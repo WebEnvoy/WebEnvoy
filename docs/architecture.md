@@ -1,14 +1,6 @@
 # WebEnvoy 架构
 
-WebEnvoy 体系由五个基础仓库组成：
-
-```text
-WebEnvoy/WebEnvoy   站点能力执行与编排层
-WebEnvoy/Harbor     Runtime / Profile / Execution Identity 底座
-WebEnvoy/Lode       站点知识、能力、任务和模板资产库
-WebEnvoy/research   组织级研究、调研、对比和决策候选仓库
-WebEnvoy/.github    组织主页与 GitHub 配置
-```
+本文档只描述 `WebEnvoy/WebEnvoy` 主仓内部架构。组织级仓库地图和跨仓关系由 `WebEnvoy/.github` 维护，见 [仓库地图](https://github.com/WebEnvoy/.github/blob/main/docs/repository-map.md)。
 
 ## 分层关系
 

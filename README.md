@@ -32,20 +32,17 @@ Lode + Harbor
 
 SDK、CLI、MCP 和 Console 都应尽量复用同一套 API，避免形成多套执行入口。
 
-## 相关仓库
+## 组织级文档
 
-- `WebEnvoy/WebEnvoy`：站点能力执行与编排层，本仓库；
-- `WebEnvoy/Harbor`：Agent-ready 指纹浏览器 / Profile Runtime / 执行身份浏览器；
-- `WebEnvoy/Lode`：站点知识、站点能力、任务封装与模板资产库；
-- `WebEnvoy/research`：组织级研究、调研、对比和决策候选仓库；
-- `WebEnvoy/.github`：组织主页、issue 模板、PR 模板和社区配置。
+完整仓库地图、跨仓关系和许可证边界由 `WebEnvoy/.github` 维护：
+
+- [仓库地图](https://github.com/WebEnvoy/.github/blob/main/docs/repository-map.md)
+- [许可证边界](https://github.com/WebEnvoy/.github/blob/main/docs/licensing.md)
 
 ## 文档
 
 - [定位](docs/positioning.md)
 - [架构](docs/architecture.md)
-- [仓库地图](docs/repository-map.md)
-- [许可证边界](docs/licensing.md)
 - [Runtime Contract](docs/runtime-contract.md)
 - [路线图](docs/roadmap.md)
 

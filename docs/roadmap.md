@@ -4,7 +4,7 @@
 
 ## P0：仓库与契约初始化
 
-- 建立 `WebEnvoy`、`Harbor`、`Lode`、`research`、`.github` 五个基础仓库；
+- 完成组织级仓库初始化，具体仓库地图由 `WebEnvoy/.github` 维护；
 - 明确 Core、Harbor、Lode 的职责边界；
 - 起草 Runtime Contract；
 - 起草 Capability / Task / Site Package 的初版 Schema；
