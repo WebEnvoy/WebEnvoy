@@ -1,55 +1,81 @@
-# WebEnvoy
+# WebEnvoy Core
 
-WebEnvoy 是面向 Agent 和上游系统的站点能力执行与编排层。
+`WebEnvoy/WebEnvoy` 是 WebEnvoy Core 仓库。
 
-它负责将 Lode 中沉淀的站点知识、站点能力、任务封装和资源需求，编排为可执行流程，并通过 Harbor 获取稳定的 Profile、执行身份和浏览器 Runtime。
+WebEnvoy 是完整产品体系；WebEnvoy Core 负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因。统一人类用户入口由 `WebEnvoy/App` 承载，浏览器身份和运行现场由 Harbor 提供，站点知识、能力包和任务模板由 Lode 维护。
 
-## 仓库角色
+WebEnvoy Core 让 Agent 的网页操作任务进入统一、可准入、可执行、可记录、可验证、可归因、可对账的核心任务路径。
 
-本仓库承载 WebEnvoy Core 及其一等对外调用入口：
+## WebEnvoy Core 解决什么问题
 
-- Core：站点能力解释、任务封装执行、执行策略合成和结果归一；
-- API Server：面向 Agent、程序、上游系统、Console、CLI、MCP 和 SDK 的统一服务入口；
-- SDK：对 API 的语言封装；
-- CLI：对 API 的命令行封装；
-- MCP：把 WebEnvoy 能力以 Agent 工具形式暴露；
-- Console：配置、观察、调试和运行记录管理；
-- Schema：WebEnvoy、Harbor 和 Lode 之间共享的基础契约。
+WebEnvoy Core 关注的是“执行网页操作任务”能不能稳定完成，而不是 Agent 能不能打开一个网页。
 
-## API 定位
+它要解决的问题包括：
 
-API 不是由 SDK 间接提供，而是 WebEnvoy 主仓的一等入口。
+- API、CLI、MCP、SDK 和 App 容易形成多套执行路径；
+- Agent 每次都要重新理解页面、入口、按钮、表单和状态；
+- 网站页面、接口字段或流程变化后，脚本和提示词容易失效；
+- 能力是否可以稳定执行缺少准入边界；
+- 当前账号、浏览器环境或资源条件不满足任务要求时，系统应该能明确指出原因，而不是继续硬跑；
+- 真实写入动作缺少前置检查，例如账号状态、页面状态、目标对象和内容完整性；
+- 上传、发布、修改、提交后缺少结果验证，不知道是否真的成功；
+- 登录失效、验证码、访问受限、风控提示等状态经常被当成普通失败；
+- 失败后只剩截图、DOM 和日志，很难判断是网站变了、能力失效、账号异常、资源不足，还是业务输入错误。
 
-```text
-Agent / 上游系统 / Console / CLI / MCP / SDK
-  ↓
-WebEnvoy API Server
-  ↓
-WebEnvoy Core
-  ↓
-Lode + Harbor
-```
+## WebEnvoy Core 适合什么场景
 
-SDK、CLI、MCP 和 Console 都应尽量复用同一套 API，避免形成多套执行入口。
+WebEnvoy Core 适合那些“不能只靠一次性脚本稳定完成”的网页操作任务：
 
-## 组织级文档
+- 需要登录账号才能完成的任务，例如读取后台数据、管理内容、查看账号状态；
+- 需要真实写入的任务，例如上传文件、保存草稿、发布内容、修改资料、提交表单；
+- 需要确认结果的任务，例如发布后回收链接、提交后检查状态、修改后验证页面是否生效；
+- 经常变化的网站流程，例如按钮位置、接口字段、页面结构或入口路径会变化；
+- 容易出现登录失效、验证码、访问受限或风控提示的网站；
+- 需要让 API、CLI、MCP、SDK 和 App 复用同一套任务执行契约的场景。
 
-完整仓库地图、跨仓关系和许可证边界由 `WebEnvoy/.github` 维护：
+## 用户和上游系统能用它做什么
 
-- [仓库地图](https://github.com/WebEnvoy/.github/blob/main/docs/repository-map.md)
-- [许可证边界](https://github.com/WebEnvoy/.github/blob/main/docs/licensing.md)
+长期目标下，用户和上游系统可以通过 WebEnvoy Core：
+
+- 通过统一 API 调用已经沉淀好的网站能力，而不是让 Agent 每次临场探索；
+- 把多个网站动作组合成自己的任务流程，例如“检查账号状态后发布内容并回收链接”；
+- 在执行前完成能力准入、输入校验和资源需求匹配；
+- 在真实读写前做必要检查，在执行后验证结果；
+- 获取结构化结果、失败原因、账号状态、页面状态、风控状态、运行证据和 Run Record；
+- 在 unknown outcome 或 manual recovery 状态下继续对账、恢复或人工接管；
+- 让 Agent、自动化程序、CLI、MCP、SDK 和 WebEnvoy App 复用同一套核心任务路径。
+
+## WebEnvoy Core 不是什么
+
+WebEnvoy Core 不是完整 WebEnvoy 产品入口，也不是 App Shell。
+
+它不是通用 Browser Agent、普通爬虫框架、账号矩阵工具、内容排期系统或简单的 Playwright / Puppeteer 脚本集合。WebEnvoy Core 不替用户决定业务策略，也不负责运营账号。它关注的是：当用户或上游系统已经知道要完成什么网页操作任务时，如何让 Agent 更稳定、更可复用、更可验证、更可归因地完成它。
+
+## 本仓库包含什么
+
+本仓库承载 WebEnvoy Core 的主要任务运行能力。这里的模块说明是实现视角，用来帮助开发者理解代码边界：
+
+- API Server：Agent、程序、上游系统、WebEnvoy App、CLI、MCP 和 SDK 的统一入口；
+- Core Runtime：统一任务路径、能力准入、资源匹配、执行控制、Run Record、结果归一和失败归因；
+- App-facing API：为 WebEnvoy App / Console 提供任务、能力、运行记录、证据和异常处理接口；
+- CLI / MCP / SDK：不同使用方式下的调用入口；
+- Schema / Contract：WebEnvoy Core、Harbor、Lode 和 App 之间共享的基础契约。
+
+API Server 是本仓库的一等入口。SDK、CLI、MCP 和 WebEnvoy App 都应尽量复用同一套 API，避免形成多套执行路径。
+
+## 与 App / Harbor / Lode 的关系
+
+WebEnvoy Core 负责让 Agent 和上游系统调用网站能力，并把执行过程和结果组织清楚。
+
+- WebEnvoy App 负责统一人类用户入口，承载 Work、Library 和 Browser 三个产品域；
+- Harbor 负责浏览器账号和运行现场：Profile、登录态、代理、指纹、浏览器会话、人工接管、运行证据，以及 provider、Profile、Runtime Session 的客观能力事实；
+- Lode 负责可复用的网站经验：站点知识、能力包、原子动作、任务封装、模板、测试样例、版本和失效标记；
+- WebEnvoy Core 负责把 Lode 中的能力拿来运行，并通过 Harbor 在真实浏览器环境中完成任务。
 
 ## 文档
 
-- [定位](docs/positioning.md)
-- [架构](docs/architecture.md)
-- [Runtime Contract](docs/runtime-contract.md)
-- [路线图](docs/roadmap.md)
-
-## 状态
-
-项目处于初始化阶段，接口、模块边界和实现路径仍在收敛中。
+- [愿景](VISION.md)
 
 ## 许可证
 
-本仓库采用 GNU Affero General Public License v3.0。
+本仓库采用 [GNU Affero General Public License v3.0](LICENSE)。
