@@ -15,9 +15,10 @@ Runtime Contract 要保证：
 - 资源不满足时不得硬跑；
 - 真实写入必须有前置检查、结果验证和状态对账；
 - 任务结果必须可记录、可查询、可审计；
+- 能力结果必须按 Lode 输出契约生成 public result envelope；
 - 失败必须返回结构化原因，而不是只返回异常文本；
 - Harbor 只提供浏览器身份、Runtime Session、能力事实和运行证据，不替 WebEnvoy 判断具体网站任务；
-- Lode 只提供站点知识、能力包、任务封装和资源需求声明，不管理运行时会话。
+- Lode 提供站点知识、能力包、任务封装、资源需求声明、输出契约、normalized schema 和 fixture，不管理运行时会话。
 
 ## 核心概念
 
@@ -32,6 +33,9 @@ Runtime Contract 要保证：
 | Runtime Session | 一次运行中的浏览器会话，包含 session_id、profile_id、identity_id、driver、cdp_url、viewer_url 和状态 |
 | Capability Execution Context | Core 执行网站能力时从 Harbor 获取的上下文，包括 session、能力事实、证据策略和可用通道 |
 | Task Record / Run Record | 一次任务运行的 durable truth，记录请求快照、生命周期状态、结果、失败原因、证据引用和运行事件 |
+| Result Envelope | Core 对能力执行结果的公共封装，消费 Lode 输出契约并暴露 normalized result、引用和状态 |
+| Public Projection | 将能力执行结果、raw_payload_ref、source_trace 和 evidence_ref 投影为上游可消费的公共结果 |
+| Raw Payload Ref | 原始载荷引用，只用于审计、调试和能力修复，不把 raw payload inline 到公共结果 |
 | Evidence | 执行证据，包括截图、Snapshot、关键 DOM 摘要、网络摘要、console 错误、执行步骤和验证结果 |
 | Write Operation Ref | 真实写入动作提交后产生的可对账引用，用于状态查询、取消请求、未知结果恢复和后续验证 |
 | Unknown Outcome | 写入动作已经可能触达外部系统，但结果无法确认时的状态，不能伪装成成功 |
@@ -67,7 +71,18 @@ API / SDK / CLI / MCP / WebEnvoy App
 | Task Record Accepted | 记录任务已被接受 | 若记录失败，应 fail closed，不调用执行侧 |
 | Task Record Running | 记录任务进入执行 | 若状态推进失败，应 fail closed |
 | Capability Execution | 执行读写动作、状态识别、验证和证据采集 | 返回结构化失败原因、证据引用和恢复线索 |
+| Result Projection | 按 Lode output schema 校验 normalized result、cursor、source trace 和引用边界 | 校验失败时返回结构化 failure envelope，不暴露不可信结果 |
 | Terminal Result | 写入成功、失败、未知结果或需要人工恢复 | 记录终态并返回结构化结果 |
+
+## Result Envelope 与公共投影
+
+Core 不应直接把平台 raw payload、完整 DOM、完整请求响应或完整截图返回给上游系统。
+
+Lode 负责定义站点能力的 output schema、normalized result schema、collection item schema、comment item schema 和 dataset record schema。Harbor 负责提供 Runtime Session、raw_payload_ref、evidence_ref、source_trace 和执行现场证据。Core 负责消费这些信息，进行运行时校验、公共投影、failure classification 和 result envelope 封装。
+
+公共结果应优先暴露 normalized result、状态、失败分类、cursor / continuation、raw_payload_ref、evidence_ref、source_trace 和 Run Record 引用。raw payload 和执行现场只以引用形式进入公共结果。
+
+更完整的结果封装方向见 [Result Envelope 与公共投影](result-envelope.md)。
 
 ## Capability Admission
 

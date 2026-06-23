@@ -9,4 +9,8 @@
 - [架构](architecture.md)
 - [Core Runtime](core-runtime.md)
 - [Runtime Contract](runtime-contract.md)
+- [Capability Admission](capability-admission.md)
+- [Result Envelope 与公共投影](result-envelope.md)
+- [Run Record](run-record.md)
+- [Write Safety](write-safety.md)
 - [路线图](roadmap.md)

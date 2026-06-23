@@ -54,12 +54,17 @@ Core Runtime 的主链路如下：
   → 推进 Run Record: running
   → 执行能力或任务封装
   → 写入前检查 / 状态识别 / 动作执行 / 写入后验证
+  → 接收 raw_payload_ref / source_trace / execution evidence
+  → 按 Lode output schema 校验 normalized result
+  → 生成 public result envelope
   → 记录 Evidence 和失败事实
   → 推进 Run Record: terminal
   → 返回结构化结果
 ```
 
 其中最重要的边界是：**准入、资源匹配和记录创建发生在执行前**。如果能力未准入、输入非法、资源不满足或运行上下文不可用，Core 应返回结构化失败，不应进入真实执行。
+
+执行后同样需要边界：Core 应消费 Lode 声明的 output schema，对 normalized result、collection item、comment item、dataset record、cursor、continuation 和 source trace 进行校验。raw payload、完整截图、network 摘要和执行现场只能通过引用进入公共结果，不应 inline 到 public result envelope。
 
 ## 请求模型
 
