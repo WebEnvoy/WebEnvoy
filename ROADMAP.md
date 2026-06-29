@@ -18,6 +18,9 @@ WebEnvoy 的目标是让用户、Agent、自动化程序和上游系统通过统
 最终产品应满足：
 
 - API、CLI、MCP、SDK 和 App 共用同一条 Core 任务路径。
+- 任务围绕连续执行身份、环境一致性和风险状态准入；资源或状态不满足时可以停止、接管和记录。
+- 页面现场优先压缩为低噪音结构化上下文、evidence refs 和 result envelope，不要求调用方默认消费完整 DOM、截图或原始请求响应。
+- 账号、Cookie、token、完整 DOM、完整请求响应、用户业务内容和未脱敏执行现场默认不上传；平台资产与用户个人资产分离。
 - Core 不直接拥有浏览器现场、站点知识或 App UI 状态。
 - Harbor 不判断任务业务成功，不拥有 Lode schema 或 Core Run Record。
 - Lode 不选择具体 Runtime Session，不保存真实账号状态或生产运行现场。
@@ -47,6 +50,7 @@ WebEnvoy 的目标是让用户、Agent、自动化程序和上游系统通过统
 - Core 的 task、run、result、admission 和 action risk 合同可被 API、CLI、MCP、SDK 和 App 复用。
 - Harbor 的 runtime facts、session refs、snapshot refs 和 evidence refs 可被 Core 消费。
 - Lode 的 capability package、workflow package、schema、fixtures 和 post-check 可被 Core 准入和校验。
+- 资源需求、页面状态摘要、结构化失败原因和证据引用能在 Core、Harbor 和 Lode 的合同之间传递。
 - App 只消费上游合同，不自行定义 Core、Harbor 或 Lode 的字段真相。
 
 ### 阶段三：能力可复用
@@ -59,6 +63,7 @@ WebEnvoy 的目标是让用户、Agent、自动化程序和上游系统通过统
 - Core 可以按能力版本准入、执行、记录和归因。
 - Harbor 提供足够的 runtime facts 和 evidence refs 支撑能力验证。
 - App Library 能让用户浏览、安装、锁定、上报和修复能力资产。
+- 探索、失败归因、站点变化、修复草稿、测试和版本更新能反哺 Lode 资产。
 
 ### 阶段四：运行可恢复
 
@@ -73,7 +78,7 @@ WebEnvoy 的目标是让用户、Agent、自动化程序和上游系统通过统
 
 ### 阶段五：产品可操作
 
-用户可以通过 App 完成任务运行、结果查看、异常处理、能力管理和浏览器身份管理，而不需要理解四仓内部结构。
+用户可以通过 App 完成任务运行、结果查看、异常处理、能力管理和浏览器身份管理，而不需要理解四仓内部结构。App 可以早期采用统一产品外壳；本阶段表示 Work、Library 和 Browser 三个产品域形成完整用户闭环。
 
 达到该阶段时：
 
