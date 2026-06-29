@@ -60,9 +60,9 @@ accepted -> running -> succeeded / failed / unknown_outcome / manual_recovery_re
 - [docs/draft/result-envelope.md](../draft/result-envelope.md) 定义了公共投影、归一化结果，以及 raw/evidence 只通过引用出现的边界。
 - [docs/draft/run-record.md](../draft/run-record.md) 定义了持久运行记录生命周期和最小字段。
 - [docs/draft/runtime-contract.md](../draft/runtime-contract.md) 连接了结果封装、运行记录、证据、未知结果和对账。
-- [research/synthesis.md](../../../research/synthesis.md) 把结果封装、未知结果、证据引用和运行记录记录为跨主题公共边界。
-- [research/absorability/themes/result-normalization-and-reconciliation.md](../../../research/absorability/themes/result-normalization-and-reconciliation.md) 支撑低噪音结构化结果、类型化错误和大结果引用。
-- [research/absorability/themes/evidence-and-observability.md](../../../research/absorability/themes/evidence-and-observability.md) 支撑运行记录基线、证据引用，以及运行时状态和任务事实的区别。
+- [研究综合](https://github.com/WebEnvoy/research/blob/main/synthesis.md) 把结果封装、未知结果、证据引用和运行记录记录为跨主题公共边界。
+- [结果归一化与对账主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/result-normalization-and-reconciliation.md) 支撑低噪音结构化结果、类型化错误和大结果引用。
+- [证据与可观测性主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/evidence-and-observability.md) 支撑运行记录基线、证据引用，以及运行时状态和任务事实的区别。
 
 ## 未决问题
 

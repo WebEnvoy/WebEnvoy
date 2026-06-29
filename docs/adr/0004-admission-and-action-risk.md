@@ -66,9 +66,9 @@ Core 需要为缺少审批、缺少幂等边界、目标不匹配、运行时事
 - [docs/draft/capability-admission.md](../draft/capability-admission.md) 定义了失败即关闭路径的准入，以及不应进入准入面的字段。
 - [docs/draft/write-safety.md](../draft/write-safety.md) 定义了写侧执行意图、幂等、审批证据、写操作引用、未知结果和对账。
 - [docs/draft/runtime-contract.md](../draft/runtime-contract.md) 定义了资源需求匹配和未知结果处理。
-- [research/synthesis.md](../../../research/synthesis.md) 记录了运行时事实与任务策略必须拆开，以及 Core 准入/动作风险仍需产品决策。
-- [research/absorability/themes/task-execution-and-admission.md](../../../research/absorability/themes/task-execution-and-admission.md) 支撑敏感操作确认、资源匹配、动作策略和写侧失败即关闭路径门禁。
-- [research/absorability/themes/evidence-and-observability.md](../../../research/absorability/themes/evidence-and-observability.md) 支撑证据边界、不能作为证明的信号和显式隐私/遥测策略。
+- [研究综合](https://github.com/WebEnvoy/research/blob/main/synthesis.md) 记录了运行时事实与任务策略必须拆开，以及 Core 准入/动作风险仍需产品决策。
+- [任务执行与准入主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/task-execution-and-admission.md) 支撑敏感操作确认、资源匹配、动作策略和写侧失败即关闭路径门禁。
+- [证据与可观测性主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/evidence-and-observability.md) 支撑证据边界、不能作为证明的信号和显式隐私/遥测策略。
 
 ## 未决问题
 

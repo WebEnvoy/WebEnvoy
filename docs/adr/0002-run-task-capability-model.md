@@ -73,9 +73,9 @@ Core 必须在浏览器执行前拒绝一部分任务。这是预期行为：接
 - [docs/draft/architecture.md](../draft/architecture.md) 定义了单一 Core 任务路径和仓库边界。
 - [docs/draft/runtime-contract.md](../draft/runtime-contract.md) 定义了任务请求、能力准入、资源需求、运行时能力事实和运行记录概念。
 - [docs/draft/capability-admission.md](../draft/capability-admission.md) 定义了稳定能力准入和失败即关闭路径的行为。
-- [research/synthesis.md](../../../research/synthesis.md) 记录了能力、工作流和任务资产需要模式化，以及运行时事实必须与任务策略拆开。
-- [research/absorability/themes/task-execution-and-admission.md](../../../research/absorability/themes/task-execution-and-admission.md) 支撑公共操作准入、资源匹配和写侧失败即关闭路径门禁。
-- [research/absorability/themes/api-cli-mcp-and-agent-interface.md](../../../research/absorability/themes/api-cli-mcp-and-agent-interface.md) 支撑共享任务接口，并警示不要把低层浏览器工具暴露成稳定站点任务 API。
+- [研究综合](https://github.com/WebEnvoy/research/blob/main/synthesis.md) 记录了能力、工作流和任务资产需要模式化，以及运行时事实必须与任务策略拆开。
+- [任务执行与准入主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/task-execution-and-admission.md) 支撑公共操作准入、资源匹配和写侧失败即关闭路径门禁。
+- [API、CLI、MCP 与 Agent 接口主题](https://github.com/WebEnvoy/research/blob/main/absorability/themes/api-cli-mcp-and-agent-interface.md) 支撑共享任务接口，并警示不要把低层浏览器工具暴露成稳定站点任务 API。
 
 ## 未决问题
 
