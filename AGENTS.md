@@ -42,6 +42,19 @@ API Server 是一等入口。SDK、CLI、MCP 和 WebEnvoy App 应通过 API Serv
 
 Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 provider driver；这些属于 Harbor。站点知识、能力包、任务封装和模板资产属于 Lode。不要把 WebEnvoy Core 扩展成通用 Browser Agent、账号矩阵系统或业务决策系统。
 
+## 路线图 / 里程碑 / 功能需求 / 工作项
+
+- 跨仓长期方向以 `WebEnvoy/WebEnvoy/ROADMAP.md` 为准。
+- 当前执行状态以 GitHub Milestones、Project、issues 和 PR 为准，不在仓库文档中复制维护。
+- GitHub Milestone 只承载当前 1-3 个可交付阶段，不承载全部远期设想。
+- 功能需求（FR）issue 表达用户可见或系统可验证的能力增量。
+- 工作项（Work Item）issue 是可由一个 PR 完成的最小执行单元。
+- 新建功能需求或工作项前，先确认它属于当前活跃 Milestone；不属于则回到总 ROADMAP 或 backlog。
+- 单仓 planning 文档只能解释本仓如何服务当前活跃 Milestone，不能新增跨仓 Milestone。
+- 不允许在单仓创建与总 ROADMAP 冲突的平行路线图；不要新建单仓 `ROADMAP.md`。
+- 规格文档只服务当前或下一个活跃 Milestone，不提前铺满远期设计。
+- 涉及跨仓方向、里程碑阶梯或边界调整时，先更新或评审总 ROADMAP / 跨仓架构，再拆单仓事项。
+
 ## 许可证边界说明
 
 本仓库属于 AGPL 核心仓库，承载 Core、API Server、CLI、MCP Server、SDK 和正式执行逻辑。统一产品入口属于 `WebEnvoy/App`。公共 SDK、Client、跨语言 Schema、OpenAPI、JSON Schema、协议定义和生成类型如果面向外部集成，应优先评估是否放入未来的 `contracts`、`sdk-js` 或 `sdk-python` 等 MIT / Apache-2.0 仓库，不应默认进入 AGPL 核心代码路径。相关策略见组织级 `.github/docs/licensing.md`。
