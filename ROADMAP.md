@@ -23,122 +23,86 @@ WebEnvoy 的目标是让用户、Agent、自动化程序和上游系统通过统
 - Lode 不选择具体 Runtime Session，不保存真实账号状态或生产运行现场。
 - App 不直接执行能力、不写 Run Record、不绕过 Harbor 操作 Runtime Session。
 
-## 里程碑阶梯
+## 阶段阶梯
 
-里程碑只表达阶段顺序和边界。当前哪些里程碑处于活跃状态，以 GitHub 为准。
+阶段阶梯描述 WebEnvoy 从当前状态到目标状态的产品和架构成熟度。它不是 GitHub Milestone，也不指定近期 issue 顺序。
 
-### M0：边界与治理基线
+### 阶段一：边界清晰
 
-目标是让四仓后续工作不分叉。
+四仓职责、truth source、主要数据流和禁止跨界稳定下来，后续工作不会各自发明平行路线。
 
-完成边界：
+达到该阶段时：
 
-- 跨仓 architecture 已定义四仓角色、数据流和禁止跨界。
-- 方向性 ADR 与 pending decision 索引已进入各仓。
-- ROADMAP 和 AGENTS 约束已明确路线图、里程碑、FR 和 Work Item 的关系。
+- 跨仓 architecture 说明四仓角色、数据流和禁止跨界。
+- 方向性 ADR 记录关键取舍，pending decision 集中索引。
+- 总 ROADMAP 和四仓 AGENTS 约束路线图、GitHub Milestone、功能需求和工作项的关系。
+- 单仓文档不创建与总路线冲突的平行路线图。
 
-不包含：
+### 阶段二：合同可执行
 
-- 字段级 schema；
-- runtime 实现；
-- App UI 实现；
-- 站点能力资产实现。
+四仓之间的公共合同稳定到可以被实现、验证和 review 消费，而不是停留在方向性描述。
 
-### M1：最小合同闭环
+达到该阶段时：
 
-目标是让 Core、Harbor、Lode 可以用最小合同描述一次 read capability 的执行条件。
+- Core 的 task、run、result、admission 和 action risk 合同可被 API、CLI、MCP、SDK 和 App 复用。
+- Harbor 的 runtime facts、session refs、snapshot refs 和 evidence refs 可被 Core 消费。
+- Lode 的 capability package、workflow package、schema、fixtures 和 post-check 可被 Core 准入和校验。
+- App 只消费上游合同，不自行定义 Core、Harbor 或 Lode 的字段真相。
 
-阶段边界：
+### 阶段三：能力可复用
 
-- Core 定义最小 task request、admission、Run Record 和 Result Envelope spec。
-- Harbor 定义 Core 可消费的最小 runtime facts、session refs 和 evidence refs spec。
-- Lode 定义最小 capability package、schema、fixture、post-check 和 validator spec。
-- App 只准备消费这些事实，不先行定义上游字段。
+网站经验从一次性脚本或提示词，变成可版本化、可测试、可失效、可修复、可安装的能力资产。
 
-不包含：
+达到该阶段时：
 
-- 写侧提交；
-- 人工接管完整状态机；
-- 多 provider 策略；
-- capability marketplace。
+- Lode 能力资产有稳定生命周期、版本、fixtures、回归检查和失效标记。
+- Core 可以按能力版本准入、执行、记录和归因。
+- Harbor 提供足够的 runtime facts 和 evidence refs 支撑能力验证。
+- App Library 能让用户浏览、安装、锁定、上报和修复能力资产。
 
-### M2：最小 read capability 跑通
+### 阶段四：运行可恢复
 
-目标是用一个 read capability 验证 Core、Harbor、Lode 的合同可以贯通。
+任务运行不只返回成功或失败，还能在异常、人工接管、未知结果和对账场景下保持可解释和可恢复。
 
-阶段边界：
+达到该阶段时：
 
-- Lode 提供一个脱敏、可测试的 read capability package。
-- Core 能完成能力准入、资源匹配、运行记录和结果封装。
-- Harbor 能提供最小 Runtime Session、Snapshot / Evidence refs。
-- App 可以展示 run、result、evidence summary 和 capability metadata。
+- Core Run Record 能记录 accepted、running、terminal、unknown outcome 和 recovery 事实。
+- Harbor 能提供 viewer、handoff、control ownership 和 evidence provenance。
+- Lode 能声明 post-check、failure classification 和修复线索。
+- App 能让用户观察、接管、恢复、停止、重试或对账，而不复制上游状态机。
 
-不包含：
+### 阶段五：产品可操作
 
-- 真实写入；
-- 复杂 workflow；
-- 长期 asset 分发；
-- 完整 recovery UI。
+用户可以通过 App 完成任务运行、结果查看、异常处理、能力管理和浏览器身份管理，而不需要理解四仓内部结构。
 
-### M3：写侧安全与恢复
+达到该阶段时：
 
-目标是让 submit / destructive 类任务具备可审计、可恢复、可对账的最小安全路径。
+- Work 表面覆盖任务提交、运行状态、结果、证据和恢复入口。
+- Library 表面覆盖能力浏览、安装、更新、锁定、草稿、修复和上报。
+- Browser 表面覆盖 Profile、Runtime Session、Viewer、接管和 provider facts。
+- Settings 能表达本地 API、Harbor、Lode 资产来源、数据目录和连接状态。
 
-阶段边界：
+### 阶段六：生态可扩展
 
-- Core 定义 action risk、approval evidence、idempotency 和 unknown outcome。
-- Harbor 暴露 handoff / viewer / control ownership facts。
-- Lode 为 write-like capability 提供 post-check 和 failure classification。
-- App 提供审批、人工接管、恢复和对账入口。
+WebEnvoy 可以扩展到更多 provider、更多资产来源、团队协作、可选同步和外部集成，而不破坏核心边界。
 
-不包含：
+达到该阶段时：
 
-- 通用账号运营系统；
-- 内容排期或业务策略系统；
-- 反检测承诺；
-- 完整远程浏览器平台。
-
-### M4：资产复用与分发
-
-目标是让 capability package、workflow package 和用户 overlay 可以稳定维护和复用。
-
-阶段边界：
-
-- Lode 支持版本、失效标记、registry、fixture regression 和 repair draft。
-- Core 可以引用 capability / schema / fixture 版本。
-- App Library 支持浏览、安装、锁定、上报和修复入口。
-
-不包含：
-
-- 公共市场运营规则；
-- 云同步默认开启；
-- benchmark task 作为产品 task contract。
-
-### M5：扩展运行时与协作
-
-目标是支持更多 runtime provider、远程 session、团队协作和可选同步。
-
-阶段边界：
-
-- Harbor 支持更多 provider mode 和 remote browser facts。
-- Core 保持 provider-neutral admission 和 result contract。
-- App 支持更丰富的 Browser 和 Library 管理表面。
-
-不包含：
-
-- Harbor 对账号安全或站点成功率作承诺；
-- Core 内置 provider 排名；
-- Lode 绑定某个 provider 实现。
+- Harbor 支持多 provider 和远程 session，但仍只输出 runtime facts。
+- Lode 支持平台资产、用户 overlay、fork、draft 和可选同步。
+- Core 保持 provider-neutral 和 capability-version-aware。
+- SDK、MCP、CLI 和外部集成消费同一套公共合同。
+- Benchmark、crawler、hosted runtime 和 marketplace 都不越界变成默认产品合同。
 
 ## 更新规则
 
 - 本文只维护稳定路线，不维护当前活跃 issue、Work Item、PR 或执行看板。
 - 当前执行状态以 GitHub Milestones、Project、issues 和 PR 为准。
 - GitHub Milestone 只承载当前 1-3 个可交付阶段，不承载全部远期设想。
-- FR issue 表达用户可见或系统可验证的能力增量。
-- Work Item issue 是可由一个 PR 完成的最小执行单元。
-- 新建 FR 或 Work Item 前，先确认它属于当前活跃 Milestone；不属于则回到本文或 backlog。
+- 功能需求（FR）issue 表达用户可见或系统可验证的能力增量。
+- 工作项（Work Item）issue 是可由一个 PR 完成的最小执行单元。
+- 新建功能需求或工作项前，先确认它属于当前活跃 Milestone；不属于则回到本文或 backlog。
 - 单仓 planning 文档只能解释本仓如何服务当前活跃 Milestone，不能新增跨仓 Milestone。
 - 不允许在单仓创建与本文冲突的平行路线图。
 - 规格文档只服务当前或下一个活跃 Milestone，不提前铺满远期设计。
-- 修改目标状态、里程碑阶梯或跨仓边界时，优先在 `WebEnvoy/WebEnvoy` 发起 PR，并说明受影响仓库。
+- 修改目标状态、阶段阶梯或跨仓边界时，优先在 `WebEnvoy/WebEnvoy` 发起 PR，并说明受影响仓库。

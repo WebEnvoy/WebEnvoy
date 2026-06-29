@@ -53,7 +53,7 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 - 单仓 planning 文档只能解释本仓如何服务当前活跃 Milestone，不能新增跨仓 Milestone。
 - 不允许在单仓创建与总 ROADMAP 冲突的平行路线图；不要新建单仓 `ROADMAP.md`。
 - 规格文档只服务当前或下一个活跃 Milestone，不提前铺满远期设计。
-- 涉及跨仓方向、里程碑阶梯或边界调整时，先更新或评审总 ROADMAP / 跨仓架构，再拆单仓事项。
+- 涉及跨仓方向、阶段阶梯或边界调整时，先更新或评审总 ROADMAP / 跨仓架构，再拆单仓事项。
 
 ## 许可证边界说明
 
