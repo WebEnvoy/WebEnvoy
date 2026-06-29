@@ -1,86 +1,86 @@
-# 0002. Run Task Capability Model
+# 0002. 运行、任务与能力模型
 
-## Status
+## 状态
 
-Proposed.
+拟议。
 
-## Context
+## 背景
 
-WebEnvoy Core must give API, SDK, CLI, MCP and WebEnvoy App one task path instead of letting every entrypoint run browser actions differently. The core problem is not opening a browser. It is deciding whether a site capability is defined, versioned, resource-backed, executable, recorded and safe to expose as a public task.
+WebEnvoy Core 必须让 API、SDK、CLI、MCP 和 WebEnvoy App 进入同一条任务路径，而不是让每个入口各自运行浏览器动作。核心问题不是打开浏览器，而是判断一个站点能力是否已定义、已版本化、资源满足、可执行、可记录，并且能作为公共任务安全暴露。
 
-Current drafts already split responsibilities:
+当前草稿已经拆出职责：
 
-- Lode owns site knowledge, capability packages, task packages, input/output schemas, fixtures, versions and invalidation markers.
-- Harbor owns Profile, Execution Identity, Runtime Session, provider/runtime facts, Viewer/CDP/VNC and evidence capture.
-- WebEnvoy App owns the human product surface, configuration, observation and recovery UX.
-- WebEnvoy Core owns the public task path, capability admission, resource matching, execution control, Run Record and Result Envelope.
+- Lode 拥有站点知识、能力包、任务封装、输入输出模式、测试样例、版本和失效标记。
+- Harbor 拥有 Profile、执行身份、运行时会话、提供方/运行时事实、Viewer/CDP/VNC 和证据采集。
+- WebEnvoy App 拥有人类产品界面、配置、观察和恢复体验。
+- WebEnvoy Core 拥有公共任务路径、能力准入、资源匹配、执行控制、运行记录和结果封装。
 
-## Decision
+## 决策
 
-WebEnvoy Core will model a public execution as:
+WebEnvoy Core 将一次公共执行建模为：
 
 ```text
-Task Request
-  -> Capability Admission
-  -> Resource Requirement Matching
-  -> Harbor Runtime Binding
-  -> Run
-  -> Result Envelope / Run Record
+任务请求
+  -> 能力准入
+  -> 资源需求匹配
+  -> Harbor 运行时绑定
+  -> 运行
+  -> 结果封装 / 运行记录
 ```
 
-`Task Request` is the Core-owned input shape after API Server normalization. It references a Lode capability or task package by stable id and version, includes public input, execution policy, evidence policy and resource requirements, and carries the caller entrypoint.
+任务请求是 API Server 归一化之后进入 Core 的输入形态。它通过稳定 id 和版本引用 Lode 能力或任务包，包含公共输入、执行策略、证据策略、资源需求和调用入口。
 
-`Capability` is not a free-form browser action. A capability can enter the stable task path only when Lode declares at least:
+能力不是任意浏览器动作。只有 Lode 至少声明以下内容时，能力才能进入稳定任务路径：
 
-- capability identity and version;
-- lifecycle;
-- input contract;
-- output contract;
-- resource requirements;
-- pre-check and post-check expectations;
-- evidence expectations;
-- fixture or regression evidence;
-- invalidation marker.
+- 能力身份和版本；
+- 生命周期；
+- 输入合同；
+- 输出合同；
+- 资源需求；
+- 前置检查和后置验证预期；
+- 证据预期；
+- 测试样例或回归证据；
+- 失效标记。
 
-Core owns the admission decision. Stable execution fails closed when the capability is unknown, not stable, invalidated, missing contracts, missing resource requirements or missing evidence expectations.
+Core 拥有准入决策。当能力未知、未稳定、已失效、缺少合同、缺少资源需求或缺少证据预期时，稳定执行必须失败即关闭路径。
 
-Core does not own Harbor Profile or Runtime Session details. It only consumes Harbor runtime binding through public references and objective facts such as `runtime_session_ref`, `profile_ref`, `execution_identity_ref`, provider capability facts, health facts, Viewer/CDP availability and evidence capability facts.
+Core 不拥有 Harbor Profile 或运行时会话细节。Core 只通过公共引用和客观事实消费 Harbor 运行时绑定，例如 `runtime_session_ref`、`profile_ref`、`execution_identity_ref`、提供方能力事实、健康事实、Viewer/CDP 可用性和证据能力事实。
 
-Core does not own Lode site knowledge or normalized business schemas. It consumes Lode declarations and rejects execution when they are insufficient.
+Core 不拥有 Lode 站点知识或归一化业务模式。Core 消费 Lode 声明，并在声明不足时拒绝执行。
 
-API Server remains the first-class entrypoint. CLI, MCP, SDK and WebEnvoy App should submit task requests through the API Server path rather than bypass Core to call Harbor, CDP or Lode directly.
+API Server 是一等入口。CLI、MCP、SDK 和 WebEnvoy App 应通过 API Server 路径提交任务请求，而不是绕过 Core 直接调用 Harbor、CDP 或 Lode。
 
-## Consequences
+## 后果
 
-All public entrypoints get the same admission, resource matching, failure categories, Run Record and Result Envelope.
+所有公共入口都会获得同一套准入、资源匹配、失败分类、运行记录和结果封装。
 
-Low-level browser tools remain useful for exploration and Lode authoring, but they are not the stable site task interface.
+低层浏览器工具仍可用于探索和 Lode 能力编写，但不是稳定站点任务接口。
 
-Core must reject some tasks before browser execution. This is expected: pre-accepted failure is safer than discovering missing contracts after a real site action starts.
+Core 必须在浏览器执行前拒绝一部分任务。这是预期行为：接受前失败比真实站点动作开始后才发现合同缺失更安全。
 
-Future schemas can be small because this ADR freezes ownership and flow, not every field name.
+后续 Schema 可以保持较小，因为本 ADR 冻结的是所有权和流程，不是每个字段名。
 
-## Alternatives Considered
+## 备选方案
 
-- Use a generic browser agent loop as Core: rejected because it lacks capability versioning, admission records, public result envelopes and reconciliation.
-- Let Harbor decide whether a task should run: rejected because Harbor owns runtime facts, not site task policy.
-- Let Lode execute tasks directly: rejected because Lode owns reusable capability assets, not runtime sessions or task records.
-- Give CLI, MCP and SDK independent execution paths: rejected because behavior, safety and evidence would drift.
-- Put provider routing, fallback priority, marketplace state or credentials into Core admission: rejected because these are runtime, product or secret-management concerns, not the public capability contract.
+- 用通用浏览器智能体循环作为 Core：拒绝，因为它缺少能力版本、准入记录、公共结果封装和对账能力。
+- 让 Harbor 判断任务是否应该运行：拒绝，因为 Harbor 拥有运行时事实，不拥有站点任务策略。
+- 让 Lode 直接执行任务：拒绝，因为 Lode 拥有可复用能力资产，不拥有运行时会话或任务记录。
+- 让 CLI、MCP 和 SDK 各自拥有独立执行路径：拒绝，因为行为、安全和证据会漂移。
+- 把提供方路由、回退优先级、市场状态或凭据放进 Core 准入：拒绝，因为它们属于运行时、产品或密钥管理关注点，不属于公共能力合同。
 
-## Research Evidence
+## 研究证据
 
-- [docs/draft/architecture.md](../draft/architecture.md) defines the single Core task path and repo boundaries.
-- [docs/draft/runtime-contract.md](../draft/runtime-contract.md) defines Task Request, Capability Admission, Resource Requirement, Runtime Capability Facts and Run Record concepts.
-- [docs/draft/capability-admission.md](../draft/capability-admission.md) defines stable capability admission and fail-closed behavior.
-- [research/synthesis.md](../../../research/synthesis.md) records that capability/workflow/task assets need schema and that runtime facts must be split from task policy.
-- [research/absorability/themes/task-execution-and-admission.md](../../../research/absorability/themes/task-execution-and-admission.md) supports public operation admission, resource matching and write-side fail-closed gates.
-- [research/absorability/themes/api-cli-mcp-and-agent-interface.md](../../../research/absorability/themes/api-cli-mcp-and-agent-interface.md) supports a shared task interface and warns against exposing low-level browser tools as the stable site task API.
+- [docs/draft/architecture.md](../draft/architecture.md) 定义了单一 Core 任务路径和仓库边界。
+- [docs/draft/runtime-contract.md](../draft/runtime-contract.md) 定义了任务请求、能力准入、资源需求、运行时能力事实和运行记录概念。
+- [docs/draft/capability-admission.md](../draft/capability-admission.md) 定义了稳定能力准入和失败即关闭路径的行为。
+- [research/synthesis.md](../../../research/synthesis.md) 记录了能力、工作流和任务资产需要模式化，以及运行时事实必须与任务策略拆开。
+- [research/absorability/themes/task-execution-and-admission.md](../../../research/absorability/themes/task-execution-and-admission.md) 支撑公共操作准入、资源匹配和写侧失败即关闭路径门禁。
+- [research/absorability/themes/api-cli-mcp-and-agent-interface.md](../../../research/absorability/themes/api-cli-mcp-and-agent-interface.md) 支撑共享任务接口，并警示不要把低层浏览器工具暴露成稳定站点任务 API。
 
-## Open Questions
+## 未决问题
 
-- Exact JSON Schema names and field names for Task Request, Capability Admission, Resource Requirement and Runtime Capability Facts.
-- Whether `experimental` capabilities can run through a separate explicitly marked exploration mode.
-- Which public contract artifacts should stay in this AGPL repository and which should later move to a permissive contracts or SDK repository.
-- The first minimum API surface for CLI, MCP and SDK generation.
-- The lock or concurrency granularity for task execution against the same runtime identity.
+- 任务请求、能力准入、资源需求和运行时能力事实的最终 JSON Schema 名称与字段名。
+- `experimental` 能力是否可以通过单独标记的探索模式运行。
+- 哪些公共合同产物留在这个 AGPL 仓库，哪些后续拆到宽松许可证合同仓库或 SDK 仓库。
+- CLI、MCP 和 SDK 生成所需的第一版最小 API 面。
+- 同一运行时身份下任务执行的锁或并发粒度。

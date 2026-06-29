@@ -1,50 +1,50 @@
-# 0001. Record Architecture Decisions
+# 0001. 记录架构决策
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-WebEnvoy Core already has draft architecture notes under `docs/draft/`, but the drafts are not final contracts. Harbor, Lode, App, CLI, MCP and SDK work need a small way to point at stable direction without copying long planning text into each downstream design.
+WebEnvoy Core 已经在 `docs/draft/` 下保存架构草稿，但这些草稿不是最终合同。Harbor、Lode、App、命令行、MCP 和 SDK 后续设计需要一个小而稳定的引用点，避免在各自设计里复制长篇规划文本。
 
-The repository has no ADR convention yet.
+本仓库此前没有架构决策记录约定。
 
-## Decision
+## 决策
 
-Record durable architecture decisions in `docs/adr/` as numbered Markdown files.
+在 `docs/adr/` 中用编号 Markdown 文件记录可持续引用的架构决策。
 
-Each ADR uses this minimal format:
+每份 ADR 使用以下精简格式：
 
-- `Status`
-- `Context`
-- `Decision`
-- `Consequences`
-- `Alternatives Considered`
-- `Research Evidence`
-- `Open Questions`
+- 状态
+- 背景
+- 决策
+- 后果
+- 备选方案
+- 研究证据
+- 未决问题
 
-ADR statuses are `Proposed`, `Accepted`, `Superseded`, `Rejected` or `Deprecated`. A proposed ADR can guide design, but downstream schemas and implementation still need their own tests and migration notes.
+ADR 状态使用：拟议、已接受、已替代、已拒绝或已废弃。拟议状态可以指导设计，但下游模式定义和实现仍需要各自的测试与迁移说明。
 
-Every Core contract ADR must say what WebEnvoy Core owns and what it only references from Harbor, Lode or WebEnvoy App. Research should be linked by file and theme, not copied into the ADR.
+每份 Core 合同 ADR 必须说明 WebEnvoy Core 拥有什么，只引用 Harbor、Lode 或 WebEnvoy App 的什么。研究证据只链接到文件和主题，不复制研究长文。
 
-## Consequences
+## 后果
 
-Downstream design can cite a small decision record instead of treating draft docs as implicit contracts.
+下游设计可以引用小型决策记录，而不是把草稿文档当作隐式合同。
 
-Some duplication with `docs/draft/` remains intentional. Draft docs can explore; ADRs freeze the current choice and its tradeoffs.
+ADR 与 `docs/draft/` 会保留少量重复。草稿用于探索，ADR 用于冻结当前选择和权衡。
 
-## Alternatives Considered
+## 备选方案
 
-- Keep only `docs/draft/`: rejected because drafts mix exploration, candidate fields and future work.
-- Write full specifications first: rejected because the current goal is to freeze public contract direction, not final JSON Schema or API syntax.
-- Use a heavier ADR template: rejected because this repository needs a small decision log, not process overhead.
+- 只保留 `docs/draft/`：拒绝，因为草稿混合了探索、候选字段和后续工作。
+- 先写完整规格：拒绝，因为当前目标是冻结公共合同方向，不是最终 JSON Schema 或 API 语法。
+- 使用更重的 ADR 模板：拒绝，因为本仓库需要的是小型决策日志，不是流程负担。
 
-## Research Evidence
+## 研究证据
 
-This ADR is a repository process decision. It is grounded in the draft boundary stated in [docs/draft/README.md](../draft/README.md) and the repository requirement that shared schemas and App-facing APIs stay consistent in [AGENTS.md](../../AGENTS.md).
+这是一条仓库流程决策。依据来自 [docs/draft/README.md](../draft/README.md) 对草稿边界的说明，以及 [AGENTS.md](../../AGENTS.md) 对共享模式定义和面向 App 的 API 一致性的要求。
 
-## Open Questions
+## 未决问题
 
-- Whether future public contract schemas should remain in this AGPL repository or move to a separate permissive `contracts` or SDK repository.
-- Whether accepted ADRs should later be indexed from a dedicated `docs/adr/README.md` once the list grows.
+- 未来公共合同模式定义应继续放在这个 AGPL 仓库，还是拆到单独的宽松许可证 `contracts` 或 SDK 仓库。
+- ADR 数量增加后，是否需要新增专门的 `docs/adr/README.md` 索引。
