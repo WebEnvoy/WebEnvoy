@@ -22,9 +22,11 @@ WebEnvoy Core 已经在 `docs/draft/` 下保存架构草稿，但这些草稿不
 - 后果
 - 备选方案
 - 研究证据
-- 未决问题
+- 未决问题（拟议 ADR）或后续决策（已接受 ADR）
 
 ADR 状态使用：拟议、已接受、已替代、已拒绝或已废弃。拟议状态可以指导设计，但下游模式定义和实现仍需要各自的测试与迁移说明。
+
+拟议 ADR 可以保留“未决问题”。已接受 ADR 不保留会阻塞决策成立的未决问题；非阻塞后续项应放入“后续决策”，并链接到 [待决策索引](pending-decisions.md)。
 
 每份 Core 合同 ADR 必须说明 WebEnvoy Core 拥有什么，只引用 Harbor、Lode 或 WebEnvoy App 的什么。研究证据只链接到文件和主题，不复制研究长文。
 
@@ -44,7 +46,7 @@ ADR 与 `docs/draft/` 会保留少量重复。草稿用于探索，ADR 用于冻
 
 这是一条仓库流程决策。依据来自 [docs/draft/README.md](../draft/README.md) 对草稿边界的说明，以及 [AGENTS.md](../../AGENTS.md) 对共享模式定义和面向 App 的 API 一致性的要求。
 
-## 未决问题
+## 后续决策
 
-- 未来公共合同模式定义应继续放在这个 AGPL 仓库，还是拆到单独的宽松许可证 `contracts` 或 SDK 仓库。
-- ADR 数量增加后，是否需要新增专门的 `docs/adr/README.md` 索引。
+- [PD-0001](pending-decisions.md#pd-0001)：未来公共合同模式定义应继续放在这个 AGPL 仓库，还是拆到单独的宽松许可证 `contracts` 或 SDK 仓库。
+- [PD-0002](pending-decisions.md#pd-0002)：ADR 数量增加后，是否需要新增专门的 `docs/adr/README.md` 索引。

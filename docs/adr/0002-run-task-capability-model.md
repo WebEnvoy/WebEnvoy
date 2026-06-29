@@ -79,8 +79,8 @@ Core 必须在浏览器执行前拒绝一部分任务。这是预期行为：接
 
 ## 未决问题
 
-- 任务请求、能力准入、资源需求和运行时能力事实的最终 JSON Schema 名称与字段名。
-- `experimental` 能力是否可以通过单独标记的探索模式运行。
-- 哪些公共合同产物留在这个 AGPL 仓库，哪些后续拆到宽松许可证合同仓库或 SDK 仓库。
-- CLI、MCP 和 SDK 生成所需的第一版最小 API 面。
-- 同一运行时身份下任务执行的锁或并发粒度。
+- [PD-0003](pending-decisions.md#pd-0003)：任务请求、能力准入、资源需求和运行时能力事实的最终 JSON Schema 名称与字段名。
+- [PD-0004](pending-decisions.md#pd-0004)：`experimental` 能力是否可以通过单独标记的探索模式运行。
+- [PD-0001](pending-decisions.md#pd-0001)：哪些公共合同产物留在这个 AGPL 仓库，哪些后续拆到宽松许可证合同仓库或 SDK 仓库。
+- [PD-0005](pending-decisions.md#pd-0005)：CLI、MCP 和 SDK 生成所需的第一版最小 API 面。
+- [PD-0006](pending-decisions.md#pd-0006)：同一运行时身份下任务执行的锁或并发粒度。

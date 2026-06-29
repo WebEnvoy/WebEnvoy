@@ -66,9 +66,9 @@ accepted -> running -> succeeded / failed / unknown_outcome / manual_recovery_re
 
 ## 未决问题
 
-- 结果封装和运行记录的最终 JSON Schema。
-- 最小证据分类、保留策略和脱敏策略。
-- CLI 退出码与失败分类的映射。
-- 成本、令牌和延迟指标是否进入持久运行记录，还是进入单独指标流。
-- 步骤级历史默认进入运行记录多少，多少只进入证据产物。
-- 数据集投影在 Core 中保存归一化载荷，还是只保存投影引用。
+- [PD-0007](pending-decisions.md#pd-0007)：结果封装和运行记录的最终 JSON Schema。
+- [PD-0008](pending-decisions.md#pd-0008)：最小证据分类、保留策略和脱敏策略。
+- [PD-0009](pending-decisions.md#pd-0009)：CLI 退出码与失败分类的映射。
+- [PD-0010](pending-decisions.md#pd-0010)：成本、令牌和延迟指标是否进入持久运行记录，还是进入单独指标流。
+- [PD-0011](pending-decisions.md#pd-0011)：步骤级历史默认进入运行记录多少，多少只进入证据产物。
+- [PD-0012](pending-decisions.md#pd-0012)：数据集投影在 Core 中保存归一化载荷，还是只保存投影引用。
