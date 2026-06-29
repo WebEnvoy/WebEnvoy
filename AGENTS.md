@@ -44,7 +44,7 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 
 ## 路线图 / 里程碑 / 功能需求 / 工作项
 
-- 跨仓长期方向以 `WebEnvoy/WebEnvoy/ROADMAP.md` 为准。
+- 跨仓长期方向以 `WebEnvoy/.github/ROADMAP.md` 为准。
 - 当前执行状态以 GitHub Milestones、Project、issues 和 PR 为准，不在仓库文档中复制维护。
 - GitHub Milestone 只承载当前 1-3 个可交付阶段，不承载全部远期设想。
 - 功能需求（FR）issue 表达用户可见或系统可验证的能力增量。
