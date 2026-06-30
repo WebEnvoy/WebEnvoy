@@ -5,8 +5,8 @@
   "kind": "spec_review",
   "summary": "GH-57 docs-only spec is bounded to Core common task entry semantics and does not introduce implementation scope.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "85e6f1630ba31f62288d0bef51391ac24fce3e00",
-  "reviewed_validation_summary": "2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1630ba31f62288d0bef51391ac24fce3e00; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.",
+  "reviewed_head": "85e6f1671c094a20cd3aa763303b7109fbc91502",
+  "reviewed_validation_summary": "2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1671c094a20cd3aa763303b7109fbc91502; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
