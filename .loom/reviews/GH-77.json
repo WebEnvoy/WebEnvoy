@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-77",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Workflow-only Loom 0.22.1 maintenance PR #76 is approved.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "fda71915c4689d8a06786585b209e9b4a4644b48",
+  "reviewed_validation_summary": "PR head fda71915c4689d8a06786585b209e9b4a4644b48 contains the Loom workflow pin update to 0.22.1 plus the GH-77 item-specific maintenance carrier; no product docs, product contracts, code, roadmap, issue tree, plugin cache path, or historical INIT-0001 migration changed.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "This review does not approve product, schema, API, runtime, fixture, roadmap, or issue-tree changes."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored review covers only the workflow version-pin update for PR #76. Drift after reviewed_head must be limited to GH-77 Loom carrier metadata or require a fresh review."
+  },
+  "consumed_inputs": {
+    "issue": "https://github.com/WebEnvoy/WebEnvoy/issues/77",
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/76",
+    "reviewed_head": "fda71915c4689d8a06786585b209e9b4a4644b48",
+    "changed_workflow": ".github/workflows/loom-check.yml",
+    "suite_path": "not_applicable"
+  }
+}

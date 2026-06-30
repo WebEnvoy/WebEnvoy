@@ -1,0 +1,6 @@
+# Task Carrier
+
+| carrier_type | carrier_locator | source_value | normalized_status | relationship | work_item_locator | breakdown_unit_locator | spec_scenario_locator | plan_phase_locator | validation_strategy_locator | provenance | freshness_rule |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| github_issue | https://github.com/WebEnvoy/WebEnvoy/issues/77 | Upgrade Loom workflow to 0.22.1 | in_progress | primary | .loom/work-items/GH-77.md | .loom/specs/GH-77/implementation-contract.md#implementation-contract | .loom/specs/GH-77/spec.md#required-behavior | .loom/specs/GH-77/plan.md#implementation | .loom/specs/GH-77/plan.md#validation | GitHub issue created on 2026-07-01 for workflow-only maintenance | Recheck issue and PR head before merge-ready or closeout. |
+| pull_request | https://github.com/WebEnvoy/WebEnvoy/pull/76 | Workflow-only LOOM_VERSION pin update | in_progress | implementation | .loom/work-items/GH-77.md | .loom/specs/GH-77/implementation-contract.md#host-binding | .loom/specs/GH-77/spec.md#required-behavior | .loom/specs/GH-77/plan.md#implementation | .loom/specs/GH-77/plan.md#validation | PR #76 changes `.github/workflows/loom-check.yml` and GH-77 carrier only | Recheck PR body and head SHA after every push. |
