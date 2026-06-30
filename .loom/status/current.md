@@ -10,14 +10,14 @@
 - Recovery Entry: .loom/progress/GH-38.md
 - Review Entry: .loom/reviews/GH-38.json
 - Validation Entry: `git diff --check`; available low-cost repository and Loom local checks; hosted checks after PR creation.
-- Closing Condition: PR to `main` opened and ready for review for GH-38 / GH-39 / GH-40; no merge and no issue closeout in this execution thread.
-- Current Checkpoint: merge
-- Current Stop: Docs-only semantic review recorded for PR #61; ready for coordinator merge gate.
-- Next Step: Run PR merge gate, merge PR #61 if hosted checks pass, then perform post-merge closeout.
+- Closing Condition: PR #61 merged into `main`; hosted required checks passed; issue closeout is owned by the coordinator as the next external step.
+- Current Checkpoint: closed_out
+- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#61.
+- Next Step: No further action for GH-38/GH-39/GH-40 after coordinator issue closeout comments are posted and covered issues are closed.
 - Blockers: None
-- Latest Validation Summary: 2026-06-30T10:10Z local checks: `git diff --check` pass; Python compile not_applicable because no Python files are tracked; `loom doctor --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom verify --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom fact-chain --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom installed-state validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom suite validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom build --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --build-evidence .loom/specs/GH-38/build-evidence.json --json` blocked only because the build flow looks for repo-local `tools/loom.py` suite JSON, while this repo's workflow uses global `loom`; classified as local tool-path mismatch, not contract drift. PR #61 opened at https://github.com/WebEnvoy/WebEnvoy/pull/61.
-- Recovery Boundary: Docs-only contract convergence for GH-38/GH-39/GH-40; do not implement API/runtime/schema, do not merge, and do not close issues.
-- Current Lane: core
+- Latest Validation Summary: Post-merge closeout consumed PR #61, head 68ac1da8bf7d69c53c536c81df1891ab552a1ad7, merge commit 51ddf5515244123768c5c3af31b2243c2ab32226, target branch main, and hosted run 28437893051 with all required checks passing.
+- Recovery Boundary: Terminal carrier for docs-only Core task/run lifecycle contract; open new Work Items for schema/API/runtime implementation.
+- Current Lane: terminal closeout
 
 ## Runtime Evidence
 
