@@ -5,7 +5,7 @@
   "kind": "spec_review",
   "summary": "Minimal docs-only governance spec is sufficient for recording Loom PR and closeout constraints.",
   "reviewer": "codex",
-  "reviewed_head": "pending-head",
+  "reviewed_head": "f25c29a51cd1c17941c111ef2387ab50232d23cc",
   "reviewed_validation_summary": "Spec limits the PR to AGENTS.md guidance and item-specific carrier files.",
   "fallback_to": null,
   "blocking_issues": [],
