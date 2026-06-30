@@ -154,5 +154,7 @@ jobs:
           rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
           cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
       - run: |
-          export LOOM_SOURCE_REPO_ROOT="$(npm root -g)/@mc-and-his-agents/loom"
-          loom flow pr-gate check --target "$GITHUB_WORKSPACE" --pr "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}" --json
+          LOOM_SOURCE_REPO_ROOT="$(npm root -g)/@mc-and-his-agents/loom"
+          PYTHONPATH="$LOOM_SOURCE_REPO_ROOT/src/skills/shared/scripts" \
+            LOOM_SOURCE_REPO_ROOT="$LOOM_SOURCE_REPO_ROOT" \
+            python "$LOOM_SOURCE_REPO_ROOT/src/skills/shared/scripts/loom_flow.py" pr-gate check --target "$GITHUB_WORKSPACE" --pr "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
