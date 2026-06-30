@@ -61,3 +61,22 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 ## 许可证边界说明
 
 本仓库属于 AGPL 核心仓库，承载 Core、API Server、CLI、MCP Server、SDK 和正式执行逻辑。统一产品入口属于 `WebEnvoy/App`。公共 SDK、Client、跨语言 Schema、OpenAPI、JSON Schema、协议定义和生成类型如果面向外部集成，应优先评估是否放入未来的 `contracts`、`sdk-js` 或 `sdk-python` 等 MIT / Apache-2.0 仓库，不应默认进入 AGPL 核心代码路径。相关策略见组织级 `.github/docs/licensing.md`。
+
+<!-- LOOM_BOOTSTRAP_START -->
+## Loom Bootstrap
+
+本仓库采用 Loom 来管理 agent 执行流程、工作事实载体、review、merge-ready 和 closeout；开始实现、review、merge-ready 或 closeout 前，先完成以下 bootstrap 检查。
+
+1. 检查 `.loom/installed-state.json`。
+2. 若本机没有 `loom`，执行：
+   `npm install -g @mc-and-his-agents/loom`
+3. 运行：
+   `loom doctor --target . --json`
+4. 若 Codex Loom plugin 缺失，执行：
+   `loom host install --host codex --scope user --apply --json`
+   `loom host register --host codex --scope user --apply --json`
+5. 重新运行：
+   `loom doctor --target . --json`
+
+不要把 Loom runtime、plugin 或 skills payload 写入仓库；它们属于用户级全局安装。
+<!-- LOOM_BOOTSTRAP_END -->
