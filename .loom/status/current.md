@@ -15,7 +15,7 @@
 - Current Stop: Docs-only draft closeout implemented locally; local validation passed; PR creation pending.
 - Next Step: Commit, push, create PR, and record PR locator.
 - Blockers: None recorded.
-- Latest Validation Summary: `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed. `loom build` blocked on local wrapper input plumbing: suite validate/carrier CLI JSON unavailable via `tools/loom.py`, while the global suite commands passed.
+- Latest Validation Summary: At head caac4b0170eba4a79327448c4a9f7ba9bd6c1ccf, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed. `loom build` previously blocked on local wrapper input plumbing: suite validate/carrier CLI JSON unavailable via `tools/loom.py`, while the global suite commands passed.
 - Recovery Boundary: Continue only docs-only closeout for GH-69/GH-70/GH-71/GH-72/GH-73. Do not merge, close issues, create code/schema/API/runtime/fixture behavior, or create `docs/guides/`.
 - Current Lane: docs-draft-closeout
 
