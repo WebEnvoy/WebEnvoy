@@ -19,3 +19,18 @@
 - 若合同需要最终 JSON Schema、OpenAPI、fixture 或生成类型，新建专门规格文件，并从本索引链接。
 - ADR 0002-0004 仍是拟议 ADR；只有其中已经标注 `accepted` 的 Stage 1/Stage 2 facts 进入本索引。
 - 不把 `docs/draft/` 当作实现依据。
+
+## 已吸收的实现判断
+
+这些判断来自旧 `docs/draft/`，已经由上方 ADR/contract 索引承接。后续实现可以消费这些判断，但不能把这里当成最终字段 Schema。
+
+| 主题 | 可消费判断 | 权威位置 |
+| --- | --- | --- |
+| 单一任务入口 | API、CLI、MCP、SDK 和 App 都应经 API Server/Core Runtime 进入同一任务路径，不各自直接调用 Harbor 或 Lode。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0006](../adr/0006-common-task-entry-v0.md) |
+| 能力准入 | stable execution 只接受 Lode 声明了 lifecycle、input/output contract、resource requirements、fixtures/post-check、version/invalidation 和 evidence expectation 的能力；缺失时 fail closed。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
+| 资源匹配 | Lode 声明资源需求，Harbor 提供 runtime/profile/session facts，Core 做匹配和拒绝原因；Harbor 不输出业务适配结论。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
+| Result Envelope | Core 校验 Lode output 并生成 public envelope；raw payload、DOM、HAR、screenshot、network/runtime material 只能以 refs 进入公共结果。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md) |
+| Run Record | `accepted` 后的 run 是 durable truth；状态单调；记录 request/capability/resource/runtime/result/failure/evidence/raw/source/resource/write/reconciliation refs。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md) |
+| 写侧安全 | 真实写入必须区分 execution intent、approval/idempotency、write operation ref、post-check、unknown outcome、manual recovery 和 reconciliation；unknown outcome 不能转成 success。 | [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md) |
+| no-leakage | Core 不保存 Cookie、Token、完整 DOM、完整请求/响应、未脱敏页面现场、本地路径、provider private object 或业务私有 payload。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
+| 非目标 | Core 不成为通用 browser agent loop、Harbor process manager、Lode asset store、provider router/marketplace、account risk scoring system、business strategy engine、ETL/data warehouse。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
