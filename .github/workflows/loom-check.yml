@@ -49,6 +49,24 @@ jobs:
         with:
           node-version: "24"
       - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom host install --host codex --scope user --apply --json
+      - name: Prime Codex host state
+        run: |
+          mkdir -p "$HOME/.agents/plugins" "$HOME/.codex" "$HOME/.codex/plugins/cache/local-user-plugins/loom"
+          cat > "$HOME/.agents/plugins/marketplace.json" <<'JSON'
+          {"name":"local-user-plugins","interface":{"displayName":"Local User Plugins"},"plugins":[{"name":"loom","source":{"source":"local","path":"./plugins/loom"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}
+          JSON
+          cat > "$HOME/.codex/config.toml" <<TOML
+          [marketplaces.local-user-plugins]
+          last_updated = "2026-06-30T00:00:00Z"
+          source_type = "local"
+          source = "$HOME"
+
+          [plugins."loom@local-user-plugins"]
+          enabled = true
+          TOML
+          rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
+          cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
       - run: loom detect --target "$GITHUB_WORKSPACE" --json
       - run: loom doctor --target "$GITHUB_WORKSPACE" --json
 
@@ -80,6 +98,24 @@ jobs:
         with:
           node-version: "24"
       - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom host install --host codex --scope user --apply --json
+      - name: Prime Codex host state
+        run: |
+          mkdir -p "$HOME/.agents/plugins" "$HOME/.codex" "$HOME/.codex/plugins/cache/local-user-plugins/loom"
+          cat > "$HOME/.agents/plugins/marketplace.json" <<'JSON'
+          {"name":"local-user-plugins","interface":{"displayName":"Local User Plugins"},"plugins":[{"name":"loom","source":{"source":"local","path":"./plugins/loom"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}
+          JSON
+          cat > "$HOME/.codex/config.toml" <<TOML
+          [marketplaces.local-user-plugins]
+          last_updated = "2026-06-30T00:00:00Z"
+          source_type = "local"
+          source = "$HOME"
+
+          [plugins."loom@local-user-plugins"]
+          enabled = true
+          TOML
+          rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
+          cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
       - run: loom verify --target "$GITHUB_WORKSPACE" --json
       - run: loom fact-chain --target "$GITHUB_WORKSPACE" --json
       - run: loom profile status --target "$GITHUB_WORKSPACE" --json
@@ -99,4 +135,22 @@ jobs:
         with:
           node-version: "24"
       - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom host install --host codex --scope user --apply --json
+      - name: Prime Codex host state
+        run: |
+          mkdir -p "$HOME/.agents/plugins" "$HOME/.codex" "$HOME/.codex/plugins/cache/local-user-plugins/loom"
+          cat > "$HOME/.agents/plugins/marketplace.json" <<'JSON'
+          {"name":"local-user-plugins","interface":{"displayName":"Local User Plugins"},"plugins":[{"name":"loom","source":{"source":"local","path":"./plugins/loom"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}
+          JSON
+          cat > "$HOME/.codex/config.toml" <<TOML
+          [marketplaces.local-user-plugins]
+          last_updated = "2026-06-30T00:00:00Z"
+          source_type = "local"
+          source = "$HOME"
+
+          [plugins."loom@local-user-plugins"]
+          enabled = true
+          TOML
+          rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
+          cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
       - run: loom pr gate "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}" --json
