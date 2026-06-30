@@ -69,6 +69,88 @@ accepted -> running -> succeeded / failed / unknown_outcome / manual_recovery_re
 | 只读 unknown outcome | 默认不作为只读成功/失败的常规终态；只在外部状态可能已变化的写侧使用。 | 不适用。 | 不适用。 | 只读任务若无法确认抽取结果，应返回结构化失败或 manual recovery，不伪装成 unknown write outcome。 | rejected |
 | 证据引用 | Core 只保存 evidence/raw/source/resource refs 和摘要；证据生产、保留和脱敏策略由 Harbor/Lode/App 后续对齐。 | Harbor refs、Lode evidence expectation。 | evidence ref 字段族、脱敏摘要、consumer boundary。 | 最小分类、保留和脱敏策略仍待 [PD-0008](pending-decisions.md#pd-0008)。 | accepted |
 
+## Stage 2 Result / Run / Query 合同 v0
+
+本节覆盖 Core #44/#45/#46/#47/#48/#49/#50。它只冻结 docs-only 公共合同，不创建 JSON Schema、OpenAPI、SDK、CLI、MCP、API、runtime、storage、evidence store、viewer 或 App UI。
+
+### Result Envelope shape
+
+| 字段或状态 | owner | consumer | 有效性/过期规则 | 失败分类 | 非目标 |
+|---|---|---|---|---|---|
+| `envelope_version` | Core | API、CLI、MCP、SDK、App。 | Stage 2 v0 只保证语义版本；最终字段名留给后续 Schema。 | `unsupported_version`。 | 不生成 schema 或类型。 |
+| `ok` / `outcome` / `terminal` | Core | 所有入口和 Run Record。 | `ok=true` 只表示公共投影可消费；终态单调，不因证据过期改写。v0 outcome：`success`、`partial`、`empty`、`failed`、`blocked`、`requires_user_action`、`manual_recovery_required`、`unknown_outcome`。 | `invalid_state_transition`、`projection_failed`。 | 不用浏览器 step 完成状态代表业务成功。 |
+| `result_kind` / `capability_ref` / `package_ref` | Lode owns capability/package；Core 记录引用。 | App 展示、CLI/MCP/SDK 分类、后续能力修复。 | 必须绑定运行时消费的 Lode version；后续 Lode 更新不得重写历史 run。 | `capability_not_found`、`capability_version_incompatible`、`package_lock_mismatch`、`invalid_contract`。 | 不复制 package body、fixture、站点知识或 authoring draft。 |
+| `data` / `items[]` / `projection_ref` | Lode owns normalized public shape；Core 校验并封装。 | 调用方和 App result view。 | 只允许 JSON-safe public payload；大结果优先引用。数据可被保留或删除，但引用状态必须可查询。 | `output_invalid`、`normalization_failed`、`mapping_incomplete`、`empty_result`。 | 不内联 raw payload、完整 DOM/HAR/screenshot/network body、Cookie、Token、本地路径或 provider private object。 |
+| `raw_payload_refs[]` / `source_refs[]` / `evidence_refs[]` / `source_trace_refs[]` / `resource_trace_refs[]` | Harbor/Lode/Core 按来源拥有；Core 记录 refs 和摘要。 | App evidence view、能力修复、审计、对账。 | ref 必须携带 producer、type、redaction、retention/access 状态或可安全摘要；query 时区分 missing、expired、access denied、redacted。 | `source_unavailable`、`evidence_missing`、`evidence_expired`、`evidence_access_denied`、`evidence_redacted`、`resource_trace_unavailable`。 | Core 不成为 evidence store；App 不获得 raw sensitive material。 |
+| `run_record_ref` / `result_ref` | Core。 | 查询入口、历史列表、恢复入口。 | `accepted` 后可查询；若 result body 过期，Run Record 仍保留 terminal summary 和 ref state。 | `run_not_found`、`result_unavailable`、`result_expired`。 | 不承诺完整分页/搜索产品。 |
+| `write_operation_ref` / `reconciliation_ref` | Core 写侧合同；外部事实仍来自 Harbor evidence。 | 后续写前验证、真实写入和对账入口。 | v0 只预留字段族；真实写入进入 deferred，`unknown_outcome` 不得转成 `success`。 | `unknown_outcome`、`reconciliation_required`、`write_ref_missing`。 | 不执行 submit/destructive，不实现 write store。 |
+
+### Failure reason taxonomy and recovery hint
+
+| 分类 | 典型 code | failure phase | recovery hint 语义 | 用户/系统动作 | 状态 |
+|---|---|---|---|---|---|
+| `request_invalid` | `input_invalid`、`target_type_invalid`、`request_snapshot_invalid` | `pre_admission` | 修正输入、目标或入口参数。 | App/CLI 显示安全字段级提示；Core 不创建 Run Record。 | v0 |
+| `capability_contract` | `capability_not_found`、`operation_not_stable`、`unsupported_version`、`invalid_contract`、`output_contract_missing` | `pre_admission` / `projection` | 选择稳定能力、固定兼容版本或等待 Lode 修复。 | Lode 修复 package；Core fail closed。 | v0 |
+| `resource_admission` | `resource_unavailable`、`runtime_ref_missing`、`profile_unavailable`、`identity_unavailable`、`unauthorized_runtime` | `admission` / `resource_matching` / `runtime_binding` | 连接 runtime、选择 profile、登录或调整 policy。 | App 引导设置；Harbor 提供新 facts。 | v0 |
+| `action_risk` | `risk_not_allowed`、`approval_required`、`approval_expired`、`idempotency_required`、`policy_denied` | `admission` | 获取审批、降低 intent 或补 idempotency boundary。 | App 承接确认；Core 不绕过策略。 | v0 |
+| `runtime_execution` | `runtime_lost`、`timeout`、`source_unavailable`、`selector_unstable`、`handoff_required` | `execution` | 重新绑定、人工接管、重试或走恢复入口。 | Harbor/App 修复现场；Core 记录失败和 refs。 | v0 |
+| `result_projection` | `output_invalid`、`normalization_failed`、`mapping_incomplete`、`empty_result`、`post_check_failed` | `verification` / `projection` | 修复能力、重新采集 source，或以 partial/empty 展示。 | Lode 修 normalizer/post-check；App 不把 contract bug 当用户错。 | v0 |
+| `evidence_reference` | `evidence_missing`、`evidence_expired`、`evidence_access_denied`、`evidence_redacted`、`capture_denied` | `evidence` / `query` | 重新采集、请求权限或查看脱敏摘要。 | Harbor/App 管 access/redaction；Core 不恢复 raw evidence。 | v0 |
+| `persistence_observability` | `run_record_write_failed`、`result_unavailable`、`metric_unavailable` | `persistence` / `observability` | 重试写入事实载体或降级为可审计失败。 | 系统处理；不得伪装业务成功。 | v0 |
+| `write_outcome` | `unknown_outcome`、`reconciliation_required`、`cancel_unknown`、`duplicate_rejected` | `write_verification` / `reconciliation` | 围绕 `write_operation_ref` 对账、取消或人工恢复。 | 后续写侧 Work Item 实现；本 ADR 只保留语义。 | deferred implementation |
+
+`recovery_hint` 是机器可读提示族，不是自由文本异常。v0 候选：`fix_input`、`select_capability_version`、`connect_runtime`、`login_or_select_profile`、`request_approval`、`retry_after_refresh`、`rerun_with_evidence`、`manual_handoff`、`repair_package`、`reconcile_write_operation`、`contact_operator`。
+
+### Run Record fields, terminal states, retention, and redaction
+
+| 字段或状态 | owner | consumer | retention/redaction | 失败分类 | 非目标 |
+|---|---|---|---|---|---|
+| `run_id` / `status` / `created_at` / `updated_at` / `terminal_at` | Core | 所有查询方。 | 持久保存公共 id、状态和时间；不保存 runtime 内部对象。 | `run_not_found`、`invalid_state_transition`。 | 不定义数据库 schema。 |
+| `request_snapshot` / `entrypoint_ref` / `caller_ref` | Core/API Server。 | 审计、失败归因、恢复入口。 | 保存脱敏摘要、策略摘要和 refs；用户业务内容、secret、本地路径默认不 inline。 | `caller_unauthorized`、`request_snapshot_invalid`。 | 不保存 App UI 草稿或本地缓存。 |
+| `capability_ref` / `package_ref` / `schema_refs` | Lode owns；Core records refs。 | 结果校验、能力修复、App Library 归因。 | 保存运行时消费的稳定版本和 lock 摘要；不复制 package body。 | `capability_invalidated`、`package_lock_mismatch`、`invalid_contract`。 | 不实现 registry。 |
+| `resource_requirements_summary` / `resource_match_result` / `admission_decision` / `action_risk` | Core consumes Lode + Harbor + caller policy。 | App setup、审计、恢复。 | 保存匹配摘要、拒绝原因和 refs；不保存 Harbor facts 全量。 | `resource_unavailable`、`risk_not_allowed`、`approval_required`。 | 不硬编码站点策略。 |
+| `runtime_binding_refs` | Harbor owns refs；Core records public binding. | 执行、查询、viewer/evidence 展示。 | 保存 `runtime_session_ref`、`profile_ref`、`execution_identity_ref`、可选 page/viewer/source refs；不保存 CDP/VNC URL、Cookie、Token、profile data。 | `runtime_ref_expired`、`identity_unavailable`。 | Core 不管理 browser process。 |
+| `attempts[]` / `run_event_refs[]` / `failure_signal_refs[]` | Core；runtime evidence refs 可来自 Harbor。 | 调试、恢复、对账。 | 保存 task-bound 摘要和 refs；完整 agent history、prompt、LLM response、逐步截图默认不进入 Run Record body。 | `timeout`、`runtime_lost`、`handoff_required`。 | 不做通用日志仓库。 |
+| `terminal_result_envelope` | Core。 | 所有入口。 | 保存公共 envelope 或 result ref；raw/heavy/sensitive 只以 ref 表达。 | 见 taxonomy。 | 不保存业务数据仓库。 |
+| `retention_state` / `redaction_state` | Core records; Harbor/App enforce raw access. | 查询方、审计。 | v0 状态：`active`、`summary_only`、`expired`、`redacted`、`access_denied`、`deleted_by_policy`；状态变化不改写 run terminal outcome。 | `result_expired`、`evidence_redacted`、`permission_denied`。 | 不承诺 raw evidence 恢复。 |
+
+终态 v0：`succeeded`、`failed`、`blocked`、`requires_user_action`、`manual_recovery_required`、`unknown_outcome`、`cancelled`。`cancelled` 只表示 WebEnvoy 停止继续推进；若外部写入可能已发生，必须使用 `unknown_outcome` 或后续 write reconciliation 状态。
+
+### Task / Run / Result query shape
+
+| 查询面 | v0 输入 | v0 返回 | not_found/expired/redaction 语义 | deferred |
+|---|---|---|---|---|
+| get run summary | `run_id` 或 `run_record_ref`，调用方 policy。 | run status、timestamps、capability/package refs、admission summary、terminal summary、safe refs、available actions。 | `not_found` 表示 Core 没有该 run 或调用方不可见；`permission_denied` 表示存在但调用方无权；`expired` 不应用于 run summary 本体。 | 历史列表、复杂过滤、全文搜索。 |
+| get result envelope | `run_id` / `result_ref`，可选 `include=data|summary|refs`。 | terminal result envelope、public data 或 `projection_ref`、failure、refs。 | `result_expired` 表示可查询到 run，但 result body 已按策略移除；必须保留 terminal summary。`redacted` 表示结果可见但字段被脱敏。 | dataset export、streaming large result。 |
+| get failure detail | `run_id`，可选 `phase`。 | taxonomy、code、phase、safe message、recovery_hint、evidence/source/resource refs。 | evidence 不可访问不删除 failure detail；用 ref state 表达。 | 完整 debug log 下载。 |
+| get evidence/source/resource ref state | ref id、type、caller policy。 | `available`、`missing`、`expired`、`redacted`、`access_denied`、`capture_denied`、safe summary。 | `missing` 是没有或未生成；`expired` 是曾有但 TTL/retention 后不可解引用；`redacted` 是存在但敏感内容不可显示；`access_denied` 是调用方无权。 | raw viewer、evidence export。 |
+| get task/request view | `run_id` 或 caller task id。 | request/admission safe summary、entrypoint/caller refs、related run refs。 | 若 request summary 被策略删除，返回 `summary_only` 而不是伪造空请求。 | 完整任务队列和分页产品。 |
+| get recovery/reconciliation entry | `run_id`，terminal status。 | allowed next action refs：retry、manual_handoff、reconcile、cancel status、rerun with evidence。 | 不允许的动作返回 `action_not_available`，不是 `not_found`。 | 真正执行 recovery/write。 |
+
+### Consumed upstream facts
+
+| 上游事实 | Core 消费方式 | 不复制/不实现 |
+|---|---|---|
+| Core ADR 0007 / PR #65 reference/version ownership | 本 ADR 复用 owner、ref validity 和 missing/expired/redacted/access denied 语义；Result/Run/Query 不重新定义 owner。 | 不把 0007 扩成 schema/API/storage。 |
+| Harbor PR #58 / ADR 0007 page scene facts | Core Run Record 和 query refs 可记录 `snapshot_ref`、`refmap_ref`、`source_trace`、`evidence_ref`、`viewer_ref`、`control_owner`、`handoff_reason` 的公共摘要和 ref state。 | 不保存完整 DOM、screenshot、HAR、VNC/CDP endpoint、cookies、tokens、provider node ids 或 viewer UI。 |
+| Lode PR #60 / ADR 0003 resource requirements / fixtures / post-check / validator | Core 校验 Lode normalized output、resource requirement profiles、post-check result、failure mapping 和 validator status，并把 package/schema refs 写入 Run Record。 | 不保存 Lode fixture、package body、validator implementation、registry 或 normalizer code。 |
+
+### Stage 2 research absorption boundary
+
+| locator | 判断 | 吸收/裁剪/拒绝理由 | 落点 |
+|---|---|---|---|
+| `WebEnvoy/ROADMAP.md` | 吸收 | 阶段二目标是统一 `task/run/result/evidence/action request` 最小协议；完整入口矩阵、真实写入和产品历史列表后移。 | Result/Run/Query v0 和 deferred 列。 |
+| `docs/adr/0003-result-envelope-and-run-record.md` | 吸收 | 既有 owner/ref/raw boundary 是本轮权威基线；本轮补全字段族、query shape 和 taxonomy。 | 本节全部表格。 |
+| `docs/adr/0007-reference-version-ownership-v0.md` | 吸收 | 已合并 Core ref/version owner、validity 和 ref failure 语义；本轮只消费，不重开 owner 决策。 | Consumed upstream facts、query ref state。 |
+| Harbor ADR 0007 / PR #58 | 吸收 | 吸收 snapshot/refmap/source_trace/evidence/viewer/control/handoff facts 的公共 ref 和状态；拒绝 Harbor raw scene、viewer endpoint、provider private object 进入 Core body。 | Run Record refs、evidence/source query state。 |
+| Lode ADR 0003 / PR #60 | 吸收 | 吸收 normalized output、resource requirement profiles、post-check、validator report 和 Lode failure mapping；拒绝 package fixture、registry、validator code 进入 Core。 | Result projection、failure taxonomy、Run Record package refs。 |
+| `research/absorability/themes/result-normalization-and-reconciliation.md` | 裁剪复用 | 复用 typed error、hint、low-noise result、large payload by ref、unknown outcome/reconciliation 机制；裁剪掉 adapter-specific JSON、display columns、file export 和 renderer code。 | Result envelope、failure taxonomy、write refs。 |
+| `research/absorability/themes/evidence-and-observability.md` | 裁剪复用 | 复用 evidence refs、retention/redaction、Run Record baseline、non-proof policy；拒绝默认保存 screenshot/HAR/video/full DOM/prompt/agent history。 | Run Record retention/redaction、query ref state。 |
+| `research/absorability/themes/api-cli-mcp-and-agent-interface.md` | 裁剪复用 | 复用统一 envelope、machine-readable failures 和 entrypoint consistency；不把某个 CLI/MCP transport 或 command surface 固化为 v0 API。 | Query shape、failure hint。 |
+| `research/absorability/themes/workflow-and-task-package.md` | 只参考 | 支持任务/工作流包和 verification 思路，但 Core 本轮不定义 workflow DSL 或 package format。 | post-check/result projection rationale。 |
+| Syvert TaskRecord、旧 WebEnvoy runtime store / CLI envelope / risk gate | 裁剪复用 | 只取 run id、terminal state、evidence/risk/failure/hint 思路；历史平台字段、store shape 和 UI 流程不进入 MVP。 | Run Record fields、taxonomy。 |
+| Browser agent history、live activity registry、raw dashboard transcript | 拒绝进入 MVP | 缺少 capability version、admission、retention/redaction 和 ref owner 边界；会把 Core 变成日志/现场仓库。 | 非目标。 |
+
 ## 后果
 
 调用方可以跨 API、SDK、CLI、MCP 和 App 消费同一种结果封装。
