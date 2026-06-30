@@ -19,7 +19,8 @@ Close out WebEnvoy Core document drafts for the current docs milestone without c
 
 ## Suite Path
 
-- Suite path: minimal
-- Full suite artifacts not_applicable: rationale: docs-only closeout and GH-71 item-specific Loom carrier; no code, final schema, API, runtime behavior, generated facts, fixtures, migrations, or user-facing runtime behavior.
-- Consumer boundary: documentation readers, GitHub issues #69/#70/#71/#72/#73, PR metadata, GH-71 Loom carrier, local docs/gate checks, and hosted checks.
-- Recheck condition: require stronger validation if this PR or a follow-up PR adds code, final schema, API/runtime behavior, generated facts, fixtures, workflow logic, migrations, or behavior changes.
+- Suite path: not_applicable
+- Suite-level not_applicable: rationale: docs-only closeout and GH-71 item-specific Loom carrier; no code, final schema, API, runtime behavior, generated facts, fixtures, migrations, workflow logic, or user-facing runtime behavior; consumer boundary: docs readers, GitHub issues #69/#70/#71/#72/#73, PR metadata, GH-71 Loom carrier, local docs/gate checks, and hosted checks; recheck condition: require stronger validation if this PR or a follow-up PR adds code, final schema, API/runtime behavior, generated facts, fixtures, workflow logic, migrations, or behavior changes.
+- Full suite artifacts not_applicable: rationale: docs-only closeout and GH-71 item-specific Loom carrier; no code, final schema, API, runtime behavior, generated facts, fixtures, migrations, workflow logic, or user-facing runtime behavior; consumer boundary: docs readers, GitHub issues #69/#70/#71/#72/#73, PR metadata, GH-71 Loom carrier, local docs/gate checks, and hosted checks; recheck condition: require stronger validation if this PR or a follow-up PR adds code, final schema, API/runtime behavior, generated facts, fixtures, workflow logic, migrations, or behavior changes.
+- Consumer boundary: documented in the not_applicable rationale above.
+- Recheck condition: documented in the not_applicable rationale above.

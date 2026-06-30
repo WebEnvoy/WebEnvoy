@@ -1,6 +1,6 @@
 # Plan
 
-- Suite path: minimal
+- Suite path: not_applicable
 
 ## Implementation
 
@@ -18,7 +18,7 @@
 - Available Loom local checks: `loom fact-chain --target . --json`, `loom suite validate --target . --json`, and `loom suite carrier validate --target . --json`.
 - Hosted checks after PR creation.
 
-## Minimal Path Applicability Records
+## Suite N/A Records
 
 - full-path-artifacts not_applicable rationale: docs-only closeout; no code, final schema, API/runtime behavior, generated facts, fixture file, migration, or workflow logic.
 - consumer boundary: docs readers, GitHub issues #69/#70/#71/#72/#73, PR metadata, GH-71 Loom carrier, and hosted docs/gate checks.
