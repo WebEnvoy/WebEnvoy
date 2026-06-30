@@ -5,8 +5,8 @@
   "kind": "spec_review",
   "summary": "Docs-only boundary spec is scoped to the first read-only Core wedge and research absorption boundary.",
   "reviewer": "codex",
-  "reviewed_head": "3854c5268867275e0eefa2d38d81d54a204a2940",
-  "reviewed_validation_summary": "git diff --check passed after docs/carrier, fact-chain locator, and progress freshness sync commits; local Loom wrapper commands are blocked by workstation installed-state / target binding and deferred to hosted direct entry.",
+  "reviewed_head": "765fe1ea3b2a692e40dc525f092f4273bd747a07",
+  "reviewed_validation_summary": "git diff --check passed; PR metadata preflight passed; direct PR gate consumed GH-20 and suite validate passed, with local Loom wrapper doctor/verify/fact-chain still blocked by workstation installed-state / target binding.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [

@@ -15,7 +15,7 @@
 - Current Stop: Docs-only boundary spine prepared for PR.
 - Next Step: Push branch, create PR, and let hosted required checks consume the GH-20 carrier.
 - Blockers: Local `loom doctor` / `loom verify` are blocked by workstation installed-state and legacy surface diagnostics; local `loom fact-chain` reports missing init-result despite `.loom/bootstrap/init-result.json` existing in the worktree, classified as wrapper/target binding.
-- Latest Validation Summary: Pending final post-edit validation.
+- Latest Validation Summary: git diff --check passed; PR metadata preflight passed; direct PR gate consumed GH-20 and suite validate passed, with local Loom wrapper doctor/verify/fact-chain still blocked by workstation installed-state / target binding.
 - Recovery Boundary: Continue from this branch and GH-20 carrier; do not reuse INIT-0001 or GH-32.
 - Current Lane: docs-only boundary spine
 
