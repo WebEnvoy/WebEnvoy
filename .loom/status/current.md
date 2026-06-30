@@ -11,11 +11,11 @@
 - Review Entry: .loom/reviews/GH-42.json
 - Validation Entry: `git diff --check`; JSON validation; Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#41/#42/#43; no merge and no issue closeout in this thread.
-- Current Checkpoint: build
-- Current Stop: Docs-only reference/version ownership contract drafted for Core #41/#42/#43.
-- Next Step: Open PR, run hosted checks, then hand back to coordinator for review/merge/closeout.
+- Current Checkpoint: merge
+- Current Stop: PR #65 has docs-only content, GH-42 carrier, and authored review artifacts ready for merge-gate consumption.
+- Next Step: Run PR merge gate, wait for hosted checks on the current head, then merge and perform post-merge closeout.
 - Blockers: None recorded.
-- Latest Validation Summary: 2026-06-30 local validation passed: `git diff --check`, JSON validation, `loom_flow.py fact-chain`, `loom suite validate`, and `loom suite carrier validate`; hosted checks pending PR creation.
+- Latest Validation Summary: 2026-06-30 merge-ready carrier prepared for PR #65; content head 105b325528bd1f704dae19674c4b48184735ac88 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.
 - Recovery Boundary: Do not implement schema/API/runtime/storage/evidence/viewer code in this Work Item.
 - Current Lane: core-reference-version-contract
 
