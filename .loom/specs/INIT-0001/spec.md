@@ -2,64 +2,32 @@
 
 ## Goal
 
-- What problem does this change solve?
-- What user or system outcome must become true?
+Repair the Loom PR merge gate workflow so GitHub Actions evaluates the checked out repository, while leaving the Work Item binding to the PR body.
 
 ## Scope
 
-- In scope:
-- Out of scope:
+- In scope: `.github/workflows/loom-check.yml` gate command for PR checks.
+- Out of scope: product boundary documents, product behavior, Loom CLI internals, and global gate policy.
 
-## Key Scenarios
+## Behavior
 
-Use these scenarios as the BDD outer loop. Each scenario should describe observable behavior, not implementation steps.
+- `loom-pr-merge-gate` calls `loom flow pr-gate check --target "$GITHUB_WORKSPACE" --pr <number> --head-sha <sha> --json`.
+- The workflow does not pass `--item INIT-0001`; gate reads the real `Loom Work Item` from the PR body.
+- Repair PR body may use `Loom Work Item: INIT-0001` because this repair is part of Loom bootstrap/adoption repair.
 
-If a User Story exists, reference its scenario id or locator here instead of copying the full story into `spec.md` as a second truth source.
+## Validation
 
-If the User Story carries business semantics, record its Story Business Confirmation locator or `not_applicable` rationale before shaping this spec.
+- `git diff --check`
+- `loom doctor --target <repair-worktree-abs> --json`
+- `loom verify --target <repair-worktree-abs> --json`
+- `loom fact-chain --target <repair-worktree-abs> --json`
+- CI stable checks: `py-compile`, `demo-bootstrap`, `repo-local-cli`, `loom-check`
+- Local gate readback proves owner/repo, PR body Work Item, and fact-chain are readable without workflow hardcoded item.
 
-### Scenario 1
+## Suite Applicability
 
-Given
-- a clear starting state
-
-When
-- the actor performs the target action
-
-Then
-- the expected observable outcome happens
-
-### Scenario 2
-
-Given
-- an important variant or edge condition
-
-When
-- the relevant action occurs
-
-Then
-- the system still behaves within the intended boundary
-
-## Behavior Evidence
-
-- Story scenario mapping:
-- Story business confirmation locator or `not_applicable` rationale:
-- Scenario coverage:
-- Expected evidence locator:
-- Freshness rule:
-- Execution ledger acceptance locator:
-- `not_applicable` rationale, if this is not a behavior-bearing change:
-
-## Exceptions And Boundaries
-
-- Failure modes:
-- Operational boundaries:
-- Rollback or fallback expectations:
-
-## Acceptance Criteria
-
-- [ ] Target outcome is observable
-- [ ] Key scenarios are covered
-- [ ] Important boundary behavior is defined
-- [ ] Validation evidence is identified
-- [ ] Behavior evidence can be consumed by review, merge-ready, and closeout
+- Suite path: not_applicable
+- Artifact: suite-level
+- Rationale: This PR changes only workflow invocation for Loom gate plumbing and does not change product code, runtime behavior, schema, API, or user-facing docs semantics.
+- Consumer boundary: This N/A applies only to the workflow/gate repair in this PR and only to the current repair PR head.
+- Recheck condition: Re-run suite applicability and workflow validation if product code changes, workflow inputs change, runner checkout behavior changes, Loom CLI version changes, or the PR head changes.

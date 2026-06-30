@@ -11,13 +11,13 @@
 - Review Entry: .loom/reviews/INIT-0001.json
 - Validation Entry: loom verify --target . --json
 - Closing Condition: The generated entry, work item, recovery entry, and templates are readable and verified
-- Current Checkpoint: admission
-- Current Stop: Bootstrap artifacts have been generated and are awaiting downstream review.
-- Next Step: Accept the generated Loom entry and promote the first real repository work item.
+- Current Checkpoint: merge
+- Current Stop: Workflow-only Loom PR gate repair is reviewed and waiting on host PR gate / controlled merge.
+- Next Step: Merge the repair PR after required checks pass; re-run gate validation if Loom CLI, workflow, or runner behavior changes.
 - Blockers: None recorded.
-- Latest Validation Summary: Bootstrap result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.
+- Latest Validation Summary: Workflow-only gate repair validated by git diff --check, loom doctor/verify/fact-chain, suite not_applicable evidence, and CI stable checks.
 - Recovery Boundary: Bootstrap result at `.loom/bootstrap/init-result.json`.
-- Current Lane: bootstrap verification only
+- Current Lane: workflow gate repair
 
 ## Governance Status
 
