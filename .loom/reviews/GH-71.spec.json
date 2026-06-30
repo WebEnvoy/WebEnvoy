@@ -5,8 +5,8 @@
   "kind": "spec_review",
   "summary": "Spec review passed for the docs-only GH-71 draft closeout. The PR defines docs directory semantics, draft lifecycle rules, per-draft disposition, and explicit absorption/rejected/deferred analysis without adding code, schema, API, runtime, fixture, generated, migration, or behavior changes.",
   "reviewer": "codex-main",
-  "reviewed_head": "5fb6891702f6bfa6f2ccb3ae3973e99ab92b2210",
-  "reviewed_validation_summary": "At head 5fb6891702f6bfa6f2ccb3ae3973e99ab92b2210, git diff --check, .loom JSON jq validation, loom fact-chain, loom suite validate --item GH-71, and loom suite carrier validate --item GH-71 passed. loom build remained blocked by local wrapper suite JSON plumbing, while global suite commands passed.",
+  "reviewed_head": "e31e82f9b95064cde3bcf9801602daa156dc8602",
+  "reviewed_validation_summary": "At head e31e82f9b95064cde3bcf9801602daa156dc8602, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
@@ -15,7 +15,7 @@
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The spec and plan preserve the requested docs-only scope, identify GH-71 as the Loom anchor, define minimal suite not_applicable rationale and recheck conditions, and bind all covered issues through task-carrier without closing them."
+    "reason": "The spec and plan preserve the requested docs-only scope, identify GH-71 as the Loom anchor, define suite-level and full-suite-artifact not_applicable rationale and recheck conditions, and bind all covered issues through task-carrier without closing them."
   },
   "consumed_inputs": {
     "spec": ".loom/specs/GH-71/spec.md",
