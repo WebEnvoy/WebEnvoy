@@ -2,64 +2,27 @@
 
 ## Goal
 
-- What problem does this change solve?
-- What user or system outcome must become true?
+Use a temporary bootstrap-bound docs-only gate for the Core boundary documentation PR.
 
 ## Scope
 
-- In scope:
-- Out of scope:
+- In scope: review the Core boundary documentation semantics in PR #30.
+- Out of scope: Phase 2 schema/API/runtime implementation, product code, generated facts, and cross-repo runtime behavior.
 
-## Key Scenarios
+## Boundary Statement
 
-Use these scenarios as the BDD outer loop. Each scenario should describe observable behavior, not implementation steps.
+Core documents that WebEnvoy consumes refs, facts, and intent, while Harbor, Lode, and App own their respective runtime/capability/UI facts.
 
-If a User Story exists, reference its scenario id or locator here instead of copying the full story into `spec.md` as a second truth source.
+## Validation
 
-If the User Story carries business semantics, record its Story Business Confirmation locator or `not_applicable` rationale before shaping this spec.
+- Review changed ADR and pending-decision documents only.
+- Confirm no product code or test fixture files changed.
+- Confirm PR metadata binds `Loom Work Item: INIT-0001`, branch, and head SHA.
 
-### Scenario 1
+## Suite Applicability
 
-Given
-- a clear starting state
-
-When
-- the actor performs the target action
-
-Then
-- the expected observable outcome happens
-
-### Scenario 2
-
-Given
-- an important variant or edge condition
-
-When
-- the relevant action occurs
-
-Then
-- the system still behaves within the intended boundary
-
-## Behavior Evidence
-
-- Story scenario mapping:
-- Story business confirmation locator or `not_applicable` rationale:
-- Scenario coverage:
-- Expected evidence locator:
-- Freshness rule:
-- Execution ledger acceptance locator:
-- `not_applicable` rationale, if this is not a behavior-bearing change:
-
-## Exceptions And Boundaries
-
-- Failure modes:
-- Operational boundaries:
-- Rollback or fallback expectations:
-
-## Acceptance Criteria
-
-- [ ] Target outcome is observable
-- [ ] Key scenarios are covered
-- [ ] Important boundary behavior is defined
-- [ ] Validation evidence is identified
-- [ ] Behavior evidence can be consumed by review, merge-ready, and closeout
+- Suite path: not_applicable
+- Artifact: suite-level
+- Rationale: This PR changes only boundary documentation and does not change executable code, schemas, APIs, runtime behavior, or tests.
+- Consumer boundary: This N/A applies only to Core PR #30 boundary documentation semantics at the current PR head; it does not approve Phase 2 implementation.
+- Recheck condition: Require suite/test validation if code, schema, API, runtime behavior, generated facts, or fixture contracts change.
