@@ -1,0 +1,15 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-32",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Minimal docs-only governance spec is sufficient for recording Loom PR and closeout constraints.",
+  "reviewer": "codex",
+  "reviewed_head": "pending-head",
+  "reviewed_validation_summary": "Spec limits the PR to AGENTS.md guidance and item-specific carrier files.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Use a new Work Item and carrier for each future product PR."
+  ]
+}

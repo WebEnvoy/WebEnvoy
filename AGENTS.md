@@ -75,3 +75,13 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 
 Loom CLI、Codex plugin 和 skills 由用户级全局安装提供；不要把 repo-local Loom runtime、plugin payload、skills payload 或 runtime/cache 写入仓库。运行态只应留在 `.loom/runtime/`、`.loom/tmp/`、`.loom/cache/`、`.loom/local/` 等忽略路径。
 <!-- LOOM_BOOTSTRAP_END -->
+
+## Loom / PR / closeout 约束
+
+- `INIT-0001` 只用于 Loom bootstrap 或 gate repair；产品、规划、边界和实现 PR 必须绑定真实 GitHub Work Item，并使用对应的 item-specific Loom carrier。
+- PR body、`.loom/work-items/**`、`.loom/progress/**` 和 `.loom/reviews/**` 必须指向同一 Work Item、branch 和 head 链路；每次 push 后回读 `Loom Work Item`、`Branch`、`Head SHA` 和 review artifact 的 `reviewed_head`。
+- 如果 Loom workflow 或 gate 本身有问题，先用独立 repair PR 合入 `main`，再更新产品 PR 到新 base；不要在旧 gate 上反复重跑产品 PR。
+- 本地 gate 验证必须匹配 hosted workflow 的真实入口；当前 workflow 直接调用 packaged `loom_flow.py`，不要改回会清理执行上下文的外层 `loom` wrapper。
+- `suite not_applicable` 只适用于真实 docs-only 或 workflow-only PR，并必须写清原因、覆盖 head、consumer boundary 和重新要求 suite 的条件。
+- 不并行改同一个共享 Loom carrier；同一 PR 默认只维护自己的 item-specific carrier。确需修改 `.loom/status/current.md` 时，必须由当前 PR 串行更新，并确认默认 `loom fact-chain` 不产生 active item 漂移。
+- issue closeout 不等于 PR merge；关闭 issue 前必须写 post-merge 证据：PR、merge commit、head、hosted run、仓内事实载体和范围限制。
