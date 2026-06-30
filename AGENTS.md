@@ -65,24 +65,14 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 <!-- LOOM_BOOTSTRAP_START -->
 ## Loom Bootstrap
 
-本仓库当前是 Loom metadata-only 接入；仓内只保存 `.loom/installed-state.json` 和本段 bootstrap 指引。Loom CLI、Codex plugin 和 skills 由用户级全局安装提供，不写入仓库。
+本仓库采用 Loom execution-control（standard maturity）承接正式执行事实链。正式实现、review、merge-ready 或 closeout 前，先从 Loom 入口恢复当前事实：
 
-开始实现、review、merge-ready 或 closeout 前，先完成以下检查：
+1. 运行 `loom doctor --target . --json` 和 `loom verify --target . --json`。
+2. 运行 `loom fact-chain --target . --json`，确认 `Work Item -> progress -> status -> review/merge-ready` 事实链可读。
+3. 以 `.loom/work-items/**` 作为静态执行入口，以 `.loom/progress/**` 和 `.loom/status/current.md` 作为恢复与状态读取入口；GitHub issue / PR 是宿主控制面，不替代仓内事实链。
+4. merge-ready / closeout 前必须消费 Loom review、验证摘要、PR head 和事实链当前状态。
 
-1. 确认 `.loom/installed-state.json` 存在。
-2. 若本机没有 `loom`，执行：
-   `npm install -g @mc-and-his-agents/loom`
-3. 运行：
-   `loom doctor --target . --json`
-   `loom verify --target . --json`
-4. 若 Codex Loom plugin 缺失，执行：
-   `loom host install --host codex --scope user --apply --json`
-   `loom host register --host codex --scope user --apply --json`
-5. 重新运行：
-   `loom doctor --target . --json`
-   `loom verify --target . --json`
+Loom CLI、Codex plugin 和 skills 由用户级全局安装提供；不要把 repo-local Loom runtime、plugin payload、skills payload 或 runtime/cache 写入仓库。运行态只应留在 `.loom/runtime/`、`.loom/tmp/`、`.loom/cache/`、`.loom/local/` 等忽略路径。
 
-metadata-only 阶段，执行事实来源是 GitHub issue / PR、当前分支、`AGENTS.md`、`README.md` 和 `docs/`。不要临时手写 `.loom/work-items/**`、`.loom/progress/**`、`.loom/status/current.md`、`.loom/specs/**` 或 `.loom/reviews/**` 作为执行事实载体。
-
-当任务需要跨多轮恢复、一个任务拆多个 PR、多个 Agent 并行推进同一 Work Item、merge 前需要消费状态 / 验证 / review 事实链，或 GitHub issue / PR 已不足以承载执行事实时，先升级到 `execution-control` 再继续实施。涉及安全、数据、运行时、发布或强 merge gate 时，再评估是否升级到 `strong-governance`。
+默认不启用 `strong-governance`。当事项涉及安全、数据、权限、运行时身份、发布、生产写入、强 merge gate，或可能破坏跨仓共享合同/API/Schema 时，先评估并显式升级到 `strong-governance` 再继续。
 <!-- LOOM_BOOTSTRAP_END -->
