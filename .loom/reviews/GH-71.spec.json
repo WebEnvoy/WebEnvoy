@@ -21,7 +21,7 @@
     "spec": ".loom/specs/GH-71/spec.md",
     "plan": ".loom/specs/GH-71/plan.md",
     "task_carrier": ".loom/specs/GH-71/task-carrier.md",
-    "suite_path": "minimal",
+    "suite_path": "not_applicable",
     "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/74"
   }
 }
