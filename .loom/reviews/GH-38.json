@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-38",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "The docs-only ADR and GH-38 carrier stay within the Core Stage 2 task/run lifecycle lane and establish a usable public contract without code or runtime implementation.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "c3cbfb22c5994512f8c4bb17a7ef558903c606fe",
+  "reviewed_validation_summary": "2026-06-30T10:10Z local checks: `git diff --check` pass; Python compile not_applicable because no Python files are tracked; `loom doctor --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom verify --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom fact-chain --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom installed-state validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom suite validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom build --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --build-evidence .loom/specs/GH-38/build-evidence.json --json` blocked only because the build flow looks for repo-local `tools/loom.py` suite JSON, while this repo's workflow uses global `loom`; classified as local tool-path mismatch, not contract drift. PR #61 opened at https://github.com/WebEnvoy/WebEnvoy/pull/61.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this approval as completion of final JSON Schema, OpenAPI, SDK, CLI, MCP, runtime execution, App UI, or true write behavior.",
+    "Close GH-37/GH-38/GH-39/GH-40 only after merge and post-merge closeout evidence are recorded."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "ADR 0005 defines Task Intent Envelope v0, shared public run states, pre-admission failure behavior, Run Record creation rules, shared entry boundaries, research absorption decisions, and non-goals for GH-37/GH-38/GH-39/GH-40."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-38/spec.md",
+    "plan": ".loom/specs/GH-38/plan.md",
+    "suite_path": "minimal",
+    "validation": "git diff --check; loom verify/fact-chain/suite validate/suite carrier validate; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check"
+  }
+}
