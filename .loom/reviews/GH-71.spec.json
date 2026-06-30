@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-71",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review passed for the docs-only GH-71 draft closeout. The PR defines docs directory semantics, draft lifecycle rules, per-draft disposition, and explicit absorption/rejected/deferred analysis without adding code, schema, API, runtime, fixture, generated, migration, or behavior changes.",
+  "reviewer": "codex-main",
+  "reviewed_head": "a3b73f382779c3a165caa9187655663d12f08e76",
+  "reviewed_validation_summary": "At head a3b73f382779c3a165caa9187655663d12f08e76, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this spec review as approval for code, final JSON Schema, API/runtime behavior, generated artifacts, fixtures, migrations, workflow logic, user-facing behavior, merge, or issue closeout.",
+    "Future schema/API/runtime work must consume the accepted facts indexed in docs/contracts/README.md and avoid treating docs/draft pointer files as implementation truth."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec and plan preserve the requested docs-only scope, identify GH-71 as the Loom anchor, define suite-level and full-suite-artifact not_applicable rationale and recheck conditions, and bind all covered issues through task-carrier without closing them."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-71/spec.md",
+    "plan": ".loom/specs/GH-71/plan.md",
+    "task_carrier": ".loom/specs/GH-71/task-carrier.md",
+    "suite_path": "not_applicable",
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/74"
+  }
+}
