@@ -65,18 +65,24 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 <!-- LOOM_BOOTSTRAP_START -->
 ## Loom Bootstrap
 
-本仓库采用 Loom 来管理 agent 执行流程、工作事实载体、review、merge-ready 和 closeout；开始实现、review、merge-ready 或 closeout 前，先完成以下 bootstrap 检查。
+本仓库当前是 Loom metadata-only 接入；仓内只保存 `.loom/installed-state.json` 和本段 bootstrap 指引。Loom CLI、Codex plugin 和 skills 由用户级全局安装提供，不写入仓库。
 
-1. 检查 `.loom/installed-state.json`。
+开始实现、review、merge-ready 或 closeout 前，先完成以下检查：
+
+1. 确认 `.loom/installed-state.json` 存在。
 2. 若本机没有 `loom`，执行：
    `npm install -g @mc-and-his-agents/loom`
 3. 运行：
    `loom doctor --target . --json`
+   `loom verify --target . --json`
 4. 若 Codex Loom plugin 缺失，执行：
    `loom host install --host codex --scope user --apply --json`
    `loom host register --host codex --scope user --apply --json`
 5. 重新运行：
    `loom doctor --target . --json`
+   `loom verify --target . --json`
 
-不要把 Loom runtime、plugin 或 skills payload 写入仓库；它们属于用户级全局安装。
+metadata-only 阶段，执行事实来源是 GitHub issue / PR、当前分支、`AGENTS.md`、`README.md` 和 `docs/`。不要临时手写 `.loom/work-items/**`、`.loom/progress/**`、`.loom/status/current.md`、`.loom/specs/**` 或 `.loom/reviews/**` 作为执行事实载体。
+
+当任务需要跨多轮恢复、一个任务拆多个 PR、多个 Agent 并行推进同一 Work Item、merge 前需要消费状态 / 验证 / review 事实链，或 GitHub issue / PR 已不足以承载执行事实时，先升级到 `execution-control` 再继续实施。涉及安全、数据、运行时、发布或强 merge gate 时，再评估是否升级到 `strong-governance`。
 <!-- LOOM_BOOTSTRAP_END -->
