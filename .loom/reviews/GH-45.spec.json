@@ -3,14 +3,13 @@
   "item_id": "GH-45",
   "decision": "allow",
   "kind": "spec_review",
-  "summary": "Spec review approved for the docs-only Core Result/Admission contract in PR #67.",
+  "summary": "Post-merge spec closeout for GH-45 is approved; the docs-only contract is merged and no implementation completion is implied.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "d73e5b26b8d20dcbf4e383d32abc6c11acae5177",
-  "reviewed_validation_summary": "2026-06-30 merge-ready carrier prepared for PR #67; content head d73e5b26b8d20dcbf4e383d32abc6c11acae5177 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.",
+  "reviewed_head": "49883886979766355977ecb8ee3aad2bcad7099f",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #67, head 2c9d5ab29cdd0de0a450f35b1b8c79a773157db3, merge commit 49883886979766355977ecb8ee3aad2bcad7099f, target branch main, and hosted run 28445296390 with all required checks passing.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
-    "Do not treat this approval as completion of JSON Schema, OpenAPI, SDK, CLI, MCP, API implementation, runtime, storage, evidence store, viewer, App UI, or true-write behavior.",
-    "Downstream App contracts may consume ADR 0003/0004 semantics after this PR is merged."
+    "Do not treat this approval as schema/API/runtime/storage/evidence/viewer/App implementation or true-write behavior completion."
   ]
 }
