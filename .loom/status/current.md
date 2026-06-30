@@ -6,7 +6,7 @@
 - Goal: 收敛 Core Stage 2 Result/Run/Query 与 Admission/Resource/Action Risk docs-only 合同，并同批覆盖 Core #44/#45/#46/#47/#48/#49/#50/#51/#52/#53/#54/#55。
 - Scope: docs-only ADR updates plus GH-45 item-specific Loom carrier; ownership is limited to ADR 0003/0004 and GH-45 carrier files.
 - Execution Path: docs-only/core-result-admission-v0
-- Workspace Entry: /Volumes/2T/.codex/worktrees/stage2/core-result-admission
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/GH-45.md
 - Review Entry: .loom/reviews/GH-45.json
 - Validation Entry: `git diff --check`; JSON validation; Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
