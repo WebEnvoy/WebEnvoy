@@ -11,11 +11,11 @@
 - Review Entry: .loom/reviews/GH-57.json
 - Validation Entry: `git diff --check`; JSON validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#56/#57/#58/#59/#60; no merge and no issue closeout in this thread.
-- Current Checkpoint: build
-- Current Stop: Local docs, JSON, fact-chain, suite, and carrier validation passed; PR creation is next.
-- Next Step: Commit, push, open PR, and classify hosted checks.
+- Current Checkpoint: merge
+- Current Stop: Coordinator semantic review approved the docs-only common task entry contract at product head 85e6f1630ba31f62288d0bef51391ac24fce3e00; next PR head should contain only Loom review/status carrier drift.
+- Next Step: Push carrier refresh, update PR #63 head metadata, run hosted merge gate, then merge and perform post-merge closeout.
 - Blockers: None.
-- Latest Validation Summary: 2026-06-30T10:53:40Z `loom fact-chain --target /Volumes/2T/.codex/worktrees/stage2/core-common-entry --json` passed; 2026-06-30T10:52:03Z `loom suite validate --target /Volumes/2T/.codex/worktrees/stage2/core-common-entry --item GH-57 --json` and `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/stage2/core-common-entry --item GH-57 --json` passed; `git diff --check` and JSON validation passed; `loom build` is blocked only by repo-local suite CLI JSON lookup through absent `tools/loom.py` while the global suite commands pass.
+- Latest Validation Summary: 2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1630ba31f62288d0bef51391ac24fce3e00; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.
 - Recovery Boundary: Do not implement API/CLI/MCP/SDK code, schema/runtime, fixture files, or conformance runner in this Work Item.
 - Current Lane: core-common-entry-contract
 
