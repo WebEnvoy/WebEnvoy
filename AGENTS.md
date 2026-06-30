@@ -65,14 +65,13 @@ Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 pr
 <!-- LOOM_BOOTSTRAP_START -->
 ## Loom Bootstrap
 
-本仓库采用 Loom execution-control（standard maturity）承接正式执行事实链。正式实现、review、merge-ready 或 closeout 前，先从 Loom 入口恢复当前事实：
+本仓库采用 Loom execution-control 承接正式执行事实链，并默认按 strong-governance 评估正式 Work Item。开始实现、review、merge-ready 或 closeout 前，先运行 `loom doctor --target . --json`、`loom verify --target . --json` 和 `loom fact-chain --target . --json`。
 
-1. 运行 `loom doctor --target . --json` 和 `loom verify --target . --json`。
-2. 运行 `loom fact-chain --target . --json`，确认 `Work Item -> progress -> status -> review/merge-ready` 事实链可读。
-3. 以 `.loom/work-items/**` 作为静态执行入口，以 `.loom/progress/**` 和 `.loom/status/current.md` 作为恢复与状态读取入口；GitHub issue / PR 是宿主控制面，不替代仓内事实链。
-4. merge-ready / closeout 前必须消费 Loom review、验证摘要、PR head 和事实链当前状态。
+默认策略：中高风险、跨仓、API/Schema、数据、安全、权限、运行时身份、发布、生产写入或 merge gate 相关事项按 `strong-governance` 执行；只有明确低风险事项才可在 PR metadata 中降为 `standard`。
+
+执行事实链固定为 `.loom/work-items/**`、`.loom/progress/**`、`.loom/status/current.md`、`.loom/reviews/**` 和 `.loom/specs/**`。GitHub issue / PR 是宿主控制面，不替代仓内事实链。
+
+宿主强制条件由 GitHub branch protection / repository ruleset 承接：`py-compile`、`demo-bootstrap`、`repo-local-cli`、`loom-check` 和 `loom-pr-merge-gate` 必须作为 required checks 通过。单人开发不启用 GitHub 原生 required PR review；semantic approval 必须来自绑定当前 head 的 Loom authored review record。
 
 Loom CLI、Codex plugin 和 skills 由用户级全局安装提供；不要把 repo-local Loom runtime、plugin payload、skills payload 或 runtime/cache 写入仓库。运行态只应留在 `.loom/runtime/`、`.loom/tmp/`、`.loom/cache/`、`.loom/local/` 等忽略路径。
-
-默认不启用 `strong-governance`。当事项涉及安全、数据、权限、运行时身份、发布、生产写入、强 merge gate，或可能破坏跨仓共享合同/API/Schema 时，先评估并显式升级到 `strong-governance` 再继续。
 <!-- LOOM_BOOTSTRAP_END -->
