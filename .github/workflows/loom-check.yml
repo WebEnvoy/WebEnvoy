@@ -153,4 +153,4 @@ jobs:
           TOML
           rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
           cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
-      - run: loom flow pr-gate check --target "$GITHUB_WORKSPACE" --pr "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}" --item INIT-0001 --json
+      - run: loom flow pr-gate check --target "$GITHUB_WORKSPACE" --pr "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}" --json
