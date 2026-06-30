@@ -6,7 +6,7 @@
 - Goal: 盘点 `docs/draft/` 文档归宿，并把 WebEnvoy Core 文档草稿收口 milestone 推到 PR Ready。
 - Scope: docs-only closeout for docs directory semantics, draft lifecycle rules, draft inventory, accepted contract pointers, and GH-71 item-specific Loom carrier; ownership is limited to docs closeout files and GH-71 carrier files.
 - Execution Path: docs-only/draft-closeout-core
-- Workspace Entry: /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/GH-71.md
 - Review Entry: .loom/reviews/GH-71.json
 - Validation Entry: `git diff --check`; `.loom/**/*.json` validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
