@@ -1,0 +1,17 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "INIT-0001",
+  "decision": "fallback",
+  "kind": "spec_review",
+  "summary": "Formal spec review has not been completed yet.",
+  "reviewer": "not yet assigned",
+  "reviewed_head": "bootstrap-placeholder",
+  "reviewed_validation_summary": "Bootstrap manifest exists; init-result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.",
+  "fallback_to": "admission",
+  "blocking_issues": [
+    "Spec gate remains open until the formal spec path receives its own review record."
+  ],
+  "follow_ups": [
+    "Record a spec_review decision before implementation review or merge-ready consumes the formal spec path."
+  ]
+}

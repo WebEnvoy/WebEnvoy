@@ -1,0 +1,17 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "INIT-0001",
+  "decision": "fallback",
+  "kind": "general_review",
+  "summary": "Bootstrap has not entered formal review yet.",
+  "reviewer": "not yet assigned",
+  "reviewed_head": "bootstrap-placeholder",
+  "reviewed_validation_summary": "Bootstrap manifest exists; init-result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.",
+  "fallback_to": "admission",
+  "blocking_issues": [
+    "Formal review starts only after downstream work replaces the bootstrap placeholder item."
+  ],
+  "follow_ups": [
+    "Record the first real semantic review before asking merge checkpoint to consume reviewer judgment."
+  ]
+}

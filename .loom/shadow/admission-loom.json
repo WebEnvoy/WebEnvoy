@@ -1,0 +1,9 @@
+{
+  "result": "pass",
+  "source_files": [
+    ".loom/work-items/INIT-0001.md"
+  ],
+  "source_sha256": {
+    ".loom/work-items/INIT-0001.md": "8f168a7c2f0418504de135481ee105d46e4675de89540f4f6979def348100111"
+  }
+}
