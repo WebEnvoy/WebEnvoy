@@ -57,6 +57,18 @@ accepted -> running -> succeeded / failed / unknown_outcome / manual_recovery_re
 | dataset projection payload | Core 可选记录公共投影或引用。 | 下游消费者、导出、对账。 | Core 不成为业务数据库；归一化公共载荷是否持久保存留待规格决定。 | 本 ADR、`docs/draft/result-envelope.md`。 | needs-product-decision，见 [PD-0012](pending-decisions.md#pd-0012) |
 | raw runtime material as Run Record body | 不生产。 | 不适用。 | 完整 DOM、HAR、截图、视频、request/response body、Cookie、Token、local path 和 provider private object 不进入 Run Record body。 | 本 ADR、Core #15。 | rejected |
 
+## 只读任务结果/失败/证据边界
+
+本节覆盖 Core #21 的第一阶段输出边界。字段名只表达字段族，不冻结最终 Schema。
+
+| 步骤/场景 | 本仓责任 | 输入 | 输出 | 失败/证据 | 状态 |
+|---|---|---|---|---|---|
+| 接受前失败 | Core 返回结构化失败，不创建 Run Record。 | 归一化请求、capability/runtime refs、策略摘要。 | failure category、code、stage、hint、可安全展示的 refs。 | 适用于 capability unknown、runtime facts missing、证据策略缺失、目标不清或风险不允许。 | accepted |
+| 只读成功结果 | Core 返回公共 result envelope，并把运行事实写入 Run Record。 | Lode 输出合同、公共 payload 或 projection ref、Harbor evidence/raw refs。 | public payload/ref、run_record_ref、evidence_refs、source/resource trace refs。 | 不内联完整 DOM、截图、HAR、请求响应、本地路径、Cookie、Token 或 provider 私有对象。 | accepted |
+| 只读终态失败 | Core 把失败归因到阶段和可恢复提示，保留引用。 | 运行事件、能力输出校验结果、Harbor evidence refs。 | terminal status `failed` 或 `manual_recovery_required`、failure reason、evidence refs。 | 页面变化、输出不合约、runtime lost、evidence unavailable 和 user action required 分开表达。 | accepted |
+| 只读 unknown outcome | 默认不作为只读成功/失败的常规终态；只在外部状态可能已变化的写侧使用。 | 不适用。 | 不适用。 | 只读任务若无法确认抽取结果，应返回结构化失败或 manual recovery，不伪装成 unknown write outcome。 | rejected |
+| 证据引用 | Core 只保存 evidence/raw/source/resource refs 和摘要；证据生产、保留和脱敏策略由 Harbor/Lode/App 后续对齐。 | Harbor refs、Lode evidence expectation。 | evidence ref 字段族、脱敏摘要、consumer boundary。 | 最小分类、保留和脱敏策略仍待 [PD-0008](pending-decisions.md#pd-0008)。 | accepted |
+
 ## 后果
 
 调用方可以跨 API、SDK、CLI、MCP 和 App 消费同一种结果封装。
