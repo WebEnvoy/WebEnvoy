@@ -1,0 +1,16 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-38",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "GH-38 docs-only spec is scoped to Stage 2 Core task/run lifecycle contract convergence and covers GH-38/GH-39/GH-40 without implementation claims.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "18185671b99334c1ff101d5aaec59e9369e00857",
+  "reviewed_validation_summary": "On PR #61 head 18185671b99334c1ff101d5aaec59e9369e00857, git diff --check, loom verify, loom fact-chain, loom suite validate, and hosted py-compile/demo-bootstrap/repo-local-cli/loom-check passed.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Core #56 must later add the shared entry fixture and conformance checklist before App #36 consumes it.",
+    "Schema/API/runtime implementation belongs to later Work Items."
+  ]
+}

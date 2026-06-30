@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-38",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "The docs-only ADR and GH-38 carrier stay within the Core Stage 2 task/run lifecycle lane and establish a usable public contract without code or runtime implementation.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "18185671b99334c1ff101d5aaec59e9369e00857",
+  "reviewed_validation_summary": "On PR #61 head 18185671b99334c1ff101d5aaec59e9369e00857, git diff --check, loom verify, loom fact-chain, loom suite validate, loom suite carrier validate, and hosted py-compile/demo-bootstrap/repo-local-cli/loom-check passed.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this approval as completion of final JSON Schema, OpenAPI, SDK, CLI, MCP, runtime execution, App UI, or true write behavior.",
+    "Close GH-37/GH-38/GH-39/GH-40 only after merge and post-merge closeout evidence are recorded."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "ADR 0005 defines Task Intent Envelope v0, shared public run states, pre-admission failure behavior, Run Record creation rules, shared entry boundaries, research absorption decisions, and non-goals for GH-37/GH-38/GH-39/GH-40."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-38/spec.md",
+    "plan": ".loom/specs/GH-38/plan.md",
+    "suite_path": "minimal",
+    "validation": "git diff --check; loom verify/fact-chain/suite validate/suite carrier validate; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check"
+  }
+}
