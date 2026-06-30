@@ -1,0 +1,37 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "delegations": [],
+  "ownership_constraints": {
+    "write_scope": [
+      ".github/workflows/loom-check.yml",
+      ".loom/work-items/GH-77.md",
+      ".loom/progress/GH-77.md",
+      ".loom/specs/GH-77/*",
+      ".loom/reviews/GH-77.json",
+      ".loom/reviews/GH-77.spec.json",
+      ".loom/status/current.md",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "forbidden_scope": [
+      "product code",
+      "product documentation",
+      "roadmap or issue-tree planning",
+      "schema/API/runtime behavior",
+      "fixtures or generated facts",
+      "historical INIT-0001 migration"
+    ],
+    "owner": "coordinator"
+  },
+  "integration_evidence": [
+    {
+      "carrier": "workflow",
+      "locator": ".github/workflows/loom-check.yml",
+      "summary": "LOOM_VERSION is pinned to 0.22.1 while the packaged loom_flow.py gate entry remains unchanged."
+    },
+    {
+      "carrier": "task_carrier",
+      "locator": ".loom/specs/GH-77/task-carrier.md",
+      "summary": "PR #76 and issue #77 are mapped as a workflow-only maintenance item."
+    }
+  ]
+}

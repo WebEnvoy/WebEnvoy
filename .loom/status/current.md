@@ -2,34 +2,34 @@
 
 ## Derived Fact Chain View
 
-- Item ID: GH-71
-- Goal: 盘点 `docs/draft/` 文档归宿，并把 WebEnvoy Core 文档草稿收口 milestone 推到 PR Ready。
-- Scope: docs-only closeout for docs directory semantics, draft lifecycle rules, draft inventory, accepted contract pointers, and GH-71 item-specific Loom carrier; ownership is limited to docs closeout files and GH-71 carrier files.
-- Execution Path: docs-only/draft-closeout-core
+- Item ID: GH-77
+- Goal: Upgrade the repository Loom workflow pin from 0.21.1 to 0.22.1.
+- Scope: Workflow-only CI maintenance for `.github/workflows/loom-check.yml`; no product code, product docs, roadmap, issue-tree, schema, API, runtime, fixture, or historical carrier migration.
+- Execution Path: ci-maintenance/loom-version-pin
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/GH-71.md
-- Review Entry: .loom/reviews/GH-71.json
-- Validation Entry: `git diff --check`; `.loom/**/*.json` validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
-- Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#69/#70/#71/#72/#73; no merge and no issue closeout in this thread.
-- Current Checkpoint: closed_out
-- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#74.
-- Next Step: No further action for GH-69/GH-70/GH-71/GH-72/GH-73 after coordinator issue closeout comments are posted and covered issues are closed.
+- Recovery Entry: .loom/progress/GH-77.md
+- Review Entry: .loom/reviews/GH-77.json
+- Validation Entry: `git diff --check`; PR metadata readback; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check/loom-pr-merge-gate.
+- Closing Condition: PR #76 is merged to main and GH-77 records post-merge closeout evidence.
+- Current Checkpoint: merge
+- Current Stop: PR #76 is ready for hosted merge gate on the GH-77 workflow-only maintenance carrier.
+- Next Step: Run hosted checks for PR #76, merge after required checks pass, then record closeout evidence for GH-77.
 - Blockers: None recorded.
-- Latest Validation Summary: Post-merge closeout consumed PR #74, head 427305c737d349191a7c5d8834813d3b4226dd8f, merge commit 2047016eeb1aa61bc1884c244b760e6efdb0a049, target branch main, and hosted run 28457270526 with all required checks passing.
-- Recovery Boundary: Terminal carrier for docs-only Core draft lifecycle closeout; open later Work Items for schema/API/runtime/storage/fixture implementation or any contract behavior change.
-- Current Lane: terminal closeout
+- Latest Validation Summary: Workflow head 40f87a76fb6015d40d6691eb27a9ca74c2ccc049 changed only `LOOM_VERSION: 0.21.1` to `LOOM_VERSION: 0.22.1`; earlier hosted basic checks passed and the carrier now binds this maintenance PR to GH-77 instead of INIT-0001.
+- Recovery Boundary: This carrier approves only Loom workflow version-pin maintenance; it does not approve product, schema, API, runtime, fixture, roadmap, issue-tree, or governance process changes.
+- Current Lane: ci-maintenance
 
 ## Runtime Evidence
 
 - Run Entry: not_applicable
 - Logs Entry: not_applicable
 - Diagnostics Entry: not_applicable
-- Verification Entry: .loom/progress/GH-71.md
-- Lane Entry: core-docs
+- Verification Entry: .loom/progress/GH-77.md
+- Lane Entry: core-ci
 
 ## Sources
 
-- Static Truth: .loom/work-items/GH-71.md
-- Dynamic Truth: .loom/progress/GH-71.md
+- Static Truth: .loom/work-items/GH-77.md
+- Dynamic Truth: .loom/progress/GH-77.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json

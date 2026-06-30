@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-77",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Workflow-only Loom 0.22.1 maintenance PR #76 is approved.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "40f87a76fb6015d40d6691eb27a9ca74c2ccc049",
+  "reviewed_validation_summary": "Workflow head 40f87a76fb6015d40d6691eb27a9ca74c2ccc049 changed only `LOOM_VERSION: 0.21.1` to `LOOM_VERSION: 0.22.1`; earlier hosted basic checks passed and the carrier now binds this maintenance PR to GH-77 instead of INIT-0001.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "This review does not approve product, schema, API, runtime, fixture, roadmap, or issue-tree changes."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored review covers only the workflow version-pin update for PR #76. Drift after reviewed_head must be limited to GH-77 Loom carrier metadata or require a fresh review."
+  },
+  "consumed_inputs": {
+    "issue": "https://github.com/WebEnvoy/WebEnvoy/issues/77",
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/76",
+    "reviewed_head": "40f87a76fb6015d40d6691eb27a9ca74c2ccc049",
+    "changed_workflow": ".github/workflows/loom-check.yml",
+    "suite_path": "not_applicable"
+  }
+}
