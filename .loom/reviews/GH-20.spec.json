@@ -1,0 +1,15 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-20",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Docs-only boundary spec is scoped to the first read-only Core wedge and research absorption boundary.",
+  "reviewer": "codex",
+  "reviewed_head": "442e1f4b445275cdcaac2e089f61c69949fd76da",
+  "reviewed_validation_summary": "git diff --check passed after docs/carrier commit; local Loom wrapper commands are blocked by workstation installed-state / target binding and deferred to hosted direct entry.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this PR as full schema, runtime, or write-side implementation readiness."
+  ]
+}
