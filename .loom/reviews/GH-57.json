@@ -3,19 +3,20 @@
   "item_id": "GH-57",
   "decision": "allow",
   "kind": "general_review",
-  "summary": "PR #63 is approved for the docs-only common task entry contract and remains within Core #56/#57/#58/#59/#60 scope.",
+  "summary": "Post-merge closeout for PR #63 is approved; the docs-only common task entry contract and GH-57 carrier are merged to main and ready for issue closeout.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "85e6f1671c094a20cd3aa763303b7109fbc91502",
-  "reviewed_validation_summary": "2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1671c094a20cd3aa763303b7109fbc91502; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.",
+  "reviewed_head": "e12f26ad3b23a925fc7ef2b8465a920aea600463",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #63, head d0cef325144ffa6f1a1eec717a792d90c09574bc, merge commit e12f26ad3b23a925fc7ef2b8465a920aea600463, target branch main, and hosted run 28440643714 with all required checks passing.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    "Do not treat this approval as API routes, CLI commands, MCP tools, SDK generation, final schema, fixture files, conformance runner, or runtime behavior completion."
+    "Do not treat this approval as completion of API/CLI/MCP/SDK implementation, schema generation, fixture files, conformance runner, App UI, or runtime behavior.",
+    "Close covered GitHub issues only after this closeout carrier PR is merged and issue comments reference PR #63, merge commit e12f26ad3b23a925fc7ef2b8465a920aea600463, and hosted run 28440643714."
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "ADR 0006 defines one shared task submission projection for API, CLI, MCP, SDK, and App; it keeps entrypoint-specific transport separate from Core task/run/result/failure semantics and records research absorption/non-goals."
+    "reason": "ADR 0006 defines the Stage 2 common task entry projection contract for API, CLI, MCP, SDK, and App without claiming implementation, fixture, schema, or runtime completion."
   },
   "consumed_inputs": {
     "spec": ".loom/specs/GH-57/spec.md",

@@ -3,13 +3,13 @@
   "item_id": "GH-57",
   "decision": "allow",
   "kind": "spec_review",
-  "summary": "GH-57 docs-only spec is bounded to Core common task entry semantics and does not introduce implementation scope.",
+  "summary": "Post-merge spec closeout for GH-57 is approved; the docs-only contract is merged and no implementation completion is implied.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "85e6f1671c094a20cd3aa763303b7109fbc91502",
-  "reviewed_validation_summary": "2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1671c094a20cd3aa763303b7109fbc91502; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.",
+  "reviewed_head": "e12f26ad3b23a925fc7ef2b8465a920aea600463",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #63, head d0cef325144ffa6f1a1eec717a792d90c09574bc, merge commit e12f26ad3b23a925fc7ef2b8465a920aea600463, target branch main, and hosted run 28440643714 with all required checks passing.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
-    "Create separate Work Items for actual fixture files, conformance checks, API/CLI/MCP/SDK implementation, and schema generation."
+    "Do not treat this approval as completion of API/CLI/MCP/SDK implementation, schema generation, fixture files, conformance runner, App UI, or runtime behavior."
   ]
 }
