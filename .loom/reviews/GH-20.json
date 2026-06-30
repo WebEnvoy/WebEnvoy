@@ -1,0 +1,26 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-20",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Docs-only boundary spine stays within ADR and item-specific carrier scope.",
+  "reviewer": "codex",
+  "reviewed_head": "d83dc0d779f90646539ce6b7afb347bab2ae3f67",
+  "reviewed_validation_summary": "git diff --check passed; PR metadata preflight passed; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check passed on run 28426605340; hosted pr-gate pre-sync consumed GH-20 with no missing inputs and only the merge checkpoint blocker.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this PR as full schema, runtime, or write-side implementation readiness."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The change records boundary decisions only; it does not alter schema, API, runtime, generated artifacts, or user-facing behavior."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-20/spec.md",
+    "plan": ".loom/specs/GH-20/plan.md",
+    "suite_path": "minimal",
+    "validation": "git diff --check; PR metadata preflight; hosted run 28426605340; hosted pr-gate pre-sync"
+  }
+}

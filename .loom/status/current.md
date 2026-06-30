@@ -2,22 +2,22 @@
 
 ## Derived Fact Chain View
 
-- Item ID: GH-32
-- Goal: 沉淀 Loom PR 与 closeout 执行约束，避免后续产品 PR 复用 `INIT-0001` 或产生 head/carrier 漂移。
-- Scope: 仅更新 `AGENTS.md` 和本事项的最小 Loom carrier。
-- Execution Path: docs-only/governance
+- Item ID: GH-20
+- Goal: 用最小 docs-only PR 收敛第一阶段 Core 首个低风险只读任务楔子和研究吸收边界。
+- Scope: 更新现有 ADR 中的责任路径、字段族和边界表；新增本事项最小 Loom carrier。
+- Execution Path: docs-only/boundary-spine
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/GH-32.md
-- Review Entry: .loom/reviews/GH-32.json
-- Validation Entry: `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; hosted Loom checks
-- Closing Condition: AGENTS.md 约束合入 main，hosted checks 通过，并在 issue 中写入 post-merge closeout 证据。
-- Current Checkpoint: closed_out
-- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#32 and PR #33.
-- Next Step: No further action for this Work Item.
-- Blockers: None recorded.
-- Latest Validation Summary: Post-merge closeout consumed PR #33, merge commit 009b94e2f3d6b42bcfa77f37ee9e14049a8c916a, and hosted run 28424977610 with all required checks passing.
-- Recovery Boundary: Terminal carrier; open a new Work Item for future Loom governance changes.
-- Current Lane: terminal closeout
+- Recovery Entry: .loom/progress/GH-20.md
+- Review Entry: .loom/reviews/GH-20.json
+- Validation Entry: `git diff --check`; Loom direct hosted-equivalent entry or available local gate; hosted Loom checks
+- Closing Condition: PR 创建并通过 required checks；本线程不 merge、不关闭 issue。
+- Current Checkpoint: merge
+- Current Stop: PR #35 is ready for hosted merge gate consumption as a docs-only boundary spine; do not merge or close issues in this thread.
+- Next Step: Let hosted `loom-pr-merge-gate` consume the GH-20 merge checkpoint; no host merge in this thread.
+- Blockers: none
+- Latest Validation Summary: git diff --check passed; PR metadata preflight passed; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check passed on run 28426605340; hosted pr-gate pre-sync consumed GH-20 with no missing inputs and only the merge checkpoint blocker.
+- Recovery Boundary: Continue from this branch and GH-20 carrier; do not reuse INIT-0001 or GH-32.
+- Current Lane: docs-only boundary spine
 
 ## Runtime Evidence
 
@@ -29,7 +29,7 @@
 
 ## Sources
 
-- Static Truth: .loom/work-items/GH-32.md
-- Dynamic Truth: .loom/progress/GH-32.md
+- Static Truth: .loom/work-items/GH-20.md
+- Dynamic Truth: .loom/progress/GH-20.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json

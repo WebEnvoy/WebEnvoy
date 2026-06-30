@@ -67,6 +67,30 @@ API Server 是一等入口。CLI、MCP、SDK 和 WebEnvoy App 应通过 API Serv
 | 通用 browser agent loop 作为 Core 正式路径 | Core 不把任意浏览器动作、通用 eval、低层 tool loop 或一次性 helper 当成稳定任务合同。 | 探索、authoring、debug 可以在 Harbor / Lode / App 的对应模式中存在，但不能绕过 Core 准入成为公共任务路径。 | 后续能力设计、准入设计。 | 本 ADR、research `execution-space-and-context` / `task-execution-and-admission`。 | rejected |
 | 完整阶段二 JSON Schema / API 字段 | 本轮只冻结归属和消费边界。 | 具体字段、枚举、API 和生成类型属于后续阶段二规格。 | 后续 Core 协议规格。 | Core #13、#14、#16、#17、#18。 | deferred；见 [PD-0003](pending-decisions.md#pd-0003)、[PD-0005](pending-decisions.md#pd-0005)、[PD-0013](pending-decisions.md#pd-0013) |
 
+## 首个低风险只读任务楔子
+
+本节覆盖 Core #19、#20 和 #21 的第一阶段楔子，只冻结责任路径和字段族，不定义阶段二完整 Schema。
+
+| 步骤/场景 | 本仓责任 | 输入 | 输出 | 失败/证据 | 状态 |
+|---|---|---|---|---|---|
+| 用户提交低风险只读意图 | API Server 归一化调用入口、用户意图和请求快照，进入同一条 Core 任务路径。 | App/API 提交的目标页面或账号环境意图、调用上下文、用户策略摘要。 | `task_request` 字段族、调用入口、脱敏请求摘要。 | 输入缺失、目标不清、策略不允许时返回接受前失败；不创建 Run Record。 | accepted |
+| 能力与运行时引用绑定 | Core 消费一个 `capability_ref` 和一个 `runtime_ref`，做能力准入、资源匹配和读风险准入。 | Lode capability/package refs、resource requirements、Harbor runtime facts refs、证据策略。 | admission decision、resource match、read action risk、run accepted/refused。 | 能力未知、非稳定、缺少资源需求、runtime facts 不满足或证据策略缺失时 fail-closed。 | accepted |
+| 已接受运行记录 | Core 生成 run id，记录 accepted/running/terminal 生命周期和引用，不拥有浏览器现场。 | 已准入任务、runtime binding refs、capability refs。 | Run Record 字段族：run identity、status、timestamps、request summary、binding refs、attempt summary。 | runtime unavailable、capability contract drift、manual recovery need 等进入结构化失败阶段。 | accepted |
+| 只读结果投影 | Core 根据 Lode 输出合同投影公共 result envelope，不把 raw runtime material 内联。 | 能力输出、Harbor evidence/raw/source/resource refs、Lode output schema。 | result envelope、public payload/ref、run_record_ref、evidence refs、failure reason。 | 输出不符合 schema、证据不可用、页面变化或抽取失败返回结构化失败。 | accepted |
+| 通用浏览器代理循环 | 不作为正式执行路径；只能作为探索、authoring 或 debug 输入。 | 低层 tool loop、任意 action history、prompt-only browser agent。 | 无 Core 稳定合同输出。 | 缺少 capability version、admission record、result envelope 和对账边界。 | rejected |
+
+## 第一阶段研究吸收边界
+
+本表覆盖 Core #7、#8、#9、#10、#11 和 #12 的可吸收机制边界。
+
+| 候选项 | 吸收方式 | 源码复用判断 | 依据 locator | Owner | 状态 |
+|---|---|---|---|---|---|
+| Syvert Run Record / TaskRecord / admission / resource trace | 吸收机制：运行记录、公共准入、资源匹配、终态封装和 fail-closed 错误边界。 | 仅可裁剪小型状态/校验/证据思想；不迁入 Syvert runtime 主链。 | `research/synthesis.md`、`research/absorability/themes/task-execution-and-admission.md`、`sources/lodcel/Syvert/syvert/runtime.py`、`sources/lodcel/Syvert/syvert/task_record.py`、`sources/lodcel/Syvert/syvert/resource_lifecycle.py`。 | Core | accepted |
+| 旧 WebEnvoy runtime store / CLI envelope / risk gate | 吸收机制：CLI 结构化错误、运行时状态摘要、风险门禁、证据边界和 local state 经验。 | 自有旧代码可作为 schema/fixture/helper seed；不得复制 XHS 专用平台流程为 Core 通用合同。 | `research/synthesis.md`、`research/absorability/themes/api-cli-mcp-and-agent-interface.md`、`sources/lodcel/WebEnvoy/src/cli.ts`、`sources/lodcel/WebEnvoy/src/commands/xhs-runtime.ts`。 | Core | accepted |
+| browser-use failure budget / ActionResult / domain constraints | 只吸收字段族参考：失败预算、动作结果、allowed/prohibited domain 和结构化错误思想。 | 不复用源码，不采用 agent loop 作为正式路径。 | `research/absorability/themes/task-execution-and-admission.md`、`sources/browser-use/browser-use/browser_use/agent/views.py`、`sources/browser-use/browser-use/browser_use/browser/profile.py`。 | Core / Harbor 边界 | candidate |
+| Skyvern hosted workflow / generic browser agent loop | 仅参考任务/工作流产品形态和错误分类；不作为 Core 路径。 | 不复用源码；hosted platform、UI shell、credential/vault 和 org workflow runtime 不进入 Core。 | `research/synthesis.md`、`sources/Skyvern-AI/skyvern/CLAUDE.md`、`sources/Skyvern-AI/skyvern/skyvern/forge/agent.py`。 | 不进入 Core | rejected |
+| Harbor runtime / Lode assets / App UI truth | Core 只消费 refs、facts 和 user intent，不复制 truth。 | 不复用其他仓实现为 Core 内部状态。 | `ROADMAP.md`、Harbor/Lode/App `ROADMAP.md`、`docs/architecture/cross-repo-architecture.md`。 | Harbor / Lode / App | accepted |
+
 ## 后果
 
 所有公共入口都会获得同一套准入、资源匹配、失败分类、运行记录和结果封装。
