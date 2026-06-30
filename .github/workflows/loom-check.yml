@@ -1,0 +1,102 @@
+name: Loom strong governance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+env:
+  LOOM_VERSION: 0.21.1
+
+jobs:
+  py-compile:
+    name: py-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Compile Python files
+        shell: bash
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.py')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Python files tracked."
+            exit 0
+          fi
+          python -m py_compile "${files[@]}"
+
+  demo-bootstrap:
+    name: demo-bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom detect --target "$GITHUB_WORKSPACE" --json
+      - run: loom doctor --target "$GITHUB_WORKSPACE" --json
+
+  repo-local-cli:
+    name: repo-local-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: test ! -d "$GITHUB_WORKSPACE/.loom/bin"
+      - run: loom version --json
+      - run: loom installed-state validate --target "$GITHUB_WORKSPACE" --json
+
+  loom-check:
+    name: loom-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom verify --target "$GITHUB_WORKSPACE" --json
+      - run: loom fact-chain --target "$GITHUB_WORKSPACE" --json
+      - run: loom profile status --target "$GITHUB_WORKSPACE" --json
+
+  loom-pr-merge-gate:
+    name: loom-pr-merge-gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g "@mc-and-his-agents/loom@${LOOM_VERSION}"
+      - run: loom pr gate "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}" --json
