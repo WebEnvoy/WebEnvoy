@@ -5,7 +5,7 @@
   "kind": "spec_review",
   "summary": "Minimal workflow-only spec is sufficient for the Loom PR gate target repair.",
   "reviewer": "codex",
-  "reviewed_head": "0c7388af24d8f3545f61b279217e71b129389a14",
+  "reviewed_head": "9dc66b14352636209c58835bae8dac5e6606135b",
   "reviewed_validation_summary": "Bootstrap result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.",
   "fallback_to": null,
   "blocking_issues": [],
