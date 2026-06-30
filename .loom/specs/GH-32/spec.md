@@ -15,9 +15,7 @@ Record the minimal Loom / PR / closeout rules that prevent future PRs from reusi
 - Product, planning, boundary, and implementation PRs bind to a real GitHub Work Item and item-specific Loom carrier.
 - PR body, carrier, review artifact, and closeout evidence stay bound to the same item/head chain.
 
-## Suite Applicability
+## Suite Path
 
-- Suite path: not_applicable
-- Rationale: This PR changes repository agent guidance and Loom documentation carriers only; no product code, schema, API, runtime, generated facts, fixtures, or user-facing behavior changes.
-- Consumer boundary: Applies only to this docs-only governance PR and its current head.
-- Recheck condition: Require suite or stronger validation if this PR adds executable code, schema/API/runtime behavior, generated facts, fixtures, or workflow logic.
+- Suite path: minimal
+- Full suite artifacts not_applicable: rationale: this PR changes repository agent guidance and Loom documentation carriers only; consumer boundary: suite validation, review, merge-ready, and closeout consume only `AGENTS.md` guidance plus item-specific carrier files; recheck condition: require full suite or stronger validation if this PR adds executable code, schema/API/runtime behavior, generated facts, fixtures, workflow logic, or user-facing behavior.
