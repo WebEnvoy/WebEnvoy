@@ -5,7 +5,7 @@
   "kind": "general_review",
   "summary": "The docs-only ADR and GH-38 carrier stay within the Core Stage 2 task/run lifecycle lane and establish a usable public contract without code or runtime implementation.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "18185671b99334c1ff101d5aaec59e9369e00857",
+  "reviewed_head": "c3cbfb22c5994512f8c4bb17a7ef558903c606fe",
   "reviewed_validation_summary": "2026-06-30T10:10Z local checks: `git diff --check` pass; Python compile not_applicable because no Python files are tracked; `loom doctor --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom verify --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom fact-chain --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom installed-state validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --json` pass; `loom suite validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --json` pass; `loom build --target /Volumes/2T/.codex/worktrees/stage2/core-task-run-lifecycle --item GH-38 --build-evidence .loom/specs/GH-38/build-evidence.json --json` blocked only because the build flow looks for repo-local `tools/loom.py` suite JSON, while this repo's workflow uses global `loom`; classified as local tool-path mismatch, not contract drift. PR #61 opened at https://github.com/WebEnvoy/WebEnvoy/pull/61.",
   "fallback_to": null,
   "findings": [],
