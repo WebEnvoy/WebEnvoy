@@ -2,40 +2,22 @@
 
 ## Derived Fact Chain View
 
-- Item ID: INIT-0001
-- Goal: Bootstrap the first executable Loom path for this repository
-- Scope: Establish rule entry, first work item, progress carrier, spec/plan, and verification entry
-- Execution Path: bootstrap/root
+- Item ID: GH-32
+- Goal: 沉淀 Loom PR 与 closeout 执行约束，避免后续产品 PR 复用 `INIT-0001` 或产生 head/carrier 漂移。
+- Scope: 仅更新 `AGENTS.md` 和本事项的最小 Loom carrier。
+- Execution Path: docs-only/governance
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/INIT-0001.md
-- Review Entry: .loom/reviews/INIT-0001.json
-- Validation Entry: loom verify --target . --json
-- Closing Condition: The generated entry, work item, recovery entry, and templates are readable and verified
+- Recovery Entry: .loom/progress/GH-32.md
+- Review Entry: .loom/reviews/GH-32.json
+- Validation Entry: `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; hosted Loom checks
+- Closing Condition: AGENTS.md 约束合入 main，hosted checks 通过，并在 issue 中写入 post-merge closeout 证据。
 - Current Checkpoint: merge
-- Current Stop: Docs-only boundary carrier is reviewed for the current PR head; no Phase 2 implementation is complete.
-- Next Step: Review and merge the docs-only boundary PR when host gates pass; require a new Work Item for schema, API, runtime, generated fact, or fixture changes.
+- Current Stop: Docs-only governance constraint is ready for PR review.
+- Next Step: Merge after hosted checks pass, then write post-merge closeout to WebEnvoy/WebEnvoy#32.
 - Blockers: None recorded.
-- Latest Validation Summary: Docs-only boundary change validated by git diff --check, loom doctor/verify/fact-chain, and suite not_applicable evidence.
-- Recovery Boundary: Bootstrap result at `.loom/bootstrap/init-result.json`.
-- Current Lane: docs-only boundary review
-
-## Governance Status
-
-- Item Key: INIT-0001
-- Item Type: work_item
-- Phase: not_declared
-- FR: not_declared
-- Release: not_declared
-- Sprint: not_declared
-- Head SHA: bootstrap-placeholder
-- Status: planning
-- Spec Entry: .loom/specs/INIT-0001/spec.md
-- Plan Entry: .loom/specs/INIT-0001/plan.md
-- Implementation Contract Entry: .loom/specs/INIT-0001/implementation-contract.md
-- Spec Review Entry: .loom/reviews/INIT-0001.spec.json
-- Spec Review Status: pending
-- Review Head Status: bootstrap-placeholder
-- Merge Gate Status: pending
+- Latest Validation Summary: Local preflight passed with `git diff --check`, `loom doctor`, `loom verify`, and `loom fact-chain`; hosted checks pending PR creation.
+- Recovery Boundary: Re-run local static checks and hosted Loom checks if AGENTS.md or carrier files change.
+- Current Lane: docs-only governance
 
 ## Runtime Evidence
 
@@ -47,7 +29,7 @@
 
 ## Sources
 
-- Static Truth: .loom/work-items/INIT-0001.md
-- Dynamic Truth: .loom/progress/INIT-0001.md
+- Static Truth: .loom/work-items/GH-32.md
+- Dynamic Truth: .loom/progress/GH-32.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json

@@ -1,0 +1,26 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-32",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Docs-only AGENTS.md constraint update is approved for this PR scope.",
+  "reviewer": "codex",
+  "reviewed_head": "4d4a29fa4edf8e18eab0bbbc0c565478200058b6",
+  "reviewed_validation_summary": "Local preflight passed with `git diff --check`, `loom doctor`, `loom verify`, and `loom fact-chain`; hosted checks pending PR creation.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this as migration of historical INIT-0001 carrier state."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The change records operational constraints only; it does not alter product behavior or implementation contracts."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-32/spec.md",
+    "plan": ".loom/specs/GH-32/plan.md",
+    "suite_path": "minimal",
+    "validation": "git diff --check; loom doctor/verify/fact-chain; loom suite validate; hosted required checks"
+  }
+}

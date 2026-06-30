@@ -1,0 +1,15 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-32",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Minimal docs-only governance spec is sufficient for recording Loom PR and closeout constraints.",
+  "reviewer": "codex",
+  "reviewed_head": "4d4a29fa4edf8e18eab0bbbc0c565478200058b6",
+  "reviewed_validation_summary": "Local preflight passed with `git diff --check`, `loom doctor`, `loom verify`, and `loom fact-chain`; hosted checks pending PR creation.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Use a new Work Item and carrier for each future product PR."
+  ]
+}
