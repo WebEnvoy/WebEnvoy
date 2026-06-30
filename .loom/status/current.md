@@ -9,12 +9,12 @@
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/GH-20.md
 - Review Entry: .loom/reviews/GH-20.json
-- Validation Entry: `git diff --check`; local available Loom gate or direct hosted-equivalent entry; hosted Loom checks
+- Validation Entry: `git diff --check`; Loom direct hosted-equivalent entry or available local gate; hosted Loom checks
 - Closing Condition: PR 创建并通过 required checks；本线程不 merge、不关闭 issue。
 - Current Checkpoint: build_ready
-- Current Stop: Docs-only boundary spine prepared for PR.
-- Next Step: Push branch, create PR, and let hosted required checks consume the GH-20 carrier.
-- Blockers: Local `loom doctor` / `loom verify` are blocked by workstation installed-state and legacy surface diagnostics; local `loom fact-chain` reports missing init-result despite `.loom/bootstrap/init-result.json` existing in the worktree, classified as wrapper/target binding.
+- Current Stop: PR #35 opened for docs-only boundary spine; hosted required checks are the remaining authority before merge-ready.
+- Next Step: Let hosted required checks consume the GH-20 carrier; do not merge or close issues in this thread.
+- Blockers: Local `loom doctor` / `loom verify` are blocked by workstation installed-state and legacy surface diagnostics; local `loom fact-chain` reports missing init-result despite `.loom/bootstrap/init-result.json` existing in the worktree, so this is classified as wrapper/target binding and deferred to hosted direct entry.
 - Latest Validation Summary: git diff --check passed; PR metadata preflight passed; direct PR gate consumed GH-20 and suite validate passed, with local Loom wrapper doctor/verify/fact-chain still blocked by workstation installed-state / target binding.
 - Recovery Boundary: Continue from this branch and GH-20 carrier; do not reuse INIT-0001 or GH-32.
 - Current Lane: docs-only boundary spine
