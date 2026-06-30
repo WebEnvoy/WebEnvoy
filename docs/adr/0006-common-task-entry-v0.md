@@ -2,7 +2,7 @@
 
 ## 状态
 
-拟议。
+Accepted for Stage 2 docs-only contract, 2026-06-30.
 
 ## 背景
 
