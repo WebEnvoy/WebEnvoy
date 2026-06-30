@@ -5,7 +5,7 @@
   "kind": "general_review",
   "summary": "Docs-only AGENTS.md constraint update is approved for this PR scope.",
   "reviewer": "codex",
-  "reviewed_head": "9a01a0d531f5bc131b9af30f4c243155ed278329",
+  "reviewed_head": "01bcfd90c8cc53bd2a8d098fbf2581f323f615f5",
   "reviewed_validation_summary": "Scope is limited to reusable execution constraints and GH-32 Loom carrier files.",
   "fallback_to": null,
   "findings": [],
