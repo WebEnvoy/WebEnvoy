@@ -5,13 +5,13 @@
   "kind": "general_review",
   "summary": "Docs-only boundary spine stays within ADR and item-specific carrier scope.",
   "reviewer": "codex",
-  "reviewed_head": "765fe1ea3b2a692e40dc525f092f4273bd747a07",
-  "reviewed_validation_summary": "git diff --check passed; PR metadata preflight passed; direct PR gate consumed GH-20 and suite validate passed, with local Loom wrapper doctor/verify/fact-chain still blocked by workstation installed-state / target binding.",
+  "reviewed_head": "d83dc0d779f90646539ce6b7afb347bab2ae3f67",
+  "reviewed_validation_summary": "git diff --check passed; PR metadata preflight passed; hosted py-compile/demo-bootstrap/repo-local-cli/loom-check passed on run 28426605340; hosted pr-gate pre-sync consumed GH-20 with no missing inputs and only the merge checkpoint blocker.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    "Hosted checks must consume the PR head and GH-20 metadata before merge-ready."
+    "Do not treat this PR as full schema, runtime, or write-side implementation readiness."
   ],
   "semantic_review_disposition": {
     "status": "passed",
@@ -21,6 +21,6 @@
     "spec": ".loom/specs/GH-20/spec.md",
     "plan": ".loom/specs/GH-20/plan.md",
     "suite_path": "minimal",
-    "validation": "git diff --check; local Loom gate if available; hosted required checks"
+    "validation": "git diff --check; PR metadata preflight; hosted run 28426605340; hosted pr-gate pre-sync"
   }
 }
