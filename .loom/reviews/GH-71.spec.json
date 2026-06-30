@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-71",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review passed for the docs-only GH-71 draft closeout. The PR defines docs directory semantics, draft lifecycle rules, per-draft disposition, and explicit absorption/rejected/deferred analysis without adding code, schema, API, runtime, fixture, generated, migration, or behavior changes.",
+  "reviewer": "codex-main",
+  "reviewed_head": "5fb6891702f6bfa6f2ccb3ae3973e99ab92b2210",
+  "reviewed_validation_summary": "At head 5fb6891702f6bfa6f2ccb3ae3973e99ab92b2210, git diff --check, .loom JSON jq validation, loom fact-chain, loom suite validate --item GH-71, and loom suite carrier validate --item GH-71 passed. loom build remained blocked by local wrapper suite JSON plumbing, while global suite commands passed.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this spec review as approval for code, final JSON Schema, API/runtime behavior, generated artifacts, fixtures, migrations, workflow logic, user-facing behavior, merge, or issue closeout.",
+    "Future schema/API/runtime work must consume the accepted facts indexed in docs/contracts/README.md and avoid treating docs/draft pointer files as implementation truth."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec and plan preserve the requested docs-only scope, identify GH-71 as the Loom anchor, define minimal suite not_applicable rationale and recheck conditions, and bind all covered issues through task-carrier without closing them."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-71/spec.md",
+    "plan": ".loom/specs/GH-71/plan.md",
+    "task_carrier": ".loom/specs/GH-71/task-carrier.md",
+    "suite_path": "minimal",
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/74"
+  }
+}
