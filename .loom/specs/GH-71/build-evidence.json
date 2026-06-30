@@ -1,0 +1,49 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "delegations": [],
+  "ownership_constraints": {
+    "write_scope": [
+      "docs/README.md",
+      "docs/contracts/README.md",
+      "docs/draft/**",
+      ".loom/work-items/GH-71.md",
+      ".loom/progress/GH-71.md",
+      ".loom/specs/GH-71/*",
+      ".loom/status/current.md",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "forbidden_scope": [
+      "product code",
+      "API/CLI/MCP/SDK/App/runtime implementation",
+      "final schemas",
+      "fixtures",
+      "generated artifacts",
+      "docs/guides/",
+      "merge",
+      "issue closeout"
+    ],
+    "owner": "main-thread"
+  },
+  "integration_evidence": [
+    {
+      "carrier": "docs",
+      "locator": "docs/README.md",
+      "summary": "Minimal docs directory semantics for adr, contracts, and draft are integrated."
+    },
+    {
+      "carrier": "contracts_index",
+      "locator": "docs/contracts/README.md",
+      "summary": "Accepted Stage 2 contract truth is indexed by authoritative ADR without duplicating long specs."
+    },
+    {
+      "carrier": "draft_inventory",
+      "locator": "docs/draft/README.md",
+      "summary": "All input drafts are classified with status, target location, linked issue, and action."
+    },
+    {
+      "carrier": "task_carrier",
+      "locator": ".loom/specs/GH-71/task-carrier.md",
+      "summary": "GH-69, GH-70, GH-71, GH-72, and GH-73 issue coverage is mapped without marking host issues complete."
+    }
+  ]
+}
