@@ -3,10 +3,10 @@
   "item_id": "GH-32",
   "decision": "allow",
   "kind": "general_review",
-  "summary": "Docs-only AGENTS.md constraint update is approved for this PR scope.",
+  "summary": "Terminal carrier closeout sync is docs-only and approved for this PR scope.",
   "reviewer": "codex",
-  "reviewed_head": "4d4a29fa4edf8e18eab0bbbc0c565478200058b6",
-  "reviewed_validation_summary": "Local preflight passed with `git diff --check`, `loom doctor`, `loom verify`, and `loom fact-chain`; hosted checks pending PR creation.",
+  "reviewed_head": "0ef3976a0f3e72b5c81dec12c6e63b1cb8e70066",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #33, merge commit 009b94e2f3d6b42bcfa77f37ee9e14049a8c916a, and hosted run 28424977610 with all required checks passing.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
@@ -15,7 +15,7 @@
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The change records operational constraints only; it does not alter product behavior or implementation contracts."
+    "reason": "The closeout-only PR records terminal repo carrier facts for GH-32; it does not alter product behavior, schema, API, runtime, or the already merged governance constraints."
   },
   "consumed_inputs": {
     "spec": ".loom/specs/GH-32/spec.md",
