@@ -11,13 +11,13 @@
 - Review Entry: .loom/reviews/GH-57.json
 - Validation Entry: `git diff --check`; JSON validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#56/#57/#58/#59/#60; no merge and no issue closeout in this thread.
-- Current Checkpoint: merge
-- Current Stop: Coordinator semantic review approved the docs-only common task entry contract at product head 85e6f1671c094a20cd3aa763303b7109fbc91502; next PR head should contain only Loom review/status carrier drift.
-- Next Step: Push carrier refresh, update PR #63 head metadata, run hosted merge gate, then merge and perform post-merge closeout.
+- Current Checkpoint: closed_out
+- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#63.
+- Next Step: No further action for GH-56/GH-57/GH-58/GH-59/GH-60 after coordinator issue closeout comments are posted and covered issues are closed.
 - Blockers: None recorded.
-- Latest Validation Summary: 2026-06-30 coordinator review approved PR #63 docs-only contract at product head 85e6f1671c094a20cd3aa763303b7109fbc91502; prior branch validation covered `git diff --check`, JSON syntax, Loom fact-chain, suite validate, and carrier validate; no executable code, final schema, generated artifact, fixture file, runtime behavior, migration, or workflow logic changed.
-- Recovery Boundary: Do not implement API/CLI/MCP/SDK code, schema/runtime, fixture files, or conformance runner in this Work Item.
-- Current Lane: core-common-entry-contract
+- Latest Validation Summary: Post-merge closeout consumed PR #63, head d0cef325144ffa6f1a1eec717a792d90c09574bc, merge commit e12f26ad3b23a925fc7ef2b8465a920aea600463, target branch main, and hosted run 28440643714 with all required checks passing.
+- Recovery Boundary: Terminal carrier for docs-only Core common task entry contract; open new Work Items for fixture files, conformance checks, API/CLI/MCP/SDK implementation, schema generation, or runtime behavior.
+- Current Lane: terminal closeout
 
 ## Runtime Evidence
 
