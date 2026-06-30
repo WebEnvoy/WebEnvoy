@@ -3,24 +3,23 @@
   "item_id": "INIT-0001",
   "decision": "allow",
   "kind": "general_review",
-  "summary": "Workflow-only Loom PR gate repair is approved for this repair PR head.",
+  "summary": "Core boundary documentation semantics are approved for docs-only PR #30.",
   "reviewer": "codex",
-  "reviewed_head": "72137d1d0f1f17638e34e45516bae89270b91ba6",
-  "reviewed_validation_summary": "Workflow-only gate repair validated by git diff --check, loom doctor/verify/fact-chain, suite not_applicable evidence, and CI stable checks.",
+  "reviewed_head": "2f4f405b0f1503593844df888f5829fa4dc4b280",
+  "reviewed_validation_summary": "Docs-only boundary change validated by git diff --check, loom doctor/verify/fact-chain, and suite not_applicable evidence.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    "Do not treat this review as approval for product boundary document semantics or later schema/API/runtime implementation."
+    "This review does not approve Phase 2 schema/API/runtime implementation."
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored review covers only the workflow/gate repair at the current repair PR head."
+    "reason": "Authored review covers only Core boundary documentation semantics for the current PR."
   },
   "consumed_inputs": {
-    "spec": ".loom/specs/INIT-0001/spec.md",
-    "plan": ".loom/specs/INIT-0001/plan.md",
-    "suite_path": "not_applicable",
-    "validation": "git diff --check; loom doctor/verify/fact-chain with absolute repair worktree target; CI stable checks"
+    "scope": "temporary bootstrap-bound docs-only gate",
+    "docs": "docs/adr/0002-run-task-capability-model.md; docs/adr/0003-result-envelope-and-run-record.md; docs/adr/pending-decisions.md",
+    "suite_path": "not_applicable"
   }
 }

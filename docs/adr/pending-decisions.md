@@ -145,3 +145,11 @@
 - 阻塞什么：人工恢复状态、App 恢复入口和 Harbor 接管协作。
 - 当前状态：待决策。
 - 后续归属/下一步：Core / Harbor / App 接管设计时确认。
+
+## PD-0019
+
+- 问题：Core 消费 Harbor runtime facts、Snapshot / RefMap、evidence refs、Lode package / schema 和 App 用户意图的最终跨仓字段、状态和有效性规则。
+- 来源 ADR：[0002](0002-run-task-capability-model.md)、[0003](0003-result-envelope-and-run-record.md)；GitHub issues WebEnvoy/WebEnvoy#16、#17、#18。
+- 阻塞什么：Core #16 的跨仓 closeout、阶段二最小统一协议、Harbor / Lode / App 对外 facts 与 Core 消费合同对齐。
+- 当前状态：需要跨仓收敛。
+- 后续归属/下一步：由调度线程在 WebEnvoy/Harbor#8、#9，WebEnvoy/Lode#6、#9，WebEnvoy/App#6、#9 与 Core #16 之间收敛；Core 本轮只固定“不复制其他仓 truth，只消费对外 refs / facts / intent”的边界。

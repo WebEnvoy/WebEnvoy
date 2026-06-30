@@ -2,19 +2,15 @@
 
 ## Implementation
 
-- Replace the PR gate workflow command with the direct Loom flow entry and explicit `$GITHUB_WORKSPACE` target.
-- Do not hardcode `--item`; keep Work Item binding in the PR body.
-- Do not modify product boundary document semantics.
+- Keep the existing boundary documentation semantics unchanged.
+- Add only Loom docs-only carrier evidence for PR #30.
+- Do not claim Phase 2 implementation completion.
 
 ## Validation
 
-- Run `git diff --check`.
-- Run `loom doctor --target <repair-worktree-abs> --json`.
-- Run `loom verify --target <repair-worktree-abs> --json`.
-- Run `loom fact-chain --target <repair-worktree-abs> --json`.
-- Confirm local gate reads owner/repo, PR body Work Item, and fact-chain without `--item`.
-- Confirm GitHub Actions runs the updated command.
-
-## Rollback
-
-Revert the workflow line if the direct flow entry regresses.
+- `git diff --check`
+- `loom suite validate --target <repo> --item INIT-0001 --json`
+- `loom doctor --target <repo> --json`
+- `loom verify --target <repo> --json`
+- `loom fact-chain --target <repo> --json`
+- `loom flow pr-gate check --target <repo> --pr 30 --head-sha <head> --json`
