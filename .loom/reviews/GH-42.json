@@ -1,0 +1,28 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-42",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Semantic review approved for the docs-only Core reference/version ownership contract in PR #65.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "105b325528bd1f704dae19674c4b48184735ac88",
+  "reviewed_validation_summary": "2026-06-30 merge-ready carrier prepared for PR #65; content head 105b325528bd1f704dae19674c4b48184735ac88 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this approval as implementation of schema/API/runtime/storage/evidence/viewer behavior.",
+    "Close Core #41/#42/#43 only after merge and post-merge closeout evidence consume the PR, merge commit, target branch, and hosted run."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "ADR 0007 defines owner boundaries, validity rules, failure mapping, and research absorption for Core references without claiming implementation or runtime behavior."
+  },
+  "consumed_inputs": {
+    "spec": ".loom/specs/GH-42/spec.md",
+    "plan": ".loom/specs/GH-42/plan.md",
+    "task_carrier": ".loom/specs/GH-42/task-carrier.md",
+    "suite_path": "minimal",
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/65"
+  }
+}

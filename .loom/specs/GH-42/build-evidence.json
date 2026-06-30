@@ -1,0 +1,27 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "delegations": [],
+  "integration_evidence": [
+    {
+      "id": "main-thread-docs-contract",
+      "status": "integrated",
+      "summary": "ADR 0007 records the docs-only Core reference/version ownership contract for GH-41/GH-42/GH-43.",
+      "locators": [
+        "docs/adr/0007-reference-version-ownership-v0.md",
+        ".loom/work-items/GH-42.md",
+        ".loom/progress/GH-42.md",
+        ".loom/specs/GH-42/spec.md",
+        ".loom/specs/GH-42/plan.md",
+        ".loom/specs/GH-42/implementation-contract.md",
+        ".loom/specs/GH-42/task-carrier.md"
+      ],
+      "validation": [
+        "git diff --check",
+        "JSON validation",
+        "loom fact-chain",
+        "loom suite validate",
+        "loom suite carrier validate"
+      ]
+    }
+  ]
+}

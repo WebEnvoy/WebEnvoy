@@ -2,34 +2,34 @@
 
 ## Derived Fact Chain View
 
-- Item ID: GH-57
-- Goal: 收敛 API、CLI、MCP、SDK 共用任务入口 v0 的 docs-only 合同，并同批覆盖 Core #56/#57/#58/#59/#60。
-- Scope: docs-only ADR plus GH-57 item-specific Loom carrier; ownership is limited to allowed docs and GH-57 carrier files.
-- Execution Path: docs-only/core-common-task-entry-v0
+- Item ID: GH-42
+- Goal: 收敛 Core 引用和版本归属合同 v0，并同批覆盖 Core #41/#42/#43。
+- Scope: docs-only ADR plus GH-42 item-specific Loom carrier; ownership is limited to allowed docs and GH-42 carrier files.
+- Execution Path: docs-only/core-reference-version-v0
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/GH-57.md
-- Review Entry: .loom/reviews/GH-57.json
-- Validation Entry: `git diff --check`; JSON validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
-- Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#56/#57/#58/#59/#60; no merge and no issue closeout in this thread.
-- Current Checkpoint: closed_out
-- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#63.
-- Next Step: No further action for GH-56/GH-57/GH-58/GH-59/GH-60 after coordinator issue closeout comments are posted and covered issues are closed.
+- Recovery Entry: .loom/progress/GH-42.md
+- Review Entry: .loom/reviews/GH-42.json
+- Validation Entry: `git diff --check`; JSON validation; Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
+- Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#41/#42/#43; no merge and no issue closeout in this thread.
+- Current Checkpoint: merge
+- Current Stop: PR #65 has docs-only content, GH-42 carrier, and authored review artifacts ready for merge-gate consumption.
+- Next Step: Run PR merge gate, wait for hosted checks on the current head, then merge and perform post-merge closeout.
 - Blockers: None recorded.
-- Latest Validation Summary: Post-merge closeout consumed PR #63, head d0cef325144ffa6f1a1eec717a792d90c09574bc, merge commit e12f26ad3b23a925fc7ef2b8465a920aea600463, target branch main, and hosted run 28440643714 with all required checks passing.
-- Recovery Boundary: Terminal carrier for docs-only Core common task entry contract; open new Work Items for fixture files, conformance checks, API/CLI/MCP/SDK implementation, schema generation, or runtime behavior.
-- Current Lane: terminal closeout
+- Latest Validation Summary: 2026-06-30 merge-ready carrier prepared for PR #65; content head 105b325528bd1f704dae19674c4b48184735ac88 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.
+- Recovery Boundary: Do not implement schema/API/runtime/storage/evidence/viewer code in this Work Item.
+- Current Lane: core-reference-version-contract
 
 ## Runtime Evidence
 
 - Run Entry: not_applicable
 - Logs Entry: not_applicable
 - Diagnostics Entry: not_applicable
-- Verification Entry: .loom/progress/GH-57.md
-- Lane Entry: core
+- Verification Entry: .loom/progress/GH-42.md
+- Lane Entry: core-reference-version-contract
 
 ## Sources
 
-- Static Truth: .loom/work-items/GH-57.md
-- Dynamic Truth: .loom/progress/GH-57.md
+- Static Truth: .loom/work-items/GH-42.md
+- Dynamic Truth: .loom/progress/GH-42.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json
