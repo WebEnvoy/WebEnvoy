@@ -12,10 +12,10 @@
 - Validation Entry: `git diff --check`; `.loom/**/*.json` validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#69/#70/#71/#72/#73; no merge and no issue closeout in this thread.
 - Current Checkpoint: merge
-- Current Stop: PR #74 is open; content, validation, and review carriers are ready for PR merge-gate consumption at head 2336f85e744db8948661168d1d9bb07c32453e90.
+- Current Stop: PR #74 is open; content, validation, and review carriers are ready for PR merge-gate consumption after the repo-local workspace entry correction.
 - Next Step: Wait for hosted checks and stop at PR Ready without merge or issue closeout.
 - Blockers: None recorded.
-- Latest Validation Summary: At head e31e82f9b95064cde3bcf9801602daa156dc8602, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.
+- Latest Validation Summary: At head a3b73f382779c3a165caa9187655663d12f08e76, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.
 - Recovery Boundary: Continue only docs-only closeout for GH-69/GH-70/GH-71/GH-72/GH-73. Do not merge, close issues, create code/schema/API/runtime/fixture behavior, or create `docs/guides/`.
 - Current Lane: docs-draft-closeout
 

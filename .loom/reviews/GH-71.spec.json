@@ -5,8 +5,8 @@
   "kind": "spec_review",
   "summary": "Spec review passed for the docs-only GH-71 draft closeout. The PR defines docs directory semantics, draft lifecycle rules, per-draft disposition, and explicit absorption/rejected/deferred analysis without adding code, schema, API, runtime, fixture, generated, migration, or behavior changes.",
   "reviewer": "codex-main",
-  "reviewed_head": "e31e82f9b95064cde3bcf9801602daa156dc8602",
-  "reviewed_validation_summary": "At head e31e82f9b95064cde3bcf9801602daa156dc8602, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.",
+  "reviewed_head": "a3b73f382779c3a165caa9187655663d12f08e76",
+  "reviewed_validation_summary": "At head a3b73f382779c3a165caa9187655663d12f08e76, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
