@@ -11,13 +11,13 @@
 - Review Entry: .loom/reviews/GH-71.json
 - Validation Entry: `git diff --check`; `.loom/**/*.json` validation; available Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#69/#70/#71/#72/#73; no merge and no issue closeout in this thread.
-- Current Checkpoint: merge
-- Current Stop: PR #74 is open; content, validation, and review carriers are ready for PR merge-gate consumption after the repo-local workspace entry correction.
-- Next Step: Wait for hosted checks and stop at PR Ready without merge or issue closeout.
+- Current Checkpoint: closed_out
+- Current Stop: Post-merge carrier closeout recorded for WebEnvoy/WebEnvoy#74.
+- Next Step: No further action for GH-69/GH-70/GH-71/GH-72/GH-73 after coordinator issue closeout comments are posted and covered issues are closed.
 - Blockers: None recorded.
-- Latest Validation Summary: At head a3b73f382779c3a165caa9187655663d12f08e76, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.
-- Recovery Boundary: Continue only docs-only closeout for GH-69/GH-70/GH-71/GH-72/GH-73. Do not merge, close issues, create code/schema/API/runtime/fixture behavior, or create `docs/guides/`.
-- Current Lane: docs-draft-closeout
+- Latest Validation Summary: Post-merge closeout consumed PR #74, head 427305c737d349191a7c5d8834813d3b4226dd8f, merge commit 2047016eeb1aa61bc1884c244b760e6efdb0a049, target branch main, and hosted run 28457270526 with all required checks passing.
+- Recovery Boundary: Terminal carrier for docs-only Core draft lifecycle closeout; open later Work Items for schema/API/runtime/storage/fixture implementation or any contract behavior change.
+- Current Lane: terminal closeout
 
 ## Runtime Evidence
 

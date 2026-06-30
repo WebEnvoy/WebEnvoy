@@ -3,29 +3,25 @@
   "item_id": "GH-71",
   "decision": "allow",
   "kind": "general_review",
-  "summary": "Implementation review passed for the docs-only GH-71 draft closeout. Each draft now has a disposition with concrete reasoning, valid analysis is absorbed into docs/adr, docs/contracts, ROADMAP, or architecture surfaces, rejected/deferred material is named, and no product semantics or executable surface were introduced.",
-  "reviewer": "codex-main",
-  "reviewed_head": "a3b73f382779c3a165caa9187655663d12f08e76",
-  "reviewed_validation_summary": "At head a3b73f382779c3a165caa9187655663d12f08e76, `git diff --check` passed; `.loom/**/*.json` passed jq validation; `loom fact-chain --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --json` passed; `loom suite validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` returned not_applicable with no missing inputs; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/docs-draft-closeout/WebEnvoy --item GH-71 --json` passed.",
+  "summary": "Post-merge closeout for PR #74 is approved; the docs-only Core docs draft closeout and GH-71 carrier are merged to main and ready for issue closeout.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "2047016eeb1aa61bc1884c244b760e6efdb0a049",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #74, head 427305c737d349191a7c5d8834813d3b4226dd8f, merge commit 2047016eeb1aa61bc1884c244b760e6efdb0a049, target branch main, and hosted run 28457270526 with all required checks passing.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    "Delete docs/draft pointer files only after stale inbound references are removed.",
-    "Do not treat ADR 0002-0004 as fully accepted ADRs; docs/contracts/README.md indexes only the accepted facts inside them.",
-    "Open separate Work Items for any code, schema/API/runtime behavior, fixtures, generated artifacts, migrations, workflow logic, or user-facing behavior."
+    "Do not treat this approval as code, schema, API, runtime, storage, UI, fixture, generated fact, or product behavior implementation completion."
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The content now meets the supplemental acceptance criteria: it does more than reduce drafts; it records whether each draft has continuing value, where valid analysis was absorbed, and what was rejected or deferred. The PR remains docs-only and does not claim implementation completion."
+    "reason": "Post-merge closeout consumes the merged docs-only Core docs draft closeout and records terminal evidence without claiming implementation completion."
   },
   "consumed_inputs": {
-    "draft_inventory": "docs/draft/README.md",
-    "contract_index": "docs/contracts/README.md",
-    "docs_directory_semantics": "docs/README.md",
-    "spec": ".loom/specs/GH-71/spec.md",
-    "plan": ".loom/specs/GH-71/plan.md",
-    "task_carrier": ".loom/specs/GH-71/task-carrier.md",
-    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/74"
+    "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/74",
+    "pr_head": "427305c737d349191a7c5d8834813d3b4226dd8f",
+    "merge_commit": "2047016eeb1aa61bc1884c244b760e6efdb0a049",
+    "target_branch": "main",
+    "evidence": "https://github.com/WebEnvoy/WebEnvoy/actions/runs/28457270526"
   }
 }
