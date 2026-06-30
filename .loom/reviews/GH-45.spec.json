@@ -1,0 +1,16 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-45",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for the docs-only Core Result/Admission contract in PR #67.",
+  "reviewer": "codex-coordinator",
+  "reviewed_head": "d73e5b26b8d20dcbf4e383d32abc6c11acae5177",
+  "reviewed_validation_summary": "2026-06-30 merge-ready carrier prepared for PR #67; content head d73e5b26b8d20dcbf4e383d32abc6c11acae5177 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.",
+  "fallback_to": null,
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not treat this approval as completion of JSON Schema, OpenAPI, SDK, CLI, MCP, API implementation, runtime, storage, evidence store, viewer, App UI, or true-write behavior.",
+    "Downstream App contracts may consume ADR 0003/0004 semantics after this PR is merged."
+  ]
+}

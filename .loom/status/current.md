@@ -11,11 +11,11 @@
 - Review Entry: .loom/reviews/GH-45.json
 - Validation Entry: `git diff --check`; JSON validation; Loom fact-chain / suite / carrier checks; hosted checks after PR creation.
 - Closing Condition: PR reaches PR Ready for WebEnvoy/WebEnvoy#44/#45/#46/#47/#48/#49/#50/#51/#52/#53/#54/#55; no merge and no issue closeout in this thread.
-- Current Checkpoint: build
-- Current Stop: Docs-only contract updates and GH-45 carrier passed local diff, JSON, fact-chain, suite, and carrier checks. `loom build` is blocked only by the build wrapper looking for repo-local `tools/loom.py` suite JSON while the global suite surfaces pass.
-- Next Step: Commit, push, create PR, then run hosted basic checks.
+- Current Checkpoint: merge
+- Current Stop: PR #67 has docs-only content, GH-45 carrier, and authored review artifacts ready for merge-gate consumption.
+- Next Step: Run PR merge gate, wait for hosted checks on the current head, then merge and perform post-merge closeout.
 - Blockers: None recorded before validation.
-- Latest Validation Summary: 2026-06-30 local checks: `git diff --check` pass; `.loom/**/*.json` via `python3 -m json.tool` pass; `loom fact-chain --target /Volumes/2T/.codex/worktrees/stage2/core-result-admission --item GH-45 --json` pass; `loom suite validate --target /Volumes/2T/.codex/worktrees/stage2/core-result-admission --item GH-45 --json` pass; `loom suite carrier validate --target /Volumes/2T/.codex/worktrees/stage2/core-result-admission --item GH-45 --json` pass; `loom build --target ... --item GH-45 --build-evidence .loom/specs/GH-45/build-evidence.json --json` blocked at build-wrapper suite JSON lookup for repo-local `tools/loom.py`.
+- Latest Validation Summary: 2026-06-30 merge-ready carrier prepared for PR #67; content head d73e5b26b8d20dcbf4e383d32abc6c11acae5177 passed local validation and hosted basic checks, with current-head hosted checks pending after carrier commit.
 - Recovery Boundary: Keep scope to ADR 0003/0004 and GH-45 item-specific Loom carrier. Do not merge, close issues, write code, create schema/API/runtime/storage/evidence/viewer/App implementation, or reuse INIT-0001.
 - Current Lane: docs-only contract convergence
 
