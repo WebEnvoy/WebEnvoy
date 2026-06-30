@@ -3,25 +3,26 @@
   "item_id": "GH-77",
   "decision": "allow",
   "kind": "general_review",
-  "summary": "Workflow-only Loom 0.22.1 maintenance PR #76 is approved.",
+  "summary": "Post-merge closeout for PR #76 is approved; Loom 0.22.1 workflow maintenance is merged to main and ready for issue closeout.",
   "reviewer": "codex-coordinator",
-  "reviewed_head": "fda71915c4689d8a06786585b209e9b4a4644b48",
-  "reviewed_validation_summary": "PR head fda71915c4689d8a06786585b209e9b4a4644b48 contains the Loom workflow pin update to 0.22.1 plus the GH-77 item-specific maintenance carrier; no product docs, product contracts, code, roadmap, issue tree, plugin cache path, or historical INIT-0001 migration changed.",
+  "reviewed_head": "6b3f2a6d5d06d3c787e8d5d8d8ee3825be05b226",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR #76, head 0c7168c25e9105ce45e63cbbba20576558f9128f, merge commit 6b3f2a6d5d06d3c787e8d5d8d8ee3825be05b226, target branch main, and hosted run 28461417924 with all required checks passing.",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    "This review does not approve product, schema, API, runtime, fixture, roadmap, or issue-tree changes."
+    "This closeout review does not approve product, schema, API, runtime, fixture, roadmap, or issue-tree changes."
   ],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored review covers only the workflow version-pin update for PR #76. Drift after reviewed_head must be limited to GH-77 Loom carrier metadata or require a fresh review."
+    "reason": "Post-merge closeout consumes the merged workflow-only maintenance PR and records terminal evidence without claiming product implementation."
   },
   "consumed_inputs": {
     "issue": "https://github.com/WebEnvoy/WebEnvoy/issues/77",
     "pull_request": "https://github.com/WebEnvoy/WebEnvoy/pull/76",
-    "reviewed_head": "fda71915c4689d8a06786585b209e9b4a4644b48",
-    "changed_workflow": ".github/workflows/loom-check.yml",
-    "suite_path": "not_applicable"
+    "pr_head": "0c7168c25e9105ce45e63cbbba20576558f9128f",
+    "merge_commit": "6b3f2a6d5d06d3c787e8d5d8d8ee3825be05b226",
+    "target_branch": "main",
+    "evidence": "https://github.com/WebEnvoy/WebEnvoy/actions/runs/28461417924"
   }
 }
