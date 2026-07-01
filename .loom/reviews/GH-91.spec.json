@@ -1,0 +1,62 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-91",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Runtime-upgrade-only spec is sufficient for this Loom 0.25.0 workflow maintenance PR. Suite path is not_applicable only because changed paths are limited to workflow/runtime metadata and item-specific carrier evidence.",
+  "reviewer": "codex-coordinator",
+  "authored_at": "2026-07-01T11:43:54Z",
+  "reviewed_head": "ca37503d2e62780ea48d872e898abf9f4648aace",
+  "reviewed_validation_summary": "The initial PR updated the workflow pin to 0.25.0 and added the v0.25 repo metadata declaration/spec. Hosted checks consumed v0.25.0 and exposed that fact-chain and semantic review must be item-specific for GH-91; this refresh aligns the current fact-chain and records workflow-only review evidence. Product/runtime tests remain not applicable.",
+  "fallback_to": "merge",
+  "findings": [
+    {
+      "id": "compat-follow-up-1",
+      "summary": "Use a separate Work Item for bootstrap residue, product implementation, or future runtime/provider changes.",
+      "severity": "warn",
+      "rebuttal": null,
+      "disposition": {
+        "status": "deferred",
+        "summary": "Projected from compatibility `follow_ups`."
+      }
+    }
+  ],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Use a separate Work Item for bootstrap residue, product implementation, or future runtime/provider changes."
+  ],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-91.md",
+    "recovery_entry": ".loom/progress/GH-91.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-91/spec.md",
+    "suite_plan": ".loom/specs/GH-91/plan.md",
+    "suite_evidence_map": null,
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
