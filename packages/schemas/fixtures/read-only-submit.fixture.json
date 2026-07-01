@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/task-intent.schema.json",
+  "schema_version": "webenvoy.task-intent.v0",
+  "intent_id": "intent_fixture_read_only_001",
+  "correlation_id": "corr_fixture_read_only_001",
+  "entrypoint": "api",
+  "user_intent": {
+    "summary": "Read a public page summary without changing external state."
+  },
+  "capability": {
+    "ref": "lode:capability/read-page-summary",
+    "version": "0.1.0"
+  },
+  "input": {
+    "summary": "Target URL and extraction options are represented as public refs.",
+    "refs": ["input:fixture/read-only-submit"]
+  },
+  "scope": {
+    "target_type": "web_page",
+    "target_ref": "target:fixture/public-page"
+  },
+  "policy": {
+    "risk": "read",
+    "execution_intent": "read",
+    "timeout_ms": 30000
+  },
+  "resource_requirement_refs": ["lode:resource-requirement/read-page-summary/default"],
+  "evidence_policy_ref": "evidence-policy:summary-only"
+}

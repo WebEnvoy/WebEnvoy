@@ -96,6 +96,12 @@ pnpm test
 pnpm lint
 ```
 
+Schema 合同载体位于 `packages/schemas`：
+
+```bash
+pnpm --filter @webenvoy/schemas test
+```
+
 启动最小 API Server：
 
 ```bash

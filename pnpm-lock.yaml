@@ -17,6 +17,8 @@ importers:
 
   packages/api-server: {}
 
+  packages/schemas: {}
+
 packages:
 
   '@types/node@24.13.2':

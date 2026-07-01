@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/run-record.v0.schema.json",
+  "title": "WebEnvoy Core Run Record v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Run Record",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.run-record.v0",
+    "compatibility_boundary": "Run status is monotonic. Optional refs may be added, but terminal states, ref owner boundaries, and raw-material exclusions require an ADR or pending-decision update.",
+    "source_adrs": [
+      "docs/adr/0003-result-envelope-and-run-record.md",
+      "docs/adr/0005-task-intent-and-run-lifecycle-v0.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "run_id": "Core",
+      "status": "Core",
+      "task_intent_ref": "Core",
+      "capability_ref": "Lode owns referenced capability",
+      "runtime_binding_refs": "Harbor owns referenced runtime facts",
+      "result_ref": "Core",
+      "evidence_refs": "Harbor or evidence producer owns ref body; Core records refs only",
+      "failure": "Core"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "status",
+    "created_at",
+    "updated_at",
+    "task_intent_ref",
+    "capability_ref",
+    "admission"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.run-record.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "admitted",
+        "running",
+        "succeeded",
+        "failed",
+        "blocked",
+        "requires_user_action",
+        "manual_recovery_required",
+        "unknown_outcome",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "terminal_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "task_intent_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entrypoint_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "action_risk"],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["accepted", "accepted_with_warnings", "blocked_pre_admission", "requires_user_action", "deferred_true_write"]
+        },
+        "action_risk": {
+          "type": "string",
+          "enum": ["read", "write", "submit", "destructive"]
+        },
+        "resource_match_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runtime_binding_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "result_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "code", "phase", "recovery_hint"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "request_invalid",
+            "capability_contract",
+            "resource_admission",
+            "action_risk",
+            "runtime_execution",
+            "result_projection",
+            "evidence_reference",
+            "persistence_observability",
+            "write_outcome"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["pre_admission", "admission", "resource_matching", "runtime_binding", "execution", "verification", "projection", "evidence", "persistence", "observability", "query", "write_verification", "reconciliation"]
+        },
+        "recovery_hint": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "retention_state": {
+      "type": "string",
+      "enum": ["active", "summary_only", "expired", "redacted", "access_denied", "deleted_by_policy"]
+    }
+  }
+}
