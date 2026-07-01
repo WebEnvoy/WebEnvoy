@@ -1,0 +1,154 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "GH-101",
+  "parent_fr": "95",
+  "covered_issues": [101],
+  "ownership_constraints": {
+    "write_scope": [
+      "packages/core/src/task-submission.ts",
+      "packages/core/src/index.ts",
+      "packages/core/src/self-check.ts",
+      ".loom/work-items/GH-101.md",
+      ".loom/progress/GH-101.md",
+      ".loom/status/current.md",
+      ".loom/specs/GH-101/*",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "forbidden_scope": [
+      "HTTP API submission/query routes",
+      "CLI/MCP/SDK/App-facing API integration",
+      "Harbor or Lode repository changes",
+      "Lode package-body resolution or copying",
+      "Harbor runtime session binding or execution",
+      "action execution loop",
+      "result projection or evidence retrieval",
+      "generated TypeScript types, Ajv integration, or OpenAPI",
+      "database/ORM/migration tooling",
+      "multi-backend abstraction",
+      "hosted service storage",
+      "true-write behavior",
+      "issue closure",
+      "PR merge",
+      "FR #95 closeout before remaining #95 Work Items and cross-repo dependencies are resolved"
+    ],
+    "owner": "core-repo-control-thread"
+  },
+  "delegations": [],
+  "integration_evidence": [
+    {
+      "carrier": "task_submission_helper",
+      "locator": "packages/core/src/task-submission.ts",
+      "summary": "Parses Task Intent v0, rejects invalid/private input before admission, enforces read-only policy, and creates accepted/admitted Run Records through the file-backed store."
+    },
+    {
+      "carrier": "core_export_surface",
+      "locator": "packages/core/src/index.ts",
+      "summary": "Exports the read-only task submission helper and related task intent/submission types."
+    },
+    {
+      "carrier": "core_self_check",
+      "locator": "packages/core/src/self-check.ts",
+      "summary": "Validates accepted read-only task submission and invalid private-field rejection without adding a test framework."
+    },
+    {
+      "carrier": "task_carrier",
+      "locator": ".loom/specs/GH-101/task-carrier.md",
+      "summary": "Maps GH-101 as the primary Work Item and GH-95 as parent FR evidence without claiming FR completion."
+    }
+  ],
+  "suite_path_consumption": {
+    "path": "minimal",
+    "required_artifacts": [
+      ".loom/specs/GH-101/spec.md",
+      ".loom/specs/GH-101/plan.md",
+      ".loom/specs/GH-101/implementation-contract.md"
+    ],
+    "not_applicable_full_artifacts": [
+      "suite-index.md",
+      "research.md",
+      "contracts.md",
+      "readiness-checklist.md",
+      "consistency-analysis",
+      "execution-breakdown"
+    ],
+    "rationale": "Narrow Core runtime PR with the first accepted admission recording path on top of existing schema fixtures and local Run Record storage, with no API route, runtime execution, generated consumers, database, hosted service, or cross-repo integration.",
+    "consumer_boundary": "Review and PR Ready consume the core runtime helper, self-check output, GH-101 carrier, local build/typecheck/test/lint/conformance output, PR metadata readback, and hosted checks.",
+    "recheck_condition": "Upgrade to broader suite artifacts when API submit/query behavior, runtime lifecycle execution, Lode package/capability consumption, Harbor runtime binding, result projection, evidence retrieval, generated types, CLI/MCP/SDK/App-facing API, database storage, hosted service storage, or true-write guardrails are added."
+  },
+  "validation": {
+    "status": "passed_pre_pr",
+    "content_head": "pre_pr_branch_head_pending_commit",
+    "commands": [
+      {
+        "command": "pnpm --filter @webenvoy/core-runtime test",
+        "result": "pass",
+        "note": "Passed on 2026-07-01T20:24:51Z; built core runtime and validated Run Record file store plus read-only task submission admission."
+      },
+      {
+        "command": "pnpm build",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm lint",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm conformance",
+        "result": "pass"
+      },
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/GH-101/build-evidence.json",
+        "result": "pass"
+      },
+      {
+        "command": "loom doctor --target . --json",
+        "result": "pass",
+        "note": "Installed surface diagnostics passed; CLI freshness reported installed v0.25.0 stale against npm 0.26.2 while plugin payload was current."
+      },
+      {
+        "command": "loom verify --target . --json",
+        "result": "pass",
+        "note": "Installed Loom delivery layers verified."
+      },
+      {
+        "command": "loom fact-chain --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite validate --target . --item GH-101 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite carrier validate --target . --item GH-101 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite evidence validate --target . --item GH-101 --json",
+        "result": "pass"
+      },
+      {
+        "command": "packaged loom_flow.py flow build --target . --item GH-101 --build-evidence .loom/specs/GH-101/build-evidence.json",
+        "result": "pass",
+        "attempt": "GH-101-build-a3eca451f5f3-6aaa473942f0"
+      }
+    ],
+    "hosted_gate": "pending_hosted_checks",
+    "pr_url": "pending",
+    "initial_pr_readback": {
+      "result": "pending"
+    },
+    "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
+  }
+}

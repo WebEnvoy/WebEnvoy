@@ -12,3 +12,11 @@ export {
   type RunRecordPatch,
   type RunRecordStatus
 } from "./run-record-store.js";
+export {
+  acceptReadOnlyTaskSubmission,
+  taskIntentSchemaVersion,
+  type TaskEntrypoint,
+  type TaskIntentEnvelope,
+  type TaskSubmissionInput,
+  type TaskSubmissionResult
+} from "./task-submission.js";
