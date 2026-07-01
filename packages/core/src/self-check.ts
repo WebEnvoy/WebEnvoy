@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, type RunRecord } from "./run-record-store.js";
+import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
 
@@ -28,12 +29,56 @@ function baseInput(runId: string) {
   } as const;
 }
 
+async function readTaskIntentFixture(): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(new URL("../../schemas/fixtures/read-only-submit.fixture.json", import.meta.url), "utf8")) as Record<string, unknown>;
+}
+
 function assertRefsOnly(record: RunRecord): void {
   assert(!Object.hasOwn(record, "raw_payload"), "Run Record must not inline raw_payload");
   assert(!Object.hasOwn(record, "dom"), "Run Record must not inline DOM");
   assert(!Object.hasOwn(record, "screenshot"), "Run Record must not inline screenshots");
   assert(!Object.hasOwn(record, "cookie"), "Run Record must not inline cookies");
   assert(!Object.hasOwn(record, "token"), "Run Record must not inline tokens");
+}
+
+async function assertTaskSubmissionAdmission(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-task-submission-"));
+  try {
+    const store = createFileRunRecordStore({ directory, clock: nextInstant });
+    const taskIntent = await readTaskIntentFixture();
+    const accepted = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_submit_accepted",
+      task_intent: taskIntent,
+      resource_match_ref: "resource-match:fixture/ready",
+      evidence_refs: ["evidence:fixture/admission-ready"]
+    });
+
+    assert.equal(accepted.ok, true);
+    if (!accepted.ok) {
+      throw new Error("read-only submission must be accepted");
+    }
+    assert.equal(accepted.run_record.status, "admitted");
+    assert.equal(accepted.run_record.admission.decision, "accepted");
+    assert.equal(accepted.run_record.task_intent_ref, "intent_fixture_read_only_001");
+    assert.equal(accepted.run_record.capability_ref, "lode:capability/read-page-summary");
+    assert.deepEqual(await store.getRunRecord("run_self_check_submit_accepted"), accepted.run_record);
+
+    const invalid = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_submit_invalid",
+      task_intent: {
+        ...taskIntent,
+        token: "must-not-enter-core"
+      }
+    });
+    assert.equal(invalid.ok, false);
+    if (invalid.ok) {
+      throw new Error("private-field submission must fail");
+    }
+    assert.equal(invalid.failure.code, "private_field_rejected:token");
+    assert.equal(await store.getRunRecord("run_self_check_submit_invalid"), undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 const directory = await mkdtemp(join(tmpdir(), "webenvoy-run-record-store-"));
@@ -115,3 +160,6 @@ try {
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
+
+await assertTaskSubmissionAdmission();
+console.log("Validated read-only task submission admission.");
