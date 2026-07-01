@@ -9,14 +9,13 @@
     "pnpm": ">=10 <11"
   },
   "scripts": {
-    "build": "pnpm --filter @webenvoy/api-server build",
-    "typecheck": "pnpm --filter @webenvoy/api-server typecheck",
-    "test": "pnpm build && pnpm --filter @webenvoy/api-server test",
-    "lint": "pnpm --filter @webenvoy/api-server lint"
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm build && pnpm -r test",
+    "lint": "pnpm -r lint"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "typescript": "^5.9.3"
   }
 }
-

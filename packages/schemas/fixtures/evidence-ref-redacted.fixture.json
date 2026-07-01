@@ -1,0 +1,12 @@
+{
+  "$schema": "../schemas/evidence-ref.schema.json",
+  "schema_version": "webenvoy.evidence-ref.v0",
+  "ref": "evidence:fixture/page-summary",
+  "ref_type": "evidence",
+  "producer": "harbor",
+  "state": "redacted",
+  "redaction_state": "summary_only",
+  "retention_state": "active",
+  "safe_summary": "Evidence exists but raw browser material is not exposed by Core.",
+  "consumer_boundary": "Core records this ref for Run Record and Result Envelope queries only; raw material remains outside Core."
+}

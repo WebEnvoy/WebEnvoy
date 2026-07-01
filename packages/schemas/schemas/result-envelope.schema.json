@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/result-envelope.v0.schema.json",
+  "title": "WebEnvoy Core Result Envelope v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Result Projection",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.result-envelope.v0",
+    "compatibility_boundary": "Result payload may add optional refs and public projections. Raw runtime material, failure taxonomy changes, and terminal outcome changes require an ADR or pending-decision update.",
+    "source_adrs": [
+      "docs/adr/0003-result-envelope-and-run-record.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "run_record_ref": "Core",
+      "result_ref": "Core",
+      "capability_ref": "Lode owns referenced capability",
+      "package_ref": "Lode owns referenced package",
+      "data": "Lode owns normalized public shape; Core validates projection",
+      "raw_payload_refs": "Harbor or evidence producer owns raw payload body",
+      "evidence_refs": "Harbor or evidence producer owns evidence body",
+      "failure": "Core"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_record_ref",
+    "outcome",
+    "terminal",
+    "capability_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.result-envelope.v0"
+    },
+    "run_record_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "success",
+        "partial",
+        "empty",
+        "failed",
+        "blocked",
+        "requires_user_action",
+        "manual_recovery_required",
+        "unknown_outcome",
+        "cancelled"
+      ]
+    },
+    "terminal": {
+      "type": "boolean"
+    },
+    "result_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data": {
+      "type": "object"
+    },
+    "projection_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_payload_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "code", "phase", "recovery_hint"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recovery_hint": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "retention_state": {
+      "type": "string",
+      "enum": ["active", "summary_only", "expired", "redacted", "access_denied", "deleted_by_policy"]
+    }
+  }
+}

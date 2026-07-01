@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/evidence-ref.v0.schema.json",
+  "title": "WebEnvoy Core Evidence Ref v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core records refs; Harbor/Lode/App own referenced bodies according to producer",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.evidence-ref.v0",
+    "compatibility_boundary": "Ref state vocabulary must keep missing, expired, access_denied, and redacted distinct. Core must not inline raw DOM, HAR, screenshots, videos, cookies, tokens, local paths, or provider-private objects.",
+    "source_adrs": [
+      "docs/adr/0003-result-envelope-and-run-record.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "ref": "Producer owns referenced body",
+      "producer": "Core records public owner",
+      "state": "Core records query-visible state",
+      "redaction_state": "Producer/App policy owns raw access; Core records public state",
+      "retention_state": "Producer/App policy owns raw retention; Core records public state"
+    }
+  },
+  "required": [
+    "schema_version",
+    "ref",
+    "ref_type",
+    "producer",
+    "state",
+    "consumer_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.evidence-ref.v0"
+    },
+    "ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ref_type": {
+      "type": "string",
+      "enum": ["evidence", "raw_payload", "source_trace", "resource_trace", "runtime_binding"]
+    },
+    "producer": {
+      "type": "string",
+      "enum": ["core", "harbor", "lode", "app"]
+    },
+    "state": {
+      "type": "string",
+      "enum": ["available", "missing", "expired", "redacted", "access_denied", "capture_denied"]
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": ["none", "summary_only", "redacted"]
+    },
+    "retention_state": {
+      "type": "string",
+      "enum": ["active", "summary_only", "expired", "deleted_by_policy"]
+    },
+    "safe_summary": {
+      "type": "string"
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

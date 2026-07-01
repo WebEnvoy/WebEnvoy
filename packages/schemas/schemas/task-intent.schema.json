@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/task-intent.v0.schema.json",
+  "title": "WebEnvoy Core Task Intent v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core API Server",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.task-intent.v0",
+    "compatibility_boundary": "Additive optional fields are allowed. Required fields, enum values, owner changes, and private-field behavior require an ADR or pending-decision update.",
+    "source_adrs": [
+      "docs/adr/0005-task-intent-and-run-lifecycle-v0.md",
+      "docs/adr/0006-common-task-entry-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "intent_id": "Core API Server",
+      "entrypoint": "Core API Server",
+      "user_intent": "Caller submits; Core API Server normalizes and redacts",
+      "capability": "Lode owns referenced capability and version",
+      "input": "Core API Server owns public summary and refs",
+      "scope": "Caller declares; Core validates",
+      "policy": "Caller/App declare public constraints; Core enforces",
+      "resource_requirement_refs": "Lode owns refs; Harbor owns runtime facts",
+      "evidence_policy_ref": "Lode/Core/App contract input"
+    }
+  },
+  "required": [
+    "schema_version",
+    "intent_id",
+    "entrypoint",
+    "user_intent",
+    "capability",
+    "input",
+    "scope",
+    "policy",
+    "resource_requirement_refs",
+    "evidence_policy_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.task-intent.v0"
+    },
+    "intent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entrypoint": {
+      "type": "string",
+      "enum": ["api", "cli", "mcp", "sdk", "app"]
+    },
+    "user_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "version"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_type", "target_ref"],
+      "properties": {
+        "target_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk", "execution_intent"],
+      "properties": {
+        "risk": {
+          "type": "string",
+          "enum": ["read", "write", "submit", "destructive"]
+        },
+        "execution_intent": {
+          "type": "string",
+          "enum": [
+            "read",
+            "validate_only",
+            "draft",
+            "preview",
+            "execute_after_approval",
+            "reconcile_status",
+            "request_cancel"
+          ]
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "resource_requirement_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_policy_ref": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
