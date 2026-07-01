@@ -195,6 +195,10 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     assert.equal(created.schema_version, runRecordSchemaVersion);
 
     await store.updateRunRecord(successRunId, {
+      status: "admitted",
+      evidence_refs: [evidenceRef]
+    });
+    await store.updateRunRecord(successRunId, {
       status: "running",
       runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
       evidence_refs: [evidenceRef]
@@ -205,7 +209,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       evidence_refs: [evidenceRef],
       retention_state: asRetentionState(result.retention_state, "result.retention_state")
     });
-    assert.equal(succeeded.terminal_at, "2026-07-01T01:00:02.000Z");
+    assert.equal(succeeded.terminal_at, "2026-07-01T01:00:03.000Z");
     assertRefsOnly(succeeded);
     assert.deepEqual(await store.getRunRecord(successRunId), JSON.parse(await readFile(join(directory, `${successRunId}.json`), "utf8")));
 
