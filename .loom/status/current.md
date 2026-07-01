@@ -13,9 +13,9 @@
 - Closing Condition: PR is merged, post-merge closeout evidence is recorded, issue #97 is closed, and FR #94 remains open until #98-#100 are also complete.
 - Current Checkpoint: build
 - Current Stop: API Server minimum skeleton implemented; local validation and packaged Loom build readiness passed.
-- Next Step: Commit, push, create a PR bound to GH-97, then read back PR body, branch, and head SHA.
+- Next Step: Push the PR carrier-sync commit, refresh PR #111 body metadata to the new head, then read back PR body, branch, and head SHA.
 - Blockers: None recorded.
-- Latest Validation Summary: `pnpm install`, `pnpm build`, `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, `loom suite validate --target . --item GH-97 --json`, `loom suite carrier validate --target . --item GH-97 --json`, and packaged `loom_flow.py flow build --target . --item GH-97 --build-evidence .loom/specs/GH-97/build-evidence.json` passed on 2026-07-01 UTC before PR creation. Global `loom build` wrapper could not consume suite CLI JSON, so the validated entry is the packaged flow command used by the hosted workflow family.
+- Latest Validation Summary: `pnpm install`, `pnpm build`, `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, `loom suite validate --target . --item GH-97 --json`, `loom suite carrier validate --target . --item GH-97 --json`, packaged `loom_flow.py flow build --target . --item GH-97 --build-evidence .loom/specs/GH-97/build-evidence.json`, and local PR metadata render/preflight passed on 2026-07-01 UTC. PR #111 initial GitHub readback matched branch `work/GH-97-api-server` and head `1e36246ea21387a1d6674313bdd1c82b91b21e6d` before this carrier-sync commit.
 - Recovery Boundary: Keep scope limited to the native Node.js API Server skeleton and GH-97 carrier. Do not add task submission, schema, persistence, admission, query, CLI/MCP/SDK, Harbor/Lode/App integration, true writes, or shared Loom status changes in this PR.
 - Current Lane: build
 
@@ -37,3 +37,4 @@
 ## Notes
 
 - 2026-07-01: Aligned current status to GH-97 after `loom build --item GH-97` blocked on fact-chain current item mismatch from closed-out GH-91. This is carrier drift repair for the current product PR, not completion proof for #97.
+- 2026-07-01: Created PR #111 and confirmed initial PR readback matched branch `work/GH-97-api-server` and head `1e36246ea21387a1d6674313bdd1c82b91b21e6d`; carrier PR URL sync is being committed separately, so the PR metadata will be refreshed again after push.
