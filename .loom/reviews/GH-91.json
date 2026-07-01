@@ -5,8 +5,8 @@
   "kind": "general_review",
   "summary": "Workflow-only Loom 0.25.0 runtime-upgrade maintenance review is approved for PR #92. Scope is limited to the workflow pin, v0.25 repo metadata carrier declaration, and item-specific Loom maintenance carriers; no product, schema, API, runtime, fixture, release, or workstation plugin/cache change is approved.",
   "reviewer": "codex-coordinator",
-  "authored_at": "2026-07-01T11:36:41Z",
-  "reviewed_head": "5d62df0477809424ac2daa71af537ca4b8346bba",
+  "authored_at": "2026-07-01T11:44:02Z",
+  "reviewed_head": "ca37503d2e62780ea48d872e898abf9f4648aace",
   "reviewed_validation_summary": "The initial PR updated the workflow pin to 0.25.0 and added the v0.25 repo metadata declaration/spec. Hosted checks consumed v0.25.0 and exposed that fact-chain and semantic review must be item-specific for GH-91; this refresh aligns the current fact-chain and records workflow-only review evidence. Product/runtime tests remain not applicable.",
   "fallback_to": "merge",
   "findings": [
@@ -32,16 +32,15 @@
     "build_checkpoint": "pass",
     "budget_risk": {
       "schema_version": "loom-execution-budget-risk/v1",
-      "status": "unavailable",
+      "status": "not_applicable",
       "enforcement": "advisory",
       "highest_risk": "none",
       "risk_dimensions": [],
-      "summary": "execution budget is unavailable; budget risk remains advisory and non-blocking",
-      "budget_summary": "github control plane: Get \"https://api.github.com/repos/WebEnvoy/WebEnvoy\": EOF",
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
       "adapter_evidence_locator": "",
       "provenance": {
-        "source": "github_control_plane",
-        "error_count": 1
+        "source": "github_host"
       }
     },
     "engine_adapter": null,
