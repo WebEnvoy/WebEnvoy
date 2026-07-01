@@ -1,0 +1,7 @@
+# Evidence Map
+
+| Evidence id | Type | Source locator | Consumes | Binding | Freshness | Consumer boundary | Remediation direction |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| EV-001 | behavior_evidence | packages/api-server/src/server.ts | .loom/specs/GH-97/spec.md required behavior and acceptance | GH-97 / PR #111 / API Server minimum skeleton scope / current PR head from PR metadata | present | Review and merge-ready may consume this only for the native API Server skeleton endpoints and structured fallback behavior. | Refresh after changing API Server startup, routing, response envelope, branch, PR, or Work Item scope. |
+| EV-002 | test_evidence | .loom/progress/GH-97.md | .loom/specs/GH-97/plan.md validation strategy | GH-97 / PR #111 / Latest Validation Summary / current PR head from PR metadata | present | Review and merge-ready may consume the recorded build, typecheck, test, lint, suite, carrier, metadata, and hosted check evidence for GH-97 only. | Refresh after rerunning validation, changing package scripts, changing PR metadata, or pushing a new head. |
+| EV-003 | fresh_verification_input | .loom/progress/GH-97.md | EV-001 EV-002 | GH-97 / PR #111 / current Work Item carrier and Latest Validation Summary | present | Review and merge-ready may treat EV-001 and EV-002 as fresh only while PR #111 head, PR metadata, and the GH-97 carrier remain aligned. | Re-run local validation and PR metadata readback after every push, then refresh this row if the scope or evidence changes. |
