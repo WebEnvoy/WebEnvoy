@@ -42,6 +42,17 @@ API Server 是一等入口。SDK、CLI、MCP 和 WebEnvoy App 应通过 API Serv
 
 Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 provider driver；这些属于 Harbor。站点知识、能力包、任务封装和模板资产属于 Lode。不要把 WebEnvoy Core 扩展成通用 Browser Agent、账号矩阵系统或业务决策系统。
 
+## Core 技术架构基线
+
+- 本仓默认技术栈是 TypeScript / Node.js / pnpm；首个代码骨架 PR 才创建 package、workspace、lockfile、CI 命令或测试 runner。
+- JSON Schema 是跨仓合同主载体；Zod 只能做 TypeScript 实现 helper，Ajv 只能做 JSON Schema runtime validation，二者不得成为第二 truth。
+- API Server 负责入口归一化、鉴权、脱敏和 private field rejection；Core Runtime 负责 admission、resource matching、action risk、run lifecycle 和 failure taxonomy；Run Record 是 durable truth，只保存 refs、summaries、states 和 failure/result envelope。
+- Core 不保存 Harbor Profile、Runtime Session 内部状态、CDP/VNC endpoint、Cookie、Token、raw evidence、完整 DOM/HAR/截图/视频；不复制 Lode package body、fixtures、normalizer/validator code；不保存 App UI state、用户草稿或本地显示缓存。
+- 新 runtime dependency 必须在 PR 或 ADR 中说明用途、替代方案、许可证、调用边界、测试方式和移除条件；没有明确收益不得新增框架、ORM、多后端抽象或生成链。
+- 后续 API/Schema/Runtime/Run Record/CLI/MCP/SDK/App-facing API 实现必须先引用 `docs/adr/0008-core-technical-architecture-baseline.md` 和 `docs/contracts/README.md`，不得从 issue 讨论、`docs/draft/` 或 research 草稿直接推断字段。
+- 入口实现必须补最小 conformance fixture 或测试：read-only submit、invalid input、admission failure、result/query；docs-only N/A 只适用于没有代码、schema、fixture、runner 或 runtime 行为变化的 PR。
+- 变更范围保持单一 Work Item；产品、规划、代码骨架、依赖、schema、OpenAPI、runtime、数据库和跨仓合同修改不得混入 docs-only 基线 PR。
+
 ## 路线图 / 里程碑 / 功能需求 / 工作项
 
 - 跨仓长期方向以 `WebEnvoy/.github/ROADMAP.md` 为准。
