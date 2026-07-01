@@ -102,6 +102,12 @@ Schema 合同载体位于 `packages/schemas`：
 pnpm --filter @webenvoy/schemas test
 ```
 
+Run Record 最小本地持久化位于 `packages/core`：
+
+```bash
+pnpm --filter @webenvoy/core-runtime test
+```
+
 启动最小 API Server：
 
 ```bash
