@@ -140,11 +140,16 @@
       {
         "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow build --target . --item GH-99 --build-evidence .loom/specs/GH-99/build-evidence.json",
         "result": "pass",
-        "attempt": "GH-99-build-1af5088d113d-49e09e36de71"
+        "attempt": "GH-99-build-2548c9f9e427-8dc88fd26707"
       },
       {
-        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py pr-metadata preflight --target . --surface merge_ready --item GH-99 --issue 99 --pr 115 --head-sha f8c5273299ef44038a6c725dc9a2b6b9a1ec772b --branch work/GH-99-run-record-store",
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py pr-metadata preflight --target . --surface merge_ready --item GH-99 --issue 99 --pr 115 --head-sha 2548c9f9e427ca41b71cd6eee03394471b6da43e --branch work/GH-99-run-record-store",
         "result": "pass"
+      },
+      {
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow pre-review --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store",
+        "result": "pass",
+        "attempt": "GH-99-pre-review-2548c9f9e427-9423cc0e7ba9"
       },
       {
         "command": "tools/skills_surface.py check",
