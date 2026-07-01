@@ -78,7 +78,7 @@ export type CreateRunRecordInput = {
   task_intent_ref: string;
   capability_ref: string;
   admission: AdmissionDecision;
-  status?: Extract<RunRecordStatus, "pending" | "admitted" | "running" | "failed" | "blocked" | "requires_user_action" | "cancelled" | "expired">;
+  status?: Extract<RunRecordStatus, "pending" | "admitted" | "failed" | "cancelled" | "expired">;
   entrypoint_ref?: string;
   package_ref?: string;
   runtime_binding_refs?: readonly string[];
@@ -121,20 +121,21 @@ export const terminalRunRecordStatuses = new Set<RunRecordStatus>([
   "expired"
 ]);
 
-const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const statusRanks: Record<RunRecordStatus, number> = {
-  pending: 0,
-  admitted: 1,
-  running: 2,
-  succeeded: 3,
-  failed: 3,
-  blocked: 3,
-  requires_user_action: 3,
-  manual_recovery_required: 3,
-  unknown_outcome: 3,
-  cancelled: 3,
-  expired: 3
+export const runLifecycleTransitions: Readonly<Record<RunRecordStatus, readonly RunRecordStatus[]>> = {
+  pending: ["admitted", "failed", "cancelled", "expired"],
+  admitted: ["running", "failed", "cancelled", "expired"],
+  running: ["succeeded", "failed", "blocked", "requires_user_action", "manual_recovery_required", "unknown_outcome", "cancelled", "expired"],
+  succeeded: [],
+  failed: [],
+  blocked: [],
+  requires_user_action: [],
+  manual_recovery_required: [],
+  unknown_outcome: [],
+  cancelled: [],
+  expired: []
 };
+
+const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function requireRef(value: string, label: string): string {
   if (value.length === 0) {
@@ -172,8 +173,8 @@ function assertTransition(current: RunRecordStatus, next: RunRecordStatus): void
   if (terminalRunRecordStatuses.has(current)) {
     throw new Error(`run ${current} is terminal and cannot transition to ${next}`);
   }
-  if (statusRanks[next] < statusRanks[current]) {
-    throw new Error(`run status cannot move backward from ${current} to ${next}`);
+  if (!runLifecycleTransitions[current].includes(next)) {
+    throw new Error(`illegal run status transition from ${current} to ${next}`);
   }
 }
 

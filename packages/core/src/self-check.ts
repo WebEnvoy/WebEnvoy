@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createFileRunRecordStore, type RunRecord } from "./run-record-store.js";
+import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
@@ -90,6 +90,8 @@ try {
   const pending = await store.createRunRecord(baseInput(runId));
   assert.equal(pending.status, "pending");
   assert.equal(pending.schema_version, "webenvoy.run-record.v0");
+  assert.deepEqual(runLifecycleTransitions.pending, ["admitted", "failed", "cancelled", "expired"]);
+  await assert.rejects(() => store.updateRunRecord(runId, { status: "running" }), /illegal run status transition/);
 
   const admitted = await store.updateRunRecord(runId, {
     status: "admitted",
@@ -97,6 +99,7 @@ try {
     evidence_refs: ["evidence:fixture/admission-ready"]
   });
   assert.equal(admitted.status, "admitted");
+  await assert.rejects(() => store.updateRunRecord(runId, { status: "succeeded", result_ref: "result:fixture/too-early" }), /illegal run status transition/);
 
   const running = await store.updateRunRecord(runId, {
     status: "running",
@@ -143,7 +146,17 @@ try {
   assert.equal(failed.failure?.category, "resource_admission");
   assert.equal(failed.terminal_at, "2026-07-01T00:00:05.000Z");
 
+  const cancelledId = "run_self_check_cancelled_001";
+  await store.createRunRecord(baseInput(cancelledId));
+  const cancelled = await store.updateRunRecord(cancelledId, {
+    status: "cancelled",
+    evidence_refs: ["evidence:fixture/cancelled-by-user"]
+  });
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.terminal_at, "2026-07-01T00:00:07.000Z");
+
   await assert.rejects(() => store.updateRunRecord(runId, { status: "running" }), /terminal/);
+  await assert.rejects(() => store.updateRunRecord(cancelledId, { status: "running" }), /terminal/);
   await assert.rejects(() => store.createRunRecord({ ...baseInput("../bad"), run_id: "../bad" }), /run_id/);
   await assert.rejects(() => store.createRunRecord({ ...baseInput("run_self_check_empty_ref"), entrypoint_ref: "" }), /entrypoint_ref/);
   const invalidRefId = "run_self_check_invalid_ref_patch";
@@ -153,10 +166,10 @@ try {
   const detachedListRunRecords = store.listRunRecords;
   assert.deepEqual(
     (await detachedListRunRecords()).map((record) => record.run_id),
-    [failedId, invalidRefId, runId]
+    [cancelledId, failedId, invalidRefId, runId]
   );
 
-  console.log("Validated Run Record file store with 3 durable records.");
+  console.log("Validated Run Record file store with 4 durable records.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

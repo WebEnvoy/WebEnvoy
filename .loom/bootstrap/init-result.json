@@ -245,9 +245,9 @@
     "mode": "work-item + recovery-entry + derived status-surface",
     "read_entry": "loom fact-chain --target . --json",
     "entry_points": {
-      "current_item_id": "GH-101",
-      "work_item": ".loom/work-items/GH-101.md",
-      "recovery_entry": ".loom/progress/GH-101.md",
+      "current_item_id": "GH-102",
+      "work_item": ".loom/work-items/GH-102.md",
+      "recovery_entry": ".loom/progress/GH-102.md",
       "status_surface": ".loom/status/current.md"
     }
   },

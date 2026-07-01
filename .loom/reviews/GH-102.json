@@ -1,0 +1,57 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-102",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review approved for GH-102 PR head ec779e80119bdf7166cd306113c77b20365acb3a. The change replaces rank-based Run Record progression with an explicit transition table, exports the metadata, and updates core/conformance self-checks to cover legal, skipped, cancellation, and terminal rejection paths without expanding runtime/API scope.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T21:48:43Z",
+  "reviewed_head": "ec779e80119bdf7166cd306113c77b20365acb3a",
+  "reviewed_validation_summary": "GH-102 validation passed on 2026-07-01 UTC at PR head `ec779e80119bdf7166cd306113c77b20365acb3a`: `pnpm --filter @webenvoy/core-runtime test`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `pnpm conformance`; `git diff --check`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-102/build-evidence.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-102 --json`; `loom suite carrier validate --target . --item GH-102 --json`; `loom suite evidence validate --target . --item GH-102 --json`; packaged build flow attempt `GH-102-build-27d37690fb19-b95096d5003d`; PR #121 metadata preflight passed for `merge_ready`; packaged pre-review attempt `GH-102-pre-review-ec779e80119b-d06d921676fa` passed; packaged spec-review attempt `GH-102-spec-review-ec779e80119b-8bd9a0188442` passed; packaged implementation review attempt `GH-102-review-ec779e80119b-2a2c6ef1ef58` completed and exposed stale review head because the first review carrier commit also changed `.loom/work-items/GH-102.md` and `.loom/specs/GH-102/build-evidence.json`; this was classified as carrier head-binding drift and fixed by refreshing review artifacts against head `ec779e80119bdf7166cd306113c77b20365acb3a` with only allowed review/progress/status drift afterward; hosted `py-compile`, `demo-bootstrap`, `repo-local-cli`, and `loom-check` passed on PR #121 run `28549806302`, while hosted `loom-pr-merge-gate` remained blocked before this refresh. First `loom fact-chain`/`suite evidence`/packaged build attempts exposed carrier enum/blocker field issues; these were classified as carrier metadata defects and fixed before the passing runs. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Merge-ready, hosted merge gate, and post-merge closeout remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-102.md",
+    "recovery_entry": ".loom/progress/GH-102.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite evidence validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-102 --json",
+    "suite_carrier_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite carrier validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-102 --json",
+    "suite_evidence_map": ".loom/specs/GH-102/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-102/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored review approved the GH-102 Core-only explicit Run Record lifecycle implementation at PR head ec779e80119bdf7166cd306113c77b20365acb3a; later GH-103/GH-104/GH-105 and Lode dependency evidence remain outside this PR."
+  }
+}
