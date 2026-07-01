@@ -5,9 +5,9 @@
   "kind": "spec_review",
   "summary": "Core 技术架构基线 docs-only spec is scoped to the current milestone and covers #79-#88 without implementation completion.",
   "reviewer": "codex-coordinator",
-  "authored_at": "2026-07-01T04:27:09Z",
-  "reviewed_head": "bec0e9f2f3d4c257da98325b3f22c5127ae07cec",
-  "reviewed_validation_summary": "Reviewed content head bec0e9f2f3d4c257da98325b3f22c5127ae07cec; docs-only scope, git diff --check and JSON readability pass before review carrier. Final PR head may include carrier-only review/status updates.",
+  "authored_at": "2026-07-01T04:34:08Z",
+  "reviewed_head": "a6d516b43b8d6a4ec76e5bfd70fc298b6c4e4928",
+  "reviewed_validation_summary": "Review artifact approves the docs-only Core 技术架构基线 at head a6d516b43b8d6a4ec76e5bfd70fc298b6c4e4928. The final PR head may differ only by Loom review/progress/status carrier refresh and PR metadata updates; no code, dependency, schema, runtime, generated artifact, UI behavior, or product semantics changed after the reviewed head.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
