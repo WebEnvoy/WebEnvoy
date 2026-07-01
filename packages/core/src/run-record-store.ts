@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
 
@@ -281,38 +282,41 @@ async function writeRecord(directory: string, record: RunRecord): Promise<void> 
   assertRunRecord(record);
   await mkdir(directory, { recursive: true });
   const target = runRecordPath(directory, record.run_id);
-  const temp = join(directory, `.${record.run_id}.${process.pid}.${Date.now()}.tmp`);
+  const temp = join(directory, `.${record.run_id}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   await rename(temp, target);
 }
 
 export function createFileRunRecordStore(options: FileRunRecordStoreOptions): FileRunRecordStore {
   const clock = options.clock ?? (() => new Date());
+  const directory = options.directory;
+
+  async function getRunRecord(runId: string): Promise<RunRecord | undefined> {
+    const record = await readRecord(runRecordPath(directory, runId));
+    if (record) {
+      assertRunRecord(record);
+    }
+    return record;
+  }
 
   return {
-    directory: options.directory,
+    directory,
 
     async createRunRecord(input) {
-      const path = runRecordPath(options.directory, input.run_id);
+      const path = runRecordPath(directory, input.run_id);
       const existing = await readRecord(path);
       if (existing) {
         throw new Error(`run record already exists: ${input.run_id}`);
       }
       const record = makeRecord(input, clock().toISOString());
-      await writeRecord(options.directory, record);
+      await writeRecord(directory, record);
       return record;
     },
 
-    async getRunRecord(runId) {
-      const record = await readRecord(runRecordPath(options.directory, runId));
-      if (record) {
-        assertRunRecord(record);
-      }
-      return record;
-    },
+    getRunRecord,
 
     async updateRunRecord(runId, patch) {
-      const record = await this.getRunRecord(runId);
+      const record = await getRunRecord(runId);
       if (!record) {
         throw new Error(`run record not found: ${runId}`);
       }
@@ -331,17 +335,17 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
         next.terminal_at = now;
       }
       assertRunRecord(next);
-      await writeRecord(options.directory, next);
+      await writeRecord(directory, next);
       return next;
     },
 
     async listRunRecords() {
-      await mkdir(options.directory, { recursive: true });
-      const files = (await readdir(options.directory)).filter((entry) => entry.endsWith(".json")).sort();
+      await mkdir(directory, { recursive: true });
+      const files = (await readdir(directory)).filter((entry) => entry.endsWith(".json")).sort();
       const records: RunRecord[] = [];
       for (const file of files) {
         const runId = basename(file, ".json");
-        const record = await this.getRunRecord(runId);
+        const record = await getRunRecord(runId);
         if (record) {
           records.push(record);
         }

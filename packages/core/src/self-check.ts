@@ -71,6 +71,8 @@ try {
 
   const reloaded = await store.getRunRecord(runId);
   assert.deepEqual(reloaded, succeeded);
+  const detachedGetRunRecord = store.getRunRecord;
+  assert.deepEqual(await detachedGetRunRecord(runId), succeeded);
   assert.deepEqual(JSON.parse(await readFile(join(directory, `${runId}.json`), "utf8")), succeeded);
 
   const failedId = "run_self_check_failure_001";
@@ -103,8 +105,9 @@ try {
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
 
+  const detachedListRunRecords = store.listRunRecords;
   assert.deepEqual(
-    (await store.listRunRecords()).map((record) => record.run_id),
+    (await detachedListRunRecords()).map((record) => record.run_id),
     [failedId, invalidRefId, runId]
   );
 
