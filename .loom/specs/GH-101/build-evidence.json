@@ -145,9 +145,15 @@
       }
     ],
     "hosted_gate": "pending_hosted_checks",
-    "pr_url": "pending",
+    "pr_url": "https://github.com/WebEnvoy/WebEnvoy/pull/119",
     "initial_pr_readback": {
-      "result": "pending"
+      "result": "pass",
+      "head_sha": "e630c1d905fc8660267ea731454b3bb0e2475ba1",
+      "branch": "work/GH-101-task-submission",
+      "work_item": "GH-101",
+      "repository": "WebEnvoy/WebEnvoy",
+      "metadata_preflight": "pass",
+      "note": "This PR URL carrier sync changes the branch head; PR body/head metadata must be refreshed after push."
     },
     "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
   }
