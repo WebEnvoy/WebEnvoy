@@ -151,17 +151,18 @@
       {
         "command": "packaged loom_flow.py flow build --target . --item GH-100 --build-evidence .loom/specs/GH-100/build-evidence.json",
         "result": "pass",
-        "attempt": "GH-100-build-757f65bfe2fa-21bd76939fcf"
+        "attempt": "GH-100-build-53ead2ce21bb-3f2c926d3eef"
       }
     ],
-    "hosted_gate": "pending_pr_creation",
-    "pr_url": "pending",
+    "hosted_gate": "pending_hosted_checks",
+    "pr_url": "https://github.com/WebEnvoy/WebEnvoy/pull/117",
     "initial_pr_readback": {
-      "result": "pending",
-      "head_sha": "pending",
+      "result": "pass",
+      "head_sha": "53ead2ce21bbd5cbd9fa0d985811abce0a093140",
       "branch": "work/GH-100-conformance-self-check",
       "work_item": "GH-100",
-      "repository": "WebEnvoy/WebEnvoy"
+      "repository": "WebEnvoy/WebEnvoy",
+      "note": "This PR URL carrier sync changes the branch head; PR body/head metadata must be refreshed after push."
     },
     "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
   }
