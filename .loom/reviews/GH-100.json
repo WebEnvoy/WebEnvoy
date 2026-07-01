@@ -1,0 +1,57 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-100",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review passed for GH-100 current head: conformance self-check covers local schema fixture metadata, schema-version binding, successful and admission-failure Run Record persistence, list/read behavior, and refs-only boundaries; package scripts and root command align with the Work Item scope; no blocking findings found.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T19:59:12Z",
+  "reviewed_head": "51d9c67b158cbdf30df84afbb6d6f5ac89450ade",
+  "reviewed_validation_summary": "GH-100 validation passed on 2026-07-01 UTC for current PR head `4e596e4b4f28f607ebfb9bd9fe0dfb4546c645d8`: `pnpm conformance`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `git diff --check origin/main...HEAD`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-100/build-evidence.json .loom/reviews/GH-100.spec.json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-100 --json`; `loom suite carrier validate --target . --item GH-100 --json`; `loom suite evidence validate --target . --item GH-100 --json`; PR metadata preflight for surface `review` and head `4e596e4b4f28f607ebfb9bd9fe0dfb4546c645d8`; packaged `flow spec-review` attempt `GH-100-spec-review-4e596e4b4f28-78bb026ad3a1`. Earlier implementation head `53ead2ce21bbd5cbd9fa0d985811abce0a093140` passed `pnpm install --lockfile-only`, clean-dist `pnpm conformance`, full workspace build/typecheck/test/lint, suite validations, and packaged build flow attempt `GH-100-build-53ead2ce21bb-3f2c926d3eef`. Packaged pre-review passed at head `61c7ca18bf5ddded629d75e3388c6368f19729a9` with attempt `GH-100-pre-review-61c7ca18bf5d-01596b4f004b` after explicit N/A evidence confirmed this consumer repo has no `tools/` directory; `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not applicable. The direct `loom build` wrapper was classified as an adapter/input-consumption mismatch, while the hosted workflow-equivalent packaged build flow passed. Implementation review artifact, hosted checks, merge-ready, merge, and closeout remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-100.md",
+    "recovery_entry": ".loom/progress/GH-100.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite evidence validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-100 --json",
+    "suite_carrier_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite carrier validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-100 --json",
+    "suite_evidence_map": ".loom/specs/GH-100/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-100/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+  }
+}
