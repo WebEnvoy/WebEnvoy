@@ -18,6 +18,7 @@
 - .loom/status/current.md
 - .loom/specs/GH-100/*
 - .loom/bootstrap/init-result.json
+- .loom/reviews/GH-100*.json
 
 ## Forbidden Scope
 

@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-100",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review passed for GH-100 minimal suite: spec, plan, evidence-map, and task carrier align with the conformance self-check scope and no blocking spec findings were found.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T19:41:43Z",
+  "reviewed_head": "61c7ca18bf5ddded629d75e3388c6368f19729a9",
+  "reviewed_validation_summary": "GH-100 validation passed on 2026-07-01 UTC for implementation head `53ead2ce21bbd5cbd9fa0d985811abce0a093140`: `pnpm install --lockfile-only`; clean-dist `pnpm conformance`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `git diff --check`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-100/build-evidence.json`; `loom resume --target . --item GH-100 --json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-100 --json`; `loom suite carrier validate --target . --item GH-100 --json`; `loom suite evidence validate --target . --item GH-100 --json`; packaged `loom_flow.py flow build --target . --item GH-100 --build-evidence .loom/specs/GH-100/build-evidence.json` attempt `GH-100-build-53ead2ce21bb-3f2c926d3eef`. PR #117 metadata preflight passed for head `8d8f5ceb6c535a47c32071796a8d41b149908995`; packaged `flow pre-review` attempt `GH-100-pre-review-8d8f5ceb6c53-565c5c2af11d` blocked only because the carrier lacked explicit N/A evidence for source-distribution readiness tools. Local readback confirmed this consumer repo has no `tools/` directory, so `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not applicable. `loom doctor` reported CLI freshness stale against npm but installed surface diagnostics passed and plugin payload was current. The direct `loom build` wrapper was classified as an adapter/input-consumption mismatch, while the hosted workflow-equivalent packaged build flow passed. This N/A evidence carrier sync changes the branch head; PR metadata, hosted checks, review, merge-ready, merge, and closeout remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-100.md",
+    "recovery_entry": ".loom/progress/GH-100.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-100/spec.md",
+    "suite_plan": ".loom/specs/GH-100/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-100/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-100/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
