@@ -135,6 +135,31 @@
         "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow build --target . --item GH-98 --build-evidence .loom/specs/GH-98/build-evidence.json",
         "result": "pass_after_scope_sync",
         "note": "Initial run blocked on missing Work Item `ownership_constraints`; GH-98 scope wording was updated with explicit ownership and rerun passed."
+      },
+      {
+        "command": "tools/skills_surface.py check",
+        "result": "not_applicable",
+        "note": "This consumer repository does not include Loom source-distribution review-readiness tools."
+      },
+      {
+        "command": "tools/loom_check.py --profile source --source-surface contract-only",
+        "result": "not_applicable",
+        "note": "This consumer repository does not include Loom source-distribution review-readiness tools."
+      },
+      {
+        "command": "tools/check_release_surface.py",
+        "result": "not_applicable",
+        "note": "This consumer repository does not include Loom source-distribution review-readiness tools."
+      },
+      {
+        "command": "tools/version_surface_check.py",
+        "result": "not_applicable",
+        "note": "This consumer repository does not include Loom source-distribution review-readiness tools."
+      },
+      {
+        "command": "tools/check_npm_package.py",
+        "result": "not_applicable",
+        "note": "This consumer repository does not include Loom source-distribution review-readiness tools."
       }
     ],
     "hosted_gate": "pending_hosted_checks_for_pr_113",
