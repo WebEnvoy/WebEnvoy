@@ -27,7 +27,8 @@ Provide the first runnable WebEnvoy Core API Server skeleton for milestone #9 wi
 
 - Suite path: minimal
 - Required artifacts: .loom/specs/GH-97/spec.md and .loom/specs/GH-97/plan.md
-- Full-suite artifacts not applicable: suite-index.md, research.md, contracts.md, readiness-checklist.md, evidence-map, consistency-analysis, execution breakdown.
+- Full-suite artifacts not applicable: suite-index.md, research.md, contracts.md, readiness-checklist.md, consistency-analysis, execution breakdown.
+- Evidence-map: present only as review/merge-ready evidence binding for this minimal PR; it does not expand the product scope.
 - Rationale: This Work Item is a narrow code skeleton and smoke surface with no final schema/API contract, persistence, admission, runtime execution, or cross-repo consumer. The runnable self-check and TypeScript checks are the primary evidence.
 - Consumer boundary: Review and PR Ready should consume the code diff, README command documentation, GH-97 carrier, build evidence, local command results, PR metadata readback, and hosted checks.
 - Recheck condition: Require broader suite artifacts and contract fixtures when a later PR adds task submission, schemas, Run Record persistence, admission, result/query behavior, CLI/MCP/SDK, App-facing API, Harbor/Lode consumption, or true-write guardrails.
@@ -38,4 +39,3 @@ Provide the first runnable WebEnvoy Core API Server skeleton for milestone #9 wi
 - The self-check proves the API Server can start and answer `/health` and `/readiness`.
 - No HTTP framework or non-TypeScript runtime is introduced.
 - New runtime dependencies are limited to TypeScript development tooling and documented by PR/body evidence.
-

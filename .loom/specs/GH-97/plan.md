@@ -26,6 +26,7 @@
 - `git diff --check`
 - `loom suite validate --target . --item GH-97 --json`
 - `loom suite carrier validate --target . --item GH-97 --json`
+- `loom suite evidence validate --target . --item GH-97 --json`
 - `loom build --target . --item GH-97 --build-evidence .loom/specs/GH-97/build-evidence.json --json`
 - PR body/head readback after push and PR creation.
 
@@ -33,4 +34,3 @@
 
 - This PR should reach PR Ready for Work Item #97 only.
 - Merge-ready, semantic review, merge, issue closeout, and FR/milestone closeout require current-head review, hosted checks, merge commit, and post-merge evidence.
-
