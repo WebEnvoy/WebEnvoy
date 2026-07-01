@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
+import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
@@ -14,16 +15,47 @@ function nextInstant(): Date {
   return instant;
 }
 
+const lodeReadPublicPageContract = {
+  package_ref: "lode://site-capability/example/read-public-page@0.1.0",
+  lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
+  capability_id: "read-public-page",
+  operation_id: "content_detail_by_url",
+  operation_mode: "read",
+  version: "0.1.0",
+  lifecycle: "proposed",
+  resource_requirements: {
+    schema_version: "lode.resource-requirements.v0",
+    resource_requirements_id: "example.read-public-page.resources",
+    resource_requirements_version: "0.1.0",
+    package_ref: "lode://site-capability/example/read-public-page@0.1.0",
+    operation_mode: "read",
+    resource_requirement_profiles: [
+      {
+        requirement_profile_id: "public-page-read-with-snapshot-refmap-evidence",
+        operation_boundary: "read",
+        required_harbor_facts: [
+          { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "runtime.public_https_navigation.allowed", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "snapshot.document_summary.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "refmap.source_refs.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true, freshness: "current_execution_window" }
+        ]
+      }
+    ]
+  }
+} satisfies LodePackageAdmissionContract;
+
 function baseInput(runId: string) {
   return {
     run_id: runId,
     task_intent_ref: "intent_fixture_read_only_001",
     entrypoint_ref: "entrypoint:api",
-    capability_ref: "lode:capability/read-page-summary",
-    package_ref: "lode:package/read-page-summary@0.1.0",
+    capability_ref: "lode:capability/read-public-page",
+    package_ref: "lode://site-capability/example/read-public-page@0.1.0",
     admission: {
       decision: "accepted",
       action_risk: "read",
+      resource_requirement_refs: ["example.read-public-page.resources"],
       resource_match_ref: "resource-match:fixture/ready"
     }
   } as const;
@@ -49,6 +81,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     const accepted = await acceptReadOnlyTaskSubmission(store, {
       run_id: "run_self_check_submit_accepted",
       task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
       resource_match_ref: "resource-match:fixture/ready",
       evidence_refs: ["evidence:fixture/admission-ready"]
     });
@@ -60,7 +94,9 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(accepted.run_record.status, "admitted");
     assert.equal(accepted.run_record.admission.decision, "accepted");
     assert.equal(accepted.run_record.task_intent_ref, "intent_fixture_read_only_001");
-    assert.equal(accepted.run_record.capability_ref, "lode:capability/read-page-summary");
+    assert.equal(accepted.run_record.capability_ref, "lode:capability/read-public-page");
+    assert.equal(accepted.run_record.package_ref, lodeReadPublicPageContract.package_ref);
+    assert.deepEqual(accepted.run_record.admission.resource_requirement_refs, ["example.read-public-page.resources"]);
     assert.deepEqual(await store.getRunRecord("run_self_check_submit_accepted"), accepted.run_record);
 
     const invalid = await acceptReadOnlyTaskSubmission(store, {
@@ -76,6 +112,46 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     }
     assert.equal(invalid.failure.code, "private_field_rejected:token");
     assert.equal(await store.getRunRecord("run_self_check_submit_invalid"), undefined);
+
+    const brokenResourceContract = {
+      ...lodeReadPublicPageContract,
+      resource_requirements: {
+        ...lodeReadPublicPageContract.resource_requirements,
+        package_ref: "lode://site-capability/example/other@0.1.0"
+      }
+    };
+    const invalidContract = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_lode_invalid_contract",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: brokenResourceContract
+    });
+    assert.equal(invalidContract.ok, false);
+    if (invalidContract.ok || !invalidContract.run_record) {
+      throw new Error("invalid Lode contract must create a failed Run Record");
+    }
+    assert.equal(invalidContract.failure.code, "invalid_contract");
+    assert.equal(invalidContract.run_record.status, "failed");
+    assert.equal(invalidContract.run_record.failure?.category, "capability_contract");
+    assert.deepEqual(await store.getRunRecord("run_self_check_lode_invalid_contract"), invalidContract.run_record);
+
+    const writeContract = {
+      ...lodeReadPublicPageContract,
+      operation_mode: "write",
+      resource_requirements: {
+        ...lodeReadPublicPageContract.resource_requirements,
+        operation_mode: "write"
+      }
+    };
+    const writeRejected = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_lode_write_deferred",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: writeContract
+    });
+    assert.equal(writeRejected.ok, false);
+    assert.equal(writeRejected.failure.code, "true_write_deferred");
+    assert.equal(writeRejected.run_record?.status, "failed");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

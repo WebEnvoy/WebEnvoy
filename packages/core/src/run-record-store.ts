@@ -22,6 +22,7 @@ export type RetentionState = "active" | "summary_only" | "expired" | "redacted" 
 export type AdmissionDecision = {
   decision: "accepted" | "accepted_with_warnings" | "blocked_pre_admission" | "requires_user_action" | "deferred_true_write";
   action_risk: "read" | "write" | "submit" | "destructive";
+  resource_requirement_refs?: readonly string[];
   resource_match_ref?: string;
 };
 
@@ -198,6 +199,7 @@ function assertRunRecord(record: RunRecord): void {
   if (record.admission.resource_match_ref !== undefined) {
     requireRef(record.admission.resource_match_ref, "admission.resource_match_ref");
   }
+  copyRefs(record.admission.resource_requirement_refs, "admission.resource_requirement_refs");
   copyRefs(record.runtime_binding_refs, "runtime_binding_refs");
   copyRefs(record.evidence_refs, "evidence_refs");
   if (record.terminal_at && !terminalRunRecordStatuses.has(record.status)) {
