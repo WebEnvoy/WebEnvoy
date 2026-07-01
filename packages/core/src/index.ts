@@ -1,5 +1,6 @@
 export {
   createFileRunRecordStore,
+  runRecordSchemaVersion,
   terminalRunRecordStatuses,
   type AdmissionDecision,
   type CreateRunRecordInput,

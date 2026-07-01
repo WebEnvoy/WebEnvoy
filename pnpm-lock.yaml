@@ -17,6 +17,12 @@ importers:
 
   packages/api-server: {}
 
+  packages/conformance:
+    dependencies:
+      '@webenvoy/core-runtime':
+        specifier: workspace:*
+        version: link:../core
+
   packages/core: {}
 
   packages/schemas: {}
