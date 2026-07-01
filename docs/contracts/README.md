@@ -12,13 +12,26 @@
 | 任务意图与运行生命周期 v0 | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md) | Task Intent Envelope、Run lifecycle、Run Record 创建规则。 |
 | 共用任务入口 v0 | [ADR 0006](../adr/0006-common-task-entry-v0.md) | API、CLI、MCP、SDK 和 App 的共同入口投影。 |
 | 引用和版本归属合同 v0 | [ADR 0007](../adr/0007-reference-version-ownership-v0.md) | Lode/Harbor/App/Core 引用、版本、失效和 failure mapping。 |
+| Core 技术架构基线 | [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | TypeScript / Node.js / pnpm 默认、JSON Schema / Zod / Ajv 边界、API Server / Core Runtime / Run Record 代码边界、跨入口 fixture 规划和跨仓 no-copy 约束。 |
 
 ## 使用规则
 
 - 实现、测试和跨仓消费优先引用本索引中的权威 ADR。
 - 若合同需要最终 JSON Schema、OpenAPI、fixture 或生成类型，新建专门规格文件，并从本索引链接。
 - ADR 0002-0004 仍是拟议 ADR；只有其中已经标注 `accepted` 的 Stage 1/Stage 2 facts 进入本索引。
+- 后续 API Server、Core Runtime、Run Record、Schema、CLI、MCP、SDK 和 App-facing API 骨架必须先读 [ADR 0008](../adr/0008-core-technical-architecture-baseline.md)，再创建代码、schema、fixture、依赖或生成类型。
 - 不把 `docs/draft/` 当作实现依据。
+
+## 后续骨架入口
+
+| 后续实现主题 | 必读合同 | 当前 deferred 内容 |
+| --- | --- | --- |
+| API Server / API routes | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | HTTP framework、OpenAPI、auth middleware、route implementation。 |
+| Core Runtime | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Runtime executor、queue、resource lock、true-write execution。 |
+| Run Record / persistence | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Database/storage choice、migration tooling、query implementation。 |
+| Schema / generated types | [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | JSON Schema files、Zod helpers、Ajv validators、type generation. |
+| Cross-entry conformance | [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | read-only submit、invalid input、admission failure、result/query fixture files and runner. |
+| Cross-repo consumption | [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Harbor/Lode/App final field names, schemas, generated consumers. |
 
 ## 已吸收的实现判断
 
