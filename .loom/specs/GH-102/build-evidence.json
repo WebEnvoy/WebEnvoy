@@ -84,8 +84,8 @@
     "recheck_condition": "Upgrade to broader suite artifacts when API submit/query behavior, runtime execution, Lode package/capability consumption, Harbor runtime binding, result projection, evidence retrieval, generated types, CLI/MCP/SDK/App-facing API, database storage, hosted service storage, or true-write guardrails are added."
   },
   "validation": {
-    "status": "passed_pre_pr",
-    "content_head": "pre_pr_branch_head_pending_commit",
+    "status": "review_ready",
+    "content_head": "27d37690fb1924f80f584c7fae585da00f5f65bd",
     "commands": [
       {
         "command": "pnpm --filter @webenvoy/core-runtime test",
@@ -178,16 +178,16 @@
         "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
       }
     ],
-    "hosted_gate": "pending_hosted_checks",
-    "pr_url": "pending",
+    "hosted_gate": "blocked_missing_semantic_review_artifacts",
+    "pr_url": "https://github.com/WebEnvoy/WebEnvoy/pull/121",
     "initial_pr_readback": {
-      "result": "pending",
-      "head_sha": "pending",
+      "result": "pass",
+      "head_sha": "27d37690fb1924f80f584c7fae585da00f5f65bd",
       "branch": "work/GH-102-run-lifecycle",
       "work_item": "GH-102",
       "repository": "WebEnvoy/WebEnvoy",
-      "metadata_preflight": "pending",
-      "note": "PR body/head metadata must be read back after PR creation and every push."
+      "metadata_preflight": "pass",
+      "note": "PR body/head metadata matched head 27d37690fb1924f80f584c7fae585da00f5f65bd before this review carrier commit; refresh after pushing review artifacts."
     },
     "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
   }
