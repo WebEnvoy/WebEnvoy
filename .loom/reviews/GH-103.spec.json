@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-103",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-103 at head aa6f923112aef59f7c6f865422ce074fa460dcba. The minimal spec is scoped to Core-only static Lode package refs and resource requirement admission, keeps Harbor runtime refs for GH-104, result envelope output for GH-105, and API/App query or smoke work for later GH-96 items.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T22:43:57Z",
+  "reviewed_head": "aa6f923112aef59f7c6f865422ce074fa460dcba",
+  "reviewed_validation_summary": "GH-103 validation passed on 2026-07-01 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `git diff --check HEAD^..HEAD`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-103/build-evidence.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-103 --json`; `loom suite carrier validate --target . --item GH-103 --json`; `loom suite evidence validate --target . --item GH-103 --json`; source-runtime packaged build attempt `GH-103-build-7b5657364511-3f9de0061abc`; PR #123 metadata preflight passed at head aa6f923112aef59f7c6f865422ce074fa460dcba; packaged pre-review attempt `GH-103-pre-review-aa6f923112ae-40e8bba1770c` passed. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Earlier packaged build/pre-review attempts exposed carrier ownership, Blockers-field, installed-runtime suite JSON, and review-readiness-summary issues; each was classified as carrier/runtime metadata and fixed before this review.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-103.md",
+    "recovery_entry": ".loom/progress/GH-103.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "loom suite validate --target . --item GH-103 --json",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-103/spec.md",
+    "suite_plan": ".loom/specs/GH-103/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-103/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-103/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
