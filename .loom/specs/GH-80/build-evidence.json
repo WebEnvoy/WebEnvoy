@@ -94,7 +94,24 @@
     }
   ],
   "validation": {
-    "status": "pending",
-    "commands": []
+    "status": "passed_before_review_carrier",
+    "content_head": "bec0e9f2f3d4c257da98325b3f22c5127ae07cec",
+    "commands": [
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty on changed GH carrier JSON and bootstrap JSON",
+        "result": "pass"
+      },
+      {
+        "command": "semantic/spec review artifact creation",
+        "result": "pass",
+        "reviewed_head": "bec0e9f2f3d4c257da98325b3f22c5127ae07cec"
+      }
+    ],
+    "hosted_gate": "pending_pr_creation_or_update",
+    "recheck_condition": "Run hosted gate again after PR creation or every push; require real suite if code, schema, fixture, generated type, runtime, storage, dependency, or behavior changes are added."
   }
 }

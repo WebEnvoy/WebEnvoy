@@ -1,0 +1,30 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-80",
+  "decision": "allow",
+  "kind": "general_review",
+  "summary": "Core 技术架构基线 content head is approved for docs-only technical baseline PR Ready; coverage #79-#88 is documented and implementation is explicitly out of scope.",
+  "reviewer": "codex-coordinator",
+  "authored_at": "2026-07-01T04:27:09Z",
+  "reviewed_head": "bec0e9f2f3d4c257da98325b3f22c5127ae07cec",
+  "reviewed_validation_summary": "Content head bec0e9f2f3d4c257da98325b3f22c5127ae07cec changes documentation and item-specific Loom carriers only. Static validation passed before review carrier; hosted gate remains required before merge.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Do not close covered issues until PR merge and post-merge closeout evidence record PR head, merge commit, target branch and hosted run. This does not approve 代码骨架、API、OpenAPI、JSON Schema、runtime、persistence、CLI/MCP/SDK/App 实现."
+  ],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The reviewed content freezes the docs-only Core 技术架构基线 boundary and AGENTS/contracts constraints without adding code, dependencies, schemas, runtime behavior, generated artifacts, or user-facing implementation."
+  },
+  "consumed_inputs": {
+    "repository": "WebEnvoy/WebEnvoy",
+    "work_item": "GH-80",
+    "branch": "work/tech-baseline-core",
+    "reviewed_head": "bec0e9f2f3d4c257da98325b3f22c5127ae07cec",
+    "coverage": "#79-#88",
+    "suite_path": "minimal_docs_only",
+    "validation": "git diff --check; JSON readability; PR/head hosted gate pending"
+  }
+}

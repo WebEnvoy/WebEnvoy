@@ -11,13 +11,13 @@
 - Review Entry: .loom/reviews/GH-80.json
 - Validation Entry: `git diff --check`; Markdown/JSON readability checks; Loom suite/carrier/build validation; PR body/head readback.
 - Closing Condition: PR is merged, post-merge closeout evidence is recorded, and covered issues remain open until coordinator closeout.
-- Current Checkpoint: build
-- Current Stop: Docs-only technical baseline drafted for PR Ready; merge, issue closure, review, merge-ready, and closeout are out of scope for this execution thread.
-- Next Step: Run final validation, push branch, create PR, and read back PR body/head metadata.
+- Current Checkpoint: merge
+- Current Stop: Merge-ready carrier prepared for docs-only technical baseline; hosted PR gate, merge and post-merge closeout are coordinator-owned next steps.
+- Next Step: Create or update PR, read back PR body/head metadata, run hosted gate, merge, then write post-merge closeout evidence.
 - Blockers: None recorded.
-- Latest Validation Summary: Pending final validation on branch `work/tech-baseline-core`.
+- Latest Validation Summary: Static validation passed before review carrier; semantic/spec review artifacts approve docs-only content head `bec0e9f2f3d4c257da98325b3f22c5127ae07cec` and final PR head may differ only by carrier/status updates.
 - Recovery Boundary: Re-review if this branch adds code, package files, dependencies, OpenAPI, full JSON Schema, generated types, fixture files, conformance runner, runtime implementation, database choice, other repository changes, Loom carriers beyond GH-80/current status/bootstrap fact-chain entry points, issue closure, or merge.
-- Current Lane: core-docs-baseline
+- Current Lane: merge-ready
 
 ## Runtime Evidence
 
