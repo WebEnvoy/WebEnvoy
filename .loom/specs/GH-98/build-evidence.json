@@ -137,7 +137,7 @@
         "note": "Initial run blocked on missing Work Item `ownership_constraints`; GH-98 scope wording was updated with explicit ownership and rerun passed."
       }
     ],
-    "hosted_gate": "pending_pr_creation",
+    "hosted_gate": "pending_hosted_checks_for_pr_113",
     "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
   }
 }
