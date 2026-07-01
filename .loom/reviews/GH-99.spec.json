@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-99",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-99 PR #115 at carrier-only head 761d035d9057d8c5b3ac9bd4fc51cafc041659b6. The minimal spec path is appropriate for a narrow file-backed Run Record store, includes explicit non-goals, minimal-suite rationale, consumer boundary, and recheck conditions, and does not claim FR #94 completion.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T18:48:02Z",
+  "reviewed_head": "761d035d9057d8c5b3ac9bd4fc51cafc041659b6",
+  "reviewed_validation_summary": "Current validation passed on 2026-07-01 UTC for GH-99 through PR head `761d035d9057d8c5b3ac9bd4fc51cafc041659b6`: code validation passed for reviewed code head `2548c9f9e427ca41b71cd6eee03394471b6da43e` with `pnpm --filter @webenvoy/core-runtime test`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `git diff --check`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-99/build-evidence.json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-99 --json`; `loom suite carrier validate --target . --item GH-99 --json`; `loom suite evidence validate --target . --item GH-99 --json`; packaged `loom_flow.py flow build --target . --item GH-99 --build-evidence .loom/specs/GH-99/build-evidence.json`; and packaged `loom_flow.py flow pre-review --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store`. PR metadata preflight passed for PR #115 at head `761d035d9057d8c5b3ac9bd4fc51cafc041659b6`; packaged `loom_flow.py flow spec-review --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store` passed at head `761d035d9057d8c5b3ac9bd4fc51cafc041659b6`; packaged `loom_flow.py flow review --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store` passed at head `761d035d9057d8c5b3ac9bd4fc51cafc041659b6`. First packaged `loom_flow.py flow merge-ready --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store` at head `761d035d9057d8c5b3ac9bd4fc51cafc041659b6` fell back only because review artifacts still referenced code head `2548c9f9e427ca41b71cd6eee03394471b6da43e`; this carrier-only update refreshes those artifacts without code changes. `pnpm install --lockfile-only`, `loom doctor --target . --json`, and `loom verify --target . --json` passed earlier in this PR before the store boundary fix; the later code fix did not change workspace dependencies or installed Loom surface. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Hosted checks, final merge-ready, merge, and closeout remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-99.md",
+    "recovery_entry": ".loom/progress/GH-99.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-99/spec.md",
+    "suite_plan": ".loom/specs/GH-99/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-99/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-99/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}

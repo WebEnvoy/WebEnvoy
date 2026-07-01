@@ -1,0 +1,6 @@
+# Task Carrier
+
+| carrier_type | carrier_locator | source_value | normalized_status | relationship | work_item_locator | breakdown_unit_locator | spec_scenario_locator | plan_phase_locator | validation_strategy_locator | provenance | freshness_rule |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| github_issue | https://github.com/WebEnvoy/WebEnvoy/issues/99 | Implement minimum local Run Record persistence | in_progress | primary | .loom/work-items/GH-99.md | .loom/specs/GH-99/plan.md#implementation | .loom/specs/GH-99/spec.md#required-behavior | .loom/specs/GH-99/plan.md#implementation | .loom/specs/GH-99/plan.md#validation | GitHub issue #99 is the primary real Work Item for this Run Record local persistence PR on 2026-07-01. | Recheck issue, PR body, branch, and head SHA after every push. |
+| github_issue | https://github.com/WebEnvoy/WebEnvoy/issues/94 | FR: Core minimum runnable service and contract carriers | in_progress | evidence_locator | .loom/work-items/GH-99.md | .loom/specs/GH-99/plan.md#implementation | .loom/specs/GH-99/spec.md#acceptance | .loom/specs/GH-99/plan.md#implementation | .loom/specs/GH-99/plan.md#validation | PR scope contributes only the #99 slice under FR #94; #94 remains open until #100 is also complete. | Recheck #94 remains open and this PR does not claim FR closeout. |

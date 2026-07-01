@@ -1,0 +1,192 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "GH-99",
+  "covered_issues": [99],
+  "parent_fr": 94,
+  "delegations": [],
+  "ownership_constraints": {
+    "write_scope": [
+      "README.md",
+      "pnpm-lock.yaml",
+      "packages/core/**",
+      ".loom/work-items/GH-99.md",
+      ".loom/progress/GH-99.md",
+      ".loom/status/current.md",
+      ".loom/specs/GH-99/*",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "forbidden_scope": [
+      "API submission/query routes",
+      "API Server behavior changes",
+      "admission runtime execution",
+      "result projection implementation",
+      "Harbor/Lode/App repositories",
+      "Ajv or generated TypeScript types",
+      "OpenAPI",
+      "CLI/MCP/SDK/App-facing API integration",
+      "database/ORM/migration tooling",
+      "multi-backend abstraction",
+      "hosted service storage",
+      "GH-100 conformance runner behavior",
+      "true writes",
+      "issue closure",
+      "PR merge",
+      "FR #94 closeout"
+    ],
+    "owner": "core-repo-control-thread"
+  },
+  "suite_path_consumption": {
+    "path": "minimal",
+    "required_artifacts": [
+      ".loom/specs/GH-99/spec.md",
+      ".loom/specs/GH-99/plan.md",
+      ".loom/specs/GH-99/implementation-contract.md"
+    ],
+    "not_applicable_full_artifacts": [
+      "suite-index.md",
+      "research.md",
+      "contracts.md",
+      "readiness-checklist.md",
+      "consistency-analysis",
+      "execution-breakdown"
+    ],
+    "rationale": "Narrow Core local persistence PR with a file-backed Run Record store and no API behavior, admission runtime, generated consumers, database, hosted service, or cross-repo integration.",
+    "consumer_boundary": "Review and PR Ready consume the core runtime package, self-check, README command documentation, GH-99 carrier, local build/typecheck/test/lint output, PR metadata readback, and hosted checks.",
+    "recheck_condition": "Upgrade to broader suite artifacts when API submit/query behavior, full schema validation, admission execution, result projection, generated types, CLI/MCP/SDK/App-facing API, Harbor/Lode consumption, database storage, hosted service storage, or true-write guardrails are added."
+  },
+  "integration_evidence": [
+    {
+      "carrier": "run_record_store",
+      "locator": "packages/core/src/run-record-store.ts",
+      "summary": "Defines the no-dependency file-backed Run Record store with safe run ids, atomic writes, monotonic transitions, terminal timestamps, and refs-only record boundaries."
+    },
+    {
+      "carrier": "self_check",
+      "locator": "packages/core/src/self-check.ts",
+      "summary": "Writes and reloads successful and failed Run Records in a temporary directory and checks terminal transition and unsafe run id rejection."
+    },
+    {
+      "carrier": "package_command",
+      "locator": "packages/core/package.json",
+      "summary": "Provides `pnpm --filter @webenvoy/core-runtime test` for the targeted Run Record store self-check."
+    },
+    {
+      "carrier": "task_carrier",
+      "locator": ".loom/specs/GH-99/task-carrier.md",
+      "summary": "Maps GH-99 as the primary Work Item and GH-94 as parent FR evidence without claiming FR completion."
+    }
+  ],
+  "validation": {
+    "status": "passed_pre_pr",
+    "content_head": "pre_pr_branch_head_pending_pr_metadata_readback",
+    "commands": [
+      {
+        "command": "pnpm install --lockfile-only",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm --filter @webenvoy/core-runtime test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm build",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm lint",
+        "result": "pass"
+      },
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/GH-99/build-evidence.json",
+        "result": "pass"
+      },
+      {
+        "command": "loom doctor --target . --json",
+        "result": "pass",
+        "note": "CLI freshness was reported stale against npm, but installed surface diagnostics passed and plugin payload was current."
+      },
+      {
+        "command": "loom verify --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom fact-chain --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite validate --target . --item GH-99 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite carrier validate --target . --item GH-99 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite evidence validate --target . --item GH-99 --json",
+        "result": "pass"
+      },
+      {
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow build --target . --item GH-99 --build-evidence .loom/specs/GH-99/build-evidence.json",
+        "result": "pass",
+        "attempt": "GH-99-build-2548c9f9e427-8dc88fd26707"
+      },
+      {
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py pr-metadata preflight --target . --surface merge_ready --item GH-99 --issue 99 --pr 115 --head-sha 2548c9f9e427ca41b71cd6eee03394471b6da43e --branch work/GH-99-run-record-store",
+        "result": "pass"
+      },
+      {
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow pre-review --target . --item GH-99 --issue 99 --pr 115 --branch work/GH-99-run-record-store",
+        "result": "pass",
+        "attempt": "GH-99-pre-review-2548c9f9e427-9423cc0e7ba9"
+      },
+      {
+        "command": "tools/skills_surface.py check",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/loom_check.py --profile source --source-surface contract-only",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_release_surface.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/version_surface_check.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_npm_package.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      }
+    ],
+    "hosted_gate": "pending_hosted_checks",
+    "pr_url": "https://github.com/WebEnvoy/WebEnvoy/pull/115",
+    "initial_pr_readback": {
+      "result": "pass",
+      "head_sha": "c1d93a290afffba4af90a6b0576f4ade9344dfb2",
+      "branch": "work/GH-99-run-record-store",
+      "work_item": "GH-99",
+      "repository": "WebEnvoy/WebEnvoy",
+      "note": "This PR URL carrier sync changes the branch head; PR body/head metadata must be refreshed after push."
+    },
+    "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
+  }
+}

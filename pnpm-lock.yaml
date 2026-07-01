@@ -17,6 +17,8 @@ importers:
 
   packages/api-server: {}
 
+  packages/core: {}
+
   packages/schemas: {}
 
 packages:
