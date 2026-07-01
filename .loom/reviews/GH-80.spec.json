@@ -3,14 +3,14 @@
   "item_id": "GH-80",
   "decision": "allow",
   "kind": "spec_review",
-  "summary": "Core 技术架构基线 docs-only spec is scoped to the current milestone and covers #79-#88 without implementation completion.",
+  "summary": "Core 技术基线 closeout-only carrier is approved for merge as post-merge carrier closeout evidence.",
   "reviewer": "codex-coordinator",
-  "authored_at": "2026-07-01T04:34:08Z",
-  "reviewed_head": "a6d516b43b8d6a4ec76e5bfd70fc298b6c4e4928",
-  "reviewed_validation_summary": "Review artifact approves the docs-only Core 技术架构基线 at head a6d516b43b8d6a4ec76e5bfd70fc298b6c4e4928. The final PR head may differ only by Loom review/progress/status carrier refresh and PR metadata updates; no code, dependency, schema, runtime, generated artifact, UI behavior, or product semantics changed after the reviewed head.",
+  "authored_at": "2026-07-01T04:45:33Z",
+  "reviewed_head": "7e1c6677c0c25dc9e9dce28e5d830eeffa0c883f",
+  "reviewed_validation_summary": "Post-merge closeout consumed PR https://github.com/WebEnvoy/WebEnvoy/pull/89, PR head 4e483d3437d4cb509f50b1004cc5830775d56849, merge commit 2ee8c13bde9796baf13396568c159e94b1b0e959, target branch main, hosted run https://github.com/WebEnvoy/WebEnvoy/actions/runs/28493861163, closed issues #79-#88, and closed milestone Core 协议与运行架构基线 (#8). Scope remains docs-only technical architecture baseline; code skeleton, schema/API/runtime/persistence, CLI/MCP/SDK/App implementation were not completed.",
   "fallback_to": null,
   "blocking_issues": [],
   "follow_ups": [
-    "Do not treat this approval as 代码骨架、API、OpenAPI、JSON Schema、runtime、persistence、CLI/MCP/SDK/App 实现."
+    "This approval only covers closeout carrier synchronization after the content PR was merged, issues were closed, and the milestone was closed. It does not approve new product semantics or implementation work."
   ]
 }
