@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
+import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
@@ -45,6 +46,69 @@ const lodeReadPublicPageContract = {
   }
 } satisfies LodePackageAdmissionContract;
 
+const harborRuntimeBindingRefs = [
+  "session_fixture_ready",
+  "profile_fixture_public",
+  "provider_fixture_local",
+  "viewer_fixture_readonly",
+  "snapshot_fixture_example",
+  "refmap_fixture_example",
+  "source_trace_fixture_example"
+];
+const harborEvidenceRefs = ["evidence_fixture_snapshot", "evidence_fixture_source_trace", "evidence_fixture_refmap"];
+
+const harborRuntimeFacts = {
+  schema_version: "harbor-core-runtime-facts/v0",
+  runtime_session_ref: "session_fixture_ready",
+  profile_ref: "profile_fixture_public",
+  provider_ref: "provider_fixture_local",
+  provider_mode: "local_dedicated_profile",
+  lifecycle_state: "active",
+  availability: {
+    cdp: "available",
+    viewer: "unsupported",
+    snapshot: "available",
+    evidence: "available"
+  },
+  viewer: {
+    viewer_ref: "viewer_fixture_readonly",
+    availability: "unsupported",
+    access_mode: "none",
+    expires_at: "2026-07-01T01:00:00.000Z"
+  },
+  control: {
+    owner: "system",
+    handoff_reason: null,
+    takeover: {
+      available: false,
+      unavailable_reason: "viewer_unavailable"
+    },
+    updated_at: "2026-07-01T00:00:00.000Z"
+  },
+  current_error: null,
+  fact_refs: {
+    session: "session_fixture_ready",
+    viewer: "viewer_fixture_readonly"
+  },
+  unavailable: null
+} satisfies HarborCoreRuntimeFacts;
+
+const harborSceneRef = {
+  schema_version: "harbor-page-scene-refs/v0",
+  runtime_session_ref: "session_fixture_ready",
+  snapshot_ref: "snapshot_fixture_example",
+  refmap_ref: "refmap_fixture_example",
+  evidence_refs: harborEvidenceRefs,
+  source_trace_ref: "source_trace_fixture_example",
+  captured_at: "2026-07-01T00:00:00.000Z",
+  page_summary: {
+    title: "Example Domain",
+    url: "https://example.org/",
+    summary: "Reserved public Example Domain fixture summary."
+  },
+  unavailable: null
+} satisfies HarborCoreSceneReference;
+
 function baseInput(runId: string) {
   return {
     run_id: runId,
@@ -56,6 +120,8 @@ function baseInput(runId: string) {
       decision: "accepted",
       action_risk: "read",
       resource_requirement_refs: ["example.read-public-page.resources"],
+      runtime_binding_refs: harborRuntimeBindingRefs,
+      evidence_refs: harborEvidenceRefs,
       resource_match_ref: "resource-match:fixture/ready"
     }
   } as const;
@@ -71,6 +137,8 @@ function assertRefsOnly(record: RunRecord): void {
   assert(!Object.hasOwn(record, "screenshot"), "Run Record must not inline screenshots");
   assert(!Object.hasOwn(record, "cookie"), "Run Record must not inline cookies");
   assert(!Object.hasOwn(record, "token"), "Run Record must not inline tokens");
+  assert(!Object.hasOwn(record, "cdp_ref"), "Run Record must not inline CDP refs");
+  assert(!Object.hasOwn(record, "viewer_url"), "Run Record must not inline viewer URLs");
 }
 
 async function assertTaskSubmissionAdmission(): Promise<void> {
@@ -84,7 +152,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
       resource_match_ref: "resource-match:fixture/ready",
-      evidence_refs: ["evidence:fixture/admission-ready"]
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_scene_ref: harborSceneRef
     });
 
     assert.equal(accepted.ok, true);
@@ -97,7 +166,38 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(accepted.run_record.capability_ref, "lode:capability/read-public-page");
     assert.equal(accepted.run_record.package_ref, lodeReadPublicPageContract.package_ref);
     assert.deepEqual(accepted.run_record.admission.resource_requirement_refs, ["example.read-public-page.resources"]);
+    assert.deepEqual(accepted.run_record.admission.runtime_binding_refs, harborRuntimeBindingRefs);
+    assert.deepEqual(accepted.run_record.admission.evidence_refs, harborEvidenceRefs);
+    assert.deepEqual(accepted.run_record.runtime_binding_refs, harborRuntimeBindingRefs);
+    assert.deepEqual(accepted.run_record.evidence_refs, harborEvidenceRefs);
     assert.deepEqual(await store.getRunRecord("run_self_check_submit_accepted"), accepted.run_record);
+
+    const missingRuntime = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_harbor_missing_runtime",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract
+    });
+    assert.equal(missingRuntime.ok, false);
+    assert.equal(missingRuntime.failure.code, "runtime_ref_missing");
+    assert.equal(missingRuntime.run_record?.status, "failed");
+
+    const captureDenied = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_harbor_capture_denied",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_scene_ref: {
+        status: "unavailable",
+        failure_class: "capture_denied",
+        retryable: false
+      }
+    });
+    assert.equal(captureDenied.ok, false);
+    assert.equal(captureDenied.failure.category, "evidence_reference");
+    assert.equal(captureDenied.failure.code, "capture_denied");
+    assert.deepEqual(captureDenied.run_record?.admission.runtime_binding_refs, harborRuntimeBindingRefs.slice(0, 4));
 
     const invalid = await acceptReadOnlyTaskSubmission(store, {
       run_id: "run_self_check_submit_invalid",
@@ -171,8 +271,8 @@ try {
 
   const admitted = await store.updateRunRecord(runId, {
     status: "admitted",
-    runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
-    evidence_refs: ["evidence:fixture/admission-ready"]
+    runtime_binding_refs: harborRuntimeBindingRefs,
+    evidence_refs: harborEvidenceRefs
   });
   assert.equal(admitted.status, "admitted");
   await assert.rejects(() => store.updateRunRecord(runId, { status: "succeeded", result_ref: "result:fixture/too-early" }), /illegal run status transition/);

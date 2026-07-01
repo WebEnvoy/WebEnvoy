@@ -14,10 +14,22 @@
     "decision": "blocked_pre_admission",
     "action_risk": "read",
     "resource_requirement_refs": ["example.read-public-page.resources"],
+    "runtime_binding_refs": [
+      "session_fixture_stale",
+      "profile_fixture_public",
+      "provider_fixture_local",
+      "viewer_fixture_readonly"
+    ],
+    "evidence_refs": ["evidence_fixture_runtime_facts_stale"],
     "resource_match_ref": "resource-match:fixture/runtime-facts-stale"
   },
-  "runtime_binding_refs": [],
-  "evidence_refs": ["evidence:fixture/runtime-facts-stale"],
+  "runtime_binding_refs": [
+    "session_fixture_stale",
+    "profile_fixture_public",
+    "provider_fixture_local",
+    "viewer_fixture_readonly"
+  ],
+  "evidence_refs": ["evidence_fixture_runtime_facts_stale"],
   "failure": {
     "category": "resource_admission",
     "code": "runtime_facts_stale",

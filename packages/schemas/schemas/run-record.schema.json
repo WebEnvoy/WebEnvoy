@@ -108,6 +108,20 @@
             "minLength": 1
           }
         },
+        "runtime_binding_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "resource_match_ref": {
           "type": "string",
           "minLength": 1

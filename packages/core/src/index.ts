@@ -13,6 +13,11 @@ export {
   type RunRecordPatch,
   type RunRecordStatus
 } from "./run-record-store.js";
+export {
+  type HarborCoreRuntimeFacts,
+  type HarborCoreSceneReference,
+  type HarborUnavailable
+} from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
   acceptReadOnlyTaskSubmission,
