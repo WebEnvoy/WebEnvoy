@@ -1,0 +1,57 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-104",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review approved for GH-104 implementation head c3e7b00887310ce5047c12a28ac67011208b500c. The change consumes Harbor public runtime/page-scene refs in Core admission, records runtime/evidence refs in Run Record admission and top-level refs, rejects private/raw runtime and evidence fields, and keeps GH-105/API/App/Harbor runtime calls out of scope.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T23:51:18Z",
+  "reviewed_head": "c3e7b00887310ce5047c12a28ac67011208b500c",
+  "reviewed_validation_summary": "GH-104 validation passed on 2026-07-02 local time: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `git diff --check HEAD^..HEAD`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-104/build-evidence.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-104 --json`; `loom suite carrier validate --target . --item GH-104 --json`; `loom suite evidence validate --target . --item GH-104 --json`; source-runtime packaged build attempt `GH-104-build-6d5c1e8eb6cd-18bd1b63fd66`; packaged pre-review attempt `GH-104-pre-review-c3e7b0088731-9fe1664b02c0`; PR #125 metadata preflight passed for `merge_ready` and head `c3e7b00887310ce5047c12a28ac67011208b500c`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-104.md",
+    "recovery_entry": ".loom/progress/GH-104.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "loom suite evidence validate --target . --item GH-104 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item GH-104 --json",
+    "suite_evidence_map": ".loom/specs/GH-104/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-104/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "No blocking findings. GH-104 remains limited to Core-side Harbor public ref validation and Run Record ref binding; GH-105 result/failure envelope, API query/smoke, App integration, Harbor runtime calls, raw evidence bodies, and true writes remain out of scope."
+  }
+}
