@@ -108,6 +108,12 @@ Run Record 最小本地持久化位于 `packages/core`：
 pnpm --filter @webenvoy/core-runtime test
 ```
 
+Schema fixture 与 Run Record 本地读写的纵向 conformance check：
+
+```bash
+pnpm conformance
+```
+
 启动最小 API Server：
 
 ```bash

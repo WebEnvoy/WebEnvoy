@@ -1,0 +1,168 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "GH-100",
+  "parent_fr": "94",
+  "covered_issues": [100],
+  "ownership_constraints": {
+    "write_scope": [
+      "README.md",
+      "package.json",
+      "pnpm-lock.yaml",
+      "packages/core/src/index.ts",
+      "packages/conformance/**",
+      ".loom/work-items/GH-100.md",
+      ".loom/progress/GH-100.md",
+      ".loom/status/current.md",
+      ".loom/specs/GH-100/*",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "forbidden_scope": [
+      "API submission/query routes",
+      "API Server behavior changes",
+      "admission runtime execution beyond fixture/store checks",
+      "result projection implementation",
+      "Harbor/Lode/App repositories",
+      "Ajv or generated TypeScript types",
+      "OpenAPI",
+      "CLI/MCP/SDK/App-facing API integration",
+      "database/ORM/migration tooling",
+      "multi-backend abstraction",
+      "hosted service storage",
+      "true-write behavior",
+      "issue closure",
+      "PR merge",
+      "FR #94 closeout before #100 post-merge evidence exists"
+    ],
+    "owner": "core-repo-control-thread"
+  },
+  "delegations": [],
+  "integration_evidence": [
+    {
+      "carrier": "conformance_self_check",
+      "locator": "packages/conformance/src/self-check.ts",
+      "summary": "Validates local schema metadata, fixture-to-schema version bindings, required fixture fields, successful and failed Run Record store paths, and refs-only boundaries."
+    },
+    {
+      "carrier": "root_command",
+      "locator": "package.json",
+      "summary": "Provides the root `pnpm conformance` command that builds the core runtime and runs the conformance package self-check."
+    },
+    {
+      "carrier": "package_command",
+      "locator": "packages/conformance/package.json",
+      "summary": "Provides conformance package build/typecheck/test/lint scripts with no external runtime dependency beyond the workspace core runtime package."
+    },
+    {
+      "carrier": "documentation",
+      "locator": "README.md",
+      "summary": "Documents the repository-level conformance command for schema fixture and Run Record local read/write checks."
+    },
+    {
+      "carrier": "task_carrier",
+      "locator": ".loom/specs/GH-100/task-carrier.md",
+      "summary": "Maps GH-100 as the primary Work Item and GH-94 as parent FR evidence without claiming FR completion."
+    }
+  ],
+  "suite_path_consumption": {
+    "path": "minimal",
+    "required_artifacts": [
+      ".loom/specs/GH-100/spec.md",
+      ".loom/specs/GH-100/plan.md",
+      ".loom/specs/GH-100/implementation-contract.md"
+    ],
+    "not_applicable_full_artifacts": [
+      "suite-index.md",
+      "research.md",
+      "contracts.md",
+      "readiness-checklist.md",
+      "consistency-analysis",
+      "execution-breakdown"
+    ],
+    "rationale": "Narrow Core conformance PR with a repository-level runnable check for existing schemas, fixtures, and local Run Record storage, with no API behavior, admission runtime, generated consumers, database, hosted service, or cross-repo integration.",
+    "consumer_boundary": "Review and PR Ready consume the conformance package, root command, README command documentation, GH-100 carrier, local build/typecheck/test/lint output, PR metadata readback, and hosted checks.",
+    "recheck_condition": "Upgrade to broader suite artifacts when API submit/query behavior, full schema validation, admission execution, result projection, generated types, CLI/MCP/SDK/App-facing API, Harbor/Lode consumption, database storage, hosted service storage, or true-write guardrails are added."
+  },
+  "validation": {
+    "status": "passed_pre_pr",
+    "content_head": "pre_pr_branch_head_pending_pr_metadata_readback",
+    "commands": [
+      {
+        "command": "pnpm install --lockfile-only",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm install",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm conformance",
+        "result": "pass",
+        "note": "Passed from a clean generated-output state after removing package dist directories."
+      },
+      {
+        "command": "pnpm build",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm lint",
+        "result": "pass"
+      },
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/GH-100/build-evidence.json",
+        "result": "pass"
+      },
+      {
+        "command": "loom doctor --target . --json",
+        "result": "pass",
+        "note": "CLI freshness was reported stale against npm, but installed surface diagnostics passed and plugin payload was current."
+      },
+      {
+        "command": "loom verify --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom fact-chain --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite validate --target . --item GH-100 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite carrier validate --target . --item GH-100 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite evidence validate --target . --item GH-100 --json",
+        "result": "pass"
+      },
+      {
+        "command": "packaged loom_flow.py flow build --target . --item GH-100 --build-evidence .loom/specs/GH-100/build-evidence.json",
+        "result": "pass",
+        "attempt": "GH-100-build-757f65bfe2fa-21bd76939fcf"
+      }
+    ],
+    "hosted_gate": "pending_pr_creation",
+    "pr_url": "pending",
+    "initial_pr_readback": {
+      "result": "pending",
+      "head_sha": "pending",
+      "branch": "work/GH-100-conformance-self-check",
+      "work_item": "GH-100",
+      "repository": "WebEnvoy/WebEnvoy"
+    },
+    "recheck_condition": "Rerun local validation, Loom suite/fact-chain/build flow, PR metadata readback, and hosted checks after every push."
+  }
+}
