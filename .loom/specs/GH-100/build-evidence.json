@@ -152,6 +152,31 @@
         "command": "packaged loom_flow.py flow build --target . --item GH-100 --build-evidence .loom/specs/GH-100/build-evidence.json",
         "result": "pass",
         "attempt": "GH-100-build-53ead2ce21bb-3f2c926d3eef"
+      },
+      {
+        "command": "tools/skills_surface.py check",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/loom_check.py --profile source --source-surface contract-only",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_release_surface.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/version_surface_check.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_npm_package.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
       }
     ],
     "hosted_gate": "pending_hosted_checks",
