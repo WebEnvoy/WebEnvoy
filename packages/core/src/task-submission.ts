@@ -1,4 +1,5 @@
 import type { FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
 
@@ -37,6 +38,7 @@ export type TaskSubmissionInput = {
   run_id: string;
   task_intent: unknown;
   package_ref?: string;
+  lode_package_contract?: LodePackageAdmissionContract;
   resource_match_ref?: string;
   runtime_binding_refs?: readonly string[];
   evidence_refs?: readonly string[];
@@ -51,6 +53,7 @@ export type TaskSubmissionResult =
   | {
       ok: false;
       failure: FailureRecord;
+      run_record?: RunRecord;
     };
 
 type ParsedTaskIntentFields = {
@@ -126,13 +129,13 @@ function asStringArray(value: unknown, code: string): string[] | FailureRecord {
   return strings;
 }
 
-function findPrivateField(value: unknown): string | undefined {
+function findForbiddenField(value: unknown, forbiddenFields: ReadonlySet<string>): string | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const found = findPrivateField(entry);
+      const found = findForbiddenField(entry, forbiddenFields);
       if (found) {
         return found;
       }
@@ -140,10 +143,10 @@ function findPrivateField(value: unknown): string | undefined {
     return undefined;
   }
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (privateFieldNames.has(key)) {
+    if (forbiddenFields.has(key)) {
       return key;
     }
-    const found = findPrivateField(entry);
+    const found = findForbiddenField(entry, forbiddenFields);
     if (found) {
       return found;
     }
@@ -250,7 +253,7 @@ function buildReadOnlyTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnve
 }
 
 function parseTaskIntent(value: unknown): TaskIntentEnvelope | FailureRecord {
-  const privateField = findPrivateField(value);
+  const privateField = findForbiddenField(value, privateFieldNames);
   if (privateField) {
     return requestInvalid(`private_field_rejected:${privateField}`, "remove_private_field");
   }
@@ -279,20 +282,45 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     };
   }
 
+  const lodeAdmission = validateLodePackageAdmission(taskIntent, input);
+  if (!lodeAdmission.ok) {
+    const runRecord = await store.createRunRecord({
+      run_id: input.run_id,
+      status: "failed",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      ...(lodeAdmission.package_ref === undefined ? {} : { package_ref: lodeAdmission.package_ref }),
+      admission: {
+        decision: "blocked_pre_admission",
+        action_risk: "read",
+        resource_requirement_refs: taskIntent.resource_requirement_refs,
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+      },
+      failure: lodeAdmission.failure
+    });
+    return {
+      ok: false,
+      failure: lodeAdmission.failure,
+      run_record: runRecord
+    };
+  }
+
   const runRecordInput = {
     run_id: input.run_id,
     status: "admitted",
     task_intent_ref: taskIntent.intent_id,
     entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
     capability_ref: taskIntent.capability.ref,
+    package_ref: lodeAdmission.package_ref,
     admission: {
       decision: "accepted",
-      action_risk: "read"
+      action_risk: "read",
+      resource_requirement_refs: lodeAdmission.resource_requirement_refs
     }
   } as const;
   const runRecord = await store.createRunRecord({
     ...runRecordInput,
-    ...(input.package_ref === undefined ? {} : { package_ref: input.package_ref }),
     ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
     ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
     admission: {

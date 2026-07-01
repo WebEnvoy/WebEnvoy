@@ -8,11 +8,12 @@
   "terminal_at": "2026-07-01T00:00:02Z",
   "task_intent_ref": "intent_fixture_read_only_001",
   "entrypoint_ref": "entrypoint:api",
-  "capability_ref": "lode:capability/read-page-summary",
-  "package_ref": "lode:package/read-page-summary@0.1.0",
+  "capability_ref": "lode:capability/read-public-page",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
   "admission": {
     "decision": "blocked_pre_admission",
     "action_risk": "read",
+    "resource_requirement_refs": ["example.read-public-page.resources"],
     "resource_match_ref": "resource-match:fixture/runtime-facts-stale"
   },
   "runtime_binding_refs": [],

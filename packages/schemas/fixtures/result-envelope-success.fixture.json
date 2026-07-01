@@ -2,20 +2,20 @@
   "$schema": "../schemas/result-envelope.schema.json",
   "schema_version": "webenvoy.result-envelope.v0",
   "run_record_ref": "run_fixture_success_001",
-  "result_ref": "result:fixture/read-page-summary",
+  "result_ref": "result:fixture/read-public-page",
   "ok": true,
   "outcome": "success",
   "terminal": true,
-  "result_kind": "read_page_summary",
-  "capability_ref": "lode:capability/read-page-summary",
-  "package_ref": "lode:package/read-page-summary@0.1.0",
+  "result_kind": "content_detail",
+  "capability_ref": "lode:capability/read-public-page",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
   "data": {
-    "title": "Fixture page",
-    "summary": "Public fixture summary."
+    "title": "Example Domain",
+    "summary": "Reserved public Example Domain fixture summary."
   },
-  "projection_ref": "projection:fixture/read-page-summary",
+  "projection_ref": "projection:fixture/read-public-page",
   "raw_payload_refs": ["raw-payload:fixture/redacted"],
-  "source_refs": ["source-trace:fixture/page-summary"],
-  "evidence_refs": ["evidence:fixture/page-summary"],
+  "source_refs": ["source-trace:fixture/read-public-page"],
+  "evidence_refs": ["evidence:fixture/read-public-page"],
   "retention_state": "active"
 }

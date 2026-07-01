@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/evidence-ref.schema.json",
   "schema_version": "webenvoy.evidence-ref.v0",
-  "ref": "evidence:fixture/page-summary",
+  "ref": "evidence:fixture/read-public-page",
   "ref_type": "evidence",
   "producer": "harbor",
   "state": "redacted",

@@ -224,6 +224,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       admission: {
         decision: "blocked_pre_admission",
         action_risk: asActionRisk(failureAdmission.action_risk, "admission.action_risk"),
+        resource_requirement_refs: asStringArray(failureAdmission.resource_requirement_refs, "admission.resource_requirement_refs"),
         resource_match_ref: asString(failureAdmission.resource_match_ref, "admission.resource_match_ref")
       }
     });

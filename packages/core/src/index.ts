@@ -13,6 +13,7 @@ export {
   type RunRecordPatch,
   type RunRecordStatus
 } from "./run-record-store.js";
+export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
   acceptReadOnlyTaskSubmission,
   taskIntentSchemaVersion,
