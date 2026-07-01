@@ -141,6 +141,35 @@
         "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py flow build --target . --item GH-99 --build-evidence .loom/specs/GH-99/build-evidence.json",
         "result": "pass",
         "attempt": "GH-99-build-1af5088d113d-49e09e36de71"
+      },
+      {
+        "command": "LOOM_SOURCE_REPO_ROOT=/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/src/skills/shared/scripts/loom_flow.py pr-metadata preflight --target . --surface merge_ready --item GH-99 --issue 99 --pr 115 --head-sha f8c5273299ef44038a6c725dc9a2b6b9a1ec772b --branch work/GH-99-run-record-store",
+        "result": "pass"
+      },
+      {
+        "command": "tools/skills_surface.py check",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/loom_check.py --profile source --source-surface contract-only",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_release_surface.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/version_surface_check.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
+      },
+      {
+        "command": "tools/check_npm_package.py",
+        "result": "not_applicable",
+        "reason": "This consumer repo has no tools directory; source-distribution readiness tools are absent."
       }
     ],
     "hosted_gate": "pending_hosted_checks",
