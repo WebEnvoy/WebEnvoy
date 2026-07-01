@@ -18,7 +18,94 @@
     }
   },
   "metadata_contract": {
-    "fields": []
+    "fields": [
+      {
+        "id": "loom-governance-intensity",
+        "summary": "Loom PR metadata machine carrier consumed by review, PR gate, merge-ready, and closeout checks.",
+        "applicability_locator": "AGENTS.md",
+        "authority_locator": ".github/PULL_REQUEST_TEMPLATE.md",
+        "enforcement": "blocking",
+        "machine_carrier": {
+          "type": "pr_body_html_comment_json",
+          "schema_version": "loom-repo-pr-metadata/v1",
+          "carrier_id": "loom-governance-intensity-pr-body-block",
+          "marker": "loom:repo-pr-metadata",
+          "surface": "merge_ready",
+          "repo_specific_field_set": [
+            "loom_work_item",
+            "branch",
+            "head_sha",
+            "governance_intensity",
+            "change_class",
+            "suite_path",
+            "suite_not_applicable",
+            "review_requirement",
+            "fact_chain_required",
+            "pr_gate_required",
+            "release_judgment",
+            "closeout_required",
+            "upgrade_triggers"
+          ],
+          "enforcement": "blocking",
+          "required_fields": [
+            "loom_work_item",
+            "branch",
+            "head_sha",
+            "governance_intensity",
+            "change_class",
+            "suite_path",
+            "review_requirement",
+            "fact_chain_required",
+            "pr_gate_required",
+            "release_judgment",
+            "closeout_required",
+            "upgrade_triggers"
+          ],
+          "preflight": {
+            "required_before": [
+              "review",
+              "merge_ready"
+            ],
+            "failure_mode": "blocking",
+            "command_locator": ".github/workflows/loom-check.yml"
+          },
+          "diagnostics": {
+            "block_locator": true,
+            "parse_error": true,
+            "missing_fields": true,
+            "expected_format": true,
+            "suggested_fix": true
+          },
+          "binding_priority": [
+            "cli_explicit_input",
+            "pr_body_machine_carrier",
+            "host_readback",
+            "repo_carrier",
+            "human_pr_body_field",
+            "issue_title_or_body"
+          ],
+          "safe_repair": {
+            "allowed_when": "cli_explicit_input, pr_body_machine_carrier, and host_readback agree",
+            "allowed_targets": [
+              "missing_human_backlink",
+              "display_field_format",
+              "deterministic_machine_carrier_rerender"
+            ],
+            "forbidden_when": [
+              "work_item_conflict",
+              "issue_conflict",
+              "pr_conflict",
+              "branch_conflict",
+              "head_sha_conflict",
+              "release_judgment_conflict",
+              "closeout_policy_conflict"
+            ],
+            "required_readback": "render, update PR body, read back, then rerun metadata preflight before gate consumption"
+          },
+          "migration_mode": "required"
+        }
+      }
+    ]
   },
   "context_schema": {
     "fields": []
