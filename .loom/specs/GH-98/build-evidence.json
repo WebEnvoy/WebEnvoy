@@ -34,7 +34,8 @@
     "path": "minimal",
     "required_artifacts": [
       ".loom/specs/GH-98/spec.md",
-      ".loom/specs/GH-98/plan.md"
+      ".loom/specs/GH-98/plan.md",
+      ".loom/specs/GH-98/implementation-contract.md"
     ],
     "not_applicable_full_artifacts": [
       "suite-index.md",

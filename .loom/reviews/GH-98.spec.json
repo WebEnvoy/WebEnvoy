@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-98",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec suite is minimal by scope and the implementation contract aligns with GH-98 schema/fixture carrier boundaries.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-01T17:47:29Z",
+  "reviewed_head": "6697717762e193c42cdf3130f4089b91ae75c202",
+  "reviewed_validation_summary": "`pnpm install --lockfile-only`, `pnpm build`, `pnpm typecheck`, `pnpm --filter @webenvoy/schemas test`, `pnpm test`, `pnpm lint`, `git diff --check`, `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-98/build-evidence.json packages/schemas/schemas/*.schema.json`, `loom doctor --target . --json`, `loom verify --target . --json`, `loom fact-chain --target . --json`, `loom suite validate --target . --item GH-98 --json`, `loom suite carrier validate --target . --item GH-98 --json`, `loom suite evidence validate --target . --item GH-98 --json`, and packaged `loom_flow.py flow build --target . --item GH-98 --build-evidence .loom/specs/GH-98/build-evidence.json` passed locally on 2026-07-01 UTC. Review-readiness source-distribution tools are not applicable to this consumer repo because `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. One earlier `loom fact-chain` attempt blocked on stale GH-97 bootstrap locator truth; `.loom/bootstrap/init-result.json` was synchronized to GH-98 and the rerun passed.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-98.md",
+    "recovery_entry": ".loom/progress/GH-98.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-98/spec.md",
+    "suite_plan": ".loom/specs/GH-98/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-98/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-98/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
