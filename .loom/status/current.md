@@ -12,11 +12,11 @@
 - Validation Entry: `git diff --check`; Markdown/JSON readability checks; Loom suite/carrier/build validation; PR body/head readback.
 - Closing Condition: PR is merged, post-merge closeout evidence is recorded, and covered issues remain open until coordinator closeout.
 - Current Checkpoint: merge
-- Current Stop: Merge-ready carrier prepared for docs-only technical baseline; hosted PR gate, merge and post-merge closeout are coordinator-owned next steps.
-- Next Step: Create or update PR, read back PR body/head metadata, run hosted gate, merge, then write post-merge closeout evidence.
+- Current Stop: Closeout carrier sync is ready for hosted gate and merge.
+- Next Step: Merge this closeout-only carrier PR; no product work remains in this batch.
 - Blockers: None recorded.
-- Latest Validation Summary: Review artifact approves the docs-only Core 技术架构基线 at head a6d516b43b8d6a4ec76e5bfd70fc298b6c4e4928. The final PR head may differ only by Loom review/progress/status carrier refresh and PR metadata updates; no code, dependency, schema, runtime, generated artifact, UI behavior, or product semantics changed after the reviewed head.
-- Recovery Boundary: Re-review if this branch adds code, package files, dependencies, OpenAPI, full JSON Schema, generated types, fixture files, conformance runner, runtime implementation, database choice, other repository changes, Loom carriers beyond GH-80/current status/bootstrap fact-chain entry points, issue closure, or merge.
+- Latest Validation Summary: Post-merge closeout consumed PR https://github.com/WebEnvoy/WebEnvoy/pull/89, PR head 4e483d3437d4cb509f50b1004cc5830775d56849, merge commit 2ee8c13bde9796baf13396568c159e94b1b0e959, target branch main, hosted run https://github.com/WebEnvoy/WebEnvoy/actions/runs/28493861163, closed issues #79-#88, and closed milestone Core 协议与运行架构基线 (#8). Scope remains docs-only technical architecture baseline; code skeleton, schema/API/runtime/persistence, CLI/MCP/SDK/App implementation were not completed.
+- Recovery Boundary: Closed docs-only planning batch. Reopen or create a new Work Item if future work changes code skeleton, schema/API/runtime/persistence, CLI/MCP/SDK/App implementation.
 - Current Lane: merge-ready
 
 ## Runtime Evidence
@@ -33,3 +33,7 @@
 - Dynamic Truth: .loom/progress/GH-80.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json
+
+## Notes
+
+- 2026-07-01: Post-merge closeout recorded PR https://github.com/WebEnvoy/WebEnvoy/pull/89, merge commit `2ee8c13bde9796baf13396568c159e94b1b0e959`, hosted run https://github.com/WebEnvoy/WebEnvoy/actions/runs/28493861163, closed issues #79-#88, and closed milestone Core 协议与运行架构基线 (#8).
