@@ -1,10 +1,12 @@
-import type { FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import type { AdmissionDecision, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
 
 export type TaskEntrypoint = "api" | "cli" | "mcp" | "sdk" | "app";
+export type TaskActionRisk = AdmissionDecision["action_risk"];
+export type TaskExecutionIntent = "read" | "validate_only" | "draft" | "preview" | "execute_after_approval" | "reconcile_status" | "request_cancel";
 
 export type TaskIntentEnvelope = {
   schema_version: typeof taskIntentSchemaVersion;
@@ -27,8 +29,8 @@ export type TaskIntentEnvelope = {
     target_ref: string;
   };
   policy: {
-    risk: "read";
-    execution_intent: "read";
+    risk: TaskActionRisk;
+    execution_intent: TaskExecutionIntent;
     timeout_ms?: number;
   };
   resource_requirement_refs: string[];
@@ -72,6 +74,9 @@ type ParsedTaskIntentFields = {
 };
 
 const entrypoints = new Set<TaskEntrypoint>(["api", "cli", "mcp", "sdk", "app"]);
+const actionRisks = new Set<TaskActionRisk>(["read", "write", "submit", "destructive"]);
+const executionIntents = new Set<TaskExecutionIntent>(["read", "validate_only", "draft", "preview", "execute_after_approval", "reconcile_status", "request_cancel"]);
+const trueWriteExecutionIntents = new Set<TaskExecutionIntent>(["execute_after_approval", "reconcile_status", "request_cancel"]);
 const allowedTaskIntentFields = new Set([
   "$schema",
   "schema_version",
@@ -128,6 +133,24 @@ function asStringArray(value: unknown, code: string): string[] | FailureRecord {
     strings.push(parsed);
   }
   return strings;
+}
+
+function asActionRisk(value: unknown): TaskActionRisk | FailureRecord {
+  const risk = asNonEmptyString(value, "policy_risk_required");
+  if (isFailure(risk)) return risk;
+  if (!actionRisks.has(risk as TaskActionRisk)) {
+    return requestInvalid("policy_risk_unsupported", "fix_input");
+  }
+  return risk as TaskActionRisk;
+}
+
+function asExecutionIntent(value: unknown): TaskExecutionIntent | FailureRecord {
+  const intent = asNonEmptyString(value, "policy_execution_intent_required");
+  if (isFailure(intent)) return intent;
+  if (!executionIntents.has(intent as TaskExecutionIntent)) {
+    return requestInvalid("policy_execution_intent_unsupported", "fix_input");
+  }
+  return intent as TaskExecutionIntent;
 }
 
 function findForbiddenField(value: unknown, forbiddenFields: ReadonlySet<string>): string | undefined {
@@ -196,15 +219,14 @@ function parseTaskIntentFields(taskIntent: Record<string, unknown>): ParsedTaskI
   };
 }
 
-function buildReadOnlyTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | FailureRecord {
+function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | FailureRecord {
   if (!entrypoints.has(fields.entrypoint as TaskEntrypoint)) {
     return requestInvalid("entrypoint_unsupported", "fix_input");
   }
-  const risk = asNonEmptyString(fields.policy.risk, "policy_risk_required");
-  const executionIntent = asNonEmptyString(fields.policy.execution_intent, "policy_execution_intent_required");
-  if (risk !== "read" || executionIntent !== "read") {
-    return requestInvalid("read_only_submission_required", "use_read_intent");
-  }
+  const risk = asActionRisk(fields.policy.risk);
+  const executionIntent = asExecutionIntent(fields.policy.execution_intent);
+  if (isFailure(risk)) return risk;
+  if (isFailure(executionIntent)) return executionIntent;
 
   const inputRefs = fields.input.refs === undefined ? undefined : asStringArray(fields.input.refs, "input_refs_invalid");
   if (isFailure(inputRefs)) {
@@ -244,8 +266,8 @@ function buildReadOnlyTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnve
       target_ref: scopeTargetRef
     },
     policy: {
-      risk: "read",
-      execution_intent: "read",
+      risk,
+      execution_intent: executionIntent,
       ...(typeof fields.policy.timeout_ms === "number" ? { timeout_ms: fields.policy.timeout_ms } : {})
     },
     resource_requirement_refs: fields.resourceRequirementRefs,
@@ -271,7 +293,31 @@ function parseTaskIntent(value: unknown): TaskIntentEnvelope | FailureRecord {
   }
 
   const fields = parseTaskIntentFields(taskIntent);
-  return isFailure(fields) ? fields : buildReadOnlyTaskIntent(fields);
+  return isFailure(fields) ? fields : buildTaskIntent(fields);
+}
+
+function writeGuardrailFailure(taskIntent: TaskIntentEnvelope): FailureRecord | undefined {
+  if (taskIntent.policy.risk === "read" && taskIntent.policy.execution_intent === "read") {
+    return undefined;
+  }
+  const trueWriteRequested =
+    taskIntent.policy.risk === "submit" ||
+    taskIntent.policy.risk === "destructive" ||
+    trueWriteExecutionIntents.has(taskIntent.policy.execution_intent);
+  return {
+    category: "action_risk",
+    code: trueWriteRequested ? "true_write_deferred" : "write_action_request_deferred",
+    phase: "admission",
+    recovery_hint: trueWriteRequested ? "use_validate_or_preview" : "use_read_intent"
+  };
+}
+
+function lodeAdmissionDecision(failure: FailureRecord): AdmissionDecision["decision"] {
+  return failure.category === "action_risk" && failure.code === "true_write_deferred" ? "deferred_true_write" : "blocked_pre_admission";
+}
+
+function lodeAdmissionActionRisk(taskIntent: TaskIntentEnvelope, failure: FailureRecord): TaskActionRisk {
+  return failure.category === "action_risk" && failure.code === "true_write_deferred" && taskIntent.policy.risk === "read" ? "write" : taskIntent.policy.risk;
 }
 
 export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, input: TaskSubmissionInput): Promise<TaskSubmissionResult> {
@@ -280,6 +326,31 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     return {
       ok: false,
       failure: taskIntent
+    };
+  }
+
+  const writeGuardrail = writeGuardrailFailure(taskIntent);
+  if (writeGuardrail) {
+    const runRecord = await store.createRunRecord({
+      run_id: input.run_id,
+      status: "failed",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      ...(input.package_ref === undefined ? {} : { package_ref: input.package_ref }),
+      admission: {
+        decision: "deferred_true_write",
+        action_risk: taskIntent.policy.risk,
+        resource_requirement_refs: taskIntent.resource_requirement_refs,
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+      },
+      failure: writeGuardrail,
+      retention_state: "active"
+    });
+    return {
+      ok: false,
+      failure: writeGuardrail,
+      run_record: runRecord
     };
   }
 
@@ -293,8 +364,8 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       capability_ref: taskIntent.capability.ref,
       ...(lodeAdmission.package_ref === undefined ? {} : { package_ref: lodeAdmission.package_ref }),
       admission: {
-        decision: "blocked_pre_admission",
-        action_risk: "read",
+        decision: lodeAdmissionDecision(lodeAdmission.failure),
+        action_risk: lodeAdmissionActionRisk(taskIntent, lodeAdmission.failure),
         resource_requirement_refs: taskIntent.resource_requirement_refs,
         ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
       },
@@ -318,7 +389,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       package_ref: lodeAdmission.package_ref,
       admission: {
         decision: "blocked_pre_admission",
-        action_risk: "read",
+        action_risk: taskIntent.policy.risk,
         resource_requirement_refs: lodeAdmission.resource_requirement_refs,
         ...(harborAdmission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: harborAdmission.runtime_binding_refs }),
         ...(harborAdmission.evidence_refs === undefined ? {} : { evidence_refs: harborAdmission.evidence_refs }),
@@ -344,7 +415,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     package_ref: lodeAdmission.package_ref,
     admission: {
       decision: "accepted",
-      action_risk: "read",
+      action_risk: taskIntent.policy.risk,
       resource_requirement_refs: lodeAdmission.resource_requirement_refs,
       runtime_binding_refs: harborAdmission.runtime_binding_refs,
       evidence_refs: harborAdmission.evidence_refs

@@ -14,6 +14,8 @@ GH-106 adds a minimal run summary projection for API/App consumers. It returns s
 
 GH-107 adds minimal result and evidence-ref query projections. They return public Result Envelope state, structured failure reason, evidence refs, and unavailable/redacted/expired/access-denied states from existing Run Record refs without retrieving raw evidence or adding a result store.
 
+GH-110 adds the minimal write-side guardrail. Non-read task policy requests are recorded as failed/deferred Run Records with `deferred_true_write` admission and structured `action_risk` failures before Lode/Harbor admission or any executor path can run.
+
 It does not implement Harbor SDK/runtime calls, Lode registry/package body loading, result/evidence body retrieval, database migrations, multi-tenant storage, or true writes.
 
 ```bash

@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_write_guardrail_001",
+  "status": "failed",
+  "created_at": "2026-07-01T00:00:00Z",
+  "updated_at": "2026-07-01T00:00:01Z",
+  "terminal_at": "2026-07-01T00:00:01Z",
+  "task_intent_ref": "intent_fixture_submit_deferred_001",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/read-public-page",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "admission": {
+    "decision": "deferred_true_write",
+    "action_risk": "submit",
+    "resource_requirement_refs": ["example.read-public-page.resources"],
+    "resource_match_ref": "resource-match:fixture/write-guardrail"
+  },
+  "failure": {
+    "category": "action_risk",
+    "code": "true_write_deferred",
+    "phase": "admission",
+    "recovery_hint": "use_validate_or_preview"
+  },
+  "retention_state": "active"
+}

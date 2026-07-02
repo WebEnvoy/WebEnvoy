@@ -276,6 +276,36 @@ async function assertGoldenFixtureQueries(goldenFixture: JsonObject, golden: Run
   assert.equal(evidenceSummary.raw_access, "not_available_from_core");
 }
 
+async function assertWriteGuardrailFixtureQueries(guardrailFixture: JsonObject, guardrail: RunRecord, directory: string): Promise<void> {
+  const guardrailDirectory = join(directory, "write-guardrail");
+  await mkdir(guardrailDirectory, { recursive: true });
+  await writeFile(join(guardrailDirectory, `${guardrail.run_id}.json`), `${JSON.stringify(guardrailFixture, null, 2)}\n`, "utf8");
+
+  const guardrailStore = createFileRunRecordStore({ directory: guardrailDirectory });
+  const seeded = await guardrailStore.getRunRecord(guardrail.run_id);
+  assert(seeded, "write guardrail fixture must seed a file-backed Run Record store");
+  assert.deepEqual(withoutFixtureSchema(seeded as unknown as JsonObject), guardrail);
+
+  const runSummary = await getRunSummary(guardrailStore, guardrail.run_id);
+  if (!runSummary.ok) assert.fail(runSummary.failure.code);
+  assert.equal(runSummary.run.status, "failed");
+  assert.equal(runSummary.run.admission.decision, "deferred_true_write");
+  assert.equal(runSummary.run.admission.action_risk, "submit");
+  assert.equal(runSummary.run.terminal_summary?.failure?.code, "true_write_deferred");
+
+  const resultQuery = await getRunResult(guardrailStore, guardrail.run_id);
+  if (!resultQuery.ok) assert.fail(resultQuery.failure.code);
+  assert.equal(resultQuery.result.terminal, true);
+  assert.equal(resultQuery.result.failure?.category, "action_risk");
+  assert.equal(resultQuery.result.failure?.code, "true_write_deferred");
+  assert.equal(resultQuery.result.result.result_envelope?.ok, false);
+  assert.equal(resultQuery.result.result.result_envelope?.failure?.recovery_hint, "use_validate_or_preview");
+
+  const evidenceQuery = await getRunEvidenceRefs(guardrailStore, guardrail.run_id);
+  if (!evidenceQuery.ok) assert.fail(evidenceQuery.failure.code);
+  assert.deepEqual(evidenceQuery.evidence.evidence_refs, []);
+}
+
 async function assertRunRecordStoreConformance(): Promise<number> {
   const task = await readFixture("read-only-submit.fixture.json");
   const result = await readFixture("result-envelope-success.fixture.json");
@@ -283,6 +313,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
   const evidence = await readFixture("evidence-ref-redacted.fixture.json");
   const admissionFailure = await readFixture("admission-failure-run-record.fixture.json");
   const goldenFixture = await readFixture("golden-read-only-run-record.fixture.json");
+  const guardrailFixture = await readFixture("write-action-guardrail-run-record.fixture.json");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-conformance-"));
 
   try {
@@ -293,6 +324,11 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     const evidenceRef = asString(evidence.ref, "evidence.ref");
     assert(asStringArray(result.evidence_refs, "result.evidence_refs").includes(evidenceRef), "result fixture must reference the evidence fixture");
     const goldenRun = runRecordFromFixture(goldenFixture, "golden run fixture");
+    const guardrailRun = runRecordFromFixture(guardrailFixture, "write guardrail run fixture");
+    assert.equal(guardrailRun.status, "failed");
+    assert.equal(guardrailRun.admission.decision, "deferred_true_write");
+    assert.equal(guardrailRun.admission.action_risk, "submit");
+    assert.equal(guardrailRun.failure?.code, "true_write_deferred");
     assertGoldenReadOnlyBindings(goldenRun, task, result, evidence);
 
     const created = await store.createRunRecord({
@@ -407,7 +443,8 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       [failedRunId, failureRunId, successRunId].sort()
     );
     await assertGoldenFixtureQueries(goldenFixture, goldenRun, directory);
-    return 4;
+    await assertWriteGuardrailFixtureQueries(guardrailFixture, guardrailRun, directory);
+    return 5;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -1,0 +1,60 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-110",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review approved for GH-110 on head 64a4dcf14c87e4f6bf0493d5355fa0e44420041f. Non-read task policies are stopped before Lode/Harbor admission, queryable failed/deferred Run Records are produced, conformance covers the fixture/query path, and no true write executor or external write behavior is introduced.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T06:33:53Z",
+  "reviewed_head": "64a4dcf14c87e4f6bf0493d5355fa0e44420041f",
+  "reviewed_validation_summary": "GH-110 local validation, PR metadata, and authored review evidence passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance typecheck`; `pnpm --filter @webenvoy/conformance test`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `pnpm conformance`; `pnpm smoke`; `git diff --check`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-110/build-evidence.json packages/schemas/fixtures/write-action-guardrail-run-record.fixture.json .loom/reviews/GH-110.spec.json .loom/reviews/GH-110.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-110 --json`; `loom suite carrier validate --target . --item GH-110 --json`; `loom suite evidence validate --target . --item GH-110 --json`; `loom review read --target . --item GH-110 --json`; packaged source-runtime build and pre-review passed with attempts `GH-110-build-03320b819d85-5fbc7fea63d4`, `GH-110-build-c3fd7392bb71-baf8bba2ea1e`, and `GH-110-pre-review-25021e713523-082c5e13391a`; PR #137 metadata readback and metadata preflight passed through head `7436902efbdb17d4401b83ec0f6aca4b1b18e6dd`; hosted `py-compile`, `demo-bootstrap`, `repo-local-cli`, and `loom-check` passed in run `28570690293`; hosted `loom-pr-merge-gate` blocked only because the recovery checkpoint still pointed at `build`, which this carrier update corrects. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Final hosted merge gate and merge remain pending for the refreshed PR head.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-110.md",
+    "recovery_entry": ".loom/progress/GH-110.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "loom suite evidence validate --target . --item GH-110 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item GH-110 --json",
+    "suite_evidence_map": ".loom/specs/GH-110/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-110/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ],
+    "pr": 137,
+    "pr_metadata_preflight": "pass",
+    "review_run_cli_fallback": "suite_cli_json_unavailable_after_global_suite_surfaces_passed"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored implementation review approved the reviewed implementation head; subsequent drift must remain limited to GH-110 review carrier artifacts and PR metadata head refresh."
+  }
+}

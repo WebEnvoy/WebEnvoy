@@ -216,6 +216,52 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(invalid.failure.code, "private_field_rejected:token");
     assert.equal(await store.getRunRecord("run_self_check_submit_invalid"), undefined);
 
+    const submitActionRequest = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_true_write_deferred",
+      task_intent: {
+        ...taskIntent,
+        intent_id: "intent_fixture_submit_deferred_001",
+        policy: {
+          risk: "submit",
+          execution_intent: "execute_after_approval"
+        }
+      },
+      package_ref: lodeReadPublicPageContract.package_ref
+    });
+    assert.equal(submitActionRequest.ok, false);
+    assert.equal(submitActionRequest.failure.category, "action_risk");
+    assert.equal(submitActionRequest.failure.code, "true_write_deferred");
+    assert.equal(submitActionRequest.failure.recovery_hint, "use_validate_or_preview");
+    assert.equal(submitActionRequest.run_record?.status, "failed");
+    assert.equal(submitActionRequest.run_record?.admission.decision, "deferred_true_write");
+    assert.equal(submitActionRequest.run_record?.admission.action_risk, "submit");
+    assert.equal(submitActionRequest.run_record?.package_ref, lodeReadPublicPageContract.package_ref);
+    const submitQuery = await getRunResult(store, "run_self_check_true_write_deferred");
+    assert.equal(submitQuery.ok, true);
+    if (!submitQuery.ok) {
+      throw new Error("true-write guardrail run must be queryable");
+    }
+    assert.equal(submitQuery.result.failure?.code, "true_write_deferred");
+    assert.equal(submitQuery.result.result.result_envelope?.ok, false);
+    assert.equal(submitQuery.result.result.result_envelope?.failure?.category, "action_risk");
+
+    const previewActionRequest = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_preview_deferred",
+      task_intent: {
+        ...taskIntent,
+        intent_id: "intent_fixture_preview_deferred_001",
+        policy: {
+          risk: "write",
+          execution_intent: "preview"
+        }
+      },
+      package_ref: lodeReadPublicPageContract.package_ref
+    });
+    assert.equal(previewActionRequest.ok, false);
+    assert.equal(previewActionRequest.failure.code, "write_action_request_deferred");
+    assert.equal(previewActionRequest.run_record?.admission.decision, "deferred_true_write");
+    assert.equal(previewActionRequest.run_record?.admission.action_risk, "write");
+
     const brokenResourceContract = {
       ...lodeReadPublicPageContract,
       resource_requirements: {
@@ -255,6 +301,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(writeRejected.ok, false);
     assert.equal(writeRejected.failure.code, "true_write_deferred");
     assert.equal(writeRejected.run_record?.status, "failed");
+    assert.equal(writeRejected.run_record?.admission.decision, "deferred_true_write");
+    assert.equal(writeRejected.run_record?.admission.action_risk, "write");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

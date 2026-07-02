@@ -22,6 +22,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 
 `fixtures/golden-read-only-run-record.fixture.json` is the first reusable terminal read-only Run Record fixture. It binds the existing read-only task intent, Lode capability/package ref, Harbor runtime refs, result ref, and evidence ref so downstream smoke can query one stable run without inventing new fields.
 
+`fixtures/write-action-guardrail-run-record.fixture.json` captures the minimal write-side guardrail shape: true-write submission is deferred as a failed Run Record with `deferred_true_write` admission and a structured `action_risk` failure, without raw evidence or write execution state.
+
 Run:
 
 ```bash
