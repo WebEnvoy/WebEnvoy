@@ -1,4 +1,5 @@
 import type { FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
@@ -34,7 +35,7 @@ export type TaskIntentEnvelope = {
   evidence_policy_ref: string;
 };
 
-export type TaskSubmissionInput = {
+export type TaskSubmissionInput = HarborAdmissionInput & {
   run_id: string;
   task_intent: unknown;
   package_ref?: string;
@@ -306,6 +307,34 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     };
   }
 
+  const harborAdmission = validateHarborAdmission(input);
+  if (!harborAdmission.ok) {
+    const runRecord = await store.createRunRecord({
+      run_id: input.run_id,
+      status: "failed",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      package_ref: lodeAdmission.package_ref,
+      admission: {
+        decision: "blocked_pre_admission",
+        action_risk: "read",
+        resource_requirement_refs: lodeAdmission.resource_requirement_refs,
+        ...(harborAdmission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: harborAdmission.runtime_binding_refs }),
+        ...(harborAdmission.evidence_refs === undefined ? {} : { evidence_refs: harborAdmission.evidence_refs }),
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+      },
+      ...(harborAdmission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: harborAdmission.runtime_binding_refs }),
+      ...(harborAdmission.evidence_refs === undefined ? {} : { evidence_refs: harborAdmission.evidence_refs }),
+      failure: harborAdmission.failure
+    });
+    return {
+      ok: false,
+      failure: harborAdmission.failure,
+      run_record: runRecord
+    };
+  }
+
   const runRecordInput = {
     run_id: input.run_id,
     status: "admitted",
@@ -316,13 +345,15 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     admission: {
       decision: "accepted",
       action_risk: "read",
-      resource_requirement_refs: lodeAdmission.resource_requirement_refs
+      resource_requirement_refs: lodeAdmission.resource_requirement_refs,
+      runtime_binding_refs: harborAdmission.runtime_binding_refs,
+      evidence_refs: harborAdmission.evidence_refs
     }
   } as const;
   const runRecord = await store.createRunRecord({
     ...runRecordInput,
-    ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
-    ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+    runtime_binding_refs: harborAdmission.runtime_binding_refs,
+    evidence_refs: harborAdmission.evidence_refs,
     admission: {
       ...runRecordInput.admission,
       ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })

@@ -29,6 +29,16 @@ function nextInstant(): Date {
   return instant;
 }
 
+const harborRuntimeBindingRefs = [
+  "session_fixture_ready",
+  "profile_fixture_public",
+  "provider_fixture_local",
+  "viewer_fixture_readonly",
+  "snapshot_fixture_example",
+  "refmap_fixture_example",
+  "source_trace_fixture_example"
+];
+
 function asObject(value: unknown, label: string): JsonObject {
   assert(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
   return value as JsonObject;
@@ -189,6 +199,9 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       admission: {
         decision: "accepted",
         action_risk: asActionRisk(policy.risk, "task.policy.risk"),
+        resource_requirement_refs: asStringArray(task.resource_requirement_refs, "task.resource_requirement_refs"),
+        runtime_binding_refs: harborRuntimeBindingRefs,
+        evidence_refs: [evidenceRef],
         resource_match_ref: "resource-match:fixture/ready"
       }
     });
@@ -225,6 +238,8 @@ async function assertRunRecordStoreConformance(): Promise<number> {
         decision: "blocked_pre_admission",
         action_risk: asActionRisk(failureAdmission.action_risk, "admission.action_risk"),
         resource_requirement_refs: asStringArray(failureAdmission.resource_requirement_refs, "admission.resource_requirement_refs"),
+        runtime_binding_refs: asStringArray(failureAdmission.runtime_binding_refs, "admission.runtime_binding_refs"),
+        evidence_refs: asStringArray(failureAdmission.evidence_refs, "admission.evidence_refs"),
         resource_match_ref: asString(failureAdmission.resource_match_ref, "admission.resource_match_ref")
       }
     });

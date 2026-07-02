@@ -23,6 +23,8 @@ export type AdmissionDecision = {
   decision: "accepted" | "accepted_with_warnings" | "blocked_pre_admission" | "requires_user_action" | "deferred_true_write";
   action_risk: "read" | "write" | "submit" | "destructive";
   resource_requirement_refs?: readonly string[];
+  runtime_binding_refs?: readonly string[];
+  evidence_refs?: readonly string[];
   resource_match_ref?: string;
 };
 
@@ -200,6 +202,8 @@ function assertRunRecord(record: RunRecord): void {
     requireRef(record.admission.resource_match_ref, "admission.resource_match_ref");
   }
   copyRefs(record.admission.resource_requirement_refs, "admission.resource_requirement_refs");
+  copyRefs(record.admission.runtime_binding_refs, "admission.runtime_binding_refs");
+  copyRefs(record.admission.evidence_refs, "admission.evidence_refs");
   copyRefs(record.runtime_binding_refs, "runtime_binding_refs");
   copyRefs(record.evidence_refs, "evidence_refs");
   if (record.terminal_at && !terminalRunRecordStatuses.has(record.status)) {
@@ -240,7 +244,12 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
     updated_at: now,
     task_intent_ref: requireRef(input.task_intent_ref, "task_intent_ref"),
     capability_ref: requireRef(input.capability_ref, "capability_ref"),
-    admission: input.admission
+    admission: {
+      ...input.admission,
+      ...(input.admission.resource_requirement_refs === undefined ? {} : { resource_requirement_refs: copyRequiredRefs(input.admission.resource_requirement_refs, "admission.resource_requirement_refs") }),
+      ...(input.admission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: copyRequiredRefs(input.admission.runtime_binding_refs, "admission.runtime_binding_refs") }),
+      ...(input.admission.evidence_refs === undefined ? {} : { evidence_refs: copyRequiredRefs(input.admission.evidence_refs, "admission.evidence_refs") })
+    }
   };
   if (input.entrypoint_ref !== undefined) {
     record.entrypoint_ref = requireRef(input.entrypoint_ref, "entrypoint_ref");
