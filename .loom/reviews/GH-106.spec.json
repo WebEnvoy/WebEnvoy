@@ -1,0 +1,28 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-106",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-106 implementation PR #129 at reviewed head 9f7dffcbb1a89a312869d37fe96312be95cfe1c8. The work item stays within the requested run query contract: Core projects an existing Run Record into a compact run summary and API Server exposes GET /runs/:run_id without detailed result/evidence refs, App UI, SDK/MCP entrypoints, history search, storage backends, real execution, or true write behavior.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T02:12:07Z",
+  "reviewed_head": "9f7dffcbb1a89a312869d37fe96312be95cfe1c8",
+  "reviewed_validation_summary": "GH-106 local validation passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/api-server test`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `pnpm conformance`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-106/build-evidence.json`; `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-106 --json`; `loom suite carrier validate --target . --item GH-106 --json`; `loom suite evidence validate --target . --item GH-106 --json`; packaged build attempt `GH-106-build-f7b903ee2801-29e02f6b95aa`; PR #129 metadata readback passed for `work/GH-106-run-query` at head `9f7dffcbb1a89a312869d37fe96312be95cfe1c8`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Pre-review passed with attempt `GH-106-pre-review-9f7dffcbb1a8-9d4c96ec25a1`; review, hosted checks, merge, closeout, and issue closure remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-106.md",
+    "recovery_entry": ".loom/progress/GH-106.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "suite_validation": "loom suite validate --target . --item GH-106 --json",
+    "suite_spec": ".loom/specs/GH-106/spec.md",
+    "suite_plan": ".loom/specs/GH-106/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-106/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/GH-106/task-carrier.md"
+    ]
+  }
+}
