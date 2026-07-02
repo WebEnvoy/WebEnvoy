@@ -25,6 +25,20 @@ export {
   type ResultOutcome
 } from "./result-envelope.js";
 export {
+  getRunSummary,
+  projectRunSummary,
+  runQuerySchemaVersion,
+  type RunAdmissionSummary,
+  type RunCapabilitySummary,
+  type RunQueryResult,
+  type RunRuntimeRefs,
+  type RunSummary,
+  type RunTerminalFailureSummary,
+  type RunTerminalSummary,
+  type RunTimeline,
+  type TerminalRunStatus
+} from "./run-query.js";
+export {
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
   type HarborUnavailable
