@@ -1,0 +1,29 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-139",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Code review approved GH-139 Loom v0.26.3 maintenance adoption on head 7560fa922067e5325a25f7661a5fe75489e24b86. The diff is limited to installed-state metadata, workflow pin, and item-specific Loom carriers; no product code or business behavior changes are included.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T16:35:00Z",
+  "reviewed_head": "7560fa922067e5325a25f7661a5fe75489e24b86",
+  "reviewed_validation_summary": "`loom installed-state validate --target . --json` passed after the v0.26.3 upgrade; `loom doctor --target . --json` passed; `loom suite validate --target . --item GH-139 --json` returned not_applicable with no missing inputs; `loom pre-review --target . --item GH-139 --json` passed; PR metadata preflight/readback passed for head `7560fa922067e5325a25f7661a5fe75489e24b86`; `git diff --check` passed.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-139.md",
+    "recovery_entry": ".loom/progress/GH-139.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "suite_validation": "not_applicable",
+    "pr": 141,
+    "pr_metadata_preflight": "pass",
+    "review_run_cli_fallback": "runtime_upgrade_not_applicable_suite"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored review approved the current maintenance-only head; subsequent drift must remain limited to GH-139 Loom maintenance carriers."
+  }
+}
