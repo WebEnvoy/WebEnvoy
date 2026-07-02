@@ -7,6 +7,7 @@ import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } fro
 import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
+import { getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
@@ -305,9 +306,64 @@ try {
   assert.equal(completed.result_envelope.run_record_ref, runId);
   assert.equal(completed.result_envelope.result_ref, succeeded.result_ref);
   assertRefsOnly(succeeded);
+  assert.deepEqual(projectRunSummary(succeeded), {
+    schema_version: runQuerySchemaVersion,
+    run_id: runId,
+    status: "succeeded",
+    timeline: {
+      created_at: "2026-07-01T00:00:00.000Z",
+      updated_at: "2026-07-01T00:00:03.000Z",
+      terminal_at: "2026-07-01T00:00:03.000Z"
+    },
+    task: {
+      task_intent_ref: "intent_fixture_read_only_001",
+      capability_ref: "lode:capability/read-public-page",
+      entrypoint_ref: "entrypoint:api",
+      package_ref: "lode://site-capability/example/read-public-page@0.1.0"
+    },
+    admission: {
+      decision: "accepted",
+      action_risk: "read",
+      resource_requirement_refs: ["example.read-public-page.resources"],
+      resource_match_ref: "resource-match:fixture/ready"
+    },
+    runtime_refs: {
+      binding_refs: harborRuntimeBindingRefs,
+      admission_binding_refs: harborRuntimeBindingRefs
+    },
+    terminal_summary: {
+      terminal: true,
+      status: "succeeded",
+      terminal_at: "2026-07-01T00:00:03.000Z",
+      result_ref: "result:fixture/read-page-summary",
+      retention_state: "active"
+    }
+  });
 
   const reloaded = await store.getRunRecord(runId);
   assert.deepEqual(reloaded, succeeded);
+  assert.deepEqual(await getRunSummary(store, runId), {
+    ok: true,
+    run: projectRunSummary(succeeded)
+  });
+  assert.deepEqual(await getRunSummary(store, "missing_run"), {
+    ok: false,
+    failure: {
+      category: "persistence_observability",
+      code: "run_not_found",
+      phase: "query",
+      recovery_hint: "fix_input"
+    }
+  });
+  assert.deepEqual(await getRunSummary(store, "../bad"), {
+    ok: false,
+    failure: {
+      category: "request_invalid",
+      code: "run_id_invalid",
+      phase: "query",
+      recovery_hint: "fix_input"
+    }
+  });
   const detachedGetRunRecord = store.getRunRecord;
   assert.deepEqual(await detachedGetRunRecord(runId), succeeded);
   assert.deepEqual(JSON.parse(await readFile(join(directory, `${runId}.json`), "utf8")), succeeded);

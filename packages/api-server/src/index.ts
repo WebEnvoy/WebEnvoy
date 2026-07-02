@@ -1,5 +1,7 @@
 import { pathToFileURL } from "node:url";
 
+import { createFileRunRecordStore } from "@webenvoy/core-runtime";
+
 import { createApiServer } from "./server.js";
 
 export { createApiServer } from "./server.js";
@@ -16,10 +18,17 @@ const entrypoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : undef
 
 if (import.meta.url === entrypoint) {
   const port = parsePort(process.env.PORT);
-  const server = createApiServer();
+  const server = createApiServer(
+    process.env.WEBENVOY_RUN_RECORD_DIR
+      ? {
+          runRecordStore: createFileRunRecordStore({
+            directory: process.env.WEBENVOY_RUN_RECORD_DIR
+          })
+        }
+      : {}
+  );
 
   server.listen(port, () => {
     console.log(`WebEnvoy API Server listening on http://127.0.0.1:${port}`);
   });
 }
-

@@ -10,7 +10,9 @@ GH-104 adds Core-side validation for Harbor public runtime, viewer, snapshot, re
 
 GH-105 adds the minimal structured result/failure output helpers. They advance an existing Run Record to terminal success or structured failure and return a public Result Envelope without adding a result store or query API.
 
-It does not implement API routes, Harbor SDK/runtime calls, Lode registry/package body loading, query APIs, database migrations, multi-tenant storage, or true writes.
+GH-106 adds a minimal run summary projection for API/App consumers. It returns status, timestamps, capability/package refs, admission summary, runtime binding refs, and terminal summary from the Run Record without adding history search or a new storage backend.
+
+It does not implement Harbor SDK/runtime calls, Lode registry/package body loading, result/evidence body retrieval, database migrations, multi-tenant storage, or true writes.
 
 ```bash
 pnpm --filter @webenvoy/core-runtime test
