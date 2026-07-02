@@ -124,5 +124,6 @@
         "relationship": "requires-runtime-provider"
       }
     ]
-  }
+  },
+  "upgraded_at": "2026-07-02T15:39:43Z"
 }
