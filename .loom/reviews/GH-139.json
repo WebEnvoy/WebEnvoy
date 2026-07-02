@@ -3,10 +3,10 @@
   "item_id": "GH-139",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Closeout review approved GH-139 Loom terminal carrier sync on head 01e2b8020dbc31583404a6de78ca837a0e6dab41. The delta is limited to .loom/progress/GH-139.md terminal closeout metadata for merged PR #141; no product code or business behavior changes are included.",
+  "summary": "Final closeout review approved GH-139 Loom terminal carrier sync on head 9e117b24efa9eefb34ad1e883e994f217a806902. The delta only aligns .loom/progress/GH-139.md closed_at with the closed GitHub issue; no product code or business behavior changes are included.",
   "reviewer": "codex-main",
-  "authored_at": "2026-07-02T17:13:05Z",
-  "reviewed_head": "01e2b8020dbc31583404a6de78ca837a0e6dab41",
+  "authored_at": "2026-07-02T17:20:48Z",
+  "reviewed_head": "9e117b24efa9eefb34ad1e883e994f217a806902",
   "reviewed_validation_summary": "`loom installed-state validate --target . --json` passed after the v0.26.3 upgrade; `loom doctor --target . --json` passed; `loom runtime-upgrade check --target . --item GH-139 --issue 139 --pr 141 --branch work/GH-139-loom-v0.26.3-installed-state --head-sha 37d4c6b940817dcc288547bc32ab0f909de03e43 --to 0.26.3 --json` passed with workflow version `0.26.3`; `loom suite validate --target . --item GH-139 --json` returned not_applicable with no missing inputs; `git diff --check` passed; current-head `loom pre-review --target . --item GH-139 --json` hung locally and was interrupted after Harbor, Lode, and App completed the same command successfully, so WebEnvoy pre-review is not claimed as current-head passing evidence. Review-readiness source-distribution tools are not applicable to this consumer repo because `tools/skills_surface.py check` and `tools/loom_check.py --profile source --source-surface contract-only` are absent.",
   "fallback_to": null,
   "findings": [],
@@ -18,13 +18,13 @@
     "status_surface": ".loom/status/current.md",
     "build_checkpoint": "pass",
     "suite_validation": "not_applicable",
-    "pr": 142,
+    "pr": 143,
     "pr_metadata_preflight": "pass",
     "review_run_cli_fallback": "runtime_upgrade_not_applicable_suite",
     "local_pre_review": "interrupted_after_hang"
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored closeout review approved the GH-139 terminal carrier sync head; subsequent drift must remain limited to GH-139 Loom review carrier metadata for this closeout PR."
+    "reason": "Authored final closeout review approved the GH-139 closed_at alignment head; subsequent drift must remain limited to GH-139 Loom review carrier metadata for this final closeout PR."
   }
 }
