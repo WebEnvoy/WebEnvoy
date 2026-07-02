@@ -2,11 +2,11 @@
 
 - Suite path: not_applicable
 
-- Suite-level not_applicable: rationale: Only .loom/installed-state.json metadata changed; no product code, schema, runtime, dependency, fixture, or workflow logic changed.; consumer boundary: Consumers may use this PR only as Loom maintenance metadata refresh evidence; bootstrap residue repair remains separate work under #139.; recheck condition: Require stronger suite coverage if this PR starts changing runtime, schema, workflow, carrier ownership, or bootstrap residue beyond installed-state metadata.; scope proof: Changed paths are limited to .loom/installed-state.json.; review requirement: current_head_review_required.
+- Suite-level not_applicable: rationale: Loom v0.26.3 maintenance upgrade updates repository installed-state metadata and the item-specific Loom carrier required for admission.; consumer boundary: No product runtime, business behavior, or application source changes are included; consumers are Loom governance/admission only.; recheck condition: Re-run Loom installed-state validate, pr metadata preflight, pre-review, review, merge-ready, and hosted merge gate before merge.; scope proof: Changed paths are limited to .loom/installed-state.json and .loom/specs/GH-139/spec.md for the GH-139 maintenance item.; review requirement: current_head_review_required.
 
 ## PR Intent
 
-- Intent profile: docs-governance-only
+- Intent profile: runtime-upgrade-only
 - Work Item: GH-139
-- Change class: docs_governance
+- Change class: runtime_upgrade
 - Review, PR gate, merge-ready, release readback, and closeout evidence remain required by their normal gates.
