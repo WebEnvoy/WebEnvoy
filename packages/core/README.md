@@ -12,6 +12,8 @@ GH-105 adds the minimal structured result/failure output helpers. They advance a
 
 GH-106 adds a minimal run summary projection for API/App consumers. It returns status, timestamps, capability/package refs, admission summary, runtime binding refs, and terminal summary from the Run Record without adding history search or a new storage backend.
 
+GH-107 adds minimal result and evidence-ref query projections. They return public Result Envelope state, structured failure reason, evidence refs, and unavailable/redacted/expired/access-denied states from existing Run Record refs without retrieving raw evidence or adding a result store.
+
 It does not implement Harbor SDK/runtime calls, Lode registry/package body loading, result/evidence body retrieval, database migrations, multi-tenant storage, or true writes.
 
 ```bash

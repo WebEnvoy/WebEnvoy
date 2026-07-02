@@ -39,6 +39,24 @@ export {
   type TerminalRunStatus
 } from "./run-query.js";
 export {
+  evidenceRefsQuerySchemaVersion,
+  getRunEvidenceRefs,
+  getRunResult,
+  projectEvidenceRefs,
+  projectRunResult,
+  resultQuerySchemaVersion,
+  type EvidenceRefSource,
+  type EvidenceRefsQueryEnvelope,
+  type EvidenceRefsQueryResult,
+  type EvidenceRefState,
+  type EvidenceRefSummary,
+  type ResultEnvelopeState,
+  type ResultPayloadState,
+  type ResultQueryEnvelope,
+  type ResultQueryResult,
+  type ResultUnavailableReason
+} from "./result-query.js";
+export {
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
   type HarborUnavailable

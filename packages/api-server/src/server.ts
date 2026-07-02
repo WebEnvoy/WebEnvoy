@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { getRunSummary, type FileRunRecordStore } from "@webenvoy/core-runtime";
+import { getRunEvidenceRefs, getRunResult, getRunSummary, type FailureRecord, type FileRunRecordStore } from "@webenvoy/core-runtime";
 
 type JsonBody = Record<string, unknown>;
 
@@ -18,6 +18,38 @@ function sendJson(response: ServerResponse, statusCode: number, body: JsonBody):
   response.end(`${JSON.stringify(body)}\n`);
 }
 
+function runStoreUnavailable(): FailureRecord {
+  return {
+    category: "persistence_observability",
+    code: "run_store_unavailable",
+    phase: "query",
+    recovery_hint: "contact_operator"
+  };
+}
+
+function invalidRunId(): FailureRecord {
+  return {
+    category: "request_invalid",
+    code: "run_id_invalid",
+    phase: "query",
+    recovery_hint: "fix_input"
+  };
+}
+
+function queryStatusCode(failure: FailureRecord): number {
+  if (failure.code === "run_not_found") return 404;
+  if (failure.code === "run_store_unavailable") return 503;
+  return 400;
+}
+
+function decodeRunId(value: string | undefined): string | undefined {
+  try {
+    return decodeURIComponent(value ?? "");
+  } catch {
+    return undefined;
+  }
+}
+
 async function route(request: IncomingMessage, response: ServerResponse, options: ApiServerOptions): Promise<void> {
   if (request.method !== "GET") {
     sendJson(response, 405, {
@@ -31,6 +63,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
 
   const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
   const runMatch = /^\/runs\/([^/]+)$/.exec(path);
+  const runResultMatch = /^\/runs\/([^/]+)\/result$/.exec(path);
+  const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);
 
   if (path === "/health") {
     sendJson(response, 200, {
@@ -51,32 +85,54 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return;
   }
 
-  if (runMatch) {
+  if (runResultMatch || runEvidenceRefsMatch || runMatch) {
     if (!options.runRecordStore) {
       sendJson(response, 503, {
         ok: false,
-        error: {
-          category: "persistence_observability",
-          code: "run_store_unavailable",
-          phase: "query",
-          recovery_hint: "contact_operator"
-        }
+        error: runStoreUnavailable()
       });
       return;
     }
 
-    let runId: string;
-    try {
-      runId = decodeURIComponent(runMatch[1] ?? "");
-    } catch {
+    const runId = decodeRunId(runResultMatch?.[1] ?? runEvidenceRefsMatch?.[1] ?? runMatch?.[1]);
+    if (runId === undefined) {
       sendJson(response, 400, {
         ok: false,
-        error: {
-          category: "request_invalid",
-          code: "run_id_invalid",
-          phase: "query",
-          recovery_hint: "fix_input"
-        }
+        error: invalidRunId()
+      });
+      return;
+    }
+
+    if (runResultMatch) {
+      const result = await getRunResult(options.runRecordStore, runId);
+      if (result.ok) {
+        sendJson(response, 200, {
+          ok: true,
+          result: result.result
+        });
+        return;
+      }
+
+      sendJson(response, queryStatusCode(result.failure), {
+        ok: false,
+        error: result.failure
+      });
+      return;
+    }
+
+    if (runEvidenceRefsMatch) {
+      const result = await getRunEvidenceRefs(options.runRecordStore, runId);
+      if (result.ok) {
+        sendJson(response, 200, {
+          ok: true,
+          evidence: result.evidence
+        });
+        return;
+      }
+
+      sendJson(response, queryStatusCode(result.failure), {
+        ok: false,
+        error: result.failure
       });
       return;
     }
@@ -90,7 +146,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       return;
     }
 
-    sendJson(response, result.failure.code === "run_not_found" ? 404 : 400, {
+    sendJson(response, queryStatusCode(result.failure), {
       ok: false,
       error: result.failure
     });

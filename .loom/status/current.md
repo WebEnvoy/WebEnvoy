@@ -2,44 +2,42 @@
 
 ## Derived Fact Chain View
 
-- Item ID: GH-106
-- Goal: Provide the minimal run query interface for Core/API consumers.
-- Scope: GH-106 is limited to a Core run summary projection, API Server `GET /runs/:run_id`, API server binding to a local Run Record store, targeted self-checks, and GH-106 item-specific Loom carriers. Ownership is limited to the listed core/api files, package dependency metadata, GH-106 carriers, GH-106 review artifacts when authored, and GH-106 current status alignment.
-- Execution Path: implementation/run-query-v0
+- Item ID: GH-107
+- Goal: Provide minimal result and evidence-ref query interfaces for Core/API consumers.
+- Scope: GH-107 is limited to Core result/evidence-ref query projections, API Server `GET /runs/:run_id/result` and `GET /runs/:run_id/evidence-refs`, targeted self-checks, and GH-107 item-specific Loom carriers. Ownership is limited to the listed core/api files, GH-107 carriers, GH-107 review artifacts when authored, and GH-107 current status alignment.
+- Execution Path: implementation/result-evidence-query-v0
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/GH-106.md
-- Review Entry: .loom/reviews/GH-106.json
-- Validation Entry: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/api-server test`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `git diff --check`; `jq empty .loom/specs/GH-106/build-evidence.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-106 --json`; `loom suite carrier validate --target . --item GH-106 --json`; `loom suite evidence validate --target . --item GH-106 --json`; packaged `loom_flow.py flow build --target . --item GH-106 --build-evidence .loom/specs/GH-106/build-evidence.json`; PR body/head readback.
-- Closing Condition: PR is merged, post-merge closeout evidence is recorded, issue #106 is closed, and FR #96 remains open until GH-107 through GH-110 are complete.
-- Current Checkpoint: merge
-- Current Stop: PR #129 merged into `main` as `dca78c606656868850c58ec140421c6b7d554e47`; GH-106 terminal closeout metadata is staged in this progress carrier for the closeout PR.
-- Next Step: Merge this carrier closeout sync, then close GitHub issue #106 with post-merge evidence. FR #96 remains open until GH-107 through GH-110 are complete.
+- Recovery Entry: .loom/progress/GH-107.md
+- Review Entry: pending
+- Validation Entry: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/api-server test`; `pnpm build`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `git diff --check`; `jq empty .loom/specs/GH-107/build-evidence.json`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-107 --json`; `loom suite carrier validate --target . --item GH-107 --json`; `loom suite evidence validate --target . --item GH-107 --json`; packaged `loom_flow.py flow build --target . --item GH-107 --build-evidence .loom/specs/GH-107/build-evidence.json`; PR body/head readback.
+- Closing Condition: PR is merged, post-merge closeout evidence is recorded, issue #107 is closed, and FR #96 remains open until GH-108 through GH-110 are complete.
+- Current Checkpoint: build
+- Current Stop: Core result/evidence-ref query projections and API Server result/evidence-ref routes are implemented locally on branch `work/GH-107-result-evidence-query`; full local validation, Loom suite checks, and packaged build passed. PR creation, review, hosted checks, merge, post-merge closeout, and issue closure remain pending.
+- Next Step: Commit and push GH-107, create PR for issue #107, then run pre-review/review and hosted merge gates.
 - Blockers: None recorded.
-- Latest Validation Summary: GH-106 validation and merge evidence passed on 2026-07-02 UTC: local checks passed (`pnpm --filter @webenvoy/core-runtime typecheck`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server typecheck`, `pnpm --filter @webenvoy/api-server test`, `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm conformance`, `git diff --check`, `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-106/build-evidence.json`); Loom checks passed (`loom doctor --target . --json`, `loom verify --target . --json`, `loom fact-chain --target . --json`, `loom suite validate --target . --item GH-106 --json`, `loom suite carrier validate --target . --item GH-106 --json`, `loom suite evidence validate --target . --item GH-106 --json`); packaged source-runtime build/pre-review/spec-review/review/merge-ready passed with attempts `GH-106-build-f7b903ee2801-29e02f6b95aa`, `GH-106-pre-review-9f7dffcbb1a8-9d4c96ec25a1`, `GH-106-spec-review-03058bd46629-f7533be612f9`, `GH-106-review-03058bd46629-786ae5346294`, and `GH-106-merge-ready-ca36f859beb0-c6e7aa7f372e`; PR #129 metadata readback passed for `merge_ready` and final head `ca36f859beb09df6284cb95ee7525dcec8da0833`; hosted `py-compile`, `demo-bootstrap`, `repo-local-cli`, `loom-check`, and `loom-pr-merge-gate` passed on PR #129 in run `28561096206`; PR #129 merged into `main` as `dca78c606656868850c58ec140421c6b7d554e47`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Issue closeout remains pending until this post-merge carrier sync is merged; FR #96 remains open until GH-107 through GH-110 complete.
-- Recovery Boundary: Keep GH-106 limited to Core/API run summary query. Do not add result/evidence refs query endpoints (#107), golden run fixture (#108), API/CLI smoke (#109), write-side guardrail (#110), App UI, SDK/MCP full entrypoints, real executor, history search, database/storage backends, Harbor/Lode/App edits, raw evidence retrieval, or true writes.
-- Current Lane: merge
+- Latest Validation Summary: GH-107 local validation passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/api-server test`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `pnpm conformance`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-107/build-evidence.json`; `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-107 --json`; `loom suite carrier validate --target . --item GH-107 --json`; `loom suite evidence validate --target . --item GH-107 --json`; packaged build attempt `GH-107-build-67d13d2bf99b-075ee8ba408f`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. PR metadata readback, pre-review/review, hosted checks, merge, closeout, and issue closure remain pending.
+- Recovery Boundary: Keep GH-107 limited to result envelope/failure/evidence-ref query projections and API routes. Do not add golden run fixture (#108), API/CLI smoke (#109), write-side guardrail (#110), App UI, SDK/MCP full entrypoints, real executor, history search, database/storage backends, Harbor/Lode/App edits, raw evidence retrieval, or true writes.
+- Current Lane: build
 
 ## Runtime Evidence
 
 - Run Entry: not_applicable
 - Logs Entry: not_applicable
 - Diagnostics Entry: not_applicable
-- Verification Entry: .loom/progress/GH-106.md
-- Lane Entry: merge
+- Verification Entry: .loom/progress/GH-107.md
+- Lane Entry: build
 
 ## Sources
 
-- Static Truth: .loom/work-items/GH-106.md
-- Dynamic Truth: .loom/progress/GH-106.md
+- Static Truth: .loom/work-items/GH-107.md
+- Dynamic Truth: .loom/progress/GH-107.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json
 
 ## Notes
 
-- 2026-07-02: Started GH-106 after GH-105 and FR #95 were closed. FR #96 remains open with #106 through #110 open.
-- 2026-07-02: Added Core run summary projection and API Server `GET /runs/:run_id` using existing file-backed Run Record truth.
+- 2026-07-02: Started GH-107 after GH-106 was closed. FR #96 remains open with GH-107 through GH-110 open.
+- 2026-07-02: Added Core result/evidence-ref projections and API Server `GET /runs/:run_id/result` plus `GET /runs/:run_id/evidence-refs` using existing Run Record refs only.
 - 2026-07-02: Targeted Core/API typecheck and self-check passed before full validation.
-- 2026-07-02: Full local validation, Loom suite checks, and packaged build flow passed; review artifacts remain pending until pre-review/review stage.
-- 2026-07-02: PR #129 was created and read back at head `f55483dd895076f27dc601cc5447be1728bcc30a`; source-distribution review-readiness tool checks are not applicable because this consumer repo has no `tools/` directory.
-- 2026-07-02: Packaged pre-review, spec-review, and implementation review passed; checkpoint advanced to merge for hosted checks and merge-ready.
-- 2026-07-02: PR #129 passed local merge-ready attempt `GH-106-merge-ready-ca36f859beb0-c6e7aa7f372e`, hosted required checks in run `28561096206`, and merged into `main` as `dca78c606656868850c58ec140421c6b7d554e47`; terminal closeout metadata was recorded in `.loom/progress/GH-106.md`.
+- 2026-07-02: Full workspace validation and Loom suite checks passed; packaged build remains pending.
+- 2026-07-02: Packaged build flow passed; review artifacts remain pending until pre-review/review stage.
