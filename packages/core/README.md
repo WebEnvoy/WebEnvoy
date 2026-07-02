@@ -8,7 +8,9 @@ GH-103 adds static Lode package admission checks for package refs, capability id
 
 GH-104 adds Core-side validation for Harbor public runtime, viewer, snapshot, refmap, source-trace, and evidence refs; Run Record stores refs only and rejects private runtime/evidence fields.
 
-It does not implement API routes, Harbor SDK/runtime calls, Lode registry/package body loading, result projection, query APIs, database migrations, multi-tenant storage, or true writes.
+GH-105 adds the minimal structured result/failure output helpers. They advance an existing Run Record to terminal success or structured failure and return a public Result Envelope without adding a result store or query API.
+
+It does not implement API routes, Harbor SDK/runtime calls, Lode registry/package body loading, query APIs, database migrations, multi-tenant storage, or true writes.
 
 ```bash
 pnpm --filter @webenvoy/core-runtime test

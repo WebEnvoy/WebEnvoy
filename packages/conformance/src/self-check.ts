@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   createFileRunRecordStore,
+  completeRunWithFailure,
+  completeRunWithResult,
+  resultEnvelopeSchemaVersion,
   runRecordSchemaVersion,
   type AdmissionDecision,
   type FailureRecord,
@@ -178,6 +181,7 @@ function assertRefsOnly(record: RunRecord): void {
 async function assertRunRecordStoreConformance(): Promise<number> {
   const task = await readFixture("read-only-submit.fixture.json");
   const result = await readFixture("result-envelope-success.fixture.json");
+  const failureResult = await readFixture("result-envelope-failure.fixture.json");
   const evidence = await readFixture("evidence-ref-redacted.fixture.json");
   const admissionFailure = await readFixture("admission-failure-run-record.fixture.json");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-conformance-"));
@@ -216,15 +220,60 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
       evidence_refs: [evidenceRef]
     });
-    const succeeded = await store.updateRunRecord(successRunId, {
-      status: "succeeded",
+    const completed = await completeRunWithResult(store, successRunId, {
       result_ref: asString(result.result_ref, "result.result_ref"),
+      result_kind: asString(result.result_kind, "result.result_kind"),
+      data: asObject(result.data, "result.data"),
+      projection_ref: asString(result.projection_ref, "result.projection_ref"),
+      raw_payload_refs: asStringArray(result.raw_payload_refs, "result.raw_payload_refs"),
+      source_refs: asStringArray(result.source_refs, "result.source_refs"),
       evidence_refs: [evidenceRef],
       retention_state: asRetentionState(result.retention_state, "result.retention_state")
     });
+    const succeeded = completed.run_record;
+    assert.equal(completed.result_envelope.schema_version, resultEnvelopeSchemaVersion);
+    assert.equal(completed.result_envelope.ok, true);
+    assert.equal(completed.result_envelope.outcome, "success");
+    assert.equal(completed.result_envelope.result_ref, result.result_ref);
     assert.equal(succeeded.terminal_at, "2026-07-01T01:00:03.000Z");
     assertRefsOnly(succeeded);
     assert.deepEqual(await store.getRunRecord(successRunId), JSON.parse(await readFile(join(directory, `${successRunId}.json`), "utf8")));
+
+    const failureRunId = asString(failureResult.run_record_ref, "failure result.run_record_ref");
+    await store.createRunRecord({
+      run_id: failureRunId,
+      task_intent_ref: asString(task.intent_id, "task.intent_id"),
+      entrypoint_ref: `entrypoint:${asString(task.entrypoint, "task.entrypoint")}`,
+      capability_ref: asString(failureResult.capability_ref, "failure result.capability_ref"),
+      package_ref: asString(failureResult.package_ref, "failure result.package_ref"),
+      admission: {
+        decision: "accepted",
+        action_risk: asActionRisk(policy.risk, "task.policy.risk"),
+        resource_requirement_refs: asStringArray(task.resource_requirement_refs, "task.resource_requirement_refs"),
+        runtime_binding_refs: harborRuntimeBindingRefs,
+        evidence_refs: asStringArray(failureResult.evidence_refs, "failure result.evidence_refs"),
+        resource_match_ref: "resource-match:fixture/ready"
+      }
+    });
+    await store.updateRunRecord(failureRunId, {
+      status: "admitted",
+      runtime_binding_refs: harborRuntimeBindingRefs,
+      evidence_refs: asStringArray(failureResult.evidence_refs, "failure result.evidence_refs")
+    });
+    await store.updateRunRecord(failureRunId, {
+      status: "running",
+      runtime_binding_refs: harborRuntimeBindingRefs,
+      evidence_refs: asStringArray(failureResult.evidence_refs, "failure result.evidence_refs")
+    });
+    const failedResult = await completeRunWithFailure(store, failureRunId, {
+      failure: failureFromFixture(failureResult.failure),
+      evidence_refs: asStringArray(failureResult.evidence_refs, "failure result.evidence_refs"),
+      retention_state: asRetentionState(failureResult.retention_state, "failure result.retention_state")
+    });
+    assert.equal(failedResult.result_envelope.ok, false);
+    assert.equal(failedResult.result_envelope.outcome, "failed");
+    assert.equal(failedResult.result_envelope.failure?.category, "result_projection");
+    assert.equal(failedResult.run_record.failure?.code, "output_invalid");
 
     const failureAdmission = asObject(admissionFailure.admission, "admission failure fixture.admission");
     const failedRunId = asString(admissionFailure.run_id, "admission failure fixture.run_id");
@@ -253,9 +302,9 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     assertRefsOnly(failed);
     assert.deepEqual(
       (await store.listRunRecords()).map((record) => record.run_id),
-      [failedRunId, successRunId].sort()
+      [failedRunId, failureRunId, successRunId].sort()
     );
-    return 2;
+    return 3;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
