@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-109",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-109 implementation head 148a5b11c6d0f17e7b64e45ce508a108410b4a89. The work remains scoped to minimal API/CLI smoke validation over the existing task/run/result/evidence query contracts and GH-108 golden run fixture, excluding GH-110 write guardrail, App UI, SDK/MCP entrypoints, and real execution.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T05:29:09Z",
+  "reviewed_head": "148a5b11c6d0f17e7b64e45ce508a108410b4a89",
+  "reviewed_validation_summary": "GH-109 validation passed on 2026-07-02 UTC at implementation head 148a5b11c6d0f17e7b64e45ce508a108410b4a89: `pnpm --filter @webenvoy/conformance smoke`, `pnpm smoke`, `pnpm --filter @webenvoy/conformance typecheck`, `pnpm --filter @webenvoy/conformance test`, `pnpm --filter @webenvoy/api-server typecheck`, `pnpm --filter @webenvoy/api-server test`, `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm conformance`, `git diff --check`, `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-109/build-evidence.json`, `loom doctor --target . --json`, `loom verify --target . --json`, `loom fact-chain --target . --json`, `loom suite validate --target . --item GH-109 --json`, `loom suite carrier validate --target . --item GH-109 --json`, `loom suite evidence validate --target . --item GH-109 --json`, and packaged `loom_flow.py flow build --target . --item GH-109 --build-evidence .loom/specs/GH-109/build-evidence.json` passed. API/CLI smoke validated golden run `run_fixture_success_001`; packaged build attempts `GH-109-build-fa3e2c52d4bd-533158da6561` and `GH-109-build-ede765a6575b-62be8941131e` passed; packaged pre-review attempt `GH-109-pre-review-148a5b11c6d0-55bb67408de1` passed. PR #135 metadata readback and `loom pr metadata-preflight` passed for branch `work/GH-109-api-cli-smoke` and head 148a5b11c6d0f17e7b64e45ce508a108410b4a89. Hosted `py-compile`, `demo-bootstrap`, `repo-local-cli`, and `loom-check` passed on run 28567314521; hosted `loom-pr-merge-gate` failed only because `.loom/reviews/GH-109.spec.json` and `.loom/reviews/GH-109.json` were not present before this review-carrier commit. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. GH-110 write-side guardrail remains out of scope.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-109.md",
+    "recovery_entry": ".loom/progress/GH-109.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-109/spec.md",
+    "suite_plan": ".loom/specs/GH-109/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-109/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-109/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
