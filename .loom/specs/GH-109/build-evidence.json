@@ -1,0 +1,179 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "GH-109",
+  "parent_fr": "96",
+  "covered_issues": [
+    109
+  ],
+  "ownership_constraints": {
+    "write_scope": [
+      "packages/conformance/src/api-cli-smoke.ts",
+      "packages/conformance/package.json",
+      "packages/conformance/README.md",
+      "packages/api-server/package.json",
+      "package.json",
+      "pnpm-lock.yaml",
+      "README.md",
+      ".loom/work-items/GH-109.md",
+      ".loom/progress/GH-109.md",
+      ".loom/status/current.md",
+      ".loom/bootstrap/init-result.json",
+      ".loom/specs/GH-109/*"
+    ],
+    "forbidden_scope": [
+      "Write-side action request guardrail",
+      "Formal product CLI, SDK/MCP full entrypoints, generated clients, or App integration",
+      "API submission path",
+      "History list/search/filtering, database/ORM/migration tooling, multi-backend abstraction, hosted service storage, or result store",
+      "Browser/runtime executor, Harbor SDK/runtime calls, raw evidence retrieval, live sessions, or Harbor package imports",
+      "Harbor, Lode, App, or other repository changes",
+      "True-write behavior, write operation execution, write reconciliation, complex retry/recovery, or generic browser agent loops"
+    ],
+    "owner": "core-repo-control-thread"
+  },
+  "delegations": [],
+  "integration_evidence": [
+    {
+      "carrier": "api_cli_smoke",
+      "locator": "packages/conformance/src/api-cli-smoke.ts",
+      "summary": "Seeds the GH-108 golden read-only Run Record fixture, queries Core projections through a repo-local CLI mode, queries the same projections through API Server routes, and asserts the outputs match."
+    },
+    {
+      "carrier": "smoke_entrypoints",
+      "locator": "package.json;packages/conformance/package.json",
+      "summary": "Adds root and package smoke scripts for the minimal API/CLI smoke without introducing a formal CLI product package."
+    },
+    {
+      "carrier": "api_package_type_metadata",
+      "locator": "packages/api-server/package.json",
+      "summary": "Exposes generated TypeScript declarations so the smoke can consume the existing API Server workspace package."
+    },
+    {
+      "carrier": "smoke_docs",
+      "locator": "README.md;packages/conformance/README.md",
+      "summary": "Documents the smoke command, query route boundary, and non-product-CLI scope."
+    }
+  ],
+  "suite_path_consumption": {
+    "path": "minimal",
+    "required_artifacts": [
+      ".loom/specs/GH-109/spec.md",
+      ".loom/specs/GH-109/plan.md",
+      ".loom/specs/GH-109/implementation-contract.md"
+    ],
+    "not_applicable_full_artifacts": [
+      "suite-index.md",
+      "research.md",
+      "contracts.md",
+      "readiness-checklist.md",
+      "consistency-analysis",
+      "execution-breakdown"
+    ],
+    "rationale": "Repo-local API/CLI smoke over already-established query contracts and the GH-108 golden fixture without new protocol fields, formal CLI product, App integration, storage backends, raw evidence retrieval, or write behavior.",
+    "consumer_boundary": "Review and PR Ready consume ADR 0003/0005/0007/0008, GH-106/GH-107 query surfaces, GH-108 golden fixture, smoke output, GH-109 carrier, local build/typecheck/test/lint output, PR metadata readback, and hosted checks.",
+    "recheck_condition": "Upgrade to broader suite artifacts when write guardrails, formal CLI/SDK/MCP entrypoints, App UI, generated clients, API submission, database storage, hosted service storage, real execution, or true-write behavior are added."
+  },
+  "validation": {
+    "status": "local_passed_pre_pr",
+    "content_head": "pre_pr_full_local_validation",
+    "commands": [
+      {
+        "command": "pnpm --filter @webenvoy/conformance smoke",
+        "result": "pass",
+        "note": "Validated API/CLI smoke against golden run run_fixture_success_001."
+      },
+      {
+        "command": "pnpm smoke",
+        "result": "pass",
+        "note": "Root smoke command validated API/CLI smoke against golden run run_fixture_success_001."
+      },
+      {
+        "command": "pnpm --filter @webenvoy/conformance typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm --filter @webenvoy/conformance test",
+        "result": "pass",
+        "note": "Validated conformance fixtures with 4 schemas, 6 fixtures, and 4 Run Records."
+      },
+      {
+        "command": "pnpm --filter @webenvoy/api-server typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm --filter @webenvoy/api-server test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm build",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm lint",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm test",
+        "result": "pass",
+        "note": "Validated workspace self-checks, including schemas, Core, API Server, and conformance."
+      },
+      {
+        "command": "pnpm conformance",
+        "result": "pass",
+        "note": "Validated conformance fixtures with 4 schemas, 6 fixtures, and 4 Run Records."
+      },
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/GH-109/build-evidence.json",
+        "result": "pass"
+      },
+      {
+        "command": "loom doctor --target . --json",
+        "result": "pass",
+        "note": "Installed surface diagnostics passed; CLI version freshness was advisory stale but non-blocking."
+      },
+      {
+        "command": "loom verify --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom fact-chain --target . --json",
+        "result": "pass",
+        "note": "Fact chain resolved to GH-109 after progress Evidence Freshness was normalized to `current`."
+      },
+      {
+        "command": "loom suite validate --target . --item GH-109 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite carrier validate --target . --item GH-109 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite evidence validate --target . --item GH-109 --json",
+        "result": "pass",
+        "note": "Evidence map has present behavior, test, and fresh verification evidence."
+      },
+      {
+        "command": "packaged loom_flow.py flow build --target . --item GH-109 --build-evidence .loom/specs/GH-109/build-evidence.json",
+        "result": "pass",
+        "attempt_id": "GH-109-build-fa3e2c52d4bd-533158da6561"
+      },
+      {
+        "command": "review-readiness source-distribution tools",
+        "result": "not_applicable",
+        "note": "Consumer repo has no tools/ directory; tools/skills_surface.py check, tools/loom_check.py --profile source --source-surface contract-only, tools/check_release_surface.py, tools/version_surface_check.py, and tools/check_npm_package.py are absent."
+      }
+    ]
+  },
+  "remaining_risks": [
+    "GH-109 intentionally does not add write-side guardrails, formal CLI product, App UI, SDK/MCP entrypoints, raw evidence retrieval, or true writes; GH-110 owns the remaining write-side guardrail surface for FR #96."
+  ]
+}

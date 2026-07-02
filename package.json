@@ -11,6 +11,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "conformance": "pnpm --filter @webenvoy/core-runtime build && pnpm --filter @webenvoy/conformance test",
+    "smoke": "pnpm --filter @webenvoy/conformance smoke",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm build && pnpm -r test",
     "lint": "pnpm -r lint"

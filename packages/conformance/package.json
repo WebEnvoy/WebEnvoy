@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @webenvoy/core-runtime build && tsc -p tsconfig.json",
-    "typecheck": "pnpm --filter @webenvoy/core-runtime build && tsc -p tsconfig.json --noEmit",
+    "build": "pnpm --filter @webenvoy/api-server build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @webenvoy/api-server build && tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node dist/self-check.js",
-    "lint": "pnpm --filter @webenvoy/core-runtime build && tsc -p tsconfig.json --noEmit"
+    "smoke": "pnpm build && node dist/api-cli-smoke.js",
+    "lint": "pnpm --filter @webenvoy/api-server build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@webenvoy/api-server": "workspace:*",
     "@webenvoy/core-runtime": "workspace:*"
   }
 }

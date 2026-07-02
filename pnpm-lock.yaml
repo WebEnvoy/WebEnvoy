@@ -23,6 +23,9 @@ importers:
 
   packages/conformance:
     dependencies:
+      '@webenvoy/api-server':
+        specifier: workspace:*
+        version: link:../api-server
       '@webenvoy/core-runtime':
         specifier: workspace:*
         version: link:../core
