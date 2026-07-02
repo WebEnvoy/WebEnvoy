@@ -8,6 +8,7 @@ import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference } from "./ha
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
+import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
@@ -346,6 +347,46 @@ try {
     ok: true,
     run: projectRunSummary(succeeded)
   });
+  const successResultQuery = projectRunResult(succeeded);
+  assert.equal(successResultQuery.result.envelope_state, "available");
+  assert.equal(successResultQuery.result.payload_state, "not_persisted_in_core");
+  assert.equal(successResultQuery.result.result_envelope?.ok, true);
+  assert.equal(successResultQuery.result.result_envelope?.result_ref, "result:fixture/read-page-summary");
+  assert.deepEqual(
+    successResultQuery.evidence_refs.map((ref) => ({
+      ref: ref.ref,
+      source: ref.source,
+      state: ref.state,
+      raw_access: ref.raw_access
+    })),
+    [
+      ...harborEvidenceRefs.map((ref) => ({
+        ref,
+        source: "admission" as const,
+        state: "available" as const,
+        raw_access: "not_available_from_core" as const
+      })),
+      {
+        ref: "evidence:fixture/result-summary",
+        source: "terminal",
+        state: "available",
+        raw_access: "not_available_from_core"
+      }
+    ]
+  );
+  assert.deepEqual(await getRunResult(store, runId), {
+    ok: true,
+    result: successResultQuery
+  });
+  assert.deepEqual(await getRunEvidenceRefs(store, runId), {
+    ok: true,
+    evidence: {
+      schema_version: "webenvoy.evidence-refs-query.v0",
+      run_id: runId,
+      status: "succeeded",
+      evidence_refs: successResultQuery.evidence_refs
+    }
+  });
   assert.deepEqual(await getRunSummary(store, "missing_run"), {
     ok: false,
     failure: {
@@ -355,7 +396,25 @@ try {
       recovery_hint: "fix_input"
     }
   });
+  assert.deepEqual(await getRunResult(store, "missing_run"), {
+    ok: false,
+    failure: {
+      category: "persistence_observability",
+      code: "run_not_found",
+      phase: "query",
+      recovery_hint: "fix_input"
+    }
+  });
   assert.deepEqual(await getRunSummary(store, "../bad"), {
+    ok: false,
+    failure: {
+      category: "request_invalid",
+      code: "run_id_invalid",
+      phase: "query",
+      recovery_hint: "fix_input"
+    }
+  });
+  assert.deepEqual(await getRunEvidenceRefs(store, "../bad"), {
     ok: false,
     failure: {
       category: "request_invalid",
@@ -406,6 +465,14 @@ try {
   assert.equal(failedOutput.result_envelope.ok, false);
   assert.equal(failedOutput.result_envelope.outcome, "failed");
   assert.equal(failedOutput.result_envelope.failure?.code, "output_invalid");
+  const failedResultQuery = await getRunResult(store, failedId);
+  assert.equal(failedResultQuery.ok, true);
+  if (!failedResultQuery.ok) {
+    throw new Error("failed run result query must be available");
+  }
+  assert.equal(failedResultQuery.result.result.result_envelope?.ok, false);
+  assert.equal(failedResultQuery.result.failure?.code, "output_invalid");
+  assert.equal(failedResultQuery.result.result.payload_state, "not_persisted_in_core");
 
   const cancelledId = "run_self_check_cancelled_001";
   await store.createRunRecord(baseInput(cancelledId));
@@ -416,6 +483,34 @@ try {
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelled.terminal_at, "2026-07-01T00:00:09.000Z");
 
+  const redactedId = "run_self_check_redacted_001";
+  await store.createRunRecord(baseInput(redactedId));
+  await store.updateRunRecord(redactedId, {
+    status: "admitted",
+    runtime_binding_refs: harborRuntimeBindingRefs,
+    evidence_refs: harborEvidenceRefs
+  });
+  await store.updateRunRecord(redactedId, {
+    status: "running",
+    runtime_binding_refs: harborRuntimeBindingRefs,
+    evidence_refs: harborEvidenceRefs
+  });
+  await completeRunWithResult(store, redactedId, {
+    result_ref: "result:fixture/redacted-summary",
+    result_kind: "content_detail",
+    projection_ref: "projection:fixture/redacted-summary",
+    evidence_refs: ["evidence:fixture/redacted-summary"],
+    retention_state: "redacted"
+  });
+  const redactedResultQuery = await getRunResult(store, redactedId);
+  assert.equal(redactedResultQuery.ok, true);
+  if (!redactedResultQuery.ok) {
+    throw new Error("redacted run result query must be available");
+  }
+  assert.equal(redactedResultQuery.result.result.envelope_state, "redacted");
+  assert.equal(redactedResultQuery.result.result.payload_state, "redacted");
+  assert.equal(redactedResultQuery.result.evidence_refs.at(-1)?.state, "redacted");
+
   await assert.rejects(() => store.updateRunRecord(runId, { status: "running" }), /terminal/);
   await assert.rejects(() => store.updateRunRecord(cancelledId, { status: "running" }), /terminal/);
   await assert.rejects(() => store.createRunRecord({ ...baseInput("../bad"), run_id: "../bad" }), /run_id/);
@@ -423,6 +518,13 @@ try {
   const invalidRefId = "run_self_check_invalid_ref_patch";
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
+  const pendingResultQuery = await getRunResult(store, invalidRefId);
+  assert.equal(pendingResultQuery.ok, true);
+  if (!pendingResultQuery.ok) {
+    throw new Error("pending run result query must return unavailable state");
+  }
+  assert.equal(pendingResultQuery.result.result.envelope_state, "unavailable");
+  assert.equal(pendingResultQuery.result.result.unavailable_reason, "run_not_terminal");
   await assert.rejects(
     () =>
       completeRunWithResult(store, invalidRefId, {
@@ -439,10 +541,10 @@ try {
   const detachedListRunRecords = store.listRunRecords;
   assert.deepEqual(
     (await detachedListRunRecords()).map((record) => record.run_id),
-    [cancelledId, failedId, invalidRefId, runId]
+    [cancelledId, failedId, invalidRefId, runId, redactedId]
   );
 
-  console.log("Validated Run Record file store with 4 durable records.");
+  console.log("Validated Run Record file store with 5 durable records.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

@@ -1,0 +1,51 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-107",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-107 current head f87e94c28465b7318203d2430d861230ffc0541b. The spec and plan are limited to Core/API result and evidence-ref query contracts over existing Run Record refs, with golden fixture, API/CLI smoke, write guardrail, App UI, SDK/MCP entrypoints, history search, raw evidence retrieval, and true writes explicitly deferred to separate Work Items.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T03:24:46Z",
+  "reviewed_head": "f87e94c28465b7318203d2430d861230ffc0541b",
+  "reviewed_validation_summary": "GH-107 local validation, review, and merge-readiness passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/api-server test`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `pnpm conformance`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-107/build-evidence.json .loom/reviews/GH-107.spec.json .loom/reviews/GH-107.json`; `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-107 --json`; `loom suite carrier validate --target . --item GH-107 --json`; `loom suite evidence validate --target . --item GH-107 --json`; packaged build attempt `GH-107-build-67d13d2bf99b-075ee8ba408f`; PR #131 body/head readback passed for `work/GH-107-result-evidence-query` at `f87e94c28465b7318203d2430d861230ffc0541b`; packaged pre-review passed with attempt `GH-107-pre-review-f87e94c28465-c633323a0e3c`; packaged spec-review passed with attempt `GH-107-spec-review-f87e94c28465-0850e419a363`; packaged implementation review passed with attempt `GH-107-review-f87e94c28465-f186656593f9`; packaged merge-ready passed with attempt `GH-107-merge-ready-f87e94c28465-af611e421693`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent. Hosted checks, merge, closeout, and issue closure remain pending.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-107.md",
+    "recovery_entry": ".loom/progress/GH-107.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "/Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py",
+    "suite_validator_mode": "repo-local-cli",
+    "suite_spec": ".loom/specs/GH-107/spec.md",
+    "suite_plan": ".loom/specs/GH-107/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-107/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-107/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}

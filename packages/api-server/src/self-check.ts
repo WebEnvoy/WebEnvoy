@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithResult, createFileRunRecordStore } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore } from "@webenvoy/core-runtime";
 import { createApiServer } from "./server.js";
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
@@ -12,6 +12,11 @@ async function getJson(port: number, path: string): Promise<{ status: number; bo
     status: response.status,
     body: await response.json()
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  assert(value && typeof value === "object" && !Array.isArray(value));
+  return value as Record<string, unknown>;
 }
 
 let tick = 0;
@@ -60,6 +65,44 @@ async function main(): Promise<void> {
     projection_ref: "projection:fixture/read-public-page",
     evidence_refs: ["evidence:fixture/read-public-page"],
     retention_state: "active"
+  });
+  const failureRunId = "run_api_failure_001";
+  await store.createRunRecord({
+    run_id: failureRunId,
+    task_intent_ref: "intent_fixture_read_only_001",
+    entrypoint_ref: "entrypoint:api",
+    capability_ref: "lode:capability/read-public-page",
+    package_ref: "lode://site-capability/example/read-public-page@0.1.0",
+    admission: {
+      decision: "accepted",
+      action_risk: "read",
+      resource_requirement_refs: ["example.read-public-page.resources"],
+      runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
+      evidence_refs: ["evidence:fixture/failure-admission"],
+      resource_match_ref: "resource-match:fixture/ready"
+    },
+    runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
+    evidence_refs: ["evidence:fixture/failure-admission"]
+  });
+  await store.updateRunRecord(failureRunId, {
+    status: "admitted",
+    runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
+    evidence_refs: ["evidence:fixture/failure-admission"]
+  });
+  await store.updateRunRecord(failureRunId, {
+    status: "running",
+    runtime_binding_refs: ["harbor:runtime-session/fixture-ready"],
+    evidence_refs: ["evidence:fixture/failure-admission"]
+  });
+  await completeRunWithFailure(store, failureRunId, {
+    evidence_refs: ["evidence:fixture/output-invalid"],
+    failure: {
+      category: "result_projection",
+      code: "output_invalid",
+      phase: "projection",
+      recovery_hint: "repair_package"
+    },
+    retention_state: "redacted"
   });
 
   const server = createApiServer({ runRecordStore: store });
@@ -129,6 +172,40 @@ async function main(): Promise<void> {
       }
     });
 
+    const resultResponse = await getJson(port, `/runs/${runId}/result`);
+    assert.equal(resultResponse.status, 200);
+    const resultBody = asRecord(resultResponse.body);
+    assert.equal(resultBody.ok, true);
+    const resultEnvelope = asRecord(resultBody.result);
+    assert.equal(resultEnvelope.schema_version, "webenvoy.result-query.v0");
+    assert.equal(resultEnvelope.run_id, runId);
+    assert.equal(resultEnvelope.status, "succeeded");
+    assert.equal(asRecord(resultEnvelope.result).envelope_state, "available");
+    assert.equal(asRecord(resultEnvelope.result).payload_state, "not_persisted_in_core");
+    assert.equal(asRecord(asRecord(resultEnvelope.result).result_envelope).result_ref, "result:fixture/read-public-page");
+
+    const evidenceResponse = await getJson(port, `/runs/${runId}/evidence-refs`);
+    assert.equal(evidenceResponse.status, 200);
+    const evidenceBody = asRecord(evidenceResponse.body);
+    assert.equal(evidenceBody.ok, true);
+    const evidenceEnvelope = asRecord(evidenceBody.evidence);
+    assert.equal(evidenceEnvelope.schema_version, "webenvoy.evidence-refs-query.v0");
+    assert.equal(evidenceEnvelope.run_id, runId);
+    const evidenceRefs = evidenceEnvelope.evidence_refs as unknown[];
+    assert.equal(evidenceRefs.length, 1);
+    assert.equal(asRecord(evidenceRefs[0]).source, "admission_and_terminal");
+    assert.equal(asRecord(evidenceRefs[0]).state, "available");
+
+    const failureResponse = await getJson(port, `/runs/${failureRunId}/result`);
+    assert.equal(failureResponse.status, 200);
+    const failureBody = asRecord(failureResponse.body);
+    assert.equal(failureBody.ok, true);
+    const failureEnvelope = asRecord(failureBody.result);
+    assert.equal(asRecord(failureEnvelope.failure).code, "output_invalid");
+    assert.equal(asRecord(failureEnvelope.result).envelope_state, "redacted");
+    assert.equal(asRecord(failureEnvelope.result).payload_state, "redacted");
+    assert.equal(asRecord(asRecord(failureEnvelope.result).result_envelope).ok, false);
+
     assert.deepEqual(await getJson(port, "/runs/missing_run"), {
       status: 404,
       body: {
@@ -142,7 +219,33 @@ async function main(): Promise<void> {
       }
     });
 
+    assert.deepEqual(await getJson(port, "/runs/missing_run/result"), {
+      status: 404,
+      body: {
+        ok: false,
+        error: {
+          category: "persistence_observability",
+          code: "run_not_found",
+          phase: "query",
+          recovery_hint: "fix_input"
+        }
+      }
+    });
+
     assert.deepEqual(await getJson(port, "/runs/%E0%A4%A"), {
+      status: 400,
+      body: {
+        ok: false,
+        error: {
+          category: "request_invalid",
+          code: "run_id_invalid",
+          phase: "query",
+          recovery_hint: "fix_input"
+        }
+      }
+    });
+
+    assert.deepEqual(await getJson(port, "/runs/%E0%A4%A/evidence-refs"), {
       status: 400,
       body: {
         ok: false,
