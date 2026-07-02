@@ -158,6 +158,21 @@
         "command": "packaged loom_flow.py flow pre-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
         "result": "pass",
         "attempt_id": "GH-105-pre-review-cd137702cc0a-a6c9d4e7a94d"
+      },
+      {
+        "command": "packaged loom_flow.py flow pre-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-pre-review-00ff33d3c240-e0626cb0a84b"
+      },
+      {
+        "command": "packaged loom_flow.py flow spec-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-spec-review-00ff33d3c240-35429f073b70"
+      },
+      {
+        "command": "packaged loom_flow.py flow review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-review-00ff33d3c240-874cfdc352cd"
       }
     ]
   },

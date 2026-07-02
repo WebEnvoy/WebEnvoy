@@ -2,7 +2,7 @@
   "schema_version": "loom-review/v1",
   "item_id": "GH-105",
   "decision": "allow",
-  "kind": "general_review",
+  "kind": "code_review",
   "summary": "Implementation review approved for GH-105 implementation head cd137702cc0a3393460d87931c0af0a806c5898e. The change adds dependency-free Core helpers for terminal success and structured failure envelopes, records terminal result/failure fields through the existing Run Record store, tightens schema/fixture coverage, and leaves API query/App/Harbor/Lode/real execution/storage/write behavior out of scope.",
   "reviewer": "codex-main",
   "authored_at": "2026-07-02T00:49:00Z",
