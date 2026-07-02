@@ -28,6 +28,7 @@
   "required": [
     "schema_version",
     "run_record_ref",
+    "ok",
     "outcome",
     "terminal",
     "capability_ref"
@@ -111,7 +112,17 @@
       "properties": {
         "category": {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "request_invalid",
+            "capability_contract",
+            "resource_admission",
+            "action_risk",
+            "runtime_execution",
+            "result_projection",
+            "evidence_reference",
+            "persistence_observability",
+            "write_outcome"
+          ]
         },
         "code": {
           "type": "string",
@@ -119,7 +130,7 @@
         },
         "phase": {
           "type": "string",
-          "minLength": 1
+          "enum": ["pre_admission", "admission", "resource_matching", "runtime_binding", "execution", "verification", "projection", "evidence", "persistence", "observability", "query", "write_verification", "reconciliation"]
         },
         "recovery_hint": {
           "type": "string",

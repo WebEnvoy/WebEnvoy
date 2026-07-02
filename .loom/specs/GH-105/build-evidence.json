@@ -1,0 +1,182 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "GH-105",
+  "parent_fr": "95",
+  "covered_issues": [
+    105
+  ],
+  "ownership_constraints": {
+    "write_scope": [
+      "packages/core/src/result-envelope.ts",
+      "packages/core/src/index.ts",
+      "packages/core/src/self-check.ts",
+      "packages/core/README.md",
+      "packages/schemas/schemas/result-envelope.schema.json",
+      "packages/schemas/fixtures/result-envelope-failure.fixture.json",
+      "packages/conformance/src/self-check.ts",
+      ".loom/work-items/GH-105.md",
+      ".loom/progress/GH-105.md",
+      ".loom/status/current.md",
+      ".loom/bootstrap/init-result.json",
+      ".loom/specs/GH-105/*"
+    ],
+    "forbidden_scope": [
+      "API query, smoke, App integration, CLI/MCP/SDK-facing query API",
+      "Harbor SDK/runtime calls, browser launches, live sessions, evidence retrieval, or Harbor package imports",
+      "Harbor, Lode, App, or other repository changes",
+      "Lode package body copying, registry store ownership, validator execution, normalizer execution, or post-check execution",
+      "Action execution loop, retry/recovery orchestration, cancel endpoint, or true execution worker",
+      "Database, ORM, migration tooling, multi-backend abstraction, result store, or hosted service storage",
+      "True-write behavior or write reconciliation",
+      "FR #96 query/smoke work"
+    ],
+    "owner": "core-repo-control-thread"
+  },
+  "delegations": [],
+  "integration_evidence": [
+    {
+      "carrier": "result_envelope_helper",
+      "locator": "packages/core/src/result-envelope.ts",
+      "summary": "Adds dependency-free helpers that advance existing Run Records to terminal success or structured failure and return public Result Envelopes."
+    },
+    {
+      "carrier": "result_envelope_schema_fixture",
+      "locator": "packages/schemas/schemas/result-envelope.schema.json;packages/schemas/fixtures/result-envelope-failure.fixture.json",
+      "summary": "Requires `ok`, aligns failure category/phase with Run Record taxonomy, and adds a failure Result Envelope fixture."
+    },
+    {
+      "carrier": "core_self_check",
+      "locator": "packages/core/src/self-check.ts",
+      "summary": "Validates success envelope, failure envelope, Run Record terminal fields, and private/raw result data rejection."
+    },
+    {
+      "carrier": "conformance_check",
+      "locator": "packages/conformance/src/self-check.ts",
+      "summary": "Validates schema fixtures and Run Record store conformance through the success/failure envelope helpers plus admission failure coverage."
+    }
+  ],
+  "suite_path_consumption": {
+    "path": "minimal",
+    "required_artifacts": [
+      ".loom/specs/GH-105/spec.md",
+      ".loom/specs/GH-105/plan.md",
+      ".loom/specs/GH-105/implementation-contract.md"
+    ],
+    "not_applicable_full_artifacts": [
+      "suite-index.md",
+      "research.md",
+      "contracts.md",
+      "readiness-checklist.md",
+      "consistency-analysis",
+      "execution-breakdown"
+    ],
+    "rationale": "Narrow Core runtime PR that adds terminal result/failure output helpers, schema/fixture alignment, and self-check/conformance coverage without query routes, generated clients, live Harbor/Lode calls, storage backends, or cross-repo edits.",
+    "consumer_boundary": "Review and PR Ready consume ADR 0003/0005/0007/0008, the Core helper, Result Envelope schema/fixtures, self-check/conformance output, GH-105 carrier, local build/typecheck/test/lint/conformance output, PR metadata readback, and hosted checks.",
+    "recheck_condition": "Upgrade to broader suite artifacts when API query routes, App/API smoke, evidence retrieval, generated types, CLI/MCP/SDK/App integration, database storage, hosted service storage, true execution, or true-write guardrails are added."
+  },
+  "validation": {
+    "status": "local_passed_pre_pr",
+    "content_head": "pre_pr_local_validation",
+    "commands": [
+      {
+        "command": "pnpm --filter @webenvoy/core-runtime typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm --filter @webenvoy/core-runtime test",
+        "result": "pass",
+        "note": "Validated terminal success envelope, failure envelope, Run Record terminal fields, private/raw result data rejection, and read-only task submission admission."
+      },
+      {
+        "command": "pnpm --filter @webenvoy/schemas test",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm conformance",
+        "result": "pass",
+        "note": "Validated schema fixtures with success/failure Result Envelopes and 3 Run Records."
+      },
+      {
+        "command": "pnpm build",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm lint",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm test",
+        "result": "pass"
+      },
+      {
+        "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/GH-105/build-evidence.json packages/schemas/fixtures/result-envelope-failure.fixture.json packages/schemas/schemas/result-envelope.schema.json",
+        "result": "pass"
+      },
+      {
+        "command": "git diff --check",
+        "result": "pass"
+      },
+      {
+        "command": "loom doctor --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom verify --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom fact-chain --target . --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite validate --target . --item GH-105 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite carrier validate --target . --item GH-105 --json",
+        "result": "pass"
+      },
+      {
+        "command": "loom suite evidence validate --target . --item GH-105 --json",
+        "result": "pass"
+      },
+      {
+        "command": "packaged loom_flow.py flow build --target . --item GH-105 --build-evidence .loom/specs/GH-105/build-evidence.json",
+        "result": "pass",
+        "attempt_id": "GH-105-build-acafe179b9ab-917fe8caabcd"
+      },
+      {
+        "command": "test ! -d tools && for p in tools/skills_surface.py tools/loom_check.py tools/check_release_surface.py tools/version_surface_check.py tools/check_npm_package.py; do test ! -e \"$p\"; done",
+        "result": "pass",
+        "note": "Review-readiness source-distribution tools are not applicable to this consumer repo because there is no tools directory."
+      },
+      {
+        "command": "packaged loom_flow.py flow pre-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-pre-review-cd137702cc0a-a6c9d4e7a94d"
+      },
+      {
+        "command": "packaged loom_flow.py flow pre-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-pre-review-00ff33d3c240-e0626cb0a84b"
+      },
+      {
+        "command": "packaged loom_flow.py flow spec-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-spec-review-00ff33d3c240-35429f073b70"
+      },
+      {
+        "command": "packaged loom_flow.py flow review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-review-00ff33d3c240-874cfdc352cd"
+      }
+    ]
+  },
+  "remaining_risks": [
+    "GH-105 intentionally does not add query APIs or result storage; GH-96 owns API/query/smoke."
+  ]
+}

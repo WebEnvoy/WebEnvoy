@@ -14,6 +14,17 @@ export {
   type RunRecordStatus
 } from "./run-record-store.js";
 export {
+  completeRunWithFailure,
+  completeRunWithResult,
+  resultEnvelopeSchemaVersion,
+  type CompletedRunOutput,
+  type CompleteRunFailureInput,
+  type CompleteRunResultInput,
+  type FailureTerminalStatus,
+  type ResultEnvelope,
+  type ResultOutcome
+} from "./result-envelope.js";
+export {
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
   type HarborUnavailable

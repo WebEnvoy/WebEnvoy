@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
 import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
+import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 
 let tick = 0;
@@ -283,14 +284,26 @@ try {
   });
   assert.equal(running.status, "running");
 
-  const succeeded = await store.updateRunRecord(runId, {
-    status: "succeeded",
+  const completed = await completeRunWithResult(store, runId, {
     result_ref: "result:fixture/read-page-summary",
+    result_kind: "content_detail",
+    data: {
+      title: "Example Domain",
+      summary: "Reserved public Example Domain fixture summary."
+    },
+    projection_ref: "projection:fixture/read-page-summary",
+    raw_payload_refs: ["raw-payload:fixture/redacted"],
+    source_refs: ["source-trace:fixture/read-public-page"],
     evidence_refs: ["evidence:fixture/result-summary"],
     retention_state: "active"
   });
+  const succeeded = completed.run_record;
   assert.equal(succeeded.status, "succeeded");
   assert.equal(succeeded.terminal_at, "2026-07-01T00:00:03.000Z");
+  assert.equal(completed.result_envelope.ok, true);
+  assert.equal(completed.result_envelope.outcome, "success");
+  assert.equal(completed.result_envelope.run_record_ref, runId);
+  assert.equal(completed.result_envelope.result_ref, succeeded.result_ref);
   assertRefsOnly(succeeded);
 
   const reloaded = await store.getRunRecord(runId);
@@ -303,24 +316,40 @@ try {
   await store.createRunRecord({
     ...baseInput(failedId),
     admission: {
-      decision: "blocked_pre_admission",
+      decision: "accepted",
       action_risk: "read",
-      resource_match_ref: "resource-match:fixture/runtime-facts-stale"
+      resource_requirement_refs: ["example.read-public-page.resources"],
+      runtime_binding_refs: harborRuntimeBindingRefs,
+      evidence_refs: harborEvidenceRefs,
+      resource_match_ref: "resource-match:fixture/ready"
     }
   });
-  const failed = await store.updateRunRecord(failedId, {
-    status: "failed",
-    evidence_refs: ["evidence:fixture/runtime-facts-stale"],
+  await store.updateRunRecord(failedId, {
+    status: "admitted",
+    runtime_binding_refs: harborRuntimeBindingRefs,
+    evidence_refs: harborEvidenceRefs
+  });
+  await store.updateRunRecord(failedId, {
+    status: "running",
+    runtime_binding_refs: harborRuntimeBindingRefs,
+    evidence_refs: harborEvidenceRefs
+  });
+  const failedOutput = await completeRunWithFailure(store, failedId, {
+    evidence_refs: ["evidence:fixture/output-invalid"],
     failure: {
-      category: "resource_admission",
-      code: "runtime_facts_stale",
-      phase: "resource_matching",
-      recovery_hint: "connect_runtime"
+      category: "result_projection",
+      code: "output_invalid",
+      phase: "projection",
+      recovery_hint: "repair_package"
     },
     retention_state: "active"
   });
-  assert.equal(failed.failure?.category, "resource_admission");
-  assert.equal(failed.terminal_at, "2026-07-01T00:00:05.000Z");
+  const failed = failedOutput.run_record;
+  assert.equal(failed.failure?.category, "result_projection");
+  assert.equal(failed.terminal_at, "2026-07-01T00:00:07.000Z");
+  assert.equal(failedOutput.result_envelope.ok, false);
+  assert.equal(failedOutput.result_envelope.outcome, "failed");
+  assert.equal(failedOutput.result_envelope.failure?.code, "output_invalid");
 
   const cancelledId = "run_self_check_cancelled_001";
   await store.createRunRecord(baseInput(cancelledId));
@@ -329,7 +358,7 @@ try {
     evidence_refs: ["evidence:fixture/cancelled-by-user"]
   });
   assert.equal(cancelled.status, "cancelled");
-  assert.equal(cancelled.terminal_at, "2026-07-01T00:00:07.000Z");
+  assert.equal(cancelled.terminal_at, "2026-07-01T00:00:09.000Z");
 
   await assert.rejects(() => store.updateRunRecord(runId, { status: "running" }), /terminal/);
   await assert.rejects(() => store.updateRunRecord(cancelledId, { status: "running" }), /terminal/);
@@ -338,6 +367,18 @@ try {
   const invalidRefId = "run_self_check_invalid_ref_patch";
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
+  await assert.rejects(
+    () =>
+      completeRunWithResult(store, invalidRefId, {
+        result_ref: "result:fixture/unsafe",
+        result_kind: "content_detail",
+        data: {
+          token: "must-not-enter-core"
+        },
+        evidence_refs: ["evidence:fixture/unsafe"]
+      }),
+    /forbidden field: token/
+  );
 
   const detachedListRunRecords = store.listRunRecords;
   assert.deepEqual(
