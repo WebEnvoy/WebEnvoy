@@ -1,0 +1,28 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-105",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review approved for GH-105 implementation head cd137702cc0a3393460d87931c0af0a806c5898e. The spec is narrow: Core terminal result/failure envelope helpers, Run Record expression, fixtures, self-check, conformance, and GH-105 carriers only; API query/App/Harbor/Lode/true execution/storage/write work remains out of scope.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T00:49:00Z",
+  "reviewed_head": "cd137702cc0a3393460d87931c0af0a806c5898e",
+  "reviewed_validation_summary": "GH-105 local validation passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm build`; `pnpm typecheck`; `pnpm lint`; `pnpm test`; `jq empty .loom/bootstrap/init-result.json .loom/specs/GH-105/build-evidence.json packages/schemas/fixtures/result-envelope-failure.fixture.json packages/schemas/schemas/result-envelope.schema.json`; `git diff --check`; `loom doctor --target . --json`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item GH-105 --json`; `loom suite carrier validate --target . --item GH-105 --json`; `loom suite evidence validate --target . --item GH-105 --json`; packaged build attempt `GH-105-build-acafe179b9ab-917fe8caabcd`; packaged pre-review attempt `GH-105-pre-review-cd137702cc0a-a6c9d4e7a94d`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-105.md",
+    "recovery_entry": ".loom/progress/GH-105.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "suite_validation": "loom suite validate --target . --item GH-105 --json",
+    "suite_spec": ".loom/specs/GH-105/spec.md",
+    "suite_plan": ".loom/specs/GH-105/plan.md",
+    "suite_evidence_map": ".loom/specs/GH-105/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/GH-105/task-carrier.md"
+    ]
+  }
+}

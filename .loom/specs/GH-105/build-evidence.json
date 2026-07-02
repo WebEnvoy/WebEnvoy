@@ -153,6 +153,11 @@
         "command": "test ! -d tools && for p in tools/skills_surface.py tools/loom_check.py tools/check_release_surface.py tools/version_surface_check.py tools/check_npm_package.py; do test ! -e \"$p\"; done",
         "result": "pass",
         "note": "Review-readiness source-distribution tools are not applicable to this consumer repo because there is no tools directory."
+      },
+      {
+        "command": "packaged loom_flow.py flow pre-review --target . --item GH-105 --issue 105 --pr 127 --branch work/GH-105-result-envelope",
+        "result": "pass",
+        "attempt_id": "GH-105-pre-review-cd137702cc0a-a6c9d4e7a94d"
       }
     ]
   },
