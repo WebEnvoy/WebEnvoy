@@ -1,0 +1,57 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "GH-108",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review approved for GH-108 head 7f57c1230eb760ebd3e2309f6f1dd60ac242970f. The golden fixture is refs-only, conformance verifies generated success Run Record equality and query-store seeding, and validation passed without adding API/CLI smoke, write behavior, App UI, raw evidence access, or external repository changes.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-02T04:20:41Z",
+  "reviewed_head": "7f57c1230eb760ebd3e2309f6f1dd60ac242970f",
+  "reviewed_validation_summary": "GH-108 validation passed on 2026-07-02 UTC: `pnpm --filter @webenvoy/schemas test`, `pnpm --filter @webenvoy/conformance typecheck`, `pnpm --filter @webenvoy/conformance test`, `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm conformance`, `jq empty packages/schemas/fixtures/golden-read-only-run-record.fixture.json .loom/bootstrap/init-result.json .loom/specs/GH-108/build-evidence.json`, and `git diff --check` passed. Loom checks passed: `loom doctor --target . --json`, `loom verify --target . --json`, `loom fact-chain --target . --json`, `loom suite validate --target . --item GH-108 --json`, `loom suite carrier validate --target . --item GH-108 --json`, and `loom suite evidence validate --target . --item GH-108 --json`. Packaged source-runtime build flow passed with attempt `GH-108-build-10a86280f213-2d44adb3dc95`. Review-readiness source-distribution tools are not applicable to this consumer repo because there is no `tools/` directory and `tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are absent.",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/GH-108.md",
+    "recovery_entry": ".loom/progress/GH-108.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite evidence validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-108 --json",
+    "suite_carrier_validation": "/Users/claw/.local/share/mise/installs/python/3.12.13/bin/python3 /Users/claw/.local/share/mise/installs/node/24.14.0/lib/node_modules/@mc-and-his-agents/loom/tools/loom.py suite carrier validate --target /Volumes/2T/.codex/worktrees/6d63/WebEnvoy --item GH-108 --json",
+    "suite_evidence_map": ".loom/specs/GH-108/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/GH-108/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+  }
+}
