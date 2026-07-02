@@ -10,4 +10,12 @@ It also verifies `packages/schemas/fixtures/golden-read-only-run-record.fixture.
 pnpm conformance
 ```
 
-This package does not add a full JSON Schema validator, hosted service, API/CLI smoke entrypoint, API submission path, Harbor/Lode integration, or true writes.
+GH-109 adds the minimal API/CLI smoke over that fixture:
+
+```bash
+pnpm smoke
+```
+
+The smoke seeds a temporary file-backed Run Record store from the golden read-only fixture, reads the run/result/evidence projections through a repo-local CLI query mode, reads the same projections through the API Server query routes, and asserts both paths return the same Core contract shapes.
+
+This package does not add a full JSON Schema validator, hosted service, product CLI, API submission path, Harbor/Lode integration, or true writes.

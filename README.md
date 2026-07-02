@@ -114,13 +114,19 @@ Schema fixture 与 Run Record 本地读写的纵向 conformance check：
 pnpm conformance
 ```
 
+API/CLI smoke 验证首个只读任务 golden run fixture 能通过同一 Core 查询合同被 API Server 和 repo-local CLI smoke 读取：
+
+```bash
+pnpm smoke
+```
+
 启动最小 API Server：
 
 ```bash
 pnpm --filter @webenvoy/api-server start
 ```
 
-当前只提供 `GET /health` 和 `GET /readiness`，用于证明 API Server 骨架可启动；task submission、Run Record、admission、result/query 和写侧 guardrail 由后续 Work Item 落地。
+当前查询入口包括 `GET /health`、`GET /readiness`、`GET /runs/:run_id`、`GET /runs/:run_id/result` 和 `GET /runs/:run_id/evidence-refs`。这些接口只返回 Core Run Record、result envelope 和 evidence ref 的公共投影；写侧 guardrail 由后续 Work Item 落地。
 
 ## 许可证
 
