@@ -20,6 +20,8 @@ The files intentionally stay small:
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
+`fixtures/golden-read-only-run-record.fixture.json` is the first reusable terminal read-only Run Record fixture. It binds the existing read-only task intent, Lode capability/package ref, Harbor runtime refs, result ref, and evidence ref so downstream smoke can query one stable run without inventing new fields.
+
 Run:
 
 ```bash
