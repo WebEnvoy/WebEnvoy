@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_success_001",
+  "status": "succeeded",
+  "created_at": "2026-07-01T01:00:00.000Z",
+  "updated_at": "2026-07-01T01:00:03.000Z",
+  "terminal_at": "2026-07-01T01:00:03.000Z",
+  "task_intent_ref": "intent_fixture_read_only_001",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/read-public-page",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["example.read-public-page.resources"],
+    "runtime_binding_refs": [
+      "session_fixture_ready",
+      "profile_fixture_public",
+      "provider_fixture_local",
+      "viewer_fixture_readonly",
+      "snapshot_fixture_example",
+      "refmap_fixture_example",
+      "source_trace_fixture_example"
+    ],
+    "evidence_refs": ["evidence:fixture/read-public-page"],
+    "resource_match_ref": "resource-match:fixture/ready"
+  },
+  "runtime_binding_refs": ["harbor:runtime-session/fixture-ready"],
+  "result_ref": "result:fixture/read-public-page",
+  "evidence_refs": ["evidence:fixture/read-public-page"],
+  "retention_state": "active"
+}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,9 @@ import {
   createFileRunRecordStore,
   completeRunWithFailure,
   completeRunWithResult,
+  getRunEvidenceRefs,
+  getRunResult,
+  getRunSummary,
   resultEnvelopeSchemaVersion,
   runRecordSchemaVersion,
   type AdmissionDecision,
@@ -178,12 +181,108 @@ function assertRefsOnly(record: RunRecord): void {
   }
 }
 
+function withoutFixtureSchema(value: JsonObject): JsonObject {
+  const normalized = { ...value };
+  delete normalized.$schema;
+  return normalized;
+}
+
+function runRecordFromFixture(value: unknown, label: string): RunRecord {
+  const fixture = asObject(value, label);
+  const record = withoutFixtureSchema(fixture);
+  assert.equal(asString(record.schema_version, `${label}.schema_version`), runRecordSchemaVersion);
+  asString(record.run_id, `${label}.run_id`);
+  const status = asString(record.status, `${label}.status`);
+  assert(["pending", "admitted", "running", "succeeded", "failed", "blocked", "requires_user_action", "manual_recovery_required", "unknown_outcome", "cancelled", "expired"].includes(status), `${label}.status must be known`);
+  asString(record.created_at, `${label}.created_at`);
+  asString(record.updated_at, `${label}.updated_at`);
+  asString(record.task_intent_ref, `${label}.task_intent_ref`);
+  asString(record.capability_ref, `${label}.capability_ref`);
+  if (record.terminal_at !== undefined) asString(record.terminal_at, `${label}.terminal_at`);
+  if (record.entrypoint_ref !== undefined) asString(record.entrypoint_ref, `${label}.entrypoint_ref`);
+  if (record.package_ref !== undefined) asString(record.package_ref, `${label}.package_ref`);
+  if (record.runtime_binding_refs !== undefined) asStringArray(record.runtime_binding_refs, `${label}.runtime_binding_refs`);
+  if (record.result_ref !== undefined) asString(record.result_ref, `${label}.result_ref`);
+  if (record.evidence_refs !== undefined) asStringArray(record.evidence_refs, `${label}.evidence_refs`);
+  if (record.retention_state !== undefined) asRetentionState(record.retention_state, `${label}.retention_state`);
+
+  const admission = asObject(record.admission, `${label}.admission`);
+  const decision = asString(admission.decision, `${label}.admission.decision`);
+  assert(["accepted", "accepted_with_warnings", "blocked_pre_admission", "requires_user_action", "deferred_true_write"].includes(decision), `${label}.admission.decision must be known`);
+  asActionRisk(admission.action_risk, `${label}.admission.action_risk`);
+  if (admission.resource_requirement_refs !== undefined) asStringArray(admission.resource_requirement_refs, `${label}.admission.resource_requirement_refs`);
+  if (admission.runtime_binding_refs !== undefined) asStringArray(admission.runtime_binding_refs, `${label}.admission.runtime_binding_refs`);
+  if (admission.evidence_refs !== undefined) asStringArray(admission.evidence_refs, `${label}.admission.evidence_refs`);
+  if (admission.resource_match_ref !== undefined) asString(admission.resource_match_ref, `${label}.admission.resource_match_ref`);
+  if (record.failure !== undefined) failureFromFixture(record.failure);
+
+  const runRecord = record as RunRecord;
+  assertRefsOnly(runRecord);
+  return runRecord;
+}
+
+function assertGoldenReadOnlyBindings(golden: RunRecord, task: JsonObject, result: JsonObject, evidence: JsonObject): void {
+  const capability = asObject(task.capability, "read-only task capability");
+  const policy = asObject(task.policy, "read-only task policy");
+  const evidenceRef = asString(evidence.ref, "evidence.ref");
+  assert.equal(golden.run_id, asString(result.run_record_ref, "result.run_record_ref"));
+  assert.equal(golden.status, "succeeded");
+  assert.equal(golden.task_intent_ref, asString(task.intent_id, "task.intent_id"));
+  assert.equal(golden.entrypoint_ref, `entrypoint:${asString(task.entrypoint, "task.entrypoint")}`);
+  assert.equal(golden.capability_ref, asString(capability.ref, "task.capability.ref"));
+  assert.equal(golden.package_ref, asString(result.package_ref, "result.package_ref"));
+  assert.equal(golden.admission.decision, "accepted");
+  assert.equal(golden.admission.action_risk, asActionRisk(policy.risk, "task.policy.risk"));
+  assert.deepEqual(golden.admission.resource_requirement_refs, asStringArray(task.resource_requirement_refs, "task.resource_requirement_refs"));
+  assert.deepEqual(golden.admission.runtime_binding_refs, harborRuntimeBindingRefs);
+  assert.deepEqual(golden.admission.evidence_refs, [evidenceRef]);
+  assert.equal(golden.admission.resource_match_ref, "resource-match:fixture/ready");
+  assert.deepEqual(golden.runtime_binding_refs, ["harbor:runtime-session/fixture-ready"]);
+  assert.equal(golden.result_ref, asString(result.result_ref, "result.result_ref"));
+  assert.deepEqual(golden.evidence_refs, [evidenceRef]);
+  assert.equal(golden.retention_state, asRetentionState(result.retention_state, "result.retention_state"));
+}
+
+async function assertGoldenFixtureQueries(goldenFixture: JsonObject, golden: RunRecord, directory: string): Promise<void> {
+  const goldenDirectory = join(directory, "golden");
+  await mkdir(goldenDirectory, { recursive: true });
+  await writeFile(join(goldenDirectory, `${golden.run_id}.json`), `${JSON.stringify(goldenFixture, null, 2)}\n`, "utf8");
+
+  const goldenStore = createFileRunRecordStore({ directory: goldenDirectory });
+  const seeded = await goldenStore.getRunRecord(golden.run_id);
+  assert(seeded, "golden fixture must seed a file-backed Run Record store");
+  assert.deepEqual(withoutFixtureSchema(seeded as unknown as JsonObject), golden);
+
+  const runSummary = await getRunSummary(goldenStore, golden.run_id);
+  if (!runSummary.ok) assert.fail(runSummary.failure.code);
+  assert.equal(runSummary.run.status, "succeeded");
+  assert.equal(runSummary.run.terminal_summary?.result_ref, golden.result_ref);
+
+  const resultQuery = await getRunResult(goldenStore, golden.run_id);
+  if (!resultQuery.ok) assert.fail(resultQuery.failure.code);
+  assert.equal(resultQuery.result.result.envelope_state, "available");
+  assert.equal(resultQuery.result.result.payload_state, "not_persisted_in_core");
+  assert.equal(resultQuery.result.result.result_envelope?.ok, true);
+  assert.equal(resultQuery.result.result.result_envelope?.result_ref, golden.result_ref);
+
+  const evidenceQuery = await getRunEvidenceRefs(goldenStore, golden.run_id);
+  if (!evidenceQuery.ok) assert.fail(evidenceQuery.failure.code);
+  assert.equal(evidenceQuery.evidence.evidence_refs.length, 1);
+  const evidenceSummary = evidenceQuery.evidence.evidence_refs[0];
+  assert(evidenceSummary, "golden fixture query must return one evidence ref");
+  assert.equal(evidenceSummary.ref, golden.evidence_refs?.[0]);
+  assert.equal(evidenceSummary.source, "admission_and_terminal");
+  assert.equal(evidenceSummary.state, "available");
+  assert.equal(evidenceSummary.raw_access, "not_available_from_core");
+}
+
 async function assertRunRecordStoreConformance(): Promise<number> {
   const task = await readFixture("read-only-submit.fixture.json");
   const result = await readFixture("result-envelope-success.fixture.json");
   const failureResult = await readFixture("result-envelope-failure.fixture.json");
   const evidence = await readFixture("evidence-ref-redacted.fixture.json");
   const admissionFailure = await readFixture("admission-failure-run-record.fixture.json");
+  const goldenFixture = await readFixture("golden-read-only-run-record.fixture.json");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-conformance-"));
 
   try {
@@ -193,6 +292,8 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     const successRunId = asString(result.run_record_ref, "result.run_record_ref");
     const evidenceRef = asString(evidence.ref, "evidence.ref");
     assert(asStringArray(result.evidence_refs, "result.evidence_refs").includes(evidenceRef), "result fixture must reference the evidence fixture");
+    const goldenRun = runRecordFromFixture(goldenFixture, "golden run fixture");
+    assertGoldenReadOnlyBindings(goldenRun, task, result, evidence);
 
     const created = await store.createRunRecord({
       run_id: successRunId,
@@ -237,6 +338,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     assert.equal(completed.result_envelope.result_ref, result.result_ref);
     assert.equal(succeeded.terminal_at, "2026-07-01T01:00:03.000Z");
     assertRefsOnly(succeeded);
+    assert.deepEqual(succeeded, goldenRun, "generated success Run Record must match the golden fixture");
     assert.deepEqual(await store.getRunRecord(successRunId), JSON.parse(await readFile(join(directory, `${successRunId}.json`), "utf8")));
 
     const failureRunId = asString(failureResult.run_record_ref, "failure result.run_record_ref");
@@ -304,7 +406,8 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       (await store.listRunRecords()).map((record) => record.run_id),
       [failedRunId, failureRunId, successRunId].sort()
     );
-    return 3;
+    await assertGoldenFixtureQueries(goldenFixture, goldenRun, directory);
+    return 4;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
