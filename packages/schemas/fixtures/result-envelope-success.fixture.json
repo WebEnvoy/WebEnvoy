@@ -7,6 +7,7 @@
   "outcome": "success",
   "terminal": true,
   "result_kind": "content_detail",
+  "output_schema_id": "example.read-public-page.output",
   "capability_ref": "lode:capability/read-public-page",
   "capability_version": "0.1.0",
   "capability_source_ref": "lode://site-capability/example/read-public-page@0.1.0",

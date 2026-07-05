@@ -19,6 +19,7 @@ export type ResultEnvelope = {
   result_ref?: string;
   result_kind?: string;
   package_ref?: string;
+  output_schema_id?: string;
   data?: Record<string, unknown>;
   projection_ref?: string;
   raw_payload_refs?: string[];
@@ -32,6 +33,7 @@ export type ResultEnvelope = {
 export type CompleteRunResultInput = {
   result_ref: string;
   result_kind: string;
+  output_schema_id?: string;
   data?: Record<string, unknown>;
   projection_ref?: string;
   raw_payload_refs?: readonly string[];
@@ -154,6 +156,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
       outcome: "success",
       result_ref: input.result_ref,
       result_kind: requireRef(input.result_kind, "result_kind"),
+      ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
       ...(input.data === undefined ? {} : { data: input.data }),
       ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
       ...(input.raw_payload_refs === undefined ? {} : { raw_payload_refs: copyRequiredRefs(input.raw_payload_refs, "raw_payload_refs") }),

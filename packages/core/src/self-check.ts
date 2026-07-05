@@ -374,6 +374,7 @@ try {
   const completed = await completeRunWithResult(store, runId, {
     result_ref: "result:fixture/read-page-summary",
     result_kind: "content_detail",
+    output_schema_id: "example.read-public-page.output",
     data: {
       title: "Example Domain",
       summary: "Reserved public Example Domain fixture summary."
@@ -400,6 +401,7 @@ try {
   assert.equal(completed.result_envelope.outcome, "success");
   assert.equal(completed.result_envelope.run_record_ref, runId);
   assert.equal(completed.result_envelope.result_ref, succeeded.result_ref);
+  assert.equal(completed.result_envelope.output_schema_id, "example.read-public-page.output");
   assertRefsOnly(succeeded);
   assert.deepEqual(projectRunSummary(succeeded), {
     schema_version: runQuerySchemaVersion,
