@@ -1,0 +1,35 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-167",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review accepts action request schema, risk classification taxonomy, no-submit guard recording, Lode/Harbor write-precheck admission, and conformance fixture coverage for Core #167/#168/#169/#170.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T19:13:00Z",
+  "reviewed_head": "96e606e8b363fa880b17dce91c6d4fd30644150f",
+  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom verify --target . --json`; `loom fact-chain --target . --json` passed locally.",
+  "reviewed_validation_summary_hash": "3b305f632079e99e249a4b16471d1d4899d0f64e78d61271fbac6d091822cffe",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-167.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-167.md",
+    "recovery_entry": ".loom/progress/CORE-167.md",
+    "status_surface": ".loom/status/current.md",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-167 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-167 --json",
+    "suite_evidence_map": ".loom/specs/CORE-167/evidence-map.md",
+    "suite_task_carriers": [".loom/specs/CORE-167/task-carrier.md"]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Validate-only write-precheck requests record refs, risk, and guard status only. True submit intents remain fail-closed with no-submit guard facts."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "Core, schema, conformance, typecheck, diff, and Loom local gates passed; implementation does not store raw Harbor material or Lode package bodies."
+  }
+}
