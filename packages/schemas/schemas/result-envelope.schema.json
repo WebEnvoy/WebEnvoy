@@ -72,6 +72,10 @@
       "type": "string",
       "minLength": 1
     },
+    "output_schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "capability_ref": {
       "type": "string",
       "minLength": 1
