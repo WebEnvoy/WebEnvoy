@@ -10,3 +10,12 @@
 - Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item CORE-172 --json`; `loom suite evidence validate --target . --item CORE-172 --json`; `loom suite carrier validate --target . --item CORE-172 --json` passed locally.
 - Recovery Boundary: Core approval/cancellation refs and query truth only; no approval execution, true writes, submitted results, unknown outcome, reconciliation, App UI, Lode package truth, or Harbor raw/private material.
 - Current Lane: stage6 approval cancellation semantics
+
+## Execution Ledger
+
+- Ledger Binding: recovery_entry
+- Plan Locator: .loom/specs/CORE-172/plan.md
+- Acceptance Locator: .loom/specs/CORE-172/spec.md
+- Validation Evidence Locator: .loom/specs/CORE-172/evidence-map.md
+- Handoff Notes Locator: .loom/specs/CORE-172/task-carrier.md
+- Evidence Freshness: current
