@@ -2,11 +2,11 @@
   "schema_version": "loom-review/v1",
   "item_id": "CORE-147",
   "decision": "allow",
-  "kind": "general_review",
-  "summary": "Implementation review accepts the Core read-only capability attribution schema/runtime/conformance changes for PR #160.",
+  "kind": "code_review",
+  "summary": "Carrier-only closeout review accepts CORE-147 terminal metadata and idle pointer sync after PR #160 merged and issue #147 closed.",
   "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
-  "authored_at": "2026-07-05T11:01:49Z",
-  "reviewed_head": "4c06835067e056f48796894542f847629d07f0b5",
+  "authored_at": "2026-07-05T11:33:00Z",
+  "reviewed_head": "94108809eecaf1ffe122a25fa4d7ccfd4ae1e6e5",
   "reviewed_validation_summary": "pnpm test -- --runInBand, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed on CORE-147.",
   "reviewed_validation_summary_hash": "aa538a0109e4f79cb7288f11c6d3848ee0805858776b503ef4705d4390e89df4",
   "validation_summary_source": "recovery.latest_validation_summary",
@@ -55,6 +55,14 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+    "reason": "Authored closeout review approved only CORE-147 terminal carrier metadata and idle pointer restoration; implementation behavior was already reviewed and merged in PR #160."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "Implementation behavior was reviewed and merged in PR #160; this carrier-only review covers only post-merge closeout metadata."
+  },
+  "carrier_only_closeout_review": {
+    "status": "passed",
+    "reason": "Closeout changes are limited to CORE-147 terminal metadata, issue/PR/merge evidence, and no_active_item pointer restoration."
   }
 }
