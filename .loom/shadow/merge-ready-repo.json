@@ -1,0 +1,9 @@
+{
+  "result": "pass",
+  "source_files": [
+    ".loom/companion/merge-ready.md"
+  ],
+  "source_sha256": {
+    ".loom/companion/merge-ready.md": "9abde0cc15d2dc28f73f853005deca8f4929ac19877f9035136a7f442aad5471"
+  }
+}
