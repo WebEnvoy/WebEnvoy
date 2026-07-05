@@ -6,7 +6,7 @@
   "summary": "Implementation review accepts preview Result Envelope projection, expected change projection, preview failure classes, action/evidence/capability refs, schema fixtures, and self-check coverage for Core #177/#178/#179/#180.",
   "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
   "authored_at": "2026-07-05T20:30:00Z",
-  "reviewed_head": "e0b75692d92bd2c1bc94ef0f5db7fa8c661902ab",
+  "reviewed_head": "945a45e06667c6db0d36290305727a99d4fb3b39",
   "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item CORE-177 --json`; `loom suite evidence validate --target . --item CORE-177 --json`; `loom suite carrier validate --target . --item CORE-177 --json` passed locally.",
   "reviewed_validation_summary_hash": "67a76bcae376fbe66ca351a3a3b5b95bd0cd700a6cbf0568425affa3feaf9f5a",
   "validation_summary_source": "recovery.latest_validation_summary",
