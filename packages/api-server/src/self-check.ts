@@ -37,6 +37,9 @@ async function main(): Promise<void> {
     task_intent_ref: "intent_fixture_read_only_001",
     entrypoint_ref: "entrypoint:api",
     capability_ref: "lode:capability/read-public-page",
+    capability_version: "0.1.0",
+    capability_source_ref: "lode://site-capability/example/read-public-page@0.1.0",
+    capability_lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
     package_ref: "lode://site-capability/example/read-public-page@0.1.0",
     admission: {
       decision: "accepted",
@@ -72,6 +75,9 @@ async function main(): Promise<void> {
     task_intent_ref: "intent_fixture_read_only_001",
     entrypoint_ref: "entrypoint:api",
     capability_ref: "lode:capability/read-public-page",
+    capability_version: "0.1.0",
+    capability_source_ref: "lode://site-capability/example/read-public-page@0.1.0",
+    capability_lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
     package_ref: "lode://site-capability/example/read-public-page@0.1.0",
     admission: {
       decision: "accepted",
@@ -101,6 +107,17 @@ async function main(): Promise<void> {
       code: "output_invalid",
       phase: "projection",
       recovery_hint: "repair_package"
+    },
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "failed",
+      summary: "Normalized output did not satisfy the public result contract.",
+      checked_at: "2026-07-01T02:00:07.000Z",
+      code: "output_invalid",
+      attribution: "capability",
+      recovery_hint: "repair_package",
+      evidence_refs: ["evidence:fixture/output-invalid"],
+      consumer_boundary: "Core stores post-check refs and public status only."
     },
     retention_state: "redacted"
   });
@@ -148,6 +165,9 @@ async function main(): Promise<void> {
           task: {
             task_intent_ref: "intent_fixture_read_only_001",
             capability_ref: "lode:capability/read-public-page",
+            capability_version: "0.1.0",
+            capability_source_ref: "lode://site-capability/example/read-public-page@0.1.0",
+            capability_lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
             entrypoint_ref: "entrypoint:api",
             package_ref: "lode://site-capability/example/read-public-page@0.1.0"
           },
@@ -202,9 +222,36 @@ async function main(): Promise<void> {
     assert.equal(failureBody.ok, true);
     const failureEnvelope = asRecord(failureBody.result);
     assert.equal(asRecord(failureEnvelope.failure).code, "output_invalid");
+    assert.equal(asRecord(failureEnvelope.failure).attribution, "capability");
     assert.equal(asRecord(failureEnvelope.result).envelope_state, "redacted");
     assert.equal(asRecord(failureEnvelope.result).payload_state, "redacted");
     assert.equal(asRecord(asRecord(failureEnvelope.result).result_envelope).ok, false);
+
+    const capabilityRunsResponse = await getJson(port, "/capability-runs?capability_ref=lode%3Acapability%2Fread-public-page&capability_version=0.1.0");
+    assert.equal(capabilityRunsResponse.status, 200);
+    const capabilityRunsBody = asRecord(capabilityRunsResponse.body);
+    assert.equal(capabilityRunsBody.ok, true);
+    const capabilityRuns = asRecord(capabilityRunsBody.capability_runs);
+    assert.equal(capabilityRuns.schema_version, "webenvoy.capability-run-query.v0");
+    assert.equal(capabilityRuns.total_runs, 2);
+    assert.equal(asRecord(capabilityRuns.status_counts).succeeded, 1);
+    assert.equal(asRecord(capabilityRuns.status_counts).failed, 1);
+    assert.equal(asRecord(capabilityRuns.failure_attribution_counts).capability, 1);
+    assert.equal(asRecord(capabilityRuns.latest_failure).run_id, failureRunId);
+
+    assert.deepEqual(await getJson(port, "/capability-runs"), {
+      status: 400,
+      body: {
+        ok: false,
+        error: {
+          category: "request_invalid",
+          code: "capability_ref_required",
+          phase: "query",
+          recovery_hint: "fix_input",
+          attribution: "input"
+        }
+      }
+    });
 
     assert.deepEqual(await getJson(port, "/runs/missing_run"), {
       status: 404,

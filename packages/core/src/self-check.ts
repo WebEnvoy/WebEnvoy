@@ -10,6 +10,7 @@ import { completeRunWithFailure, completeRunWithResult } from "./result-envelope
 import { getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
 import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
+import { capabilityRunQuerySchemaVersion, getCapabilityRunSummary } from "./capability-query.js";
 
 let tick = 0;
 
@@ -307,6 +308,19 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(lockMismatch.ok, false);
     assert.equal(lockMismatch.failure.code, "package_lock_mismatch");
 
+    const brokenLifecycle = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_lode_broken_lifecycle",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: {
+        ...lodeReadPublicPageContract,
+        lifecycle: "broken"
+      }
+    });
+    assert.equal(brokenLifecycle.ok, false);
+    assert.equal(brokenLifecycle.failure.code, "capability_broken");
+    assert.equal(brokenLifecycle.failure.attribution, "capability");
+
     const writeContract = {
       ...lodeReadPublicPageContract,
       operation_mode: "write",
@@ -368,6 +382,15 @@ try {
     raw_payload_refs: ["raw-payload:fixture/redacted"],
     source_refs: ["source-trace:fixture/read-public-page"],
     evidence_refs: ["evidence:fixture/result-summary"],
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "passed",
+      summary: "Required public title and summary fields were projected.",
+      checked_at: "2026-07-01T00:00:03.000Z",
+      evidence_refs: ["evidence:fixture/result-summary"],
+      source_refs: ["source-trace:fixture/read-public-page"],
+      consumer_boundary: "Core stores post-check refs and public status only."
+    },
     retention_state: "active"
   });
   const succeeded = completed.run_record;
@@ -411,6 +434,12 @@ try {
       status: "succeeded",
       terminal_at: "2026-07-01T00:00:03.000Z",
       result_ref: "result:fixture/read-page-summary",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "passed",
+        summary: "Required public title and summary fields were projected.",
+        checked_at: "2026-07-01T00:00:03.000Z"
+      },
       retention_state: "active"
     }
   });
@@ -431,20 +460,26 @@ try {
       ref: ref.ref,
       source: ref.source,
       state: ref.state,
-      raw_access: ref.raw_access
+      raw_access: ref.raw_access,
+      capability_ref: ref.capability_ref,
+      capability_version: ref.capability_version
     })),
     [
       ...harborEvidenceRefs.map((ref) => ({
         ref,
         source: "admission" as const,
         state: "available" as const,
-        raw_access: "not_available_from_core" as const
+        raw_access: "not_available_from_core" as const,
+        capability_ref: "lode:capability/read-public-page",
+        capability_version: "0.1.0"
       })),
       {
         ref: "evidence:fixture/result-summary",
         source: "terminal",
         state: "available",
-        raw_access: "not_available_from_core"
+        raw_access: "not_available_from_core",
+        capability_ref: "lode:capability/read-public-page",
+        capability_version: "0.1.0"
       }
     ]
   );
@@ -531,14 +566,27 @@ try {
       phase: "projection",
       recovery_hint: "repair_package"
     },
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "failed",
+      summary: "Normalized output did not satisfy the public result contract.",
+      checked_at: "2026-07-01T00:00:07.000Z",
+      code: "output_invalid",
+      attribution: "capability",
+      recovery_hint: "repair_package",
+      evidence_refs: ["evidence:fixture/output-invalid"],
+      consumer_boundary: "Core stores post-check refs and public status only."
+    },
     retention_state: "active"
   });
   const failed = failedOutput.run_record;
   assert.equal(failed.failure?.category, "result_projection");
+  assert.equal(failed.failure?.attribution, "capability");
   assert.equal(failed.terminal_at, "2026-07-01T00:00:07.000Z");
   assert.equal(failedOutput.result_envelope.ok, false);
   assert.equal(failedOutput.result_envelope.outcome, "failed");
   assert.equal(failedOutput.result_envelope.failure?.code, "output_invalid");
+  assert.equal(failedOutput.result_envelope.post_check?.status, "failed");
   const failedResultQuery = await getRunResult(store, failedId);
   assert.equal(failedResultQuery.ok, true);
   if (!failedResultQuery.ok) {
@@ -546,7 +594,24 @@ try {
   }
   assert.equal(failedResultQuery.result.result.result_envelope?.ok, false);
   assert.equal(failedResultQuery.result.failure?.code, "output_invalid");
+  assert.equal(failedResultQuery.result.failure?.attribution, "capability");
   assert.equal(failedResultQuery.result.result.payload_state, "not_persisted_in_core");
+
+  const capabilityRuns = await getCapabilityRunSummary(store, {
+    capability_ref: "lode:capability/read-public-page",
+    capability_version: "0.1.0"
+  });
+  assert.equal(capabilityRuns.ok, true);
+  if (!capabilityRuns.ok) {
+    throw new Error("capability run query must succeed");
+  }
+  assert.equal(capabilityRuns.capability_runs.schema_version, capabilityRunQuerySchemaVersion);
+  assert.equal(capabilityRuns.capability_runs.total_runs, 2);
+  assert.equal(capabilityRuns.capability_runs.status_counts.succeeded, 1);
+  assert.equal(capabilityRuns.capability_runs.status_counts.failed, 1);
+  assert.equal(capabilityRuns.capability_runs.failure_attribution_counts.capability, 1);
+  assert.equal(capabilityRuns.capability_runs.latest_failure?.run_id, failedId);
+  assert.equal(capabilityRuns.capability_runs.latest_failure?.post_check?.status, "failed");
 
   const cancelledId = "run_self_check_cancelled_001";
   await store.createRunRecord(baseInput(cancelledId));

@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_failure_attribution_001",
+  "status": "failed",
+  "created_at": "2026-07-01T03:00:00.000Z",
+  "updated_at": "2026-07-01T03:00:03.000Z",
+  "terminal_at": "2026-07-01T03:00:03.000Z",
+  "task_intent_ref": "intent_fixture_read_only_001",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/read-public-page",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["example.read-public-page.resources"],
+    "runtime_binding_refs": ["harbor:runtime-session/fixture-ready"],
+    "evidence_refs": ["evidence:fixture/output-invalid"],
+    "resource_match_ref": "resource-match:fixture/ready"
+  },
+  "runtime_binding_refs": ["harbor:runtime-session/fixture-ready"],
+  "evidence_refs": ["evidence:fixture/output-invalid"],
+  "failure": {
+    "category": "result_projection",
+    "code": "output_invalid",
+    "phase": "projection",
+    "recovery_hint": "repair_package",
+    "attribution": "capability"
+  },
+  "post_check": {
+    "schema_version": "webenvoy.post-check-result.v0",
+    "status": "failed",
+    "summary": "Normalized output did not satisfy the public result contract.",
+    "checked_at": "2026-07-01T03:00:03.000Z",
+    "code": "output_invalid",
+    "attribution": "capability",
+    "recovery_hint": "repair_package",
+    "evidence_refs": ["evidence:fixture/output-invalid"],
+    "source_refs": ["source-trace:fixture/read-public-page"],
+    "consumer_boundary": "Core records post-check refs and public status only; raw Harbor evidence remains outside Core."
+  },
+  "retention_state": "active"
+}

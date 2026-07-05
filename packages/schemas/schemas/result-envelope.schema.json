@@ -150,6 +150,62 @@
         "recovery_hint": {
           "type": "string",
           "minLength": 1
+        },
+        "attribution": {
+          "type": "string",
+          "enum": ["capability", "input", "runtime", "site", "evidence", "unknown"]
+        }
+      }
+    },
+    "post_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "status", "summary", "consumer_boundary"],
+      "properties": {
+        "schema_version": {
+          "const": "webenvoy.post-check-result.v0"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "blocked", "not_run"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attribution": {
+          "type": "string",
+          "enum": ["capability", "input", "runtime", "site", "evidence", "unknown"]
+        },
+        "recovery_hint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "consumer_boundary": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

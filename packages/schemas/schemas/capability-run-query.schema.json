@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/capability-run-query.v0.schema.json",
+  "title": "WebEnvoy Core Capability Run Query v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Query",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.capability-run-query.v0",
+    "compatibility_boundary": "Core returns run summaries, failure attribution, post-check summaries, and refs only. Capability/package truth remains in Lode and evidence/runtime truth remains in Harbor.",
+    "source_adrs": [
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "capability_ref": "Lode owns referenced capability",
+      "capability_version": "Lode owns referenced capability version",
+      "latest_run": "Core projects Run Record summary",
+      "latest_failure": "Core projects failure attribution and post-check summary",
+      "runs": "Core projects Run Record summaries"
+    }
+  },
+  "required": [
+    "schema_version",
+    "capability_ref",
+    "total_runs",
+    "returned_runs",
+    "status_counts",
+    "failure_attribution_counts",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.capability-run-query.v0"
+    },
+    "capability_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "total_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "returned_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "failure_attribution_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "input", "runtime", "site", "evidence", "unknown"],
+      "properties": {
+        "capability": {"type": "integer", "minimum": 0},
+        "input": {"type": "integer", "minimum": 0},
+        "runtime": {"type": "integer", "minimum": 0},
+        "site": {"type": "integer", "minimum": 0},
+        "evidence": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0}
+      }
+    },
+    "latest_run": {
+      "type": "object"
+    },
+    "latest_failure": {
+      "type": "object"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

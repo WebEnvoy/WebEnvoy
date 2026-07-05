@@ -1,0 +1,9 @@
+{
+  "schema_version": "loom-review-record/v1",
+  "item": "CORE-148",
+  "review_type": "spec",
+  "reviewed_head": "pending-head",
+  "decision": "approved",
+  "summary": "Spec scope matches Stage 5 Core truth ownership and excludes #151, App UI, Harbor raw evidence, Lode package truth, and Stage 6.",
+  "findings": []
+}
