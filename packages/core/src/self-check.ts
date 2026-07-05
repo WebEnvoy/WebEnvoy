@@ -7,7 +7,7 @@ import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } fro
 import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
-import { getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
+import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
 import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 import { capabilityRunQuerySchemaVersion, getCapabilityRunSummary } from "./capability-query.js";
@@ -368,6 +368,94 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.deepEqual(validateOnlyActionRequest.run_record.action_request?.no_submit_guard.blocked_execution_intents, ["execute_after_approval", "reconcile_status", "request_cancel"]);
     assert.equal(validateOnlyActionRequest.run_record.action_request?.target_refs?.writable_target_ref, "target:fixture/contact-form");
     assert.deepEqual(validateOnlyActionRequest.run_record.evidence_refs, ["evidence_fixture_write_precheck"]);
+    const actionRequest = validateOnlyActionRequest.run_record.action_request;
+    assert(actionRequest, "validate-only run must carry action request");
+    const approvalEvidenceRefs = [...(actionRequest.evidence_refs ?? [])];
+    const approvalRunBase = {
+      task_intent_ref: actionRequest.task_intent_ref,
+      entrypoint_ref: "entrypoint:app",
+      capability_ref: actionRequest.capability_ref,
+      ...(actionRequest.capability_version === undefined ? {} : { capability_version: actionRequest.capability_version }),
+      ...(actionRequest.capability_source_ref === undefined ? {} : { capability_source_ref: actionRequest.capability_source_ref }),
+      ...(actionRequest.capability_lock_ref === undefined ? {} : { capability_lock_ref: actionRequest.capability_lock_ref }),
+      ...(actionRequest.package_ref === undefined ? {} : { package_ref: actionRequest.package_ref })
+    };
+    const approvalRequest = {
+      schema_version: "webenvoy.approval-request.v0" as const,
+      approval_request_id: "approval-request:fixture/preview-contact-form",
+      action_request_id: actionRequest.action_request_id,
+      task_intent_ref: actionRequest.task_intent_ref,
+      status: "pending" as const,
+      requested_at: "2026-07-01T00:00:10.000Z",
+      expires_at: "2026-07-01T00:10:10.000Z",
+      risk: "write" as const,
+      blocking_reasons: ["approval_required_before_submit"],
+      source_refs: actionRequest.no_submit_guard.source_refs,
+      evidence_refs: approvalEvidenceRefs,
+      consumer_boundary: "Core stores approval state and refs only; this is not approval execution or submitted result evidence."
+    };
+    const pendingApproval = await store.createRunRecord({
+      run_id: "run_self_check_approval_pending",
+      status: "requires_user_action",
+      ...approvalRunBase,
+      admission: {
+        decision: "requires_user_action",
+        action_risk: "write",
+        evidence_refs: approvalEvidenceRefs
+      },
+      action_request: actionRequest,
+      approval_request: approvalRequest,
+      evidence_refs: approvalEvidenceRefs,
+      retention_state: "active"
+    });
+    assert.equal(pendingApproval.status, "requires_user_action");
+    assert.equal(pendingApproval.approval_request?.status, "pending");
+
+    await store.createRunRecord({
+      run_id: "run_self_check_approval_expired",
+      status: "expired",
+      ...approvalRunBase,
+      admission: { decision: "requires_user_action", action_risk: "write" },
+      action_request: actionRequest,
+      approval_request: { ...approvalRequest, approval_request_id: "approval-request:fixture/expired", status: "expired", expires_at: "2026-07-01T00:00:00.000Z" },
+      retention_state: "active"
+    });
+    await store.createRunRecord({
+      run_id: "run_self_check_approval_blocked",
+      status: "failed",
+      ...approvalRunBase,
+      admission: { decision: "blocked_pre_admission", action_risk: "write" },
+      action_request: actionRequest,
+      approval_request: { ...approvalRequest, approval_request_id: "approval-request:fixture/blocked", status: "blocked", blocking_reasons: ["approval_blocked_by_policy"] },
+      failure: {
+        category: "action_risk",
+        code: "approval_blocked",
+        phase: "admission",
+        recovery_hint: "show_blocked_approval_state"
+      },
+      retention_state: "active"
+    });
+    const cancelledApproval = await store.createRunRecord({
+      run_id: "run_self_check_approval_cancelled",
+      status: "cancelled",
+      ...approvalRunBase,
+      admission: { decision: "requires_user_action", action_risk: "write" },
+      action_request: actionRequest,
+      failure: {
+        category: "action_risk",
+        code: "user_cancelled",
+        phase: "admission",
+        recovery_hint: "record_cancellation_without_submit"
+      },
+      retention_state: "active"
+    });
+    assert.equal(cancelledApproval.status, "cancelled");
+    const approvalQuery = await getApprovalCancellationSummary(store, actionRequest.action_request_id);
+    assert.equal(approvalQuery.schema_version, approvalCancellationQuerySchemaVersion);
+    assert.equal(approvalQuery.latest_status, "cancelled");
+    assert.equal(approvalQuery.approval_requests.length, 3);
+    assert.equal(approvalQuery.cancellations[0]?.failure_code, "user_cancelled");
+    assert.equal(JSON.stringify(approvalQuery).includes("submitted_result_ref"), false);
 
     const brokenResourceContract = {
       ...lodeReadPublicPageContract,

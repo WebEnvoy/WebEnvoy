@@ -76,6 +76,23 @@ export type ActionRequest = {
   consumer_boundary: string;
 };
 
+export type ApprovalRequestStatus = "pending" | "expired" | "blocked";
+
+export type ApprovalRequest = {
+  schema_version: "webenvoy.approval-request.v0";
+  approval_request_id: string;
+  action_request_id: string;
+  task_intent_ref: string;
+  status: ApprovalRequestStatus;
+  requested_at: string;
+  expires_at?: string;
+  risk: AdmissionDecision["action_risk"];
+  blocking_reasons?: string[];
+  source_refs?: string[];
+  evidence_refs?: string[];
+  consumer_boundary: string;
+};
+
 export type FailureRecord = {
   category:
     | "request_invalid"
@@ -123,6 +140,7 @@ export type RunRecord = {
   admission: AdmissionDecision;
   runtime_binding_refs?: string[];
   action_request?: ActionRequest;
+  approval_request?: ApprovalRequest;
   result_ref?: string;
   evidence_refs?: string[];
   failure?: FailureRecord;
@@ -135,7 +153,7 @@ export type CreateRunRecordInput = {
   task_intent_ref: string;
   capability_ref: string;
   admission: AdmissionDecision;
-  status?: Extract<RunRecordStatus, "pending" | "admitted" | "failed" | "cancelled" | "expired">;
+  status?: Extract<RunRecordStatus, "pending" | "admitted" | "failed" | "blocked" | "requires_user_action" | "cancelled" | "expired">;
   entrypoint_ref?: string;
   capability_version?: string;
   capability_source_ref?: string;
@@ -143,6 +161,7 @@ export type CreateRunRecordInput = {
   package_ref?: string;
   runtime_binding_refs?: readonly string[];
   action_request?: ActionRequest;
+  approval_request?: ApprovalRequest;
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -154,6 +173,7 @@ export type RunRecordPatch = {
   status?: RunRecordStatus;
   runtime_binding_refs?: readonly string[];
   action_request?: ActionRequest;
+  approval_request?: ApprovalRequest;
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -296,6 +316,22 @@ function assertRunRecord(record: RunRecord): void {
     copyRefs(record.action_request.evidence_refs, "action_request.evidence_refs");
     requireRef(record.action_request.consumer_boundary, "action_request.consumer_boundary");
   }
+  if (record.approval_request !== undefined) {
+    requireRef(record.approval_request.schema_version, "approval_request.schema_version");
+    if (record.approval_request.schema_version !== "webenvoy.approval-request.v0") {
+      throw new Error("approval_request.schema_version is unsupported");
+    }
+    requireRef(record.approval_request.approval_request_id, "approval_request.approval_request_id");
+    requireRef(record.approval_request.action_request_id, "approval_request.action_request_id");
+    requireRef(record.approval_request.task_intent_ref, "approval_request.task_intent_ref");
+    requireRef(record.approval_request.status, "approval_request.status");
+    requireRef(record.approval_request.requested_at, "approval_request.requested_at");
+    requireRef(record.approval_request.risk, "approval_request.risk");
+    copyRefs(record.approval_request.blocking_reasons, "approval_request.blocking_reasons");
+    copyRefs(record.approval_request.source_refs, "approval_request.source_refs");
+    copyRefs(record.approval_request.evidence_refs, "approval_request.evidence_refs");
+    requireRef(record.approval_request.consumer_boundary, "approval_request.consumer_boundary");
+  }
   copyRefs(record.evidence_refs, "evidence_refs");
   if (record.post_check !== undefined) {
     requireRef(record.post_check.schema_version, "post_check.schema_version");
@@ -332,6 +368,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   }
   if (patch.action_request !== undefined) {
     next.action_request = patch.action_request;
+  }
+  if (patch.approval_request !== undefined) {
+    next.approval_request = patch.approval_request;
   }
   if (patch.result_ref !== undefined) {
     next.result_ref = requireRef(patch.result_ref, "result_ref");
@@ -388,6 +427,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.action_request !== undefined) {
     record.action_request = input.action_request;
+  }
+  if (input.approval_request !== undefined) {
+    record.approval_request = input.approval_request;
   }
   if (input.result_ref !== undefined) {
     record.result_ref = requireRef(input.result_ref, "result_ref");

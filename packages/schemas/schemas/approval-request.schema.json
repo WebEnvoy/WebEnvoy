@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/approval-request.v0.schema.json",
+  "title": "WebEnvoy Core Approval Request v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Approval Admission",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.approval-request.v0",
+    "compatibility_boundary": "Core records approval request state and refs only. Approval execution, true writes, submitted results, raw Harbor material, and App UI state are out of boundary.",
+    "source_adrs": [
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ]
+  },
+  "required": [
+    "schema_version",
+    "approval_request_id",
+    "action_request_id",
+    "task_intent_ref",
+    "status",
+    "requested_at",
+    "risk",
+    "consumer_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.approval-request.v0"
+    },
+    "approval_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_intent_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "expired", "blocked"]
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["read", "write", "submit", "destructive"]
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

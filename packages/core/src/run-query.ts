@@ -1,5 +1,6 @@
 import {
   terminalRunRecordStatuses,
+  type ApprovalRequestStatus,
   type AdmissionDecision,
   type FailureRecord,
   type FileRunRecordStore,
@@ -11,6 +12,7 @@ import {
 import { normalizeFailureRecord } from "./failure-attribution.js";
 
 export const runQuerySchemaVersion = "webenvoy.run-query.v0";
+export const approvalCancellationQuerySchemaVersion = "webenvoy.approval-cancellation-query.v0";
 
 export type RunTimeline = {
   created_at: string;
@@ -76,6 +78,26 @@ export type RunQueryResult =
       ok: false;
       failure: FailureRecord;
     };
+
+export type ApprovalCancellationQuery = {
+  schema_version: typeof approvalCancellationQuerySchemaVersion;
+  action_request_id: string;
+  latest_status: ApprovalRequestStatus | "cancelled" | "not_found";
+  approval_requests: {
+    run_id: string;
+    approval_request_id: string;
+    status: ApprovalRequestStatus;
+    risk: AdmissionDecision["action_risk"];
+    expires_at?: string;
+  }[];
+  cancellations: {
+    run_id: string;
+    status: "cancelled";
+    terminal_at?: string;
+    failure_code?: string;
+  }[];
+  consumer_boundary: string;
+};
 
 function queryFailure(code: string, category: FailureRecord["category"], recoveryHint: string): FailureRecord {
   return {
@@ -183,5 +205,34 @@ export async function getRunSummary(store: FileRunRecordStore, runId: string): P
   return {
     ok: true,
     run: projectRunSummary(record)
+  };
+}
+
+export async function getApprovalCancellationSummary(store: FileRunRecordStore, actionRequestId: string): Promise<ApprovalCancellationQuery> {
+  const records = await store.listRunRecords();
+  const approvals = records
+    .filter((record) => record.approval_request?.action_request_id === actionRequestId)
+    .map((record) => ({
+      run_id: record.run_id,
+      approval_request_id: record.approval_request!.approval_request_id,
+      status: record.approval_request!.status,
+      risk: record.approval_request!.risk,
+      ...(record.approval_request!.expires_at === undefined ? {} : { expires_at: record.approval_request!.expires_at })
+    }));
+  const cancellations = records
+    .filter((record) => record.status === "cancelled" && record.action_request?.action_request_id === actionRequestId)
+    .map((record) => ({
+      run_id: record.run_id,
+      status: "cancelled" as const,
+      ...(record.terminal_at === undefined ? {} : { terminal_at: record.terminal_at }),
+      ...(record.failure?.code === undefined ? {} : { failure_code: record.failure.code })
+    }));
+  return {
+    schema_version: approvalCancellationQuerySchemaVersion,
+    action_request_id: actionRequestId,
+    latest_status: cancellations.length > 0 ? "cancelled" : approvals[0]?.status ?? "not_found",
+    approval_requests: approvals,
+    cancellations,
+    consumer_boundary: "Core query summarizes approval and cancellation records only; it does not execute approval or imply submitted result."
   };
 }

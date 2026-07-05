@@ -1,0 +1,37 @@
+{
+  "$schema": "approval-cancellation-query.schema.json",
+  "schema_version": "webenvoy.approval-cancellation-query.v0",
+  "action_request_id": "action-request:fixture/preview-contact-form",
+  "latest_status": "cancelled",
+  "approval_requests": [
+    {
+      "run_id": "run_fixture_approval_pending",
+      "approval_request_id": "approval-request:fixture/preview-contact-form",
+      "status": "pending",
+      "risk": "write",
+      "expires_at": "2026-07-01T00:10:00.000Z"
+    },
+    {
+      "run_id": "run_fixture_approval_expired",
+      "approval_request_id": "approval-request:fixture/preview-contact-form-expired",
+      "status": "expired",
+      "risk": "write",
+      "expires_at": "2026-07-01T00:00:00.000Z"
+    },
+    {
+      "run_id": "run_fixture_approval_blocked",
+      "approval_request_id": "approval-request:fixture/preview-contact-form-blocked",
+      "status": "blocked",
+      "risk": "write"
+    }
+  ],
+  "cancellations": [
+    {
+      "run_id": "run_fixture_cancelled",
+      "status": "cancelled",
+      "terminal_at": "2026-07-01T00:02:00.000Z",
+      "failure_code": "user_cancelled"
+    }
+  ],
+  "consumer_boundary": "Query summarizes approval/cancellation records only; cancelled is not a submitted result."
+}
