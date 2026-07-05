@@ -1,0 +1,38 @@
+{
+  "$schema": "result-envelope.schema.json",
+  "schema_version": "webenvoy.result-envelope.v0",
+  "run_record_ref": "run_fixture_preview_available",
+  "ok": true,
+  "outcome": "success",
+  "terminal": true,
+  "capability_ref": "lode:capability/preview-contact-form",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "result_ref": "result:fixture/preview-contact-form",
+  "result_kind": "validate_only_preview",
+  "evidence_refs": ["evidence:fixture/before-preview"],
+  "preview_result": {
+    "schema_version": "webenvoy.preview-result.v0",
+    "state": "available",
+    "submitted": false,
+    "expected_change": {
+      "change_kind": "form_input_preview",
+      "target_ref": "writable-target:fixture/contact-form",
+      "summary": "Preview contact form input locally without submitting.",
+      "external_submit": false
+    },
+    "action_refs": {
+      "action_request_id": "action-request:fixture/preview-contact-form"
+    },
+    "capability": {
+      "capability_ref": "lode:capability/preview-contact-form",
+      "capability_version": "0.1.0",
+      "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+      "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0"
+    },
+    "evidence_refs": ["evidence:fixture/before-preview"],
+    "consumer_boundary": "Core preview result is validate-only projection only; it is not submitted result truth."
+  },
+  "retention_state": "active"
+}

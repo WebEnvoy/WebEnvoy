@@ -26,6 +26,9 @@ export {
   type FileRunRecordStoreOptions,
   type PostCheckResult,
   type PostCheckStatus,
+  type PreviewFailureClass,
+  type PreviewResult,
+  type PreviewResultState,
   type RetentionState,
   type RunRecord,
   type RunRecordPatch,
@@ -33,10 +36,12 @@ export {
 } from "./run-record-store.js";
 export {
   completeRunWithFailure,
+  completeRunWithPreviewResult,
   completeRunWithResult,
   resultEnvelopeSchemaVersion,
   type CompletedRunOutput,
   type CompleteRunFailureInput,
+  type CompleteRunPreviewInput,
   type CompleteRunResultInput,
   type FailureTerminalStatus,
   type ResultEnvelope,

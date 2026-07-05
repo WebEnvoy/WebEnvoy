@@ -177,6 +177,7 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.result_ref === undefined ? {} : { result_ref: record.result_ref }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),
+    ...(record.preview_result === undefined ? {} : { preview_result: record.preview_result }),
     ...(record.failure === undefined ? {} : { failure: normalizeFailureRecord(record.failure) }),
     ...(record.post_check === undefined ? {} : { post_check: record.post_check }),
     ...(record.retention_state === undefined ? {} : { retention_state: record.retention_state })

@@ -1,5 +1,5 @@
 import { normalizeFailureRecord } from "./failure-attribution.js";
-import type { FailureRecord, FileRunRecordStore, PostCheckResult, RetentionState, RunRecord, RunRecordStatus } from "./run-record-store.js";
+import type { FailureRecord, FileRunRecordStore, PostCheckResult, PreviewFailureClass, PreviewResult, PreviewResultState, RetentionState, RunRecord, RunRecordStatus } from "./run-record-store.js";
 
 export const resultEnvelopeSchemaVersion = "webenvoy.result-envelope.v0";
 
@@ -25,6 +25,7 @@ export type ResultEnvelope = {
   raw_payload_refs?: string[];
   source_refs?: string[];
   evidence_refs?: string[];
+  preview_result?: PreviewResult;
   failure?: FailureRecord;
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
@@ -49,6 +50,16 @@ export type CompleteRunFailureInput = {
   evidence_refs?: readonly string[];
   retention_state?: RetentionState;
   post_check?: PostCheckResult;
+};
+
+export type CompleteRunPreviewInput = {
+  result_ref: string;
+  expected_change?: Record<string, unknown>;
+  action_request_id?: string;
+  evidence_refs?: readonly string[];
+  preview_state?: PreviewResultState;
+  post_check?: PostCheckResult;
+  retention_state?: RetentionState;
 };
 
 export type CompletedRunOutput = {
@@ -189,6 +200,66 @@ export async function completeRunWithFailure(store: FileRunRecordStore, runId: s
       outcome: status,
       ...(updated.evidence_refs === undefined ? {} : { evidence_refs: updated.evidence_refs }),
       failure,
+      ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
+      retention_state: retentionState
+    }
+  };
+}
+
+export async function completeRunWithPreviewResult(store: FileRunRecordStore, runId: string, input: CompleteRunPreviewInput): Promise<CompletedRunOutput> {
+  const current = await store.getRunRecord(runId);
+  if (!current) throw new Error(`run record not found: ${runId}`);
+  assertPublicData(input.expected_change);
+  const evidenceRefs = copyRefs(input.evidence_refs ?? current.evidence_refs ?? current.action_request?.evidence_refs, "evidence_refs");
+  if (!evidenceRefs?.length) throw new Error("preview result envelope requires evidence_refs");
+  const state = input.preview_state ?? "available";
+  const action_request_id = requireRef(input.action_request_id ?? current.action_request?.action_request_id ?? "", "action_request_id");
+  const failure_class = state === "available" ? undefined : (state as PreviewFailureClass);
+  const preview_result: PreviewResult = {
+    schema_version: "webenvoy.preview-result.v0",
+    state,
+    submitted: false,
+    ...(input.expected_change === undefined ? {} : { expected_change: input.expected_change }),
+    action_refs: { action_request_id },
+    capability: {
+      capability_ref: current.capability_ref,
+      ...(current.capability_version === undefined ? {} : { capability_version: current.capability_version }),
+      ...(current.capability_source_ref === undefined ? {} : { capability_source_ref: current.capability_source_ref }),
+      ...(current.capability_lock_ref === undefined ? {} : { capability_lock_ref: current.capability_lock_ref }),
+      ...(current.package_ref === undefined ? {} : { package_ref: current.package_ref })
+    },
+    evidence_refs: evidenceRefs,
+    ...(failure_class === undefined ? {} : { failure_class }),
+    consumer_boundary: "Core preview result is validate-only/draft/preview projection; it is not submitted result, approval execution, reconciliation, or post-submit truth."
+  };
+  const retentionState = input.retention_state ?? "active";
+  const failure = failure_class === undefined ? undefined : normalizeFailureRecord({
+    category: failure_class === "user_cancelled" ? "action_risk" : "evidence_reference",
+    code: failure_class,
+    phase: failure_class === "user_cancelled" ? "admission" : "evidence",
+    recovery_hint: failure_class === "page_changed" ? "refresh_preview_evidence" : failure_class === "preview_unavailable" ? "retry_preview_capture" : "record_cancellation_without_submit"
+  });
+  const updated = await store.updateRunRecord(runId, {
+    status: failure_class === undefined ? "succeeded" : failure_class === "user_cancelled" ? "cancelled" : "failed",
+    result_ref: requireRef(input.result_ref, "result_ref"),
+    preview_result,
+    evidence_refs: evidenceRefs,
+    ...(failure === undefined ? {} : { failure }),
+    retention_state: retentionState,
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check })
+  });
+  return {
+    run_record: updated,
+    result_envelope: {
+      ...envelopeBase(updated),
+      ok: failure_class === undefined,
+      outcome: failure_class === undefined ? "success" : failure_class === "user_cancelled" ? "cancelled" : "failed",
+      result_ref: input.result_ref,
+      result_kind: "validate_only_preview",
+      ...(input.expected_change === undefined ? {} : { data: { expected_change: input.expected_change, submitted: false } }),
+      evidence_refs: evidenceRefs,
+      preview_result,
+      ...(failure === undefined ? {} : { failure }),
       ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
       retention_state: retentionState
     }

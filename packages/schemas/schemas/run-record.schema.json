@@ -25,6 +25,7 @@
       "capability_lock_ref": "Lode owns referenced package lock",
       "runtime_binding_refs": "Harbor owns referenced runtime facts",
       "result_ref": "Core",
+      "preview_result": "Core projected validate-only preview result; submitted result truth is out of boundary",
       "evidence_refs": "Harbor or evidence producer owns ref body; Core records refs only",
       "failure": "Core"
     }
@@ -159,6 +160,17 @@
     "result_ref": {
       "type": "string",
       "minLength": 1
+    },
+    "preview_result": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["schema_version", "state", "submitted", "action_refs", "capability", "evidence_refs", "consumer_boundary"],
+      "properties": {
+        "schema_version": {"const": "webenvoy.preview-result.v0"},
+        "state": {"type": "string", "enum": ["available", "preview_unavailable", "page_changed", "user_cancelled"]},
+        "submitted": {"const": false},
+        "failure_class": {"type": "string", "enum": ["preview_unavailable", "page_changed", "user_cancelled"]}
+      }
     },
     "evidence_refs": {
       "type": "array",

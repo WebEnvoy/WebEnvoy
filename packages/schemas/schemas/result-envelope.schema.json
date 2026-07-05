@@ -8,7 +8,7 @@
     "owner": "Core Result Projection",
     "status": "accepted-v0",
     "schema_version": "webenvoy.result-envelope.v0",
-    "compatibility_boundary": "Result payload may add optional refs and public projections. Raw runtime material, failure taxonomy changes, and terminal outcome changes require an ADR or pending-decision update.",
+    "compatibility_boundary": "Result payload may add optional refs, public projections, and validate-only preview results. Raw runtime material, submitted results, failure taxonomy changes, and terminal outcome changes require an ADR or pending-decision update.",
     "source_adrs": [
       "docs/adr/0003-result-envelope-and-run-record.md",
       "docs/adr/0007-reference-version-ownership-v0.md",
@@ -25,6 +25,7 @@
       "data": "Lode owns normalized public shape; Core validates projection",
       "raw_payload_refs": "Harbor or evidence producer owns raw payload body",
       "evidence_refs": "Harbor or evidence producer owns evidence body",
+      "preview_result": "Core projects Lode expected change and Harbor preview evidence refs without submitted result truth",
       "failure": "Core"
     }
   },
@@ -122,6 +123,64 @@
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "preview_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "state", "submitted", "action_refs", "capability", "evidence_refs", "consumer_boundary"],
+      "properties": {
+        "schema_version": {
+          "const": "webenvoy.preview-result.v0"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["available", "preview_unavailable", "page_changed", "user_cancelled"]
+        },
+        "submitted": {
+          "const": false
+        },
+        "expected_change": {
+          "type": "object"
+        },
+        "action_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action_request_id"],
+          "properties": {
+            "action_request_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "capability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability_ref"],
+          "properties": {
+            "capability_ref": {"type": "string", "minLength": 1},
+            "capability_version": {"type": "string", "minLength": 1},
+            "capability_source_ref": {"type": "string", "minLength": 1},
+            "capability_lock_ref": {"type": "string", "minLength": 1},
+            "package_ref": {"type": "string", "minLength": 1}
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "failure_class": {
+          "type": "string",
+          "enum": ["preview_unavailable", "page_changed", "user_cancelled"]
+        },
+        "consumer_boundary": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "failure": {

@@ -93,6 +93,29 @@ export type ApprovalRequest = {
   consumer_boundary: string;
 };
 
+export type PreviewResultState = "available" | "preview_unavailable" | "page_changed" | "user_cancelled";
+export type PreviewFailureClass = Exclude<PreviewResultState, "available">;
+
+export type PreviewResult = {
+  schema_version: "webenvoy.preview-result.v0";
+  state: PreviewResultState;
+  submitted: false;
+  expected_change?: Record<string, unknown>;
+  action_refs: {
+    action_request_id: string;
+  };
+  capability: {
+    capability_ref: string;
+    capability_version?: string;
+    capability_source_ref?: string;
+    capability_lock_ref?: string;
+    package_ref?: string;
+  };
+  evidence_refs: string[];
+  failure_class?: PreviewFailureClass;
+  consumer_boundary: string;
+};
+
 export type FailureRecord = {
   category:
     | "request_invalid"
@@ -142,6 +165,7 @@ export type RunRecord = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  preview_result?: PreviewResult;
   evidence_refs?: string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
@@ -163,6 +187,7 @@ export type CreateRunRecordInput = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
@@ -175,6 +200,7 @@ export type RunRecordPatch = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
@@ -239,6 +265,30 @@ function copyRefs(values: readonly string[] | undefined, label: string): string[
   return values ? copyRequiredRefs(values, label) : undefined;
 }
 
+function validatePreviewResult(preview: PreviewResult): void {
+  if (preview.schema_version !== "webenvoy.preview-result.v0") {
+    throw new Error("preview_result.schema_version is unsupported");
+  }
+  requireRef(preview.state, "preview_result.state");
+  if (preview.submitted !== false) {
+    throw new Error("preview_result.submitted must be false");
+  }
+  requireRef(preview.action_refs.action_request_id, "preview_result.action_refs.action_request_id");
+  requireRef(preview.capability.capability_ref, "preview_result.capability.capability_ref");
+  if (preview.capability.capability_version !== undefined) requireRef(preview.capability.capability_version, "preview_result.capability.capability_version");
+  if (preview.capability.capability_source_ref !== undefined) requireRef(preview.capability.capability_source_ref, "preview_result.capability.capability_source_ref");
+  if (preview.capability.capability_lock_ref !== undefined) requireRef(preview.capability.capability_lock_ref, "preview_result.capability.capability_lock_ref");
+  if (preview.capability.package_ref !== undefined) requireRef(preview.capability.package_ref, "preview_result.capability.package_ref");
+  copyRequiredRefs(preview.evidence_refs, "preview_result.evidence_refs");
+  if (preview.state === "available" && preview.failure_class !== undefined) {
+    throw new Error("preview_result.failure_class must be absent when preview is available");
+  }
+  if (preview.state !== "available" && preview.failure_class !== preview.state) {
+    throw new Error("preview_result.failure_class must match unavailable preview state");
+  }
+  requireRef(preview.consumer_boundary, "preview_result.consumer_boundary");
+}
+
 function validateRunId(runId: string): string {
   if (!runIdPattern.test(runId)) {
     throw new Error("run_id must use 1-128 characters from A-Z, a-z, 0-9, dot, underscore, or hyphen");
@@ -287,6 +337,9 @@ function assertRunRecord(record: RunRecord): void {
   }
   if (record.result_ref !== undefined) {
     requireRef(record.result_ref, "result_ref");
+  }
+  if (record.preview_result !== undefined) {
+    validatePreviewResult(record.preview_result);
   }
   if (record.admission.resource_match_ref !== undefined) {
     requireRef(record.admission.resource_match_ref, "admission.resource_match_ref");
@@ -375,6 +428,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   if (patch.result_ref !== undefined) {
     next.result_ref = requireRef(patch.result_ref, "result_ref");
   }
+  if (patch.preview_result !== undefined) {
+    next.preview_result = patch.preview_result;
+  }
   if (patch.evidence_refs !== undefined) {
     next.evidence_refs = copyRequiredRefs(patch.evidence_refs, "evidence_refs");
   }
@@ -433,6 +489,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.result_ref !== undefined) {
     record.result_ref = requireRef(input.result_ref, "result_ref");
+  }
+  if (input.preview_result !== undefined) {
+    record.preview_result = input.preview_result;
   }
   if (input.evidence_refs !== undefined) {
     record.evidence_refs = copyRequiredRefs(input.evidence_refs, "evidence_refs");
