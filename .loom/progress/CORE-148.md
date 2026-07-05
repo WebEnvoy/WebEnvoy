@@ -45,13 +45,9 @@
 ## Terminal Closeout Metadata
 
 - Terminal State: closed_out
-- Issues: 148, 149, 150, 153, 154, 155, 156, 157
-- Deferred/Open Issue: 151
+- Issue: 148, 149, 150, 153, 154, 155, 156, 157
 - PR: 162
-- PR URL: https://github.com/WebEnvoy/WebEnvoy/pull/162
-- PR Head: 38d0ea1879a1ebbb40e8708108e1e165801ab103
 - Merge Commit: 5d1ce537eb602ab496377947a31df956fb7b8d16
 - Target Branch: main
-- Hosted Run: https://github.com/WebEnvoy/WebEnvoy/actions/runs/28747605253
 - Closed At: 2026-07-05T16:38:23Z
 - Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/issues/148;https://github.com/WebEnvoy/WebEnvoy/issues/149;https://github.com/WebEnvoy/WebEnvoy/issues/150;https://github.com/WebEnvoy/WebEnvoy/issues/153;https://github.com/WebEnvoy/WebEnvoy/issues/154;https://github.com/WebEnvoy/WebEnvoy/issues/155;https://github.com/WebEnvoy/WebEnvoy/issues/156;https://github.com/WebEnvoy/WebEnvoy/issues/157;https://github.com/WebEnvoy/WebEnvoy/pull/162
