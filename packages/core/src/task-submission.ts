@@ -1,8 +1,9 @@
-import type { AdmissionDecision, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import type { ActionRequest, AdmissionDecision, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
+export const actionRequestSchemaVersion = "webenvoy.action-request.v0";
 
 export type TaskEntrypoint = "api" | "cli" | "mcp" | "sdk" | "app";
 export type TaskActionRisk = AdmissionDecision["action_risk"];
@@ -79,6 +80,7 @@ const entrypoints = new Set<TaskEntrypoint>(["api", "cli", "mcp", "sdk", "app"])
 const actionRisks = new Set<TaskActionRisk>(["read", "write", "submit", "destructive"]);
 const executionIntents = new Set<TaskExecutionIntent>(["read", "validate_only", "draft", "preview", "execute_after_approval", "reconcile_status", "request_cancel"]);
 const trueWriteExecutionIntents = new Set<TaskExecutionIntent>(["execute_after_approval", "reconcile_status", "request_cancel"]);
+const writePrecheckExecutionIntents = new Set<TaskExecutionIntent>(["validate_only", "draft", "preview"]);
 const allowedTaskIntentFields = new Set([
   "$schema",
   "schema_version",
@@ -94,6 +96,7 @@ const allowedTaskIntentFields = new Set([
   "evidence_policy_ref"
 ]);
 const privateFieldNames = new Set(["raw_payload", "dom", "har", "screenshot", "video", "cookie", "token", "local_path", "ui_state", "runtime_session"]);
+type WritePrecheckExecutionIntent = Extract<TaskExecutionIntent, "validate_only" | "draft" | "preview">;
 
 function requestInvalid(code: string, recoveryHint: string): FailureRecord {
   return {
@@ -308,6 +311,9 @@ function writeGuardrailFailure(taskIntent: TaskIntentEnvelope): FailureRecord | 
   if (taskIntent.policy.risk === "read" && taskIntent.policy.execution_intent === "read") {
     return undefined;
   }
+  if (taskIntent.policy.risk === "write" && writePrecheckExecutionIntents.has(taskIntent.policy.execution_intent)) {
+    return undefined;
+  }
   const trueWriteRequested =
     taskIntent.policy.risk === "submit" ||
     taskIntent.policy.risk === "destructive" ||
@@ -317,6 +323,66 @@ function writeGuardrailFailure(taskIntent: TaskIntentEnvelope): FailureRecord | 
     code: trueWriteRequested ? "true_write_deferred" : "write_action_request_deferred",
     phase: "admission",
     recovery_hint: trueWriteRequested ? "use_validate_or_preview" : "use_read_intent"
+  };
+}
+
+function isWritePrecheckIntent(taskIntent: TaskIntentEnvelope): boolean {
+  return taskIntent.policy.risk === "write" && writePrecheckExecutionIntents.has(taskIntent.policy.execution_intent);
+}
+
+function writePrecheckOperationMode(executionIntent: TaskExecutionIntent): WritePrecheckExecutionIntent | "blocked_true_write" {
+  return writePrecheckExecutionIntents.has(executionIntent) ? (executionIntent as WritePrecheckExecutionIntent) : "blocked_true_write";
+}
+
+function buildActionRequest(
+  taskIntent: TaskIntentEnvelope,
+  input: TaskSubmissionInput,
+  refs: {
+    package_ref?: string;
+    runtime_binding_refs?: readonly string[];
+    evidence_refs?: readonly string[];
+    blocked?: boolean;
+  } = {}
+): ActionRequest {
+  const blocked = refs.blocked === true;
+  const requestOperationMode = writePrecheckOperationMode(taskIntent.policy.execution_intent);
+  const sourceRefs = [
+    taskIntent.capability.source_ref,
+    taskIntent.capability.lock_ref,
+    refs.package_ref ?? input.package_ref,
+    ...taskIntent.resource_requirement_refs
+  ].filter((ref): ref is string => Boolean(ref));
+  const writeFacts = input.harbor_write_precheck_facts && "writable_target" in input.harbor_write_precheck_facts ? input.harbor_write_precheck_facts : undefined;
+  return {
+    schema_version: actionRequestSchemaVersion,
+    action_request_id: `action-request:${taskIntent.intent_id}`,
+    task_intent_ref: taskIntent.intent_id,
+    capability_ref: taskIntent.capability.ref,
+    capability_version: taskIntent.capability.version,
+    ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+    ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
+    ...((refs.package_ref ?? input.package_ref) === undefined ? {} : { package_ref: refs.package_ref ?? input.package_ref }),
+    operation_mode: blocked ? "blocked_true_write" : requestOperationMode,
+    risk_classification: {
+      risk: taskIntent.policy.risk,
+      execution_intent: taskIntent.policy.execution_intent,
+      level: blocked ? "blocked" : taskIntent.policy.execution_intent === "validate_only" ? "low" : "medium",
+      true_write_requested: blocked,
+      reasons: blocked ? ["true_write_execution_intent_blocked"] : ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+    },
+    no_submit_guard: {
+      status: "active",
+      enforced_by: "core",
+      blocked_execution_intents: ["execute_after_approval", "reconcile_status", "request_cancel"],
+      source_refs: sourceRefs
+    },
+    target_refs: {
+      scope_target_ref: taskIntent.scope.target_ref,
+      ...(writeFacts === undefined ? {} : { writable_target_ref: writeFacts.writable_target.target_ref, form_state_ref: writeFacts.form_state.snapshot_ref })
+    },
+    ...(refs.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: refs.runtime_binding_refs }),
+    ...(refs.evidence_refs === undefined ? {} : { evidence_refs: refs.evidence_refs }),
+    consumer_boundary: "Core stores action request refs, risk classification, and no-submit guard only; no raw browser material or true write payload is stored."
   };
 }
 
@@ -355,6 +421,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
         resource_requirement_refs: taskIntent.resource_requirement_refs,
         ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
       },
+      action_request: buildActionRequest(taskIntent, input, { blocked: writeGuardrail.code === "true_write_deferred" }),
       failure: writeGuardrail,
       retention_state: "active"
     });
@@ -392,7 +459,8 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     };
   }
 
-  const harborAdmission = validateHarborAdmission(input);
+  const writePrecheck = isWritePrecheckIntent(taskIntent);
+  const harborAdmission = validateHarborAdmission(input, writePrecheck ? "write_precheck" : "read");
   if (!harborAdmission.ok) {
     const runRecord = await store.createRunRecord({
       run_id: input.run_id,
@@ -434,17 +502,25 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
     package_ref: lodeAdmission.package_ref,
     admission: {
-      decision: "accepted",
+      decision: writePrecheck ? "accepted_with_warnings" : "accepted",
       action_risk: taskIntent.policy.risk,
       resource_requirement_refs: lodeAdmission.resource_requirement_refs,
       runtime_binding_refs: harborAdmission.runtime_binding_refs,
       evidence_refs: harborAdmission.evidence_refs
     }
   } as const;
+  const actionRequest = writePrecheck
+    ? buildActionRequest(taskIntent, input, {
+        package_ref: lodeAdmission.package_ref,
+        runtime_binding_refs: harborAdmission.runtime_binding_refs,
+        evidence_refs: harborAdmission.evidence_refs
+      })
+    : undefined;
   const runRecord = await store.createRunRecord({
     ...runRecordInput,
     runtime_binding_refs: harborAdmission.runtime_binding_refs,
     evidence_refs: harborAdmission.evidence_refs,
+    ...(actionRequest === undefined ? {} : { action_request: actionRequest }),
     admission: {
       ...runRecordInput.admission,
       ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
-import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference } from "./harbor-admission.js";
+import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
@@ -113,6 +113,80 @@ const harborSceneRef = {
   },
   unavailable: null
 } satisfies HarborCoreSceneReference;
+
+const lodePreviewContactFormContract = {
+  package_ref: "lode://site-capability/example/preview-contact-form@0.1.0",
+  source_ref: "lode://site-capability/example/preview-contact-form@0.1.0",
+  lock_ref: "lode://lock/site-capability/example/preview-contact-form@0.1.0",
+  capability_id: "preview-contact-form",
+  operation_id: "contact_form_preview",
+  operation_mode: "validate_only",
+  version: "0.1.0",
+  lifecycle: "proposed",
+  resource_requirements: {
+    schema_version: "lode.resource-requirements.v0",
+    resource_requirements_id: "example.preview-contact-form.resources",
+    resource_requirements_version: "0.1.0",
+    package_ref: "lode://site-capability/example/preview-contact-form@0.1.0",
+    operation_mode: "validate_only",
+    resource_requirement_profiles: [
+      {
+        requirement_profile_id: "public-page-read-with-snapshot-refmap-evidence",
+        operation_boundary: "validate_only",
+        required_harbor_facts: [
+          { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "snapshot.document_summary.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+          { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true, freshness: "current_execution_window" }
+        ]
+      }
+    ]
+  }
+} satisfies LodePackageAdmissionContract;
+
+const harborWritePrecheckFacts = {
+  schema_version: "harbor-write-precheck-facts/v0",
+  runtime_session_ref: "session_fixture_ready",
+  provider_ref: "provider_fixture_local",
+  profile_ref: "profile_fixture_public",
+  writable_target: {
+    target_ref: "target:fixture/contact-form",
+    runtime_session_ref: "session_fixture_ready",
+    snapshot_ref: "snapshot_fixture_write_precheck",
+    refmap_ref: "refmap_fixture_write_precheck",
+    evidence_refs: ["evidence_fixture_write_precheck"]
+  },
+  form_state: {
+    snapshot_ref: "snapshot_fixture_write_precheck",
+    fields: [
+      {
+        field_ref: "field:fixture/message",
+        target_ref: "target:fixture/contact-form",
+        label: "Message",
+        input_kind: "textarea",
+        required: true,
+        sensitivity: "public",
+        export_policy: "safe_summary",
+        value_state: "empty"
+      }
+    ],
+    state_summary: "One public message field is visible; no raw input values are exported."
+  },
+  pre_write_guard: {
+    status: "active",
+    no_submit_guard: "active",
+    blocked_events: ["submit", "publish", "send"],
+    enforcement: "facts_only_no_real_submit",
+    runtime_ready: true,
+    blocking_reasons: []
+  },
+  privacy_boundary: {
+    raw_values: "not_exposed",
+    credential_profile_storage: "not_exposed",
+    page_network_capture: "not_exposed",
+    export_boundary: "refs_and_redacted_field_state_only"
+  },
+  unavailable: null
+} satisfies HarborWritePrecheckFacts;
 
 function baseInput(runId: string) {
   return {
@@ -244,6 +318,9 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(submitActionRequest.run_record?.admission.decision, "deferred_true_write");
     assert.equal(submitActionRequest.run_record?.admission.action_risk, "submit");
     assert.equal(submitActionRequest.run_record?.package_ref, lodeReadPublicPageContract.package_ref);
+    assert.equal(submitActionRequest.run_record?.action_request?.operation_mode, "blocked_true_write");
+    assert.equal(submitActionRequest.run_record?.action_request?.risk_classification.level, "blocked");
+    assert.equal(submitActionRequest.run_record?.action_request?.no_submit_guard.status, "active");
     const submitQuery = await getRunResult(store, "run_self_check_true_write_deferred");
     assert.equal(submitQuery.ok, true);
     if (!submitQuery.ok) {
@@ -253,22 +330,44 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(submitQuery.result.result.result_envelope?.ok, false);
     assert.equal(submitQuery.result.result.result_envelope?.failure?.category, "action_risk");
 
-    const previewActionRequest = await acceptReadOnlyTaskSubmission(store, {
-      run_id: "run_self_check_preview_deferred",
+    const validateOnlyActionRequest = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_validate_only_admitted",
       task_intent: {
         ...taskIntent,
-        intent_id: "intent_fixture_preview_deferred_001",
+        intent_id: "intent_fixture_validate_only_001",
+        capability: {
+          ref: "lode:capability/preview-contact-form",
+          version: "0.1.0",
+          source_ref: lodePreviewContactFormContract.source_ref,
+          lock_ref: lodePreviewContactFormContract.lock_ref
+        },
+        resource_requirement_refs: ["example.preview-contact-form.resources"],
         policy: {
           risk: "write",
-          execution_intent: "preview"
+          execution_intent: "validate_only"
         }
       },
-      package_ref: lodeReadPublicPageContract.package_ref
+      package_ref: lodePreviewContactFormContract.package_ref,
+      lode_package_contract: lodePreviewContactFormContract,
+      resource_match_ref: "resource-match:fixture/write-precheck-ready",
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_write_precheck_facts: harborWritePrecheckFacts
     });
-    assert.equal(previewActionRequest.ok, false);
-    assert.equal(previewActionRequest.failure.code, "write_action_request_deferred");
-    assert.equal(previewActionRequest.run_record?.admission.decision, "deferred_true_write");
-    assert.equal(previewActionRequest.run_record?.admission.action_risk, "write");
+    assert.equal(validateOnlyActionRequest.ok, true);
+    if (!validateOnlyActionRequest.ok) {
+      throw new Error("validate-only action request must be admitted");
+    }
+    assert.equal(validateOnlyActionRequest.run_record.status, "admitted");
+    assert.equal(validateOnlyActionRequest.run_record.admission.decision, "accepted_with_warnings");
+    assert.equal(validateOnlyActionRequest.run_record.admission.action_risk, "write");
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.schema_version, "webenvoy.action-request.v0");
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.operation_mode, "validate_only");
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.risk_classification.level, "low");
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.risk_classification.true_write_requested, false);
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.no_submit_guard.status, "active");
+    assert.deepEqual(validateOnlyActionRequest.run_record.action_request?.no_submit_guard.blocked_execution_intents, ["execute_after_approval", "reconcile_status", "request_cancel"]);
+    assert.equal(validateOnlyActionRequest.run_record.action_request?.target_refs?.writable_target_ref, "target:fixture/contact-form");
+    assert.deepEqual(validateOnlyActionRequest.run_record.evidence_refs, ["evidence_fixture_write_precheck"]);
 
     const brokenResourceContract = {
       ...lodeReadPublicPageContract,

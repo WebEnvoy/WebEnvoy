@@ -41,6 +41,10 @@ export type LodeAdmissionTaskIntent = {
     source_ref?: string;
     lock_ref?: string;
   };
+  policy: {
+    risk: "read" | "write" | "submit" | "destructive";
+    execution_intent: "read" | "validate_only" | "draft" | "preview" | "execute_after_approval" | "reconcile_status" | "request_cancel";
+  };
   resource_requirement_refs: readonly string[];
 };
 
@@ -171,7 +175,7 @@ function validateLodeResourceRequirements(taskIntent: LodeAdmissionTaskIntent, p
     if (!profile || !contractString(profile.requirement_profile_id)) {
       return invalidLodeContract("invalid_contract", "resource_matching");
     }
-    if (profile.operation_boundary !== undefined && profile.operation_boundary !== "read") {
+    if (profile.operation_boundary !== undefined && profile.operation_boundary !== operationMode) {
       return admissionFailure("action_risk", "true_write_deferred", "admission", "use_read_intent");
     }
     if (profile.required_harbor_facts !== undefined) {
@@ -245,8 +249,14 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
       return { ok: false, failure, package_ref: packageRef };
     }
   }
-  if (operationMode !== "read") {
+  if (operationMode === "write") {
     return { ok: false, failure: admissionFailure("action_risk", "true_write_deferred", "admission", "use_read_intent"), package_ref: packageRef };
+  }
+  if (operationMode !== taskIntent.policy.execution_intent) {
+    return { ok: false, failure: invalidLodeContract("operation_mode_mismatch"), package_ref: packageRef };
+  }
+  if (operationMode !== "read" && taskIntent.policy.risk === "read") {
+    return { ok: false, failure: admissionFailure("action_risk", "write_precheck_risk_required", "admission", "use_validate_or_preview"), package_ref: packageRef };
   }
   const resourceRequirementRefs = validateLodeResourceRequirements(taskIntent, packageRef, operationMode, lodePackage.resource_requirements);
   if ("category" in resourceRequirementRefs) {

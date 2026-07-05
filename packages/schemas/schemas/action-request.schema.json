@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/action-request.v0.schema.json",
+  "title": "WebEnvoy Core Action Request v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Action Admission",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.action-request.v0",
+    "compatibility_boundary": "Core records write-precheck refs, risk classification, and no-submit guard only. True write execution, approval execution, raw Harbor material, Lode package bodies, and App UI state are out of boundary.",
+    "source_adrs": [
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "action_request_id": "Core",
+      "risk_classification": "Core",
+      "no_submit_guard": "Core",
+      "capability_ref": "Lode owns referenced capability",
+      "package_ref": "Lode owns referenced package",
+      "runtime_binding_refs": "Harbor owns referenced runtime facts",
+      "evidence_refs": "Harbor owns referenced evidence bodies"
+    }
+  },
+  "required": [
+    "schema_version",
+    "action_request_id",
+    "task_intent_ref",
+    "capability_ref",
+    "operation_mode",
+    "risk_classification",
+    "no_submit_guard",
+    "consumer_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.action-request.v0"
+    },
+    "action_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_intent_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_lock_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation_mode": {
+      "type": "string",
+      "enum": ["validate_only", "draft", "preview", "blocked_true_write"]
+    },
+    "risk_classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk", "execution_intent", "level", "true_write_requested", "reasons"],
+      "properties": {
+        "risk": {
+          "type": "string",
+          "enum": ["read", "write", "submit", "destructive"]
+        },
+        "execution_intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "level": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "blocked"]
+        },
+        "true_write_requested": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "no_submit_guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "enforced_by", "blocked_execution_intents", "source_refs"],
+      "properties": {
+        "status": {
+          "const": "active"
+        },
+        "enforced_by": {
+          "const": "core"
+        },
+        "blocked_execution_intents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "target_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_target_ref"],
+      "properties": {
+        "scope_target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writable_target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "form_state_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runtime_binding_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
