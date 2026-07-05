@@ -1,4 +1,5 @@
 import { resultEnvelopeSchemaVersion, type ResultEnvelope, type ResultOutcome } from "./result-envelope.js";
+import { normalizeFailureRecord } from "./failure-attribution.js";
 import {
   terminalRunRecordStatuses,
   type FailureRecord,
@@ -25,6 +26,10 @@ export type EvidenceRefSummary = {
   redaction_state?: "none" | "summary_only" | "redacted";
   raw_access: "not_available_from_core";
   consumer_boundary: string;
+  capability_ref: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  package_ref?: string;
 };
 
 export type ResultQueryEnvelope = {
@@ -172,7 +177,8 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.result_ref === undefined ? {} : { result_ref: record.result_ref }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),
-    ...(record.failure === undefined ? {} : { failure: record.failure }),
+    ...(record.failure === undefined ? {} : { failure: normalizeFailureRecord(record.failure) }),
+    ...(record.post_check === undefined ? {} : { post_check: record.post_check }),
     ...(record.retention_state === undefined ? {} : { retention_state: record.retention_state })
   };
 }
@@ -191,7 +197,11 @@ export function projectEvidenceRefs(record: RunRecord): EvidenceRefSummary[] {
     source,
     ...state,
     raw_access: "not_available_from_core",
-    consumer_boundary: "Core query returns refs and public state only; raw evidence bodies, screenshots, HAR, DOM, cookies, tokens, and viewer endpoints remain outside Core."
+    consumer_boundary: "Core query returns refs and public state only; raw evidence bodies, screenshots, HAR, DOM, cookies, tokens, and viewer endpoints remain outside Core.",
+    capability_ref: record.capability_ref,
+    ...(record.capability_version === undefined ? {} : { capability_version: record.capability_version }),
+    ...(record.capability_source_ref === undefined ? {} : { capability_source_ref: record.capability_source_ref }),
+    ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref })
   }));
 }
 
@@ -209,7 +219,7 @@ export function projectRunResult(record: RunRecord): ResultQueryEnvelope {
       ...(envelope === undefined ? {} : { result_envelope: envelope }),
       ...(record.retention_state === undefined ? {} : { retention_state: record.retention_state })
     },
-    ...(record.failure === undefined ? {} : { failure: record.failure }),
+    ...(record.failure === undefined ? {} : { failure: normalizeFailureRecord(record.failure) }),
     evidence_refs: projectEvidenceRefs(record)
   };
 }

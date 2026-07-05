@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { getRunEvidenceRefs, getRunResult, getRunSummary, type FailureRecord, type FileRunRecordStore } from "@webenvoy/core-runtime";
+import { getCapabilityRunSummary, getRunEvidenceRefs, getRunResult, getRunSummary, type FailureRecord, type FileRunRecordStore } from "@webenvoy/core-runtime";
 
 type JsonBody = Record<string, unknown>;
 
@@ -50,6 +50,21 @@ function decodeRunId(value: string | undefined): string | undefined {
   }
 }
 
+function optionalSearchParam(url: URL, name: string): string | undefined {
+  const value = url.searchParams.get(name);
+  return value && value.length > 0 ? value : undefined;
+}
+
+function capabilityQueryMissing(): FailureRecord {
+  return {
+    category: "request_invalid",
+    code: "capability_ref_required",
+    phase: "query",
+    recovery_hint: "fix_input",
+    attribution: "input"
+  };
+}
+
 async function route(request: IncomingMessage, response: ServerResponse, options: ApiServerOptions): Promise<void> {
   if (request.method !== "GET") {
     sendJson(response, 405, {
@@ -61,7 +76,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return;
   }
 
-  const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+  const path = requestUrl.pathname;
   const runMatch = /^\/runs\/([^/]+)$/.exec(path);
   const runResultMatch = /^\/runs\/([^/]+)\/result$/.exec(path);
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);
@@ -81,6 +97,46 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       checks: {
         apiServer: "ok"
       }
+    });
+    return;
+  }
+
+  if (path === "/capability-runs") {
+    if (!options.runRecordStore) {
+      sendJson(response, 503, {
+        ok: false,
+        error: runStoreUnavailable()
+      });
+      return;
+    }
+    const capabilityRef = optionalSearchParam(requestUrl, "capability_ref");
+    if (!capabilityRef) {
+      sendJson(response, 400, {
+        ok: false,
+        error: capabilityQueryMissing()
+      });
+      return;
+    }
+    const capabilityVersion = optionalSearchParam(requestUrl, "capability_version");
+    const capabilitySourceRef = optionalSearchParam(requestUrl, "capability_source_ref");
+    const packageRef = optionalSearchParam(requestUrl, "package_ref");
+    const result = await getCapabilityRunSummary(options.runRecordStore, {
+      capability_ref: capabilityRef,
+      ...(capabilityVersion === undefined ? {} : { capability_version: capabilityVersion }),
+      ...(capabilitySourceRef === undefined ? {} : { capability_source_ref: capabilitySourceRef }),
+      ...(packageRef === undefined ? {} : { package_ref: packageRef }),
+      limit: Number(optionalSearchParam(requestUrl, "limit") ?? 20)
+    });
+    if (result.ok) {
+      sendJson(response, 200, {
+        ok: true,
+        capability_runs: result.capability_runs
+      });
+      return;
+    }
+    sendJson(response, queryStatusCode(result.failure), {
+      ok: false,
+      error: result.failure
     });
     return;
   }

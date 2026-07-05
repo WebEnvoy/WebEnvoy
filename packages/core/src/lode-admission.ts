@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./run-record-store.js";
+import { normalizeFailureRecord } from "./failure-attribution.js";
 
 export type LodePackageAdmissionContract = {
   package_ref: string;
@@ -86,14 +87,15 @@ const lodeForbiddenFieldNames = new Set([
   "user_business_data"
 ]);
 const lodeOperationModes = new Set(["read", "validate_only", "draft", "preview", "write"]);
+const lodeAllowedLifecycleStates = new Set(["proposed", "active", "suspected_broken", "broken", "deprecated"]);
 
 function admissionFailure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recoveryHint: string): FailureRecord {
-  return {
+  return normalizeFailureRecord({
     category,
     code,
     phase,
     recovery_hint: recoveryHint
-  };
+  });
 }
 
 function findForbiddenField(value: unknown): string | undefined {
@@ -131,6 +133,22 @@ function contractString(value: unknown): string | undefined {
 
 function invalidLodeContract(code = "invalid_contract", phase: FailureRecord["phase"] = "admission"): FailureRecord {
   return admissionFailure("capability_contract", code, phase, "repair_package_contract");
+}
+
+function lifecycleFailure(lifecycle: string): FailureRecord | undefined {
+  if (!lodeAllowedLifecycleStates.has(lifecycle)) {
+    return invalidLodeContract("invalid_lifecycle");
+  }
+  if (lifecycle === "broken") {
+    return admissionFailure("capability_contract", "capability_broken", "admission", "repair_package_or_choose_known_good");
+  }
+  if (lifecycle === "deprecated") {
+    return admissionFailure("capability_contract", "capability_deprecated", "admission", "choose_latest_or_known_good");
+  }
+  if (lifecycle === "suspected_broken") {
+    return admissionFailure("capability_contract", "capability_suspected_broken", "admission", "run_validation_or_choose_known_good");
+  }
+  return undefined;
 }
 
 function validateLodeResourceRequirements(taskIntent: LodeAdmissionTaskIntent, packageRef: string, operationMode: string, value: unknown): FailureRecord | readonly string[] {
@@ -216,6 +234,16 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   }
   if (!lodeOperationModes.has(operationMode)) {
     return { ok: false, failure: invalidLodeContract(), package_ref: packageRef };
+  }
+  if (lodePackage.lifecycle !== undefined) {
+    const lifecycle = contractString(lodePackage.lifecycle);
+    if (!lifecycle) {
+      return { ok: false, failure: invalidLodeContract("invalid_lifecycle"), package_ref: packageRef };
+    }
+    const failure = lifecycleFailure(lifecycle);
+    if (failure) {
+      return { ok: false, failure, package_ref: packageRef };
+    }
   }
   if (operationMode !== "read") {
     return { ok: false, failure: admissionFailure("action_risk", "true_write_deferred", "admission", "use_read_intent"), package_ref: packageRef };

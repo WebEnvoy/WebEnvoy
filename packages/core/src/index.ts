@@ -1,4 +1,17 @@
 export {
+  capabilityRunQuerySchemaVersion,
+  getCapabilityRunSummary,
+  type CapabilityFailureSummary,
+  type CapabilityRunQueryEnvelope,
+  type CapabilityRunQueryFilter,
+  type CapabilityRunQueryResult
+} from "./capability-query.js";
+export {
+  inferFailureAttribution,
+  normalizeFailureRecord,
+  type FailureAttribution
+} from "./failure-attribution.js";
+export {
   createFileRunRecordStore,
   runLifecycleTransitions,
   runRecordSchemaVersion,
@@ -8,6 +21,8 @@ export {
   type FailureRecord,
   type FileRunRecordStore,
   type FileRunRecordStoreOptions,
+  type PostCheckResult,
+  type PostCheckStatus,
   type RetentionState,
   type RunRecord,
   type RunRecordPatch,

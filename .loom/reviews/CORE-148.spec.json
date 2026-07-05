@@ -1,0 +1,45 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-148",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review accepts the CORE-148 minimal suite for Stage 5 Core capability attribution and query facts.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T16:36:00Z",
+  "reviewed_head": "d5ae1e92dca24df8636ae9dc30d1fbebfca85e1a",
+  "reviewed_validation_summary": "targeted core/api/schema/conformance tests, conformance smoke, typecheck, lint, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed locally.",
+  "reviewed_validation_summary_hash": "83bad255d8d6447872d44d14cb5939898b5798338d57636d22c0823129446d66",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-148.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "#151 Lode output schema projection remains outside this batch and stays open."
+  ],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-148.md",
+    "recovery_entry": ".loom/progress/CORE-148.md",
+    "status_surface": ".loom/status/current.md",
+    "spec": ".loom/specs/CORE-148/spec.md",
+    "plan": ".loom/specs/CORE-148/plan.md",
+    "implementation_contract": ".loom/specs/CORE-148/implementation-contract.md",
+    "evidence_map": ".loom/specs/CORE-148/evidence-map.md",
+    "task_carrier": ".loom/specs/CORE-148/task-carrier.md",
+    "suite_validation": "loom suite validate --target . --item CORE-148 --json",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-148 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-148 --json"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec freezes Stage 5 user value, failure states, sensitive-data boundary, and non-goals without expanding into App UI truth, Harbor private evidence, Lode package truth, or Stage 6."
+  },
+  "spec_review_disposition": {
+    "status": "passed",
+    "reason": "Minimal suite artifacts map directly to CORE-148 covered Work Items and explicitly exclude #151 and non-Core truth ownership."
+  },
+  "carrier_only_drift": {
+    "status": "accepted",
+    "reason": "Commits after the reviewed implementation head only update CORE-148 review/progress/status carrier metadata for v0.28 gate consumption."
+  }
+}

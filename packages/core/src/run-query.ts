@@ -3,10 +3,12 @@ import {
   type AdmissionDecision,
   type FailureRecord,
   type FileRunRecordStore,
+  type PostCheckResult,
   type RetentionState,
   type RunRecord,
   type RunRecordStatus
 } from "./run-record-store.js";
+import { normalizeFailureRecord } from "./failure-attribution.js";
 
 export const runQuerySchemaVersion = "webenvoy.run-query.v0";
 
@@ -40,7 +42,9 @@ export type RunRuntimeRefs = {
 
 export type TerminalRunStatus = Exclude<RunRecordStatus, "pending" | "admitted" | "running">;
 
-export type RunTerminalFailureSummary = Pick<FailureRecord, "category" | "code" | "phase">;
+export type RunTerminalFailureSummary = Pick<FailureRecord, "category" | "code" | "phase" | "attribution">;
+
+export type RunPostCheckSummary = Pick<PostCheckResult, "schema_version" | "status" | "summary" | "checked_at" | "code" | "attribution" | "recovery_hint">;
 
 export type RunTerminalSummary = {
   terminal: true;
@@ -48,6 +52,7 @@ export type RunTerminalSummary = {
   terminal_at?: string;
   result_ref?: string;
   failure?: RunTerminalFailureSummary;
+  post_check?: RunPostCheckSummary;
   retention_state?: RetentionState;
 };
 
@@ -85,13 +90,29 @@ function terminalSummary(record: RunRecord): RunTerminalSummary | undefined {
   if (!terminalRunRecordStatuses.has(record.status)) {
     return undefined;
   }
-  const failure =
+  const failure: RunTerminalFailureSummary | undefined =
     record.failure === undefined
       ? undefined
+      : (() => {
+          const normalized = normalizeFailureRecord(record.failure);
+          return {
+            category: normalized.category,
+            code: normalized.code,
+            phase: normalized.phase,
+            ...(normalized.attribution === undefined ? {} : { attribution: normalized.attribution })
+          };
+        })();
+  const postCheck =
+    record.post_check === undefined
+      ? undefined
       : {
-          category: record.failure.category,
-          code: record.failure.code,
-          phase: record.failure.phase
+          schema_version: record.post_check.schema_version,
+          status: record.post_check.status,
+          summary: record.post_check.summary,
+          ...(record.post_check.checked_at === undefined ? {} : { checked_at: record.post_check.checked_at }),
+          ...(record.post_check.code === undefined ? {} : { code: record.post_check.code }),
+          ...(record.post_check.attribution === undefined ? {} : { attribution: record.post_check.attribution }),
+          ...(record.post_check.recovery_hint === undefined ? {} : { recovery_hint: record.post_check.recovery_hint })
         };
   return {
     terminal: true,
@@ -99,6 +120,7 @@ function terminalSummary(record: RunRecord): RunTerminalSummary | undefined {
     ...(record.terminal_at === undefined ? {} : { terminal_at: record.terminal_at }),
     ...(record.result_ref === undefined ? {} : { result_ref: record.result_ref }),
     ...(failure === undefined ? {} : { failure }),
+    ...(postCheck === undefined ? {} : { post_check: postCheck }),
     ...(record.retention_state === undefined ? {} : { retention_state: record.retention_state })
   };
 }

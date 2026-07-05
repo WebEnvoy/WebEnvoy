@@ -1,4 +1,5 @@
-import type { FailureRecord, FileRunRecordStore, RetentionState, RunRecord, RunRecordStatus } from "./run-record-store.js";
+import { normalizeFailureRecord } from "./failure-attribution.js";
+import type { FailureRecord, FileRunRecordStore, PostCheckResult, RetentionState, RunRecord, RunRecordStatus } from "./run-record-store.js";
 
 export const resultEnvelopeSchemaVersion = "webenvoy.result-envelope.v0";
 
@@ -24,6 +25,7 @@ export type ResultEnvelope = {
   source_refs?: string[];
   evidence_refs?: string[];
   failure?: FailureRecord;
+  post_check?: PostCheckResult;
   retention_state?: RetentionState;
 };
 
@@ -36,6 +38,7 @@ export type CompleteRunResultInput = {
   source_refs?: readonly string[];
   evidence_refs?: readonly string[];
   retention_state?: RetentionState;
+  post_check?: PostCheckResult;
 };
 
 export type CompleteRunFailureInput = {
@@ -43,6 +46,7 @@ export type CompleteRunFailureInput = {
   failure: FailureRecord;
   evidence_refs?: readonly string[];
   retention_state?: RetentionState;
+  post_check?: PostCheckResult;
 };
 
 export type CompletedRunOutput = {
@@ -138,7 +142,8 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
     status: "succeeded",
     result_ref: requireRef(input.result_ref, "result_ref"),
     evidence_refs: evidenceRefs,
-    retention_state: retentionState
+    retention_state: retentionState,
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check })
   });
 
   return {
@@ -154,6 +159,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
       ...(input.raw_payload_refs === undefined ? {} : { raw_payload_refs: copyRequiredRefs(input.raw_payload_refs, "raw_payload_refs") }),
       ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
       evidence_refs: evidenceRefs,
+      ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
       retention_state: retentionState
     }
   };
@@ -163,11 +169,13 @@ export async function completeRunWithFailure(store: FileRunRecordStore, runId: s
   const status = input.status ?? "failed";
   const evidenceRefs = copyRefs(input.evidence_refs, "evidence_refs");
   const retentionState = input.retention_state ?? "active";
+  const failure = normalizeFailureRecord(input.failure);
   const updated = await store.updateRunRecord(runId, {
     status,
-    failure: input.failure,
+    failure,
     ...(evidenceRefs === undefined ? {} : { evidence_refs: evidenceRefs }),
-    retention_state: retentionState
+    retention_state: retentionState,
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check })
   });
 
   return {
@@ -177,7 +185,8 @@ export async function completeRunWithFailure(store: FileRunRecordStore, runId: s
       ok: false,
       outcome: status,
       ...(updated.evidence_refs === undefined ? {} : { evidence_refs: updated.evidence_refs }),
-      failure: input.failure,
+      failure,
+      ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
       retention_state: retentionState
     }
   };

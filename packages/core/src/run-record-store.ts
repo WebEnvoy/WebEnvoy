@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
 
@@ -18,6 +19,20 @@ export type RunRecordStatus =
   | "expired";
 
 export type RetentionState = "active" | "summary_only" | "expired" | "redacted" | "access_denied" | "deleted_by_policy";
+export type PostCheckStatus = "passed" | "failed" | "blocked" | "not_run";
+
+export type PostCheckResult = {
+  schema_version: "webenvoy.post-check-result.v0";
+  status: PostCheckStatus;
+  summary: string;
+  checked_at?: string;
+  code?: string;
+  attribution?: FailureAttribution;
+  recovery_hint?: string;
+  evidence_refs?: string[];
+  source_refs?: string[];
+  consumer_boundary: string;
+};
 
 export type AdmissionDecision = {
   decision: "accepted" | "accepted_with_warnings" | "blocked_pre_admission" | "requires_user_action" | "deferred_true_write";
@@ -55,6 +70,7 @@ export type FailureRecord = {
     | "write_verification"
     | "reconciliation";
   recovery_hint: string;
+  attribution?: FailureAttribution;
 };
 
 export type RunRecord = {
@@ -76,6 +92,7 @@ export type RunRecord = {
   result_ref?: string;
   evidence_refs?: string[];
   failure?: FailureRecord;
+  post_check?: PostCheckResult;
   retention_state?: RetentionState;
 };
 
@@ -94,6 +111,7 @@ export type CreateRunRecordInput = {
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
+  post_check?: PostCheckResult;
   retention_state?: RetentionState;
 };
 
@@ -103,6 +121,7 @@ export type RunRecordPatch = {
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
+  post_check?: PostCheckResult;
   retention_state?: RetentionState;
 };
 
@@ -221,6 +240,26 @@ function assertRunRecord(record: RunRecord): void {
   copyRefs(record.admission.evidence_refs, "admission.evidence_refs");
   copyRefs(record.runtime_binding_refs, "runtime_binding_refs");
   copyRefs(record.evidence_refs, "evidence_refs");
+  if (record.post_check !== undefined) {
+    requireRef(record.post_check.schema_version, "post_check.schema_version");
+    if (record.post_check.schema_version !== "webenvoy.post-check-result.v0") {
+      throw new Error("post_check.schema_version is unsupported");
+    }
+    requireRef(record.post_check.status, "post_check.status");
+    requireRef(record.post_check.summary, "post_check.summary");
+    requireRef(record.post_check.consumer_boundary, "post_check.consumer_boundary");
+    if (record.post_check.checked_at !== undefined) {
+      requireRef(record.post_check.checked_at, "post_check.checked_at");
+    }
+    if (record.post_check.code !== undefined) {
+      requireRef(record.post_check.code, "post_check.code");
+    }
+    if (record.post_check.recovery_hint !== undefined) {
+      requireRef(record.post_check.recovery_hint, "post_check.recovery_hint");
+    }
+    copyRefs(record.post_check.evidence_refs, "post_check.evidence_refs");
+    copyRefs(record.post_check.source_refs, "post_check.source_refs");
+  }
   if (record.terminal_at && !terminalRunRecordStatuses.has(record.status)) {
     throw new Error("terminal_at is only allowed on terminal run records");
   }
@@ -241,7 +280,10 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
     next.evidence_refs = copyRequiredRefs(patch.evidence_refs, "evidence_refs");
   }
   if (patch.failure !== undefined) {
-    next.failure = patch.failure;
+    next.failure = normalizeFailureRecord(patch.failure);
+  }
+  if (patch.post_check !== undefined) {
+    next.post_check = patch.post_check;
   }
   if (patch.retention_state !== undefined) {
     next.retention_state = patch.retention_state;
@@ -291,7 +333,10 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
     record.evidence_refs = copyRequiredRefs(input.evidence_refs, "evidence_refs");
   }
   if (input.failure !== undefined) {
-    record.failure = input.failure;
+    record.failure = normalizeFailureRecord(input.failure);
+  }
+  if (input.post_check !== undefined) {
+    record.post_check = input.post_check;
   }
   if (input.retention_state !== undefined) {
     record.retention_state = input.retention_state;

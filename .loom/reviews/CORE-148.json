@@ -1,0 +1,47 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-148",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review accepts CORE-148 capability admission, failure attribution, post-check, query, and refs-only evidence linkage changes for Stage 5.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T16:36:00Z",
+  "reviewed_head": "d5ae1e92dca24df8636ae9dc30d1fbebfca85e1a",
+  "reviewed_validation_summary": "targeted core/api/schema/conformance tests, conformance smoke, typecheck, lint, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed locally.",
+  "reviewed_validation_summary_hash": "83bad255d8d6447872d44d14cb5939898b5798338d57636d22c0823129446d66",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-148.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "#151 Lode output schema projection remains outside this batch and stays open."
+  ],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-148.md",
+    "recovery_entry": ".loom/progress/CORE-148.md",
+    "status_surface": ".loom/status/current.md",
+    "spec": ".loom/specs/CORE-148/spec.md",
+    "plan": ".loom/specs/CORE-148/plan.md",
+    "evidence_map": ".loom/specs/CORE-148/evidence-map.md",
+    "task_carrier": ".loom/specs/CORE-148/task-carrier.md",
+    "build_checkpoint": "pass",
+    "suite_validation": "loom suite validate --target . --item CORE-148 --json",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-148 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-148 --json",
+    "fact_chain": "loom fact-chain --target . --json",
+    "verify": "loom verify --target . --json"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Core remains the run/result truth owner, exposes only capability/run/result/evidence refs, and does not store App UI state, Harbor raw evidence, Lode package truth, credentials, or Stage 6 write behavior."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "The implementation adds bounded schema, fixture, query, admission, and API surfaces with targeted tests and no raw private evidence or package truth persistence."
+  },
+  "carrier_only_drift": {
+    "status": "accepted",
+    "reason": "Commits after the reviewed implementation head only update CORE-148 review/progress/status carrier metadata for v0.28 gate consumption."
+  }
+}
