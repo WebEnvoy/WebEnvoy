@@ -11,13 +11,13 @@
 - Review Entry: .loom/reviews/CORE-147.json
 - Validation Entry: pnpm test -- --runInBand && git diff --check
 - Closing Condition: Core #147/#149/#153 capability attribution fixture is validated without storing Lode package bodies, Harbor raw evidence, or App UI state
-- Current Checkpoint: build
-- Current Stop: Core capability attribution fixture, schema/runtime/conformance updates, and validation evidence are implemented on PR #160.
-- Next Step: Record current-head review, update PR metadata, and run hosted gate for Core #160.
+- Current Checkpoint: merge
+- Current Stop: Core #147 capability attribution fixture has current-head review, suite validation, repo test evidence, and PR #160 metadata ready for hosted gate consumption.
+- Next Step: Run hosted loom-pr-merge-gate for PR #160, then controlled merge if it passes.
 - Blockers: None recorded.
 - Latest Validation Summary: pnpm test -- --runInBand, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed on CORE-147.
 - Recovery Boundary: Core attribution fixture only; no Lode package body persistence, Harbor raw evidence, App UI state, credential, or Stage 6 write behavior.
-- Current Lane: stage5 capability attribution fixture
+- Current Lane: stage5 capability attribution merge-ready
 
 ## Runtime Evidence
 
