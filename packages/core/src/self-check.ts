@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
 import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
-import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
+import { completeRunWithFailure, completeRunWithPreviewResult, completeRunWithResult } from "./result-envelope.js";
 import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
 import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
@@ -456,6 +456,75 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(approvalQuery.approval_requests.length, 3);
     assert.equal(approvalQuery.cancellations[0]?.failure_code, "user_cancelled");
     assert.equal(JSON.stringify(approvalQuery).includes("submitted_result_ref"), false);
+
+    const previewRunBase = {
+      ...approvalRunBase,
+      admission: {
+        decision: "accepted_with_warnings" as const,
+        action_risk: "write" as const,
+        evidence_refs: approvalEvidenceRefs
+      },
+      action_request: actionRequest,
+      evidence_refs: approvalEvidenceRefs,
+      retention_state: "active" as const
+    };
+    await store.createRunRecord({
+      run_id: "run_self_check_preview_available",
+      status: "admitted",
+      ...previewRunBase
+    });
+    await store.updateRunRecord("run_self_check_preview_available", { status: "running", evidence_refs: approvalEvidenceRefs });
+    const preview = await completeRunWithPreviewResult(store, "run_self_check_preview_available", {
+      result_ref: "result:fixture/preview-contact-form",
+      expected_change: {
+        change_kind: "form_input_preview",
+        target_ref: "target:fixture/contact-form",
+        external_submit: false
+      },
+      evidence_refs: approvalEvidenceRefs
+    });
+    assert.equal(preview.result_envelope.ok, true);
+    assert.equal(preview.result_envelope.result_kind, "validate_only_preview");
+    assert.equal(preview.result_envelope.preview_result?.submitted, false);
+    assert.equal(preview.result_envelope.preview_result?.state, "available");
+    assert.equal(preview.result_envelope.preview_result?.action_refs.action_request_id, actionRequest.action_request_id);
+    assert.equal(preview.result_envelope.preview_result?.capability.capability_version, "0.1.0");
+    assert.equal(JSON.stringify(preview.result_envelope).includes("submitted_result"), false);
+    const previewQuery = await getRunResult(store, "run_self_check_preview_available");
+    assert.equal(previewQuery.ok, true);
+    if (!previewQuery.ok) throw new Error("preview result must be queryable");
+    assert.equal(previewQuery.result.result.result_envelope?.preview_result?.submitted, false);
+
+    await store.createRunRecord({
+      run_id: "run_self_check_preview_page_changed",
+      status: "admitted",
+      ...previewRunBase
+    });
+    await store.updateRunRecord("run_self_check_preview_page_changed", { status: "running", evidence_refs: ["evidence:fixture/page-changed"] });
+    const pageChanged = await completeRunWithPreviewResult(store, "run_self_check_preview_page_changed", {
+      result_ref: "result:fixture/preview-page-changed",
+      preview_state: "page_changed",
+      evidence_refs: ["evidence:fixture/page-changed"]
+    });
+    assert.equal(pageChanged.run_record.status, "failed");
+    assert.equal(pageChanged.result_envelope.preview_result?.failure_class, "page_changed");
+    assert.equal(pageChanged.result_envelope.failure?.code, "page_changed");
+
+    await store.createRunRecord({
+      run_id: "run_self_check_preview_user_cancelled",
+      status: "admitted",
+      ...previewRunBase
+    });
+    await store.updateRunRecord("run_self_check_preview_user_cancelled", { status: "running", evidence_refs: approvalEvidenceRefs });
+    const userCancelled = await completeRunWithPreviewResult(store, "run_self_check_preview_user_cancelled", {
+      result_ref: "result:fixture/preview-user-cancelled",
+      preview_state: "user_cancelled",
+      evidence_refs: approvalEvidenceRefs
+    });
+    assert.equal(userCancelled.run_record.status, "cancelled");
+    assert.equal(userCancelled.result_envelope.outcome, "cancelled");
+    assert.equal(userCancelled.result_envelope.preview_result?.failure_class, "user_cancelled");
+    assert.equal(userCancelled.result_envelope.failure?.code, "user_cancelled");
 
     const brokenResourceContract = {
       ...lodeReadPublicPageContract,

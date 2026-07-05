@@ -1,0 +1,39 @@
+{
+  "$schema": "result-envelope.schema.json",
+  "schema_version": "webenvoy.result-envelope.v0",
+  "run_record_ref": "run_fixture_preview_user_cancelled",
+  "ok": false,
+  "outcome": "cancelled",
+  "terminal": true,
+  "capability_ref": "lode:capability/preview-contact-form",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "result_ref": "result:fixture/preview-user-cancelled",
+  "result_kind": "validate_only_preview",
+  "evidence_refs": ["evidence:fixture/before-preview"],
+  "preview_result": {
+    "schema_version": "webenvoy.preview-result.v0",
+    "state": "user_cancelled",
+    "submitted": false,
+    "action_refs": {
+      "action_request_id": "action-request:fixture/preview-contact-form"
+    },
+    "capability": {
+      "capability_ref": "lode:capability/preview-contact-form",
+      "capability_version": "0.1.0",
+      "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+      "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0"
+    },
+    "evidence_refs": ["evidence:fixture/before-preview"],
+    "failure_class": "user_cancelled",
+    "consumer_boundary": "Core preview result records user cancellation only; it is not submitted result truth."
+  },
+  "failure": {
+    "category": "action_risk",
+    "code": "user_cancelled",
+    "phase": "admission",
+    "recovery_hint": "record_cancellation_without_submit"
+  },
+  "retention_state": "active"
+}

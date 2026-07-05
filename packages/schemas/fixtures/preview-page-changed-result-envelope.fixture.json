@@ -1,0 +1,39 @@
+{
+  "$schema": "result-envelope.schema.json",
+  "schema_version": "webenvoy.result-envelope.v0",
+  "run_record_ref": "run_fixture_preview_page_changed",
+  "ok": false,
+  "outcome": "failed",
+  "terminal": true,
+  "capability_ref": "lode:capability/preview-contact-form",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "result_ref": "result:fixture/preview-page-changed",
+  "result_kind": "validate_only_preview",
+  "evidence_refs": ["evidence:fixture/stale-refmap"],
+  "preview_result": {
+    "schema_version": "webenvoy.preview-result.v0",
+    "state": "page_changed",
+    "submitted": false,
+    "action_refs": {
+      "action_request_id": "action-request:fixture/preview-contact-form"
+    },
+    "capability": {
+      "capability_ref": "lode:capability/preview-contact-form",
+      "capability_version": "0.1.0",
+      "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+      "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0"
+    },
+    "evidence_refs": ["evidence:fixture/stale-refmap"],
+    "failure_class": "page_changed",
+    "consumer_boundary": "Core preview result records page-changed failure only; it is not submitted result truth."
+  },
+  "failure": {
+    "category": "evidence_reference",
+    "code": "page_changed",
+    "phase": "evidence",
+    "recovery_hint": "refresh_preview_evidence"
+  },
+  "retention_state": "active"
+}
