@@ -2,22 +2,22 @@
 
 ## Derived Fact Chain View
 
-- Item ID: INIT-0001
-- Goal: Bootstrap the first executable Loom path for this repository
-- Scope: Establish rule entry, first work item, progress carrier, spec/plan, and verification entry
-- Execution Path: bootstrap/root
+- Item ID: CORE-147
+- Goal: Accept read-only capability refs on Core task intent and preserve attribution in run/result records
+- Scope: Add capability source and lock refs to task intent capability, validate refs against Lode package contract, and expose attribution in run record/query/result fixtures
+- Execution Path: stage5/read-only-capability-attribution
 - Workspace Entry: .
-- Recovery Entry: .loom/progress/INIT-0001.md
-- Review Entry: .loom/reviews/INIT-0001.json
-- Validation Entry: loom verify --target . --json
-- Closing Condition: The generated entry, work item, recovery entry, and templates are readable and verified
+- Recovery Entry: .loom/progress/CORE-147.md
+- Review Entry: .loom/reviews/CORE-147.json
+- Validation Entry: pnpm test -- --runInBand && git diff --check
+- Closing Condition: Core #147/#149/#153 capability attribution fixture is validated without storing Lode package bodies, Harbor raw evidence, or App UI state
 - Current Checkpoint: merge
-- Current Stop: Bootstrap PR #159 has current-head review, suite validation, evidence map, task carrier, and PR metadata readback ready for hosted gate consumption.
-- Next Step: Run hosted loom-pr-merge-gate for PR #159, then controlled merge and post-merge closeout if it passes.
+- Current Stop: Core #147 capability attribution fixture has current-head review, suite validation, repo test evidence, and PR #160 metadata ready for hosted gate consumption.
+- Next Step: Run hosted loom-pr-merge-gate for PR #160, then controlled merge if it passes.
 - Blockers: None recorded.
-- Latest Validation Summary: Bootstrap manifest exists; init-result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.
-- Recovery Boundary: Bootstrap result at `.loom/bootstrap/init-result.json`; bootstrap manifest at `.loom/bootstrap/manifest.json`.
-- Current Lane: bootstrap merge-ready verification
+- Latest Validation Summary: pnpm test -- --runInBand, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed on CORE-147.
+- Recovery Boundary: Core attribution fixture only; no Lode package body persistence, Harbor raw evidence, App UI state, credential, or Stage 6 write behavior.
+- Current Lane: stage5 capability attribution merge-ready
 
 ## Runtime Evidence
 
@@ -29,7 +29,7 @@
 
 ## Sources
 
-- Static Truth: .loom/work-items/INIT-0001.md
-- Dynamic Truth: .loom/progress/INIT-0001.md
+- Static Truth: .loom/work-items/CORE-147.md
+- Dynamic Truth: .loom/progress/CORE-147.md
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json

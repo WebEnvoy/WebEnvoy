@@ -19,6 +19,8 @@ export type TaskIntentEnvelope = {
   capability: {
     ref: string;
     version: string;
+    source_ref?: string;
+    lock_ref?: string;
   };
   input: {
     summary: string;
@@ -235,12 +237,16 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   const userIntentSummary = asNonEmptyString(fields.userIntent.summary, "user_intent_summary_required");
   const capabilityRef = asNonEmptyString(fields.capability.ref, "capability_ref_required");
   const capabilityVersion = asNonEmptyString(fields.capability.version, "capability_version_required");
+  const capabilitySourceRef = fields.capability.source_ref === undefined ? undefined : asNonEmptyString(fields.capability.source_ref, "capability_source_ref_invalid");
+  const capabilityLockRef = fields.capability.lock_ref === undefined ? undefined : asNonEmptyString(fields.capability.lock_ref, "capability_lock_ref_invalid");
   const inputSummary = asNonEmptyString(fields.input.summary, "input_summary_required");
   const scopeTargetType = asNonEmptyString(fields.scope.target_type, "scope_target_type_required");
   const scopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
   if (isFailure(userIntentSummary)) return userIntentSummary;
   if (isFailure(capabilityRef)) return capabilityRef;
   if (isFailure(capabilityVersion)) return capabilityVersion;
+  if (isFailure(capabilitySourceRef)) return capabilitySourceRef;
+  if (isFailure(capabilityLockRef)) return capabilityLockRef;
   if (isFailure(inputSummary)) return inputSummary;
   if (isFailure(scopeTargetType)) return scopeTargetType;
   if (isFailure(scopeTargetRef)) return scopeTargetRef;
@@ -255,7 +261,9 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
     },
     capability: {
       ref: capabilityRef,
-      version: capabilityVersion
+      version: capabilityVersion,
+      ...(capabilitySourceRef === undefined ? {} : { source_ref: capabilitySourceRef }),
+      ...(capabilityLockRef === undefined ? {} : { lock_ref: capabilityLockRef })
     },
     input: {
       summary: inputSummary,
@@ -337,6 +345,9 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       task_intent_ref: taskIntent.intent_id,
       entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
       capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+      ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
       ...(input.package_ref === undefined ? {} : { package_ref: input.package_ref }),
       admission: {
         decision: "deferred_true_write",
@@ -362,6 +373,9 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       task_intent_ref: taskIntent.intent_id,
       entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
       capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+      ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
       ...(lodeAdmission.package_ref === undefined ? {} : { package_ref: lodeAdmission.package_ref }),
       admission: {
         decision: lodeAdmissionDecision(lodeAdmission.failure),
@@ -386,6 +400,9 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       task_intent_ref: taskIntent.intent_id,
       entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
       capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(lodeAdmission.capability_source_ref === undefined ? {} : { capability_source_ref: lodeAdmission.capability_source_ref }),
+      ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
       package_ref: lodeAdmission.package_ref,
       admission: {
         decision: "blocked_pre_admission",
@@ -412,6 +429,9 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     task_intent_ref: taskIntent.intent_id,
     entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
     capability_ref: taskIntent.capability.ref,
+    capability_version: taskIntent.capability.version,
+    ...(lodeAdmission.capability_source_ref === undefined ? {} : { capability_source_ref: lodeAdmission.capability_source_ref }),
+    ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
     package_ref: lodeAdmission.package_ref,
     admission: {
       decision: "accepted",

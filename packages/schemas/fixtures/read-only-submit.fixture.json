@@ -9,7 +9,9 @@
   },
   "capability": {
     "ref": "lode:capability/read-public-page",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+    "lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0"
   },
   "input": {
     "summary": "Target URL and extraction options are represented as public refs.",

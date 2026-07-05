@@ -8,6 +8,9 @@
   "terminal": true,
   "result_kind": "content_detail",
   "capability_ref": "lode:capability/read-public-page",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0",
   "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
   "data": {
     "title": "Example Domain",

@@ -12,6 +12,9 @@ export type ResultEnvelope = {
   outcome: ResultOutcome;
   terminal: true;
   capability_ref: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  capability_lock_ref?: string;
   result_ref?: string;
   result_kind?: string;
   package_ref?: string;
@@ -107,12 +110,17 @@ function assertPublicData(data: Record<string, unknown> | undefined): void {
   if (forbidden) throw new Error(`result data contains forbidden field: ${forbidden}`);
 }
 
-function envelopeBase(record: RunRecord): Pick<ResultEnvelope, "schema_version" | "run_record_ref" | "terminal" | "capability_ref" | "package_ref"> {
+function envelopeBase(
+  record: RunRecord
+): Pick<ResultEnvelope, "schema_version" | "run_record_ref" | "terminal" | "capability_ref" | "capability_version" | "capability_source_ref" | "capability_lock_ref" | "package_ref"> {
   return {
     schema_version: resultEnvelopeSchemaVersion,
     run_record_ref: record.run_id,
     terminal: true,
     capability_ref: record.capability_ref,
+    ...(record.capability_version === undefined ? {} : { capability_version: record.capability_version }),
+    ...(record.capability_source_ref === undefined ? {} : { capability_source_ref: record.capability_source_ref }),
+    ...(record.capability_lock_ref === undefined ? {} : { capability_lock_ref: record.capability_lock_ref }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref })
   };
 }

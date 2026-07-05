@@ -19,6 +19,9 @@ export type RunTimeline = {
 export type RunCapabilitySummary = {
   task_intent_ref: string;
   capability_ref: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  capability_lock_ref?: string;
   entrypoint_ref?: string;
   package_ref?: string;
 };
@@ -114,6 +117,9 @@ export function projectRunSummary(record: RunRecord): RunSummary {
     task: {
       task_intent_ref: record.task_intent_ref,
       capability_ref: record.capability_ref,
+      ...(record.capability_version === undefined ? {} : { capability_version: record.capability_version }),
+      ...(record.capability_source_ref === undefined ? {} : { capability_source_ref: record.capability_source_ref }),
+      ...(record.capability_lock_ref === undefined ? {} : { capability_lock_ref: record.capability_lock_ref }),
       ...(record.entrypoint_ref === undefined ? {} : { entrypoint_ref: record.entrypoint_ref }),
       ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref })
     },

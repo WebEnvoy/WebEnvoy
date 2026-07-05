@@ -20,6 +20,9 @@
       "status": "Core",
       "task_intent_ref": "Core",
       "capability_ref": "Lode owns referenced capability",
+      "capability_version": "Lode owns referenced capability version",
+      "capability_source_ref": "Lode owns referenced catalog/package source",
+      "capability_lock_ref": "Lode owns referenced package lock",
       "runtime_binding_refs": "Harbor owns referenced runtime facts",
       "result_ref": "Core",
       "evidence_refs": "Harbor or evidence producer owns ref body; Core records refs only",
@@ -81,6 +84,18 @@
       "minLength": 1
     },
     "capability_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_lock_ref": {
       "type": "string",
       "minLength": 1
     },
