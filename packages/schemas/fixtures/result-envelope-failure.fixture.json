@@ -6,6 +6,9 @@
   "outcome": "failed",
   "terminal": true,
   "capability_ref": "lode:capability/read-public-page",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0",
   "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
   "evidence_refs": ["evidence:fixture/output-invalid"],
   "failure": {

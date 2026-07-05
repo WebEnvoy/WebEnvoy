@@ -2,6 +2,7 @@ import type { FailureRecord } from "./run-record-store.js";
 
 export type LodePackageAdmissionContract = {
   package_ref: string;
+  source_ref?: string;
   lock_ref?: string;
   capability_id: string;
   operation_id?: string;
@@ -36,6 +37,8 @@ export type LodeAdmissionTaskIntent = {
   capability: {
     ref: string;
     version: string;
+    source_ref?: string;
+    lock_ref?: string;
   };
   resource_requirement_refs: readonly string[];
 };
@@ -44,6 +47,9 @@ export type LodeAdmission =
   | {
       ok: true;
       package_ref: string;
+      capability_version: string;
+      capability_source_ref?: string;
+      capability_lock_ref?: string;
       resource_requirement_refs: readonly string[];
     }
   | {
@@ -194,6 +200,14 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   if (!contractString(lodePackage.lock_ref)) {
     return { ok: false, failure: invalidLodeContract("package_lock_missing"), package_ref: packageRef };
   }
+  const lockRef = contractString(lodePackage.lock_ref);
+  const sourceRef = contractString(lodePackage.source_ref) ?? packageRef;
+  if (taskIntent.capability.lock_ref !== undefined && taskIntent.capability.lock_ref !== lockRef) {
+    return { ok: false, failure: invalidLodeContract("package_lock_mismatch"), package_ref: packageRef };
+  }
+  if (taskIntent.capability.source_ref !== undefined && taskIntent.capability.source_ref !== sourceRef) {
+    return { ok: false, failure: invalidLodeContract("capability_source_mismatch"), package_ref: packageRef };
+  }
   if (taskIntent.capability.ref !== expectedCapabilityRef(capabilityId) && taskIntent.capability.ref !== capabilityId) {
     return { ok: false, failure: invalidLodeContract("capability_ref_mismatch"), package_ref: packageRef };
   }
@@ -213,6 +227,9 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   return {
     ok: true,
     package_ref: packageRef,
+    capability_version: version,
+    capability_source_ref: sourceRef,
+    ...(lockRef === undefined ? {} : { capability_lock_ref: lockRef }),
     resource_requirement_refs: resourceRequirementRefs
   };
 }

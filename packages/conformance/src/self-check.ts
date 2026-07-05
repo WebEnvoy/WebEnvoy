@@ -198,6 +198,9 @@ function runRecordFromFixture(value: unknown, label: string): RunRecord {
   asString(record.updated_at, `${label}.updated_at`);
   asString(record.task_intent_ref, `${label}.task_intent_ref`);
   asString(record.capability_ref, `${label}.capability_ref`);
+  if (record.capability_version !== undefined) asString(record.capability_version, `${label}.capability_version`);
+  if (record.capability_source_ref !== undefined) asString(record.capability_source_ref, `${label}.capability_source_ref`);
+  if (record.capability_lock_ref !== undefined) asString(record.capability_lock_ref, `${label}.capability_lock_ref`);
   if (record.terminal_at !== undefined) asString(record.terminal_at, `${label}.terminal_at`);
   if (record.entrypoint_ref !== undefined) asString(record.entrypoint_ref, `${label}.entrypoint_ref`);
   if (record.package_ref !== undefined) asString(record.package_ref, `${label}.package_ref`);
@@ -230,6 +233,9 @@ function assertGoldenReadOnlyBindings(golden: RunRecord, task: JsonObject, resul
   assert.equal(golden.task_intent_ref, asString(task.intent_id, "task.intent_id"));
   assert.equal(golden.entrypoint_ref, `entrypoint:${asString(task.entrypoint, "task.entrypoint")}`);
   assert.equal(golden.capability_ref, asString(capability.ref, "task.capability.ref"));
+  assert.equal(golden.capability_version, asString(capability.version, "task.capability.version"));
+  assert.equal(golden.capability_source_ref, asString(capability.source_ref, "task.capability.source_ref"));
+  assert.equal(golden.capability_lock_ref, asString(capability.lock_ref, "task.capability.lock_ref"));
   assert.equal(golden.package_ref, asString(result.package_ref, "result.package_ref"));
   assert.equal(golden.admission.decision, "accepted");
   assert.equal(golden.admission.action_risk, asActionRisk(policy.risk, "task.policy.risk"));
@@ -336,6 +342,9 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       task_intent_ref: asString(task.intent_id, "task.intent_id"),
       entrypoint_ref: `entrypoint:${asString(task.entrypoint, "task.entrypoint")}`,
       capability_ref: asString(capability.ref, "task.capability.ref"),
+      capability_version: asString(capability.version, "task.capability.version"),
+      capability_source_ref: asString(capability.source_ref, "task.capability.source_ref"),
+      capability_lock_ref: asString(capability.lock_ref, "task.capability.lock_ref"),
       package_ref: asString(result.package_ref, "result.package_ref"),
       admission: {
         decision: "accepted",
@@ -383,6 +392,9 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       task_intent_ref: asString(task.intent_id, "task.intent_id"),
       entrypoint_ref: `entrypoint:${asString(task.entrypoint, "task.entrypoint")}`,
       capability_ref: asString(failureResult.capability_ref, "failure result.capability_ref"),
+      capability_version: asString(failureResult.capability_version, "failure result.capability_version"),
+      capability_source_ref: asString(failureResult.capability_source_ref, "failure result.capability_source_ref"),
+      capability_lock_ref: asString(failureResult.capability_lock_ref, "failure result.capability_lock_ref"),
       package_ref: asString(failureResult.package_ref, "failure result.package_ref"),
       admission: {
         decision: "accepted",
@@ -420,6 +432,9 @@ async function assertRunRecordStoreConformance(): Promise<number> {
       task_intent_ref: asString(admissionFailure.task_intent_ref, "admission failure fixture.task_intent_ref"),
       entrypoint_ref: asString(admissionFailure.entrypoint_ref, "admission failure fixture.entrypoint_ref"),
       capability_ref: asString(admissionFailure.capability_ref, "admission failure fixture.capability_ref"),
+      capability_version: asString(admissionFailure.capability_version, "admission failure fixture.capability_version"),
+      capability_source_ref: asString(admissionFailure.capability_source_ref, "admission failure fixture.capability_source_ref"),
+      capability_lock_ref: asString(admissionFailure.capability_lock_ref, "admission failure fixture.capability_lock_ref"),
       package_ref: asString(admissionFailure.package_ref, "admission failure fixture.package_ref"),
       admission: {
         decision: "blocked_pre_admission",

@@ -21,6 +21,7 @@ function nextInstant(): Date {
 
 const lodeReadPublicPageContract = {
   package_ref: "lode://site-capability/example/read-public-page@0.1.0",
+  source_ref: "lode://site-capability/example/read-public-page@0.1.0",
   lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
   capability_id: "read-public-page",
   operation_id: "content_detail_by_url",
@@ -118,6 +119,9 @@ function baseInput(runId: string) {
     task_intent_ref: "intent_fixture_read_only_001",
     entrypoint_ref: "entrypoint:api",
     capability_ref: "lode:capability/read-public-page",
+    capability_version: "0.1.0",
+    capability_source_ref: "lode://site-capability/example/read-public-page@0.1.0",
+    capability_lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
     package_ref: "lode://site-capability/example/read-public-page@0.1.0",
     admission: {
       decision: "accepted",
@@ -167,6 +171,9 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(accepted.run_record.admission.decision, "accepted");
     assert.equal(accepted.run_record.task_intent_ref, "intent_fixture_read_only_001");
     assert.equal(accepted.run_record.capability_ref, "lode:capability/read-public-page");
+    assert.equal(accepted.run_record.capability_version, "0.1.0");
+    assert.equal(accepted.run_record.capability_source_ref, lodeReadPublicPageContract.source_ref);
+    assert.equal(accepted.run_record.capability_lock_ref, lodeReadPublicPageContract.lock_ref);
     assert.equal(accepted.run_record.package_ref, lodeReadPublicPageContract.package_ref);
     assert.deepEqual(accepted.run_record.admission.resource_requirement_refs, ["example.read-public-page.resources"]);
     assert.deepEqual(accepted.run_record.admission.runtime_binding_refs, harborRuntimeBindingRefs);
@@ -284,6 +291,22 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(invalidContract.run_record.failure?.category, "capability_contract");
     assert.deepEqual(await store.getRunRecord("run_self_check_lode_invalid_contract"), invalidContract.run_record);
 
+    const lockMismatch = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_lode_lock_mismatch",
+      task_intent: {
+        ...taskIntent,
+        intent_id: "intent_fixture_lock_mismatch_001",
+        capability: {
+          ...(taskIntent.capability as Record<string, unknown>),
+          lock_ref: "lode://lock/site-capability/example/read-public-page@0.0.9"
+        }
+      },
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract
+    });
+    assert.equal(lockMismatch.ok, false);
+    assert.equal(lockMismatch.failure.code, "package_lock_mismatch");
+
     const writeContract = {
       ...lodeReadPublicPageContract,
       operation_mode: "write",
@@ -367,6 +390,9 @@ try {
     task: {
       task_intent_ref: "intent_fixture_read_only_001",
       capability_ref: "lode:capability/read-public-page",
+      capability_version: "0.1.0",
+      capability_source_ref: "lode://site-capability/example/read-public-page@0.1.0",
+      capability_lock_ref: "lode://lock/site-capability/example/read-public-page@0.1.0",
       entrypoint_ref: "entrypoint:api",
       package_ref: "lode://site-capability/example/read-public-page@0.1.0"
     },

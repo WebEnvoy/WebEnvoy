@@ -67,6 +67,9 @@ export type RunRecord = {
   task_intent_ref: string;
   entrypoint_ref?: string;
   capability_ref: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  capability_lock_ref?: string;
   package_ref?: string;
   admission: AdmissionDecision;
   runtime_binding_refs?: string[];
@@ -83,6 +86,9 @@ export type CreateRunRecordInput = {
   admission: AdmissionDecision;
   status?: Extract<RunRecordStatus, "pending" | "admitted" | "failed" | "cancelled" | "expired">;
   entrypoint_ref?: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  capability_lock_ref?: string;
   package_ref?: string;
   runtime_binding_refs?: readonly string[];
   result_ref?: string;
@@ -192,6 +198,15 @@ function assertRunRecord(record: RunRecord): void {
   if (record.entrypoint_ref !== undefined) {
     requireRef(record.entrypoint_ref, "entrypoint_ref");
   }
+  if (record.capability_version !== undefined) {
+    requireRef(record.capability_version, "capability_version");
+  }
+  if (record.capability_source_ref !== undefined) {
+    requireRef(record.capability_source_ref, "capability_source_ref");
+  }
+  if (record.capability_lock_ref !== undefined) {
+    requireRef(record.capability_lock_ref, "capability_lock_ref");
+  }
   if (record.package_ref !== undefined) {
     requireRef(record.package_ref, "package_ref");
   }
@@ -253,6 +268,15 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   };
   if (input.entrypoint_ref !== undefined) {
     record.entrypoint_ref = requireRef(input.entrypoint_ref, "entrypoint_ref");
+  }
+  if (input.capability_version !== undefined) {
+    record.capability_version = requireRef(input.capability_version, "capability_version");
+  }
+  if (input.capability_source_ref !== undefined) {
+    record.capability_source_ref = requireRef(input.capability_source_ref, "capability_source_ref");
+  }
+  if (input.capability_lock_ref !== undefined) {
+    record.capability_lock_ref = requireRef(input.capability_lock_ref, "capability_lock_ref");
   }
   if (input.package_ref !== undefined) {
     record.package_ref = requireRef(input.package_ref, "package_ref");
