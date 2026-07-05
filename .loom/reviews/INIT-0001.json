@@ -1,17 +1,60 @@
 {
   "schema_version": "loom-review/v1",
   "item_id": "INIT-0001",
-  "decision": "fallback",
+  "decision": "allow",
   "kind": "general_review",
-  "summary": "Bootstrap has not entered formal review yet.",
-  "reviewer": "not yet assigned",
-  "reviewed_head": "bootstrap-placeholder",
+  "summary": "Implementation review accepts the carrier-only bootstrap repair and finds no product-behavior change in INIT-0001.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T10:43:56Z",
+  "reviewed_head": "7ce770147e4ff47f5506da71ae65d1394baedfd6",
   "reviewed_validation_summary": "Bootstrap manifest exists; init-result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.",
-  "fallback_to": "admission",
-  "blocking_issues": [
-    "Formal review starts only after downstream work replaces the bootstrap placeholder item."
-  ],
-  "follow_ups": [
-    "Record the first real semantic review before asking merge checkpoint to consume reviewer judgment."
-  ]
+  "reviewed_validation_summary_hash": "dc624b94f286c7da372a81838efd71b6699c06bba6b373523093aca1b1318ac7",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/INIT-0001.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/INIT-0001.md",
+    "recovery_entry": ".loom/progress/INIT-0001.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "loom suite evidence validate --target /Volumes/2T/dev/WebEnvoy/WebEnvoy --item INIT-0001 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target /Volumes/2T/dev/WebEnvoy/WebEnvoy --item INIT-0001 --json",
+    "suite_evidence_map": ".loom/specs/INIT-0001/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/INIT-0001/task-carrier.md"
+    ],
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
+    ],
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+  }
 }

@@ -1,17 +1,54 @@
 {
   "schema_version": "loom-review/v1",
   "item_id": "INIT-0001",
-  "decision": "fallback",
+  "decision": "allow",
   "kind": "spec_review",
-  "summary": "Formal spec review has not been completed yet.",
-  "reviewer": "not yet assigned",
-  "reviewed_head": "bootstrap-placeholder",
+  "summary": "Spec review accepts the bootstrap-only carrier repair scope and minimal suite path for INIT-0001.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T10:43:50Z",
+  "reviewed_head": "7ce770147e4ff47f5506da71ae65d1394baedfd6",
   "reviewed_validation_summary": "Bootstrap manifest exists; init-result JSON can be read mechanically; the first work item, status surface, and spec/plan artifacts exist.",
-  "fallback_to": "admission",
-  "blocking_issues": [
-    "Spec gate remains open until the formal spec path receives its own review record."
-  ],
-  "follow_ups": [
-    "Record a spec_review decision before implementation review or merge-ready consumes the formal spec path."
-  ]
+  "reviewed_validation_summary_hash": "dc624b94f286c7da372a81838efd71b6699c06bba6b373523093aca1b1318ac7",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/INIT-0001.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/INIT-0001.md",
+    "recovery_entry": ".loom/progress/INIT-0001.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "loom",
+    "suite_validator_mode": "global-cli",
+    "suite_spec": ".loom/specs/INIT-0001/spec.md",
+    "suite_plan": ".loom/specs/INIT-0001/plan.md",
+    "suite_evidence_map": ".loom/specs/INIT-0001/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/INIT-0001/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
 }
