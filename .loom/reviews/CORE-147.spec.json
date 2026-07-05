@@ -1,0 +1,54 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-147",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review accepts the Core capability attribution fixture slice and minimal suite boundary for CORE-147.",
+  "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
+  "authored_at": "2026-07-05T11:01:30Z",
+  "reviewed_head": "b07fc7bb0195f58375feaed36640eed14d83c160",
+  "reviewed_validation_summary": "pnpm test -- --runInBand, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed on CORE-147.",
+  "reviewed_validation_summary_hash": "aa538a0109e4f79cb7288f11c6d3848ee0805858776b503ef4705d4390e89df4",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-147.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-147.md",
+    "recovery_entry": ".loom/progress/CORE-147.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "loom",
+    "suite_validator_mode": "global-cli",
+    "suite_spec": ".loom/specs/CORE-147/spec.md",
+    "suite_plan": ".loom/specs/CORE-147/plan.md",
+    "suite_evidence_map": ".loom/specs/CORE-147/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/CORE-147/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}

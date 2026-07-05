@@ -1,0 +1,39 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-147",
+  "decision": "fallback",
+  "kind": "general_review",
+  "summary": "Formal review has not been recorded yet.",
+  "reviewer": "not yet assigned",
+  "reviewed_head": "2ab24c9e9a2f76bfc55118b2f065452b8863aa58",
+  "reviewed_validation_summary": "No validation recorded yet.",
+  "fallback_to": "admission",
+  "findings": [
+    {
+      "id": "scaffolded-block-1",
+      "summary": "Review artifact scaffolded but not yet concluded.",
+      "severity": "block",
+      "rebuttal": null,
+      "disposition": {
+        "status": "rejected",
+        "summary": "Scaffold placeholder must be replaced by a real formal review conclusion."
+      }
+    },
+    {
+      "id": "scaffolded-warn-1",
+      "summary": "Record a real review before asking merge checkpoint to consume it.",
+      "severity": "warn",
+      "rebuttal": null,
+      "disposition": {
+        "status": "deferred",
+        "summary": "This follow-up stays open until a real review is recorded."
+      }
+    }
+  ],
+  "blocking_issues": [
+    "Review artifact scaffolded but not yet concluded."
+  ],
+  "follow_ups": [
+    "Record a real review before asking merge checkpoint to consume it."
+  ]
+}
