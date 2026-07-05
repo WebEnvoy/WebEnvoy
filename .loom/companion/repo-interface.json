@@ -34,7 +34,6 @@
           "repo_specific_field_set": [
             "loom_work_item",
             "branch",
-            "head_sha",
             "governance_intensity",
             "change_class",
             "suite_path",
@@ -50,7 +49,6 @@
           "required_fields": [
             "loom_work_item",
             "branch",
-            "head_sha",
             "governance_intensity",
             "change_class",
             "suite_path",

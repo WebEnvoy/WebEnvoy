@@ -1,9 +1,0 @@
-{
-  "result": "pass",
-  "source_files": [
-    ".loom/companion/review.md"
-  ],
-  "source_sha256": {
-    ".loom/companion/review.md": "87834ecdeef377b051387ecaacd29c8ae3d7a3587968e16842c2e5f97de51981"
-  }
-}

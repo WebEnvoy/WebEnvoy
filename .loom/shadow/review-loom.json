@@ -1,9 +1,0 @@
-{
-  "result": "pass",
-  "source_files": [
-    ".loom/reviews/INIT-0001.json"
-  ],
-  "source_sha256": {
-    ".loom/reviews/INIT-0001.json": "cac159984acac0278a6c34c8ded267f23b00286efcca632a98e78055313fcaf4"
-  }
-}

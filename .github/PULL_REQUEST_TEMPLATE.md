@@ -35,7 +35,6 @@ If this repository declares repo-specific PR metadata in `.loom/companion/repo-i
   "fields": {
     "loom_work_item": "WI-0000",
     "branch": "work/0000-example",
-    "head_sha": "0000000000000000000000000000000000000000",
     "governance_intensity": "standard",
     "change_class": "contract",
     "suite_path": "minimal",
