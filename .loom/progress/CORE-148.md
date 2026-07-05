@@ -7,7 +7,7 @@
 - Current Stop: CORE-148 PR #162 is merged and covered issues are closed; this carrier-only PR is retiring the current pointer.
 - Next Step: Merge carrier-only closeout PR, then keep Core #151 open for the remaining Lode output schema projection.
 - Blockers: None recorded.
-- Latest Validation Summary: targeted core/api/schema/conformance tests, conformance smoke, typecheck, lint, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed locally.
+- Latest Validation Summary: jq empty .loom/bootstrap/init-result.json, git diff --check, loom fact-chain --target . --json, and loom verify --target . --json passed for CORE-148 carrier-only closeout.
 - Recovery Boundary: Revert CORE-148 PR to remove Core attribution/query/post-check additions; no raw Harbor evidence, Lode package body, App UI state, or Stage 6 behavior is introduced.
 - Current Lane: stage5 Core capability attribution closeout
 
