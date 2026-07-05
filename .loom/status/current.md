@@ -15,7 +15,7 @@
 - Current Stop: Local implementation and targeted validation are complete; final Loom gates and PR are pending.
 - Next Step: Commit, bind review head, push PR, consume hosted gate, then close covered issues with post-merge evidence.
 - Blockers: None recorded.
-- Latest Validation Summary: targeted core/api/schema/conformance tests, conformance smoke, typecheck, lint, git diff --check, suite validate, and suite carrier validate passed locally; suite evidence/fact-chain are being refreshed.
+- Latest Validation Summary: targeted core/api/schema/conformance tests, conformance smoke, typecheck, lint, git diff --check, suite validate, suite evidence validate, suite carrier validate, fact-chain, and verify passed locally.
 - Recovery Boundary: Revert CORE-148 PR to remove Core attribution/query/post-check additions; no raw Harbor evidence, Lode package body, App UI state, or Stage 6 behavior is introduced.
 - Current Lane: stage5 Core capability attribution
 

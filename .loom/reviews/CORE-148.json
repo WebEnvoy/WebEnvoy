@@ -2,7 +2,7 @@
   "schema_version": "loom-review-record/v1",
   "item": "CORE-148",
   "review_type": "implementation",
-  "reviewed_head": "pending-head",
+  "reviewed_head": "d5ae1e9596c91337be3a890da9ae1fe7748a7ccc",
   "decision": "approved",
   "summary": "Implementation keeps Core refs-only boundaries, adds tests and schemas, and preserves Lode/Harbor/App truth ownership.",
   "findings": []
