@@ -244,12 +244,12 @@
     }
   ],
   "fact_chain": {
-    "mode": "active",
+    "mode": "idle",
     "read_entry": "loom fact-chain --target . --json",
     "entry_points": {
-      "current_item_id": "CORE-151",
-      "work_item": ".loom/work-items/CORE-151.md",
-      "recovery_entry": ".loom/progress/CORE-151.md",
+      "current_item_id": "no_active_item",
+      "work_item": "not_applicable",
+      "recovery_entry": "not_applicable",
       "status_surface": ".loom/status/current.md"
     }
   },
