@@ -15,10 +15,7 @@
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [
-    {
-      "issue": "#151",
-      "summary": "Lode output schema projection remains outside this batch and stays open."
-    }
+    "#151 Lode output schema projection remains outside this batch and stays open."
   ],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-148.md",
