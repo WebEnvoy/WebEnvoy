@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/action-request.schema.json",
+  "schema_version": "webenvoy.action-request.v0",
+  "action_request_id": "action-request:intent_fixture_validate_only_001",
+  "task_intent_ref": "intent_fixture_validate_only_001",
+  "capability_ref": "lode:capability/preview-contact-form",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/example/preview-contact-form@0.1.0",
+  "package_ref": "lode://site-capability/example/preview-contact-form@0.1.0",
+  "operation_mode": "validate_only",
+  "risk_classification": {
+    "risk": "write",
+    "execution_intent": "validate_only",
+    "level": "low",
+    "true_write_requested": false,
+    "reasons": ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+  },
+  "no_submit_guard": {
+    "status": "active",
+    "enforced_by": "core",
+    "blocked_execution_intents": ["execute_after_approval", "reconcile_status", "request_cancel"],
+    "source_refs": [
+      "lode://site-capability/example/preview-contact-form@0.1.0",
+      "lode://lock/site-capability/example/preview-contact-form@0.1.0",
+      "example.preview-contact-form.resources"
+    ]
+  },
+  "target_refs": {
+    "scope_target_ref": "https://example.org/contact",
+    "writable_target_ref": "target:fixture/contact-form",
+    "form_state_ref": "snapshot_fixture_write_precheck"
+  },
+  "runtime_binding_refs": [
+    "session_fixture_ready",
+    "profile_fixture_public",
+    "provider_fixture_local",
+    "viewer_fixture_readonly",
+    "target:fixture/contact-form",
+    "snapshot_fixture_write_precheck",
+    "refmap_fixture_write_precheck"
+  ],
+  "evidence_refs": ["evidence_fixture_write_precheck"],
+  "consumer_boundary": "Core stores action request refs, risk classification, and no-submit guard only; no raw browser material or true write payload is stored."
+}

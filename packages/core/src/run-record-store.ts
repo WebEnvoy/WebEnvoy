@@ -43,6 +43,39 @@ export type AdmissionDecision = {
   resource_match_ref?: string;
 };
 
+export type ActionRequest = {
+  schema_version: "webenvoy.action-request.v0";
+  action_request_id: string;
+  task_intent_ref: string;
+  capability_ref: string;
+  capability_version?: string;
+  capability_source_ref?: string;
+  capability_lock_ref?: string;
+  package_ref?: string;
+  operation_mode: "validate_only" | "draft" | "preview" | "blocked_true_write";
+  risk_classification: {
+    risk: AdmissionDecision["action_risk"];
+    execution_intent: string;
+    level: "low" | "medium" | "high" | "blocked";
+    true_write_requested: boolean;
+    reasons: string[];
+  };
+  no_submit_guard: {
+    status: "active";
+    enforced_by: "core";
+    blocked_execution_intents: string[];
+    source_refs: string[];
+  };
+  target_refs?: {
+    scope_target_ref: string;
+    writable_target_ref?: string;
+    form_state_ref?: string;
+  };
+  runtime_binding_refs?: readonly string[];
+  evidence_refs?: readonly string[];
+  consumer_boundary: string;
+};
+
 export type FailureRecord = {
   category:
     | "request_invalid"
@@ -89,6 +122,7 @@ export type RunRecord = {
   package_ref?: string;
   admission: AdmissionDecision;
   runtime_binding_refs?: string[];
+  action_request?: ActionRequest;
   result_ref?: string;
   evidence_refs?: string[];
   failure?: FailureRecord;
@@ -108,6 +142,7 @@ export type CreateRunRecordInput = {
   capability_lock_ref?: string;
   package_ref?: string;
   runtime_binding_refs?: readonly string[];
+  action_request?: ActionRequest;
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -118,6 +153,7 @@ export type CreateRunRecordInput = {
 export type RunRecordPatch = {
   status?: RunRecordStatus;
   runtime_binding_refs?: readonly string[];
+  action_request?: ActionRequest;
   result_ref?: string;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -239,6 +275,27 @@ function assertRunRecord(record: RunRecord): void {
   copyRefs(record.admission.runtime_binding_refs, "admission.runtime_binding_refs");
   copyRefs(record.admission.evidence_refs, "admission.evidence_refs");
   copyRefs(record.runtime_binding_refs, "runtime_binding_refs");
+  if (record.action_request !== undefined) {
+    requireRef(record.action_request.schema_version, "action_request.schema_version");
+    if (record.action_request.schema_version !== "webenvoy.action-request.v0") {
+      throw new Error("action_request.schema_version is unsupported");
+    }
+    requireRef(record.action_request.action_request_id, "action_request.action_request_id");
+    requireRef(record.action_request.task_intent_ref, "action_request.task_intent_ref");
+    requireRef(record.action_request.capability_ref, "action_request.capability_ref");
+    requireRef(record.action_request.operation_mode, "action_request.operation_mode");
+    requireRef(record.action_request.risk_classification.risk, "action_request.risk_classification.risk");
+    requireRef(record.action_request.risk_classification.execution_intent, "action_request.risk_classification.execution_intent");
+    requireRef(record.action_request.risk_classification.level, "action_request.risk_classification.level");
+    copyRefs(record.action_request.risk_classification.reasons, "action_request.risk_classification.reasons");
+    requireRef(record.action_request.no_submit_guard.status, "action_request.no_submit_guard.status");
+    requireRef(record.action_request.no_submit_guard.enforced_by, "action_request.no_submit_guard.enforced_by");
+    copyRefs(record.action_request.no_submit_guard.blocked_execution_intents, "action_request.no_submit_guard.blocked_execution_intents");
+    copyRefs(record.action_request.no_submit_guard.source_refs, "action_request.no_submit_guard.source_refs");
+    copyRefs(record.action_request.runtime_binding_refs, "action_request.runtime_binding_refs");
+    copyRefs(record.action_request.evidence_refs, "action_request.evidence_refs");
+    requireRef(record.action_request.consumer_boundary, "action_request.consumer_boundary");
+  }
   copyRefs(record.evidence_refs, "evidence_refs");
   if (record.post_check !== undefined) {
     requireRef(record.post_check.schema_version, "post_check.schema_version");
@@ -272,6 +329,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   const next: RunRecord = { ...record };
   if (patch.runtime_binding_refs !== undefined) {
     next.runtime_binding_refs = copyRequiredRefs(patch.runtime_binding_refs, "runtime_binding_refs");
+  }
+  if (patch.action_request !== undefined) {
+    next.action_request = patch.action_request;
   }
   if (patch.result_ref !== undefined) {
     next.result_ref = requireRef(patch.result_ref, "result_ref");
@@ -325,6 +385,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.runtime_binding_refs !== undefined) {
     record.runtime_binding_refs = copyRequiredRefs(input.runtime_binding_refs, "runtime_binding_refs");
+  }
+  if (input.action_request !== undefined) {
+    record.action_request = input.action_request;
   }
   if (input.result_ref !== undefined) {
     record.result_ref = requireRef(input.result_ref, "result_ref");

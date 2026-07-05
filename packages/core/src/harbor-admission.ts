@@ -61,6 +61,7 @@ export type HarborCoreSceneReference = {
 export type HarborAdmissionInput = {
   harbor_runtime_facts?: HarborCoreRuntimeFacts | HarborUnavailable;
   harbor_scene_ref?: HarborCoreSceneReference | HarborUnavailable;
+  harbor_write_precheck_facts?: HarborWritePrecheckFacts | HarborUnavailable;
 };
 
 export type HarborAdmission =
@@ -87,6 +88,42 @@ type RuntimeAdmission =
       ok: false;
       failure: FailureRecord;
     };
+
+export type HarborWritePrecheckFacts = {
+  schema_version: "harbor-write-precheck-facts/v0";
+  runtime_session_ref: string;
+  provider_ref: string;
+  profile_ref: string;
+  writable_target: {
+    target_ref: string;
+    runtime_session_ref: string;
+    snapshot_ref: string;
+    refmap_ref: string;
+    evidence_refs: readonly string[];
+  };
+  form_state: {
+    snapshot_ref: string;
+    fields: readonly unknown[];
+    state_summary: string;
+  };
+  pre_write_guard: {
+    status: "active" | "blocked";
+    no_submit_guard: "active";
+    blocked_events: readonly string[];
+    enforcement: "facts_only_no_real_submit";
+    runtime_ready: boolean;
+    blocking_reasons: readonly unknown[];
+  };
+  privacy_boundary: {
+    raw_values: "not_exposed";
+    credential_profile_storage: "not_exposed";
+    page_network_capture: "not_exposed";
+    export_boundary: "refs_and_redacted_field_state_only";
+  };
+  unavailable: null;
+};
+
+export type HarborAdmissionMode = "read" | "write_precheck";
 
 const activeRuntimeStates = new Set(["active", "idle"]);
 const harborForbiddenFieldNames = new Set([
@@ -239,7 +276,66 @@ function validateSceneRef(
   };
 }
 
-export function validateHarborAdmission(input: HarborAdmissionInput): HarborAdmission {
+function validateWritePrecheckFacts(
+  writeFacts: HarborAdmissionInput["harbor_write_precheck_facts"],
+  runtimeSessionRef: string,
+  runtimeBindingRefs: readonly string[]
+): HarborAdmission {
+  if (!writeFacts) {
+    return { ok: false, failure: failure("resource_admission", "writable_target_missing", "runtime_binding", "connect_runtime"), runtime_binding_refs: runtimeBindingRefs };
+  }
+  if (isUnavailable(writeFacts)) {
+    return {
+      ok: false,
+      failure: failure("resource_admission", writeFacts.failure_class, "runtime_binding", writeFacts.retryable ? "connect_runtime" : "remove_private_field"),
+      runtime_binding_refs: runtimeBindingRefs
+    };
+  }
+
+  const facts = contractObject(writeFacts);
+  const target = contractObject(facts?.writable_target);
+  const formState = contractObject(facts?.form_state);
+  const guard = contractObject(facts?.pre_write_guard);
+  const privacy = contractObject(facts?.privacy_boundary);
+  const targetRef = contractString(target?.target_ref);
+  const snapshotRef = contractString(target?.snapshot_ref) ?? contractString(formState?.snapshot_ref);
+  const refmapRef = contractString(target?.refmap_ref);
+  const evidenceRefs = Array.isArray(target?.evidence_refs) ? target.evidence_refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];
+
+  if (
+    facts?.schema_version !== "harbor-write-precheck-facts/v0" ||
+    facts.runtime_session_ref !== runtimeSessionRef ||
+    target?.runtime_session_ref !== runtimeSessionRef ||
+    !contractString(facts.provider_ref) ||
+    !contractString(facts.profile_ref) ||
+    !targetRef ||
+    !snapshotRef ||
+    !refmapRef ||
+    evidenceRefs.length === 0 ||
+    !Array.isArray(formState?.fields)
+  ) {
+    return { ok: false, failure: failure("resource_admission", "writable_target_missing", "runtime_binding", "connect_runtime"), runtime_binding_refs: runtimeBindingRefs };
+  }
+  if (guard?.status !== "active" || guard.no_submit_guard !== "active" || guard.enforcement !== "facts_only_no_real_submit" || guard.runtime_ready !== true) {
+    return { ok: false, failure: failure("action_risk", "no_submit_guard_missing", "admission", "use_validate_or_preview"), runtime_binding_refs: runtimeBindingRefs };
+  }
+  if (
+    privacy?.raw_values !== "not_exposed" ||
+    privacy.credential_profile_storage !== "not_exposed" ||
+    privacy.page_network_capture !== "not_exposed" ||
+    privacy.export_boundary !== "refs_and_redacted_field_state_only"
+  ) {
+    return { ok: false, failure: failure("resource_admission", "private_boundary_invalid", "runtime_binding", "remove_private_field"), runtime_binding_refs: runtimeBindingRefs };
+  }
+
+  return {
+    ok: true,
+    runtime_binding_refs: uniqueRefs([...runtimeBindingRefs, targetRef, snapshotRef, refmapRef]),
+    evidence_refs: evidenceRefs
+  };
+}
+
+export function validateHarborAdmission(input: HarborAdmissionInput, mode: HarborAdmissionMode = "read"): HarborAdmission {
   const forbiddenField = findForbiddenField(input);
   if (forbiddenField) {
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
@@ -248,6 +344,9 @@ export function validateHarborAdmission(input: HarborAdmissionInput): HarborAdmi
   const runtime = validateRuntimeFacts(input.harbor_runtime_facts);
   if (!runtime.ok) {
     return runtime;
+  }
+  if (mode === "write_precheck") {
+    return validateWritePrecheckFacts(input.harbor_write_precheck_facts, runtime.runtime_session_ref, runtime.runtime_binding_refs);
   }
   return validateSceneRef(input.harbor_scene_ref, runtime.runtime_session_ref, runtime.runtime_binding_refs, runtime.availability);
 }

@@ -16,6 +16,7 @@ export {
   runLifecycleTransitions,
   runRecordSchemaVersion,
   terminalRunRecordStatuses,
+  type ActionRequest,
   type AdmissionDecision,
   type CreateRunRecordInput,
   type FailureRecord,
@@ -74,10 +75,12 @@ export {
 export {
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
-  type HarborUnavailable
+  type HarborUnavailable,
+  type HarborWritePrecheckFacts
 } from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
+  actionRequestSchemaVersion,
   acceptReadOnlyTaskSubmission,
   taskIntentSchemaVersion,
   type TaskEntrypoint,

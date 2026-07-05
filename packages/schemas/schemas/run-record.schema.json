@@ -150,6 +150,9 @@
         "minLength": 1
       }
     },
+    "action_request": {
+      "$ref": "action-request.schema.json"
+    },
     "result_ref": {
       "type": "string",
       "minLength": 1
