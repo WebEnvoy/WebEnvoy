@@ -13,7 +13,7 @@ permissions:
   checks: read
 
 env:
-  LOOM_VERSION: 0.26.3
+  LOOM_VERSION: 0.28.0
 
 jobs:
   py-compile:
@@ -117,8 +117,8 @@ jobs:
           rm -rf "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
           cp -R "$HOME/plugins/loom" "$HOME/.codex/plugins/cache/local-user-plugins/loom/0.4.0"
       - run: loom verify --target "$GITHUB_WORKSPACE" --json
-      - run: loom fact-chain --target "$GITHUB_WORKSPACE" --json
-      - run: loom profile status --target "$GITHUB_WORKSPACE" --json
+      - run: loom workstation current --target "$GITHUB_WORKSPACE" --json
+      - run: loom migrate-global-cache plan --target "$GITHUB_WORKSPACE" --json
 
   loom-pr-merge-gate:
     name: loom-pr-merge-gate

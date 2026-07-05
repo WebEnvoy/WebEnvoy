@@ -1,11 +1,13 @@
 {
   "schema_version": "loom-installed-state/v2",
   "installation_id": "loom-WebEnvoy",
-  "target": "/Volumes/2T/dev/WebEnvoy/WebEnvoy",
-  "installed_at": "2026-06-30T00:44:33Z",
   "installing_command": "loom install",
   "upgrade_eligibility": "current",
   "runtime_provider": "global-cli",
+  "contract": {
+    "minimum_loom_version": "v0.28.0",
+    "installed_state_schema": "loom-installed-state/v2"
+  },
   "provider_requirements": {
     "global_cli": {
       "required": true,
@@ -13,12 +15,13 @@
       "authority": "workstation",
       "package": "@mc-and-his-agents/loom",
       "executable": "loom",
-      "version_requirement": "v0.21.1",
+      "version_requirement": "v0.28.0",
       "required_commands": [
         "installed-state validate",
         "detect",
         "doctor",
         "verify",
+        "workstation current",
         "fact-chain",
         "status",
         "shadow-parity",
@@ -29,8 +32,17 @@
   },
   "repo_payload": {
     "mode": "metadata-only",
+    "adoption_mode": "light-governance",
     "intentional_absent_paths": [
       ".loom/bin",
+      ".loom/runtime",
+      ".loom/tmp",
+      ".loom/shadow",
+      ".loom/status/current.md",
+      ".loom/work-items",
+      ".loom/progress",
+      ".loom/specs",
+      ".loom/reviews",
       "plugins/loom/.codex-plugin/plugin.json",
       "plugins/loom/skills",
       ".agents/skills",
@@ -49,7 +61,7 @@
       "layer_type": "repository-adoption-metadata",
       "installed_path": ".loom/installed-state.json",
       "version_context": {
-        "repo_version": "v0.21.1",
+        "repo_version": "v0.28.0",
         "installed_state_schema": "loom-installed-state/v2"
       },
       "runtime_state": "ready",
@@ -83,7 +95,7 @@
       "installed_path": "workstation:loom-cli",
       "version_context": {
         "package": "@mc-and-his-agents/loom",
-        "version_requirement": "v0.21.1"
+        "version_requirement": "v0.28.0"
       },
       "runtime_state": "unknown",
       "upgrade_eligibility": "unknown",
@@ -97,6 +109,7 @@
           "detect",
           "doctor",
           "verify",
+          "workstation current",
           "fact-chain",
           "status",
           "shadow-parity",
@@ -124,6 +137,5 @@
         "relationship": "requires-runtime-provider"
       }
     ]
-  },
-  "upgraded_at": "2026-07-02T15:39:43Z"
+  }
 }
