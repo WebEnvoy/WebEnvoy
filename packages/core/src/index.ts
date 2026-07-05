@@ -18,6 +18,8 @@ export {
   terminalRunRecordStatuses,
   type ActionRequest,
   type AdmissionDecision,
+  type ApprovalRequest,
+  type ApprovalRequestStatus,
   type CreateRunRecordInput,
   type FailureRecord,
   type FileRunRecordStore,
@@ -41,9 +43,12 @@ export {
   type ResultOutcome
 } from "./result-envelope.js";
 export {
+  approvalCancellationQuerySchemaVersion,
+  getApprovalCancellationSummary,
   getRunSummary,
   projectRunSummary,
   runQuerySchemaVersion,
+  type ApprovalCancellationQuery,
   type RunAdmissionSummary,
   type RunCapabilitySummary,
   type RunQueryResult,

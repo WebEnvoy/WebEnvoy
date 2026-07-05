@@ -1,0 +1,21 @@
+{
+  "$schema": "approval-request.schema.json",
+  "schema_version": "webenvoy.approval-request.v0",
+  "approval_request_id": "approval-request:fixture/preview-contact-form",
+  "action_request_id": "action-request:fixture/preview-contact-form",
+  "task_intent_ref": "intent_fixture_preview_contact_form",
+  "status": "pending",
+  "requested_at": "2026-07-01T00:00:00.000Z",
+  "expires_at": "2026-07-01T00:10:00.000Z",
+  "risk": "write",
+  "blocking_reasons": [
+    "approval_required_before_submit"
+  ],
+  "source_refs": [
+    "lode://site-capability/example/preview-contact-form@0.1.0"
+  ],
+  "evidence_refs": [
+    "evidence_fixture_preview"
+  ],
+  "consumer_boundary": "Core stores approval state and refs only; this is not approval execution or submitted result evidence."
+}

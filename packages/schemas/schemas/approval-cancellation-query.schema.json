@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/approval-cancellation-query.v0.schema.json",
+  "title": "WebEnvoy Core Approval Cancellation Query v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Run Query",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.approval-cancellation-query.v0",
+    "compatibility_boundary": "Query summarizes approval and cancellation records only. It does not execute approval or imply submitted results.",
+    "source_adrs": [
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ]
+  },
+  "required": [
+    "schema_version",
+    "action_request_id",
+    "latest_status",
+    "approval_requests",
+    "cancellations",
+    "consumer_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.approval-cancellation-query.v0"
+    },
+    "action_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "latest_status": {
+      "type": "string",
+      "enum": ["pending", "expired", "blocked", "cancelled", "not_found"]
+    },
+    "approval_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "approval_request_id", "status", "risk"],
+        "properties": {
+          "run_id": {"type": "string", "minLength": 1},
+          "approval_request_id": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["pending", "expired", "blocked"]},
+          "risk": {"type": "string", "enum": ["read", "write", "submit", "destructive"]},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "cancellations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "status"],
+        "properties": {
+          "run_id": {"type": "string", "minLength": 1},
+          "status": {"const": "cancelled"},
+          "terminal_at": {"type": "string", "format": "date-time"},
+          "failure_code": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
