@@ -6,7 +6,7 @@
   "summary": "Spec review accepts bounded Stage 6 Core approval request, cancellation, pending/expired/blocked state, and query fixture semantics.",
   "reviewer": "Codex thread 019f31a5-212e-7952-a56a-bba7ffe9b1b9",
   "authored_at": "2026-07-05T20:20:00Z",
-  "reviewed_head": "8b0bafa20b468d3d34d7edd2d5d7103ecd224d69",
+  "reviewed_head": "843a1e38d16418b33162c9b5b14cce31c6985afa",
   "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom verify --target . --json`; `loom fact-chain --target . --json`; `loom suite validate --target . --item CORE-172 --json`; `loom suite evidence validate --target . --item CORE-172 --json`; `loom suite carrier validate --target . --item CORE-172 --json` passed locally.",
   "reviewed_validation_summary_hash": "e96504c0221580175e54005bf166e6d7b2b9a106bfd55ba6eae89aa2ce0e3e96",
   "validation_summary_source": "recovery.latest_validation_summary",
