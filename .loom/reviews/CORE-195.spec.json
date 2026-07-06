@@ -6,7 +6,7 @@
   "summary": "Reviewed CORE-195 current pointer retire carrier after closeout PR #212 merged.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
   "authored_at": "2026-07-06T10:24:00Z",
-  "reviewed_head": "c7ed88d0b066844239697b6b615824d4477efd93",
+  "reviewed_head": "96dfd68a2029736fbef5382a08c88e976ad68b6c",
   "reviewed_validation_summary": "CORE-195 closeout PR #212 merged at 6950529a044d69601b60d47b914043ec270988ea; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.",
   "reviewed_validation_summary_hash": "0114ff12142a25edf5c54792c9e9d65554a2b8b4c4772a925f9cd127dde3f7de",
   "validation_summary_source": "retire.current_pointer_validation",
