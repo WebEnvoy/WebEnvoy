@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./run-record-store.js";
+import type { LodeRequiredHarborFact } from "./lode-admission.js";
 
 export type HarborUnavailable = {
   status: "unavailable";
@@ -105,9 +106,11 @@ export type HarborCoreSceneReference = {
 
 export type HarborAdmissionInput = {
   harbor_identity_environment_facts?: HarborIdentityEnvironmentFacts | HarborUnavailable;
+  harbor_provider_status?: HarborBrowserProviderCatalog | HarborUnavailable;
   harbor_runtime_facts?: HarborCoreRuntimeFacts | HarborUnavailable;
   harbor_scene_ref?: HarborCoreSceneReference | HarborUnavailable;
   harbor_write_precheck_facts?: HarborWritePrecheckFacts | HarborUnavailable;
+  harbor_resource_facts?: HarborResourceFacts | HarborUnavailable;
 };
 
 export type HarborAdmission =
@@ -175,6 +178,27 @@ export type HarborWritePrecheckFacts = {
 };
 
 export type HarborAdmissionMode = "read" | "write_precheck";
+
+export type HarborBrowserProviderCatalog = {
+  schema_version: "harbor-browser-provider-status/v0";
+  providers: readonly {
+    provider_id: string;
+    install: {
+      status: string;
+      launchability: string;
+    };
+  }[];
+};
+
+export type HarborResourceFacts = {
+  schema_version: "harbor-core-resource-facts/v0";
+  resource_facts: readonly {
+    fact_key: string;
+    state: "available" | "unavailable" | "stale" | "unknown";
+    source_ref?: string;
+  }[];
+  consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material.";
+};
 
 const activeRuntimeStates = new Set(["active", "idle"]);
 const busyRuntimeStates = new Set(["locked"]);
@@ -267,6 +291,30 @@ function sessionUse(owner: string): RuntimeSessionUse {
   return "direct_session";
 }
 
+function providerIdFromRef(ref: string): string {
+  return ref.split("/").at(-1) ?? ref;
+}
+
+function validateProviderStatus(input: HarborAdmissionInput, identity: HarborIdentityEnvironmentFacts): FailureRecord | undefined {
+  if (!input.harbor_provider_status) return undefined;
+  if (isUnavailable(input.harbor_provider_status)) {
+    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", input.harbor_provider_status.retryable ? "install_or_select_provider" : "open_manual_auth");
+  }
+  const providerBinding = contractObject(identity.provider_binding);
+  const selectedProviderId = contractString(providerBinding?.selected_provider_id);
+  const catalog = contractObject(input.harbor_provider_status);
+  const providers = Array.isArray(catalog?.providers) ? catalog.providers : undefined;
+  if (catalog?.schema_version !== "harbor-browser-provider-status/v0" || !selectedProviderId || !providers) {
+    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", "install_or_select_provider");
+  }
+  const selected = providers.map(contractObject).find((provider) => provider?.provider_id === selectedProviderId);
+  const install = contractObject(selected?.install);
+  if (!selected || install?.status !== "installed" || install.launchability !== "launchable") {
+    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", "install_or_select_provider");
+  }
+  return undefined;
+}
+
 function validateIdentityFacts(identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"]): HarborIdentityEnvironmentFacts | FailureRecord {
   if (!identityFacts) {
     return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
@@ -330,6 +378,10 @@ function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime
 
   if (runtime?.schema_version !== "harbor-core-runtime-facts/v0" || !runtimeSessionRef || !profileRef || !providerRef || !providerMode || !lifecycleState || !viewerRef) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
+  }
+  const selectedProviderId = contractString(contractObject(identity.provider_binding)?.selected_provider_id);
+  if (selectedProviderId && providerRef.includes("/") && providerIdFromRef(providerRef) !== selectedProviderId) {
+    return { ok: false, failure: failure("resource_admission", "identity_runtime_mismatch", "runtime_binding", "select_matching_runtime") };
   }
   if (profileRef !== identity.profile_ref || (identityRef !== undefined && identityRef !== identity.identity_environment_ref) || (executionRef !== undefined && executionRef !== identity.execution_identity_ref)) {
     return { ok: false, failure: failure("resource_admission", "identity_runtime_mismatch", "runtime_binding", "select_matching_runtime") };
@@ -470,7 +522,77 @@ function validateWritePrecheckFacts(
   };
 }
 
-export function validateHarborAdmission(input: HarborAdmissionInput, mode: HarborAdmissionMode = "read"): HarborAdmission {
+function addInferredResourceFacts(input: HarborAdmissionInput, facts: Set<string>): void {
+  const identity = contractObject(input.harbor_identity_environment_facts);
+  const runtime = contractObject(input.harbor_runtime_facts);
+  const scene = contractObject(input.harbor_scene_ref);
+  const writeFacts = contractObject(input.harbor_write_precheck_facts);
+  const identityLogin = contractObject(identity?.login_state);
+  const siteBinding = contractObject(identity?.site_binding);
+  const availability = contractObject(runtime?.availability);
+  const origin = contractString(siteBinding?.origin);
+
+  if (availability?.cdp === "available" && activeRuntimeStates.has(contractString(runtime?.lifecycle_state) ?? "")) {
+    facts.add("runtime.execution_surface.available");
+  }
+  if (origin?.startsWith("https://")) {
+    facts.add("runtime.public_https_navigation.allowed");
+  }
+  if (origin === "https://www.xiaohongshu.com") {
+    facts.add("runtime.origin.www_xiaohongshu_com.available");
+  }
+  if (origin === "https://www.zhipin.com") {
+    facts.add("runtime.origin.www_zhipin_com.available");
+  }
+  if (identityLogin?.state === "logged_in" && identityLogin.recovery_required !== true) {
+    facts.add("identity.user_logged_in.confirmed");
+    if (origin === "https://www.zhipin.com") facts.add("identity.boss_geek_logged_in.confirmed");
+  }
+  if (contractString(scene?.snapshot_ref) || contractString(contractObject(writeFacts?.writable_target)?.snapshot_ref)) {
+    facts.add("snapshot.document_summary.available");
+    facts.add("evidence.snapshot_ref.available");
+  }
+  if (contractString(scene?.source_trace_ref) || contractString(scene?.refmap_ref) || contractString(contractObject(writeFacts?.writable_target)?.refmap_ref)) {
+    facts.add("source.refs.available");
+    facts.add("refmap.source_refs.available");
+  }
+}
+
+function publicResourceFacts(input: HarborAdmissionInput): Set<string> | FailureRecord {
+  if (isUnavailable(input.harbor_resource_facts)) {
+    return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", input.harbor_resource_facts.retryable ? "rerun_with_fresh_runtime" : "open_manual_auth");
+  }
+  const facts = new Set<string>();
+  addInferredResourceFacts(input, facts);
+  if (input.harbor_resource_facts !== undefined) {
+    const resource = contractObject(input.harbor_resource_facts);
+    const entries = Array.isArray(resource?.resource_facts) ? resource.resource_facts : undefined;
+    if (
+      resource?.schema_version !== "harbor-core-resource-facts/v0" ||
+      resource.consumer_boundary !== "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material." ||
+      !entries
+    ) {
+      return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", "rerun_with_fresh_runtime");
+    }
+    for (const value of entries) {
+      const fact = contractObject(value);
+      const factKey = contractString(fact?.fact_key);
+      if (factKey && fact?.state === "available") facts.add(factKey);
+    }
+  }
+  return facts;
+}
+
+function validateRequiredHarborFacts(input: HarborAdmissionInput, requiredFacts: readonly LodeRequiredHarborFact[]): FailureRecord | undefined {
+  if (requiredFacts.length === 0) return undefined;
+  const availableFacts = publicResourceFacts(input);
+  if ("category" in availableFacts) return availableFacts;
+  const missing = requiredFacts.find((fact) => !availableFacts.has(fact.fact_key));
+  if (!missing) return undefined;
+  return failure("resource_admission", `resource_fact_missing:${missing.fact_key}`, "resource_matching", "rerun_with_fresh_runtime");
+}
+
+export function validateHarborAdmission(input: HarborAdmissionInput, mode: HarborAdmissionMode = "read", requiredFacts: readonly LodeRequiredHarborFact[] = []): HarborAdmission {
   const forbiddenField = findForbiddenField(input);
   if (forbiddenField) {
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
@@ -480,6 +602,10 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
   if ("category" in identity) {
     return { ok: false, failure: identity };
   }
+  const providerStatusFailure = validateProviderStatus(input, identity);
+  if (providerStatusFailure) {
+    return { ok: false, failure: providerStatusFailure };
+  }
 
   const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity);
   if (!runtime.ok) {
@@ -488,6 +614,15 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
       failure: runtime.failure,
       ...(runtime.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: runtime.runtime_binding_refs }),
       ...(runtime.session_binding === undefined ? {} : { runtime_session_binding: runtime.session_binding })
+    };
+  }
+  const resourceFailure = validateRequiredHarborFacts(input, requiredFacts);
+  if (resourceFailure) {
+    return {
+      ok: false,
+      failure: resourceFailure,
+      runtime_binding_refs: runtime.runtime_binding_refs,
+      runtime_session_binding: runtime.session_binding
     };
   }
   if (mode === "write_precheck") {

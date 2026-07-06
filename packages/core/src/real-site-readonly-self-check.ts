@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
+import { type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { createFileRunRecordStore, type FailureRecord, type FileRunRecordStore, type RunRecordStatus } from "./run-record-store.js";
@@ -26,6 +26,7 @@ type ReadOnlySiteSpec = {
   resultKind: string;
   outputSchemaId: string;
   resultData: Record<string, unknown>;
+  extraRequiredHarborFacts: readonly string[];
 };
 
 let tick = 0;
@@ -59,7 +60,8 @@ const siteSpecs: readonly ReadOnlySiteSpec[] = [
         { note_ref: "xhs-note:fixture/city-coffee-1", title: "City coffee route", author_ref: "xhs-author:fixture/1", follow_up_ref: "input:fixture/xhs-note-detail-1" },
         { note_ref: "xhs-note:fixture/city-coffee-2", title: "Quiet cafe shortlist", author_ref: "xhs-author:fixture/2", follow_up_ref: "input:fixture/xhs-note-detail-2" }
       ]
-    }
+    },
+    extraRequiredHarborFacts: ["page.vue_app.ready", "page.pinia_store.ready", "safety.challenge.absent"]
   },
   {
     site: "xiaohongshu",
@@ -82,7 +84,8 @@ const siteSpecs: readonly ReadOnlySiteSpec[] = [
       author_ref: "xhs-author:fixture/1",
       content_summary: "Public note summary projected by Lode package.",
       tags: ["coffee", "city-walk"]
-    }
+    },
+    extraRequiredHarborFacts: ["page.vue_app.ready", "page.pinia_store.ready", "safety.challenge.absent", "input.signed_note_ref.available"]
   },
   {
     site: "boss",
@@ -107,7 +110,8 @@ const siteSpecs: readonly ReadOnlySiteSpec[] = [
         { job_ref: "boss-job:fixture/ai-agent-1", title: "AI Agent Engineer", company_ref: "boss-company:fixture/1", detail_ref: "input:fixture/boss/job-detail-1" },
         { job_ref: "boss-job:fixture/ai-agent-2", title: "LLM Platform Engineer", company_ref: "boss-company:fixture/2", detail_ref: "input:fixture/boss/job-detail-2" }
       ]
-    }
+    },
+    extraRequiredHarborFacts: ["page.boss_spa.ready", "network.wapi_zpgeek.available", "safety.challenge.absent"]
   },
   {
     site: "boss",
@@ -130,7 +134,8 @@ const siteSpecs: readonly ReadOnlySiteSpec[] = [
       company_ref: "boss-company:fixture/1",
       recruiter_ref: "boss-recruiter:fixture/1",
       description_summary: "Public job detail summary projected by Lode package."
-    }
+    },
+    extraRequiredHarborFacts: ["page.boss_spa.ready", "network.wapi_zpgeek.available", "input.boss_security_id.available", "safety.challenge.absent"]
   }
 ];
 
@@ -165,13 +170,41 @@ function lodeContract(spec: ReadOnlySiteSpec): LodePackageAdmissionContract {
           operation_boundary: "read",
           required_harbor_facts: [
             { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
-            { fact_key: `runtime.origin.${spec.site}.available`, owner: "Harbor", required: true, freshness: "current_execution_window" },
+            { fact_key: spec.site === "boss" ? "runtime.origin.www_zhipin_com.available" : "runtime.origin.www_xiaohongshu_com.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+            { fact_key: spec.site === "boss" ? "identity.boss_geek_logged_in.confirmed" : "identity.user_logged_in.confirmed", owner: "Harbor", required: true, freshness: "current_execution_window" },
             { fact_key: "source.refs.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
-            { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true, freshness: "current_execution_window" }
+            { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true, freshness: "current_execution_window" },
+            ...spec.extraRequiredHarborFacts.map((fact_key) => ({ fact_key, owner: "Harbor" as const, required: true, freshness: "current_execution_window" }))
           ]
         }
       ]
     }
+  };
+}
+
+function harborProviderStatus(): HarborBrowserProviderCatalog {
+  return {
+    schema_version: "harbor-browser-provider-status/v0",
+    providers: [
+      {
+        provider_id: "cloakbrowser",
+        install: {
+          status: "installed",
+          launchability: "launchable"
+        }
+      }
+    ]
+  };
+}
+
+function harborResourceFacts(spec: ReadOnlySiteSpec): HarborResourceFacts {
+  return {
+    schema_version: "harbor-core-resource-facts/v0",
+    resource_facts: spec.extraRequiredHarborFacts.map((fact_key) => ({
+      fact_key,
+      state: "available"
+    })),
+    consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material."
   };
 }
 
@@ -303,8 +336,10 @@ async function admitRun(store: FileRunRecordStore, spec: ReadOnlySiteSpec, suffi
     lode_package_contract: lodeContract(spec),
     resource_match_ref: `resource-match:${spec.site}/${spec.capabilityId}/readonly`,
     harbor_identity_environment_facts: harborIdentity(spec),
+    harbor_provider_status: harborProviderStatus(),
     harbor_runtime_facts: harborRuntime(spec, owner),
-    harbor_scene_ref: harborScene(spec)
+    harbor_scene_ref: harborScene(spec),
+    harbor_resource_facts: harborResourceFacts(spec)
   });
   if (!admitted.ok) {
     throw new Error(`real-site run must admit: ${admitted.failure.code}`);

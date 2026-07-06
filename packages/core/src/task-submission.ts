@@ -468,7 +468,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
   }
 
   const writePrecheck = isWritePrecheckIntent(taskIntent);
-  const harborAdmission = validateHarborAdmission(input, writePrecheck ? "write_precheck" : "read");
+  const harborAdmission = validateHarborAdmission(input, writePrecheck ? "write_precheck" : "read", lodeAdmission.required_harbor_facts);
   if (!harborAdmission.ok) {
     if (harborAdmission.failure.code.startsWith("forbidden_field:")) {
       return {
