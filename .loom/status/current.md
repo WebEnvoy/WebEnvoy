@@ -2,34 +2,34 @@
 
 ## Derived Fact Chain View
 
-- Item ID: CORE-191
-- Goal: Accept Harbor real identity environment and runtime session public refs/facts into Core admission and Run Record without storing private browser material.
-- Scope: Covers Core FR #187 and Work Items #191/#192/#193/#194/#207; excludes Harbor #160 live evidence, real accounts, passwords, cookies, tokens, profile storage, raw browser endpoints, App UI, Lode site execution, true writes, merge, issue closeout, and current pointer retire.
-- Execution Path: work/core-187-real-identity-session
-- Workspace Entry: .
-- Recovery Entry: .loom/progress/CORE-191.md
-- Review Entry: .loom/reviews/CORE-191.json
-- Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/schemas test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-191 --json
-- Closing Condition: PR ready for review with metadata covering #187/#191/#192/#193/#194/#207 and hosted checks started; merge/closeout/current pointer retire are out of scope for this execution thread.
-- Current Checkpoint: closed_out
-- Current Stop: PR #208 merged to main, #187/#191/#192/#193/#194/#207 are closed with post-merge evidence, and this closeout carrier records the merged state.
-- Next Step: Merge the CORE-191 closeout carrier PR, then retire the current pointer to no_active_item.
-- Blockers: None recorded.
-- Latest Validation Summary: PR #208 merged at 950594cf550ebac9044d4c24b3b053a3b972977c; #187/#191/#192/#193/#194/#207 closed with post-merge evidence; hosted gate run 28781827244 and loom-check run 28781827736 passed; loom fact-chain/verify/suite validate/carrier/evidence passed locally.
-- Recovery Boundary: Core admission / Run Record / schema truth only; no Harbor/Lode/App changes, Harbor #160 live evidence, real accounts, private browser material, true writes, merge, issue closeout, or current pointer retire.
-- Current Lane: stage7 real identity session admission
+- Item ID: no_active_item
+- Goal: not_applicable
+- Scope: not_applicable
+- Execution Path: not_applicable
+- Workspace Entry: not_applicable
+- Recovery Entry: not_applicable
+- Review Entry: not_applicable
+- Validation Entry: not_applicable
+- Closing Condition: not_applicable
+- Current Checkpoint: not_applicable
+- Current Stop: not_applicable
+- Next Step: not_applicable
+- Blockers: not_applicable
+- Latest Validation Summary: not_applicable
+- Recovery Boundary: not_applicable
+- Current Lane: not_applicable
 
 ## Runtime Evidence
 
 - Run Entry: not_applicable
 - Logs Entry: not_applicable
 - Diagnostics Entry: not_applicable
-- Verification Entry: loom verify --target . --json
-- Lane Entry: .loom/specs/CORE-191/task-carrier.md
+- Verification Entry: not_applicable
+- Lane Entry: not_applicable
 
 ## Sources
 
-- Static Truth: .loom/work-items/CORE-191.md
-- Dynamic Truth: .loom/progress/CORE-191.md
+- Static Truth: not_applicable
+- Dynamic Truth: not_applicable
 - Locator Truth: .loom/bootstrap/init-result.json
 - Fact Chain CLI: loom fact-chain --target . --json
