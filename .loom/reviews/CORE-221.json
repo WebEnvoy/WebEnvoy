@@ -6,7 +6,7 @@
   "summary": "Implementation review accepts Core admission binding to real Harbor identity/runtime refs and Lode Xiaohongshu/BOSS package locks for Core #220/#221/#222/#223/#224.",
   "reviewer": "Codex master controller thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
   "authored_at": "2026-07-06T16:33:54Z",
-  "reviewed_head": "51f75c5acd7fc3b75ae73f115e7713bfa1bf77f9",
+  "reviewed_head": "a9172266fd108b67f6b00c02a32765409b86fcaa",
   "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-221 --json`; `loom suite carrier validate --target . --item CORE-221 --json`; `loom suite evidence validate --target . --item CORE-221 --json` passed locally.",
   "reviewed_validation_summary_hash": "b33a2afb9b017c61178828ca8534bf171d941e8a124e8557a8e54bf931f425bb",
   "validation_summary_source": "recovery.latest_validation_summary",
