@@ -5,8 +5,8 @@
   "kind": "code_review",
   "summary": "Reviewed CORE-203 current pointer retire carrier after closeout PR #218 merged.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
-  "authored_at": "2026-07-06T11:43:00Z",
-  "reviewed_head": "9e58884048912589075c186f4080940ddebea443",
+  "authored_at": "2026-07-06T11:45:00Z",
+  "reviewed_head": "66a331d181a2b90140f3bf29185770fb302d2e61",
   "reviewed_validation_summary": "CORE-203 closeout PR #218 merged at b0caad3abc12d50966652d953ead69a521f5244c; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.",
   "reviewed_validation_summary_hash": "f6137dbdd7f5d8f1ee29ebb09573860adedd52724d357744172895ef71ebf065",
   "validation_summary_source": "retire.current_pointer_validation",
@@ -20,7 +20,7 @@
     "closeout_merge_commit": "b0caad3abc12d50966652d953ead69a521f5244c",
     "retired_status_surface": ".loom/status/current.md",
     "retired_bootstrap_locator": ".loom/bootstrap/init-result.json",
-    "retire_validation_summary_head": "9e58884048912589075c186f4080940ddebea443"
+    "retire_validation_summary_head": "66a331d181a2b90140f3bf29185770fb302d2e61"
   },
   "semantic_review_disposition": {
     "status": "passed",
