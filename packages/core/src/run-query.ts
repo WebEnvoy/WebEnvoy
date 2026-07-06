@@ -14,6 +14,7 @@ import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 
 export const runQuerySchemaVersion = "webenvoy.run-query.v0";
 export const approvalCancellationQuerySchemaVersion = "webenvoy.approval-cancellation-query.v0";
+export const sessionRefsQuerySchemaVersion = "webenvoy.session-refs-query.v0";
 
 export type RunTimeline = {
   created_at: string;
@@ -44,6 +45,23 @@ export type RunRuntimeRefs = {
   session_binding?: RuntimeSessionBindingFacts;
 };
 
+export type RunSessionRefsSummary = {
+  binding_refs: string[];
+  admission_binding_refs: string[];
+  runtime_session_ref?: string;
+  identity_environment_ref?: string;
+  execution_identity_ref?: string;
+  profile_ref?: string;
+  provider_ref?: string;
+  provider_mode?: string;
+  lifecycle_state?: string;
+  control_owner?: string;
+  session_use?: RuntimeSessionBindingFacts["session_use"];
+  core_task_run?: true;
+  raw_access: "not_available_from_core";
+  consumer_boundary: string;
+};
+
 export type TerminalRunStatus = Exclude<RunRecordStatus, "pending" | "admitted" | "running">;
 
 export type RunTerminalFailureSummary = Pick<FailureRecord, "category" | "code" | "phase" | "attribution">;
@@ -71,10 +89,27 @@ export type RunSummary = {
   terminal_summary?: RunTerminalSummary;
 };
 
+export type SessionRefsQueryEnvelope = {
+  schema_version: typeof sessionRefsQuerySchemaVersion;
+  run_id: string;
+  status: RunRecordStatus;
+  session_refs: RunSessionRefsSummary;
+};
+
 export type RunQueryResult =
   | {
       ok: true;
       run: RunSummary;
+    }
+  | {
+      ok: false;
+      failure: FailureRecord;
+    };
+
+export type SessionRefsQueryResult =
+  | {
+      ok: true;
+      session_refs: SessionRefsQueryEnvelope;
     }
   | {
       ok: false;
@@ -149,6 +184,30 @@ function terminalSummary(record: RunRecord): RunTerminalSummary | undefined {
   };
 }
 
+function projectRunSessionRefs(record: RunRecord): RunSessionRefsSummary {
+  const binding = record.admission.runtime_session_binding;
+  return {
+    binding_refs: [...(record.runtime_binding_refs ?? [])],
+    admission_binding_refs: [...(record.admission.runtime_binding_refs ?? [])],
+    ...(binding === undefined
+      ? {}
+      : {
+          runtime_session_ref: binding.runtime_session_ref,
+          identity_environment_ref: binding.identity_environment_ref,
+          execution_identity_ref: binding.execution_identity_ref,
+          profile_ref: binding.profile_ref,
+          provider_ref: binding.provider_ref,
+          provider_mode: binding.provider_mode,
+          lifecycle_state: binding.lifecycle_state,
+          control_owner: binding.control_owner,
+          session_use: binding.session_use,
+          core_task_run: binding.core_task_run
+        }),
+    raw_access: "not_available_from_core",
+    consumer_boundary: "Core query returns Harbor public session refs and status facts only; raw profile storage, cookies, tokens, endpoints, and browser material remain outside Core."
+  };
+}
+
 export function projectRunSummary(record: RunRecord): RunSummary {
   const terminal = terminalSummary(record);
   return {
@@ -184,7 +243,7 @@ export function projectRunSummary(record: RunRecord): RunSummary {
   };
 }
 
-export async function getRunSummary(store: FileRunRecordStore, runId: string): Promise<RunQueryResult> {
+async function getRecord(store: FileRunRecordStore, runId: string): Promise<{ ok: true; record: RunRecord } | { ok: false; failure: FailureRecord }> {
   let record: RunRecord | undefined;
   try {
     record = await store.getRunRecord(runId);
@@ -204,10 +263,30 @@ export async function getRunSummary(store: FileRunRecordStore, runId: string): P
       failure: queryFailure("run_not_found", "persistence_observability", "fix_input")
     };
   }
+  return { ok: true, record };
+}
+
+export async function getRunSummary(store: FileRunRecordStore, runId: string): Promise<RunQueryResult> {
+  const record = await getRecord(store, runId);
+  if (!record.ok) return record;
 
   return {
     ok: true,
-    run: projectRunSummary(record)
+    run: projectRunSummary(record.record)
+  };
+}
+
+export async function getRunSessionRefs(store: FileRunRecordStore, runId: string): Promise<SessionRefsQueryResult> {
+  const record = await getRecord(store, runId);
+  if (!record.ok) return record;
+  return {
+    ok: true,
+    session_refs: {
+      schema_version: sessionRefsQuerySchemaVersion,
+      run_id: record.record.run_id,
+      status: record.record.status,
+      session_refs: projectRunSessionRefs(record.record)
+    }
   };
 }
 

@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/failure-reason-query.schema.json",
+  "schema_version": "webenvoy.failure-reason-query.v0",
+  "run_id": "run_fixture_login_required",
+  "status": "requires_user_action",
+  "terminal": true,
+  "failure_present": true,
+  "reason_class": "login_required",
+  "failure": {
+    "category": "resource_admission",
+    "code": "identity_auth_required",
+    "phase": "runtime_binding",
+    "recovery_hint": "open_manual_auth",
+    "attribution": "runtime"
+  },
+  "recovery_hint": "open_manual_auth",
+  "app_action": "open_manual_auth",
+  "retryable": true,
+  "evidence_refs": [
+    {
+      "ref": "harbor:evidence/login-required",
+      "source": "terminal",
+      "state": "available",
+      "redaction_state": "none",
+      "raw_access": "not_available_from_core",
+      "recorded_at": "2026-07-01T03:00:03.000Z",
+      "runtime_session_ref": "harbor:runtime-session/real-query",
+      "consumer_boundary": "Core query returns refs and public state only; raw evidence bodies remain outside Core.",
+      "capability_ref": "lode:capability/read-public-page",
+      "capability_version": "0.1.0",
+      "package_ref": "lode://site-capability/example/read-public-page@0.1.0"
+    }
+  ],
+  "consumer_boundary": "Core query returns machine-readable failure reason, recovery hint, and refs only; it does not execute recovery or expose raw browser evidence."
+}

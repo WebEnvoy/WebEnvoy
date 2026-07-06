@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/failure-reason-query.v0.schema.json",
+  "title": "WebEnvoy Core Failure Reason Query v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Query",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.failure-reason-query.v0",
+    "compatibility_boundary": "Core returns machine-readable failure class, recovery hint, and refs only. It does not execute recovery or expose private browser/page material.",
+    "source_adrs": [
+      "docs/adr/0003-result-envelope-and-run-record.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "failure": "Core",
+      "reason_class": "Core projection for App consumption",
+      "evidence_refs": "Core records refs; Harbor/Lode/App own referenced bodies"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "status",
+    "terminal",
+    "failure_present",
+    "reason_class",
+    "app_action",
+    "retryable",
+    "evidence_refs",
+    "consumer_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.failure-reason-query.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "terminal": {
+      "type": "boolean"
+    },
+    "failure_present": {
+      "type": "boolean"
+    },
+    "reason_class": {
+      "type": "string",
+      "enum": [
+        "none",
+        "login_required",
+        "page_changed",
+        "field_unavailable",
+        "risk_prompt",
+        "runtime_unavailable",
+        "resource_unavailable",
+        "evidence_unavailable",
+        "capability_failure",
+        "request_invalid",
+        "unknown"
+      ]
+    },
+    "failure": {
+      "type": "object"
+    },
+    "recovery_hint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "app_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
