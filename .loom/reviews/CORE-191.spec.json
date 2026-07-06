@@ -3,12 +3,12 @@
   "item_id": "CORE-191",
   "decision": "allow",
   "kind": "spec_review",
-  "summary": "Spec review accepts bounded Core story readiness for refs-only Harbor identity/session admission, Run Record binding, failure states, and sensitive data boundary.",
+  "summary": "Spec closeout review accepts CORE-191 post-merge carrier facts for PR #208 and closed issues #187/#191/#192/#193/#194/#207.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
-  "authored_at": "2026-07-06T09:30:00Z",
-  "reviewed_head": "7dfbbaf4ebf87079034469bc22938675ea79cddb",
-  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-191 --json`; `loom suite carrier validate --target . --item CORE-191 --json`; `loom suite evidence validate --target . --item CORE-191 --json` passed locally.",
-  "reviewed_validation_summary_hash": "6f78c3174cfd2d94bf4813a8c296965ee0da2b057a4f198a81d267e2bf4be2c2",
+  "authored_at": "2026-07-06T09:34:00Z",
+  "reviewed_head": "364941e08f058a1b19740173a939ccf1ba281e72",
+  "reviewed_validation_summary": "PR #208 merged at 950594cf550ebac9044d4c24b3b053a3b972977c; #187/#191/#192/#193/#194/#207 closed with post-merge evidence; hosted gate run 28781827244 and loom-check run 28781827736 passed; loom fact-chain/verify/suite validate/carrier/evidence passed locally.",
+  "reviewed_validation_summary_hash": "6805f88c3cf8746f46ab86b56eb37c1d70671455319f4588c62e55cab7d7d337",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-191.md",
   "fallback_to": null,
@@ -17,10 +17,22 @@
   "follow_ups": [],
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The spec keeps the feature within Core admission and Run Record truth and explicitly excludes live account/profile material, Harbor process control, Lode site execution, App UI, and true writes."
+    "reason": "Reviewed the CORE-191 closeout carrier. It records PR #208 merge evidence, closed issue evidence, and does not expand Core product behavior."
   },
   "implementation_review_disposition": {
     "status": "passed",
-    "reason": "Implementation scope matches the story readiness, plan, and implementation contract for CORE-191."
+    "reason": "Closeout carrier is limited to Loom progress/status/review facts after implementation PR #208 merged."
+  },
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-191.md",
+    "recovery_entry": ".loom/progress/CORE-191.md",
+    "status_surface": ".loom/status/current.md",
+    "implementation_pr": "#208",
+    "merge_commit": "950594cf550ebac9044d4c24b3b053a3b972977c",
+    "issue_closeout": "Core #187/#191/#192/#193/#194/#207 closed with post-merge evidence"
+  },
+  "carrier_only_closeout_review": {
+    "status": "passed",
+    "reason": "This closeout PR only updates CORE-191 Loom carrier/status facts after implementation PR #208 merged; it does not change Core runtime behavior."
   }
 }
