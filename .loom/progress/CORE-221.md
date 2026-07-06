@@ -3,9 +3,9 @@
 ## Dynamic Facts
 
 - Item ID: CORE-221
-- Current Checkpoint: merge_ready
-- Current Stop: PR #235 is ready for current-head review and merge gate after controller carrier refresh.
-- Next Step: Run gate, merge PR #235 if checks pass, then create closeout/retire lane and close #221-#224 plus parent #220 with post-merge evidence.
+- Current Checkpoint: closed_out
+- Current Stop: PR #235 has merged; this closeout lane retires the Core active pointer and records post-merge issue evidence for #220-#224.
+- Next Step: Write post-merge issue closeout evidence for #221-#224 and parent #220 after this carrier sync reaches main.
 - Blockers: None recorded.
 - Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-221 --json`; `loom suite carrier validate --target . --item CORE-221 --json`; `loom suite evidence validate --target . --item CORE-221 --json` passed locally.
 - Recovery Boundary: Core admission and Run Record refs-only behavior only; no App/Harbor/Lode code changes, no live external site run, no real browser process attach, no true write, no cookies/tokens/profile storage/raw DOM/HAR/screenshot body/network response/CDP/VNC/provider private object persistence, no merge, no issue closeout.
@@ -30,3 +30,13 @@
 - 2026-07-06T16:17:00Z `pnpm conformance`: pass; 10 schemas, 27 fixtures, 8 Run Records.
 - 2026-07-06T16:17:00Z `pnpm typecheck`: pass.
 - 2026-07-06T16:17:00Z `git diff --check`: pass.
+
+## Terminal Closeout Metadata
+
+- Terminal State: closed_out
+- Issue: 221
+- PR: 235
+- Merge Commit: f29f01574338c2167a5a07de43fa965e67bb9101
+- Target Branch: main
+- Closed At: 2026-07-06T16:48:01Z
+- Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/pull/235
