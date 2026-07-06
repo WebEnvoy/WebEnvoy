@@ -7,7 +7,7 @@
 - Current Stop: PR #214 merged to main, #189/#199/#200/#201/#202 are closed with post-merge evidence, and this closeout carrier records the merged state.
 - Next Step: Merge the CORE-199 closeout carrier PR, then retire the current pointer to no_active_item.
 - Blockers: None recorded.
-- Latest Validation Summary: PR #214 merged at 3fad8252d85d1c31a2f876cab4227e5708c108db; #189/#199/#200/#201/#202 closed with post-merge evidence; hosted gate run 28786807946 passed; loom fact-chain/verify/suite validate/carrier/evidence passed locally.
+- Latest Validation Summary: CORE-199 closeout PR #215 merged at ccbca29dc3a64dc8371f7e2cf0a173e2882f1359; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.
 - Recovery Boundary: Core query and refs-only schema/API facts only; no App/Harbor/Lode code changes, true writes, live account operation, external visible action, captcha/risk bypass, private browser material, raw evidence, release evidence, or current pointer retire.
 - Current Lane: stage5 real run query evidence
 
