@@ -11,9 +11,9 @@
 - Review Entry: .loom/reviews/CORE-226.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/schemas test; pnpm --filter @webenvoy/conformance test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-226 --json; PR metadata readback/preflight after PR creation.
 - Closing Condition: PR Ready only. Do not merge, close issues, or edit GitHub dependencies.
-- Current Checkpoint: build
-- Current Stop: Implementation and targeted local code/schema/conformance validation are complete; commit, push, PR, and PR metadata readback remain.
-- Next Step: Commit, push, create PR, then read back PR metadata and hosted check startup.
+- Current Checkpoint: merge
+- Current Stop: Implementation PR #237 is open with current-head review artifacts and hosted checks started; merge gate should consume CORE-226 review and suite evidence.
+- Next Step: Run PR merge gate, merge PR #237 after required checks pass, then perform post-merge closeout for #225/#226/#227/#228/#229.
 - Blockers: None recorded.
 - Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm typecheck`; `pnpm conformance`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-226 --json`; `loom suite carrier validate --target . --item CORE-226 --json`; `loom suite evidence validate --target . --item CORE-226 --json` passed locally.
 - Recovery Boundary: Core read-only run/result projection only; no #230-#234 write-precheck work, App/Harbor/Lode code changes, live external site run, true write, cookies/tokens/profile/raw DOM/HAR/screenshot/network/CDP/VNC/provider private object persistence, merge, issue closeout, or GitHub dependency edits.

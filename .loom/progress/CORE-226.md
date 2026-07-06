@@ -3,9 +3,9 @@
 ## Dynamic Facts
 
 - Item ID: CORE-226
-- Current Checkpoint: build
-- Current Stop: Implementation and targeted local code/schema/conformance validation are complete; commit, push, PR, and PR metadata readback remain.
-- Next Step: Commit, push, create PR, then read back PR metadata and hosted check startup.
+- Current Checkpoint: merge
+- Current Stop: Implementation PR #237 is open with current-head review artifacts and hosted checks started; merge gate should consume CORE-226 review and suite evidence.
+- Next Step: Run PR merge gate, merge PR #237 after required checks pass, then perform post-merge closeout for #225/#226/#227/#228/#229.
 - Blockers: None recorded.
 - Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm typecheck`; `pnpm conformance`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-226 --json`; `loom suite carrier validate --target . --item CORE-226 --json`; `loom suite evidence validate --target . --item CORE-226 --json` passed locally.
 - Recovery Boundary: Core read-only run/result projection only; no #230-#234 write-precheck work, App/Harbor/Lode code changes, live external site run, true write, cookies/tokens/profile/raw DOM/HAR/screenshot/network/CDP/VNC/provider private object persistence, merge, issue closeout, or GitHub dependency edits.
@@ -41,3 +41,4 @@
 - 2026-07-06T17:52Z `loom suite validate --target . --item CORE-226 --json`: pass.
 - 2026-07-06T17:52Z `loom suite carrier validate --target . --item CORE-226 --json`: pass.
 - 2026-07-06T17:52Z `loom suite evidence validate --target . --item CORE-226 --json`: pass.
+- 2026-07-06T18:10Z Added CORE-226 spec and implementation review artifacts bound to PR #237 head `729682f8119c37f7cf2aa60a65e062bebefaff63`.
