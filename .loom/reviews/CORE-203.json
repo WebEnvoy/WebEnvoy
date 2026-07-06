@@ -3,43 +3,35 @@
   "item_id": "CORE-203",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Reviewed CORE-203 closeout carrier after implementation PR #217 merged.",
+  "summary": "Reviewed CORE-203 current pointer retire carrier after closeout PR #218 merged.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
-  "authored_at": "2026-07-06T11:40:00Z",
-  "reviewed_head": "a237a89dec8cc56cd877ac62d698e991309c21ce",
-  "reviewed_validation_summary": "CORE-203 implementation PR #217 merged at e5c37cbb56d59512634f4ca56fa6c573bca4104d; issues #190/#203/#204/#205/#206 are closed with post-merge evidence; hosted py-compile, demo-bootstrap, repo-local-cli, loom-check, and loom-pr-merge-gate passed; closeout carrier diff check, fact-chain, verify, and suite validations passed locally before closeout PR creation.",
-  "reviewed_validation_summary_hash": "78639beac55b72e81d8d8f0c126d999e618e68fb51289dd6eed503267ebdc346",
-  "validation_summary_source": "progress.latest_validation_summary",
-  "validation_summary_locator": ".loom/progress/CORE-203.md",
+  "authored_at": "2026-07-06T11:45:00Z",
+  "reviewed_head": "66a331d181a2b90140f3bf29185770fb302d2e61",
+  "reviewed_validation_summary": "CORE-203 closeout PR #218 merged at b0caad3abc12d50966652d953ead69a521f5244c; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.",
+  "reviewed_validation_summary_hash": "f6137dbdd7f5d8f1ee29ebb09573860adedd52724d357744172895ef71ebf065",
+  "validation_summary_source": "retire.current_pointer_validation",
+  "validation_summary_locator": ".loom/status/current.md",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [],
   "consumed_inputs": {
-    "implementation_pr": "#217",
-    "implementation_head": "d42ae51ebf79201323b051b1e24333492e5cbbf4",
-    "implementation_merge_commit": "e5c37cbb56d59512634f4ca56fa6c573bca4104d",
-    "reviewed_closeout_head": "a237a89dec8cc56cd877ac62d698e991309c21ce",
-    "covered_issues": [
-      "#190",
-      "#203",
-      "#204",
-      "#205",
-      "#206"
-    ],
-    "validation_evidence": ".loom/specs/CORE-203/build-evidence.json",
-    "post_merge_evidence": "https://github.com/WebEnvoy/WebEnvoy/issues/190#issuecomment-4892341355"
+    "closeout_pr": "#218",
+    "closeout_merge_commit": "b0caad3abc12d50966652d953ead69a521f5244c",
+    "retired_status_surface": ".loom/status/current.md",
+    "retired_bootstrap_locator": ".loom/bootstrap/init-result.json",
+    "retire_validation_summary_head": "66a331d181a2b90140f3bf29185770fb302d2e61"
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "CORE-203 implementation merged, all covered issues have post-merge evidence, and the closeout carrier records the merged state without changing Core runtime behavior."
+    "reason": "Reviewed the current pointer retire carrier. It only resets status/bootstrap to no_active_item after CORE-203 closeout PR #218 merged."
   },
   "implementation_review_disposition": {
     "status": "passed",
-    "reason": "Closeout carrier changes are limited to progress/status and review facts for the already merged implementation."
+    "reason": "Retire carrier is limited to no_active_item/idle pointer reset and review record refresh."
   },
   "carrier_only_closeout_review": {
     "status": "passed",
-    "reason": "This closeout PR only records post-merge CORE-203 facts and does not modify runtime behavior."
+    "reason": "This retire PR only updates CORE-203 review carrier after the idle pointer commit; it does not change Core runtime behavior."
   }
 }

@@ -7,7 +7,7 @@
 - Current Stop: PR #217 merged to main, #190/#203/#204/#205/#206 are closed with post-merge evidence, and this closeout carrier records the merged state.
 - Next Step: Merge the CORE-203 closeout carrier PR, then retire the current pointer to no_active_item.
 - Blockers: None recorded.
-- Latest Validation Summary: CORE-203 implementation PR #217 merged at e5c37cbb56d59512634f4ca56fa6c573bca4104d; issues #190/#203/#204/#205/#206 are closed with post-merge evidence; hosted py-compile, demo-bootstrap, repo-local-cli, loom-check, and loom-pr-merge-gate passed; closeout carrier diff check, fact-chain, verify, and suite validations passed locally before closeout PR creation.
+- Latest Validation Summary: CORE-203 closeout PR #218 merged at b0caad3abc12d50966652d953ead69a521f5244c; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.
 - Recovery Boundary: Core schema/conformance fixtures only; no App/Harbor/Lode code changes, live external site action, true write, submitted result, reconciliation, unknown outcome, private browser material, raw evidence, merge, closeout, release evidence, or current pointer retire.
 - Current Lane: core real-page write preview no-submit records
 
