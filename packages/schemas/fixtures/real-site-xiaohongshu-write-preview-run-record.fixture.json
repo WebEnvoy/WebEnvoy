@@ -1,0 +1,143 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_site_xiaohongshu_write_preview_001",
+  "status": "succeeded",
+  "created_at": "2026-07-06T11:00:00.000Z",
+  "updated_at": "2026-07-06T11:00:04.000Z",
+  "terminal_at": "2026-07-06T11:00:04.000Z",
+  "task_intent_ref": "intent_real_site_xiaohongshu_draft_preview",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/xiaohongshu-draft-precheck",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/xiaohongshu/draft-precheck@0.1.0",
+  "package_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+  "admission": {
+    "decision": "accepted_with_warnings",
+    "action_risk": "write",
+    "resource_requirement_refs": ["xiaohongshu.draft-precheck.resources"],
+    "runtime_binding_refs": [
+      "harbor:runtime-session/xiaohongshu/write-precheck",
+      "harbor:profile/xiaohongshu/write-precheck",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/xiaohongshu/write-precheck",
+      "harbor:identity-env/xiaohongshu/write-precheck",
+      "harbor:execution-identity/xiaohongshu/write-precheck",
+      "harbor:writable-target/xiaohongshu/draft-editor",
+      "harbor:snapshot/xiaohongshu/draft-editor",
+      "harbor:refmap/xiaohongshu/draft-editor"
+    ],
+    "evidence_refs": [
+      "harbor:evidence/xiaohongshu/draft-editor/precheck",
+      "harbor:evidence/xiaohongshu/draft-editor/refmap"
+    ],
+    "resource_match_ref": "resource-match:xiaohongshu/draft-precheck",
+    "runtime_session_binding": {
+      "schema_version": "webenvoy.runtime-session-binding.v0",
+      "identity_environment_ref": "harbor:identity-env/xiaohongshu/write-precheck",
+      "execution_identity_ref": "harbor:execution-identity/xiaohongshu/write-precheck",
+      "runtime_session_ref": "harbor:runtime-session/xiaohongshu/write-precheck",
+      "profile_ref": "harbor:profile/xiaohongshu/write-precheck",
+      "provider_ref": "harbor:provider/cloakbrowser",
+      "provider_mode": "local_dedicated_profile",
+      "lifecycle_state": "active",
+      "control_owner": "core_task",
+      "session_use": "core_task_run",
+      "core_task_run": true,
+      "consumer_boundary": "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+    }
+  },
+  "runtime_binding_refs": [
+    "harbor:runtime-session/xiaohongshu/write-precheck",
+    "harbor:profile/xiaohongshu/write-precheck",
+    "harbor:provider/cloakbrowser",
+    "harbor:viewer/xiaohongshu/write-precheck",
+    "harbor:identity-env/xiaohongshu/write-precheck",
+    "harbor:execution-identity/xiaohongshu/write-precheck",
+    "harbor:writable-target/xiaohongshu/draft-editor",
+    "harbor:snapshot/xiaohongshu/draft-editor",
+    "harbor:refmap/xiaohongshu/draft-editor"
+  ],
+  "action_request": {
+    "schema_version": "webenvoy.action-request.v0",
+    "action_request_id": "action-request:intent_real_site_xiaohongshu_draft_preview",
+    "task_intent_ref": "intent_real_site_xiaohongshu_draft_preview",
+    "capability_ref": "lode:capability/xiaohongshu-draft-precheck",
+    "capability_version": "0.1.0",
+    "capability_source_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+    "capability_lock_ref": "lode://lock/site-capability/xiaohongshu/draft-precheck@0.1.0",
+    "package_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+    "operation_mode": "draft",
+    "risk_classification": {
+      "risk": "write",
+      "execution_intent": "draft",
+      "level": "medium",
+      "true_write_requested": false,
+      "reasons": ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+    },
+    "no_submit_guard": {
+      "status": "active",
+      "enforced_by": "core",
+      "blocked_execution_intents": ["execute_after_approval", "reconcile_status", "request_cancel"],
+      "source_refs": [
+        "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+        "lode://lock/site-capability/xiaohongshu/draft-precheck@0.1.0",
+        "xiaohongshu.draft-precheck.resources"
+      ]
+    },
+    "target_refs": {
+      "scope_target_ref": "https://www.xiaohongshu.com/publish",
+      "writable_target_ref": "harbor:writable-target/xiaohongshu/draft-editor",
+      "form_state_ref": "harbor:snapshot/xiaohongshu/draft-editor"
+    },
+    "runtime_binding_refs": [
+      "harbor:runtime-session/xiaohongshu/write-precheck",
+      "harbor:writable-target/xiaohongshu/draft-editor",
+      "harbor:snapshot/xiaohongshu/draft-editor",
+      "harbor:refmap/xiaohongshu/draft-editor"
+    ],
+    "evidence_refs": ["harbor:evidence/xiaohongshu/draft-editor/precheck"],
+    "consumer_boundary": "Core stores action request refs, risk classification, and no-submit guard only; no raw browser material or true write payload is stored."
+  },
+  "approval_request": {
+    "schema_version": "webenvoy.approval-request.v0",
+    "approval_request_id": "approval-request:xiaohongshu/draft-precheck",
+    "action_request_id": "action-request:intent_real_site_xiaohongshu_draft_preview",
+    "task_intent_ref": "intent_real_site_xiaohongshu_draft_preview",
+    "status": "pending",
+    "requested_at": "2026-07-06T11:00:01.000Z",
+    "expires_at": "2026-07-06T11:10:01.000Z",
+    "risk": "write",
+    "blocking_reasons": ["approval_required_before_submit"],
+    "source_refs": ["lode://site-capability/xiaohongshu/draft-precheck@0.1.0"],
+    "evidence_refs": ["harbor:evidence/xiaohongshu/draft-editor/precheck"],
+    "consumer_boundary": "Core stores approval state and refs only; this is not approval execution or submitted result evidence."
+  },
+  "result_ref": "result:core/xiaohongshu/draft-precheck/fixture",
+  "preview_result": {
+    "schema_version": "webenvoy.preview-result.v0",
+    "state": "available",
+    "submitted": false,
+    "expected_change": {
+      "change_kind": "xiaohongshu_draft_preview",
+      "target_ref": "harbor:writable-target/xiaohongshu/draft-editor",
+      "summary": "预览小红书草稿编辑器可写字段和预期草稿变化，不保存、不发布。",
+      "external_submit": false
+    },
+    "action_refs": {
+      "action_request_id": "action-request:intent_real_site_xiaohongshu_draft_preview"
+    },
+    "capability": {
+      "capability_ref": "lode:capability/xiaohongshu-draft-precheck",
+      "capability_version": "0.1.0",
+      "capability_source_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+      "capability_lock_ref": "lode://lock/site-capability/xiaohongshu/draft-precheck@0.1.0",
+      "package_ref": "lode://site-capability/xiaohongshu/draft-precheck@0.1.0"
+    },
+    "evidence_refs": ["harbor:evidence/xiaohongshu/draft-editor/precheck"],
+    "consumer_boundary": "Core preview result is validate-only/draft/preview projection; it is not submitted result, approval execution, reconciliation, or post-submit truth."
+  },
+  "evidence_refs": ["harbor:evidence/xiaohongshu/draft-editor/precheck"],
+  "retention_state": "active"
+}

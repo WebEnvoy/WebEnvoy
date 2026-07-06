@@ -19,6 +19,7 @@ import {
   type RunRecord
 } from "@webenvoy/core-runtime";
 import { assertRealSiteReadOnlyFixtureQueries } from "./real-site-readonly-fixtures.js";
+import { assertRealSiteWritePreviewFixtureQueries } from "./real-site-write-preview-fixtures.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -334,6 +335,13 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     await readFixture("real-site-boss-read-only-run-record.fixture.json"),
     await readFixture("real-site-user-takeover-run-record.fixture.json")
   ];
+  const realSiteWritePreviewFixtures = [
+    await readFixture("real-site-xiaohongshu-write-preview-run-record.fixture.json"),
+    await readFixture("real-site-boss-write-preview-run-record.fixture.json"),
+    await readFixture("real-site-write-preview-page-changed-run-record.fixture.json"),
+    await readFixture("real-site-write-preview-cancelled-run-record.fixture.json"),
+    await readFixture("real-site-write-preview-expired-run-record.fixture.json")
+  ];
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-conformance-"));
 
   try {
@@ -474,6 +482,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     await assertGoldenFixtureQueries(goldenFixture, goldenRun, directory);
     await assertWriteGuardrailFixtureQueries(guardrailFixture, guardrailRun, directory);
     await assertRealSiteReadOnlyFixtureQueries(realSiteFixtures, directory);
+    await assertRealSiteWritePreviewFixtureQueries(realSiteWritePreviewFixtures, directory);
     return 8;
   } finally {
     await rm(directory, { recursive: true, force: true });

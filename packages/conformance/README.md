@@ -8,6 +8,8 @@ It also verifies `packages/schemas/fixtures/golden-read-only-run-record.fixture.
 
 It verifies `packages/schemas/fixtures/write-action-guardrail-run-record.fixture.json` through the same query helpers so write-side guardrail records stay App/API-readable without adding a write executor.
 
+It also verifies real-site Xiaohongshu and BOSS write-preview Run Record fixtures: action request, risk classification, approval request, preview result, no-submit state, page-changed, cancelled, and expired states.
+
 ```bash
 pnpm conformance
 ```

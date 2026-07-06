@@ -1,0 +1,127 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item": "CORE-203",
+  "generated_at": "2026-07-06T11:26:10Z",
+  "task_goal": "Generate refs-only real-page Xiaohongshu and BOSS write-preview records with no-submit states for FR #190.",
+  "context_locators": [
+    ".loom/work-items/CORE-203.md",
+    ".loom/specs/CORE-203/spec.md",
+    ".loom/specs/CORE-203/plan.md",
+    ".loom/specs/CORE-203/evidence-map.md"
+  ],
+  "ownership_contract": {
+    "write_ownership": [
+      "packages/schemas/fixtures/*write-preview*.fixture.json",
+      "packages/conformance/src/real-site-write-preview-fixtures.ts",
+      "packages/conformance/src/self-check.ts",
+      "packages/conformance/README.md",
+      "packages/schemas/README.md",
+      ".loom/**/CORE-203*",
+      ".loom/status/current.md",
+      ".loom/bootstrap/init-result.json"
+    ],
+    "non_goals": [
+      "App/Harbor/Lode code changes",
+      "live external site action",
+      "true write or submitted result",
+      "raw browser/evidence/private material",
+      "merge, closeout, release evidence, or current pointer retire"
+    ]
+  },
+  "delegations": [
+    {
+      "id": "codex-subagent-core-203",
+      "task_goal": "Implement CORE-203 write-preview fixture and conformance coverage.",
+      "context_locators": [
+        ".loom/work-items/CORE-203.md",
+        ".loom/specs/CORE-203/spec.md",
+        ".loom/specs/CORE-203/plan.md",
+        "packages/conformance/src/real-site-readonly-fixtures.ts",
+        "packages/schemas/fixtures/real-site-xiaohongshu-read-only-run-record.fixture.json",
+        "packages/schemas/fixtures/real-site-boss-read-only-run-record.fixture.json"
+      ],
+      "read_scope": [
+        "Core schema fixtures",
+        "Core conformance fixture checks",
+        "Loom CORE-203 carriers",
+        "GitHub issues #190/#203/#204/#205/#206"
+      ],
+      "write_ownership": [
+        "Core schema/conformance fixtures",
+        "CORE-203 Loom carriers"
+      ],
+      "non_goals": [
+        "App/Harbor/Lode code changes",
+        "live external site action",
+        "true write or submitted result",
+        "private/raw material"
+      ],
+      "validation_expectation": [
+        "pnpm --filter @webenvoy/schemas test",
+        "pnpm conformance",
+        "git diff --check",
+        "loom suite validate/carrier/evidence"
+      ],
+      "output_format": "Integrated repo diff plus validation summary.",
+      "integration_target": "Implementation PR for CORE-203 on branch work/core-190-write-preview-real-page.",
+      "status": "integrated"
+    }
+  ],
+  "delegation_evidence": {
+    "mode": "single_subagent",
+    "unintegrated_output": false
+  },
+  "integration_evidence": [
+    "Added real-page write-preview Run Record fixtures for Xiaohongshu draft, BOSS greeting, page_changed, cancelled, and expired states.",
+    "Added conformance checks for action request, risk classification, approval request, preview_result.submitted=false, no-submit guard, page_changed failure reason, cancellation, and expiry.",
+    "Updated schema/conformance README summaries and CORE-203 Loom carriers."
+  ],
+  "validation": [
+    {
+      "command": "pnpm --filter @webenvoy/core-runtime test",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm --filter @webenvoy/api-server test",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm --filter @webenvoy/schemas test",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm conformance",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm typecheck",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "loom fact-chain --target . --json",
+      "result": "pass"
+    },
+    {
+      "command": "loom verify --target . --json",
+      "result": "pass"
+    },
+    {
+      "command": "loom suite validate --target . --item CORE-203 --json",
+      "result": "pass"
+    },
+    {
+      "command": "loom suite carrier validate --target . --item CORE-203 --json",
+      "result": "pass"
+    },
+    {
+      "command": "loom suite evidence validate --target . --item CORE-203 --json",
+      "result": "pass"
+    }
+  ],
+  "ownership_conflicts": [],
+  "repeated_blocker_signal": null
+}
