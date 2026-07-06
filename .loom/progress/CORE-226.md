@@ -7,7 +7,7 @@
 - Current Stop: CORE-226 result projection batch is merged, #225/#226/#227/#228/#229 are closed, and this carrier-only PR returns the repo to no_active_item.
 - Next Step: Merge carrier-only current pointer retire PR after hosted gate, then start the next Core batch.
 - Blockers: None recorded.
-- Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm typecheck`; `pnpm conformance`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-226 --json`; `loom suite carrier validate --target . --item CORE-226 --json`; `loom suite evidence validate --target . --item CORE-226 --json` passed locally.
+- Latest Validation Summary: loom fact-chain --target . --json; loom verify --target . --json; git diff --check passed locally before CORE-226 current pointer retire PR.
 - Recovery Boundary: Core read-only run/result projection only; no #230-#234 write-precheck work, App/Harbor/Lode code changes, live external site run, true write, cookies/tokens/profile/raw DOM/HAR/screenshot/network/CDP/VNC/provider private object persistence, merge, issue closeout, or GitHub dependency edits.
 - Current Lane: core real-site read-only result projection
 
