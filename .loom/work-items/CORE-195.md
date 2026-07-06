@@ -6,7 +6,7 @@
 - Goal: Execute Core-side real Xiaohongshu and BOSS read-only task runs by consuming Lode package refs and Harbor public runtime/evidence refs, then persist refs-only Run Records, capability attribution, result projection refs, and interruption states.
 - Scope: Covers Core FR #188 and Work Items #195/#196/#197/#198; excludes #189/#190/#199-#206, App UI, Harbor/Lode/App code changes, true writes, live account operation, captcha bypass, credentials, cookies, tokens, profile storage, raw DOM, raw network, raw screenshot/video, CDP/VNC/websocket endpoints, and production private page content.
 - Execution Path: work/core-188-real-site-readonly
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/WebEnvoy-core-188-real-site-readonly
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-195.md
 - Review Entry: .loom/reviews/CORE-195.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/schemas test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-195 --json; loom pr metadata-preflight after PR readback
