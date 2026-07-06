@@ -10,6 +10,7 @@ import {
   type RunRecordStatus
 } from "./run-record-store.js";
 import { normalizeFailureRecord } from "./failure-attribution.js";
+import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 
 export const runQuerySchemaVersion = "webenvoy.run-query.v0";
 export const approvalCancellationQuerySchemaVersion = "webenvoy.approval-cancellation-query.v0";
@@ -40,6 +41,7 @@ export type RunAdmissionSummary = {
 export type RunRuntimeRefs = {
   binding_refs?: string[];
   admission_binding_refs?: string[];
+  session_binding?: RuntimeSessionBindingFacts;
 };
 
 export type TerminalRunStatus = Exclude<RunRecordStatus, "pending" | "admitted" | "running">;
@@ -175,7 +177,8 @@ export function projectRunSummary(record: RunRecord): RunSummary {
     },
     runtime_refs: {
       ...(record.runtime_binding_refs === undefined ? {} : { binding_refs: [...record.runtime_binding_refs] }),
-      ...(record.admission.runtime_binding_refs === undefined ? {} : { admission_binding_refs: [...record.admission.runtime_binding_refs] })
+      ...(record.admission.runtime_binding_refs === undefined ? {} : { admission_binding_refs: [...record.admission.runtime_binding_refs] }),
+      ...(record.admission.runtime_session_binding === undefined ? {} : { session_binding: record.admission.runtime_session_binding })
     },
     ...(terminal === undefined ? {} : { terminal_summary: terminal })
   };

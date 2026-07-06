@@ -9,6 +9,8 @@ export type HarborUnavailable = {
 export type HarborCoreRuntimeFacts = {
   schema_version: "harbor-core-runtime-facts/v0";
   runtime_session_ref: string;
+  identity_environment_ref?: string;
+  execution_identity_ref?: string;
   profile_ref: string;
   provider_ref: string;
   provider_mode: string;
@@ -42,6 +44,49 @@ export type HarborCoreRuntimeFacts = {
   unavailable: null;
 };
 
+export type HarborIdentityEnvironmentFacts = {
+  schema_version: "harbor-local-identity-environment/v0";
+  identity_environment_ref: string;
+  execution_identity_ref: string;
+  profile_ref: string;
+  site_binding: {
+    site_id: string;
+    origin: string;
+  };
+  login_state: {
+    state: string;
+    recovery_required: boolean;
+  };
+  browser_storage: {
+    state: string;
+  };
+  provider_binding: {
+    selected_provider_id: string | null;
+    binding_status: string;
+  };
+  consumer_boundary: {
+    core: string;
+    not_exposed: readonly string[];
+  };
+};
+
+export type RuntimeSessionUse = "manual_browsing" | "agent_direct_browsing" | "direct_session" | "core_task_run";
+
+export type RuntimeSessionBindingFacts = {
+  schema_version: "webenvoy.runtime-session-binding.v0";
+  identity_environment_ref: string;
+  execution_identity_ref: string;
+  runtime_session_ref: string;
+  profile_ref: string;
+  provider_ref: string;
+  provider_mode: string;
+  lifecycle_state: string;
+  control_owner: string;
+  session_use: RuntimeSessionUse;
+  core_task_run: true;
+  consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence.";
+};
+
 export type HarborCoreSceneReference = {
   schema_version: "harbor-page-scene-refs/v0";
   runtime_session_ref: string;
@@ -59,6 +104,7 @@ export type HarborCoreSceneReference = {
 };
 
 export type HarborAdmissionInput = {
+  harbor_identity_environment_facts?: HarborIdentityEnvironmentFacts | HarborUnavailable;
   harbor_runtime_facts?: HarborCoreRuntimeFacts | HarborUnavailable;
   harbor_scene_ref?: HarborCoreSceneReference | HarborUnavailable;
   harbor_write_precheck_facts?: HarborWritePrecheckFacts | HarborUnavailable;
@@ -69,12 +115,14 @@ export type HarborAdmission =
       ok: true;
       runtime_binding_refs: readonly string[];
       evidence_refs: readonly string[];
+      runtime_session_binding?: RuntimeSessionBindingFacts;
     }
   | {
       ok: false;
       failure: FailureRecord;
       runtime_binding_refs?: readonly string[];
       evidence_refs?: readonly string[];
+      runtime_session_binding?: RuntimeSessionBindingFacts;
     };
 
 type RuntimeAdmission =
@@ -83,10 +131,13 @@ type RuntimeAdmission =
       runtime_session_ref: string;
       runtime_binding_refs: readonly string[];
       availability: Record<string, unknown>;
+      session_binding: RuntimeSessionBindingFacts;
     }
   | {
       ok: false;
       failure: FailureRecord;
+      runtime_binding_refs?: readonly string[];
+      session_binding?: RuntimeSessionBindingFacts;
     };
 
 export type HarborWritePrecheckFacts = {
@@ -126,6 +177,10 @@ export type HarborWritePrecheckFacts = {
 export type HarborAdmissionMode = "read" | "write_precheck";
 
 const activeRuntimeStates = new Set(["active", "idle"]);
+const busyRuntimeStates = new Set(["locked"]);
+const expiredRuntimeStates = new Set(["closed", "expired"]);
+const unreachableRuntimeStates = new Set(["disconnected", "failed"]);
+const busyControlOwners = new Set(["user", "agent", "app", "provider"]);
 const harborForbiddenFieldNames = new Set([
   "raw_payload",
   "dom",
@@ -149,6 +204,7 @@ const harborForbiddenFieldNames = new Set([
   "network_response_body",
   "provider_private_object"
 ]);
+const identityRequiredPrivateBoundary = ["password", "verification_code", "cookie_value", "storage_value", "session_token"];
 
 function failure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recoveryHint: string): FailureRecord {
   return {
@@ -198,10 +254,57 @@ function unavailableRuntimeCode(value: HarborUnavailable): string {
 }
 
 function runtimeExpiredCode(lifecycleState: string): string {
-  return lifecycleState === "closed" || lifecycleState === "expired" ? "runtime_ref_expired" : "runtime_session_unavailable";
+  if (expiredRuntimeStates.has(lifecycleState)) return "runtime_ref_expired";
+  if (unreachableRuntimeStates.has(lifecycleState)) return "runtime_session_unreachable";
+  if (busyRuntimeStates.has(lifecycleState)) return "runtime_session_busy";
+  return "runtime_session_unavailable";
 }
 
-function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime_facts"]): RuntimeAdmission {
+function sessionUse(owner: string): RuntimeSessionUse {
+  if (owner === "user") return "manual_browsing";
+  if (owner === "agent") return "agent_direct_browsing";
+  if (owner === "core_task") return "core_task_run";
+  return "direct_session";
+}
+
+function validateIdentityFacts(identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"]): HarborIdentityEnvironmentFacts | FailureRecord {
+  if (!identityFacts) {
+    return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
+  }
+  if (isUnavailable(identityFacts)) {
+    return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", identityFacts.retryable ? "connect_identity_environment" : "open_manual_auth");
+  }
+
+  const identity = contractObject(identityFacts);
+  const identityRef = contractString(identity?.identity_environment_ref);
+  const executionRef = contractString(identity?.execution_identity_ref);
+  const profileRef = contractString(identity?.profile_ref);
+  const site = contractObject(identity?.site_binding);
+  const login = contractObject(identity?.login_state);
+  const storage = contractObject(identity?.browser_storage);
+  const provider = contractObject(identity?.provider_binding);
+  const boundary = contractObject(identity?.consumer_boundary);
+  const notExposed = Array.isArray(boundary?.not_exposed) ? boundary.not_exposed : [];
+
+  if (identity?.schema_version !== "harbor-local-identity-environment/v0" || !identityRef || !executionRef || !profileRef || !contractString(site?.origin)) {
+    return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
+  }
+  if (login?.recovery_required === true || login?.state === "logged_out" || login?.state === "expired" || login?.state === "manual_auth_required") {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
+  }
+  if (storage?.state !== "present") {
+    return failure("resource_admission", "identity_storage_unavailable", "runtime_binding", "open_manual_auth");
+  }
+  if (!contractString(provider?.selected_provider_id) || provider?.binding_status === "no_launchable_provider") {
+    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", "install_or_select_provider");
+  }
+  if (boundary?.core !== "admission_facts_refs_and_blocking_reasons_only" || identityRequiredPrivateBoundary.some((entry) => !notExposed.includes(entry))) {
+    return failure("resource_admission", "private_boundary_invalid", "runtime_binding", "remove_private_field");
+  }
+  return identityFacts as HarborIdentityEnvironmentFacts;
+}
+
+function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime_facts"], identity: HarborIdentityEnvironmentFacts): RuntimeAdmission {
   if (!runtimeFacts) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
   }
@@ -211,26 +314,58 @@ function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime
 
   const runtime = contractObject(runtimeFacts);
   const runtimeSessionRef = contractString(runtime?.runtime_session_ref);
+  const identityRef = contractString(runtime?.identity_environment_ref);
+  const executionRef = contractString(runtime?.execution_identity_ref);
   const profileRef = contractString(runtime?.profile_ref);
   const providerRef = contractString(runtime?.provider_ref);
+  const providerMode = contractString(runtime?.provider_mode);
   const lifecycleState = contractString(runtime?.lifecycle_state);
+  const control = contractObject(runtime?.control);
   const viewer = contractObject(runtime?.viewer);
   const factRefs = contractObject(runtime?.fact_refs);
   const availability = contractObject(runtime?.availability) ?? {};
   const viewerRef = contractString(viewer?.viewer_ref);
+  const controlOwner = contractString(control?.owner) ?? "unknown";
+  const takeover = contractObject(control?.takeover);
 
-  if (runtime?.schema_version !== "harbor-core-runtime-facts/v0" || !runtimeSessionRef || !profileRef || !providerRef || !lifecycleState || !viewerRef) {
+  if (runtime?.schema_version !== "harbor-core-runtime-facts/v0" || !runtimeSessionRef || !profileRef || !providerRef || !providerMode || !lifecycleState || !viewerRef) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
+  }
+  if (profileRef !== identity.profile_ref || (identityRef !== undefined && identityRef !== identity.identity_environment_ref) || (executionRef !== undefined && executionRef !== identity.execution_identity_ref)) {
+    return { ok: false, failure: failure("resource_admission", "identity_runtime_mismatch", "runtime_binding", "select_matching_runtime") };
   }
   if (factRefs?.session !== runtimeSessionRef || factRefs.viewer !== viewerRef) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
   }
   if (!activeRuntimeStates.has(lifecycleState)) {
-    return { ok: false, failure: failure("resource_admission", runtimeExpiredCode(lifecycleState), "runtime_binding", "connect_runtime") };
+    return { ok: false, failure: failure("resource_admission", runtimeExpiredCode(lifecycleState), "runtime_binding", lifecycleState === "locked" ? "wait_or_request_handoff" : "connect_runtime") };
+  }
+  const binding: RuntimeSessionBindingFacts = {
+    schema_version: "webenvoy.runtime-session-binding.v0",
+    identity_environment_ref: identity.identity_environment_ref,
+    execution_identity_ref: identity.execution_identity_ref,
+    runtime_session_ref: runtimeSessionRef,
+    profile_ref: profileRef,
+    provider_ref: providerRef,
+    provider_mode: providerMode,
+    lifecycle_state: lifecycleState,
+    control_owner: controlOwner,
+    session_use: sessionUse(controlOwner),
+    core_task_run: true,
+    consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+  };
+  const busyOwner = busyControlOwners.has(controlOwner) && takeover?.available !== true;
+  if (busyOwner) {
+    return {
+      ok: false,
+      failure: failure("resource_admission", "runtime_session_busy", "runtime_binding", "wait_or_request_handoff"),
+      runtime_binding_refs: uniqueRefs([runtimeSessionRef, profileRef, providerRef, viewerRef, identity.identity_environment_ref, identity.execution_identity_ref]),
+      session_binding: binding
+    };
   }
 
-  const runtimeBindingRefs = uniqueRefs([runtimeSessionRef, profileRef, providerRef, viewerRef]);
-  return { ok: true, runtime_session_ref: runtimeSessionRef, runtime_binding_refs: runtimeBindingRefs, availability };
+  const runtimeBindingRefs = uniqueRefs([runtimeSessionRef, profileRef, providerRef, viewerRef, identity.identity_environment_ref, identity.execution_identity_ref]);
+  return { ok: true, runtime_session_ref: runtimeSessionRef, runtime_binding_refs: runtimeBindingRefs, availability, session_binding: binding };
 }
 
 function validateSceneRef(
@@ -341,12 +476,24 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
   }
 
-  const runtime = validateRuntimeFacts(input.harbor_runtime_facts);
+  const identity = validateIdentityFacts(input.harbor_identity_environment_facts);
+  if ("category" in identity) {
+    return { ok: false, failure: identity };
+  }
+
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity);
   if (!runtime.ok) {
-    return runtime;
+    return {
+      ok: false,
+      failure: runtime.failure,
+      ...(runtime.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: runtime.runtime_binding_refs }),
+      ...(runtime.session_binding === undefined ? {} : { runtime_session_binding: runtime.session_binding })
+    };
   }
   if (mode === "write_precheck") {
-    return validateWritePrecheckFacts(input.harbor_write_precheck_facts, runtime.runtime_session_ref, runtime.runtime_binding_refs);
+    const admission = validateWritePrecheckFacts(input.harbor_write_precheck_facts, runtime.runtime_session_ref, runtime.runtime_binding_refs);
+    return admission.ok ? { ...admission, runtime_session_binding: runtime.session_binding } : { ...admission, runtime_session_binding: runtime.session_binding };
   }
-  return validateSceneRef(input.harbor_scene_ref, runtime.runtime_session_ref, runtime.runtime_binding_refs, runtime.availability);
+  const admission = validateSceneRef(input.harbor_scene_ref, runtime.runtime_session_ref, runtime.runtime_binding_refs, runtime.availability);
+  return admission.ok ? { ...admission, runtime_session_binding: runtime.session_binding } : { ...admission, runtime_session_binding: runtime.session_binding };
 }

@@ -1,0 +1,60 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_identity_session_001",
+  "status": "admitted",
+  "created_at": "2026-07-06T08:00:00.000Z",
+  "updated_at": "2026-07-06T08:00:00.000Z",
+  "task_intent_ref": "intent_fixture_read_only_001",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/read-public-page",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0",
+  "package_ref": "lode://site-capability/example/read-public-page@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["example.read-public-page.resources"],
+    "runtime_binding_refs": [
+      "session_fixture_ready",
+      "profile_fixture_public",
+      "provider_fixture_local",
+      "viewer_fixture_readonly",
+      "identity-env_fixture",
+      "identity-env_fixture:execution",
+      "snapshot_fixture_example",
+      "refmap_fixture_example",
+      "source_trace_fixture_example"
+    ],
+    "evidence_refs": ["evidence_fixture_snapshot"],
+    "resource_match_ref": "resource-match:fixture/real-identity-session",
+    "runtime_session_binding": {
+      "schema_version": "webenvoy.runtime-session-binding.v0",
+      "identity_environment_ref": "identity-env_fixture",
+      "execution_identity_ref": "identity-env_fixture:execution",
+      "runtime_session_ref": "session_fixture_ready",
+      "profile_ref": "profile_fixture_public",
+      "provider_ref": "provider_fixture_local",
+      "provider_mode": "local_dedicated_profile",
+      "lifecycle_state": "active",
+      "control_owner": "core_task",
+      "session_use": "core_task_run",
+      "core_task_run": true,
+      "consumer_boundary": "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+    }
+  },
+  "runtime_binding_refs": [
+    "session_fixture_ready",
+    "profile_fixture_public",
+    "provider_fixture_local",
+    "viewer_fixture_readonly",
+    "identity-env_fixture",
+    "identity-env_fixture:execution",
+    "snapshot_fixture_example",
+    "refmap_fixture_example",
+    "source_trace_fixture_example"
+  ],
+  "evidence_refs": ["evidence_fixture_snapshot"],
+  "retention_state": "active"
+}

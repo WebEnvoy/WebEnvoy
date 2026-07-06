@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
-import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborWritePrecheckFacts } from "./harbor-admission.js";
+import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithPreviewResult, completeRunWithResult } from "./result-envelope.js";
 import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
@@ -56,6 +56,8 @@ const harborRuntimeBindingRefs = [
   "profile_fixture_public",
   "provider_fixture_local",
   "viewer_fixture_readonly",
+  "identity-env_fixture",
+  "identity-env_fixture:execution",
   "snapshot_fixture_example",
   "refmap_fixture_example",
   "source_trace_fixture_example"
@@ -65,6 +67,8 @@ const harborEvidenceRefs = ["evidence_fixture_snapshot", "evidence_fixture_sourc
 const harborRuntimeFacts = {
   schema_version: "harbor-core-runtime-facts/v0",
   runtime_session_ref: "session_fixture_ready",
+  identity_environment_ref: "identity-env_fixture",
+  execution_identity_ref: "identity-env_fixture:execution",
   profile_ref: "profile_fixture_public",
   provider_ref: "provider_fixture_local",
   provider_mode: "local_dedicated_profile",
@@ -97,6 +101,32 @@ const harborRuntimeFacts = {
   },
   unavailable: null
 } satisfies HarborCoreRuntimeFacts;
+
+const harborIdentityEnvironmentFacts = {
+  schema_version: "harbor-local-identity-environment/v0",
+  identity_environment_ref: "identity-env_fixture",
+  execution_identity_ref: "identity-env_fixture:execution",
+  profile_ref: "profile_fixture_public",
+  site_binding: {
+    site_id: "example",
+    origin: "https://example.org"
+  },
+  login_state: {
+    state: "logged_in",
+    recovery_required: false
+  },
+  browser_storage: {
+    state: "present"
+  },
+  provider_binding: {
+    selected_provider_id: "cloakbrowser",
+    binding_status: "default_provider_available"
+  },
+  consumer_boundary: {
+    core: "admission_facts_refs_and_blocking_reasons_only",
+    not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
+  }
+} satisfies HarborIdentityEnvironmentFacts;
 
 const harborSceneRef = {
   schema_version: "harbor-page-scene-refs/v0",
@@ -234,6 +264,7 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
       resource_match_ref: "resource-match:fixture/ready",
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
       harbor_runtime_facts: harborRuntimeFacts,
       harbor_scene_ref: harborSceneRef
     });
@@ -253,6 +284,10 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.deepEqual(accepted.run_record.admission.resource_requirement_refs, ["example.read-public-page.resources"]);
     assert.deepEqual(accepted.run_record.admission.runtime_binding_refs, harborRuntimeBindingRefs);
     assert.deepEqual(accepted.run_record.admission.evidence_refs, harborEvidenceRefs);
+    assert.equal(accepted.run_record.admission.runtime_session_binding?.identity_environment_ref, "identity-env_fixture");
+    assert.equal(accepted.run_record.admission.runtime_session_binding?.runtime_session_ref, "session_fixture_ready");
+    assert.equal(accepted.run_record.admission.runtime_session_binding?.session_use, "direct_session");
+    assert.equal(JSON.stringify(accepted.run_record).includes("cookie_value"), false);
     assert.deepEqual(accepted.run_record.runtime_binding_refs, harborRuntimeBindingRefs);
     assert.deepEqual(accepted.run_record.evidence_refs, harborEvidenceRefs);
     assert.deepEqual(await store.getRunRecord("run_self_check_submit_accepted"), accepted.run_record);
@@ -261,7 +296,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       run_id: "run_self_check_harbor_missing_runtime",
       task_intent: taskIntent,
       package_ref: lodeReadPublicPageContract.package_ref,
-      lode_package_contract: lodeReadPublicPageContract
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts
     });
     assert.equal(missingRuntime.ok, false);
     assert.equal(missingRuntime.failure.code, "runtime_ref_missing");
@@ -272,6 +308,7 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       task_intent: taskIntent,
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
       harbor_runtime_facts: harborRuntimeFacts,
       harbor_scene_ref: {
         status: "unavailable",
@@ -282,7 +319,60 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(captureDenied.ok, false);
     assert.equal(captureDenied.failure.category, "evidence_reference");
     assert.equal(captureDenied.failure.code, "capture_denied");
-    assert.deepEqual(captureDenied.run_record?.admission.runtime_binding_refs, harborRuntimeBindingRefs.slice(0, 4));
+    assert.deepEqual(captureDenied.run_record?.admission.runtime_binding_refs, harborRuntimeBindingRefs.slice(0, 6));
+
+    const expiredIdentity = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_identity_expired",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: {
+        ...harborIdentityEnvironmentFacts,
+        login_state: { state: "expired", recovery_required: true }
+      },
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_scene_ref: harborSceneRef
+    });
+    assert.equal(expiredIdentity.ok, false);
+    assert.equal(expiredIdentity.failure.code, "identity_auth_required");
+    assert.equal(expiredIdentity.run_record?.status, "requires_user_action");
+    assert.equal(expiredIdentity.run_record?.admission.decision, "requires_user_action");
+
+    const busySession = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_runtime_busy",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_runtime_facts: {
+        ...harborRuntimeFacts,
+        control: {
+          ...harborRuntimeFacts.control,
+          owner: "agent",
+          takeover: { available: false, unavailable_reason: "viewer_unavailable" }
+        }
+      },
+      harbor_scene_ref: harborSceneRef
+    });
+    assert.equal(busySession.ok, false);
+    assert.equal(busySession.failure.code, "runtime_session_busy");
+    assert.equal(busySession.run_record?.admission.runtime_session_binding?.session_use, "agent_direct_browsing");
+
+    const rawEndpointRejected = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_raw_endpoint_rejected",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_runtime_facts: {
+        ...harborRuntimeFacts,
+        cdp_endpoint: "ws://127.0.0.1/private"
+      } as unknown as HarborCoreRuntimeFacts,
+      harbor_scene_ref: harborSceneRef
+    });
+    assert.equal(rawEndpointRejected.ok, false);
+    assert.equal(rawEndpointRejected.failure.code, "forbidden_field:cdp_endpoint");
+    assert.equal(await store.getRunRecord("run_self_check_raw_endpoint_rejected"), undefined);
 
     const invalid = await acceptReadOnlyTaskSubmission(store, {
       run_id: "run_self_check_submit_invalid",
@@ -350,6 +440,7 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodePreviewContactFormContract.package_ref,
       lode_package_contract: lodePreviewContactFormContract,
       resource_match_ref: "resource-match:fixture/write-precheck-ready",
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
       harbor_runtime_facts: harborRuntimeFacts,
       harbor_write_precheck_facts: harborWritePrecheckFacts
     });

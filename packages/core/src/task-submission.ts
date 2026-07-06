@@ -394,6 +394,14 @@ function lodeAdmissionActionRisk(taskIntent: TaskIntentEnvelope, failure: Failur
   return failure.category === "action_risk" && failure.code === "true_write_deferred" && taskIntent.policy.risk === "read" ? "write" : taskIntent.policy.risk;
 }
 
+function harborAdmissionDecision(failure: FailureRecord): AdmissionDecision["decision"] {
+  return failure.code === "identity_auth_required" ? "requires_user_action" : "blocked_pre_admission";
+}
+
+function harborAdmissionStatus(failure: FailureRecord): Extract<RunRecord["status"], "failed" | "requires_user_action"> {
+  return failure.code === "identity_auth_required" ? "requires_user_action" : "failed";
+}
+
 export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, input: TaskSubmissionInput): Promise<TaskSubmissionResult> {
   const taskIntent = parseTaskIntent(input.task_intent);
   if (isFailure(taskIntent)) {
@@ -462,9 +470,15 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
   const writePrecheck = isWritePrecheckIntent(taskIntent);
   const harborAdmission = validateHarborAdmission(input, writePrecheck ? "write_precheck" : "read");
   if (!harborAdmission.ok) {
+    if (harborAdmission.failure.code.startsWith("forbidden_field:")) {
+      return {
+        ok: false,
+        failure: harborAdmission.failure
+      };
+    }
     const runRecord = await store.createRunRecord({
       run_id: input.run_id,
-      status: "failed",
+      status: harborAdmissionStatus(harborAdmission.failure),
       task_intent_ref: taskIntent.intent_id,
       entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
       capability_ref: taskIntent.capability.ref,
@@ -473,12 +487,13 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
       package_ref: lodeAdmission.package_ref,
       admission: {
-        decision: "blocked_pre_admission",
+        decision: harborAdmissionDecision(harborAdmission.failure),
         action_risk: taskIntent.policy.risk,
         resource_requirement_refs: lodeAdmission.resource_requirement_refs,
         ...(harborAdmission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: harborAdmission.runtime_binding_refs }),
         ...(harborAdmission.evidence_refs === undefined ? {} : { evidence_refs: harborAdmission.evidence_refs }),
-        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref }),
+        ...(harborAdmission.runtime_session_binding === undefined ? {} : { runtime_session_binding: harborAdmission.runtime_session_binding })
       },
       ...(harborAdmission.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: harborAdmission.runtime_binding_refs }),
       ...(harborAdmission.evidence_refs === undefined ? {} : { evidence_refs: harborAdmission.evidence_refs }),
@@ -506,7 +521,8 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       action_risk: taskIntent.policy.risk,
       resource_requirement_refs: lodeAdmission.resource_requirement_refs,
       runtime_binding_refs: harborAdmission.runtime_binding_refs,
-      evidence_refs: harborAdmission.evidence_refs
+      evidence_refs: harborAdmission.evidence_refs,
+      ...(harborAdmission.runtime_session_binding === undefined ? {} : { runtime_session_binding: harborAdmission.runtime_session_binding })
     }
   } as const;
   const actionRequest = writePrecheck
