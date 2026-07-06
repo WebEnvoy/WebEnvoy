@@ -141,6 +141,72 @@
         "resource_match_ref": {
           "type": "string",
           "minLength": 1
+        },
+        "runtime_session_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "identity_environment_ref",
+            "execution_identity_ref",
+            "runtime_session_ref",
+            "profile_ref",
+            "provider_ref",
+            "provider_mode",
+            "lifecycle_state",
+            "control_owner",
+            "session_use",
+            "core_task_run",
+            "consumer_boundary"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "webenvoy.runtime-session-binding.v0"
+            },
+            "identity_environment_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "execution_identity_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runtime_session_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "profile_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provider_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provider_mode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lifecycle_state": {
+              "type": "string",
+              "minLength": 1
+            },
+            "control_owner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "session_use": {
+              "type": "string",
+              "enum": ["manual_browsing", "agent_direct_browsing", "direct_session", "core_task_run"]
+            },
+            "core_task_run": {
+              "const": true
+            },
+            "consumer_boundary": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },

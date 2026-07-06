@@ -83,10 +83,13 @@ export {
   type ResultUnavailableReason
 } from "./result-query.js";
 export {
+  type HarborIdentityEnvironmentFacts,
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
   type HarborUnavailable,
-  type HarborWritePrecheckFacts
+  type HarborWritePrecheckFacts,
+  type RuntimeSessionBindingFacts,
+  type RuntimeSessionUse
 } from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {

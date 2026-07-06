@@ -217,6 +217,14 @@ function runRecordFromFixture(value: unknown, label: string): RunRecord {
   if (admission.runtime_binding_refs !== undefined) asStringArray(admission.runtime_binding_refs, `${label}.admission.runtime_binding_refs`);
   if (admission.evidence_refs !== undefined) asStringArray(admission.evidence_refs, `${label}.admission.evidence_refs`);
   if (admission.resource_match_ref !== undefined) asString(admission.resource_match_ref, `${label}.admission.resource_match_ref`);
+  if (admission.runtime_session_binding !== undefined) {
+    const binding = asObject(admission.runtime_session_binding, `${label}.admission.runtime_session_binding`);
+    assert.equal(asString(binding.schema_version, `${label}.admission.runtime_session_binding.schema_version`), "webenvoy.runtime-session-binding.v0");
+    asString(binding.identity_environment_ref, `${label}.admission.runtime_session_binding.identity_environment_ref`);
+    asString(binding.execution_identity_ref, `${label}.admission.runtime_session_binding.execution_identity_ref`);
+    asString(binding.runtime_session_ref, `${label}.admission.runtime_session_binding.runtime_session_ref`);
+    assert.equal(binding.core_task_run, true, `${label}.admission.runtime_session_binding.core_task_run must be true`);
+  }
   if (record.failure !== undefined) failureFromFixture(record.failure);
 
   const runRecord = record as RunRecord;

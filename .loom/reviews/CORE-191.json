@@ -1,0 +1,34 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-191",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review accepts Core identity environment and runtime session refs-only admission, Run Record projection, schema fixture coverage, structured failure mapping, and raw/private Harbor material rejection for #187/#191/#192/#193/#194/#207.",
+  "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
+  "authored_at": "2026-07-06T09:30:00Z",
+  "reviewed_head": "7dfbbaf4ebf87079034469bc22938675ea79cddb",
+  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-191 --json`; `loom suite carrier validate --target . --item CORE-191 --json`; `loom suite evidence validate --target . --item CORE-191 --json` passed locally.",
+  "reviewed_validation_summary_hash": "6f78c3174cfd2d94bf4813a8c296965ee0da2b057a4f198a81d267e2bf4be2c2",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-191.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-191.md",
+    "recovery_entry": ".loom/progress/CORE-191.md",
+    "suite_evidence_map": ".loom/specs/CORE-191/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/CORE-191/task-carrier.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Core stores only public identity/session refs and status facts, rejects raw/private Harbor material, and does not claim live Harbor evidence, Lode site execution, App UI, or true write behavior."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "Targeted Core runtime tests, schema checks, conformance, typecheck, diff check, and Loom local checks passed before PR review."
+  }
+}

@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
+import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
 
@@ -41,6 +42,7 @@ export type AdmissionDecision = {
   runtime_binding_refs?: readonly string[];
   evidence_refs?: readonly string[];
   resource_match_ref?: string;
+  runtime_session_binding?: RuntimeSessionBindingFacts;
 };
 
 export type ActionRequest = {
@@ -347,6 +349,22 @@ function assertRunRecord(record: RunRecord): void {
   copyRefs(record.admission.resource_requirement_refs, "admission.resource_requirement_refs");
   copyRefs(record.admission.runtime_binding_refs, "admission.runtime_binding_refs");
   copyRefs(record.admission.evidence_refs, "admission.evidence_refs");
+  if (record.admission.runtime_session_binding !== undefined) {
+    requireRef(record.admission.runtime_session_binding.schema_version, "admission.runtime_session_binding.schema_version");
+    if (record.admission.runtime_session_binding.schema_version !== "webenvoy.runtime-session-binding.v0") {
+      throw new Error("admission.runtime_session_binding.schema_version is unsupported");
+    }
+    requireRef(record.admission.runtime_session_binding.identity_environment_ref, "admission.runtime_session_binding.identity_environment_ref");
+    requireRef(record.admission.runtime_session_binding.execution_identity_ref, "admission.runtime_session_binding.execution_identity_ref");
+    requireRef(record.admission.runtime_session_binding.runtime_session_ref, "admission.runtime_session_binding.runtime_session_ref");
+    requireRef(record.admission.runtime_session_binding.profile_ref, "admission.runtime_session_binding.profile_ref");
+    requireRef(record.admission.runtime_session_binding.provider_ref, "admission.runtime_session_binding.provider_ref");
+    requireRef(record.admission.runtime_session_binding.provider_mode, "admission.runtime_session_binding.provider_mode");
+    requireRef(record.admission.runtime_session_binding.lifecycle_state, "admission.runtime_session_binding.lifecycle_state");
+    requireRef(record.admission.runtime_session_binding.control_owner, "admission.runtime_session_binding.control_owner");
+    requireRef(record.admission.runtime_session_binding.session_use, "admission.runtime_session_binding.session_use");
+    requireRef(record.admission.runtime_session_binding.consumer_boundary, "admission.runtime_session_binding.consumer_boundary");
+  }
   copyRefs(record.runtime_binding_refs, "runtime_binding_refs");
   if (record.action_request !== undefined) {
     requireRef(record.action_request.schema_version, "action_request.schema_version");
