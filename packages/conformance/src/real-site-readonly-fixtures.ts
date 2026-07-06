@@ -5,7 +5,10 @@ import { join } from "node:path";
 import {
   createFileRunRecordStore,
   getCapabilityRunSummary,
+  getRunEvidenceRefs,
+  getRunFailureReason,
   getRunResult,
+  getRunSessionRefs,
   getRunSummary,
   runRecordSchemaVersion,
   type RunRecord
@@ -61,6 +64,16 @@ export async function assertRealSiteReadOnlyFixtureQueries(realSiteFixtures: rea
   assert.equal(xhsResult.result.result.result_envelope?.ok, true);
   assert.equal(xhsResult.result.result.result_envelope?.package_ref, xhs.package_ref);
   assert.equal(xhsResult.result.evidence_refs.every((entry) => entry.raw_access === "not_available_from_core"), true);
+  assert.equal(xhsResult.result.evidence_refs.every((entry) => typeof entry.recorded_at === "string"), true);
+
+  const xhsEvidence = await getRunEvidenceRefs(realSiteStore, xhs.run_id);
+  if (!xhsEvidence.ok) assert.fail(xhsEvidence.failure.code);
+  assert.equal(xhsEvidence.evidence.evidence_refs.every((entry) => entry.raw_access === "not_available_from_core"), true);
+
+  const xhsSessionRefs = await getRunSessionRefs(realSiteStore, xhs.run_id);
+  if (!xhsSessionRefs.ok) assert.fail(xhsSessionRefs.failure.code);
+  assert.equal(xhsSessionRefs.session_refs.schema_version, "webenvoy.session-refs-query.v0");
+  assert.equal(xhsSessionRefs.session_refs.session_refs.raw_access, "not_available_from_core");
 
   const bossSummary = await getRunSummary(realSiteStore, boss.run_id);
   if (!bossSummary.ok) assert.fail(bossSummary.failure.code);
@@ -73,6 +86,11 @@ export async function assertRealSiteReadOnlyFixtureQueries(realSiteFixtures: rea
   assert.equal(takeoverResult.result.status, "manual_recovery_required");
   assert.equal(takeoverResult.result.result.result_envelope?.outcome, "manual_recovery_required");
   assert.equal(takeoverResult.result.failure?.code, "user_takeover");
+  const takeoverFailure = await getRunFailureReason(realSiteStore, takeover.run_id);
+  if (!takeoverFailure.ok) assert.fail(takeoverFailure.failure.code);
+  assert.equal(takeoverFailure.failure_reason.schema_version, "webenvoy.failure-reason-query.v0");
+  assert.equal(takeoverFailure.failure_reason.failure_present, true);
+  assert.equal(takeoverFailure.failure_reason.app_action, "show_user_takeover_state");
 
   const xhsCapabilityRuns = await getCapabilityRunSummary(realSiteStore, {
     capability_ref: "lode:capability/search-notes",

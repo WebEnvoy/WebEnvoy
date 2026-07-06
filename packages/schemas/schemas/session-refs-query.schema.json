@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/session-refs-query.v0.schema.json",
+  "title": "WebEnvoy Core Session Refs Query v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Query",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.session-refs-query.v0",
+    "compatibility_boundary": "Core returns Harbor public runtime/session/profile refs and status facts only. Raw browser endpoints, profile storage, cookies, tokens, and evidence bodies stay outside Core.",
+    "source_adrs": [
+      "docs/adr/0003-result-envelope-and-run-record.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "run_id": "Core",
+      "status": "Core",
+      "session_refs": "Core projection of Harbor public refs"
+    }
+  },
+  "required": ["schema_version", "run_id", "status", "session_refs"],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.session-refs-query.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_refs", "admission_binding_refs", "raw_access", "consumer_boundary"],
+      "properties": {
+        "binding_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "admission_binding_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "runtime_session_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_environment_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_identity_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profile_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_mode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycle_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "control_owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_use": {
+          "type": "string",
+          "enum": ["manual_browsing", "agent_direct_browsing", "direct_session", "core_task_run"]
+        },
+        "core_task_run": {
+          "const": true
+        },
+        "raw_access": {
+          "const": "not_available_from_core"
+        },
+        "consumer_boundary": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

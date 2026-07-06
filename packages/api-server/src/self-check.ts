@@ -215,6 +215,16 @@ async function main(): Promise<void> {
     assert.equal(evidenceRefs.length, 1);
     assert.equal(asRecord(evidenceRefs[0]).source, "admission_and_terminal");
     assert.equal(asRecord(evidenceRefs[0]).state, "available");
+    assert.equal(asRecord(evidenceRefs[0]).recorded_at, "2026-07-01T02:00:03.000Z");
+
+    const sessionRefsResponse = await getJson(port, `/runs/${runId}/session-refs`);
+    assert.equal(sessionRefsResponse.status, 200);
+    const sessionRefsBody = asRecord(sessionRefsResponse.body);
+    assert.equal(sessionRefsBody.ok, true);
+    const sessionRefsEnvelope = asRecord(sessionRefsBody.session_refs);
+    assert.equal(sessionRefsEnvelope.schema_version, "webenvoy.session-refs-query.v0");
+    assert.deepEqual(asRecord(sessionRefsEnvelope.session_refs).binding_refs, ["harbor:runtime-session/fixture-ready"]);
+    assert.equal(asRecord(sessionRefsEnvelope.session_refs).raw_access, "not_available_from_core");
 
     const failureResponse = await getJson(port, `/runs/${failureRunId}/result`);
     assert.equal(failureResponse.status, 200);
@@ -226,6 +236,16 @@ async function main(): Promise<void> {
     assert.equal(asRecord(failureEnvelope.result).envelope_state, "redacted");
     assert.equal(asRecord(failureEnvelope.result).payload_state, "redacted");
     assert.equal(asRecord(asRecord(failureEnvelope.result).result_envelope).ok, false);
+
+    const failureReasonResponse = await getJson(port, `/runs/${failureRunId}/failure`);
+    assert.equal(failureReasonResponse.status, 200);
+    const failureReasonBody = asRecord(failureReasonResponse.body);
+    assert.equal(failureReasonBody.ok, true);
+    const failureReason = asRecord(failureReasonBody.failure_reason);
+    assert.equal(failureReason.schema_version, "webenvoy.failure-reason-query.v0");
+    assert.equal(failureReason.reason_class, "capability_failure");
+    assert.equal(failureReason.app_action, "repair_package");
+    assert.equal(failureReason.retryable, false);
 
     const capabilityRunsResponse = await getJson(port, "/capability-runs?capability_ref=lode%3Acapability%2Fread-public-page&capability_version=0.1.0");
     assert.equal(capabilityRunsResponse.status, 200);
@@ -293,6 +313,19 @@ async function main(): Promise<void> {
     });
 
     assert.deepEqual(await getJson(port, "/runs/%E0%A4%A/evidence-refs"), {
+      status: 400,
+      body: {
+        ok: false,
+        error: {
+          category: "request_invalid",
+          code: "run_id_invalid",
+          phase: "query",
+          recovery_hint: "fix_input"
+        }
+      }
+    });
+
+    assert.deepEqual(await getJson(port, "/runs/%E0%A4%A/failure"), {
       status: 400,
       body: {
         ok: false,

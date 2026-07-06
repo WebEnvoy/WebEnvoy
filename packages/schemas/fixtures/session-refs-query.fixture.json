@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/session-refs-query.schema.json",
+  "schema_version": "webenvoy.session-refs-query.v0",
+  "run_id": "run_fixture_real_query_success",
+  "status": "succeeded",
+  "session_refs": {
+    "binding_refs": [
+      "harbor:runtime-session/real-query",
+      "harbor:profile/real-query",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/real-query"
+    ],
+    "admission_binding_refs": [
+      "harbor:runtime-session/real-query",
+      "harbor:profile/real-query",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/real-query"
+    ],
+    "runtime_session_ref": "harbor:runtime-session/real-query",
+    "identity_environment_ref": "identity-env:fixture/real-query",
+    "execution_identity_ref": "identity-env:fixture/real-query:execution",
+    "profile_ref": "harbor:profile/real-query",
+    "provider_ref": "harbor:provider/cloakbrowser",
+    "provider_mode": "local_dedicated_profile",
+    "lifecycle_state": "active",
+    "control_owner": "core_task",
+    "session_use": "core_task_run",
+    "core_task_run": true,
+    "raw_access": "not_available_from_core",
+    "consumer_boundary": "Core query returns Harbor public session refs and status facts only; raw profile storage, cookies, tokens, endpoints, and browser material remain outside Core."
+  }
+}

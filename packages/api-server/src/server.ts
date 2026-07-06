@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { getCapabilityRunSummary, getRunEvidenceRefs, getRunResult, getRunSummary, type FailureRecord, type FileRunRecordStore } from "@webenvoy/core-runtime";
+import { getCapabilityRunSummary, getRunEvidenceRefs, getRunFailureReason, getRunResult, getRunSessionRefs, getRunSummary, type FailureRecord, type FileRunRecordStore } from "@webenvoy/core-runtime";
 
 type JsonBody = Record<string, unknown>;
 
@@ -81,6 +81,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const runMatch = /^\/runs\/([^/]+)$/.exec(path);
   const runResultMatch = /^\/runs\/([^/]+)\/result$/.exec(path);
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);
+  const runSessionRefsMatch = /^\/runs\/([^/]+)\/session-refs$/.exec(path);
+  const runFailureMatch = /^\/runs\/([^/]+)\/failure$/.exec(path);
 
   if (path === "/health") {
     sendJson(response, 200, {
@@ -141,7 +143,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return;
   }
 
-  if (runResultMatch || runEvidenceRefsMatch || runMatch) {
+  if (runResultMatch || runEvidenceRefsMatch || runSessionRefsMatch || runFailureMatch || runMatch) {
     if (!options.runRecordStore) {
       sendJson(response, 503, {
         ok: false,
@@ -150,7 +152,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       return;
     }
 
-    const runId = decodeRunId(runResultMatch?.[1] ?? runEvidenceRefsMatch?.[1] ?? runMatch?.[1]);
+    const runId = decodeRunId(runResultMatch?.[1] ?? runEvidenceRefsMatch?.[1] ?? runSessionRefsMatch?.[1] ?? runFailureMatch?.[1] ?? runMatch?.[1]);
     if (runId === undefined) {
       sendJson(response, 400, {
         ok: false,
@@ -182,6 +184,40 @@ async function route(request: IncomingMessage, response: ServerResponse, options
         sendJson(response, 200, {
           ok: true,
           evidence: result.evidence
+        });
+        return;
+      }
+
+      sendJson(response, queryStatusCode(result.failure), {
+        ok: false,
+        error: result.failure
+      });
+      return;
+    }
+
+    if (runSessionRefsMatch) {
+      const result = await getRunSessionRefs(options.runRecordStore, runId);
+      if (result.ok) {
+        sendJson(response, 200, {
+          ok: true,
+          session_refs: result.session_refs
+        });
+        return;
+      }
+
+      sendJson(response, queryStatusCode(result.failure), {
+        ok: false,
+        error: result.failure
+      });
+      return;
+    }
+
+    if (runFailureMatch) {
+      const result = await getRunFailureReason(options.runRecordStore, runId);
+      if (result.ok) {
+        sendJson(response, 200, {
+          ok: true,
+          failure_reason: result.failure_reason
         });
         return;
       }
