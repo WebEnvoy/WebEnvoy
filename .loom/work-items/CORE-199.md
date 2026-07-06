@@ -10,7 +10,7 @@
 - Recovery Entry: .loom/progress/CORE-199.md
 - Review Entry: .loom/reviews/CORE-199.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/schemas test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-199 --json; loom pr metadata-preflight after PR readback
-- Closing Condition: Non-draft PR is ready with metadata covering #189/#199/#200/#201/#202. Merge, issue closeout, release evidence, current-head review, and current pointer retire are out of scope for this execution thread.
+- Closing Condition: PR #214 merges, issues #189/#199/#200/#201/#202 receive post-merge closeout evidence, and current pointer returns to no_active_item/idle after closeout.
 
 ## Covered Work Items
 

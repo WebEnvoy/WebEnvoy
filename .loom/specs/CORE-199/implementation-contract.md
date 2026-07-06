@@ -2,11 +2,11 @@
 
 ## Ownership
 
-- packages/core/src owns read-only Run Record query projection, evidence summary shape, session refs query, and failure reason query behavior.
-- packages/api-server/src owns additive GET routes for `/runs/:id/session-refs` and `/runs/:id/failure`.
-- packages/schemas owns App-facing JSON Schema fixtures for session refs and failure reason query envelopes.
-- packages/conformance owns fixture validation for refs-only real-site query surfaces.
-- .loom/work-items/CORE-199.md, .loom/progress/CORE-199.md, .loom/status/current.md, .loom/bootstrap/init-result.json, and .loom/specs/CORE-199 are the item-specific Loom carriers for this PR.
+- `packages/core/src` owns refs-only real-run query behavior for result, evidence refs, session refs, failure reasons, and recovery hints.
+- `packages/api-server/src` owns App-consumable API routes that expose those Core query projections.
+- `packages/schemas` owns JSON schemas and fixtures for the query payloads.
+- `packages/conformance` owns fixture-backed checks proving the App-facing query contract remains stable.
+- `.loom/specs/CORE-199` and `.loom/progress/CORE-199.md` are the item-specific execution carriers.
 
 ## Verification
 
@@ -22,9 +22,9 @@
 - `loom suite carrier validate --target . --item CORE-199 --json`
 - `loom suite evidence validate --target . --item CORE-199 --json`
 - `loom build --target . --item CORE-199 --build-evidence .loom/specs/CORE-199/build-evidence.json --json`
-- `loom pr metadata-readback` and `loom pr metadata-preflight` after PR body readback.
+- `loom pr metadata-preflight` after PR body readback
 
 ## Non-Goals
 
-- No #190/#203-#206 behavior, App/Harbor/Lode code changes, true writes, live account operation, external visible action, captcha/risk bypass, merge, issue closeout, release evidence, current-head review, or current pointer retire.
-- No Harbor private scene material, account/cookie/token/profile storage, raw DOM, raw network, raw screenshot/video, CDP/VNC/websocket endpoint, viewer URL, Lode package body, fixture body, or validator body copied into Core query envelopes.
+- No App UI, Harbor/Lode/App code changes, true writes, live account operation, external visible action, captcha or risk-control bypass, Stage 7 write-side behavior, issue closeout, release evidence, or current pointer retire in the implementation PR.
+- No credentials, cookies, tokens, verification codes, profile storage, raw DOM/HAR/network, raw screenshot/video, CDP/VNC/websocket endpoints, viewer URLs, production private page content, Harbor private browser material, or Lode package bodies in Core query responses.

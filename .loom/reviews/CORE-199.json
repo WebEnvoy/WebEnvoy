@@ -1,0 +1,39 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-199",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Reviewed CORE-199 implementation PR #214 for refs-only real-run query and evidence entry points.",
+  "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
+  "authored_at": "2026-07-06T10:58:00Z",
+  "reviewed_head": "d0b5017038abdfae70fdbe315296acd19e294bdf",
+  "reviewed_validation_summary": "pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/schemas test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate --target . --item CORE-199 --json; loom suite carrier validate --target . --item CORE-199 --json; loom suite evidence validate --target . --item CORE-199 --json; loom build --target . --item CORE-199 --build-evidence .loom/specs/CORE-199/build-evidence.json --json passed locally on 2026-07-06 UTC; PR #214 metadata readback/preflight passed; hosted py-compile, demo-bootstrap, repo-local-cli and loom-check passed; merge gate is pending current-head review.",
+  "reviewed_validation_summary_hash": "e51df1701dc2879cd4d11d422dfbec3fa0b06ff389fbae7a15f8245f205a103b",
+  "validation_summary_source": "main_controller.merge_review",
+  "validation_summary_locator": ".loom/progress/CORE-199.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "implementation_pr": "#214",
+    "covered_issues": [
+      "#189",
+      "#199",
+      "#200",
+      "#201",
+      "#202"
+    ],
+    "spec": ".loom/specs/CORE-199/spec.md",
+    "implementation_contract": ".loom/specs/CORE-199/implementation-contract.md",
+    "build_evidence": ".loom/specs/CORE-199/build-evidence.json"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "CORE-199 exposes App-consumable Core query projections for result, evidence refs, session refs, failure reasons, and recovery hints without copying private Harbor/Lode/runtime material."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "Implementation is limited to Core/API/schema/conformance query surfaces and item-specific Loom carriers; excluded App, Harbor, Lode, true write, live account operation, and private/raw material remain out of scope."
+  }
+}
