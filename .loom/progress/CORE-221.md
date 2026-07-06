@@ -3,11 +3,11 @@
 ## Dynamic Facts
 
 - Item ID: CORE-221
-- Current Checkpoint: implementation_validated
-- Current Stop: Implementation and targeted validation are integrated locally; PR creation and metadata readback remain.
-- Next Step: Run final Loom/suite checks, commit, push, create PR, and validate PR metadata.
+- Current Checkpoint: merge_ready
+- Current Stop: PR #235 is ready for current-head review and merge gate after controller carrier refresh.
+- Next Step: Run gate, merge PR #235 if checks pass, then create closeout/retire lane and close #221-#224 plus parent #220 with post-merge evidence.
 - Blockers: None recorded.
-- Latest Validation Summary: 2026-07-06T16:18:07Z local checks passed before carrier creation: `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/schemas test`, `pnpm conformance`, `pnpm typecheck`, `git diff --check`.
+- Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-221 --json`; `loom suite carrier validate --target . --item CORE-221 --json`; `loom suite evidence validate --target . --item CORE-221 --json` passed locally.
 - Recovery Boundary: Core admission and Run Record refs-only behavior only; no App/Harbor/Lode code changes, no live external site run, no real browser process attach, no true write, no cookies/tokens/profile storage/raw DOM/HAR/screenshot body/network response/CDP/VNC/provider private object persistence, no merge, no issue closeout.
 - Current Lane: core real Harbor and Lode admission spine
 
