@@ -60,6 +60,10 @@
     "harbor:source-trace/boss/job-search"
   ],
   "result_ref": "result:core/boss/job-search/fixture",
+  "result_kind": "boss_job_search",
+  "output_schema_id": "lode://schema/site-capability/boss/job-search/output@0.1.0",
+  "projection_ref": "projection:core/boss/job-search/fixture",
+  "source_refs": ["harbor:source-trace/boss/job-search"],
   "evidence_refs": [
     "harbor:evidence/boss/job-search/snapshot",
     "harbor:evidence/boss/job-search/source-trace"

@@ -12,6 +12,7 @@ import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-que
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 import { capabilityRunQuerySchemaVersion, getCapabilityRunSummary } from "./capability-query.js";
 import { assertRealSiteReadOnlyTaskExecution } from "./real-site-readonly-self-check.js";
+import { assertRealSiteReadOnlyResultProjection } from "./real-site-readonly-result-self-check.js";
 import { assertRealRunQueryEvidence } from "./real-run-query-self-check.js";
 
 let tick = 0;
@@ -1157,5 +1158,7 @@ await assertTaskSubmissionAdmission();
 console.log("Validated read-only task submission admission.");
 await assertRealSiteReadOnlyTaskExecution();
 console.log("Validated real-site read-only task execution.");
+await assertRealSiteReadOnlyResultProjection();
+console.log("Validated real-site read-only result projection.");
 await assertRealRunQueryEvidence();
 console.log("Validated real run query evidence and failure reasons.");

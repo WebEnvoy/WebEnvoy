@@ -208,6 +208,10 @@ function runRecordFromFixture(value: unknown, label: string): RunRecord {
   if (record.package_ref !== undefined) asString(record.package_ref, `${label}.package_ref`);
   if (record.runtime_binding_refs !== undefined) asStringArray(record.runtime_binding_refs, `${label}.runtime_binding_refs`);
   if (record.result_ref !== undefined) asString(record.result_ref, `${label}.result_ref`);
+  if (record.result_kind !== undefined) asString(record.result_kind, `${label}.result_kind`);
+  if (record.output_schema_id !== undefined) asString(record.output_schema_id, `${label}.output_schema_id`);
+  if (record.projection_ref !== undefined) asString(record.projection_ref, `${label}.projection_ref`);
+  if (record.source_refs !== undefined) asStringArray(record.source_refs, `${label}.source_refs`);
   if (record.evidence_refs !== undefined) asStringArray(record.evidence_refs, `${label}.evidence_refs`);
   if (record.retention_state !== undefined) asRetentionState(record.retention_state, `${label}.retention_state`);
 
@@ -255,6 +259,10 @@ function assertGoldenReadOnlyBindings(golden: RunRecord, task: JsonObject, resul
   assert.equal(golden.admission.resource_match_ref, "resource-match:fixture/ready");
   assert.deepEqual(golden.runtime_binding_refs, ["harbor:runtime-session/fixture-ready"]);
   assert.equal(golden.result_ref, asString(result.result_ref, "result.result_ref"));
+  assert.equal(golden.result_kind, asString(result.result_kind, "result.result_kind"));
+  assert.equal(golden.output_schema_id, asString(result.output_schema_id, "result.output_schema_id"));
+  assert.equal(golden.projection_ref, asString(result.projection_ref, "result.projection_ref"));
+  assert.deepEqual(golden.source_refs, asStringArray(result.source_refs, "result.source_refs"));
   assert.deepEqual(golden.evidence_refs, [evidenceRef]);
   assert.equal(golden.retention_state, asRetentionState(result.retention_state, "result.retention_state"));
 }
@@ -391,6 +399,7 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     const completed = await completeRunWithResult(store, successRunId, {
       result_ref: asString(result.result_ref, "result.result_ref"),
       result_kind: asString(result.result_kind, "result.result_kind"),
+      output_schema_id: asString(result.output_schema_id, "result.output_schema_id"),
       data: asObject(result.data, "result.data"),
       projection_ref: asString(result.projection_ref, "result.projection_ref"),
       raw_payload_refs: asStringArray(result.raw_payload_refs, "result.raw_payload_refs"),

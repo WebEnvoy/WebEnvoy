@@ -215,7 +215,11 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.capability_source_ref === undefined ? {} : { capability_source_ref: record.capability_source_ref }),
     ...(record.capability_lock_ref === undefined ? {} : { capability_lock_ref: record.capability_lock_ref }),
     ...(record.result_ref === undefined ? {} : { result_ref: record.result_ref }),
+    ...(record.result_kind === undefined ? {} : { result_kind: record.result_kind }),
+    ...(record.output_schema_id === undefined ? {} : { output_schema_id: record.output_schema_id }),
+    ...(record.projection_ref === undefined ? {} : { projection_ref: record.projection_ref }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
+    ...(record.source_refs === undefined ? {} : { source_refs: [...record.source_refs] }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),
     ...(record.preview_result === undefined ? {} : { preview_result: record.preview_result }),
     ...(record.failure === undefined ? {} : { failure: normalizeFailureRecord(record.failure) }),
@@ -226,10 +230,10 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
 
 function failureReasonClass(failure: FailureRecord | undefined): FailureReasonClass {
   if (!failure) return "none";
-  if (failure.code === "identity_auth_required" || failure.code === "identity_environment_unavailable") return "login_required";
-  if (["page_changed", "site_changed", "source_shape_changed", "source_schema_changed"].includes(failure.code)) return "page_changed";
-  if (["field_not_visible", "field_unavailable", "writable_target_missing", "selector_unstable", "mapping_incomplete"].includes(failure.code)) return "field_unavailable";
-  if (["risk_prompt", "risk_challenge", "captcha_required", "anti_automation_challenge"].includes(failure.code)) return "risk_prompt";
+  if (["identity_auth_required", "identity_environment_unavailable", "not_logged_in", "login_expired", "identity_insufficient"].includes(failure.code)) return "login_required";
+  if (["page_changed", "page_not_ready", "site_changed", "source_shape_changed", "source_schema_changed"].includes(failure.code)) return "page_changed";
+  if (["field_missing", "field_not_visible", "field_unavailable", "writable_target_missing", "selector_unstable", "mapping_incomplete"].includes(failure.code)) return "field_unavailable";
+  if (["risk_prompt", "risk_challenge", "captcha_required", "safety_challenge", "anti_automation_challenge"].includes(failure.code)) return "risk_prompt";
   if (failure.category === "evidence_reference" || failure.code.startsWith("evidence_") || failure.code === "snapshot_missing") return "evidence_unavailable";
   if (failure.category === "capability_contract" || failure.category === "result_projection") return "capability_failure";
   if (failure.category === "request_invalid") return "request_invalid";

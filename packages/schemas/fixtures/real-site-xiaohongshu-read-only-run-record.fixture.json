@@ -60,6 +60,10 @@
     "harbor:source-trace/xiaohongshu/search-notes"
   ],
   "result_ref": "result:core/xiaohongshu/search-notes/fixture",
+  "result_kind": "xhs_note_search",
+  "output_schema_id": "lode://schema/site-capability/xiaohongshu/search-notes/output@0.1.0",
+  "projection_ref": "projection:core/xiaohongshu/search-notes/fixture",
+  "source_refs": ["harbor:source-trace/xiaohongshu/search-notes"],
   "evidence_refs": [
     "harbor:evidence/xiaohongshu/search-notes/snapshot",
     "harbor:evidence/xiaohongshu/search-notes/source-trace"
