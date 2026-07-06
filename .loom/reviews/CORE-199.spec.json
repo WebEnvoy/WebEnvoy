@@ -5,8 +5,8 @@
   "kind": "spec_review",
   "summary": "Reviewed CORE-199 current pointer retire carrier after closeout PR #215 merged.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
-  "authored_at": "2026-07-06T11:08:00Z",
-  "reviewed_head": "484d41deb9a0407f8fcaaf41ac46f01a95d92f26",
+  "authored_at": "2026-07-06T11:11:00Z",
+  "reviewed_head": "bd62e304ea66418fe4e6e845d6ac1dda66351e0c",
   "reviewed_validation_summary": "CORE-199 closeout PR #215 merged at ccbca29dc3a64dc8371f7e2cf0a173e2882f1359; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.",
   "reviewed_validation_summary_hash": "95a315b3dd93ff154a543f492342645dea719b5d0c69000e74ce23570c537df7",
   "validation_summary_source": "retire.current_pointer_validation",
@@ -19,7 +19,8 @@
     "closeout_pr": "#215",
     "closeout_merge_commit": "ccbca29dc3a64dc8371f7e2cf0a173e2882f1359",
     "retired_status_surface": ".loom/status/current.md",
-    "retired_bootstrap_locator": ".loom/bootstrap/init-result.json"
+    "retired_bootstrap_locator": ".loom/bootstrap/init-result.json",
+    "retire_validation_summary_head": "bd62e304ea66418fe4e6e845d6ac1dda66351e0c"
   },
   "semantic_review_disposition": {
     "status": "passed",
