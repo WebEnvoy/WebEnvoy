@@ -1,0 +1,82 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_site_write_preview_page_changed_001",
+  "status": "failed",
+  "created_at": "2026-07-06T11:02:00.000Z",
+  "updated_at": "2026-07-06T11:02:03.000Z",
+  "terminal_at": "2026-07-06T11:02:03.000Z",
+  "task_intent_ref": "intent_real_site_boss_greeting_preview_page_changed",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/boss-greeting-precheck",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/boss/greeting-precheck@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/boss/greeting-precheck@0.1.0",
+  "package_ref": "lode://site-capability/boss/greeting-precheck@0.1.0",
+  "admission": {
+    "decision": "accepted_with_warnings",
+    "action_risk": "write",
+    "resource_requirement_refs": ["boss.greeting-precheck.resources"],
+    "runtime_binding_refs": ["harbor:runtime-session/boss/write-precheck", "harbor:refmap/boss/greeting-box/stale"],
+    "evidence_refs": ["harbor:evidence/boss/greeting-box/page-changed"],
+    "resource_match_ref": "resource-match:boss/greeting-precheck"
+  },
+  "action_request": {
+    "schema_version": "webenvoy.action-request.v0",
+    "action_request_id": "action-request:intent_real_site_boss_greeting_preview_page_changed",
+    "task_intent_ref": "intent_real_site_boss_greeting_preview_page_changed",
+    "capability_ref": "lode:capability/boss-greeting-precheck",
+    "capability_version": "0.1.0",
+    "capability_source_ref": "lode://site-capability/boss/greeting-precheck@0.1.0",
+    "capability_lock_ref": "lode://lock/site-capability/boss/greeting-precheck@0.1.0",
+    "package_ref": "lode://site-capability/boss/greeting-precheck@0.1.0",
+    "operation_mode": "preview",
+    "risk_classification": {
+      "risk": "write",
+      "execution_intent": "preview",
+      "level": "medium",
+      "true_write_requested": false,
+      "reasons": ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+    },
+    "no_submit_guard": {
+      "status": "active",
+      "enforced_by": "core",
+      "blocked_execution_intents": ["execute_after_approval", "reconcile_status", "request_cancel"],
+      "source_refs": ["lode://site-capability/boss/greeting-precheck@0.1.0", "boss.greeting-precheck.resources"]
+    },
+    "target_refs": {
+      "scope_target_ref": "https://www.zhipin.com/web/geek/job",
+      "writable_target_ref": "harbor:writable-target/boss/greeting-box",
+      "form_state_ref": "harbor:snapshot/boss/greeting-box/stale"
+    },
+    "evidence_refs": ["harbor:evidence/boss/greeting-box/page-changed"],
+    "consumer_boundary": "Core stores action request refs, risk classification, and no-submit guard only; no raw browser material or true write payload is stored."
+  },
+  "result_ref": "result:core/boss/greeting-precheck/page-changed",
+  "preview_result": {
+    "schema_version": "webenvoy.preview-result.v0",
+    "state": "page_changed",
+    "submitted": false,
+    "action_refs": {
+      "action_request_id": "action-request:intent_real_site_boss_greeting_preview_page_changed"
+    },
+    "capability": {
+      "capability_ref": "lode:capability/boss-greeting-precheck",
+      "capability_version": "0.1.0",
+      "capability_source_ref": "lode://site-capability/boss/greeting-precheck@0.1.0",
+      "capability_lock_ref": "lode://lock/site-capability/boss/greeting-precheck@0.1.0",
+      "package_ref": "lode://site-capability/boss/greeting-precheck@0.1.0"
+    },
+    "evidence_refs": ["harbor:evidence/boss/greeting-box/page-changed"],
+    "failure_class": "page_changed",
+    "consumer_boundary": "Core preview result records page-changed failure only; it is not submitted result truth."
+  },
+  "evidence_refs": ["harbor:evidence/boss/greeting-box/page-changed"],
+  "failure": {
+    "category": "evidence_reference",
+    "code": "page_changed",
+    "phase": "evidence",
+    "recovery_hint": "refresh_preview_evidence"
+  },
+  "retention_state": "active"
+}
