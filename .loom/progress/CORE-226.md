@@ -3,9 +3,9 @@
 ## Dynamic Facts
 
 - Item ID: CORE-226
-- Current Checkpoint: merge
-- Current Stop: Implementation PR #237 is open with current-head review artifacts and hosted checks started; merge gate should consume CORE-226 review and suite evidence.
-- Next Step: Run PR merge gate, merge PR #237 after required checks pass, then perform post-merge closeout for #225/#226/#227/#228/#229.
+- Current Checkpoint: closed_out
+- Current Stop: Implementation PR #237 has merged and terminal closeout metadata is recorded for #225/#226/#227/#228/#229.
+- Next Step: Close #225/#226/#227/#228/#229 with post-merge evidence, then retire CORE-226 current pointer before starting the next Core batch.
 - Blockers: None recorded.
 - Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm typecheck`; `pnpm conformance`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-226 --json`; `loom suite carrier validate --target . --item CORE-226 --json`; `loom suite evidence validate --target . --item CORE-226 --json` passed locally.
 - Recovery Boundary: Core read-only run/result projection only; no #230-#234 write-precheck work, App/Harbor/Lode code changes, live external site run, true write, cookies/tokens/profile/raw DOM/HAR/screenshot/network/CDP/VNC/provider private object persistence, merge, issue closeout, or GitHub dependency edits.
@@ -42,3 +42,14 @@
 - 2026-07-06T17:52Z `loom suite carrier validate --target . --item CORE-226 --json`: pass.
 - 2026-07-06T17:52Z `loom suite evidence validate --target . --item CORE-226 --json`: pass.
 - 2026-07-06T18:10Z Added CORE-226 spec and implementation review artifacts bound to PR #237 head `729682f8119c37f7cf2aa60a65e062bebefaff63`.
+- 2026-07-06T18:12Z Recorded PR #237 merge commit `5929784e33e0241b226baa982d1e6379136db564` and moved CORE-226 carrier to closed_out.
+
+## Terminal Closeout Metadata
+
+- Terminal State: merged
+- Issue: 226
+- PR: 237
+- Merge Commit: 5929784e33e0241b226baa982d1e6379136db564
+- Target Branch: main
+- Closed At: 2026-07-06T18:10:18Z
+- Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/pull/237;https://github.com/WebEnvoy/WebEnvoy/issues/225;https://github.com/WebEnvoy/WebEnvoy/issues/226;https://github.com/WebEnvoy/WebEnvoy/issues/227;https://github.com/WebEnvoy/WebEnvoy/issues/228;https://github.com/WebEnvoy/WebEnvoy/issues/229
