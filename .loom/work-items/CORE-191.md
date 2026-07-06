@@ -6,7 +6,7 @@
 - Goal: Accept Harbor real identity environment and runtime session public refs/facts into Core admission and Run Record without storing private browser material.
 - Scope: Covers Core FR #187 and Work Items #191/#192/#193/#194/#207; excludes Harbor #160 live evidence, real accounts, passwords, cookies, tokens, profile storage, raw browser endpoints, App UI, Lode site execution, true writes, merge, issue closeout, and current pointer retire.
 - Execution Path: work/core-187-real-identity-session
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/WebEnvoy-core-187-real-identity-session
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-191.md
 - Review Entry: .loom/reviews/CORE-191.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/schemas test; pnpm conformance; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-191 --json
