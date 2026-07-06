@@ -248,6 +248,33 @@ export const runLifecycleTransitions: Readonly<Record<RunRecordStatus, readonly 
 };
 
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const forbiddenRunRecordFieldNames = new Set([
+  "raw_payload",
+  "dom",
+  "har",
+  "screenshot",
+  "screenshot_body",
+  "video",
+  "cookie",
+  "cookies",
+  "token",
+  "tokens",
+  "password",
+  "verification_code",
+  "local_path",
+  "profile_path",
+  "storage_url",
+  "cdp_endpoint",
+  "vnc_url",
+  "viewer_url",
+  "webSocketDebuggerUrl",
+  "raw_evidence_body",
+  "full_dom",
+  "network_response_body",
+  "provider_private_object",
+  "production_payload",
+  "user_business_data"
+]);
 
 function requireRef(value: string, label: string): string {
   if (value.length === 0) {
@@ -315,6 +342,10 @@ function assertTransition(current: RunRecordStatus, next: RunRecordStatus): void
 }
 
 function assertRunRecord(record: RunRecord): void {
+  const forbiddenField = findForbiddenRunRecordField(record);
+  if (forbiddenField) {
+    throw new Error(`run record must not contain private browser material: ${forbiddenField}`);
+  }
   validateRunId(record.run_id);
   requireRef(record.task_intent_ref, "task_intent_ref");
   requireRef(record.capability_ref, "capability_ref");
@@ -430,6 +461,23 @@ function assertRunRecord(record: RunRecord): void {
   if (record.status === "failed" && !record.failure) {
     throw new Error("failed run records must include failure");
   }
+}
+
+function findForbiddenRunRecordField(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findForbiddenRunRecordField(entry);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (forbiddenRunRecordFieldNames.has(key)) return key;
+    const found = findForbiddenRunRecordField(entry);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord {

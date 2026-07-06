@@ -1,0 +1,26 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-221",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review accepts the bounded Core real Harbor/Lode admission spine slice.",
+  "reviewer": "Codex master controller thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
+  "authored_at": "2026-07-06T16:33:54Z",
+  "reviewed_head": "a9172266fd108b67f6b00c02a32765409b86fcaa",
+  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-221 --json`; `loom suite carrier validate --target . --item CORE-221 --json`; `loom suite evidence validate --target . --item CORE-221 --json` passed locally.",
+  "reviewed_validation_summary_hash": "b33a2afb9b017c61178828ca8534bf171d941e8a124e8557a8e54bf931f425bb",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-221.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec is limited to Core admission and Run Record refs-only behavior for real Harbor and Lode facts; live site execution, App UI, true writes, and raw private material remain out of scope."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "The implementation contract maps required provider, identity, runtime, resource, package-lock, and privacy checks to targeted tests and conformance validation."
+  }
+}

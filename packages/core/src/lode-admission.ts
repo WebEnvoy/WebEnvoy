@@ -29,6 +29,13 @@ export type LodePackageAdmissionContract = {
   };
 };
 
+export type LodeRequiredHarborFact = {
+  fact_key: string;
+  owner: "Harbor";
+  required?: boolean;
+  freshness?: string;
+};
+
 export type LodeAdmissionInput = {
   package_ref?: string;
   lode_package_contract?: LodePackageAdmissionContract;
@@ -56,6 +63,7 @@ export type LodeAdmission =
       capability_source_ref?: string;
       capability_lock_ref?: string;
       resource_requirement_refs: readonly string[];
+      required_harbor_facts: readonly LodeRequiredHarborFact[];
     }
   | {
       ok: false;
@@ -155,7 +163,12 @@ function lifecycleFailure(lifecycle: string): FailureRecord | undefined {
   return undefined;
 }
 
-function validateLodeResourceRequirements(taskIntent: LodeAdmissionTaskIntent, packageRef: string, operationMode: string, value: unknown): FailureRecord | readonly string[] {
+function validateLodeResourceRequirements(
+  taskIntent: LodeAdmissionTaskIntent,
+  packageRef: string,
+  operationMode: string,
+  value: unknown
+): FailureRecord | { resourceRequirementRefs: readonly string[]; requiredHarborFacts: readonly LodeRequiredHarborFact[] } {
   const resource = contractObject(value);
   if (!resource) {
     return invalidLodeContract();
@@ -170,6 +183,7 @@ function validateLodeResourceRequirements(taskIntent: LodeAdmissionTaskIntent, p
   if (resourcePackageRef !== packageRef || resourceOperationMode !== operationMode) {
     return invalidLodeContract("invalid_contract", "resource_matching");
   }
+  const requiredHarborFacts: LodeRequiredHarborFact[] = [];
   for (const profileValue of profiles) {
     const profile = contractObject(profileValue);
     if (!profile || !contractString(profile.requirement_profile_id)) {
@@ -187,13 +201,21 @@ function validateLodeResourceRequirements(taskIntent: LodeAdmissionTaskIntent, p
         if (!fact || !contractString(fact.fact_key) || fact.owner !== "Harbor") {
           return invalidLodeContract("invalid_contract", "resource_matching");
         }
+        if (fact.required !== false) {
+          requiredHarborFacts.push({
+            fact_key: fact.fact_key as string,
+            owner: "Harbor",
+            ...(fact.required === undefined ? {} : { required: fact.required as boolean }),
+            ...(contractString(fact.freshness) === undefined ? {} : { freshness: fact.freshness as string })
+          });
+        }
       }
     }
   }
   if (taskIntent.resource_requirement_refs.length === 0 || !taskIntent.resource_requirement_refs.every((ref) => ref === resourceId)) {
     return admissionFailure("resource_admission", "resource_requirement_missing", "resource_matching", "repair_package_contract");
   }
-  return taskIntent.resource_requirement_refs;
+  return { resourceRequirementRefs: taskIntent.resource_requirement_refs, requiredHarborFacts };
 }
 
 export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent, input: LodeAdmissionInput): LodeAdmission {
@@ -258,9 +280,9 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   if (operationMode !== "read" && taskIntent.policy.risk === "read") {
     return { ok: false, failure: admissionFailure("action_risk", "write_precheck_risk_required", "admission", "use_validate_or_preview"), package_ref: packageRef };
   }
-  const resourceRequirementRefs = validateLodeResourceRequirements(taskIntent, packageRef, operationMode, lodePackage.resource_requirements);
-  if ("category" in resourceRequirementRefs) {
-    return { ok: false, failure: resourceRequirementRefs, package_ref: packageRef };
+  const resourceRequirements = validateLodeResourceRequirements(taskIntent, packageRef, operationMode, lodePackage.resource_requirements);
+  if ("category" in resourceRequirements) {
+    return { ok: false, failure: resourceRequirements, package_ref: packageRef };
   }
   return {
     ok: true,
@@ -268,6 +290,7 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
     capability_version: version,
     capability_source_ref: sourceRef,
     ...(lockRef === undefined ? {} : { capability_lock_ref: lockRef }),
-    resource_requirement_refs: resourceRequirementRefs
+    resource_requirement_refs: resourceRequirements.resourceRequirementRefs,
+    required_harbor_facts: resourceRequirements.requiredHarborFacts
   };
 }

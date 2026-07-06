@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
-import { type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
+import { type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithPreviewResult, completeRunWithResult } from "./result-envelope.js";
 import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
@@ -129,6 +129,31 @@ const harborIdentityEnvironmentFacts = {
     not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
   }
 } satisfies HarborIdentityEnvironmentFacts;
+
+const harborProviderStatus = {
+  schema_version: "harbor-browser-provider-status/v0",
+  providers: [
+    {
+      provider_id: "cloakbrowser",
+      install: {
+        status: "installed",
+        launchability: "launchable"
+      }
+    }
+  ]
+} satisfies HarborBrowserProviderCatalog;
+
+const harborResourceFacts = {
+  schema_version: "harbor-core-resource-facts/v0",
+  resource_facts: [
+    { fact_key: "runtime.public_https_navigation.allowed", state: "available" },
+    { fact_key: "runtime.execution_surface.available", state: "available" },
+    { fact_key: "snapshot.document_summary.available", state: "available" },
+    { fact_key: "refmap.source_refs.available", state: "available" },
+    { fact_key: "evidence.snapshot_ref.available", state: "available" }
+  ],
+  consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material."
+} satisfies HarborResourceFacts;
 
 const harborSceneRef = {
   schema_version: "harbor-page-scene-refs/v0",
@@ -267,8 +292,10 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       lode_package_contract: lodeReadPublicPageContract,
       resource_match_ref: "resource-match:fixture/ready",
       harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: harborRuntimeFacts,
-      harbor_scene_ref: harborSceneRef
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
     });
 
     assert.equal(accepted.ok, true);
@@ -299,7 +326,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       task_intent: taskIntent,
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
-      harbor_identity_environment_facts: harborIdentityEnvironmentFacts
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus
     });
     assert.equal(missingRuntime.ok, false);
     assert.equal(missingRuntime.failure.code, "runtime_ref_missing");
@@ -311,12 +339,14 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
       harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: harborRuntimeFacts,
       harbor_scene_ref: {
         status: "unavailable",
         failure_class: "capture_denied",
         retryable: false
-      }
+      },
+      harbor_resource_facts: harborResourceFacts
     });
     assert.equal(captureDenied.ok, false);
     assert.equal(captureDenied.failure.category, "evidence_reference");
@@ -332,8 +362,10 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
         ...harborIdentityEnvironmentFacts,
         login_state: { state: "expired", recovery_required: true }
       },
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: harborRuntimeFacts,
-      harbor_scene_ref: harborSceneRef
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
     });
     assert.equal(expiredIdentity.ok, false);
     assert.equal(expiredIdentity.failure.code, "identity_auth_required");
@@ -346,6 +378,7 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
       harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: {
         ...harborRuntimeFacts,
         control: {
@@ -354,7 +387,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
           takeover: { available: false, unavailable_reason: "viewer_unavailable" }
         }
       },
-      harbor_scene_ref: harborSceneRef
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
     });
     assert.equal(busySession.ok, false);
     assert.equal(busySession.failure.code, "runtime_session_busy");
@@ -366,11 +400,13 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       package_ref: lodeReadPublicPageContract.package_ref,
       lode_package_contract: lodeReadPublicPageContract,
       harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: {
         ...harborRuntimeFacts,
         cdp_endpoint: "ws://127.0.0.1/private"
       } as unknown as HarborCoreRuntimeFacts,
-      harbor_scene_ref: harborSceneRef
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
     });
     assert.equal(rawEndpointRejected.ok, false);
     assert.equal(rawEndpointRejected.failure.code, "forbidden_field:cdp_endpoint");
@@ -443,8 +479,10 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       lode_package_contract: lodePreviewContactFormContract,
       resource_match_ref: "resource-match:fixture/write-precheck-ready",
       harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
       harbor_runtime_facts: harborRuntimeFacts,
-      harbor_write_precheck_facts: harborWritePrecheckFacts
+      harbor_write_precheck_facts: harborWritePrecheckFacts,
+      harbor_resource_facts: harborResourceFacts
     });
     assert.equal(validateOnlyActionRequest.ok, true);
     if (!validateOnlyActionRequest.ok) {
@@ -689,6 +727,57 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(writeRejected.run_record?.status, "failed");
     assert.equal(writeRejected.run_record?.admission.decision, "deferred_true_write");
     assert.equal(writeRejected.run_record?.admission.action_risk, "write");
+
+    const missingResourceFact = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_resource_fact_missing",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: {
+        ...lodeReadPublicPageContract,
+        resource_requirements: {
+          ...lodeReadPublicPageContract.resource_requirements,
+          resource_requirement_profiles: [
+            {
+              ...lodeReadPublicPageContract.resource_requirements.resource_requirement_profiles[0]!,
+              required_harbor_facts: [
+                ...lodeReadPublicPageContract.resource_requirements.resource_requirement_profiles[0]!.required_harbor_facts!,
+                { fact_key: "page.real_fixture.ready", owner: "Harbor", required: true, freshness: "current_execution_window" }
+              ]
+            }
+          ]
+        }
+      },
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
+    });
+    assert.equal(missingResourceFact.ok, false);
+    assert.equal(missingResourceFact.failure.code, "resource_fact_missing:page.real_fixture.ready");
+    assert.equal(missingResourceFact.run_record?.status, "failed");
+
+    const providerUnavailable = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_provider_unavailable",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: {
+        schema_version: "harbor-browser-provider-status/v0",
+        providers: [
+          {
+            provider_id: "cloakbrowser",
+            install: { status: "missing", launchability: "not_checked" }
+          }
+        ]
+      },
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
+    });
+    assert.equal(providerUnavailable.ok, false);
+    assert.equal(providerUnavailable.failure.code, "browser_provider_unavailable");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1005,6 +1094,31 @@ try {
   await assert.rejects(() => store.updateRunRecord(cancelledId, { status: "running" }), /terminal/);
   await assert.rejects(() => store.createRunRecord({ ...baseInput("../bad"), run_id: "../bad" }), /run_id/);
   await assert.rejects(() => store.createRunRecord({ ...baseInput("run_self_check_empty_ref"), entrypoint_ref: "" }), /entrypoint_ref/);
+  await assert.rejects(
+    () =>
+      store.createRunRecord({
+        ...baseInput("run_self_check_private_material_refused"),
+        admission: {
+          ...baseInput("run_self_check_private_material_refused").admission,
+          runtime_session_binding: {
+            schema_version: "webenvoy.runtime-session-binding.v0",
+            identity_environment_ref: "identity-env_fixture",
+            execution_identity_ref: "identity-env_fixture:execution",
+            runtime_session_ref: "session_fixture_ready",
+            profile_ref: "profile_fixture_public",
+            provider_ref: "provider_fixture_local",
+            provider_mode: "local_dedicated_profile",
+            lifecycle_state: "active",
+            control_owner: "system",
+            session_use: "direct_session",
+            core_task_run: true,
+            consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence.",
+            cdp_endpoint: "ws://127.0.0.1/private"
+          } as never
+        }
+      }),
+    /private browser material: cdp_endpoint/
+  );
   const invalidRefId = "run_self_check_invalid_ref_patch";
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
