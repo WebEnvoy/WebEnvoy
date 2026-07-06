@@ -3,36 +3,34 @@
   "item_id": "CORE-191",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Closeout review accepts CORE-191 post-merge carrier facts for PR #208 and closed issues #187/#191/#192/#193/#194/#207.",
+  "summary": "Reviewed CORE-191 current pointer retire carrier after closeout PR #209 merged.",
   "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
-  "authored_at": "2026-07-06T09:34:00Z",
-  "reviewed_head": "364941e08f058a1b19740173a939ccf1ba281e72",
-  "reviewed_validation_summary": "PR #208 merged at 950594cf550ebac9044d4c24b3b053a3b972977c; #187/#191/#192/#193/#194/#207 closed with post-merge evidence; hosted gate run 28781827244 and loom-check run 28781827736 passed; loom fact-chain/verify/suite validate/carrier/evidence passed locally.",
-  "reviewed_validation_summary_hash": "6805f88c3cf8746f46ab86b56eb37c1d70671455319f4588c62e55cab7d7d337",
-  "validation_summary_source": "recovery.latest_validation_summary",
-  "validation_summary_locator": ".loom/progress/CORE-191.md",
+  "authored_at": "2026-07-06T09:37:00Z",
+  "reviewed_head": "a9bd4a17a9031106a47d0d13a7bc659adea9d3df",
+  "reviewed_validation_summary": "CORE-191 closeout PR #209 merged at 0c005f77d04234d73fe2f75dbfe226300bbed167; current pointer reset to no_active_item/idle; loom fact-chain and diff check passed locally.",
+  "reviewed_validation_summary_hash": "43ea66c1991f0e7a24b9913c9433a1a02898f29d0bccdb512e44e1caf094a2f7",
+  "validation_summary_source": "retire.current_pointer_validation",
+  "validation_summary_locator": ".loom/status/current.md",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
   "follow_ups": [],
   "consumed_inputs": {
-    "work_item": ".loom/work-items/CORE-191.md",
-    "recovery_entry": ".loom/progress/CORE-191.md",
-    "status_surface": ".loom/status/current.md",
-    "implementation_pr": "#208",
-    "merge_commit": "950594cf550ebac9044d4c24b3b053a3b972977c",
-    "issue_closeout": "Core #187/#191/#192/#193/#194/#207 closed with post-merge evidence"
+    "closeout_pr": "#209",
+    "closeout_merge_commit": "0c005f77d04234d73fe2f75dbfe226300bbed167",
+    "retired_status_surface": ".loom/status/current.md",
+    "retired_bootstrap_locator": ".loom/bootstrap/init-result.json"
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Reviewed the CORE-191 closeout carrier. It records PR #208 merge evidence, closed issue evidence, and does not expand Core product behavior."
+    "reason": "Reviewed the current pointer retire carrier. It only resets status/bootstrap to no_active_item after CORE-191 closeout PR #209 merged."
   },
   "implementation_review_disposition": {
     "status": "passed",
-    "reason": "Closeout carrier is limited to Loom progress/status/review facts after implementation PR #208 merged."
+    "reason": "Retire carrier is limited to no_active_item/idle pointer reset and review record refresh."
   },
   "carrier_only_closeout_review": {
     "status": "passed",
-    "reason": "This closeout PR only updates CORE-191 Loom carrier/status facts after implementation PR #208 merged; it does not change Core runtime behavior."
+    "reason": "This retire PR only updates CORE-191 review carrier after the idle pointer commit; it does not change Core runtime behavior."
   }
 }
