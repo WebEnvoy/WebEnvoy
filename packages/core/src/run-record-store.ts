@@ -167,6 +167,10 @@ export type RunRecord = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  result_kind?: string;
+  output_schema_id?: string;
+  projection_ref?: string;
+  source_refs?: string[];
   preview_result?: PreviewResult;
   evidence_refs?: string[];
   failure?: FailureRecord;
@@ -189,6 +193,10 @@ export type CreateRunRecordInput = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  result_kind?: string;
+  output_schema_id?: string;
+  projection_ref?: string;
+  source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -202,6 +210,10 @@ export type RunRecordPatch = {
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
   result_ref?: string;
+  result_kind?: string;
+  output_schema_id?: string;
+  projection_ref?: string;
+  source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
@@ -371,6 +383,16 @@ function assertRunRecord(record: RunRecord): void {
   if (record.result_ref !== undefined) {
     requireRef(record.result_ref, "result_ref");
   }
+  if (record.result_kind !== undefined) {
+    requireRef(record.result_kind, "result_kind");
+  }
+  if (record.output_schema_id !== undefined) {
+    requireRef(record.output_schema_id, "output_schema_id");
+  }
+  if (record.projection_ref !== undefined) {
+    requireRef(record.projection_ref, "projection_ref");
+  }
+  copyRefs(record.source_refs, "source_refs");
   if (record.preview_result !== undefined) {
     validatePreviewResult(record.preview_result);
   }
@@ -494,6 +516,18 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   if (patch.result_ref !== undefined) {
     next.result_ref = requireRef(patch.result_ref, "result_ref");
   }
+  if (patch.result_kind !== undefined) {
+    next.result_kind = requireRef(patch.result_kind, "result_kind");
+  }
+  if (patch.output_schema_id !== undefined) {
+    next.output_schema_id = requireRef(patch.output_schema_id, "output_schema_id");
+  }
+  if (patch.projection_ref !== undefined) {
+    next.projection_ref = requireRef(patch.projection_ref, "projection_ref");
+  }
+  if (patch.source_refs !== undefined) {
+    next.source_refs = copyRequiredRefs(patch.source_refs, "source_refs");
+  }
   if (patch.preview_result !== undefined) {
     next.preview_result = patch.preview_result;
   }
@@ -555,6 +589,18 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.result_ref !== undefined) {
     record.result_ref = requireRef(input.result_ref, "result_ref");
+  }
+  if (input.result_kind !== undefined) {
+    record.result_kind = requireRef(input.result_kind, "result_kind");
+  }
+  if (input.output_schema_id !== undefined) {
+    record.output_schema_id = requireRef(input.output_schema_id, "output_schema_id");
+  }
+  if (input.projection_ref !== undefined) {
+    record.projection_ref = requireRef(input.projection_ref, "projection_ref");
+  }
+  if (input.source_refs !== undefined) {
+    record.source_refs = copyRequiredRefs(input.source_refs, "source_refs");
   }
   if (input.preview_result !== undefined) {
     record.preview_result = input.preview_result;

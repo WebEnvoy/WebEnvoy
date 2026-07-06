@@ -244,12 +244,12 @@
     }
   ],
   "fact_chain": {
-    "mode": "idle",
+    "mode": "work-item + recovery-entry + derived status-surface",
     "read_entry": "loom fact-chain --target . --json",
     "entry_points": {
-      "current_item_id": "no_active_item",
-      "work_item": "not_applicable",
-      "recovery_entry": "not_applicable",
+      "current_item_id": "CORE-226",
+      "work_item": ".loom/work-items/CORE-226.md",
+      "recovery_entry": ".loom/progress/CORE-226.md",
       "status_surface": ".loom/status/current.md"
     }
   },

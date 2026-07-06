@@ -25,6 +25,8 @@
       "capability_lock_ref": "Lode owns referenced package lock",
       "runtime_binding_refs": "Harbor owns referenced runtime facts",
       "result_ref": "Core",
+      "projection_ref": "Core",
+      "source_refs": "Harbor or Lode owns referenced source body; Core records refs only",
       "preview_result": "Core projected validate-only preview result; submitted result truth is out of boundary",
       "evidence_refs": "Harbor or evidence producer owns ref body; Core records refs only",
       "failure": "Core"
@@ -226,6 +228,25 @@
     "result_ref": {
       "type": "string",
       "minLength": 1
+    },
+    "result_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output_schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projection_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "preview_result": {
       "type": "object",

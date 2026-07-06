@@ -35,6 +35,15 @@ export {
   type RunRecordStatus
 } from "./run-record-store.js";
 export {
+  completeRunWithReadOnlyFailure,
+  completeRunWithReadOnlyProjection,
+  type CompleteReadOnlyFailureInput,
+  type CompleteReadOnlyProjectionInput,
+  type LodeProjectionRef,
+  type LodeReadOnlyFailureClass,
+  type LodeReadOnlyProjection
+} from "./read-only-result-projection.js";
+export {
   completeRunWithFailure,
   completeRunWithPreviewResult,
   completeRunWithResult,

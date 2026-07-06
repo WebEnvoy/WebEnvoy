@@ -154,6 +154,10 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
   const updated = await store.updateRunRecord(runId, {
     status: "succeeded",
     result_ref: requireRef(input.result_ref, "result_ref"),
+    result_kind: requireRef(input.result_kind, "result_kind"),
+    ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
+    ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
+    ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
     evidence_refs: evidenceRefs,
     retention_state: retentionState,
     ...(input.post_check === undefined ? {} : { post_check: input.post_check })

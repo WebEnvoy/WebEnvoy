@@ -31,6 +31,10 @@
   },
   "runtime_binding_refs": ["harbor:runtime-session/fixture-ready"],
   "result_ref": "result:fixture/read-public-page",
+  "result_kind": "content_detail",
+  "output_schema_id": "example.read-public-page.output",
+  "projection_ref": "projection:fixture/read-public-page",
+  "source_refs": ["source-trace:fixture/read-public-page"],
   "evidence_refs": ["evidence:fixture/read-public-page"],
   "retention_state": "active"
 }

@@ -63,6 +63,8 @@ export async function assertRealSiteReadOnlyFixtureQueries(realSiteFixtures: rea
   if (!xhsResult.ok) assert.fail(xhsResult.failure.code);
   assert.equal(xhsResult.result.result.result_envelope?.ok, true);
   assert.equal(xhsResult.result.result.result_envelope?.package_ref, xhs.package_ref);
+  assert.equal(xhsResult.result.result.result_envelope?.result_kind, "xhs_note_search");
+  assert.deepEqual(xhsResult.result.result.result_envelope?.source_refs, ["harbor:source-trace/xiaohongshu/search-notes"]);
   assert.equal(xhsResult.result.evidence_refs.every((entry) => entry.raw_access === "not_available_from_core"), true);
   assert.equal(xhsResult.result.evidence_refs.every((entry) => typeof entry.recorded_at === "string"), true);
 
