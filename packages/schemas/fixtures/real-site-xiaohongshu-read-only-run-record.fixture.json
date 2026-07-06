@@ -1,0 +1,80 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_site_xiaohongshu_search_notes_001",
+  "status": "succeeded",
+  "created_at": "2026-07-06T10:00:00.000Z",
+  "updated_at": "2026-07-06T10:00:03.000Z",
+  "terminal_at": "2026-07-06T10:00:03.000Z",
+  "task_intent_ref": "intent_real_site_xiaohongshu_search_notes_success",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/search-notes",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+  "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["xiaohongshu.search-notes.resources"],
+    "runtime_binding_refs": [
+      "harbor:runtime-session/xiaohongshu/readonly",
+      "harbor:profile/xiaohongshu/readonly",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/xiaohongshu/readonly",
+      "harbor:identity-env/xiaohongshu/readonly",
+      "harbor:execution-identity/xiaohongshu/readonly",
+      "harbor:snapshot/xiaohongshu/search-notes",
+      "harbor:refmap/xiaohongshu/search-notes",
+      "harbor:source-trace/xiaohongshu/search-notes"
+    ],
+    "evidence_refs": [
+      "harbor:evidence/xiaohongshu/search-notes/snapshot",
+      "harbor:evidence/xiaohongshu/search-notes/source-trace"
+    ],
+    "resource_match_ref": "resource-match:xiaohongshu/search-notes/readonly",
+    "runtime_session_binding": {
+      "schema_version": "webenvoy.runtime-session-binding.v0",
+      "identity_environment_ref": "harbor:identity-env/xiaohongshu/readonly",
+      "execution_identity_ref": "harbor:execution-identity/xiaohongshu/readonly",
+      "runtime_session_ref": "harbor:runtime-session/xiaohongshu/readonly",
+      "profile_ref": "harbor:profile/xiaohongshu/readonly",
+      "provider_ref": "harbor:provider/cloakbrowser",
+      "provider_mode": "local_dedicated_profile",
+      "lifecycle_state": "active",
+      "control_owner": "core_task",
+      "session_use": "core_task_run",
+      "core_task_run": true,
+      "consumer_boundary": "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+    }
+  },
+  "runtime_binding_refs": [
+    "harbor:runtime-session/xiaohongshu/readonly",
+    "harbor:profile/xiaohongshu/readonly",
+    "harbor:provider/cloakbrowser",
+    "harbor:viewer/xiaohongshu/readonly",
+    "harbor:identity-env/xiaohongshu/readonly",
+    "harbor:execution-identity/xiaohongshu/readonly",
+    "harbor:snapshot/xiaohongshu/search-notes",
+    "harbor:refmap/xiaohongshu/search-notes",
+    "harbor:source-trace/xiaohongshu/search-notes"
+  ],
+  "result_ref": "result:core/xiaohongshu/search-notes/fixture",
+  "evidence_refs": [
+    "harbor:evidence/xiaohongshu/search-notes/snapshot",
+    "harbor:evidence/xiaohongshu/search-notes/source-trace"
+  ],
+  "post_check": {
+    "schema_version": "webenvoy.post-check-result.v0",
+    "status": "passed",
+    "summary": "Projected public Xiaohongshu note cards satisfy the Lode search-notes contract.",
+    "checked_at": "2026-07-06T10:00:03.000Z",
+    "evidence_refs": [
+      "harbor:evidence/xiaohongshu/search-notes/snapshot",
+      "harbor:evidence/xiaohongshu/search-notes/source-trace"
+    ],
+    "source_refs": ["harbor:source-trace/xiaohongshu/search-notes"],
+    "consumer_boundary": "Core stores public projection status and refs only."
+  },
+  "retention_state": "active"
+}

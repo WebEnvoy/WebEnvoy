@@ -11,6 +11,7 @@ import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary,
 import { getRunEvidenceRefs, getRunResult, projectRunResult } from "./result-query.js";
 import { acceptReadOnlyTaskSubmission } from "./task-submission.js";
 import { capabilityRunQuerySchemaVersion, getCapabilityRunSummary } from "./capability-query.js";
+import { assertRealSiteReadOnlyTaskExecution } from "./real-site-readonly-self-check.js";
 
 let tick = 0;
 
@@ -1039,3 +1040,5 @@ try {
 
 await assertTaskSubmissionAdmission();
 console.log("Validated read-only task submission admission.");
+await assertRealSiteReadOnlyTaskExecution();
+console.log("Validated real-site read-only task execution.");
