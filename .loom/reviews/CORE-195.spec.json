@@ -1,0 +1,32 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-195",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Reviewed CORE-195 spec and plan against Core FR #188 and Work Items #195-#198.",
+  "reviewer": "Codex thread 019f2731-5b28-72d1-897e-8d1199e94fdc",
+  "authored_at": "2026-07-06T10:18:00Z",
+  "reviewed_head": "9d3dd46196f2d8ef188a283472f2d750c31892d5",
+  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm conformance`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-195 --json`; `loom suite carrier validate --target . --item CORE-195 --json`; `loom suite evidence validate --target . --item CORE-195 --json` passed locally; PR #211 metadata readback/preflight passed; hosted basic checks run 28783910472 passed except merge gate pending current-head review.",
+  "reviewed_validation_summary_hash": "cc080df73850ba2e12a858ea43a621e6ad139b06c0a0cd0e699fce15992e948d",
+  "validation_summary_source": "progress.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-195.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "spec": ".loom/specs/CORE-195/spec.md",
+    "plan": ".loom/specs/CORE-195/plan.md",
+    "implementation_contract": ".loom/specs/CORE-195/implementation-contract.md",
+    "evidence_map": ".loom/specs/CORE-195/evidence-map.md"
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Spec scope matches the FR batch: real-site read-only Core run records and result/query fixtures only, with explicit exclusion of live account operation and private browser/page material."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "The planned implementation is bounded to Core runtime/schema/conformance artifacts and does not expand into #189/#190, App UI, Harbor/Lode code, or write-side behavior."
+  }
+}

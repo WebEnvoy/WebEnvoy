@@ -1,0 +1,80 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_site_boss_job_search_001",
+  "status": "succeeded",
+  "created_at": "2026-07-06T10:00:04.000Z",
+  "updated_at": "2026-07-06T10:00:07.000Z",
+  "terminal_at": "2026-07-06T10:00:07.000Z",
+  "task_intent_ref": "intent_real_site_boss_job_search_success",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/job-search",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/boss/job-search@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/boss/job-search@0.1.0",
+  "package_ref": "lode://site-capability/boss/job-search@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["boss.job-search.resources"],
+    "runtime_binding_refs": [
+      "harbor:runtime-session/boss/readonly",
+      "harbor:profile/boss/readonly",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/boss/readonly",
+      "harbor:identity-env/boss/readonly",
+      "harbor:execution-identity/boss/readonly",
+      "harbor:snapshot/boss/job-search",
+      "harbor:refmap/boss/job-search",
+      "harbor:source-trace/boss/job-search"
+    ],
+    "evidence_refs": [
+      "harbor:evidence/boss/job-search/snapshot",
+      "harbor:evidence/boss/job-search/source-trace"
+    ],
+    "resource_match_ref": "resource-match:boss/job-search/readonly",
+    "runtime_session_binding": {
+      "schema_version": "webenvoy.runtime-session-binding.v0",
+      "identity_environment_ref": "harbor:identity-env/boss/readonly",
+      "execution_identity_ref": "harbor:execution-identity/boss/readonly",
+      "runtime_session_ref": "harbor:runtime-session/boss/readonly",
+      "profile_ref": "harbor:profile/boss/readonly",
+      "provider_ref": "harbor:provider/cloakbrowser",
+      "provider_mode": "local_dedicated_profile",
+      "lifecycle_state": "active",
+      "control_owner": "core_task",
+      "session_use": "core_task_run",
+      "core_task_run": true,
+      "consumer_boundary": "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+    }
+  },
+  "runtime_binding_refs": [
+    "harbor:runtime-session/boss/readonly",
+    "harbor:profile/boss/readonly",
+    "harbor:provider/cloakbrowser",
+    "harbor:viewer/boss/readonly",
+    "harbor:identity-env/boss/readonly",
+    "harbor:execution-identity/boss/readonly",
+    "harbor:snapshot/boss/job-search",
+    "harbor:refmap/boss/job-search",
+    "harbor:source-trace/boss/job-search"
+  ],
+  "result_ref": "result:core/boss/job-search/fixture",
+  "evidence_refs": [
+    "harbor:evidence/boss/job-search/snapshot",
+    "harbor:evidence/boss/job-search/source-trace"
+  ],
+  "post_check": {
+    "schema_version": "webenvoy.post-check-result.v0",
+    "status": "passed",
+    "summary": "Projected public BOSS job cards satisfy the Lode job-search contract.",
+    "checked_at": "2026-07-06T10:00:07.000Z",
+    "evidence_refs": [
+      "harbor:evidence/boss/job-search/snapshot",
+      "harbor:evidence/boss/job-search/source-trace"
+    ],
+    "source_refs": ["harbor:source-trace/boss/job-search"],
+    "consumer_boundary": "Core stores public projection status and refs only."
+  },
+  "retention_state": "active"
+}

@@ -18,6 +18,7 @@ import {
   type RetentionState,
   type RunRecord
 } from "@webenvoy/core-runtime";
+import { assertRealSiteReadOnlyFixtureQueries } from "./real-site-readonly-fixtures.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -328,6 +329,11 @@ async function assertRunRecordStoreConformance(): Promise<number> {
   const admissionFailure = await readFixture("admission-failure-run-record.fixture.json");
   const goldenFixture = await readFixture("golden-read-only-run-record.fixture.json");
   const guardrailFixture = await readFixture("write-action-guardrail-run-record.fixture.json");
+  const realSiteFixtures = [
+    await readFixture("real-site-xiaohongshu-read-only-run-record.fixture.json"),
+    await readFixture("real-site-boss-read-only-run-record.fixture.json"),
+    await readFixture("real-site-user-takeover-run-record.fixture.json")
+  ];
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-conformance-"));
 
   try {
@@ -467,7 +473,8 @@ async function assertRunRecordStoreConformance(): Promise<number> {
     );
     await assertGoldenFixtureQueries(goldenFixture, goldenRun, directory);
     await assertWriteGuardrailFixtureQueries(guardrailFixture, guardrailRun, directory);
-    return 5;
+    await assertRealSiteReadOnlyFixtureQueries(realSiteFixtures, directory);
+    return 8;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

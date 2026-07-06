@@ -1,0 +1,73 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_real_site_boss_user_takeover_001",
+  "status": "manual_recovery_required",
+  "created_at": "2026-07-06T10:00:08.000Z",
+  "updated_at": "2026-07-06T10:00:11.000Z",
+  "terminal_at": "2026-07-06T10:00:11.000Z",
+  "task_intent_ref": "intent_real_site_boss_read_job_detail_manual_recovery_required",
+  "entrypoint_ref": "entrypoint:api",
+  "capability_ref": "lode:capability/read-job-detail",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/boss/read-job-detail@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/boss/read-job-detail@0.1.0",
+  "package_ref": "lode://site-capability/boss/read-job-detail@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "resource_requirement_refs": ["boss.read-job-detail.resources"],
+    "runtime_binding_refs": [
+      "harbor:runtime-session/boss/readonly",
+      "harbor:profile/boss/readonly",
+      "harbor:provider/cloakbrowser",
+      "harbor:viewer/boss/readonly",
+      "harbor:identity-env/boss/readonly",
+      "harbor:execution-identity/boss/readonly",
+      "harbor:snapshot/boss/read-job-detail",
+      "harbor:refmap/boss/read-job-detail",
+      "harbor:source-trace/boss/read-job-detail"
+    ],
+    "evidence_refs": [
+      "harbor:evidence/boss/read-job-detail/snapshot",
+      "harbor:evidence/boss/read-job-detail/source-trace"
+    ],
+    "resource_match_ref": "resource-match:boss/read-job-detail/readonly",
+    "runtime_session_binding": {
+      "schema_version": "webenvoy.runtime-session-binding.v0",
+      "identity_environment_ref": "harbor:identity-env/boss/readonly",
+      "execution_identity_ref": "harbor:execution-identity/boss/readonly",
+      "runtime_session_ref": "harbor:runtime-session/boss/readonly",
+      "profile_ref": "harbor:profile/boss/readonly",
+      "provider_ref": "harbor:provider/cloakbrowser",
+      "provider_mode": "local_dedicated_profile",
+      "lifecycle_state": "active",
+      "control_owner": "user",
+      "session_use": "manual_browsing",
+      "core_task_run": true,
+      "consumer_boundary": "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+    }
+  },
+  "runtime_binding_refs": [
+    "harbor:runtime-session/boss/readonly",
+    "harbor:profile/boss/readonly",
+    "harbor:provider/cloakbrowser",
+    "harbor:viewer/boss/readonly",
+    "harbor:identity-env/boss/readonly",
+    "harbor:execution-identity/boss/readonly",
+    "harbor:snapshot/boss/read-job-detail",
+    "harbor:refmap/boss/read-job-detail",
+    "harbor:source-trace/boss/read-job-detail"
+  ],
+  "evidence_refs": [
+    "harbor:evidence/boss/read-job-detail/snapshot",
+    "harbor:evidence/boss/read-job-detail/source-trace"
+  ],
+  "failure": {
+    "category": "runtime_execution",
+    "code": "user_takeover",
+    "phase": "execution",
+    "recovery_hint": "show_user_takeover_state"
+  },
+  "retention_state": "active"
+}
