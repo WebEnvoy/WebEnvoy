@@ -4,10 +4,10 @@
 
 - Item ID: CORE-231
 - Current Checkpoint: closed_out
-- Current Stop: Implementation PR #240 has merged and terminal closeout metadata is recorded for #230/#231/#232/#233/#234.
-- Next Step: Close #230/#231/#232/#233/#234 with post-merge evidence, then retire CORE-231 current pointer before starting the App write-precheck display batch.
+- Current Stop: CORE-231 write-precheck batch is merged, #230/#231/#232/#233/#234 are closed, and this carrier-only PR returns the repo to no_active_item.
+- Next Step: Merge carrier-only current pointer retire PR after hosted gate, then continue App #14 execution batches.
 - Blockers: None recorded.
-- Latest Validation Summary: `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm conformance`; `pnpm --filter @webenvoy/api-server test`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-231 --json`; `loom suite carrier validate --target . --item CORE-231 --json`; `loom suite evidence validate --target . --item CORE-231 --json`; `loom pr gate 240 --target . --work-item CORE-231 --head-sha 1899836f3902bcddc2b34f5e6c1daa619062a3d2 --json`; hosted run 28840726737 passed py-compile, demo-bootstrap, repo-local-cli, loom-check, and loom-pr-merge-gate; PR #240 merged to main as c7d803a76abd4c51e4ca0b1fc9f81fa812caf616 at 2026-07-07T04:07:55Z.
+- Latest Validation Summary: loom fact-chain --target . --json; loom verify --target . --json; git diff --check passed locally before CORE-231 current pointer retire PR.
 - Recovery Boundary: Core write-precheck result generation and queryable Run Record facts only; no App UI, Harbor/Lode code, live external site action, real account/profile/Cookie use, true write, submit/publish/send, hosted browser, marketplace, bulk collection, full account cloud hosting, risk-bypass claim, merge without review/gate, or issue closeout without post-merge evidence.
 - Current Lane: core real-site write-precheck result generation
 
@@ -79,6 +79,7 @@
 - 2026-07-07T04:04Z `loom pr gate 240 --target . --work-item CORE-231 --head-sha 1899836f3902bcddc2b34f5e6c1daa619062a3d2 --json`: pass after PR metadata, review artifacts, fact-chain, and merge checkpoint aligned with the final PR head.
 - 2026-07-07T04:06Z hosted strong governance run 28840726737: `py-compile`, `demo-bootstrap`, `repo-local-cli`, `loom-check`, and `loom-pr-merge-gate` passed for PR #240 head `1899836f3902bcddc2b34f5e6c1daa619062a3d2`.
 - 2026-07-07T04:07:55Z GitHub merged PR #240 to `main` as merge commit `c7d803a76abd4c51e4ca0b1fc9f81fa812caf616`.
+- 2026-07-07T04:20Z Closed #230/#231/#232/#233/#234 with post-merge evidence and prepared carrier-only current pointer retire to `no_active_item`.
 
 ## Terminal Closeout Metadata
 
