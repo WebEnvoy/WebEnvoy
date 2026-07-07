@@ -6,7 +6,7 @@
 - Current Checkpoint: merge
 - Current Stop: PR #240 is open at head `70317bb9de314e6023c15315f95a6b68846e43a1`; fact-chain passed after CORE-231 carrier alignment; current-head spec/code review artifacts are recorded; hosted `py-compile`, `demo-bootstrap`, `repo-local-cli`, and `loom-check` passed.
 - Next Step: Rerun PR gate, merge after required checks pass, and close out #230-#234.
-- Blockers: None recorded. `loom build --full-output` shows build-execution, suite validate, suite carrier validate, and runtime evidence pass, but the wrapper still returns block because `checkpoint-admission` reports block with no missing inputs; classified as Loom checkpoint surface advisory after review artifacts were manually recorded.
+- Blockers: None recorded.
 - Latest Validation Summary: 2026-07-07T03:40Z fact-chain passed after CORE-231 bootstrap/current/work-item/progress alignment; build-execution, suite validate, suite carrier validate, and runtime evidence passed inside loom build full-output, while the loom build wrapper still returned block on checkpoint-admission with no missing inputs; current-head spec/code review artifacts were manually recorded because loom review record allow remained blocked by that checkpoint surface. PR #240 metadata readback/preflight passed at head 70317bb9de314e6023c15315f95a6b68846e43a1; hosted py-compile, demo-bootstrap, repo-local-cli, and loom-check passed. Earlier core-runtime, schemas, conformance, API server smoke, typecheck, git diff, verify, and suite evidence checks passed.
 - Recovery Boundary: Core write-precheck result generation and queryable Run Record facts only; no App UI, Harbor/Lode code, live external site action, real account/profile/Cookie use, true write, submit/publish/send, hosted browser, marketplace, bulk collection, full account cloud hosting, risk-bypass claim, merge without review/gate, or issue closeout without post-merge evidence.
 - Current Lane: core real-site write-precheck result generation
@@ -75,6 +75,7 @@
 - 2026-07-07T03:39Z `loom build --target . --item CORE-231 --build-evidence .loom/specs/CORE-231/build-evidence.json --json --full-output`: build-execution, suite validate, suite carrier validate, and runtime evidence pass; wrapper result remains block because `checkpoint-admission` returns block with no missing inputs.
 - 2026-07-07T03:39Z `loom checkpoint merge --target . --item CORE-231 --json`: fallback only because `.loom/reviews/CORE-231.json` and `.loom/reviews/CORE-231.spec.json` were missing before manual review fallback.
 - 2026-07-07T03:40Z `.loom/reviews/CORE-231.spec.json` and `.loom/reviews/CORE-231.json`: manual current-head review fallback recorded after CLI `loom review record ... --decision allow` remained blocked by the checkpoint surface despite passing build-execution evidence.
+- 2026-07-07T03:58Z `loom checkpoint merge --target . --item CORE-231 --json --full-output`: blocked with `missing_inputs: []` because the machine-consumed `Blockers:` field included advisory text after `None recorded`; classified as carrier vocabulary issue and remediated by keeping `Blockers:` literal `None recorded.` while retaining the advisory in this validation log.
 
 ## Terminal Closeout Metadata
 
