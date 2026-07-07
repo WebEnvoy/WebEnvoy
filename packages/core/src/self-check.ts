@@ -14,6 +14,7 @@ import { capabilityRunQuerySchemaVersion, getCapabilityRunSummary } from "./capa
 import { assertRealSiteReadOnlyTaskExecution } from "./real-site-readonly-self-check.js";
 import { assertRealSiteReadOnlyResultProjection } from "./real-site-readonly-result-self-check.js";
 import { assertRealRunQueryEvidence } from "./real-run-query-self-check.js";
+import { assertRealSiteWritePreviewResults } from "./real-site-write-preview-self-check.js";
 
 let tick = 0;
 
@@ -1162,3 +1163,5 @@ await assertRealSiteReadOnlyResultProjection();
 console.log("Validated real-site read-only result projection.");
 await assertRealRunQueryEvidence();
 console.log("Validated real run query evidence and failure reasons.");
+await assertRealSiteWritePreviewResults();
+console.log("Validated real-site write preview records.");

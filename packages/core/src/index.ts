@@ -57,6 +57,11 @@ export {
   type ResultOutcome
 } from "./result-envelope.js";
 export {
+  recordRealSiteWritePreviewResult,
+  type RealSiteWritePreviewInput,
+  type RealSiteWritePreviewResult
+} from "./real-site-write-preview.js";
+export {
   approvalCancellationQuerySchemaVersion,
   getApprovalCancellationSummary,
   getRunSummary,
