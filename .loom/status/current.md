@@ -6,7 +6,7 @@
 - Goal: Deliver Core's real-site write-precheck result generation slice for FR #230.
 - Scope: Covers FR #230 and Work Items #231/#232/#233/#234. Anchor Work Item is #231. Consumes Harbor #12 closed identity/runtime/evidence facts and Lode #14 closed write-precheck capability facts, but does not modify Harbor/Lode/App. Ownership is limited to Core runtime helper/self-check/export files and CORE-231 Loom carriers; shared `.loom/status/current.md` is active for this implementation PR and must be retired to `no_active_item` during closeout/retire; no unintegrated subagent output or parallel carrier writer is allowed.
 - Execution Path: work/core-231-real-write-precheck
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/.worktrees/WebEnvoy-core-231-real-write-precheck
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-231.md
 - Review Entry: .loom/reviews/CORE-231.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/schemas test; pnpm --filter @webenvoy/conformance test; pnpm conformance; pnpm --filter @webenvoy/api-server test; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom verify --target . --json; loom suite validate/carrier/evidence --target . --item CORE-231 --json; PR metadata readback/preflight after PR creation.
