@@ -129,7 +129,7 @@
     {
       "command": "loom build --target . --item CORE-231 --build-evidence .loom/specs/CORE-231/build-evidence.json --json",
       "result": "block",
-      "evidence": "2026-07-07T03:20Z rerun blocks only on `runtime_evidence is missing from fact-chain report`; classified as Loom build/runtime surface mismatch for item-specific carrier mode with shared .loom/status/current.md intentionally idle. Artifact: .loom/tmp/output-artifacts/2026-07-07T032033Z-build-17a08451f8cd.json"
+      "evidence": "2026-07-07T03:39Z full-output shows runtime evidence, suite validate, suite carrier validate, and build-execution pass after bootstrap/current/work-item/progress alignment; wrapper still returns block because checkpoint-admission reports block with no missing inputs. Artifact: .loom/tmp/output-artifacts/2026-07-07T033911Z-build-92b4dab17f4a.json"
     }
   ],
   "integration_evidence": [
@@ -166,7 +166,7 @@
   "ownership_overlap": false,
   "repeated_blocker": false,
   "known_tool_surface_notes": [
-    "Manual shared current pointer activation caused idle fact-chain mismatch; resolved by returning .loom/status/current.md to no_active_item and using item-specific CORE-231 carriers.",
-    "loom build blocks on missing fact-chain runtime_evidence in the idle shared-status mode, while loom fact-chain, loom verify, suite validate, suite carrier validate, and suite evidence validate pass for CORE-231."
+    "CORE-231 implementation PR requires active .loom/status/current.md plus .loom/bootstrap/init-result.json fact_chain entry alignment; idle item-specific-only carrier mode caused build/review runtime evidence gaps.",
+    "After carrier alignment, loom build full-output shows runtime evidence, suite validate, suite carrier validate, and build-execution pass, but the wrapper still returns block because checkpoint-admission reports block with no missing inputs. Manual review fallback records the current-head review artifacts for PR gate consumption."
   ]
 }

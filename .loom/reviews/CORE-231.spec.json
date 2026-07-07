@@ -1,0 +1,26 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-231",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review accepts the bounded Core real-site write-precheck result generation slice for #230/#231-#234.",
+  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-07T03:40:00Z",
+  "reviewed_head": "70317bb9de314e6023c15315f95a6b68846e43a1",
+  "reviewed_validation_summary": "2026-07-07T03:40Z fact-chain passed after CORE-231 bootstrap/current/work-item/progress alignment; build-execution, suite validate, suite carrier validate, and runtime evidence passed inside loom build full-output, while the loom build wrapper still returned block on checkpoint-admission with no missing inputs; current-head spec/code review artifacts were manually recorded because loom review record allow remained blocked by that checkpoint surface. PR #240 metadata readback/preflight passed at head 70317bb9de314e6023c15315f95a6b68846e43a1; hosted py-compile, demo-bootstrap, repo-local-cli, and loom-check passed. Earlier core-runtime, schemas, conformance, API server smoke, typecheck, git diff, verify, and suite evidence checks passed.",
+  "reviewed_validation_summary_hash": "62de67eb84136479ff9d1db111fabb3dd4d33b9f0e602b6ddc6abb3fb454a3d0",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-231.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec is limited to Core refs-only write-precheck result generation, approval/cancellation/expiry state recording, and no-submit proof. App UI, Harbor/Lode code, live account operation, true write/submit, hosted browser, marketplace, bulk collection, account cloud hosting, risk-bypass claims, and private/raw material persistence remain out of scope."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "The implementation contract maps Xiaohongshu draft preview, BOSS greeting preview, page_changed, user_cancelled, approval expired, and submitted=false states to targeted Core self-checks and existing Run Record/query contracts."
+  }
+}
