@@ -3,12 +3,12 @@
   "item_id": "CORE-231",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Implementation review accepts Core real-site write-precheck result generation for #230/#231-#234.",
+  "summary": "Carrier-only closeout review accepts CORE-231 terminal metadata and idle pointer sync after PR #240 merged and #230/#231/#232/#233/#234 closed.",
   "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-07T04:12:00Z",
+  "authored_at": "2026-07-07T04:22:00Z",
   "reviewed_head": "c7d803a76abd4c51e4ca0b1fc9f81fa812caf616",
-  "reviewed_validation_summary": "`pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/schemas test`; `pnpm --filter @webenvoy/conformance test`; `pnpm conformance`; `pnpm --filter @webenvoy/api-server test`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom verify --target . --json`; `loom suite validate --target . --item CORE-231 --json`; `loom suite carrier validate --target . --item CORE-231 --json`; `loom suite evidence validate --target . --item CORE-231 --json`; `loom pr gate 240 --target . --work-item CORE-231 --head-sha 1899836f3902bcddc2b34f5e6c1daa619062a3d2 --json`; hosted run 28840726737 passed py-compile, demo-bootstrap, repo-local-cli, loom-check, and loom-pr-merge-gate; PR #240 merged to main as c7d803a76abd4c51e4ca0b1fc9f81fa812caf616 at 2026-07-07T04:07:55Z.",
-  "reviewed_validation_summary_hash": "bfe43c80a6568f30c3a78471e573da2486482cb78b3d4d6183dd0b9173a67b5a",
+  "reviewed_validation_summary": "loom fact-chain --target . --json; loom verify --target . --json; git diff --check passed locally before CORE-231 current pointer retire PR.",
+  "reviewed_validation_summary_hash": "d31d84ee2f4e6d81c53c73121cd09b6ebfda5eec6e75ae0948ca435f4f0432d1",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-231.md",
   "fallback_to": null,
@@ -37,10 +37,14 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Core records Xiaohongshu and BOSS write-precheck preview results from Harbor/Lode public refs into durable Run Record and Result Envelope metadata, preserving approval/cancellation/expiry and page_changed states without persisting private runtime material or submitted results."
+    "reason": "Authored closeout review approved only CORE-231 terminal carrier metadata and idle pointer restoration; implementation behavior was reviewed and merged in PR #240."
   },
   "implementation_review_disposition": {
     "status": "passed",
-    "reason": "The helper reuses existing task submission admission, requires active no-submit action_request facts, keeps preview_result.submitted false, records approval expired/blocked outcomes as terminal state, rejects mismatched approval requests, and adds targeted self-check coverage for success, page_changed, user_cancelled, expired approval, and forbidden private fields."
+    "reason": "Implementation behavior was reviewed and merged in PR #240; this carrier-only review covers only post-merge closeout metadata."
+  },
+  "carrier_only_closeout_review": {
+    "status": "passed",
+    "reason": "Closeout changes are limited to CORE-231 terminal metadata, closed issue evidence, and no_active_item pointer restoration."
   }
 }
