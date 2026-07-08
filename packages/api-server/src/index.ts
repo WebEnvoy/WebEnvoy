@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { createFileRunRecordStore } from "@webenvoy/core-runtime";
+import { createFileRunRecordStore, createHttpHarborRuntimeClient, createLocalLodePackageResolver } from "@webenvoy/core-runtime";
 
 import { createApiServer } from "./server.js";
 
@@ -21,9 +21,13 @@ if (import.meta.url === entrypoint) {
   const server = createApiServer(
     process.env.WEBENVOY_RUN_RECORD_DIR
       ? {
-          runRecordStore: createFileRunRecordStore({
-            directory: process.env.WEBENVOY_RUN_RECORD_DIR
-          })
+          runRecordStore: createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR }),
+          ...(process.env.WEBENVOY_LODE_REGISTRY_PATH === undefined
+            ? {}
+            : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: process.env.WEBENVOY_LODE_REGISTRY_PATH }) }),
+          ...(process.env.WEBENVOY_HARBOR_RUNTIME_URL === undefined
+            ? {}
+            : { harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL }) })
         }
       : {}
   );

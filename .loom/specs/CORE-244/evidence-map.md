@@ -1,0 +1,12 @@
+# CORE-244 Evidence Map
+
+| Evidence ID | Evidence Type | Source Locator | Consumes | Binding | Freshness | Consumer Boundary | Remediation Direction |
+|---|---|---|---|---|---|---|---|
+| EV-001 | issue_tree_evidence | https://github.com/WebEnvoy/WebEnvoy/issues/243 https://github.com/WebEnvoy/WebEnvoy/issues/244 https://github.com/WebEnvoy/WebEnvoy/issues/245 https://github.com/WebEnvoy/WebEnvoy/issues/246 https://github.com/WebEnvoy/WebEnvoy/issues/247 https://github.com/WebEnvoy/WebEnvoy/issues/248 | #243 parent and #244-#248 leaf Work Items read on 2026-07-08 UTC | CORE-244 scope | present | planning/review only | Re-read before PR metadata or gate. |
+| EV-002 | behavior_evidence | .loom/specs/CORE-244/spec.md | S-001/S-002/S-003/S-004/S-005 behavior and non-goal boundaries | CORE-244 acceptance | present | Worker handoff and review only | Refresh after behavior or boundary changes. |
+| EV-003 | implementation_evidence | packages/core/src/runtime-task-chain.ts | Lode resolver, Harbor HTTP client, and submit orchestration | CORE-244 Core runtime implementation | present | Core refs-only runtime behavior | Rerun typecheck/tests after changes. |
+| EV-004 | implementation_evidence | packages/api-server/src/server.ts | POST `/tasks` request parsing, submit call, evidence/runtime refs response, and failure mapping | CORE-244 API implementation | present | App-facing API behavior only | Rerun API validation after changes. |
+| EV-005 | test_evidence | packages/api-server/src/runtime-task-submit-self-check.ts | Mock Lode registry and mock Harbor local runtime API endpoints | CORE-244 validation | present | Mock evidence only; not live runtime evidence | Replace or supplement with live evidence only after explicit permission and real Harbor availability. |
+| EV-006 | validation_evidence | .loom/progress/CORE-244.md | Focused validation commands and results | CORE-244 readiness | present | Worker handoff only | Refresh after commit/head change. |
+| EV-007 | fresh_verification_input | .loom/progress/CORE-244.md | EV-002 EV-005 EV-006 | CORE-244 current behavior and validation evidence | present | Worker handoff and review only | Refresh after validation, branch/head, PR metadata, or carrier changes. |
+| EV-008 | non_goal_evidence | .loom/work-items/CORE-244.md | Prohibited actions and excluded repos | CORE-244 safety boundary | present | No App/Harbor/Lode mutation | Recheck if scope changes. |

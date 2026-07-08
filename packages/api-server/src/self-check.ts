@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore } from "@webenvoy/core-runtime";
 import { createApiServer } from "./server.js";
+import { assertRuntimeTaskSubmitApi } from "./runtime-task-submit-self-check.js";
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -347,6 +348,8 @@ async function main(): Promise<void> {
         }
       }
     });
+
+    await assertRuntimeTaskSubmitApi();
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));

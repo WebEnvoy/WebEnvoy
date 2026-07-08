@@ -45,6 +45,8 @@ export type TaskSubmissionInput = HarborAdmissionInput & {
   task_intent: unknown;
   package_ref?: string;
   lode_package_contract?: LodePackageAdmissionContract;
+  lode_resolution_failure?: FailureRecord;
+  harbor_admission_failure?: FailureRecord;
   resource_match_ref?: string;
   runtime_binding_refs?: readonly string[];
   evidence_refs?: readonly string[];
@@ -440,6 +442,32 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     };
   }
 
+  if (input.lode_resolution_failure) {
+    const runRecord = await store.createRunRecord({
+      run_id: input.run_id,
+      status: "failed",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+      ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
+      ...(input.package_ref === undefined ? {} : { package_ref: input.package_ref }),
+      admission: {
+        decision: lodeAdmissionDecision(input.lode_resolution_failure),
+        action_risk: lodeAdmissionActionRisk(taskIntent, input.lode_resolution_failure),
+        resource_requirement_refs: taskIntent.resource_requirement_refs,
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+      },
+      failure: input.lode_resolution_failure
+    });
+    return {
+      ok: false,
+      failure: input.lode_resolution_failure,
+      run_record: runRecord
+    };
+  }
+
   const lodeAdmission = validateLodePackageAdmission(taskIntent, input);
   if (!lodeAdmission.ok) {
     const runRecord = await store.createRunRecord({
@@ -463,6 +491,36 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     return {
       ok: false,
       failure: lodeAdmission.failure,
+      run_record: runRecord
+    };
+  }
+
+  if (input.harbor_admission_failure) {
+    const runRecord = await store.createRunRecord({
+      run_id: input.run_id,
+      status: harborAdmissionStatus(input.harbor_admission_failure),
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(lodeAdmission.capability_source_ref === undefined ? {} : { capability_source_ref: lodeAdmission.capability_source_ref }),
+      ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
+      package_ref: lodeAdmission.package_ref,
+      admission: {
+        decision: harborAdmissionDecision(input.harbor_admission_failure),
+        action_risk: taskIntent.policy.risk,
+        resource_requirement_refs: lodeAdmission.resource_requirement_refs,
+        ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
+        ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+      },
+      ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
+      ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+      failure: input.harbor_admission_failure
+    });
+    return {
+      ok: false,
+      failure: input.harbor_admission_failure,
       run_record: runRecord
     };
   }

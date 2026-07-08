@@ -1,0 +1,26 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-244",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review accepts the bounded Core runtime task submission chain slice for #243/#244-#248.",
+  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-08T10:22:00Z",
+  "reviewed_head": "80f4b015f7e6ad25df5c3ee86922815ffc08e638",
+  "reviewed_validation_summary": "2026-07-08T10:12Z reviewer P1/P2 findings were fixed; full workspace typecheck/test/lint passed. Targeted API/Core typecheck, API self-check, git diff check, previous fact-chain, build, resume, and JSON validation also passed. Live Harbor evidence was not attempted.",
+  "reviewed_validation_summary_hash": "2f55470c0c7bda1710e7d1224ecab266d8b2a2fcab145118b50c42169db569b2",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-244.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The spec is limited to Core refs-only task submission, Lode asset resolution, Harbor local runtime API consumption, admission/failure Run Record writes, and evidence/runtime ref queryability. App UI, Harbor/Lode code, live browser/account/profile/Cookie/production page operation, true write/submit, hosted browser, marketplace, bulk collection, account cloud hosting, and risk-bypass claims remain out of scope."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "The plan maps submit/admission, Lode asset resolution, Harbor readiness/provider/session/snapshot/evidence calls, fail-closed behavior, and no-private-material boundaries to focused API/Core self-checks and Loom evidence."
+  }
+}

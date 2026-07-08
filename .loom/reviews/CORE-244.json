@@ -1,0 +1,50 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-244",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Code review accepts the Core runtime task submission chain after reviewer P1/P2 findings were fixed and full workspace validation passed.",
+  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-08T10:22:00Z",
+  "reviewed_head": "80f4b015f7e6ad25df5c3ee86922815ffc08e638",
+  "reviewed_validation_summary": "2026-07-08T10:12Z reviewer P1/P2 findings were fixed; full workspace typecheck/test/lint passed. Targeted API/Core typecheck, API self-check, git diff check, previous fact-chain, build, resume, and JSON validation also passed. Live Harbor evidence was not attempted.",
+  "reviewed_validation_summary_hash": "2f55470c0c7bda1710e7d1224ecab266d8b2a2fcab145118b50c42169db569b2",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-244.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-244.md",
+    "recovery_entry": ".loom/progress/CORE-244.md",
+    "status_surface": ".loom/status/current.md",
+    "suite_evidence_map": ".loom/specs/CORE-244/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/CORE-244/task-carrier.md"
+    ],
+    "core_modules": [
+      "packages/core/src/runtime-task-chain.ts",
+      "packages/core/src/task-submission.ts",
+      "packages/core/src/index.ts",
+      "packages/api-server/src/server.ts",
+      "packages/api-server/src/index.ts",
+      "packages/api-server/src/runtime-task-submit-self-check.ts",
+      "packages/api-server/src/self-check.ts"
+    ],
+    "reviewer_findings_consumed": [
+      "P1 harbor.evidence_policy private material passthrough rejected at API boundary",
+      "P1 duplicate run_id race mapped to 409 instead of API 500",
+      "P2 Lode local resolver hardened with realpath root confinement including symlink escape coverage"
+    ],
+    "pre_review_fallback_classification": "loom pre-review blocked only on legacy deterministic tools/* commands that are absent from this repository checkout; suite validate/carrier/evidence, fact-chain, build, PR metadata preflight, full workspace typecheck/test/lint, and targeted self-checks passed."
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The implementation uses a mock Harbor HTTP server for validation and does not claim live runtime evidence. It validates trust-boundary inputs, rejects private evidence policy fields, strips session/snapshot passthrough override surfaces, maps duplicate run races to 409, confines Lode file reads with realpath, and records only refs/public state in Core."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "After fixing the reviewer findings, targeted API/Core checks and full workspace typecheck/test/lint passed at the reviewed head."
+  }
+}
