@@ -6,7 +6,7 @@
 - Goal: Implement Core #243 core runtime task chain batch anchored on Work Item #244 and covering #244/#245/#246/#247/#248.
 - Scope: App-facing Core API accepts a read-only task request, resolves Lode capability metadata/resource requirements from a local registry asset, calls Harbor local runtime API readiness/provider/session/snapshot/evidence endpoints, writes Run Record admission/failure facts, and returns evidence/runtime refs without claiming live task success. Ownership is limited to Core/WebEnvoy API server, Core runtime clients/orchestration, focused self-checks, and CORE-244 Loom carriers.
 - Execution Path: work/core-244-runtime-task-chain
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-runtime-task-chain
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-244 --json
