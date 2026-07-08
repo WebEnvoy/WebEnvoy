@@ -1,9 +1,10 @@
 {
   "schema_version": "loom-build-evidence/v1",
   "item_id": "CORE-244",
-  "task_goal": "Implement Core #243 runtime task chain batch covering #244-#248.",
-  "branch": "work/core-244-runtime-task-chain",
-  "head_at_validation": "55c3c2506a6aaf91baaafeaa8741130e4d29ee54-plus-working-tree-diff",
+  "task_goal": "Implement the Core #243/#244 App-facing admission health and capability-run query compatibility slice for App #265.",
+  "branch": "work/core-244-admission-contract",
+  "head_at_validation": "b62f6e3e42fe0b6a3fe8a605d8cb55e346cbd413-plus-carrier-diff",
+  "current_pointer": "CORE-244 active in .loom/status/current.md until post-merge closeout/retire",
   "covered_issues": [244, 245, 246, 247, 248],
   "excluded_issues": [230, 231, 232, 233, 234, 238, 239, 240, 241, 242],
   "ownership_constraints": [

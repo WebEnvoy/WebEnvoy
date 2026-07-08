@@ -30,7 +30,7 @@
 ## Ownership Constraints
 
 - Writes limited to Core/WebEnvoy API server, Core runtime clients/orchestration, run record admission paths, focused self-checks, and CORE-244 Loom carriers.
-- Shared `.loom/status/current.md` remains `no_active_item`; this worker does not claim the shared current pointer.
+- Shared `.loom/status/current.md` is intentionally active for CORE-244 in this formal worktree so fact-chain, current-head review, and merge-ready consume the same item. Closeout/retire remains out of scope until after merge.
 - No subagent output was used or left unintegrated.
 
 ## Associated Artifacts
