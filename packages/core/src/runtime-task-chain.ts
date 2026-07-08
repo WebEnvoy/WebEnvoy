@@ -272,8 +272,11 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         init.body = JSON.stringify(body ?? {});
       }
       const response = await fetchJson(`${baseUrl}${path}`, init);
-      if (!response.ok) return failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
-      return await response.json() as unknown;
+      const payload = await response.json() as unknown;
+      if (!response.ok) {
+        return failureFromHarborPayload(payload) ?? failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
+      }
+      return payload;
     } catch {
       return failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
     }
@@ -356,6 +359,33 @@ function providerStatus(value: unknown): HarborBrowserProviderCatalog | HarborUn
   const direct = pickObject(value, "harbor_provider_status", "browser_provider_status", "provider_status");
   if (direct?.status === "unavailable") return unavailable(string(direct.failure_class) ?? "browser_provider_unavailable", direct.retryable !== false);
   return (direct ?? value) as HarborBrowserProviderCatalog;
+}
+
+function failureFromHarborPayload(value: unknown): FailureRecord | undefined {
+  const direct = pickObject(value, "error", "failure", "current_error");
+  if (!direct) return undefined;
+  if (typeof direct.category === "string" && typeof direct.code === "string") {
+    return {
+      category: direct.category as FailureRecord["category"],
+      code: direct.code,
+      phase: typeof direct.phase === "string" ? direct.phase as FailureRecord["phase"] : "runtime_binding",
+      recovery_hint: typeof direct.recovery_hint === "string" ? direct.recovery_hint : recoveryHintForHarborFailure(direct.code),
+      ...(typeof direct.attribution === "string"
+        ? { attribution: direct.attribution as NonNullable<FailureRecord["attribution"]> }
+        : { attribution: "runtime" as const })
+    };
+  }
+  const failureClass = string(direct.failure_class) ?? string(direct.code);
+  if (!failureClass) return undefined;
+  return failure("resource_admission", failureClass, "runtime_binding", recoveryHintForHarborFailure(failureClass));
+}
+
+function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hint"] {
+  if (code === "identity_auth_required" || code === "login_expired") return "open_manual_auth";
+  if (code.startsWith("identity_environment_")) return "connect_identity_environment";
+  if (code === "session_locked") return "wait_or_request_handoff";
+  if (code === "url_unreachable") return "fix_input";
+  return "connect_runtime";
 }
 
 function identityFactsFromSession(value: unknown): HarborIdentityEnvironmentFacts | undefined {
