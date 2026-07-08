@@ -254,6 +254,37 @@ function createBadJsonHarborMock(): Server {
   });
 }
 
+function createIdentityRequiredHarborMock(): Server {
+  return createServer((request, response) => {
+    void readRequestJson(request).then(() => {
+      if (request.method === "GET" && request.url === "/readiness") {
+        sendJson(response, 200, { status: "ready" });
+        return;
+      }
+      if (request.method === "GET" && request.url === "/runtime/browser-providers") {
+        sendJson(response, 200, {
+          schema_version: "harbor-browser-provider-status/v0",
+          providers: [{ provider_id: "chrome_official", install: { status: "installed", launchability: "launchable" } }]
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
+        sendJson(response, 400, {
+          status: "unavailable",
+          failure_class: "identity_environment_required",
+          retryable: true,
+          public_boundary: {
+            output: "status_and_redacted_refs_only",
+            raw_material: "not_exposed"
+          }
+        });
+        return;
+      }
+      sendJson(response, 404, { error: "not_found" });
+    });
+  });
+}
+
 async function assertLodeResolverStaysUnderRoot(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "webenvoy-lode-confined-"));
   const outsideRoot = await mkdtemp(join(tmpdir(), "webenvoy-lode-outside-"));
@@ -363,11 +394,13 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const harbor = createHarborMock(true, paths, bodies);
   const offlineHarbor = createHarborMock(false, []);
   const badJsonHarbor = createBadJsonHarborMock();
+  const identityRequiredHarbor = createIdentityRequiredHarborMock();
   try {
     const registryPath = await writeLodeRegistry(root);
     const harborPort = await listen(harbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
+    const identityRequiredHarborPort = await listen(identityRequiredHarbor);
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({
       runRecordStore: store,
@@ -384,6 +417,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${badJsonHarborPort}` })
     });
+    const identityRequiredServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${identityRequiredHarborPort}` })
+    });
     const raceDuplicateServer = createApiServer({
       runRecordStore: createDuplicateRunRaceStore(store),
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
@@ -392,6 +430,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const port = await listen(server);
     const offlinePort = await listen(offlineServer);
     const badJsonPort = await listen(badJsonServer);
+    const identityRequiredPort = await listen(identityRequiredServer);
     const raceDuplicatePort = await listen(raceDuplicateServer);
     try {
       const submit = await postJson(port, "/tasks", {
@@ -465,6 +504,20 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(asRecord(badJsonBody.error).code, "harbor_runtime_api_unavailable");
       assert.equal(asRecord(badJsonBody.run).status, "failed");
 
+      const identityRequired = await postJson(identityRequiredPort, "/tasks", {
+        run_id: "run_api_submit_identity_required",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_identity_required"),
+        harbor: { url: "https://example.org/" }
+      });
+      assert.equal(identityRequired.status, 503);
+      const identityRequiredBody = asRecord(identityRequired.body);
+      assert.equal(identityRequiredBody.ok, false);
+      assert.equal(asRecord(identityRequiredBody.error).code, "identity_environment_required");
+      const identityRequiredRun = asRecord(identityRequiredBody.run);
+      assert.equal(identityRequiredRun.status, "requires_user_action");
+      assert.equal(asRecord(identityRequiredRun.admission).decision, "requires_user_action");
+
       const privateEvidencePolicy = await postJson(port, "/tasks", {
         run_id: "run_api_submit_private_evidence_policy",
         package_ref: packageRef,
@@ -506,12 +559,14 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(server);
       await close(offlineServer);
       await close(badJsonServer);
+      await close(identityRequiredServer);
       await close(raceDuplicateServer);
     }
   } finally {
     await close(harbor);
     await close(offlineHarbor);
     await close(badJsonHarbor);
+    await close(identityRequiredHarbor);
     await rm(root, { recursive: true, force: true });
     await rm(runDir, { recursive: true, force: true });
   }

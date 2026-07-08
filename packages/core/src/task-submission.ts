@@ -397,11 +397,21 @@ function lodeAdmissionActionRisk(taskIntent: TaskIntentEnvelope, failure: Failur
 }
 
 function harborAdmissionDecision(failure: FailureRecord): AdmissionDecision["decision"] {
-  return failure.code === "identity_auth_required" ? "requires_user_action" : "blocked_pre_admission";
+  return harborFailureRequiresUserAction(failure.code) ? "requires_user_action" : "blocked_pre_admission";
 }
 
 function harborAdmissionStatus(failure: FailureRecord): Extract<RunRecord["status"], "failed" | "requires_user_action"> {
-  return failure.code === "identity_auth_required" ? "requires_user_action" : "failed";
+  return harborFailureRequiresUserAction(failure.code) ? "requires_user_action" : "failed";
+}
+
+function harborFailureRequiresUserAction(code: string): boolean {
+  return (
+    code === "identity_auth_required" ||
+    code === "identity_environment_required" ||
+    code === "identity_environment_unavailable" ||
+    code === "identity_environment_missing" ||
+    code === "login_expired"
+  );
 }
 
 export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, input: TaskSubmissionInput): Promise<TaskSubmissionResult> {
