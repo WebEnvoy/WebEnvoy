@@ -11,7 +11,7 @@
 - Review Entry: .loom/reviews/CORE-244.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-244 --json
 - Closing Condition: PR Ready, merge, post-merge closeout for #243/#244/#245/#246/#247/#248, and follow-up current pointer retire if required by gate.
-- Current Checkpoint: build
+- Current Checkpoint: merge
 - Current Stop: Core runtime task chain batch implemented and hardened in formal worktree; waiting for main controller PR/review/gate.
 - Next Step: Create/update PR, run metadata readback, review, merge-ready gate, merge after checks, then close out #243/#244/#245/#246/#247/#248 only within their Core contract boundaries.
 - Blockers: None recorded.

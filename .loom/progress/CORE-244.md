@@ -3,7 +3,7 @@
 ## Dynamic Facts
 
 - Item ID: CORE-244
-- Current Checkpoint: build
+- Current Checkpoint: merge
 - Current Stop: Core runtime task chain batch implemented and hardened in formal worktree; waiting for main controller PR/review/gate.
 - Next Step: Create/update PR, run metadata readback, review, merge-ready gate, merge after checks, then close out #243/#244/#245/#246/#247/#248 only within their Core contract boundaries.
 - Blockers: None recorded.
