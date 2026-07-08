@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1054,6 +1054,26 @@ try {
   assert.equal(capabilityRuns.capability_runs.failure_attribution_counts.capability, 1);
   assert.equal(capabilityRuns.capability_runs.latest_failure?.run_id, failedId);
   assert.equal(capabilityRuns.capability_runs.latest_failure?.post_check?.status, "failed");
+
+  await writeFile(
+    join(directory, "run_self_check_stale_partial.json"),
+    JSON.stringify({
+      schema_version: "webenvoy.run-record.v0",
+      run_id: "run_self_check_stale_partial",
+      status: "pending",
+      created_at: "2026-07-01T00:00:08.000Z",
+      updated_at: "2026-07-01T00:00:08.000Z"
+    })
+  );
+  const capabilityRunsWithStaleRecord = await getCapabilityRunSummary(store, {
+    capability_ref: "lode:capability/read-public-page",
+    capability_version: "0.1.0"
+  });
+  assert.equal(capabilityRunsWithStaleRecord.ok, true);
+  if (!capabilityRunsWithStaleRecord.ok) {
+    throw new Error("capability run query must ignore stale partial run records");
+  }
+  assert.equal(capabilityRunsWithStaleRecord.capability_runs.total_runs, 2);
 
   const cancelledId = "run_self_check_cancelled_001";
   await store.createRunRecord(baseInput(cancelledId));

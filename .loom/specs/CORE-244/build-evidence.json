@@ -208,6 +208,18 @@
   ],
   "integration_evidence": [
     {
+      "id": "admission-health-query-fix-integrated",
+      "status": "integrated",
+      "locators": ["packages/api-server/src/server.ts", "packages/api-server/src/self-check.ts"],
+      "summary": "API server exposes GET /admission/health and self-check covers the App-facing admission health response."
+    },
+    {
+      "id": "stale-run-query-fix-integrated",
+      "status": "integrated",
+      "locators": ["packages/core/src/run-record-store.ts", "packages/core/src/self-check.ts"],
+      "summary": "Capability run list query skips stale partial records while single-run reads remain strict; self-check covers stale record behavior."
+    },
+    {
       "id": "runtime-task-chain-integrated",
       "status": "integrated",
       "locators": ["packages/core/src/runtime-task-chain.ts", "packages/core/src/task-submission.ts", "packages/core/src/index.ts"],

@@ -266,6 +266,20 @@ function capabilityQueryMissing(): FailureRecord {
   };
 }
 
+function admissionHealth(options: ApiServerOptions): JsonBody {
+  const checks = {
+    runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
+    lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
+    harborRuntimeClient: options.harborRuntimeClient === undefined ? "missing" : "configured"
+  };
+  return {
+    service: serviceName,
+    status: Object.values(checks).every((status) => status === "configured") ? "ready" : "degraded",
+    checks,
+    consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
+  };
+}
+
 async function route(request: IncomingMessage, response: ServerResponse, options: ApiServerOptions): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const path = requestUrl.pathname;
@@ -351,6 +365,11 @@ async function route(request: IncomingMessage, response: ServerResponse, options
         apiServer: "ok"
       }
     });
+    return;
+  }
+
+  if (path === "/admission/health") {
+    sendJson(response, 200, admissionHealth(options));
     return;
   }
 

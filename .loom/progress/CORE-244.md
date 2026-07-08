@@ -3,13 +3,13 @@
 ## Dynamic Facts
 
 - Item ID: CORE-244
-- Current Checkpoint: closed_out
-- Current Stop: CORE-244 runtime task chain batch is merged, #243/#244/#245/#246/#247/#248 are closed, and this carrier-only PR returns the repo to no_active_item.
-- Next Step: Merge carrier-only current pointer retire PR after hosted gate, then continue the next Core/Harbor/App runtime batch.
-- Blockers: None recorded.
-- Latest Validation Summary: loom fact-chain --target . --json; loom verify --target . --json; git diff --check passed locally before CORE-244 current pointer retire PR.
-- Recovery Boundary: Core runtime task submission chain only; no App UI, Harbor/Lode code mutation, real external site action, real account/profile/Cookie use, true write, submit/publish/send, hosted browser, marketplace, bulk collection, full account cloud hosting, risk-bypass claim, merge without review/gate, or issue closeout without post-merge evidence.
-- Current Lane: core runtime task chain implementation
+- Current Checkpoint: build
+- Current Stop: Reopened after 2026-07-09 App E2E No-Go. Prior PR #249/#250/#251 evidence remains valid for the earlier task-chain slice, but App E2E still failed because Core `/admission/health` returned 404 and `/capability-runs?...` returned 500 on stale/partial run records.
+- Next Step: Land the Core admission/query compatibility fix, then feed this PR/head into App #265 E2E.
+- Blockers: None
+- Latest Validation Summary: 2026-07-08T17:21Z UTC main-controller validation passed: `pnpm --filter @webenvoy/core-runtime typecheck`; `pnpm --filter @webenvoy/api-server typecheck`; `pnpm --filter @webenvoy/core-runtime test`; `pnpm --filter @webenvoy/api-server test`; `pnpm --filter @webenvoy/conformance test`; `pnpm typecheck`; `git diff --check`; `loom fact-chain --target . --json`; `loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json`. Deterministic review-readiness evidence was run and classified as repo-local tool surface absent, not product failure: `tools/skills_surface.py check` exit 127; `tools/loom_check.py --profile source --source-surface contract-only` exit 127; `tools/check_release_surface.py` exit 127; `tools/version_surface_check.py` exit 127; `tools/check_npm_package.py` exit 127.
+- Recovery Boundary: Revert branch `work/core-244-admission-contract`; no App/Harbor/Lode repository changes, real account/profile/Cookie/production page action, submit, publish, send, hosted browser, marketplace, bulk collection, or risk-bypass claim occurred.
+- Current Lane: Core admission health and capability-runs query compatibility for App #265.
 
 ## Execution Ledger
 
@@ -20,70 +20,10 @@
 - Handoff Notes Locator: .loom/specs/CORE-244/task-carrier.md
 - Evidence Freshness: current
 
-## Validation Log
-
-- 2026-07-08T07:35Z `pnpm install --frozen-lockfile`: pass; installed workspace dependencies in the formal worktree without lockfile changes.
-- 2026-07-08T07:35Z `pnpm --filter @webenvoy/core-runtime typecheck`: pass.
-- 2026-07-08T07:35Z `pnpm --filter @webenvoy/api-server typecheck`: pass.
-- 2026-07-08T07:35Z `pnpm --filter @webenvoy/core-runtime test`: pass; existing Core self-checks still pass.
-- 2026-07-08T07:35Z `pnpm --filter @webenvoy/api-server test`: pass; includes POST `/tasks` mock Lode registry plus mock Harbor readiness/provider/session/snapshot/evidence chain, fail-closed readiness failure, and malformed Harbor JSON failure.
-- 2026-07-08T07:40Z `pnpm typecheck`: pass; all workspace TypeScript checks passed.
-- 2026-07-08T07:40Z `git diff --check`: pass; no whitespace errors.
-- 2026-07-08T07:40Z `pnpm test`: pass; workspace build plus schemas/core/api-server/conformance self-checks passed.
-- 2026-07-08T07:40Z `loom verify --target . --json`: pass; installed Loom delivery layers verified.
-- 2026-07-08T07:42Z `loom suite carrier validate --target . --item CORE-244 --json`: pass.
-- 2026-07-08T07:42Z `loom suite evidence validate --target . --item CORE-244 --json`: pass after evidence map rows were tightened for behavior/test/fresh verification inputs.
-- 2026-07-08T07:43Z `loom suite validate --target . --item CORE-244 --json`: pass with minimal suite path and required artifacts present.
-- 2026-07-08T07:44Z `pnpm lint`: pass; workspace lint scripts completed.
-- 2026-07-08T07:45Z final `pnpm typecheck`: pass after fail-closed Harbor JSON/throwing-client edge fix.
-- 2026-07-08T07:45Z final `pnpm test`: pass after fail-closed Harbor JSON/throwing-client edge fix.
-- 2026-07-08T07:45Z final `pnpm lint`: pass after fail-closed Harbor JSON/throwing-client edge fix.
-- 2026-07-08T09:53Z `pnpm --filter @webenvoy/core-runtime typecheck`: pass after main-controller hardening of Harbor request passthrough removal, HTTP URL restriction, and Lode root confinement.
-- 2026-07-08T09:54Z `pnpm --filter @webenvoy/api-server typecheck`: pass after POST `/tasks` request validation and duplicate run-id handling.
-- 2026-07-08T09:54Z `pnpm --filter @webenvoy/core-runtime test`: pass.
-- 2026-07-08T09:54Z `pnpm --filter @webenvoy/api-server test`: pass; includes boundary assertions that Harbor session/snapshot passthrough cannot override Core-owned fields, invalid run_id returns 400, duplicate run_id returns 409, and Lode registry paths cannot escape the configured root.
-- 2026-07-08T09:56Z `git diff --check`: pass.
-- 2026-07-08T09:56Z `loom fact-chain --target . --json`: pass for shared no_active_item baseline.
-- 2026-07-08T09:56Z `loom suite carrier validate --target . --item CORE-244 --json`: pass.
-- 2026-07-08T09:56Z `loom suite evidence validate --target . --item CORE-244 --json`: pass.
-- 2026-07-08T09:56Z `loom suite validate --target . --item CORE-244 --json`: pass.
-- 2026-07-08T09:57Z `pnpm --filter @webenvoy/api-server test`: pass after CORE-244 associated artifacts carrier fix.
-- 2026-07-08T10:00Z `loom resume --target . --item CORE-244 --json`: pass after checkpoint and ownership carrier alignment.
-- 2026-07-08T10:03Z `loom fact-chain --target . --json`: blocked after activating CORE-244 current pointer because status surface still carried worker-handoff wording; remediation is aligning work item, progress, and status surface to the main-controller PR path in this carrier update.
-- 2026-07-08T10:03Z live Harbor runtime evidence remained not attempted by contract; this is a scope boundary, not an active blocker for the Core mock-runtime PR readiness lane.
-- 2026-07-08T10:04Z `loom fact-chain --target . --json`: pass after CORE-244 active current pointer and carrier alignment.
-- 2026-07-08T10:04Z `loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json`: pass.
-- 2026-07-08T10:04Z `loom resume --target . --item CORE-244 --json`: pass.
-- 2026-07-08T10:04Z `git diff --check && jq empty .loom/bootstrap/init-result.json .loom/specs/CORE-244/build-evidence.json`: pass.
-- 2026-07-08T10:05Z `pnpm typecheck`: pass; schemas, core-runtime, API server, and conformance packages typecheck.
-- 2026-07-08T10:05Z `pnpm test`: pass; workspace build plus schemas/core/api-server/conformance self-checks pass.
-- 2026-07-08T10:05Z `pnpm lint`: pass.
-- 2026-07-08T10:09Z subagent Core review reported P1 evidence_policy private material passthrough, P1 duplicate run_id race returning 500, and P2 Lode symlink path escape. Main controller fixed all three before PR.
-- 2026-07-08T10:10Z `pnpm --filter @webenvoy/api-server typecheck`: pass after reviewer fixes.
-- 2026-07-08T10:10Z `pnpm --filter @webenvoy/api-server test`: pass; self-check now covers private `harbor.evidence_policy` rejection, duplicate run_id race 409 mapping, and symlink escape fail-closed.
-- 2026-07-08T10:10Z `pnpm --filter @webenvoy/core-runtime typecheck`: pass after `realpath` confinement change.
-- 2026-07-08T10:10Z `git diff --check`: pass.
-- 2026-07-08T10:12Z `pnpm typecheck`: pass after reviewer fixes.
-- 2026-07-08T10:12Z `pnpm test`: pass after reviewer fixes.
-- 2026-07-08T10:12Z `pnpm lint`: pass after reviewer fixes.
-- 2026-07-08T10:14Z `loom fact-chain --target . --json`: pass after reviewer fixes and carrier evidence update.
-- 2026-07-08T10:14Z `loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json`: pass after reviewer fixes and carrier evidence update.
-- 2026-07-08T10:14Z `jq empty .loom/bootstrap/init-result.json .loom/specs/CORE-244/build-evidence.json && git diff --check`: pass.
-
 ## Runtime Evidence
 
 - Run Entry: not_applicable_live_runtime_not_attempted
 - Logs Entry: not_applicable
-- Diagnostics Entry: packages/api-server/src/runtime-task-submit-self-check.ts
+- Diagnostics Entry: packages/api-server/src/self-check.ts;packages/core/src/self-check.ts
 - Verification Entry: .loom/progress/CORE-244.md
 - Lane Entry: .loom/specs/CORE-244/plan.md
-
-## Terminal Closeout Metadata
-
-- Terminal State: merged
-- Issue: 244
-- PR: 249
-- Merge Commit: 9101eaa6f42cc6584e8b428de5398f0c1f56539d
-- Target Branch: main
-- Closed At: 2026-07-08T10:39:22Z
-- Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/pull/249;https://github.com/WebEnvoy/WebEnvoy/actions/runs/28936264313;https://github.com/WebEnvoy/WebEnvoy/issues/243;https://github.com/WebEnvoy/WebEnvoy/issues/244;https://github.com/WebEnvoy/WebEnvoy/issues/245;https://github.com/WebEnvoy/WebEnvoy/issues/246;https://github.com/WebEnvoy/WebEnvoy/issues/247;https://github.com/WebEnvoy/WebEnvoy/issues/248
