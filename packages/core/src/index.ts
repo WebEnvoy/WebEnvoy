@@ -117,6 +117,19 @@ export {
 } from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
+  createHttpHarborRuntimeClient,
+  createLocalLodePackageResolver,
+  submitRuntimeTask,
+  type HarborRuntimeAdmissionRequest,
+  type HarborRuntimeClient,
+  type HttpHarborRuntimeClientOptions,
+  type LocalLodePackageResolverOptions,
+  type LodePackageResolver,
+  type LodePackageResolverInput,
+  type RuntimeTaskSubmissionDependencies,
+  type RuntimeTaskSubmissionRequest
+} from "./runtime-task-chain.js";
+export {
   actionRequestSchemaVersion,
   acceptReadOnlyTaskSubmission,
   taskIntentSchemaVersion,
