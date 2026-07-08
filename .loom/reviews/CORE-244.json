@@ -3,12 +3,12 @@
   "item_id": "CORE-244",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Carrier-only closeout review accepts CORE-244 terminal metadata and idle pointer sync after PR #249 merged and #243/#244/#245/#246/#247/#248 closed.",
-  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-08T10:22:00Z",
-  "reviewed_head": "9101eaa6f42cc6584e8b428de5398f0c1f56539d",
-  "reviewed_validation_summary": "loom fact-chain --target . --json; loom verify --target . --json; git diff --check passed locally before CORE-244 current pointer retire PR.",
-  "reviewed_validation_summary_hash": "4e25ada10a7eaa13aaa9d41bd6b182c1d990a86b616bf1f8198d489e5c785ac1",
+  "summary": "Code review allows CORE-244 at implementation head: Core API exposes /admission/health, capability-run list queries skip stale invalid records while single-run reads remain strict, and CORE-244 carriers now bind to the admission-contract branch and active worktree pointer. Scope is limited to Core admission/query compatibility and Loom carriers; it does not claim App packaged E2E, real site execution, account/profile/Cookie access, submit/publish/send, hosted browser, marketplace, batch collection, or risk-control bypass.",
+  "reviewer": "Codex main controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-08T18:02:25Z",
+  "reviewed_head": "ef90b275a129799e309873724b84f7eb588a5a88",
+  "reviewed_validation_summary": "2026-07-08T17:56Z UTC main-controller carrier validation passed after CORE-244 review drift fix: `git diff --check`; `loom fact-chain --target . --json`; `loom suite carrier validate --target . --item CORE-244 --json`; `loom suite evidence validate --target . --item CORE-244 --json`; `loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json`. Product-code validation from 2026-07-08T17:21Z remains unchanged and passed: Core/API/conformance typecheck and tests plus workspace typecheck. No real account, Cookie, browser profile import, production page action, submit, publish, send, or external visible action was performed.",
+  "reviewed_validation_summary_hash": "62b6a54cbd7a571978f0f9881458090a3d2e67c4793fe5db7ec08ecbccda4468",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-244.md",
   "fallback_to": null,
@@ -19,32 +19,42 @@
     "work_item": ".loom/work-items/CORE-244.md",
     "recovery_entry": ".loom/progress/CORE-244.md",
     "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "loom suite evidence validate --target /Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-admission-contract --item CORE-244 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target /Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-admission-contract --item CORE-244 --json",
     "suite_evidence_map": ".loom/specs/CORE-244/evidence-map.md",
+    "suite_consistency_analysis": null,
     "suite_task_carriers": [
       ".loom/specs/CORE-244/task-carrier.md"
     ],
-    "core_modules": [
-      "packages/core/src/runtime-task-chain.ts",
-      "packages/core/src/task-submission.ts",
-      "packages/core/src/index.ts",
-      "packages/api-server/src/server.ts",
-      "packages/api-server/src/index.ts",
-      "packages/api-server/src/runtime-task-submit-self-check.ts",
-      "packages/api-server/src/self-check.ts"
+    "suite_evidence_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/evidence-map.md"
     ],
-    "reviewer_findings_consumed": [
-      "P1 harbor.evidence_policy private material passthrough rejected at API boundary",
-      "P1 duplicate run_id race mapped to 409 instead of API 500",
-      "P2 Lode local resolver hardened with realpath root confinement including symlink escape coverage"
-    ],
-    "pre_review_fallback_classification": "loom pre-review blocked only on legacy deterministic tools/* commands that are absent from this repository checkout; suite validate/carrier/evidence, fact-chain, build, PR metadata preflight, full workspace typecheck/test/lint, and targeted self-checks passed."
+    "suite_carrier_consumed_contracts": [
+      "docs/methodology/harness/task-carrier-contract.md",
+      "docs/methodology/templates/execution-breakdown.md",
+      "docs/methodology/harness/full-spec-suite-cli-surface.md"
+    ]
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The implementation uses a mock Harbor HTTP server for validation and does not claim live runtime evidence. It validates trust-boundary inputs, rejects private evidence policy fields, strips session/snapshot passthrough override surfaces, maps duplicate run races to 409, confines Lode file reads with realpath, and records only refs/public state in Core."
-  },
-  "implementation_review_disposition": {
-    "status": "passed",
-    "reason": "After fixing the reviewer findings, targeted API/Core checks and full workspace typecheck/test/lint passed at the reviewed head."
+    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
   }
 }

@@ -288,8 +288,8 @@ const forbiddenRunRecordFieldNames = new Set([
   "user_business_data"
 ]);
 
-function requireRef(value: string, label: string): string {
-  if (value.length === 0) {
+function requireRef(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${label} must not be empty`);
   }
   return value;
@@ -702,7 +702,12 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
       const records: RunRecord[] = [];
       for (const file of files) {
         const runId = basename(file, ".json");
-        const record = await getRunRecord(runId);
+        let record: RunRecord | undefined;
+        try {
+          record = await getRunRecord(runId);
+        } catch {
+          continue;
+        }
         if (record) {
           records.push(record);
         }

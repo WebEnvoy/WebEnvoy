@@ -3,14 +3,14 @@
 ## Static Facts
 
 - Item ID: CORE-244
-- Goal: Implement Core #243 core runtime task chain batch anchored on Work Item #244 and covering #244/#245/#246/#247/#248.
-- Scope: App-facing Core API accepts a read-only task request, resolves Lode capability metadata/resource requirements from a local registry asset, calls Harbor local runtime API readiness/provider/session/snapshot/evidence endpoints, writes Run Record admission/failure facts, and returns evidence/runtime refs without claiming live task success. Ownership is limited to Core/WebEnvoy API server, Core runtime clients/orchestration, focused self-checks, and CORE-244 Loom carriers.
-- Execution Path: work/core-244-runtime-task-chain
+- Goal: Implement Core #243 core runtime task chain compatibility batch anchored on Work Item #244 and covering the App-facing admission/query repair for App #265.
+- Scope: App-facing Core API exposes admission health and keeps capability run list queries stable when stale or partial run records exist. Ownership is limited to Core/WebEnvoy API server, run record query paths, focused self-checks, and CORE-244 Loom carriers.
+- Execution Path: work/core-244-admission-contract
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
-- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-244 --json
-- Closing Condition: PR Ready, merge, post-merge closeout for #243/#244/#245/#246/#247/#248, and follow-up current pointer retire if required by gate.
+- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/conformance test; pnpm typecheck; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-244 --json
+- Closing Condition: PR Ready, merge, post-merge closeout for Core #243/#244 compatibility evidence, and follow-up current pointer retire if required by gate.
 
 ## Covered Issues
 
@@ -30,7 +30,7 @@
 ## Ownership Constraints
 
 - Writes limited to Core/WebEnvoy API server, Core runtime clients/orchestration, run record admission paths, focused self-checks, and CORE-244 Loom carriers.
-- Shared `.loom/status/current.md` remains `no_active_item`; this worker does not claim the shared current pointer.
+- Shared `.loom/status/current.md` is intentionally active for CORE-244 in this formal worktree so fact-chain, current-head review, and merge-ready consume the same item. Closeout/retire remains out of scope until after merge.
 - No subagent output was used or left unintegrated.
 
 ## Associated Artifacts
@@ -45,6 +45,8 @@
 - `.loom/specs/CORE-244/build-evidence.json`
 - `packages/core/src/runtime-task-chain.ts`
 - `packages/core/src/task-submission.ts`
+- `packages/core/src/run-record-store.ts`
+- `packages/core/src/self-check.ts`
 - `packages/core/src/index.ts`
 - `packages/api-server/src/server.ts`
 - `packages/api-server/src/index.ts`

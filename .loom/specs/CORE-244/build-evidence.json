@@ -1,9 +1,10 @@
 {
   "schema_version": "loom-build-evidence/v1",
   "item_id": "CORE-244",
-  "task_goal": "Implement Core #243 runtime task chain batch covering #244-#248.",
-  "branch": "work/core-244-runtime-task-chain",
-  "head_at_validation": "55c3c2506a6aaf91baaafeaa8741130e4d29ee54-plus-working-tree-diff",
+  "task_goal": "Implement the Core #243/#244 App-facing admission health and capability-run query compatibility slice for App #265.",
+  "branch": "work/core-244-admission-contract",
+  "head_at_validation": "b62f6e3e42fe0b6a3fe8a605d8cb55e346cbd413-plus-carrier-diff",
+  "current_pointer": "CORE-244 active in .loom/status/current.md until post-merge closeout/retire",
   "covered_issues": [244, 245, 246, 247, 248],
   "excluded_issues": [230, 231, 232, 233, 234, 238, 239, 240, 241, 242],
   "ownership_constraints": [
@@ -207,6 +208,18 @@
     }
   ],
   "integration_evidence": [
+    {
+      "id": "admission-health-query-fix-integrated",
+      "status": "integrated",
+      "locators": ["packages/api-server/src/server.ts", "packages/api-server/src/self-check.ts"],
+      "summary": "API server exposes GET /admission/health and self-check covers the App-facing admission health response."
+    },
+    {
+      "id": "stale-run-query-fix-integrated",
+      "status": "integrated",
+      "locators": ["packages/core/src/run-record-store.ts", "packages/core/src/self-check.ts"],
+      "summary": "Capability run list query skips stale partial records while single-run reads remain strict; self-check covers stale record behavior."
+    },
     {
       "id": "runtime-task-chain-integrated",
       "status": "integrated",

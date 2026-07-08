@@ -150,6 +150,20 @@ async function main(): Promise<void> {
       }
     });
 
+    assert.deepEqual(await getJson(port, "/admission/health"), {
+      status: 200,
+      body: {
+        service: "webenvoy-api-server",
+        status: "degraded",
+        checks: {
+          runRecordStore: "configured",
+          lodePackageResolver: "missing",
+          harborRuntimeClient: "missing"
+        },
+        consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
+      }
+    });
+
     assert.deepEqual(await getJson(port, `/runs/${runId}`), {
       status: 200,
       body: {
