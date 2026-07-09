@@ -3,7 +3,7 @@
   "item_id": "CORE-223",
   "task_goal": "Consume Harbor #234 site-resource facts in Core runtime admission so Lode-backed real-site tasks fail closed on unknown required facts.",
   "branch": "work/core-223-harbor-site-facts",
-  "head_at_validation": "818ae76699cb467d4b6d60aabad316b9c79097e0-plus-local-core-223-changes",
+  "head_at_validation": "5929c8a99db93e5b6cb519e203ba85fa6986fc07 plus carrier-only review-readiness evidence sync",
   "current_pointer": "CORE-223 active in .loom/status/current.md until PR/closeout retire",
   "covered_issues": [223, 243, 244],
   "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
@@ -30,7 +30,12 @@
     {"command": "loom suite validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite validate found minimal path with required artifacts."},
     {"command": "loom suite carrier validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite carrier validate found carrier locators, normalized status, relationships, and Work Item backlinks."},
     {"command": "loom suite evidence validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite evidence validate found present behavior, test, and fresh verification evidence."},
-    {"command": "loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json", "result": "pass", "evidence": "Build flow found integrated execution evidence and can proceed toward review."}
+    {"command": "loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json", "result": "pass", "evidence": "Build flow found integrated execution evidence and can proceed toward review."},
+    {"command": "tools/skills_surface.py check", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core product behavior."},
+    {"command": "tools/loom_check.py --profile source --source-surface contract-only", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Equivalent local `loom verify --target . --json` passed; hosted `loom-check` passed for PR #262 run 29019230310."},
+    {"command": "tools/check_release_surface.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Global `loom skills release-check --target . --json` returned block on Loom release/runtime-copy surfaces outside this no-release Core PR."},
+    {"command": "tools/version_surface_check.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. `loom version --json`, `loom installed-state validate --target . --json`, `loom doctor --target . --json`, and `loom host doctor --host codex --scope user --json` passed."},
+    {"command": "tools/check_npm_package.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Global `loom skills release-check --target . --json` reports runtime-copy parity failures for Loom packaging surfaces outside this no-release Core PR."}
   ],
   "integration_evidence": [
     {
