@@ -1,0 +1,38 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-259",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Carrier-only review allows CORE-259 to repair the CORE-248 stale current pointer using a separate review entry. The diff is limited to CORE-259 carriers, .loom/status/current.md, and .loom/bootstrap/init-result.json fact-chain entry points; .loom/reviews/CORE-248.json remains untouched, so PR #257 implementation review evidence is preserved. This review does not claim Core #243/App #265 live E2E, real Xiaohongshu/BOSS execution, or any product runtime behavior.",
+  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-09T11:24:30Z",
+  "reviewed_head": "9c753109490e60d4d8a5389784af765377ca5b51",
+  "reviewed_validation_summary": "2026-07-09T11:21Z UTC CORE-259 carrier-only validation at head `026978372b04809a674589e8ab794500d6bdb86e`: `git diff --check`, `jq empty .loom/bootstrap/init-result.json .loom/specs/CORE-259/build-evidence.json`, `loom fact-chain --target . --json`, `loom verify --target . --json`, `loom suite validate --target . --item CORE-259 --json`, `loom suite carrier validate --target . --item CORE-259 --json`, and `loom suite evidence validate --target . --item CORE-259 --json` passed. `loom build` / `loom checkpoint build` are not used as pass evidence for this carrier-only repair because they require implementation execution material and returned block without actionable missing inputs after required carrier inputs were present. No product code changed, `.loom/reviews/CORE-248.json` remained unchanged, and no real browser/account/profile/Cookie/production page or external-visible action occurred.",
+  "reviewed_validation_summary_hash": "514d6fc72908c68d6bcfbc74ab397f0026e319a90f57ee7430eecf7c523c7718",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-259.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "Continue Core #243/#244 implementation after CORE-259 closeout; Core still needs to consume Harbor #234 site-resource and write-precheck facts.",
+    "Final App E2E remains gated on explicit user authorization before any real account/profile/production-page action."
+  ],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-259.md",
+    "recovery_entry": ".loom/progress/CORE-259.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "not_applicable_carrier_only",
+    "suite_validation": "loom suite validate --target . --item CORE-259 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-259 --json",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-259 --json",
+    "suite_evidence_map": ".loom/specs/CORE-259/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/CORE-259/task-carrier.md"
+    ]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored CORE-259 carrier-only review approved the current head for review checkpoint consumption without overwriting CORE-248 implementation review evidence."
+  }
+}
