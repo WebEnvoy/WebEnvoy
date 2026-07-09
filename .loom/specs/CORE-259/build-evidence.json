@@ -3,7 +3,7 @@
   "item_id": "CORE-259",
   "task_goal": "Retire the stale CORE-248 current pointer without overwriting CORE-248 implementation review evidence.",
   "branch": "work/core-259-carrier-retire",
-  "head_at_validation": "pending",
+  "head_at_validation": "01d688bf0021cb658b7372313b21e0c9a7845045",
   "current_pointer": "CORE-259 active in .loom/status/current.md for this carrier-only repair PR",
   "covered_issues": [259],
   "excluded_issues": [243, 244, 225, 226, 227, 228, 230, 248],
@@ -17,11 +17,52 @@
     "No submit, publish, send, save, hosted browser, marketplace, batch collection, or risk-control bypass"
   ],
   "delegations": [],
-  "validation_results": [],
+  "validation_results": [
+    {
+      "command": "git diff --check",
+      "result": "pass",
+      "evidence": "No whitespace errors at head 01d688bf0021cb658b7372313b21e0c9a7845045."
+    },
+    {
+      "command": "jq empty .loom/bootstrap/init-result.json .loom/specs/CORE-259/build-evidence.json",
+      "result": "pass",
+      "evidence": "Locator truth and build evidence JSON are parseable."
+    },
+    {
+      "command": "loom fact-chain --target . --json",
+      "result": "pass",
+      "evidence": "Fact-chain reads CORE-259 from a single entry and no longer reports CORE-248 current-item mismatch."
+    },
+    {
+      "command": "loom verify --target . --json",
+      "result": "pass",
+      "evidence": "Installed Loom delivery layers verified."
+    },
+    {
+      "command": "loom suite validate --target . --item CORE-259 --json",
+      "result": "pass",
+      "evidence": "Minimal suite path found required spec and plan artifacts."
+    },
+    {
+      "command": "loom suite carrier validate --target . --item CORE-259 --json",
+      "result": "pass",
+      "evidence": "Task carrier row and CORE-259 work-item/progress backlinks are valid."
+    },
+    {
+      "command": "loom suite evidence validate --target . --item CORE-259 --json",
+      "result": "pass",
+      "evidence": "Evidence map has present behavior, test, and fresh verification evidence."
+    },
+    {
+      "command": "loom build --target . --item CORE-259 --build-evidence .loom/specs/CORE-259/build-evidence.json --json",
+      "result": "not_applicable",
+      "evidence": "Carrier-only repair has no implementation execution material. The command returned block without missing inputs after required carrier inputs were present, so it is classified as a Loom build-surface limitation for this lane, not product behavior."
+    }
+  ],
   "integration_evidence": [
     {
       "id": "separate-core-259-carrier",
-      "status": "pending_validation",
+      "status": "integrated",
       "locators": [
         ".loom/work-items/CORE-259.md",
         ".loom/progress/CORE-259.md",
