@@ -8,6 +8,7 @@
 - `packages/api-server/src/server.ts`
 - `packages/api-server/src/index.ts`
 - `packages/api-server/src/runtime-task-submit-self-check.ts`
+- `packages/api-server/src/runtime-process-self-check.ts`
 - `packages/api-server/src/self-check.ts`
 - `.loom/work-items/CORE-244.md`
 - `.loom/progress/CORE-244.md`
@@ -23,4 +24,4 @@
 
 - API submit path resolves Lode assets and calls Harbor local runtime API endpoints in order.
 - Readiness/runtime failures produce failed Run Records and clear failure codes.
-- Tests use mock HTTP server only and do not claim live runtime evidence.
+- Tests include in-process mock HTTP server coverage and a built-process API server smoke. They do not claim live Xiaohongshu/BOSS runtime evidence.
