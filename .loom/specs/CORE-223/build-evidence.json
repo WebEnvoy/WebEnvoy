@@ -1,0 +1,65 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-223",
+  "task_goal": "Consume Harbor #234 site-resource facts in Core runtime admission so Lode-backed real-site tasks fail closed on unknown required facts.",
+  "branch": "work/core-223-harbor-site-facts",
+  "head_at_validation": "f5b20a1fd5bc37a9ccb5e63d93c233718bf6a510 plus carrier-only review-readiness evidence sync",
+  "current_pointer": "CORE-223 active in .loom/status/current.md until PR/closeout retire",
+  "covered_issues": [223, 243, 244],
+  "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
+  "ownership_constraints": [
+    "Core/WebEnvoy only",
+    "No App, Harbor, or Lode code changes",
+    "No real site/account/profile/Cookie access",
+    "No external visible action",
+    "No submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-control bypass"
+  ],
+  "delegations": [],
+  "generated_at": "2026-07-09T12:36:00Z",
+  "summary": "Core consumes Harbor #234 site-resource facts for Lode-backed real-site resource admission and fails closed on unknown required facts. Review cleanup removed out-of-scope write-precheck runtime calls from this PR.",
+  "validation_results": [
+    {"command": "pnpm install --frozen-lockfile", "result": "pass", "evidence": "Installed worktree dependencies without lockfile changes."},
+    {"command": "pnpm exec tsc -p packages/core/tsconfig.json --noEmit", "result": "pass", "evidence": "Core runtime TypeScript typecheck passed."},
+    {"command": "pnpm --filter @webenvoy/core-runtime build", "result": "pass", "evidence": "Core runtime package built."},
+    {"command": "pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit", "result": "pass", "evidence": "API server TypeScript typecheck passed after Core build artifacts were present."},
+    {"command": "pnpm --filter @webenvoy/api-server test", "result": "pass", "evidence": "API self-check covers no-external Xiaohongshu Lode package + mock Harbor #234 site-resource facts success and unknown fact fail-closed behavior."},
+    {"command": "pnpm --filter @webenvoy/core-runtime test", "result": "pass", "evidence": "Core runtime self-check suite passed."},
+    {"command": "pnpm typecheck", "result": "pass", "evidence": "Workspace TypeScript typecheck passed."},
+    {"command": "git diff --check", "result": "pass", "evidence": "No whitespace errors."},
+    {"command": "loom fact-chain --target . --json", "result": "pass", "evidence": "Fact chain validates CORE-223 implementation carrier."},
+    {"command": "loom suite validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite validate found minimal path with required artifacts."},
+    {"command": "loom suite carrier validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite carrier validate found carrier locators, normalized status, relationships, and Work Item backlinks."},
+    {"command": "loom suite evidence validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite evidence validate found present behavior, test, and fresh verification evidence."},
+    {"command": "loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json", "result": "pass", "evidence": "Build flow found integrated execution evidence and can proceed toward review."},
+    {"command": "tools/skills_surface.py check", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core product behavior."},
+    {"command": "tools/loom_check.py --profile source --source-surface contract-only", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Equivalent local `loom verify --target . --json` passed; hosted `loom-check` passed for PR #262 run 29019230310."},
+    {"command": "tools/check_release_surface.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Global `loom skills release-check --target . --json` returned block on Loom release/runtime-copy surfaces outside this no-release Core PR."},
+    {"command": "tools/version_surface_check.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. `loom version --json`, `loom installed-state validate --target . --json`, `loom doctor --target . --json`, and `loom host doctor --host codex --scope user --json` passed."},
+    {"command": "tools/check_npm_package.py", "result": "not_present", "evidence": "`tools/` is not present in this repo checkout. Global `loom skills release-check --target . --json` reports runtime-copy parity failures for Loom packaging surfaces outside this no-release Core PR."}
+  ],
+  "integration_evidence": [
+    {
+      "id": "harbor-site-resource-facts-consumption",
+      "status": "integrated",
+      "locators": ["packages/core/src/runtime-task-chain.ts"],
+      "summary": "Core now calls Harbor site-resource facts for Xiaohongshu/BOSS package refs and normalizes available facts into Core resource admission facts."
+    },
+    {
+      "id": "write-precheck-scope-cleanup",
+      "status": "integrated",
+      "locators": ["packages/core/src/runtime-task-chain.ts"],
+      "summary": "Out-of-scope write-precheck runtime calls were removed from CORE-223; write-precheck remains owned by later Core/App write-precheck Work Items."
+    },
+    {
+      "id": "api-xiaohongshu-site-facts-self-check",
+      "status": "integrated",
+      "locators": ["packages/api-server/src/runtime-task-submit-self-check.ts"],
+      "summary": "API self-check asserts Core calls Harbor #234 site-resource endpoint, succeeds on available Xiaohongshu facts, and fails closed when page.pinia_store.ready is unknown."
+    }
+  ],
+  "runtime_live_evidence": {
+    "attempted": false,
+    "reason": "This Core PR uses mock Harbor/Lode validation only. Real account/profile/production page actions require explicit user authorization and are App E2E-owned.",
+    "boundary": "No external visible action was performed."
+  }
+}

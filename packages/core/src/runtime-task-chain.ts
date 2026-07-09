@@ -18,6 +18,7 @@ import { acceptReadOnlyTaskSubmission, type TaskIntentEnvelope, type TaskSubmiss
 type JsonObject = Record<string, unknown>;
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 type HarborResourceFactState = HarborResourceFacts["resource_facts"][number]["state"];
+type SiteRuntimeId = "xiaohongshu" | "boss";
 
 export type RuntimeTaskSubmissionRequest = {
   run_id: string;
@@ -377,6 +378,17 @@ function assetByRole(manifest: JsonObject | undefined, role: string): JsonObject
   return assets.find((asset) => asset?.role === role);
 }
 
+function siteTaskFromPackageRef(packageRef: string): { site_id: SiteRuntimeId; task_kind: string } | undefined {
+  const match = /^lode:\/\/site-capability\/(xiaohongshu|boss)\/([^@]+)@/.exec(packageRef);
+  if (!match) return undefined;
+  const taskSegment = match[2];
+  if (!taskSegment) return undefined;
+  return {
+    site_id: match[1] as SiteRuntimeId,
+    task_kind: taskSegment.replace(/-/g, "_")
+  };
+}
+
 export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOptions): HarborRuntimeClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const fetchJson = options.fetch ?? fetch;
@@ -424,6 +436,14 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const runtime = coreRuntimeFactsFromSession(session, identity);
       if (isFailure(runtime)) return runtime;
       const runtimeSessionRef = runtime.runtime_session_ref;
+      const siteTask = siteTaskFromPackageRef(input.package_ref);
+      const siteResourceFacts = siteTask === undefined
+        ? undefined
+        : await requestJson(
+            "GET",
+            `/runtime/sessions/${encodeURIComponent(runtimeSessionRef)}/site-resource-facts?site_id=${encodeURIComponent(siteTask.site_id)}&task_kind=${encodeURIComponent(siteTask.task_kind)}`
+          );
+      if (isFailure(siteResourceFacts)) return siteResourceFacts;
 
       const snapshot = await requestJson("POST", `/runtime/sessions/${encodeURIComponent(runtimeSessionRef)}/snapshot`, {
         run_id: input.run_id,
@@ -434,13 +454,14 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
       const scene = sceneFromSnapshot(snapshot);
       const evidenceFailure = "status" in scene ? undefined : await verifyEvidenceRefs(scene.evidence_refs);
-      return {
+      const facts: HarborAdmissionInput = {
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
         harbor_provider_status: providerStatus(provider),
         harbor_runtime_facts: runtime,
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
-        harbor_resource_facts: resourceFactsFromSession(session, runtime)
+        harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
       };
+      return facts;
     }
   };
 
@@ -569,6 +590,27 @@ function sceneFromSnapshot(value: unknown): HarborCoreSceneReference | HarborUna
   if (direct?.status === "unavailable") return unavailable(string(direct.failure_class) ?? "snapshot_missing", direct.retryable !== false);
   if (direct?.schema_version === "harbor-page-scene-refs/v0") return direct as HarborCoreSceneReference;
   return unavailable("snapshot_missing");
+}
+
+function resourceFactsFromSiteFacts(value: unknown): HarborResourceFacts | HarborUnavailable | undefined {
+  if (value === undefined) return undefined;
+  const direct = pickObject(value, "harbor_site_resource_facts", "site_resource_facts", "resource_facts");
+  if (direct?.status === "unavailable") return unavailable(string(direct.failure_class) ?? "resource_requirement_unmatched", direct.retryable !== false);
+  if (direct?.schema_version !== "harbor-site-resource-facts/v0") return unavailable("resource_requirement_unmatched");
+
+  const entries = Array.isArray(direct.resource_facts) ? direct.resource_facts.map(object) : [];
+  return {
+    schema_version: "harbor-core-resource-facts/v0",
+    resource_facts: entries.flatMap((entry) => {
+      const fact_key = string(entry?.key) ?? string(entry?.fact_key);
+      if (!fact_key) return [];
+      const rawState = string(entry?.state);
+      const state: HarborResourceFactState = rawState === "available" ? "available" : rawState === "unavailable" || rawState === "blocked" || rawState === "unsupported" ? "unavailable" : "unknown";
+      const source_ref = string(entry?.evidence_ref);
+      return [source_ref === undefined ? { fact_key, state } : { fact_key, state, source_ref }];
+    }),
+    consumer_boundary: resourceFactsBoundary
+  };
 }
 
 function resourceFactsFromSession(value: unknown, runtime: HarborCoreRuntimeFacts): HarborResourceFacts {

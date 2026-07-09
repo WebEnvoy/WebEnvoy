@@ -1,16 +1,8 @@
-# Current Status
+# CORE-223 Progress
 
-## Derived Fact Chain View
+## Dynamic Facts
 
 - Item ID: CORE-223
-- Goal: Consume Harbor #234 site-resource facts in Core runtime admission so App-submitted real-site read-only tasks fail closed unless Harbor public runtime facts satisfy Lode resource requirements.
-- Scope: Core/WebEnvoy ownership only. This batch adds Core HTTP client calls to Harbor `/runtime/sessions/{runtime_session_ref}/site-resource-facts`, maps Harbor site facts into Core resource admission facts, preserves existing snapshot/evidence-ref verification, and extends API self-checks with a no-external Xiaohongshu package path.
-- Execution Path: work/core-223-harbor-site-facts
-- Workspace Entry: .
-- Recovery Entry: .loom/progress/CORE-223.md
-- Review Entry: .loom/reviews/CORE-223.json
-- Validation Entry: pnpm exec tsc -p packages/core/tsconfig.json --noEmit; pnpm --filter @webenvoy/core-runtime build; pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/core-runtime test; pnpm typecheck; git diff --check; loom fact-chain/suite/carrier/evidence after carrier creation.
-- Closing Condition: PR ready, merge, post-merge closeout for Core #223/#243 resource admission evidence, without closing final App E2E issues until App-driven live runtime evidence exists.
 - Current Checkpoint: merge
 - Current Stop: PR #262 is open at head `435e81674da21de443a4e853281ecafe2f45c935`; implementation validation, PR metadata readback, spec review, and code review are consumable. The lane is waiting for `loom-pr-merge-gate` and controlled merge. This Core-only PR does not close Core #243 or claim App live E2E.
 - Next Step: Rerun PR merge gate and controlled merge for PR #262, then perform post-merge closeout for Core #223 while keeping final App/Core live E2E issues open.
@@ -19,6 +11,15 @@
 - Recovery Boundary: Revert this branch. No App/Harbor/Lode code changes, real account/profile/Cookie/production page access, submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-bypass action occurred. Final product E2E still requires App-driven runtime evidence and user authorization before any real account/profile/production page action.
 - Current Lane: Core Harbor #234 site-resource facts admission consumption.
 
+## Execution Ledger
+
+- Ledger Binding: recovery_entry
+- Plan Locator: .loom/specs/CORE-223/plan.md
+- Acceptance Locator: .loom/specs/CORE-223/spec.md
+- Validation Evidence Locator: .loom/specs/CORE-223/build-evidence.json
+- Handoff Notes Locator: .loom/specs/CORE-223/task-carrier.md
+- Evidence Freshness: current
+
 ## Runtime Evidence
 
 - Run Entry: packages/api-server/src/runtime-task-submit-self-check.ts
@@ -26,10 +27,3 @@
 - Diagnostics Entry: packages/core/src/runtime-task-chain.ts
 - Verification Entry: .loom/progress/CORE-223.md
 - Lane Entry: .loom/specs/CORE-223/plan.md
-
-## Sources
-
-- Static Truth: .loom/work-items/CORE-223.md
-- Dynamic Truth: .loom/progress/CORE-223.md
-- Locator Truth: .loom/bootstrap/init-result.json
-- Fact Chain CLI: loom fact-chain --target . --json
