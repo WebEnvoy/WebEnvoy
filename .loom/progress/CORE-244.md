@@ -3,7 +3,7 @@
 ## Dynamic Facts
 
 - Item ID: CORE-244
-- Current Checkpoint: lane_retired_after_merge
+- Current Checkpoint: merge
 - Current Stop: PR #252 and PR #253 merged to `main`, covering CORE-244 admission/query compatibility and structured Harbor identity failure semantics. Core #244 remains open because successful live task execution and terminal result/evidence refs still require App/Core/Harbor E2E evidence.
 - Next Step: Continue the next real Core runtime batch from `no_active_item`; do not treat #252/#253 as full Core #243/#244 closeout.
 - Blockers: None
