@@ -3,18 +3,18 @@
 ## Static Facts
 
 - Item ID: CORE-248
-- Goal: Complete the Core #248 terminal read-only result/evidence refs slice after successful App-facing task submission, Lode package resolution, and Harbor runtime admission.
-- Scope: Core/WebEnvoy only. POST `/tasks` may complete a read-only run to a terminal refs-only result when Harbor returns valid scene/evidence refs. Query endpoints must expose run/result/evidence/session refs without raw browser material. Ownership is limited to Core runtime task-chain code, focused API self-checks, and CORE-248 carriers.
-- Execution Path: work/core-248-terminal-read-result
+- Goal: Correct the Core #248 terminal read-only result/evidence refs slice so Harbor evidence refs are only recorded after the runtime API positively confirms each requested ref.
+- Scope: Core/WebEnvoy only. POST `/tasks` may complete a read-only run to a terminal refs-only result only when Harbor returns valid same-origin scene refs and each evidence lookup confirms the exact requested ref with an available access state. Query endpoints must expose run/result/evidence/session refs without raw browser material. Ownership is limited to Core runtime task-chain code, focused API self-checks, and CORE-248 carriers.
+- Execution Path: work/core-248-evidence-ref-validation
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-248.md
 - Review Entry: .loom/reviews/CORE-248.json
-- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm typecheck; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-248 --json
-- Closing Condition: PR ready, merge, post-merge closeout for Core #248 and covered Core runtime result/evidence refs, with App E2E left open until App consumes the API.
+- Validation Entry: pnpm exec tsc -p packages/core/tsconfig.json --noEmit; pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/core-runtime test; pnpm typecheck; git diff --check; loom fact-chain --target . --json; loom suite validate/carrier/evidence --target . --item CORE-248 --json
+- Closing Condition: PR ready, merge, post-merge closeout for the corrective Core #248 evidence-ref validation slice, with App E2E left open until App consumes the API.
 
 ## Covered Issues
 
-- #248 return result/evidence/failure refs.
+- #248 return result/evidence/failure refs, including corrective Harbor evidence-ref validation.
 - #244 submit/admission API terminal success behavior for read-only runs.
 - #243 Core runtime chain evidence needed by App #265.
 

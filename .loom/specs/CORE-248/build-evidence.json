@@ -1,12 +1,12 @@
 {
   "schema_version": "loom-build-evidence/v1",
   "item_id": "CORE-248",
-  "task_goal": "Complete the Core #248 terminal read-only result/evidence refs slice for App-facing task submissions.",
-  "branch": "work/core-248-terminal-read-result",
-  "head_at_validation": "554ed2f220f87c4fc58c21a6f685530ac21e728b-plus-working-diff-2026-07-09T05:03Z",
+  "task_goal": "Correct the Core #248 terminal read-only result/evidence refs slice so Harbor evidence refs are only recorded after the runtime API positively confirms each requested ref.",
+  "branch": "work/core-248-evidence-ref-validation",
+  "head_at_validation": "0b97b8f4f53f1287373ef02648f7f77b0c73c65b-review-prep-carrier-baseline",
   "current_pointer": "CORE-248 active in .loom/status/current.md until PR/closeout retire",
-  "covered_issues": [248, 244, 243],
-  "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
+  "covered_issues": [248, 243],
+  "excluded_issues": [220, 223, 225, 226, 227, 228, 230, 234],
   "ownership_constraints": [
     "Core/WebEnvoy only",
     "No App, Harbor, or Lode code changes",
@@ -14,22 +14,61 @@
     "No external visible action",
     "No submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-control bypass"
   ],
-  "delegations": [],
+  "delegations": [
+    {
+      "agent": "019f45d3-8a60-7360-a480-7bac9fa1d0b3",
+      "task_goal": "Tighten Core terminal result Harbor evidence-ref validation and add focused API self-check coverage.",
+      "context_locators": [
+        "packages/core/src/runtime-task-chain.ts",
+        "packages/api-server/src/runtime-task-submit-self-check.ts",
+        "https://github.com/WebEnvoy/WebEnvoy/issues/248"
+      ],
+      "read_scope": [
+        "Core runtime task-chain evidence lookup flow",
+        "API runtime task submit self-check fixtures"
+      ],
+      "status": "integrated",
+      "scope": "Core #248 evidence-ref validation code and focused API self-checks",
+      "write_ownership": [
+        "packages/core/src/runtime-task-chain.ts",
+        "packages/api-server/src/runtime-task-submit-self-check.ts"
+      ],
+      "non_goals": [
+        "No .loom carrier edits by subagent",
+        "No App, Harbor, or Lode code changes",
+        "No real browser/account/profile/Cookie/production page action"
+      ],
+      "validation_expectation": [
+        "Core/API typecheck passes",
+        "API self-check covers malformed and mismatched evidence lookup responses failing closed",
+        "git diff --check passes"
+      ],
+      "output_format": "changed files, implementation summary, validation commands/results, blockers/risks, scope confirmation",
+      "integration_target": "Main controller review and commit in CORE-248 corrective PR",
+      "validation": [
+        "pnpm exec tsc -p packages/core/tsconfig.json --noEmit",
+        "pnpm --filter @webenvoy/core-runtime build",
+        "pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit",
+        "pnpm --filter @webenvoy/api-server test",
+        "git diff --check"
+      ]
+    }
+  ],
   "validation_results": [
     {
-      "command": "pnpm install",
+      "command": "pnpm install --frozen-lockfile",
       "result": "pass",
       "evidence": "Installed worktree dependencies without lockfile changes."
     },
     {
-      "command": "pnpm --filter @webenvoy/core-runtime typecheck",
+      "command": "pnpm exec tsc -p packages/core/tsconfig.json --noEmit",
       "result": "pass",
       "evidence": "Core runtime TypeScript typecheck passed."
     },
     {
-      "command": "pnpm --filter @webenvoy/api-server typecheck",
+      "command": "pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit",
       "result": "pass",
-      "evidence": "API server TypeScript typecheck passed after Core build."
+      "evidence": "API server TypeScript typecheck passed after Core build artifacts were present."
     },
     {
       "command": "pnpm --filter @webenvoy/core-runtime test",
@@ -39,7 +78,7 @@
     {
       "command": "pnpm --filter @webenvoy/api-server test",
       "result": "pass",
-      "evidence": "API self-check passed, including POST /tasks terminal succeeded run, result envelope, evidence refs, capability-runs status count, and fail-closed edge cases."
+      "evidence": "API self-check passed, including invalid scene URL staying admitted/non-terminal and malformed/mismatched Harbor evidence lookup responses failing closed without copied evidence_refs."
     },
     {
       "command": "pnpm typecheck",
@@ -52,143 +91,43 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "final pnpm --filter @webenvoy/core-runtime typecheck",
+      "command": "loom fact-chain --target . --json",
       "result": "pass",
-      "evidence": "Core runtime typecheck passed after adding same-origin protection to terminal read completion."
+      "evidence": "Fact chain validates CORE-248 corrective implementation carrier."
     },
     {
-      "command": "final pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API self-check still passes after same-origin protection."
-    },
-    {
-      "command": "final pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed after same-origin protection."
-    },
-    {
-      "command": "final git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors after same-origin protection."
-    },
-    {
-      "command": "2026-07-09T05:00Z pnpm --filter @webenvoy/core-runtime typecheck",
-      "result": "pass",
-      "evidence": "Core runtime TypeScript typecheck passed after requiring valid same-origin Harbor scene URLs."
-    },
-    {
-      "command": "2026-07-09T05:00Z pnpm --filter @webenvoy/api-server typecheck",
-      "result": "pass",
-      "evidence": "API server TypeScript typecheck passed after same-origin scene guard and mismatched-origin self-check."
-    },
-    {
-      "command": "2026-07-09T05:00Z pnpm --filter @webenvoy/core-runtime test",
-      "result": "pass",
-      "evidence": "Core runtime self-check suite passed."
-    },
-    {
-      "command": "2026-07-09T05:00Z pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API self-check passed, including terminal success for same-origin Harbor scene and non-terminal admitted state for mismatched-origin Harbor scene."
-    },
-    {
-      "command": "2026-07-09T05:00Z pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed."
-    },
-    {
-      "command": "2026-07-09T05:00Z git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "2026-07-09T05:00Z loom suite carrier validate --target . --item CORE-248 --json",
+      "command": "loom suite carrier validate --target . --item CORE-248 --json",
       "result": "pass",
       "evidence": "Suite carrier validate found carrier locators, normalized status, relationships, and Work Item backlinks."
     },
     {
-      "command": "2026-07-09T05:00Z loom suite validate --target . --item CORE-248 --json",
-      "result": "pass",
-      "evidence": "Suite validate found a minimal suite path with core required artifacts present."
-    },
-    {
-      "command": "2026-07-09T05:00Z loom suite evidence validate --target . --item CORE-248 --json",
+      "command": "loom suite evidence validate --target . --item CORE-248 --json",
       "result": "pass",
       "evidence": "Suite evidence validate found present behavior, test, and fresh verification evidence."
     },
     {
-      "command": "2026-07-09T05:00Z loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json",
+      "command": "loom suite validate --target . --item CORE-248 --json",
+      "result": "pass",
+      "evidence": "Suite validate found a minimal suite path with required artifacts present."
+    },
+    {
+      "command": "loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json",
       "result": "pass",
       "evidence": "Build flow found integrated execution evidence and can proceed toward review."
-    },
-    {
-      "command": "2026-07-09T05:03Z pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API self-check passed with same-origin terminal success, mismatched/missing scene URL non-terminal cases, and invalid evidence refs failing closed."
-    },
-    {
-      "command": "2026-07-09T05:03Z pnpm --filter @webenvoy/core-runtime typecheck",
-      "result": "pass",
-      "evidence": "Core runtime TypeScript typecheck passed."
-    },
-    {
-      "command": "2026-07-09T05:03Z git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "2026-07-09T05:03Z pnpm --filter @webenvoy/api-server typecheck",
-      "result": "pass",
-      "evidence": "API server TypeScript typecheck passed."
-    },
-    {
-      "command": "2026-07-09T05:03Z pnpm --filter @webenvoy/core-runtime test",
-      "result": "pass",
-      "evidence": "Core runtime self-check suite passed."
-    },
-    {
-      "command": "2026-07-09T05:03Z pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed."
-    },
-    {
-      "command": "2026-07-09T05:03Z loom suite carrier validate --target . --item CORE-248 --json && loom suite validate --target . --item CORE-248 --json && loom suite evidence validate --target . --item CORE-248 --json",
-      "result": "pass",
-      "evidence": "Suite carrier, suite, and evidence validation passed."
-    },
-    {
-      "command": "2026-07-09T05:03Z loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json",
-      "result": "pass",
-      "evidence": "Build flow found integrated execution evidence and can proceed toward review."
-    },
-    {
-      "command": "2026-07-09T05:12Z loom verify --target . --json; loom installed-state validate --target . --json; loom version --json; loom doctor --target . --json; loom host doctor --host codex --scope user --json",
-      "result": "pass",
-      "evidence": "Installed-state, version, doctor, and host plugin readback passed."
-    },
-    {
-      "command": "2026-07-09T05:12Z loom skills check --target . --json",
-      "result": "block_classified_tool_surface",
-      "evidence": "Blocked on pre-existing .loom/bootstrap repo-local payload residue; classified as Loom tool-surface blocker outside this Core #248 product slice."
-    },
-    {
-      "command": "2026-07-09T05:12Z loom skills release-check --target . --json",
-      "result": "block_classified_tool_surface",
-      "evidence": "Blocked on Loom release docs/workflow/runtime-copy surfaces outside this no-release Core PR; PR metadata declares no_release."
     }
   ],
   "integration_evidence": [
     {
-      "id": "core-terminal-read-completion-integrated",
+      "id": "harbor-evidence-ref-positive-confirmation",
       "status": "integrated",
       "locators": ["packages/core/src/runtime-task-chain.ts"],
-      "summary": "Read-only submitted tasks with valid Harbor scene/evidence refs transition admitted -> running -> succeeded and store a refs-only result projection."
+      "summary": "Core now fails closed unless each Harbor evidence lookup response has evidence_ref equal to the requested ref and access_state equal to available."
     },
     {
-      "id": "api-terminal-result-self-check-integrated",
+      "id": "api-evidence-ref-fail-closed-self-check",
       "status": "integrated",
       "locators": ["packages/api-server/src/runtime-task-submit-self-check.ts"],
-      "summary": "API self-check asserts terminal run status, result/evidence refs, result envelope, capability-run status count, mismatched/missing scene URLs remaining non-terminal, and invalid evidence refs failing closed."
+      "summary": "API self-check asserts invalid scene URL stays admitted/non-terminal and malformed/mismatched evidence lookup responses return evidence_unavailable, failed run status, and no copied evidence_refs."
     }
   ],
   "runtime_live_evidence": {

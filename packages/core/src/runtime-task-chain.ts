@@ -449,7 +449,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const evidence = await requestJson("GET", `/runtime/evidence/${encodeURIComponent(ref)}`);
       if (isFailure(evidence)) return failure("evidence_reference", "evidence_unavailable", "evidence", "rerun_with_evidence");
       const value = object(evidence);
-      if (value?.status === "unavailable" || value?.access_state === "missing" || value?.access_state === "expired") {
+      if (value?.evidence_ref !== ref || value.access_state !== "available") {
         return failure("evidence_reference", "evidence_unavailable", "evidence", "rerun_with_evidence");
       }
     }
