@@ -3,31 +3,18 @@
   "item_id": "CORE-223",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Carrier-only current-head review for CORE-223 PR #262 at 435e81674da21de443a4e853281ecafe2f45c935. Since the prior implementation review, changes are limited to Loom review/checkpoint carrier updates and portable workspace-entry metadata; Core runtime behavior remains the reviewed Harbor site-resource facts admission implementation. No App/Harbor/Lode code, real browser/account/profile/Cookie, production page access, submit/publish/send/save, hosted browser, marketplace, batch collection, or risk-control bypass is included. App #265/Core #243 live E2E remains open.",
+  "summary": "Carrier-only current-head review for CORE-223 closeout-sync PR #263 at cdf82f30cbba5ca0fe7b68b698f60cb328501454. Changes are limited to .loom/bootstrap/init-result.json, .loom/status/current.md, and .loom/progress/CORE-223.md: CORE-223 terminal closeout metadata is recorded, and the shared fact-chain pointer returns to no_active_item/idle after PR #262 merged and issue #223 closed. Validation consumed git diff --check, jq empty .loom/bootstrap/init-result.json, loom fact-chain --target . --json, loom status --target . --json, loom verify --target . --json, PR #262 merge/readback, and PR #263 metadata preflight/readback. No product code, Core #243 closeout, App/Harbor/Lode changes, real browser/account/profile/Cookie/production page access, submit/publish/send/save, hosted browser, marketplace, batch collection, or risk-control bypass is included.",
   "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-09T13:21:22Z",
-  "reviewed_head": "435e81674da21de443a4e853281ecafe2f45c935",
+  "authored_at": "2026-07-09T13:49:42Z",
+  "reviewed_head": "cdf82f30cbba5ca0fe7b68b698f60cb328501454",
   "reviewed_validation_summary": "2026-07-09T12:54Z UTC: implementation validation remained green after review cleanup removed out-of-scope write-precheck runtime calls from CORE-223. `pnpm install --frozen-lockfile`, `pnpm exec tsc -p packages/core/tsconfig.json --noEmit`, `pnpm --filter @webenvoy/core-runtime build`, `pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit`, `pnpm --filter @webenvoy/api-server test`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm typecheck`, `git diff --check`, `loom fact-chain --target . --json`, `loom suite validate --target . --item CORE-223 --json`, `loom suite carrier validate --target . --item CORE-223 --json`, `loom suite evidence validate --target . --item CORE-223 --json`, `loom checkpoint build --target . --item CORE-223 --json`, and `loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json` passed. API self-check includes a no-external mock Xiaohongshu Lode package and mock Harbor #234 site-resource facts path; Core calls `/runtime/sessions/{ref}/site-resource-facts?site_id=xiaohongshu&task_kind=search_notes`, succeeds when required facts are available, and fails closed when `page.pinia_store.ready` is unknown. Deterministic review-readiness evidence: `tools/skills_surface.py check` is not present in this repo; equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core product behavior. `tools/loom_check.py --profile source --source-surface contract-only` is not present in this repo; hosted `loom-check` passed for PR #262 run 29019230310 and local `loom verify --target . --json` passed. `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repo; global `loom skills release-check --target . --json` returned block on Loom release/runtime-copy surfaces outside this no-release Core PR, while `loom installed-state validate --target . --json`, `loom version --json`, `loom doctor --target . --json`, and `loom host doctor --host codex --scope user --json` passed. No App/Harbor/Lode code changed and no real browser/account/profile/Cookie/production page action occurred.",
   "reviewed_validation_summary_hash": "05a5f557ddeb28f89bb1705c6b3573066d83e8ed7541c8088aab1e5270d329ad",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-223.md",
   "fallback_to": null,
-  "findings": [
-    {
-      "id": "compat-follow-up-1",
-      "summary": "App #265/Core #243 still require App-driven live E2E after explicit user authorization for any browser/profile/site actions.",
-      "severity": "warn",
-      "rebuttal": null,
-      "disposition": {
-        "status": "deferred",
-        "summary": "Projected from compatibility `follow_ups`."
-      }
-    }
-  ],
+  "findings": [],
   "blocking_issues": [],
-  "follow_ups": [
-    "App #265/Core #243 still require App-driven live E2E after explicit user authorization for any browser/profile/site actions."
-  ],
+  "follow_ups": [],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-223.md",
     "recovery_entry": ".loom/progress/CORE-223.md",
