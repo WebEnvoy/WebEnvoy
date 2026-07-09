@@ -1,21 +1,52 @@
 {
   "schema_version": "loom-build-evidence/v1",
   "item_id": "CORE-244",
-  "task_goal": "Implement the Core #243/#244 App-facing admission health and capability-run query compatibility slice for App #265.",
-  "branch": "work/core-244-admission-contract",
-  "head_at_validation": "b62f6e3e42fe0b6a3fe8a605d8cb55e346cbd413-plus-carrier-diff",
-  "current_pointer": "CORE-244 active in .loom/status/current.md until post-merge closeout/retire",
-  "covered_issues": [244, 245, 246, 247, 248],
-  "excluded_issues": [230, 231, 232, 233, 234, 238, 239, 240, 241, 242],
+  "task_goal": "Add the Core #244 App-facing process-level admission/query regression guard for App #265.",
+  "branch": "work/core-244-app-admission-e2e",
+  "head_at_validation": "working-tree-before-final-commit",
+  "current_pointer": "CORE-244 active in .loom/status/current.md for this process-smoke PR lane",
+  "covered_issues": [244],
+  "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234, 245, 246, 247, 248],
   "ownership_constraints": [
     "Core/WebEnvoy only",
     "No App, Harbor, or Lode code changes",
     "No real site/account/profile/Cookie access",
     "No external visible action",
-    "No PR, push, merge, or issue closeout from this worker"
+    "No App, Harbor, or Lode code changes",
+    "No final milestone or live E2E closeout from this batch"
   ],
   "delegations": [],
   "validation_results": [
+    {
+      "command": "pnpm --filter @webenvoy/api-server test",
+      "result": "pass",
+      "evidence": "API server test passed with new runtime-process-self-check: built dist/index.js launched with WEBENVOY_RUN_RECORD_DIR, /admission/health returned structured degraded readiness, /capability-runs returned empty envelope, and missing capability_ref returned structured 400."
+    },
+    {
+      "command": "pnpm typecheck",
+      "result": "pass",
+      "evidence": "Workspace TypeScript typecheck passed for schemas, core-runtime, API server, and conformance packages after process smoke addition."
+    },
+    {
+      "command": "pnpm test",
+      "result": "pass",
+      "evidence": "Workspace build and schemas/core/api-server/conformance self-checks passed after process smoke addition."
+    },
+    {
+      "command": "pnpm lint",
+      "result": "pass",
+      "evidence": "Workspace lint scripts passed after process smoke addition."
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass",
+      "evidence": "No whitespace errors after process smoke addition."
+    },
+    {
+      "command": "App smoke: WEBENVOY_CORE_RUNTIME_SOURCE_DIR=/Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-app-admission-e2e WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR=/Volumes/2T/dev/WebEnvoy/Harbor.worktrees/harbor-main-packaged-smoke npm run smoke:packaged:runtime",
+      "result": "pass",
+      "evidence": "App latest origin/main packaged latest Core and Harbor sources and reported packaged runtime live gate ready; no account/profile/Cookie/production page or submit/publish/send action."
+    },
     {
       "command": "pnpm install --frozen-lockfile",
       "result": "pass",
@@ -237,6 +268,12 @@
       "status": "integrated",
       "locators": ["packages/api-server/src/runtime-task-submit-self-check.ts", "packages/api-server/src/self-check.ts"],
       "summary": "Focused self-check validates Harbor readiness/provider/session/snapshot/evidence calls and fail-closed behavior."
+    },
+    {
+      "id": "api-server-process-smoke-integrated",
+      "status": "integrated",
+      "locators": ["packages/api-server/src/runtime-process-self-check.ts", "packages/api-server/package.json"],
+      "summary": "API server package test now launches built dist/index.js with a real run-record directory and verifies App-facing admission health plus capability-runs query behavior at process level."
     }
   ],
   "unintegrated_subagent_output": false,

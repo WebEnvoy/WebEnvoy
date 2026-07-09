@@ -3,22 +3,20 @@
 ## Static Facts
 
 - Item ID: CORE-244
-- Goal: Implement Core #243 core runtime task chain compatibility batch anchored on Work Item #244 and covering the App-facing admission/query repair for App #265.
-- Scope: App-facing Core API exposes admission health and keeps capability run list queries stable when stale or partial run records exist. Ownership is limited to Core/WebEnvoy API server, run record query paths, focused self-checks, and CORE-244 Loom carriers.
-- Execution Path: work/core-244-admission-contract
-- Workspace Entry: .
+- Goal: Add Core #244 process-level regression evidence for App #265 runtime admission/query failures.
+- Scope: App-facing Core API Server process launch. The built `dist/index.js` must expose `/admission/health`, return structured degraded readiness when Lode/Harbor are not configured, and keep `/capability-runs` from returning 500 for empty or invalid App-facing queries. Ownership is limited to Core/WebEnvoy API Server test code and CORE-244 Loom carriers.
+- Execution Path: work/core-244-app-admission-e2e
+- Workspace Entry: /Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-app-admission-e2e
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
-- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/conformance test; pnpm typecheck; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-244 --json
-- Closing Condition: PR Ready, merge, post-merge closeout for Core #243/#244 compatibility evidence, and follow-up current pointer retire if required by gate.
+- Validation Entry: pnpm --filter @webenvoy/api-server test; pnpm typecheck; pnpm test; pnpm lint; git diff --check; App packaged runtime smoke with explicit latest Core/Harbor source dirs
+- Closing Condition: PR Ready, merge, post-merge closeout comment on #244 documenting this process-smoke evidence without closing final live E2E scope.
 
 ## Covered Issues
 
 - #244 submit/admission API.
-- #245 Lode capability metadata/resource requirements parsing.
-- #246 Harbor runtime session/evidence API client.
-- #247 Run Record lifecycle admission/failure write.
-- #248 result/evidence/failure refs returned through submit response and existing query endpoints.
+
+This batch is evidence consumed by parent #243 and App #265, but it does not close #225/#226/#227/#228/#230 or the final App E2E story.
 
 ## Explicitly Not Covered
 
@@ -26,6 +24,7 @@
 - Real Xiaohongshu/BOSS page access, real accounts, profile/Cookie import, external visible action, publish/send/submit, hosted browser, marketplace, bulk collection, or risk bypass.
 - Lode runtime runner behavior; Lode remains asset/registry source only.
 - PR creation, push, merge-ready, issue closeout, or milestone closeout.
+- Real App/Computer Use production-page E2E; this remains gated by explicit allowed/forbidden actions.
 
 ## Ownership Constraints
 
@@ -51,4 +50,5 @@
 - `packages/api-server/src/server.ts`
 - `packages/api-server/src/index.ts`
 - `packages/api-server/src/runtime-task-submit-self-check.ts`
+- `packages/api-server/src/runtime-process-self-check.ts`
 - `packages/api-server/src/self-check.ts`
