@@ -3,12 +3,12 @@
   "item_id": "CORE-244",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Code review allows current CORE-244 corrective head: Core preserves Harbor structured identity/session admission failures instead of flattening them into transport unavailable, and marks identity-environment required/unavailable outcomes as requires_user_action in run records.",
+  "summary": "Carrier-only review allows CORE-244 current pointer retire after PR #252/#253 merged. This review covers Loom carrier synchronization only and does not claim successful live Xiaohongshu/BOSS execution or terminal result/evidence refs.",
   "reviewer": "Codex main controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-08T18:54:05Z",
-  "reviewed_head": "34025ef61d71f4bb115ae218cd725187e4146153",
-  "reviewed_validation_summary": "2026-07-08T17:56Z UTC main-controller carrier validation passed after CORE-244 review drift fix: `git diff --check`; `loom fact-chain --target . --json`; `loom suite carrier validate --target . --item CORE-244 --json`; `loom suite evidence validate --target . --item CORE-244 --json`; `loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json`. Product-code validation from 2026-07-08T17:21Z remains unchanged and passed: Core/API/conformance typecheck and tests plus workspace typecheck. No real account, Cookie, browser profile import, production page action, submit, publish, send, or external visible action was performed.",
-  "reviewed_validation_summary_hash": "62b6a54cbd7a571978f0f9881458090a3d2e67c4793fe5db7ec08ecbccda4468",
+  "authored_at": "2026-07-09T03:33:00Z",
+  "reviewed_head": "de9090da46a57cea548510dbe98720b8fc6f72ff",
+  "reviewed_validation_summary": "2026-07-09T03:13Z UTC post-merge carrier retire sync: PR #252 head `c2b941b41fc933d907658fa7da13d2769336fa3b` merged as `7d224396df16b3669d56be268eef60f12c0e805b`; PR #253 head `3fd07579ce242461ad3397224ad8c259e4189679` merged as `b2cf96fd86c4d11c260605d93a9e1797a79c7ec1`. Pre-merge validation for #252 passed Core/API/conformance typecheck and tests plus workspace typecheck; pre-merge validation for #253 passed `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server test`, `pnpm typecheck`, `git diff --check`, and cross-repo local API E2E returning `identity_environment_required` without real site/account/profile access. This carrier retire does not claim successful Xiaohongshu/BOSS execution.",
+  "reviewed_validation_summary_hash": "115819bad7101a3649f2a9453c656d179111f4b73d4773120bf9f9ab64873103",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-244.md",
   "fallback_to": null,
@@ -55,6 +55,6 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+    "reason": "Authored carrier-only review approved the current pointer retire head for merge checkpoint consumption."
   }
 }
