@@ -27,3 +27,13 @@
 - Diagnostics Entry: packages/core/src/runtime-task-chain.ts
 - Verification Entry: .loom/progress/CORE-223.md
 - Lane Entry: .loom/specs/CORE-223/plan.md
+
+## Terminal Closeout Metadata
+
+- Terminal State: closed_out
+- Issue: 223
+- PR: 262
+- Merge Commit: d7efbf2d0f48dbf96fc22817ce5e9d8363a22cef
+- Target Branch: main
+- Closed At: 2026-07-09T13:32:18Z
+- Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/issues/223;https://github.com/WebEnvoy/WebEnvoy/pull/262
