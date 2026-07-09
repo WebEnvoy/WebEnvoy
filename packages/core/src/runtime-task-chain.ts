@@ -11,8 +11,9 @@ import type {
   HarborUnavailable
 } from "./harbor-admission.js";
 import type { LodePackageAdmissionContract } from "./lode-admission.js";
+import { completeRunWithReadOnlyProjection, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import type { FailureRecord, FileRunRecordStore } from "./run-record-store.js";
-import { acceptReadOnlyTaskSubmission, type TaskSubmissionResult } from "./task-submission.js";
+import { acceptReadOnlyTaskSubmission, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 
 type JsonObject = Record<string, unknown>;
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -114,6 +115,120 @@ function taskUrl(taskIntent: unknown): string | undefined {
   return safeHttpUrl(object(intent?.scope)?.target_ref);
 }
 
+function isHarborSceneReference(value: unknown): value is HarborCoreSceneReference {
+  const scene = object(value);
+  const pageSummary = object(scene?.page_summary);
+  return (
+    scene?.schema_version === "harbor-page-scene-refs/v0" &&
+    typeof scene.runtime_session_ref === "string" &&
+    typeof scene.snapshot_ref === "string" &&
+    typeof scene.source_trace_ref === "string" &&
+    Array.isArray(scene.evidence_refs) &&
+    scene.evidence_refs.every((ref) => typeof ref === "string" && ref.length > 0) &&
+    pageSummary !== undefined &&
+    safeHttpUrl(pageSummary.url) !== undefined &&
+    scene.unavailable === null
+  );
+}
+
+function packageOutputSchemaId(packageRef: string, fallbackVersion: string): string {
+  const match = /^lode:\/\/site-capability\/(.+)@([^/@]+)$/.exec(packageRef);
+  if (!match) return `lode://schema/core/read-only-result/output@${fallbackVersion}`;
+  return `lode://schema/site-capability/${match[1]}/output@${match[2]}`;
+}
+
+function readOnlyResultKind(taskIntent: TaskIntentEnvelope): string {
+  return `${taskIntent.capability.ref.replace(/^lode:capability\//, "")}.read_result`;
+}
+
+function sameOrigin(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return false;
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
+}
+
+function projectionFromScene(taskIntent: TaskIntentEnvelope, packageRef: string, scene: HarborCoreSceneReference): LodeReadOnlyProjection {
+  const pageSummary = object(scene.page_summary) ?? {};
+  const evidenceRefs = [...scene.evidence_refs];
+  const sourceRefs = [scene.source_trace_ref, scene.refmap_ref, scene.snapshot_ref].filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+  return {
+    result_kind: readOnlyResultKind(taskIntent),
+    status: "available",
+    classification: "success_result",
+    normalized: {
+      schema_version: "webenvoy.core-readonly-harbor-scene-projection.v0",
+      title: string(pageSummary.title) ?? "",
+      url: string(pageSummary.url) ?? taskIntent.scope.target_ref,
+      summary: string(pageSummary.summary) ?? "Harbor provided refs-only page scene evidence.",
+      capability: {
+        ref: taskIntent.capability.ref,
+        version: taskIntent.capability.version,
+        ...(taskIntent.capability.source_ref === undefined ? {} : { source_ref: taskIntent.capability.source_ref }),
+        ...(taskIntent.capability.lock_ref === undefined ? {} : { lock_ref: taskIntent.capability.lock_ref }),
+        package_ref: packageRef
+      },
+      harbor_scene: {
+        snapshot_ref: scene.snapshot_ref,
+        ...(scene.refmap_ref === undefined ? {} : { refmap_ref: scene.refmap_ref }),
+        source_trace_ref: scene.source_trace_ref
+      },
+      consumer_boundary: "Core stores refs-only read result projection from Harbor scene evidence; no raw DOM, HAR, screenshot body, cookies, tokens, profile storage, or browser endpoints are stored."
+    },
+    source_refs: sourceRefs,
+    evidence_refs: evidenceRefs,
+    warnings: ["Site-specific Lode runtime normalizer execution remains outside this Core refs-only completion path."]
+  };
+}
+
+async function completeAcceptedReadTask(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  packageRef: string,
+  harbor: HarborAdmissionInput
+): Promise<TaskSubmissionResult> {
+  const taskIntent = result.task_intent;
+  if (taskIntent.policy.risk !== "read" || taskIntent.policy.execution_intent !== "read") {
+    return result;
+  }
+  const scene = harbor.harbor_scene_ref;
+  if (!isHarborSceneReference(scene)) {
+    return result;
+  }
+  if (!sameOrigin(safeHttpUrl(object(scene.page_summary)?.url), taskUrl(taskIntent))) {
+    return result;
+  }
+  const evidenceRefs = [...scene.evidence_refs];
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    evidence_refs: evidenceRefs
+  });
+  const completed = await completeRunWithReadOnlyProjection(store, result.run_record.run_id, {
+    result_ref: `result:core/${taskIntent.intent_id}`,
+    output_schema_id: packageOutputSchemaId(packageRef, taskIntent.capability.version),
+    projection: projectionFromScene(taskIntent, packageRef, scene),
+    projection_ref: `projection:core/${taskIntent.intent_id}`,
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "passed",
+      summary: "Core completed the read-only task from Harbor refs-only scene evidence.",
+      checked_at: new Date().toISOString(),
+      evidence_refs: evidenceRefs,
+      source_refs: [scene.source_trace_ref],
+      consumer_boundary: "Core post-check confirms a terminal refs-only read result envelope; it does not execute writes or inline raw browser/page material."
+    },
+    retention_state: "active"
+  });
+
+  return {
+    ok: true,
+    task_intent: taskIntent,
+    run_record: completed.run_record
+  };
+}
+
 export async function submitRuntimeTask(
   store: FileRunRecordStore,
   request: RuntimeTaskSubmissionRequest,
@@ -173,12 +288,14 @@ export async function submitRuntimeTask(
   } catch {
     harbor = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
   }
-  return acceptReadOnlyTaskSubmission(
+  const submitted = await acceptReadOnlyTaskSubmission(
     store,
     isFailure(harbor)
       ? { ...base, lode_package_contract, harbor_admission_failure: harbor }
       : { ...base, lode_package_contract, ...harbor }
   );
+  if (!submitted.ok || isFailure(harbor)) return submitted;
+  return completeAcceptedReadTask(store, submitted, package_ref, harbor);
 }
 
 export function createLocalLodePackageResolver(options: LocalLodePackageResolverOptions): LodePackageResolver {

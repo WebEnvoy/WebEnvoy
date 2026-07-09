@@ -1,16 +1,8 @@
-# Current Status
+# CORE-248 Progress
 
-## Derived Fact Chain View
+## Dynamic Facts
 
 - Item ID: CORE-248
-- Goal: Complete the Core #248 terminal read-only result/evidence refs slice after successful App-facing task submission, Lode package resolution, and Harbor runtime admission.
-- Scope: Core/WebEnvoy only. POST `/tasks` may complete a read-only run to a terminal refs-only result when Harbor returns valid scene/evidence refs. Query endpoints must expose run/result/evidence/session refs without raw browser material. Ownership is limited to Core runtime task-chain code, focused API self-checks, and CORE-248 carriers.
-- Execution Path: work/core-248-terminal-read-result
-- Workspace Entry: .
-- Recovery Entry: .loom/progress/CORE-248.md
-- Review Entry: .loom/reviews/CORE-248.json
-- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm typecheck; git diff --check; loom suite validate/carrier/evidence --target . --item CORE-248 --json
-- Closing Condition: PR ready, merge, post-merge closeout for Core #248 and covered Core runtime result/evidence refs, with App E2E left open until App consumes the API.
 - Current Checkpoint: build
 - Current Stop: Core read-only task submission now transitions admitted runs through running to succeeded when Harbor returns valid same-origin refs-only scene/evidence. API self-check validates result/evidence/session refs, capability-run status counts, mismatched or missing scene URLs staying non-terminal, and invalid evidence refs failing closed.
 - Next Step: Complete Loom carrier validation, review, PR creation, hosted gate, merge, and post-merge closeout before closing Core issues.
@@ -19,6 +11,15 @@
 - Recovery Boundary: Revert this branch. No App/Harbor/Lode code changes, real account/profile/Cookie/production page access, submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-bypass action occurred. App E2E remains blocked until App submits through this API and user authorizes any real account/profile/production page action.
 - Current Lane: Core terminal read-only result/evidence refs for App-facing task submission.
 
+## Execution Ledger
+
+- Ledger Binding: recovery_entry
+- Plan Locator: .loom/specs/CORE-248/plan.md
+- Acceptance Locator: .loom/specs/CORE-248/spec.md
+- Validation Evidence Locator: .loom/specs/CORE-248/build-evidence.json
+- Handoff Notes Locator: .loom/work-items/CORE-248.md
+- Evidence Freshness: current
+
 ## Runtime Evidence
 
 - Run Entry: packages/api-server/src/runtime-task-submit-self-check.ts
@@ -26,10 +27,3 @@
 - Diagnostics Entry: packages/core/src/runtime-task-chain.ts
 - Verification Entry: .loom/progress/CORE-248.md
 - Lane Entry: .loom/specs/CORE-248/plan.md
-
-## Sources
-
-- Static Truth: .loom/work-items/CORE-248.md
-- Dynamic Truth: .loom/progress/CORE-248.md
-- Locator Truth: .loom/bootstrap/init-result.json
-- Fact Chain CLI: loom fact-chain --target . --json
