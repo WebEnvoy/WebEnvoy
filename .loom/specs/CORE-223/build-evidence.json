@@ -3,7 +3,7 @@
   "item_id": "CORE-223",
   "task_goal": "Consume Harbor #234 site-resource facts in Core runtime admission so Lode-backed real-site tasks fail closed on unknown required facts.",
   "branch": "work/core-223-harbor-site-facts",
-  "head_at_validation": "5929c8a99db93e5b6cb519e203ba85fa6986fc07 plus carrier-only review-readiness evidence sync",
+  "head_at_validation": "f5b20a1fd5bc37a9ccb5e63d93c233718bf6a510 plus carrier-only review-readiness evidence sync",
   "current_pointer": "CORE-223 active in .loom/status/current.md until PR/closeout retire",
   "covered_issues": [223, 243, 244],
   "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
@@ -16,7 +16,7 @@
   ],
   "delegations": [],
   "generated_at": "2026-07-09T12:36:00Z",
-  "summary": "Core consumes Harbor #234 site-resource facts for Lode-backed real-site resource admission and fails closed on unknown required facts.",
+  "summary": "Core consumes Harbor #234 site-resource facts for Lode-backed real-site resource admission and fails closed on unknown required facts. Review cleanup removed out-of-scope write-precheck runtime calls from this PR.",
   "validation_results": [
     {"command": "pnpm install --frozen-lockfile", "result": "pass", "evidence": "Installed worktree dependencies without lockfile changes."},
     {"command": "pnpm exec tsc -p packages/core/tsconfig.json --noEmit", "result": "pass", "evidence": "Core runtime TypeScript typecheck passed."},
@@ -43,6 +43,12 @@
       "status": "integrated",
       "locators": ["packages/core/src/runtime-task-chain.ts"],
       "summary": "Core now calls Harbor site-resource facts for Xiaohongshu/BOSS package refs and normalizes available facts into Core resource admission facts."
+    },
+    {
+      "id": "write-precheck-scope-cleanup",
+      "status": "integrated",
+      "locators": ["packages/core/src/runtime-task-chain.ts"],
+      "summary": "Out-of-scope write-precheck runtime calls were removed from CORE-223; write-precheck remains owned by later Core/App write-precheck Work Items."
     },
     {
       "id": "api-xiaohongshu-site-facts-self-check",
