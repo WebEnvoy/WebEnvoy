@@ -9,7 +9,7 @@
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
-- Validation Entry: pnpm --filter @webenvoy/api-server test; pnpm typecheck; pnpm test; pnpm lint; git diff --check; App packaged runtime smoke with explicit latest Core/Harbor source dirs
+- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/api-server build && node packages/api-server/dist/runtime-task-submit-self-check.js; pnpm typecheck; pnpm test; pnpm lint; git diff --check; Loom suite/fact-chain/build checks
 - Closing Condition: PR Ready, merge, post-merge closeout comment on #244 documenting this process-smoke evidence without closing final live E2E scope.
 
 ## Covered Issues

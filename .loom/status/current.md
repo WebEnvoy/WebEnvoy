@@ -9,7 +9,7 @@
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
-- Validation Entry: pnpm --filter @webenvoy/api-server test; pnpm typecheck; pnpm test; pnpm lint; git diff --check; App packaged runtime smoke with explicit latest Core/Harbor source dirs
+- Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/api-server build && node packages/api-server/dist/runtime-task-submit-self-check.js; pnpm typecheck; pnpm test; pnpm lint; git diff --check; Loom suite/fact-chain/build checks
 - Closing Condition: PR Ready, merge, post-merge closeout comment on #244 documenting this process-smoke evidence without closing final live E2E scope.
 - Current Checkpoint: merge
 - Current Stop: Branch `work/core-244-terminal-submit-smoke` has local implementation and validation ready for PR. It prevents App-facing read tasks from lingering in `admitted` when Harbor cannot provide a valid same-origin scene, and extends built-process API smoke to cover configured `/tasks` submit plus run/result/evidence/session/capability query refs. This is mock/local contract evidence only; it does not close Core #244/#243 final live E2E scope.
