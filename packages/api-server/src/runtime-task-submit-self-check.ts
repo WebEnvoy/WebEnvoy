@@ -352,6 +352,37 @@ function createHarborMock(
         });
         return;
       }
+      if (request.method === "GET" && request.url === "/runtime/identity-environments/identity-env_runtime_api") {
+        sendJson(response, 200, {
+          schema_version: "harbor-local-identity-environment-store/v0",
+          identity_environment_ref: "identity-env_runtime_api",
+          site: { site_id: "example", origin: "https://example.org", display_name: "Example", account_ref: "account_runtime_api" },
+          status: {
+            readiness: "ready",
+            login_state: "logged_in",
+            browser_storage_state: "present",
+            manual_authentication_state: "not_required",
+            recovery_required: false,
+            blocking_reasons: []
+          },
+          refs: {
+            execution_identity_ref: "identity-env_runtime_api:execution",
+            profile_ref: "profile_runtime_api",
+            profile_storage_ref: "profile_storage_ref_runtime_api"
+          },
+          environment_summary: {
+            provider_id: "cloakbrowser",
+            proxy_state: "configured",
+            region: "CN",
+            language: "zh-CN",
+            timezone: "Asia/Shanghai",
+            browser_family: "cloakbrowser",
+            fingerprint_summary: "provider_claim"
+          },
+          public_boundary: { output: "status_and_redacted_refs_only", raw_material: "not_exposed" }
+        });
+        return;
+      }
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
         sendJson(response, 200, {
           identity_environment_facts: {
@@ -618,6 +649,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       )
     }
   );
+  const publicIdentityPaths: string[] = [];
+  const publicIdentityHarbor = createHarborMock(
+    true,
+    publicIdentityPaths,
+    [],
+    {},
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    { identity_environment_facts: undefined }
+  );
   const offlineHarbor = createHarborMock(false, []);
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
@@ -632,6 +672,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const mismatchedEvidenceHarborPort = await listen(mismatchedEvidenceHarbor);
     const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
     const missingXiaohongshuFactHarborPort = await listen(missingXiaohongshuFactHarbor);
+    const publicIdentityHarborPort = await listen(publicIdentityHarbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
@@ -686,6 +727,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingXiaohongshuFactHarborPort}` })
     });
+    const publicIdentityServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${publicIdentityHarborPort}` })
+    });
     const badJsonServer = createApiServer({
       runRecordStore: store,
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
@@ -710,6 +756,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const mismatchedEvidencePort = await listen(mismatchedEvidenceServer);
     const xiaohongshuPort = await listen(xiaohongshuServer);
     const missingXiaohongshuFactPort = await listen(missingXiaohongshuFactServer);
+    const publicIdentityPort = await listen(publicIdentityServer);
     const offlinePort = await listen(offlineServer);
     const badJsonPort = await listen(badJsonServer);
     const identityRequiredPort = await listen(identityRequiredServer);
@@ -749,6 +796,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       ]);
       assert(paths.includes("GET /readiness"));
       assert(paths.includes("GET /runtime/browser-providers"));
+      assert(paths.includes("GET /runtime/identity-environments/identity-env_runtime_api"));
       assert(paths.includes("POST /runtime/identity-environment-sessions"));
       assert(paths.includes("POST /runtime/sessions/session_runtime_api_ready/snapshot"));
       assert(paths.includes("GET /runtime/evidence/evidence_runtime_api_snapshot"));
@@ -818,6 +866,19 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(xiaohongshuMissingFactBody.ok, false);
       assert.equal(asRecord(xiaohongshuMissingFactBody.error).code, "resource_fact_missing:page.pinia_store.ready");
       assert.equal(asRecord(xiaohongshuMissingFactBody.run).status, "failed");
+
+      const publicIdentitySubmit = await postJson(publicIdentityPort, "/tasks", {
+        run_id: "run_api_submit_public_identity_record",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_public_identity_record"),
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://example.org/"
+        }
+      });
+      assert.equal(publicIdentitySubmit.status, 202);
+      assert(publicIdentityPaths.includes("GET /runtime/identity-environments/identity-env_runtime_api"));
+      assert.equal(asRecord(asRecord(publicIdentitySubmit.body).run).status, "succeeded");
 
       const failed = await postJson(offlinePort, "/tasks", {
         run_id: "run_api_submit_no_harbor",
@@ -977,6 +1038,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(mismatchedEvidenceServer);
       await close(xiaohongshuServer);
       await close(missingXiaohongshuFactServer);
+      await close(publicIdentityServer);
       await close(offlineServer);
       await close(badJsonServer);
       await close(identityRequiredServer);
@@ -992,6 +1054,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(mismatchedEvidenceHarbor);
     await close(xiaohongshuHarbor);
     await close(missingXiaohongshuFactHarbor);
+    await close(publicIdentityHarbor);
     await close(offlineHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);

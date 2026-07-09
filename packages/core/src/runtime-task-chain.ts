@@ -420,8 +420,13 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const provider = await requestJson("GET", "/runtime/browser-providers");
       if (isFailure(provider)) return provider;
 
+      const identityRef = input.harbor?.identity_environment_ref;
+      const identityRecord = identityRef === undefined
+        ? undefined
+        : await requestJson("GET", `/runtime/identity-environments/${encodeURIComponent(identityRef)}`);
+
       const session = await requestJson("POST", "/runtime/identity-environment-sessions", {
-        identity_environment_ref: input.harbor?.identity_environment_ref,
+        identity_environment_ref: identityRef,
         url: input.harbor?.url ?? taskUrl(input.task_intent),
         run_id: input.run_id,
         package_ref: input.package_ref,
@@ -432,7 +437,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       });
       if (isFailure(session)) return session;
 
-      const identity = identityFactsFromSession(session);
+      const identity = identityFactsFromSession(session) ?? (isFailure(identityRecord) ? undefined : identityFactsFromPublicRecord(identityRecord));
       const runtime = coreRuntimeFactsFromSession(session, identity);
       if (isFailure(runtime)) return runtime;
       const runtimeSessionRef = runtime.runtime_session_ref;
@@ -453,11 +458,12 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (isFailure(snapshot)) return snapshot;
 
       const scene = sceneFromSnapshot(snapshot);
+      const runtimeAfterSnapshot = runtimeFactsAfterSnapshot(runtime, scene);
       const evidenceFailure = "status" in scene ? undefined : await verifyEvidenceRefs(scene.evidence_refs);
       const facts: HarborAdmissionInput = {
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
         harbor_provider_status: providerStatus(provider),
-        harbor_runtime_facts: runtime,
+        harbor_runtime_facts: runtimeAfterSnapshot,
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
       };
@@ -531,6 +537,46 @@ function identityFactsFromSession(value: unknown): HarborIdentityEnvironmentFact
   return direct?.schema_version === "harbor-local-identity-environment/v0" ? (direct as HarborIdentityEnvironmentFacts) : undefined;
 }
 
+function identityFactsFromPublicRecord(value: unknown): HarborIdentityEnvironmentFacts | undefined {
+  const direct = object(value);
+  if (direct?.schema_version !== "harbor-local-identity-environment-store/v0") return undefined;
+  const site = object(direct.site);
+  const status = object(direct.status);
+  const refs = object(direct.refs);
+  const environment = object(direct.environment_summary);
+  const identity_environment_ref = string(direct.identity_environment_ref);
+  const execution_identity_ref = string(refs?.execution_identity_ref);
+  const profile_ref = string(refs?.profile_ref);
+  const origin = string(site?.origin);
+  if (!identity_environment_ref || !execution_identity_ref || !profile_ref || !origin) return undefined;
+  const selected_provider_id = string(environment?.provider_id) ?? null;
+  return {
+    schema_version: "harbor-local-identity-environment/v0",
+    identity_environment_ref,
+    execution_identity_ref,
+    profile_ref,
+    site_binding: {
+      site_id: string(site?.site_id) ?? "unknown",
+      origin
+    },
+    login_state: {
+      state: string(status?.login_state) ?? "unknown",
+      recovery_required: status?.recovery_required === true
+    },
+    browser_storage: {
+      state: string(status?.browser_storage_state) ?? "unknown"
+    },
+    provider_binding: {
+      selected_provider_id,
+      binding_status: selected_provider_id ? "public_record_provider_available" : "no_launchable_provider"
+    },
+    consumer_boundary: {
+      core: "admission_facts_refs_and_blocking_reasons_only",
+      not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
+    }
+  };
+}
+
 function coreRuntimeFactsFromSession(value: unknown, identity: HarborIdentityEnvironmentFacts | undefined): HarborCoreRuntimeFacts | FailureRecord {
   const direct = pickObject(value, "harbor_runtime_facts", "core_runtime_facts", "runtime_facts", "session");
   if (!direct) return failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime");
@@ -590,6 +636,22 @@ function sceneFromSnapshot(value: unknown): HarborCoreSceneReference | HarborUna
   if (direct?.status === "unavailable") return unavailable(string(direct.failure_class) ?? "snapshot_missing", direct.retryable !== false);
   if (direct?.schema_version === "harbor-page-scene-refs/v0") return direct as HarborCoreSceneReference;
   return unavailable("snapshot_missing");
+}
+
+function runtimeFactsAfterSnapshot(
+  runtime: HarborCoreRuntimeFacts,
+  scene: HarborCoreSceneReference | HarborUnavailable
+): HarborCoreRuntimeFacts {
+  return "status" in scene
+    ? runtime
+    : {
+        ...runtime,
+        availability: {
+          ...runtime.availability,
+          snapshot: "available",
+          evidence: "available"
+        }
+      };
 }
 
 function resourceFactsFromSiteFacts(value: unknown): HarborResourceFacts | HarborUnavailable | undefined {
