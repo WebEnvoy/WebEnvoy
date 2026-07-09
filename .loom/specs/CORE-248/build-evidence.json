@@ -3,7 +3,7 @@
   "item_id": "CORE-248",
   "task_goal": "Correct the Core #248 terminal read-only result/evidence refs slice so Harbor evidence refs are only recorded after the runtime API positively confirms each requested ref.",
   "branch": "work/core-248-evidence-ref-validation",
-  "head_at_validation": "1f1436a6fdc4ce7f3c96ca06b838fb2c4f44076f-plus-working-diff-2026-07-09T08:02Z",
+  "head_at_validation": "0b97b8f4f53f1287373ef02648f7f77b0c73c65b-review-prep-carrier-baseline",
   "current_pointer": "CORE-248 active in .loom/status/current.md until PR/closeout retire",
   "covered_issues": [248, 243],
   "excluded_issues": [220, 223, 225, 226, 227, 228, 230, 234],
