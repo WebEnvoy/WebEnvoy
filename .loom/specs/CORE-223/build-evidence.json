@@ -4,7 +4,7 @@
   "task_goal": "Consume Harbor #234 site-resource facts in Core runtime admission so Lode-backed real-site tasks fail closed on unknown required facts.",
   "branch": "work/core-223-harbor-site-facts",
   "head_at_validation": "f5b20a1fd5bc37a9ccb5e63d93c233718bf6a510 plus carrier-only review-readiness evidence sync",
-  "current_pointer": "CORE-223 active in .loom/status/current.md until PR/closeout retire",
+  "current_pointer": "no_active_item in .loom/status/current.md after PR #263 closeout carrier sync",
   "covered_issues": [223, 243, 244],
   "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
   "ownership_constraints": [
