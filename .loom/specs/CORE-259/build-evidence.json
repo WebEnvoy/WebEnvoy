@@ -1,0 +1,39 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-259",
+  "task_goal": "Retire the stale CORE-248 current pointer without overwriting CORE-248 implementation review evidence.",
+  "branch": "work/core-259-carrier-retire",
+  "head_at_validation": "pending",
+  "current_pointer": "CORE-259 active in .loom/status/current.md for this carrier-only repair PR",
+  "covered_issues": [259],
+  "excluded_issues": [243, 244, 225, 226, 227, 228, 230, 248],
+  "ownership_constraints": [
+    "Core/WebEnvoy governance carrier only",
+    "Do not modify .loom/reviews/CORE-248.json",
+    "No product code changes",
+    "No App, Harbor, or Lode code changes",
+    "No real site/account/profile/Cookie access",
+    "No external visible action",
+    "No submit, publish, send, save, hosted browser, marketplace, batch collection, or risk-control bypass"
+  ],
+  "delegations": [],
+  "validation_results": [],
+  "integration_evidence": [
+    {
+      "id": "separate-core-259-carrier",
+      "status": "pending_validation",
+      "locators": [
+        ".loom/work-items/CORE-259.md",
+        ".loom/progress/CORE-259.md",
+        ".loom/status/current.md",
+        ".loom/bootstrap/init-result.json"
+      ],
+      "summary": "CORE-259 owns carrier drift repair without changing CORE-248 review evidence."
+    }
+  ],
+  "runtime_live_evidence": {
+    "attempted": false,
+    "reason": "Carrier-only repair. Live browser/account/profile/production page actions remain gated by explicit user authorization and App E2E.",
+    "boundary": "No external visible action was performed."
+  }
+}
