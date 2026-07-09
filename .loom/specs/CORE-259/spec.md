@@ -6,12 +6,13 @@ Core can leave the CORE-248 stale current pointer state without losing the imple
 
 ## Suite Path
 
-- Suite path: minimal
-- Path decision: this is a carrier-only governance repair. It changes no product code, schema, API behavior, runtime behavior, or external integration.
+- Suite path: not_applicable
+- Path decision: this is a carrier-only governance repair with no implementation execution material. It changes no product code, schema, API behavior, runtime behavior, or external integration.
+- suite-level not_applicable rationale: CORE-259 only repairs Loom carrier truth and current-pointer locators; consumer boundary: suite validation, spec review, PR gate, and closeout-specific gate consume the carrier boundary only and must not infer product runtime readiness; recheck condition: switch to minimal or full suite when any product code, schema/API/runtime behavior, App/Harbor/Lode file, live browser/account/profile/production page action, release, or non-carrier change enters scope.
 - contracts.md not_applicable rationale: no cross-repo contract or runtime payload changes. Consumer boundary: Core carrier repair review only. Recheck condition: require contract review if product code or API fields change.
 - readiness-checklist.md not_applicable rationale: product readiness is owned by App/Core/Harbor/Lode live E2E and remains open. Consumer boundary: this PR only unblocks the next Work Item. Recheck condition: require readiness checklist before final milestone closeout.
 - research.md not_applicable rationale: no new product or technical research decision. Consumer boundary: closeout drift classification only. Recheck condition: require research if the gate failure recurs with a new signature.
-- suite-index.md not_applicable rationale: minimal suite artifacts are directly locatable under `.loom/specs/CORE-259/`. Consumer boundary: suite validation and PR gate.
+- suite-index.md not_applicable rationale: CORE-259 has no full or minimal implementation suite to execute. Consumer boundary: carrier repair admission and PR gate only. Recheck condition: require minimal or full suite if any product code, schema, runtime, or non-carrier path changes.
 
 ## Scenarios
 
