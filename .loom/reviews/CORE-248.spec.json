@@ -3,10 +3,10 @@
   "item_id": "CORE-248",
   "decision": "allow",
   "kind": "spec_review",
-  "summary": "Spec review accepts the bounded Core #248 terminal read-only result/evidence refs slice. The spec keeps this PR Core-only, mock-Harbor/Lode validated, refs-only, and explicitly excludes App UI, Harbor/Lode changes, live browser/profile/site execution, true writes, and final user-story closeout.",
+  "summary": "Spec review accepts the CORE-248 carrier-only post-merge closeout sync. The PR records merged implementation evidence and closed issue state without expanding scope beyond Core #248 or claiming App E2E/live site completion.",
   "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-09T05:30:00Z",
-  "reviewed_head": "1505da62f90315c76b20f2905673a98a7fd3a6eb",
+  "authored_at": "2026-07-09T05:57:30Z",
+  "reviewed_head": "399088e1fbe2a63450a516b19cad8bccce84b8e6",
   "reviewed_validation_summary": "2026-07-09T05:12Z UTC: `pnpm --filter @webenvoy/core-runtime typecheck`, `pnpm --filter @webenvoy/api-server typecheck`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server test`, `pnpm typecheck`, `git diff --check`, `loom suite carrier validate --target . --item CORE-248 --json`, `loom suite validate --target . --item CORE-248 --json`, `loom suite evidence validate --target . --item CORE-248 --json`, and `loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json` passed after requiring valid same-origin Harbor scene URLs for terminal read completion and adding missing-URL/invalid-evidence regression coverage. Deterministic review-readiness evidence: `tools/skills_surface.py check` is not present in this repo; equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core behavior. `tools/loom_check.py --profile source --source-surface contract-only` is not present in this repo; hosted `loom-check` passed for PR #255 run 28995492402 and local `loom verify --target . --json` passed. `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repo; global `loom skills release-check --target . --json` blocked on Loom release/runtime-copy surfaces outside this no-release Core PR, while `loom version --json`, `loom doctor --target . --json`, `loom installed-state validate --target . --json`, and `loom host doctor --host codex --scope user --json` passed. PR metadata declares `release_judgment: no_release`.",
   "reviewed_validation_summary_hash": "6f073930637c04a29a92d7eba60783c5dd4a5e540f547d5847d3959460571361",
   "validation_summary_source": "recovery.latest_validation_summary",
@@ -37,10 +37,10 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "The spec is bounded to terminal Core refs-only read results and explicitly states that mock validation does not equal live App E2E or final user-story completion."
+    "reason": "The closeout spec boundary is carrier-only: it records PR #255, merge commit, issue #248 state, and remaining Loom shadow/adoption drift without claiming live App E2E or final user-story completion."
   },
   "implementation_review_disposition": {
     "status": "passed",
-    "reason": "The implementation plan maps terminal success, query refs, fail-closed edge cases, and no-leakage boundaries to focused Core/API validation."
+    "reason": "The reviewed head changes only closeout carriers and keeps the existing Core implementation plan and non-goal boundaries intact."
   }
 }
