@@ -19,6 +19,9 @@ type JsonObject = Record<string, unknown>;
 const packageRef = "lode://site-capability/example/read-public-page@0.1.0";
 const lockRef = "lode://lock/site-capability/example/read-public-page@0.1.0";
 const resourceRef = "example.read-public-page.resources";
+const xiaohongshuPackageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
+const xiaohongshuLockRef = "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0";
+const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
 const readyResourceFacts: JsonObject = {
   schema_version: "harbor-core-resource-facts/v0",
   resource_facts: [
@@ -29,6 +32,48 @@ const readyResourceFacts: JsonObject = {
     { fact_key: "evidence.snapshot_ref.available", state: "available" }
   ],
   consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material."
+};
+const readyXiaohongshuSiteFacts: JsonObject = {
+  schema_version: "harbor-site-resource-facts/v0",
+  runtime_session_ref: "session_runtime_api_ready",
+  provider_ref: "harbor:provider/cloakbrowser",
+  profile_ref: "profile_runtime_api",
+  site_id: "xiaohongshu",
+  task_kind: "search_notes",
+  generated_at: "2026-07-09T00:00:00.000Z",
+  page: {
+    requested_url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+    current_url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+    origin: "https://www.xiaohongshu.com",
+    title: "Xiaohongshu search",
+    status: "ready",
+    failure: null
+  },
+  resource_facts: [
+    { key: "runtime.execution_surface.available", state: "available", source: "observed", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "runtime.origin.www_xiaohongshu_com.available", state: "available", source: "observed", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "identity.user_logged_in.confirmed", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "page.vue_app.ready", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "page.pinia_store.ready", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "source.refs.available", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "evidence.snapshot_ref.available", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "safety.challenge.absent", state: "available", source: "derived", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" }
+  ],
+  evidence_refs: ["evidence_runtime_api_snapshot"],
+  snapshot_ref: "snapshot_runtime_api_ready",
+  refmap_ref: "refmap_runtime_api_ready",
+  public_boundary: {
+    output: "public_runtime_facts_and_refs_only",
+    raw_credentials: "not_exposed",
+    raw_profile_storage: "not_exposed",
+    raw_cdp_endpoint: "not_exposed",
+    raw_dom: "not_exposed",
+    raw_har: "not_exposed",
+    raw_network_bodies: "not_exposed",
+    screenshot_body: "not_exposed",
+    external_write_actions: "not_performed"
+  },
+  unavailable: null
 };
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -109,9 +154,40 @@ function taskIntent(intentId: string): JsonObject {
   };
 }
 
+function xiaohongshuTaskIntent(intentId: string): JsonObject {
+  return {
+    schema_version: "webenvoy.task-intent.v0",
+    intent_id: intentId,
+    entrypoint: "app",
+    user_intent: { summary: "Read Xiaohongshu search results through Harbor runtime facts." },
+    capability: {
+      ref: "lode:capability/xiaohongshu-search-notes",
+      version: "0.1.0",
+      source_ref: xiaohongshuPackageRef,
+      lock_ref: xiaohongshuLockRef
+    },
+    input: {
+      summary: "Read current Xiaohongshu search page summary.",
+      refs: ["https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"]
+    },
+    scope: {
+      target_type: "xiaohongshu_search",
+      target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
+    },
+    policy: {
+      risk: "read",
+      execution_intent: "read",
+      timeout_ms: 5000
+    },
+    resource_requirement_refs: [xiaohongshuResourceRef],
+    evidence_policy_ref: "evidence-policy:refs-only"
+  };
+}
+
 async function writeLodeRegistry(root: string): Promise<string> {
   await mkdir(join(root, "registry"), { recursive: true });
   await mkdir(join(root, "sites", "example", "read-public-page"), { recursive: true });
+  await mkdir(join(root, "sites", "xiaohongshu", "search-notes"), { recursive: true });
   await writeFile(
     join(root, "registry", "local-packages.json"),
     JSON.stringify({
@@ -125,6 +201,18 @@ async function writeLodeRegistry(root: string): Promise<string> {
           lock_ref: lockRef,
           capability_id: "read-public-page",
           operation_id: "content_detail_by_url",
+          operation_mode: "read",
+          version: "0.1.0",
+          lifecycle: "proposed"
+        },
+        {
+          package_ref: xiaohongshuPackageRef,
+          package_type: "site-capability",
+          package_path: "sites/xiaohongshu/search-notes",
+          manifest_path: "sites/xiaohongshu/search-notes/manifest.json",
+          lock_ref: xiaohongshuLockRef,
+          capability_id: "xiaohongshu-search-notes",
+          operation_id: "xhs_search_notes",
           operation_mode: "read",
           version: "0.1.0",
           lifecycle: "proposed"
@@ -152,6 +240,25 @@ async function writeLodeRegistry(root: string): Promise<string> {
     })
   );
   await writeFile(
+    join(root, "sites", "xiaohongshu", "search-notes", "manifest.json"),
+    JSON.stringify({
+      manifest_version: "lode.site-capability.manifest.v0",
+      package_ref: xiaohongshuPackageRef,
+      package_type: "site-capability",
+      capability: {
+        capability_id: "xiaohongshu-search-notes",
+        operation_id: "xhs_search_notes",
+        operation_mode: "read",
+        version: "0.1.0",
+        lifecycle: "proposed"
+      },
+      asset_refs: [
+        { role: "resource_requirements", path: "resource-requirements.json", status: "present" },
+        { role: "package_lock", path: "package-lock.json", status: "present", lock_ref: xiaohongshuLockRef }
+      ]
+    })
+  );
+  await writeFile(
     join(root, "sites", "example", "read-public-page", "resource-requirements.json"),
     JSON.stringify({
       schema_version: "lode.resource-requirements.v0",
@@ -174,6 +281,32 @@ async function writeLodeRegistry(root: string): Promise<string> {
       ]
     })
   );
+  await writeFile(
+    join(root, "sites", "xiaohongshu", "search-notes", "resource-requirements.json"),
+    JSON.stringify({
+      schema_version: "lode.resource-requirements.v0",
+      resource_requirements_id: xiaohongshuResourceRef,
+      resource_requirements_version: "0.1.0",
+      package_ref: xiaohongshuPackageRef,
+      operation_mode: "read",
+      resource_requirement_profiles: [
+        {
+          requirement_profile_id: "xiaohongshu-search-notes-live-runtime",
+          operation_boundary: "read",
+          required_harbor_facts: [
+            { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true },
+            { fact_key: "runtime.origin.www_xiaohongshu_com.available", owner: "Harbor", required: true },
+            { fact_key: "identity.user_logged_in.confirmed", owner: "Harbor", required: true },
+            { fact_key: "page.vue_app.ready", owner: "Harbor", required: true },
+            { fact_key: "page.pinia_store.ready", owner: "Harbor", required: true },
+            { fact_key: "source.refs.available", owner: "Harbor", required: true },
+            { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true },
+            { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
+          ]
+        }
+      ]
+    })
+  );
   return join(root, "registry", "local-packages.json");
 }
 
@@ -183,7 +316,8 @@ function createHarborMock(
   bodies: Array<{ path: string; body: JsonObject }> = [],
   sceneOverrides: JsonObject = {},
   evidenceBody: JsonObject = { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
-  sessionOverrides: JsonObject = {}
+  sessionOverrides: JsonObject = {},
+  siteResourceBody: JsonObject | undefined = undefined
 ): Server {
   const sessionRef = "session_runtime_api_ready";
   const scene = {
@@ -256,6 +390,14 @@ function createHarborMock(
       }
       if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/snapshot`) {
         sendJson(response, 200, { status: "captured", core_scene_ref: scene, evidence_refs: scene.evidence_refs });
+        return;
+      }
+      if (request.method === "GET" && request.url?.startsWith(`/runtime/sessions/${sessionRef}/site-resource-facts`)) {
+        sendJson(response, 200, siteResourceBody ?? {
+          status: "unavailable",
+          failure_class: "unsupported_site",
+          retryable: false
+        });
         return;
       }
       if (request.method === "GET" && request.url === "/runtime/evidence/evidence_runtime_api_snapshot") {
@@ -444,6 +586,38 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     { evidence_ref: "evidence_other_snapshot", access_state: "available" },
     { resource_facts: readyResourceFacts }
   );
+  const xiaohongshuPaths: string[] = [];
+  const xiaohongshuBodies: Array<{ path: string; body: JsonObject }> = [];
+  const xiaohongshuScene = {
+    page_summary: {
+      title: "Xiaohongshu search",
+      url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+      summary: "Xiaohongshu search page summary captured by Harbor refs."
+    }
+  };
+  const xiaohongshuHarbor = createHarborMock(
+    true,
+    xiaohongshuPaths,
+    xiaohongshuBodies,
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    readyXiaohongshuSiteFacts
+  );
+  const missingXiaohongshuFactHarbor = createHarborMock(
+    true,
+    [],
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    {
+      ...readyXiaohongshuSiteFacts,
+      resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) =>
+        fact.key === "page.pinia_store.ready" ? { ...fact, state: "unknown", severity: "warning", message: "Pinia readiness is not safely observable." } : fact
+      )
+    }
+  );
   const offlineHarbor = createHarborMock(false, []);
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
@@ -456,6 +630,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const invalidEvidenceHarborPort = await listen(invalidEvidenceHarbor);
     const malformedEvidenceHarborPort = await listen(malformedEvidenceHarbor);
     const mismatchedEvidenceHarborPort = await listen(mismatchedEvidenceHarbor);
+    const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
+    const missingXiaohongshuFactHarborPort = await listen(missingXiaohongshuFactHarbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
@@ -500,6 +676,16 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${mismatchedEvidenceHarborPort}` })
     });
+    const xiaohongshuServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${xiaohongshuHarborPort}` })
+    });
+    const missingXiaohongshuFactServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingXiaohongshuFactHarborPort}` })
+    });
     const badJsonServer = createApiServer({
       runRecordStore: store,
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
@@ -522,6 +708,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const invalidEvidencePort = await listen(invalidEvidenceServer);
     const malformedEvidencePort = await listen(malformedEvidenceServer);
     const mismatchedEvidencePort = await listen(mismatchedEvidenceServer);
+    const xiaohongshuPort = await listen(xiaohongshuServer);
+    const missingXiaohongshuFactPort = await listen(missingXiaohongshuFactServer);
     const offlinePort = await listen(offlineServer);
     const badJsonPort = await listen(badJsonServer);
     const identityRequiredPort = await listen(identityRequiredServer);
@@ -593,6 +781,43 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(capabilityRuns.status, 200);
       const statusCounts = asRecord(asRecord(asRecord(capabilityRuns.body).capability_runs).status_counts);
       assert.equal(statusCounts.succeeded, 1);
+
+      const xiaohongshuSubmit = await postJson(xiaohongshuPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_site_facts",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_site_facts"),
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
+        }
+      });
+      assert.equal(xiaohongshuSubmit.status, 202);
+      const xiaohongshuRun = asRecord(asRecord(xiaohongshuSubmit.body).run);
+      assert.equal(xiaohongshuRun.status, "succeeded");
+      assert.equal(xiaohongshuRun.package_ref, xiaohongshuPackageRef);
+      assert.equal(xiaohongshuRun.result_ref, "result:core/intent_api_submit_xiaohongshu_site_facts");
+      assert(xiaohongshuPaths.some((entry) =>
+        entry === "GET /runtime/sessions/session_runtime_api_ready/site-resource-facts?site_id=xiaohongshu&task_kind=search_notes"
+      ));
+      assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/snapshot"));
+      const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
+      assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
+      assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+
+      const xiaohongshuMissingFact = await postJson(missingXiaohongshuFactPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_missing_fact",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_missing_fact"),
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
+        }
+      });
+      assert.equal(xiaohongshuMissingFact.status, 503);
+      const xiaohongshuMissingFactBody = asRecord(xiaohongshuMissingFact.body);
+      assert.equal(xiaohongshuMissingFactBody.ok, false);
+      assert.equal(asRecord(xiaohongshuMissingFactBody.error).code, "resource_fact_missing:page.pinia_store.ready");
+      assert.equal(asRecord(xiaohongshuMissingFactBody.run).status, "failed");
 
       const failed = await postJson(offlinePort, "/tasks", {
         run_id: "run_api_submit_no_harbor",
@@ -750,6 +975,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(invalidEvidenceServer);
       await close(malformedEvidenceServer);
       await close(mismatchedEvidenceServer);
+      await close(xiaohongshuServer);
+      await close(missingXiaohongshuFactServer);
       await close(offlineServer);
       await close(badJsonServer);
       await close(identityRequiredServer);
@@ -763,6 +990,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(invalidEvidenceHarbor);
     await close(malformedEvidenceHarbor);
     await close(mismatchedEvidenceHarbor);
+    await close(xiaohongshuHarbor);
+    await close(missingXiaohongshuFactHarbor);
     await close(offlineHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);

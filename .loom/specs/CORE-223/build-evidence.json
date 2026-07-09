@@ -1,0 +1,54 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-223",
+  "task_goal": "Consume Harbor #234 site-resource facts in Core runtime admission so Lode-backed real-site tasks fail closed on unknown required facts.",
+  "branch": "work/core-223-harbor-site-facts",
+  "head_at_validation": "818ae76699cb467d4b6d60aabad316b9c79097e0-plus-local-core-223-changes",
+  "current_pointer": "CORE-223 active in .loom/status/current.md until PR/closeout retire",
+  "covered_issues": [223, 243, 244],
+  "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234],
+  "ownership_constraints": [
+    "Core/WebEnvoy only",
+    "No App, Harbor, or Lode code changes",
+    "No real site/account/profile/Cookie access",
+    "No external visible action",
+    "No submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-control bypass"
+  ],
+  "delegations": [],
+  "generated_at": "2026-07-09T12:36:00Z",
+  "summary": "Core consumes Harbor #234 site-resource facts for Lode-backed real-site resource admission and fails closed on unknown required facts.",
+  "validation_results": [
+    {"command": "pnpm install --frozen-lockfile", "result": "pass", "evidence": "Installed worktree dependencies without lockfile changes."},
+    {"command": "pnpm exec tsc -p packages/core/tsconfig.json --noEmit", "result": "pass", "evidence": "Core runtime TypeScript typecheck passed."},
+    {"command": "pnpm --filter @webenvoy/core-runtime build", "result": "pass", "evidence": "Core runtime package built."},
+    {"command": "pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit", "result": "pass", "evidence": "API server TypeScript typecheck passed after Core build artifacts were present."},
+    {"command": "pnpm --filter @webenvoy/api-server test", "result": "pass", "evidence": "API self-check covers no-external Xiaohongshu Lode package + mock Harbor #234 site-resource facts success and unknown fact fail-closed behavior."},
+    {"command": "pnpm --filter @webenvoy/core-runtime test", "result": "pass", "evidence": "Core runtime self-check suite passed."},
+    {"command": "pnpm typecheck", "result": "pass", "evidence": "Workspace TypeScript typecheck passed."},
+    {"command": "git diff --check", "result": "pass", "evidence": "No whitespace errors."},
+    {"command": "loom fact-chain --target . --json", "result": "pass", "evidence": "Fact chain validates CORE-223 implementation carrier."},
+    {"command": "loom suite validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite validate found minimal path with required artifacts."},
+    {"command": "loom suite carrier validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite carrier validate found carrier locators, normalized status, relationships, and Work Item backlinks."},
+    {"command": "loom suite evidence validate --target . --item CORE-223 --json", "result": "pass", "evidence": "Suite evidence validate found present behavior, test, and fresh verification evidence."},
+    {"command": "loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json", "result": "pass", "evidence": "Build flow found integrated execution evidence and can proceed toward review."}
+  ],
+  "integration_evidence": [
+    {
+      "id": "harbor-site-resource-facts-consumption",
+      "status": "integrated",
+      "locators": ["packages/core/src/runtime-task-chain.ts"],
+      "summary": "Core now calls Harbor site-resource facts for Xiaohongshu/BOSS package refs and normalizes available facts into Core resource admission facts."
+    },
+    {
+      "id": "api-xiaohongshu-site-facts-self-check",
+      "status": "integrated",
+      "locators": ["packages/api-server/src/runtime-task-submit-self-check.ts"],
+      "summary": "API self-check asserts Core calls Harbor #234 site-resource endpoint, succeeds on available Xiaohongshu facts, and fails closed when page.pinia_store.ready is unknown."
+    }
+  ],
+  "runtime_live_evidence": {
+    "attempted": false,
+    "reason": "This Core PR uses mock Harbor/Lode validation only. Real account/profile/production page actions require explicit user authorization and are App E2E-owned.",
+    "boundary": "No external visible action was performed."
+  }
+}
