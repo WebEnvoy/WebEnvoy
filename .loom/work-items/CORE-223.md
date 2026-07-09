@@ -6,7 +6,7 @@
 - Goal: Consume Harbor #234 site-resource facts in Core runtime admission so App-submitted real-site read-only tasks fail closed unless Harbor public runtime facts satisfy Lode resource requirements.
 - Scope: Core/WebEnvoy ownership only. This batch adds Core HTTP client calls to Harbor `/runtime/sessions/{runtime_session_ref}/site-resource-facts`, maps Harbor site facts into Core resource admission facts, preserves existing snapshot/evidence-ref verification, and extends API self-checks with a no-external Xiaohongshu package path.
 - Execution Path: work/core-223-harbor-site-facts
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/.worktrees/WebEnvoy-core-223-harbor-site-facts
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-223.md
 - Review Entry: .loom/reviews/CORE-223.json
 - Validation Entry: pnpm exec tsc -p packages/core/tsconfig.json --noEmit; pnpm --filter @webenvoy/core-runtime build; pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/core-runtime test; pnpm typecheck; git diff --check; loom fact-chain/suite/carrier/evidence after carrier creation.
