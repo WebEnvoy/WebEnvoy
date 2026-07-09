@@ -1,0 +1,49 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-248",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Implementation review accepts Core #248 terminal read-only result/evidence refs. The code completes App-facing read-only task submissions only after successful Lode resolution and Harbor admission with valid same-origin refs-only scene evidence, exposes run/result/evidence refs, and preserves fail-closed behavior for unavailable Harbor, missing/foreign scene URLs, invalid evidence refs, identity-required, invalid input, duplicate run id, and private evidence policy payloads.",
+  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-09T05:30:00Z",
+  "reviewed_head": "1505da62f90315c76b20f2905673a98a7fd3a6eb",
+  "reviewed_validation_summary": "2026-07-09T05:12Z UTC: `pnpm --filter @webenvoy/core-runtime typecheck`, `pnpm --filter @webenvoy/api-server typecheck`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server test`, `pnpm typecheck`, `git diff --check`, `loom suite carrier validate --target . --item CORE-248 --json`, `loom suite validate --target . --item CORE-248 --json`, `loom suite evidence validate --target . --item CORE-248 --json`, and `loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json` passed after requiring valid same-origin Harbor scene URLs for terminal read completion and adding missing-URL/invalid-evidence regression coverage. Deterministic review-readiness evidence: `tools/skills_surface.py check` is not present in this repo; equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core behavior. `tools/loom_check.py --profile source --source-surface contract-only` is not present in this repo; hosted `loom-check` passed for PR #255 run 28995492402 and local `loom verify --target . --json` passed. `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repo; global `loom skills release-check --target . --json` blocked on Loom release/runtime-copy surfaces outside this no-release Core PR, while `loom version --json`, `loom doctor --target . --json`, `loom installed-state validate --target . --json`, and `loom host doctor --host codex --scope user --json` passed. PR metadata declares `release_judgment: no_release`.",
+  "reviewed_validation_summary_hash": "6f073930637c04a29a92d7eba60783c5dd4a5e540f547d5847d3959460571361",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-248.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [
+    "App #265 must still consume POST /tasks and poll run/result/evidence/session refs in the packaged App before final user-story closeout.",
+    "Live Xiaohongshu/BOSS execution still requires explicit user authorization for browser/profile/site actions."
+  ],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-248.md",
+    "recovery_entry": ".loom/progress/CORE-248.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-248 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-248 --json",
+    "suite_evidence_map": ".loom/specs/CORE-248/evidence-map.md",
+    "suite_task_carriers": [
+      ".loom/specs/CORE-248/task-carrier.md"
+    ],
+    "core_modules": [
+      "packages/core/src/runtime-task-chain.ts",
+      "packages/api-server/src/runtime-task-submit-self-check.ts",
+      "packages/core/src/read-only-result-projection.ts",
+      "packages/core/src/task-submission.ts",
+      "packages/core/src/harbor-admission.ts"
+    ],
+    "subagent_review": "Hume reported same-origin and evidence-ref blockers; main controller fixed them and added regression coverage before this allow decision."
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "The terminal result path is read/read-only only, refs-only, same-origin guarded, and does not store raw DOM, HAR, screenshot body, cookies, tokens, profile storage, browser endpoints, or live write material."
+  },
+  "implementation_review_disposition": {
+    "status": "passed",
+    "reason": "Focused Core/API typecheck, self-checks, workspace typecheck, diff check, suite validations, build gate, and pre-review pass on the reviewed head. Known Loom tool-surface blocks are classified outside this Core product slice."
+  }
+}
