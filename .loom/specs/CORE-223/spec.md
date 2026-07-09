@@ -6,8 +6,9 @@ Core consumes Harbor #234 site-level runtime facts during App/API task submissio
 
 ## Suite Path
 
-- Suite path: minimal
-- Path decision: Core-only implementation slice with no-external mock Harbor/Lode validation. Full App E2E and live account/profile/site evidence remain with App #265 and final milestone closeout.
+- Suite path: not_applicable
+- Path decision: PR #263 is carrier-only terminal closeout sync after Core-only implementation PR #262 merged. It changes no product code, schema, API behavior, runtime behavior, or external integration. Full App E2E and live account/profile/site evidence remain with App #265 and final milestone closeout.
+- suite-level not_applicable rationale: CORE-223 implementation evidence was merged in PR #262; this PR only records terminal Loom carrier truth and resets the current pointer. Consumer boundary: closeout-specific gate and post-merge carrier sync only; do not infer product runtime readiness. Recheck condition: switch to minimal or full suite when any product code, schema/API/runtime behavior, App/Harbor/Lode file, live browser/account/profile/production page action, release, or non-carrier change enters scope.
 - contracts.md not_applicable rationale: no new cross-repo field ownership is authored; Core consumes Harbor #234 and Lode resource fact contracts already present in merged upstream work and current issues. Consumer boundary: Core PR review only. Recheck condition: require contracts.md if Harbor/Lode payload semantics change.
 - readiness-checklist.md not_applicable rationale: readiness is tracked in `.loom/progress/CORE-223.md`, `.loom/specs/CORE-223/build-evidence.json`, and PR validation; final release readiness is App E2E-owned. Consumer boundary: Core PR review only. Recheck condition: require readiness checklist before final product closeout.
 - research.md not_applicable rationale: no new research decision is introduced; upstream behavior is read from current Harbor/Lode issue and source truth. Consumer boundary: scope verification only. Recheck condition: require research.md if upstream API behavior becomes uncertain or changes.
