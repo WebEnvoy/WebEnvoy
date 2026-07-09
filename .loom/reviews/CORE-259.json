@@ -3,31 +3,18 @@
   "item_id": "CORE-259",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Carrier-only closeout review allows CORE-259 terminal carrier metadata for PR #260. This review only approves closeout-specific carrier consumption; it does not approve Core #243/#244 product runtime behavior, App E2E, live browser/account/profile/production-page actions, or any user-story completion.",
-  "reviewer": "Codex master controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
-  "authored_at": "2026-07-09T11:43:45Z",
-  "reviewed_head": "a07f016efe3a71feab4cc7a57c0b737744f2fcfe",
-  "reviewed_validation_summary": "2026-07-09T11:37Z UTC CORE-259 carrier-only validation at head `e6215e32096fe7b8e43268af431eec7cf379ae87`: `git diff --check`, `jq empty .loom/bootstrap/init-result.json .loom/specs/CORE-259/build-evidence.json .loom/reviews/CORE-259.json .loom/reviews/CORE-259.spec.json`, `loom fact-chain --target . --json`, `loom verify --target . --json`, `loom suite validate --target . --item CORE-259 --json` returned not_applicable with no blocking gaps, `loom suite carrier validate --target . --item CORE-259 --json`, and `loom suite evidence validate --target . --item CORE-259 --json` passed. This is a carrier-only repair; there is no implementation execution material, no product code change, `.loom/reviews/CORE-248.json` remained unchanged, and no real browser/account/profile/Cookie/production page or external-visible action occurred.",
-  "reviewed_validation_summary_hash": "1321f18f54815eb43bd7ca5003b06d959a44e8e2fd8e5b072e2b945f7fb0a24d",
+  "summary": "Current-head carrier-only review for PR #261: changes are limited to Loom carrier truth, reset shared current pointer to no_active_item, sync CORE-259 terminal metadata, and do not touch product code or runtime/live behavior.",
+  "reviewer": "codex-master",
+  "authored_at": "2026-07-09T12:04:25Z",
+  "reviewed_head": "9a9a7ced307a1df01b195f2d0aa34101f1b7bda9",
+  "reviewed_validation_summary": "2026-07-09T11:54Z UTC PR #260 merged at `01b49b0c5d0a57c68d2defbea0e83094f70c0a5c`, Core #259 was closed with post-merge evidence, and this final retire sync records the merge/closeout metadata while returning `.loom/status/current.md` and `.loom/bootstrap/init-result.json` to `no_active_item` / idle. This is a carrier-only repair; there is no implementation execution material, no product code change, `.loom/reviews/CORE-248.json` remained unchanged, and no real browser/account/profile/Cookie/production page or external-visible action occurred.",
+  "reviewed_validation_summary_hash": "2f1180a1951e78ce328c92db9ab54765723ca078cc264380edad69664708fe87",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-259.md",
   "fallback_to": null,
-  "findings": [
-    {
-      "id": "compat-follow-up-1",
-      "summary": "After PR #260 merges, close Core #259 with actual merge commit/readback evidence and continue Core #243/#244 live runtime work.",
-      "severity": "warn",
-      "rebuttal": null,
-      "disposition": {
-        "status": "deferred",
-        "summary": "Projected from compatibility `follow_ups`."
-      }
-    }
-  ],
+  "findings": [],
   "blocking_issues": [],
-  "follow_ups": [
-    "After PR #260 merges, close Core #259 with actual merge commit/readback evidence and continue Core #243/#244 live runtime work."
-  ],
+  "follow_ups": [],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-259.md",
     "recovery_entry": ".loom/progress/CORE-259.md",
