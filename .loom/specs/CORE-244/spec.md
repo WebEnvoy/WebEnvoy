@@ -19,7 +19,7 @@ Core accepts a read-only task request from App/API, resolves the referenced Lode
 - S-001 submit/admission API: POST `/tasks` accepts a task intent, run id, package ref, and Harbor binding hint, then returns a Run Record.
 - S-002 Lode asset resolution: Core reads Lode registry/manifest/resource requirements and passes only the admission contract into Core runtime admission.
 - S-003 Harbor runtime API: Core calls GET `/readiness`, GET `/runtime/browser-providers`, POST `/runtime/identity-environment-sessions`, POST `/runtime/sessions/{ref}/snapshot`, and GET `/runtime/evidence/{ref}`.
-- S-004 fail closed: missing/unready Harbor runtime writes a failed Run Record and never returns real success.
+- S-004 fail closed: missing/unready Harbor runtime or an invalid/cross-origin Harbor page scene writes a terminal failed/blocked Run Record and never returns real success or a lingering `admitted` state.
 - S-005 no leakage: Run Record stores refs/status/failure only, not raw evidence, cookies, tokens, DOM, HAR, screenshots, or provider endpoints.
 
 ## Non-Goals

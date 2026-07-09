@@ -24,4 +24,5 @@
 
 - API submit path resolves Lode assets and calls Harbor local runtime API endpoints in order.
 - Readiness/runtime failures produce failed Run Records and clear failure codes.
+- Invalid or cross-origin Harbor scenes produce terminal failure records instead of lingering `admitted` runs.
 - Tests include in-process mock HTTP server coverage and a built-process API server smoke. They do not claim live Xiaohongshu/BOSS runtime evidence.

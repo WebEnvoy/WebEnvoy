@@ -1,290 +1,116 @@
 {
   "schema_version": "loom-build-evidence/v1",
   "item_id": "CORE-244",
-  "task_goal": "Add the Core #244 App-facing process-level admission/query regression guard for App #265.",
-  "branch": "work/core-244-app-admission-e2e",
+  "task_goal": "Add Core #244 terminal submit behavior and process-level regression evidence for App task submit/admission/query failures.",
+  "branch": "work/core-244-terminal-submit-smoke",
   "head_at_validation": "working-tree-before-final-commit",
-  "current_pointer": "CORE-244 active in .loom/status/current.md for this process-smoke PR lane",
+  "current_pointer": "CORE-244 active in .loom/status/current.md for this PR lane",
   "covered_issues": [244],
   "excluded_issues": [225, 226, 227, 228, 230, 231, 232, 233, 234, 245, 246, 247, 248],
   "ownership_constraints": [
     "Core/WebEnvoy only",
     "No App, Harbor, or Lode code changes",
-    "No real site/account/profile/Cookie access",
-    "No external visible action",
-    "No App, Harbor, or Lode code changes",
+    "No real Xiaohongshu/BOSS account, browser profile, Cookie, or production page access",
+    "No external visible action, submit, publish, send, hosted browser, marketplace, bulk collection, full account cloud hosting, or risk-control bypass",
     "No final milestone or live E2E closeout from this batch"
   ],
-  "delegations": [],
+  "delegations": [
+    {
+      "id": "core-244-github-state-check",
+      "agent": "019f4849-0527-7502-b9fd-29df60a074aa",
+      "task_goal": "Read-only GitHub/Core #244 state and PR metadata requirements check",
+      "context_locators": [
+        "https://github.com/WebEnvoy/WebEnvoy/issues/244",
+        "/Volumes/2T/dev/WebEnvoy/WebEnvoy"
+      ],
+      "read_scope": [
+        "Core #244 issue state, milestone, labels, comments",
+        "open PR list and merged Core #244 PR history",
+        "PR template and Loom metadata requirements"
+      ],
+      "write_ownership": ["read_only_no_write"],
+      "non_goals": [
+        "No file changes",
+        "No GitHub issue or PR mutations",
+        "No real browser, account, profile, Cookie, or production page action"
+      ],
+      "validation_expectation": "Return GitHub state, anchor issue metadata, PR body requirements, and external blockers only.",
+      "output_format": "Structured summary with current GitHub status, anchor Work Item, PR/closeout fields, and blockers.",
+      "integration_target": ".loom/specs/CORE-244/build-evidence.json and PR planning facts",
+      "status": "integrated",
+      "result": "Confirmed #244 is open, no open Core PR exists, anchor issue/milestone/labels, and closeout must remain open until App-driven live E2E evidence exists."
+    }
+  ],
+  "integration_evidence": [
+    {
+      "delegation_id": "core-244-github-state-check",
+      "integrated_into": [
+        ".loom/specs/CORE-244/build-evidence.json",
+        ".loom/progress/CORE-244.md",
+        ".loom/status/current.md",
+        "PR planning facts"
+      ],
+      "summary": "Subagent output was used only to confirm #244 remains open, no Core PR exists, and closeout/live E2E boundaries must stay explicit."
+    }
+  ],
   "validation_results": [
-    {
-      "command": "pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API server test passed with new runtime-process-self-check: built dist/index.js launched with WEBENVOY_RUN_RECORD_DIR, /admission/health returned structured degraded readiness, /capability-runs returned empty envelope, and missing capability_ref returned structured 400."
-    },
-    {
-      "command": "pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed for schemas, core-runtime, API server, and conformance packages after process smoke addition."
-    },
-    {
-      "command": "pnpm test",
-      "result": "pass",
-      "evidence": "Workspace build and schemas/core/api-server/conformance self-checks passed after process smoke addition."
-    },
-    {
-      "command": "pnpm lint",
-      "result": "pass",
-      "evidence": "Workspace lint scripts passed after process smoke addition."
-    },
-    {
-      "command": "git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors after process smoke addition."
-    },
-    {
-      "command": "App smoke: WEBENVOY_CORE_RUNTIME_SOURCE_DIR=/Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-app-admission-e2e WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR=/Volumes/2T/dev/WebEnvoy/Harbor.worktrees/harbor-main-packaged-smoke npm run smoke:packaged:runtime",
-      "result": "pass",
-      "evidence": "App latest origin/main packaged latest Core and Harbor sources and reported packaged runtime live gate ready; no account/profile/Cookie/production page or submit/publish/send action."
-    },
-    {
-      "command": "review-readiness tools surface classification",
-      "result": "not_applicable",
-      "evidence": "`tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repository. Release/version/npm package checks are not applicable because PR #264 declares no_release and changes only private workspace API server smoke coverage plus CORE-244 carriers. Global Loom fact-chain and suite validators provide the active review-readiness evidence."
-    },
-    {
-      "command": "pnpm install --frozen-lockfile",
-      "result": "pass",
-      "evidence": "Installed worktree dependencies without lockfile changes."
-    },
     {
       "command": "pnpm --filter @webenvoy/core-runtime typecheck",
       "result": "pass",
-      "evidence": "Core runtime TypeScript typecheck passed."
+      "evidence": "Core runtime TypeScript typecheck passed after terminal scene failure handling."
     },
     {
       "command": "pnpm --filter @webenvoy/api-server typecheck",
       "result": "pass",
-      "evidence": "API server TypeScript typecheck passed after Core build."
+      "evidence": "API server TypeScript typecheck passed after process smoke expansion."
     },
     {
       "command": "pnpm --filter @webenvoy/core-runtime test",
       "result": "pass",
-      "evidence": "Existing Core self-check suite passed."
+      "evidence": "Core runtime self-checks passed."
     },
     {
       "command": "pnpm --filter @webenvoy/api-server test",
       "result": "pass",
-      "evidence": "API self-check passed, including POST /tasks with mock Lode registry and mock Harbor runtime API plus fail-closed readiness and malformed JSON failures."
+      "evidence": "API server self-checks passed, including built-process degraded readiness and configured submit/query refs smoke."
+    },
+    {
+      "command": "pnpm --filter @webenvoy/api-server build && node packages/api-server/dist/runtime-task-submit-self-check.js",
+      "result": "pass",
+      "evidence": "Runtime task submit self-check passed, including terminal failure for invalid or cross-origin Harbor scenes."
     },
     {
       "command": "pnpm typecheck",
       "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed."
+      "evidence": "Workspace TypeScript typecheck passed for schemas, core-runtime, API server, and conformance packages."
+    },
+    {
+      "command": "pnpm test",
+      "result": "pass",
+      "evidence": "Workspace build and schemas/core/api-server/conformance self-checks passed."
+    },
+    {
+      "command": "pnpm lint",
+      "result": "pass",
+      "evidence": "Workspace lint scripts passed."
     },
     {
       "command": "git diff --check",
       "result": "pass",
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "pnpm test",
-      "result": "pass",
-      "evidence": "Workspace build and schemas/core/api-server/conformance self-checks passed."
-    },
-    {
-      "command": "loom verify --target . --json",
-      "result": "pass",
-      "evidence": "Installed Loom delivery layers verified."
-    },
-    {
-      "command": "loom suite carrier validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "CORE-244 task carrier locators, status, relationships, and backlinks validated."
-    },
-    {
-      "command": "loom suite evidence validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "Evidence map contains present behavior, test, and fresh verification evidence."
-    },
-    {
-      "command": "loom suite validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "Minimal suite path has required artifacts present."
-    },
-    {
-      "command": "pnpm lint",
-      "result": "pass",
-      "evidence": "Workspace lint scripts passed."
-    },
-    {
-      "command": "final pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace TypeScript typecheck passed after the fail-closed Harbor JSON/throwing-client edge fix."
-    },
-    {
-      "command": "final pnpm test",
-      "result": "pass",
-      "evidence": "Workspace build and self-checks passed after the fail-closed Harbor JSON/throwing-client edge fix."
-    },
-    {
-      "command": "final pnpm lint",
-      "result": "pass",
-      "evidence": "Workspace lint scripts passed after the fail-closed Harbor JSON/throwing-client edge fix."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/core-runtime typecheck",
-      "result": "pass",
-      "evidence": "Passed after main-controller hardening of Harbor request passthrough removal, HTTP URL restriction, and Lode root confinement."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/api-server typecheck",
-      "result": "pass",
-      "evidence": "Passed after POST /tasks request validation and duplicate run-id handling."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/core-runtime test",
-      "result": "pass",
-      "evidence": "Core runtime self-checks passed after hardening."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API self-check passed with boundary assertions for Core-owned Harbor request fields, invalid run_id, duplicate run_id, and Lode root confinement."
-    },
-    {
-      "command": "git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors after main-controller hardening."
-    },
-    {
-      "command": "loom suite carrier validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "CORE-244 task carrier and Work Item backlinks validate after Associated Artifacts were added."
-    },
-    {
-      "command": "loom suite evidence validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "Evidence map still validates after hardening."
-    },
-    {
-      "command": "loom suite validate --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "Minimal suite path validates after hardening."
-    },
-    {
-      "command": "loom fact-chain --target . --json",
-      "result": "pass",
-      "evidence": "Fact chain passed after CORE-244 active current pointer and carrier alignment."
-    },
-    {
-      "command": "loom build --target . --item CORE-244 --build-evidence .loom/specs/CORE-244/build-evidence.json --json",
-      "result": "pass",
-      "evidence": "Build flow found integrated execution evidence and can proceed toward review."
-    },
-    {
-      "command": "loom resume --target . --item CORE-244 --json",
-      "result": "pass",
-      "evidence": "Resume flow rebuilt the current execution context and next step."
-    },
-    {
-      "command": "pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace typecheck passed for schemas, core-runtime, API server, and conformance packages."
-    },
-    {
-      "command": "pnpm test",
-      "result": "pass",
-      "evidence": "Workspace build and schemas/core/api-server/conformance self-checks passed."
-    },
-    {
-      "command": "pnpm lint",
-      "result": "pass",
-      "evidence": "Workspace lint scripts passed."
-    },
-    {
-      "command": "subagent Core review",
-      "result": "pass_after_fixes",
-      "evidence": "Reviewer reported P1 evidence_policy private material passthrough, P1 duplicate run_id race returning 500, and P2 Lode symlink path escape; all were fixed before PR."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/api-server typecheck",
-      "result": "pass",
-      "evidence": "API server typecheck passed after reviewer fixes."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/api-server test",
-      "result": "pass",
-      "evidence": "API self-check covers private harbor.evidence_policy rejection, duplicate run_id race 409 mapping, and symlink escape fail-closed."
-    },
-    {
-      "command": "pnpm --filter @webenvoy/core-runtime typecheck",
-      "result": "pass",
-      "evidence": "Core runtime typecheck passed after realpath confinement change."
-    },
-    {
-      "command": "git diff --check",
-      "result": "pass",
-      "evidence": "No whitespace errors after reviewer fixes."
-    },
-    {
-      "command": "pnpm typecheck",
-      "result": "pass",
-      "evidence": "Workspace typecheck passed after reviewer fixes."
-    },
-    {
-      "command": "pnpm test",
-      "result": "pass",
-      "evidence": "Workspace build and self-checks passed after reviewer fixes."
-    },
-    {
-      "command": "pnpm lint",
-      "result": "pass",
-      "evidence": "Workspace lint scripts passed after reviewer fixes."
     }
   ],
-  "integration_evidence": [
-    {
-      "id": "admission-health-query-fix-integrated",
-      "status": "integrated",
-      "locators": ["packages/api-server/src/server.ts", "packages/api-server/src/self-check.ts"],
-      "summary": "API server exposes GET /admission/health and self-check covers the App-facing admission health response."
-    },
-    {
-      "id": "stale-run-query-fix-integrated",
-      "status": "integrated",
-      "locators": ["packages/core/src/run-record-store.ts", "packages/core/src/self-check.ts"],
-      "summary": "Capability run list query skips stale partial records while single-run reads remain strict; self-check covers stale record behavior."
-    },
-    {
-      "id": "runtime-task-chain-integrated",
-      "status": "integrated",
-      "locators": ["packages/core/src/runtime-task-chain.ts", "packages/core/src/task-submission.ts", "packages/core/src/index.ts"],
-      "summary": "Core resolves Lode assets, calls Harbor runtime API client, and routes the result through existing admission/Run Record logic."
-    },
-    {
-      "id": "api-submit-integrated",
-      "status": "integrated",
-      "locators": ["packages/api-server/src/server.ts", "packages/api-server/src/index.ts"],
-      "summary": "API server exposes POST /tasks and can wire Lode registry and Harbor runtime URLs from environment variables."
-    },
-    {
-      "id": "self-check-integrated",
-      "status": "integrated",
-      "locators": ["packages/api-server/src/runtime-task-submit-self-check.ts", "packages/api-server/src/self-check.ts"],
-      "summary": "Focused self-check validates Harbor readiness/provider/session/snapshot/evidence calls and fail-closed behavior."
-    },
-    {
-      "id": "api-server-process-smoke-integrated",
-      "status": "integrated",
-      "locators": ["packages/api-server/src/runtime-process-self-check.ts", "packages/api-server/package.json"],
-      "summary": "API server package test now launches built dist/index.js with a real run-record directory and verifies App-facing admission health plus capability-runs query behavior at process level."
-    }
-  ],
-  "unintegrated_subagent_output": false,
-  "ownership_overlap": false,
-  "repeated_blocker": false,
-  "known_tool_surface_notes": [
-    "Live Harbor runtime was not available and was not attempted; validation uses a local mock HTTP server and must not be presented as live evidence."
+  "runtime_evidence_boundary": {
+    "evidence_type": "mock_local_contract_smoke",
+    "not_live_e2e": true,
+    "not_issue_closeout": true,
+    "no_real_account_profile_cookie_or_production_page": true
+  },
+  "next_required_evidence_before_closing_244": [
+    "App-driven real task submit/admission output",
+    "Lode capability ref/version used by Core",
+    "Harbor session/evidence refs from allowed local runtime",
+    "Core run record plus result/evidence/failure refs",
+    "User-authorized live browser/profile/site boundary recorded before any production page action"
   ]
 }

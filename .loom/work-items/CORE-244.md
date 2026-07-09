@@ -3,9 +3,9 @@
 ## Static Facts
 
 - Item ID: CORE-244
-- Goal: Add Core #244 process-level regression evidence for App #265 runtime admission/query failures.
-- Scope: App-facing Core API Server process launch. The built `dist/index.js` must expose `/admission/health`, return structured degraded readiness when Lode/Harbor are not configured, and keep `/capability-runs` from returning 500 for empty or invalid App-facing queries. Ownership is limited to Core/WebEnvoy API Server test code and CORE-244 Loom carriers.
-- Execution Path: work/core-244-app-admission-e2e
+- Goal: Add Core #244 terminal submit behavior and process-level regression evidence for App task submit/admission/query failures.
+- Scope: App-facing Core API Server and Core runtime task chain. The built `dist/index.js` must expose `/admission/health`, return structured degraded readiness when Lode/Harbor are not configured, submit a mock configured read task through local Lode/Harbor contracts, expose run/result/evidence/session/capability refs, and fail closed with a terminal Run Record when Harbor cannot provide a valid same-origin page scene. Ownership is limited to Core/WebEnvoy runtime task chain, API Server self-checks, and CORE-244 Loom carriers.
+- Execution Path: work/core-244-terminal-submit-smoke
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json

@@ -11,7 +11,7 @@ import type {
   HarborUnavailable
 } from "./harbor-admission.js";
 import type { LodePackageAdmissionContract } from "./lode-admission.js";
-import { completeRunWithReadOnlyProjection, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
+import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import type { FailureRecord, FileRunRecordStore } from "./run-record-store.js";
 import { acceptReadOnlyTaskSubmission, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 
@@ -184,6 +184,50 @@ function projectionFromScene(taskIntent: TaskIntentEnvelope, packageRef: string,
   };
 }
 
+function sceneEvidenceRefs(value: unknown): string[] {
+  const refs = object(value)?.evidence_refs;
+  return Array.isArray(refs) ? refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];
+}
+
+function readFailureRecoveryHint(failureClass: LodeReadOnlyFailureClass): string {
+  return failureClass === "page_changed" || failureClass === "page_not_ready" ? "retry_after_refresh" : "manual_handoff";
+}
+
+async function completeAcceptedReadTaskWithFailure(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  failureClass: LodeReadOnlyFailureClass,
+  summary: string,
+  evidenceRefs: readonly string[] = []
+): Promise<TaskSubmissionResult> {
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs })
+  });
+  const recoveryHint = readFailureRecoveryHint(failureClass);
+  const completed = await completeRunWithReadOnlyFailure(store, result.run_record.run_id, {
+    lode_failure_class: failureClass,
+    ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs }),
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "blocked",
+      summary,
+      checked_at: new Date().toISOString(),
+      code: failureClass,
+      attribution: "runtime",
+      recovery_hint: recoveryHint,
+      ...(evidenceRefs.length === 0 ? {} : { evidence_refs: [...evidenceRefs] }),
+      consumer_boundary: "Core records terminal refs-only failure state for App recovery; it does not execute writes or inline raw browser/page material."
+    },
+    retention_state: "active"
+  });
+  return {
+    ok: false,
+    failure: completed.run_record.failure ?? failure("runtime_execution", failureClass, "execution", recoveryHint),
+    run_record: completed.run_record
+  };
+}
+
 async function completeAcceptedReadTask(
   store: FileRunRecordStore,
   result: Extract<TaskSubmissionResult, { ok: true }>,
@@ -196,10 +240,22 @@ async function completeAcceptedReadTask(
   }
   const scene = harbor.harbor_scene_ref;
   if (!isHarborSceneReference(scene)) {
-    return result;
+    return completeAcceptedReadTaskWithFailure(
+      store,
+      result,
+      "page_not_ready",
+      "Core could not complete the read-only task because Harbor did not provide a valid refs-only page scene.",
+      sceneEvidenceRefs(scene)
+    );
   }
   if (!sameOrigin(safeHttpUrl(object(scene.page_summary)?.url), taskUrl(taskIntent))) {
-    return result;
+    return completeAcceptedReadTaskWithFailure(
+      store,
+      result,
+      "page_changed",
+      "Core rejected the Harbor page scene because its page URL was not same-origin with the submitted task target.",
+      scene.evidence_refs
+    );
   }
   const evidenceRefs = [...scene.evidence_refs];
   await store.updateRunRecord(result.run_record.run_id, {
