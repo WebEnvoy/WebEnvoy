@@ -898,10 +898,14 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         task_intent: taskIntent("intent_api_submit_mismatched_scene"),
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
       });
-      assert.equal(mismatchedScene.status, 202);
-      const mismatchedSceneRun = asRecord(asRecord(mismatchedScene.body).run);
-      assert.equal(mismatchedSceneRun.status, "admitted");
+      assert.equal(mismatchedScene.status, 400);
+      const mismatchedSceneBody = asRecord(mismatchedScene.body);
+      assert.equal(mismatchedSceneBody.ok, false);
+      assert.equal(asRecord(mismatchedSceneBody.error).code, "page_changed");
+      const mismatchedSceneRun = asRecord(mismatchedSceneBody.run);
+      assert.equal(mismatchedSceneRun.status, "blocked");
       assert.equal(mismatchedSceneRun.result_ref, undefined);
+      assert.deepEqual(mismatchedSceneRun.evidence_refs, ["evidence_runtime_api_snapshot"]);
 
       const missingSceneUrl = await postJson(missingSceneUrlPort, "/tasks", {
         run_id: "run_api_submit_missing_scene_url",
@@ -909,9 +913,12 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         task_intent: taskIntent("intent_api_submit_missing_scene_url"),
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
       });
-      assert.equal(missingSceneUrl.status, 202);
-      const missingSceneUrlRun = asRecord(asRecord(missingSceneUrl.body).run);
-      assert.equal(missingSceneUrlRun.status, "admitted");
+      assert.equal(missingSceneUrl.status, 400);
+      const missingSceneUrlBody = asRecord(missingSceneUrl.body);
+      assert.equal(missingSceneUrlBody.ok, false);
+      assert.equal(asRecord(missingSceneUrlBody.error).code, "page_not_ready");
+      const missingSceneUrlRun = asRecord(missingSceneUrlBody.run);
+      assert.equal(missingSceneUrlRun.status, "blocked");
       assert.equal(missingSceneUrlRun.result_ref, undefined);
 
       const invalidSceneUrl = await postJson(invalidSceneUrlPort, "/tasks", {
@@ -920,9 +927,12 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         task_intent: taskIntent("intent_api_submit_invalid_scene_url"),
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
       });
-      assert.equal(invalidSceneUrl.status, 202);
-      const invalidSceneUrlRun = asRecord(asRecord(invalidSceneUrl.body).run);
-      assert.equal(invalidSceneUrlRun.status, "admitted");
+      assert.equal(invalidSceneUrl.status, 400);
+      const invalidSceneUrlBody = asRecord(invalidSceneUrl.body);
+      assert.equal(invalidSceneUrlBody.ok, false);
+      assert.equal(asRecord(invalidSceneUrlBody.error).code, "page_not_ready");
+      const invalidSceneUrlRun = asRecord(invalidSceneUrlBody.run);
+      assert.equal(invalidSceneUrlRun.status, "blocked");
       assert.equal(invalidSceneUrlRun.result_ref, undefined);
 
       const invalidEvidence = await postJson(invalidEvidencePort, "/tasks", {
