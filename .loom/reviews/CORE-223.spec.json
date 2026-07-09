@@ -1,0 +1,54 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-223",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "Spec review allows CORE-223 minimal suite: the spec is scoped to Core consuming Harbor #234 site-resource facts for Xiaohongshu/BOSS package refs, preserves no-external-action boundaries, and keeps live App E2E/write-precheck out of scope.",
+  "reviewer": "codex-main",
+  "authored_at": "2026-07-09T12:57:17Z",
+  "reviewed_head": "27c12b08fdaa33cedab815923832a72f7479b800",
+  "reviewed_validation_summary": "2026-07-09T12:54Z UTC: implementation validation remained green after review cleanup removed out-of-scope write-precheck runtime calls from CORE-223. `pnpm install --frozen-lockfile`, `pnpm exec tsc -p packages/core/tsconfig.json --noEmit`, `pnpm --filter @webenvoy/core-runtime build`, `pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit`, `pnpm --filter @webenvoy/api-server test`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm typecheck`, `git diff --check`, `loom fact-chain --target . --json`, `loom suite validate --target . --item CORE-223 --json`, `loom suite carrier validate --target . --item CORE-223 --json`, `loom suite evidence validate --target . --item CORE-223 --json`, `loom checkpoint build --target . --item CORE-223 --json`, and `loom build --target . --item CORE-223 --build-evidence .loom/specs/CORE-223/build-evidence.json --json` passed. API self-check includes a no-external mock Xiaohongshu Lode package and mock Harbor #234 site-resource facts path; Core calls `/runtime/sessions/{ref}/site-resource-facts?site_id=xiaohongshu&task_kind=search_notes`, succeeds when required facts are available, and fails closed when `page.pinia_store.ready` is unknown. Deterministic review-readiness evidence: `tools/skills_surface.py check` is not present in this repo; equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core product behavior. `tools/loom_check.py --profile source --source-surface contract-only` is not present in this repo; hosted `loom-check` passed for PR #262 run 29019230310 and local `loom verify --target . --json` passed. `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repo; global `loom skills release-check --target . --json` returned block on Loom release/runtime-copy surfaces outside this no-release Core PR, while `loom installed-state validate --target . --json`, `loom version --json`, `loom doctor --target . --json`, and `loom host doctor --host codex --scope user --json` passed. No App/Harbor/Lode code changed and no real browser/account/profile/Cookie/production page action occurred.",
+  "reviewed_validation_summary_hash": "05a5f557ddeb28f89bb1705c6b3573066d83e8ed7541c8088aab1e5270d329ad",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-223.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-223.md",
+    "recovery_entry": ".loom/progress/CORE-223.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {
+        "source": "github_host"
+      }
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_validation": "suite validate",
+    "suite_validator": "loom",
+    "suite_validator_mode": "global-cli",
+    "suite_spec": ".loom/specs/CORE-223/spec.md",
+    "suite_plan": ".loom/specs/CORE-223/plan.md",
+    "suite_evidence_map": ".loom/specs/CORE-223/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [
+      ".loom/specs/CORE-223/task-carrier.md"
+    ],
+    "suite_consumed_contracts": [
+      "docs/methodology/harness/full-spec-suite-cli-surface.md",
+      "docs/methodology/templates/spec-suite.md"
+    ]
+  }
+}
