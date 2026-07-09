@@ -6,7 +6,7 @@
 - Goal: Add Core #244 process-level regression evidence for App #265 runtime admission/query failures.
 - Scope: App-facing Core API Server process launch. The built `dist/index.js` must expose `/admission/health`, return structured degraded readiness when Lode/Harbor are not configured, and keep `/capability-runs` from returning 500 for empty or invalid App-facing queries. Ownership is limited to Core/WebEnvoy API Server test code and CORE-244 Loom carriers.
 - Execution Path: work/core-244-app-admission-e2e
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/WebEnvoy.worktrees/core-244-app-admission-e2e
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-244.md
 - Review Entry: .loom/reviews/CORE-244.json
 - Validation Entry: pnpm --filter @webenvoy/api-server test; pnpm typecheck; pnpm test; pnpm lint; git diff --check; App packaged runtime smoke with explicit latest Core/Harbor source dirs
