@@ -18,7 +18,7 @@
 - Acceptance Locator: .loom/specs/CORE-223/spec.md
 - Validation Evidence Locator: .loom/specs/CORE-223/build-evidence.json
 - Handoff Notes Locator: .loom/specs/CORE-223/task-carrier.md
-- Evidence Freshness: carrier_closeout_current
+- Evidence Freshness: current
 
 ## Runtime Evidence
 

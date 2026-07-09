@@ -53,12 +53,16 @@
       "docs/methodology/harness/full-spec-suite-cli-surface.md"
     ]
   },
-  "semantic_review_disposition": {
-    "status": "passed",
-    "reason": "Authored closeout review approved terminal carrier metadata consumption only."
-  },
   "carrier_only_closeout_review": {
     "status": "passed",
     "reason": "This review does not approve product implementation behavior or App/Core live E2E."
+  },
+  "semantic_review_disposition": {
+    "status": "not_applicable",
+    "reason": "PR #263 is a carrier-only terminal closeout sync after implementation PR #262 merged; there is no new product behavior to semantically review.",
+    "change_class": "docs_governance",
+    "non_behavioral_scope": "Only Loom closeout carrier truth, terminal metadata, and current-pointer status are in scope.",
+    "substitute_validation": "Carrier-only review consumed git diff --check, JSON parse checks, loom fact-chain, loom status, loom verify, PR body metadata preflight/readback, and local pr-gate diagnostics.",
+    "authority": "The implementation behavior was reviewed and merged in PR #262; this review authorizes only post-merge carrier closeout metadata for PR #263."
   }
 }
