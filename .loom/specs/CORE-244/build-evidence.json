@@ -48,6 +48,11 @@
       "evidence": "App latest origin/main packaged latest Core and Harbor sources and reported packaged runtime live gate ready; no account/profile/Cookie/production page or submit/publish/send action."
     },
     {
+      "command": "review-readiness tools surface classification",
+      "result": "not_applicable",
+      "evidence": "`tools/skills_surface.py check`, `tools/loom_check.py --profile source --source-surface contract-only`, `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repository. Release/version/npm package checks are not applicable because PR #264 declares no_release and changes only private workspace API server smoke coverage plus CORE-244 carriers. Global Loom fact-chain and suite validators provide the active review-readiness evidence."
+    },
+    {
       "command": "pnpm install --frozen-lockfile",
       "result": "pass",
       "evidence": "Installed worktree dependencies without lockfile changes."
