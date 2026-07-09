@@ -142,12 +142,6 @@ function readOnlyResultKind(taskIntent: TaskIntentEnvelope): string {
   return `${taskIntent.capability.ref.replace(/^lode:capability\//, "")}.read_result`;
 }
 
-function writePrecheckIntent(taskIntent: unknown): boolean {
-  const intent = object(taskIntent);
-  const policy = object(intent?.policy);
-  return string(policy?.risk) === "write" && (string(policy?.execution_intent) === "validate_only" || string(policy?.execution_intent) === "preview" || string(policy?.execution_intent) === "draft");
-}
-
 function sameOrigin(left: string | undefined, right: string | undefined): boolean {
   if (!left || !right) return false;
   try {
@@ -460,14 +454,6 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
       const scene = sceneFromSnapshot(snapshot);
       const evidenceFailure = "status" in scene ? undefined : await verifyEvidenceRefs(scene.evidence_refs);
-      const writePrecheck = writePrecheckIntent(input.task_intent)
-        ? await requestJson("POST", `/runtime/sessions/${encodeURIComponent(runtimeSessionRef)}/write-precheck-facts`, writePrecheckFactsRequest(input))
-        : undefined;
-      if (isFailure(writePrecheck)) return writePrecheck;
-      const parsedWritePrecheck = writePrecheckFacts(writePrecheck);
-      const writeEvidenceFailure = parsedWritePrecheck === undefined || "status" in parsedWritePrecheck
-        ? undefined
-        : await verifyEvidenceRefs(writePrecheckEvidenceRefs(parsedWritePrecheck));
       const facts: HarborAdmissionInput = {
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
         harbor_provider_status: providerStatus(provider),
@@ -475,8 +461,6 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
       };
-      if (writeEvidenceFailure) facts.harbor_write_precheck_facts = unavailable(writeEvidenceFailure.code);
-      else if (parsedWritePrecheck !== undefined) facts.harbor_write_precheck_facts = parsedWritePrecheck;
       return facts;
     }
   };
@@ -492,29 +476,6 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
     }
     return undefined;
   }
-}
-
-function writePrecheckFactsRequest(input: HarborRuntimeAdmissionRequest): JsonObject {
-  const intent = object(input.task_intent);
-  return {
-    title: string(object(intent?.user_intent)?.summary),
-    url: input.harbor?.url ?? taskUrl(input.task_intent),
-    summary: string(object(intent?.input)?.summary),
-    target_label: "Write precheck target"
-  };
-}
-
-function writePrecheckFacts(value: unknown): HarborAdmissionInput["harbor_write_precheck_facts"] | undefined {
-  const direct = pickObject(value, "harbor_write_precheck_facts", "write_precheck_facts");
-  if (direct?.status === "unavailable") return unavailable(string(direct.failure_class) ?? "writable_target_missing", direct.retryable !== false);
-  if (direct?.schema_version === "harbor-write-precheck-facts/v0") return direct as NonNullable<HarborAdmissionInput["harbor_write_precheck_facts"]>;
-  return undefined;
-}
-
-function writePrecheckEvidenceRefs(value: unknown): readonly string[] {
-  const direct = pickObject(value, "harbor_write_precheck_facts", "write_precheck_facts");
-  const target = object(direct?.writable_target);
-  return Array.isArray(target?.evidence_refs) ? target.evidence_refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];
 }
 
 function readinessOk(value: unknown): boolean {
