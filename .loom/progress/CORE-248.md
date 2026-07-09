@@ -3,13 +3,13 @@
 ## Dynamic Facts
 
 - Item ID: CORE-248
-- Current Checkpoint: closed_out
-- Current Stop: CORE-248 closed out by closeout run: PR #255 merged at 65c6a3989d12112ddb536e5ad9a58c1fe7d5ac19, issue #248 closed, host reconciliation consumed, and terminal carrier metadata written. The final shadow refresh step blocked on missing `.loom/bootstrap/manifest.json`; this is tracked as Loom shadow/adoption surface drift, not Core product behavior.
-- Next Step: No further CORE-248 implementation work remains.
+- Current Checkpoint: build
+- Current Stop: Corrective implementation is integrated in the worktree: `verifyEvidenceRefs` now requires each Harbor evidence lookup response to match the requested `evidence_ref` and report `access_state: available`, with self-check coverage for invalid scene URLs plus malformed and mismatched evidence lookup responses failing closed without copied `evidence_refs`.
+- Next Step: Create PR for Core #248, run current-head review and merge gates, then keep Core #243/App #265 open for App-driven live E2E.
 - Blockers: None recorded.
-- Latest Validation Summary: 2026-07-09T05:12Z UTC: `pnpm --filter @webenvoy/core-runtime typecheck`, `pnpm --filter @webenvoy/api-server typecheck`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server test`, `pnpm typecheck`, `git diff --check`, `loom suite carrier validate --target . --item CORE-248 --json`, `loom suite validate --target . --item CORE-248 --json`, `loom suite evidence validate --target . --item CORE-248 --json`, and `loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json` passed after requiring valid same-origin Harbor scene URLs for terminal read completion and adding missing-URL/invalid-evidence regression coverage. Deterministic review-readiness evidence: `tools/skills_surface.py check` is not present in this repo; equivalent `loom skills check --target . --json` returned block on pre-existing `.loom/bootstrap` repo-local payload residue and is classified as Loom tool-surface blocker, not Core behavior. `tools/loom_check.py --profile source --source-surface contract-only` is not present in this repo; hosted `loom-check` passed for PR #255 run 28995492402 and local `loom verify --target . --json` passed. `tools/check_release_surface.py`, `tools/version_surface_check.py`, and `tools/check_npm_package.py` are not present in this repo; global `loom skills release-check --target . --json` blocked on Loom release/runtime-copy surfaces outside this no-release Core PR, while `loom version --json`, `loom doctor --target . --json`, `loom installed-state validate --target . --json`, and `loom host doctor --host codex --scope user --json` passed. PR metadata declares `release_judgment: no_release`.
-- Recovery Boundary: Revert this branch. No App/Harbor/Lode code changes, real account/profile/Cookie/production page access, submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-bypass action occurred. App E2E remains blocked until App submits through this API and user authorizes any real account/profile/production page action.
-- Current Lane: post-merge-closeout-run
+- Latest Validation Summary: 2026-07-09T08:04Z UTC: `pnpm install --frozen-lockfile`, `pnpm exec tsc -p packages/core/tsconfig.json --noEmit`, `pnpm exec tsc -p packages/api-server/tsconfig.json --noEmit`, `pnpm --filter @webenvoy/core-runtime test`, `pnpm --filter @webenvoy/api-server test`, `pnpm typecheck`, `git diff --check`, `loom fact-chain --target . --json`, `loom suite carrier validate --target . --item CORE-248 --json`, `loom suite evidence validate --target . --item CORE-248 --json`, `loom suite validate --target . --item CORE-248 --json`, and `loom build --target . --item CORE-248 --build-evidence .loom/specs/CORE-248/build-evidence.json --json` passed. API self-check now covers invalid scene URL staying admitted/non-terminal, malformed and mismatched Harbor evidence lookup responses returning `evidence_unavailable`, failed run status, and no copied `evidence_refs`. Subagent implementation output was integrated and verified by the main controller, then the main controller added invalid scene URL coverage. No App/Harbor/Lode code changed and no real browser/account/profile/Cookie/production page action occurred.
+- Recovery Boundary: Revert this corrective branch. No App/Harbor/Lode code changes, real account/profile/Cookie/production page access, submit, publish, send, save, hosted browser, marketplace, bulk collection, or risk-bypass action may occur in this batch. App E2E remains blocked until App submits through this API and user authorizes any real account/profile/production page action.
+- Current Lane: Core #248 corrective evidence-ref validation.
 
 ## Execution Ledger
 
@@ -28,9 +28,9 @@
 - Verification Entry: .loom/progress/CORE-248.md
 - Lane Entry: .loom/specs/CORE-248/plan.md
 
-## Terminal Closeout Metadata
+## Previous Terminal Closeout Metadata
 
-- Terminal State: closed_out
+- Terminal State: superseded_by_reopen
 - Issue: 248
 - PR: 255
 - Merge Commit: 65c6a3989d12112ddb536e5ad9a58c1fe7d5ac19

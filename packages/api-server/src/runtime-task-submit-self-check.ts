@@ -19,6 +19,17 @@ type JsonObject = Record<string, unknown>;
 const packageRef = "lode://site-capability/example/read-public-page@0.1.0";
 const lockRef = "lode://lock/site-capability/example/read-public-page@0.1.0";
 const resourceRef = "example.read-public-page.resources";
+const readyResourceFacts: JsonObject = {
+  schema_version: "harbor-core-resource-facts/v0",
+  resource_facts: [
+    { fact_key: "runtime.execution_surface.available", state: "available" },
+    { fact_key: "runtime.public_https_navigation.allowed", state: "available" },
+    { fact_key: "snapshot.document_summary.available", state: "available" },
+    { fact_key: "refmap.source_refs.available", state: "available" },
+    { fact_key: "evidence.snapshot_ref.available", state: "available" }
+  ],
+  consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material."
+};
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
@@ -166,7 +177,14 @@ async function writeLodeRegistry(root: string): Promise<string> {
   return join(root, "registry", "local-packages.json");
 }
 
-function createHarborMock(ready: boolean, paths: string[], bodies: Array<{ path: string; body: JsonObject }> = [], sceneOverrides: JsonObject = {}): Server {
+function createHarborMock(
+  ready: boolean,
+  paths: string[],
+  bodies: Array<{ path: string; body: JsonObject }> = [],
+  sceneOverrides: JsonObject = {},
+  evidenceBody: JsonObject = { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+  sessionOverrides: JsonObject = {}
+): Server {
   const sessionRef = "session_runtime_api_ready";
   const scene = {
     schema_version: "harbor-page-scene-refs/v0",
@@ -231,7 +249,8 @@ function createHarborMock(ready: boolean, paths: string[], bodies: Array<{ path:
             current_error: null,
             fact_refs: { session: sessionRef, viewer: "viewer_runtime_api" },
             unavailable: null
-          }
+          },
+          ...sessionOverrides
         });
         return;
       }
@@ -240,7 +259,7 @@ function createHarborMock(ready: boolean, paths: string[], bodies: Array<{ path:
         return;
       }
       if (request.method === "GET" && request.url === "/runtime/evidence/evidence_runtime_api_snapshot") {
-        sendJson(response, 200, { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" });
+        sendJson(response, 200, evidenceBody);
         return;
       }
       sendJson(response, 404, { error: "not_found" });
@@ -406,9 +425,25 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       summary: "A scene without a valid page URL must not complete the Core read result."
     }
   });
+  const invalidSceneUrlHarbor = createHarborMock(true, [], [], {
+    page_summary: {
+      title: "Invalid URL",
+      url: "not-a-valid-url",
+      summary: "A scene without a parseable page URL must not complete the Core read result."
+    }
+  });
   const invalidEvidenceHarbor = createHarborMock(true, [], [], {
     evidence_refs: ["evidence_runtime_api_snapshot", ""]
   });
+  const malformedEvidenceHarbor = createHarborMock(true, [], [], {}, { access_state: "available" }, { resource_facts: readyResourceFacts });
+  const mismatchedEvidenceHarbor = createHarborMock(
+    true,
+    [],
+    [],
+    {},
+    { evidence_ref: "evidence_other_snapshot", access_state: "available" },
+    { resource_facts: readyResourceFacts }
+  );
   const offlineHarbor = createHarborMock(false, []);
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
@@ -417,7 +452,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const harborPort = await listen(harbor);
     const mismatchedSceneHarborPort = await listen(mismatchedSceneHarbor);
     const missingSceneUrlHarborPort = await listen(missingSceneUrlHarbor);
+    const invalidSceneUrlHarborPort = await listen(invalidSceneUrlHarbor);
     const invalidEvidenceHarborPort = await listen(invalidEvidenceHarbor);
+    const malformedEvidenceHarborPort = await listen(malformedEvidenceHarbor);
+    const mismatchedEvidenceHarborPort = await listen(mismatchedEvidenceHarbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
@@ -442,10 +480,25 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingSceneUrlHarborPort}` })
     });
+    const invalidSceneUrlServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${invalidSceneUrlHarborPort}` })
+    });
     const invalidEvidenceServer = createApiServer({
       runRecordStore: store,
       lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${invalidEvidenceHarborPort}` })
+    });
+    const malformedEvidenceServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${malformedEvidenceHarborPort}` })
+    });
+    const mismatchedEvidenceServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: createLocalLodePackageResolver({ registryPath }),
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${mismatchedEvidenceHarborPort}` })
     });
     const badJsonServer = createApiServer({
       runRecordStore: store,
@@ -465,7 +518,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const port = await listen(server);
     const mismatchedScenePort = await listen(mismatchedSceneServer);
     const missingSceneUrlPort = await listen(missingSceneUrlServer);
+    const invalidSceneUrlPort = await listen(invalidSceneUrlServer);
     const invalidEvidencePort = await listen(invalidEvidenceServer);
+    const malformedEvidencePort = await listen(malformedEvidenceServer);
+    const mismatchedEvidencePort = await listen(mismatchedEvidenceServer);
     const offlinePort = await listen(offlineServer);
     const badJsonPort = await listen(badJsonServer);
     const identityRequiredPort = await listen(identityRequiredServer);
@@ -572,6 +628,17 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(missingSceneUrlRun.status, "admitted");
       assert.equal(missingSceneUrlRun.result_ref, undefined);
 
+      const invalidSceneUrl = await postJson(invalidSceneUrlPort, "/tasks", {
+        run_id: "run_api_submit_invalid_scene_url",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_invalid_scene_url"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(invalidSceneUrl.status, 202);
+      const invalidSceneUrlRun = asRecord(asRecord(invalidSceneUrl.body).run);
+      assert.equal(invalidSceneUrlRun.status, "admitted");
+      assert.equal(invalidSceneUrlRun.result_ref, undefined);
+
       const invalidEvidence = await postJson(invalidEvidencePort, "/tasks", {
         run_id: "run_api_submit_invalid_evidence_ref",
         package_ref: packageRef,
@@ -583,6 +650,34 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(invalidEvidenceBody.ok, false);
       assert.equal(asRecord(invalidEvidenceBody.error).code, "resource_fact_missing:snapshot.document_summary.available");
       assert.equal(asRecord(invalidEvidenceBody.run).status, "failed");
+
+      const malformedEvidence = await postJson(malformedEvidencePort, "/tasks", {
+        run_id: "run_api_submit_malformed_evidence_lookup",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_malformed_evidence_lookup"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(malformedEvidence.status, 503);
+      const malformedEvidenceBody = asRecord(malformedEvidence.body);
+      assert.equal(malformedEvidenceBody.ok, false);
+      assert.equal(asRecord(malformedEvidenceBody.error).code, "evidence_unavailable");
+      const malformedEvidenceRun = asRecord(malformedEvidenceBody.run);
+      assert.equal(malformedEvidenceRun.status, "failed");
+      assert.equal(malformedEvidenceRun.evidence_refs, undefined);
+
+      const mismatchedEvidence = await postJson(mismatchedEvidencePort, "/tasks", {
+        run_id: "run_api_submit_mismatched_evidence_lookup",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_mismatched_evidence_lookup"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(mismatchedEvidence.status, 503);
+      const mismatchedEvidenceBody = asRecord(mismatchedEvidence.body);
+      assert.equal(mismatchedEvidenceBody.ok, false);
+      assert.equal(asRecord(mismatchedEvidenceBody.error).code, "evidence_unavailable");
+      const mismatchedEvidenceRun = asRecord(mismatchedEvidenceBody.run);
+      assert.equal(mismatchedEvidenceRun.status, "failed");
+      assert.equal(mismatchedEvidenceRun.evidence_refs, undefined);
 
       const badJson = await postJson(badJsonPort, "/tasks", {
         run_id: "run_api_submit_bad_harbor_json",
@@ -651,7 +746,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(server);
       await close(mismatchedSceneServer);
       await close(missingSceneUrlServer);
+      await close(invalidSceneUrlServer);
       await close(invalidEvidenceServer);
+      await close(malformedEvidenceServer);
+      await close(mismatchedEvidenceServer);
       await close(offlineServer);
       await close(badJsonServer);
       await close(identityRequiredServer);
@@ -661,7 +759,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(harbor);
     await close(mismatchedSceneHarbor);
     await close(missingSceneUrlHarbor);
+    await close(invalidSceneUrlHarbor);
     await close(invalidEvidenceHarbor);
+    await close(malformedEvidenceHarbor);
+    await close(mismatchedEvidenceHarbor);
     await close(offlineHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);
