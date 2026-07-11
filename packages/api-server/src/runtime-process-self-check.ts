@@ -3,7 +3,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type JsonResponse = {
   status: number;
@@ -24,6 +25,7 @@ const requiredHarborFactKeys = [
 const identityPrivateBoundary = ["password", "verification_code", "cookie_value", "storage_value", "session_token"];
 const expectedRuntimeBindingRefs = ["session_process_ready", "profile_process", "harbor:provider/cloakbrowser", "viewer_process", "identity-env_process", "identity-env_process:execution", "snapshot_process_ready", "refmap_process_ready", "source_trace_process_ready"];
 const harborSupervisorToken = "runtime-process-supervisor-token";
+const apiServerEntry = join(dirname(fileURLToPath(import.meta.url)), "index.js");
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
@@ -120,7 +122,7 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 }
 
 function spawnApiServer(port: number, runRecordDir: string, env: Record<string, string> = {}): { child: ChildProcess; output: () => string } {
-  const child = spawn(process.execPath, ["dist/index.js"], {
+  const child = spawn(process.execPath, [apiServerEntry], {
     env: {
       ...process.env,
       PORT: String(port),

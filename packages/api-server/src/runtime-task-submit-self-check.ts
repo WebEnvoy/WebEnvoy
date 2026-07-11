@@ -582,7 +582,7 @@ function createHarborMock(
           evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111"],
           evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" }, { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }],
           post_check: { post_check_ref: "post_check_11111111-1111-4111-8111-111111111111", status: "passed", reason: "managed_provider_read_probe_completed" },
-          lode_pin: { repository: "WebEnvoy/Lode", commit: "e36a4a7", asset_path: "registry/runtime-consumption-allowlist.json", asset_sha256: "5aa6be8bd416bbd19f73dcfab995f62f769849923f2aa2e995da974b0f329184", mirror_payload_sha256: "bbc17210563ed91fc320f006bbd81a9a965ed43f18ffd3018ee9b25f6c5bdf2e", allowlist_id: "lode.xhs-boss.read.runtime-consumption", allowlist_version: "0.1.0", asset_owner: "Lode", consumer: { repository: "WebEnvoy/Harbor", issue: "#245", purpose: "allowlisted one-shot read-only operation admission" } },
+          lode_pin: { repository: "WebEnvoy/Lode", commit: "e36a4a7", asset_path: "registry/runtime-consumption-allowlist.json", asset_sha256: "5aa6be8bd416bbd19f73dcfab995f62f769849923f2aa2e995da974b0f329184", mirror_payload_sha256: "3b32e37e04cb008c7e1c072ead35919cde6e498ebfcea34a57de889559a0f141", allowlist_id: "lode.xhs-boss.read.runtime-consumption", allowlist_version: "0.1.0", asset_owner: "Lode", consumer: { repository: "WebEnvoy/Harbor", issue: "#245", purpose: "allowlisted one-shot read-only operation admission" } },
           public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed", raw_profile_storage: "not_exposed", raw_cdp_endpoint: "not_exposed", raw_dom: "not_exposed", raw_har: "not_exposed", raw_network_bodies: "not_exposed", screenshot_body: "not_exposed", external_write_actions: "not_performed" },
           ...readOperationOverrides
         });
@@ -805,11 +805,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const bossPaths: string[] = [];
   const bossBodies: Array<{ path: string; body: JsonObject }> = [];
   const bossHarbor = createHarborMock(true, bossPaths, bossBodies, {
-    page_summary: { title: "BOSS jobs", url: "https://www.zhipin.com/web/geek/jobs?query=AI", summary: "BOSS job search." }
+    page_summary: { title: "BOSS jobs", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS job search." }
   }, undefined, {}, readyBossSiteFacts, {
     site_id: "boss",
     operation_id: "boss_job_search",
-    public_summary: { schema_version: "harbor-read-operation-public-summary/v0", operation_id: "boss_job_search", result_kind: "boss_job_search_surface", surface: "web_geek_jobs", result_state: "operation_read_response_observed", response_status: 200, source_signals: ["boss_wapi_zpgeek_read_network"] },
+    public_summary: { schema_version: "harbor-read-operation-public-summary/v0", operation_id: "boss_job_search", result_kind: "boss_job_search_surface", surface: "web_geek_jobs", result_state: "operation_read_response_observed", response_status: 200, query: "AI", city_code: "101010100", business_code: 0, job_count: 2, source_signals: ["boss_wapi_zpgeek_read_network"] },
     source_refs: [{ kind: "network_summary", ref: "source_44444444-4444-4444-8444-444444444444" }],
     evidence_refs: ["evidence_55555555-5555-4555-8555-555555555555", "evidence_66666666-6666-4666-8666-666666666666"],
     evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_55555555-5555-4555-8555-555555555555" }, { kind: "network_summary_ref", ref: "evidence_66666666-6666-4666-8666-666666666666" }, { kind: "post_check_ref", ref: "post_check_77777777-7777-4777-8777-777777777777" }],
@@ -889,6 +889,42 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const operationRefDriftHarbors = operationRefDriftCases.map((entry) =>
     createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, entry.override)
   );
+  const bossSummary = asRecord(asRecord({ public_summary: {
+    schema_version: "harbor-read-operation-public-summary/v0", operation_id: "boss_job_search", result_kind: "boss_job_search_surface", surface: "web_geek_jobs",
+    result_state: "operation_read_response_observed", response_status: 200, query: "AI", city_code: "101010100", business_code: 0, job_count: 2,
+    source_signals: ["boss_wapi_zpgeek_read_network"]
+  } }).public_summary);
+  const bossContractDriftCases: Array<{ name: string; override: JsonObject }> = [
+    { name: "query", override: { public_summary: { ...bossSummary, query: "other" } } },
+    { name: "city", override: { public_summary: { ...bossSummary, city_code: "101020100" } } },
+    { name: "result_kind", override: { public_summary: { ...bossSummary, result_kind: "xiaohongshu_search_notes_surface" } } },
+    { name: "surface", override: { public_summary: { ...bossSummary, surface: "search_result" } } },
+    { name: "source_signal", override: { public_summary: { ...bossSummary, source_signals: ["pinia_store"] } } },
+    { name: "duplicate_signal", override: { public_summary: { ...bossSummary, source_signals: ["boss_wapi_zpgeek_read_network", "boss_wapi_zpgeek_read_network"] } } },
+    { name: "extra_summary", override: { public_summary: { ...bossSummary, raw_jobs: [] } } },
+    { name: "lode_pin", override: { lode_pin: { repository: "WebEnvoy/Lode", commit: "wrong" } } },
+    { name: "extra_ref_kind", override: { source_refs: [{ kind: "network_summary", ref: "source_44444444-4444-4444-8444-444444444444" }, { kind: "raw_network", ref: "source_88888888-8888-4888-8888-888888888888" }] } },
+    { name: "duplicate_ref_kind", override: { evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_55555555-5555-4555-8555-555555555555" }, { kind: "network_summary_ref", ref: "evidence_66666666-6666-4666-8666-666666666666" }, { kind: "network_summary_ref", ref: "evidence_88888888-8888-4888-8888-888888888888" }, { kind: "post_check_ref", ref: "post_check_77777777-7777-4777-8777-777777777777" }] } },
+    { name: "unknown_outcome", override: { schema_version: "unknown" } }
+  ];
+  const bossContractDriftHarbors = bossContractDriftCases.map((entry) => createHarborMock(
+    true, [], [], { page_summary: { title: "BOSS jobs", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS job search." } },
+    undefined, {}, readyBossSiteFacts, { site_id: "boss", operation_id: "boss_job_search", public_summary: bossSummary,
+      source_refs: [{ kind: "network_summary", ref: "source_44444444-4444-4444-8444-444444444444" }],
+      evidence_refs: ["evidence_55555555-5555-4555-8555-555555555555", "evidence_66666666-6666-4666-8666-666666666666"],
+      evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_55555555-5555-4555-8555-555555555555" }, { kind: "network_summary_ref", ref: "evidence_66666666-6666-4666-8666-666666666666" }, { kind: "post_check_ref", ref: "post_check_77777777-7777-4777-8777-777777777777" }],
+      post_check: { post_check_ref: "post_check_77777777-7777-4777-8777-777777777777", status: "passed", reason: "managed_provider_read_probe_completed" }, ...entry.override }
+  ));
+  const bossAdmissionCases: Array<{ name: string; session?: JsonObject; siteFacts?: JsonObject }> = [
+    { name: "session", session: { runtime_facts: liveRuntimeFacts({ lifecycle_state: "closed" }) } },
+    { name: "control", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "user", takeover: { available: false } } }) } },
+    { name: "challenge", siteFacts: { ...readyBossSiteFacts, resource_facts: (readyBossSiteFacts.resource_facts as JsonObject[]).map((fact) => fact.key === "safety.challenge.absent" ? { ...fact, state: "unknown" } : fact) } }
+  ];
+  const bossAdmissionPaths = bossAdmissionCases.map(() => [] as string[]);
+  const bossAdmissionHarbors = bossAdmissionCases.map((entry, index) => createHarborMock(
+    true, bossAdmissionPaths[index]!, [], { page_summary: { title: "BOSS jobs", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS job search." } },
+    undefined, entry.session ?? {}, entry.siteFacts ?? readyBossSiteFacts
+  ));
   const deferredXiaohongshuFactsPaths: string[] = [];
   const deferredXiaohongshuFactsHarbor = createHarborMock(
     true,
@@ -982,6 +1018,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedBoundaryOperationHarborPort = await listen(driftedBoundaryOperationHarbor);
     const unknownOutcomeHarborPort = await listen(unknownOutcomeHarbor);
     const operationRefDriftHarborPorts = await Promise.all(operationRefDriftHarbors.map(listen));
+    const bossContractDriftHarborPorts = await Promise.all(bossContractDriftHarbors.map(listen));
+    const bossAdmissionHarborPorts = await Promise.all(bossAdmissionHarbors.map(listen));
     const deferredXiaohongshuFactsHarborPort = await listen(deferredXiaohongshuFactsHarbor);
     const blockedIdentityHarborPorts = await Promise.all(blockedIdentityHarbors.map(listen));
     const publicIdentityHarborPort = await listen(publicIdentityHarbor);
@@ -1101,6 +1139,16 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: resolver,
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftPort}` })
     }));
+    const bossContractDriftServers = bossContractDriftHarborPorts.map((driftPort) => createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftPort}` })
+    }));
+    const bossAdmissionServers = bossAdmissionHarborPorts.map((admissionPort) => createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${admissionPort}` })
+    }));
     const blockedIdentityServers = blockedIdentityHarborPorts.map((blockedPort) => createApiServer({
       runRecordStore: store,
       lodePackageResolver: resolver,
@@ -1143,6 +1191,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const deferredXiaohongshuFactsPort = await listen(deferredXiaohongshuFactsServer);
     const nonPinnedDeferredFactsPort = await listen(nonPinnedDeferredFactsServer);
     const operationRefDriftPorts = await Promise.all(operationRefDriftServers.map(listen));
+    const bossContractDriftPorts = await Promise.all(bossContractDriftServers.map(listen));
+    const bossAdmissionPorts = await Promise.all(bossAdmissionServers.map(listen));
     const blockedIdentityPorts = await Promise.all(blockedIdentityServers.map(listen));
     const publicIdentityPort = await listen(publicIdentityServer);
     const offlinePort = await listen(offlineServer);
@@ -1253,12 +1303,48 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         package_ref: bossPackageRef,
         task_intent: bossTaskIntent("intent_api_submit_boss_operation"),
         public_query: { query: "AI" },
-        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/jobs?query=AI" }
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
       });
       assert.equal(bossSubmit.status, 202, JSON.stringify(bossSubmit.body));
-      assert.equal(asRecord(asRecord(bossSubmit.body).run).status, "succeeded");
+      const bossRun = asRecord(asRecord(bossSubmit.body).run);
+      assert.equal(bossRun.status, "succeeded");
+      assert.equal(bossRun.result_kind, "job-search.read_result");
+      assert.deepEqual(bossRun.source_refs, ["source_44444444-4444-4444-8444-444444444444"]);
+      assert.deepEqual(bossRun.evidence_refs, ["evidence_55555555-5555-4555-8555-555555555555", "evidence_66666666-6666-4666-8666-666666666666", "post_check_77777777-7777-4777-8777-777777777777"]);
       assert(bossPaths.includes("POST /runtime/sessions/session_runtime_api_ready/snapshot"));
-      assert.equal(asRecord(bossBodies.find((entry) => entry.path.endsWith("/read-operations"))?.body).query, "AI");
+      const bossReadBody = asRecord(bossBodies.find((entry) => entry.path.endsWith("/read-operations"))?.body);
+      assert.equal(bossReadBody.query, "AI");
+      assert.equal(bossReadBody.city_code, "101010100");
+      assert.equal(JSON.stringify(bossReadBody).includes(harborSupervisorToken), false);
+
+      for (const [index, driftCase] of bossContractDriftCases.entries()) {
+        const drift = await postJson(bossContractDriftPorts[index]!, "/tasks", {
+          run_id: `run_api_submit_boss_${driftCase.name}`,
+          package_ref: bossPackageRef,
+          task_intent: bossTaskIntent(`intent_api_submit_boss_${driftCase.name}`),
+          public_query: { query: "AI" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+        });
+        const driftRun = asRecord(asRecord(drift.body).run);
+        if (driftCase.name === "unknown_outcome") {
+          assert.equal(driftRun.status, "unknown_outcome", driftCase.name);
+        } else {
+          assert.equal(asRecord(drift.body).ok, false, driftCase.name);
+          assert.equal(driftRun.status, "failed", driftCase.name);
+          assert.equal(driftRun.result_ref, undefined, driftCase.name);
+        }
+      }
+      for (const [index, admissionCase] of bossAdmissionCases.entries()) {
+        const blocked = await postJson(bossAdmissionPorts[index]!, "/tasks", {
+          run_id: `run_api_submit_boss_${admissionCase.name}`,
+          package_ref: bossPackageRef,
+          task_intent: bossTaskIntent(`intent_api_submit_boss_${admissionCase.name}`),
+          public_query: { query: "AI" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+        });
+        assert.equal(asRecord(blocked.body).ok, false, admissionCase.name);
+        assert.equal(bossAdmissionPaths[index]!.some((path) => path.endsWith("/read-operations")), false, admissionCase.name);
+      }
 
       for (const [targetPort, runId, status, httpStatus] of [[unavailableOperationPort, "run_api_submit_operation_unavailable", "blocked", 503], [missingRefsOperationPort, "run_api_submit_operation_missing_refs", "failed", 400]] as const) {
         const failedOperation = await postJson(targetPort, "/tasks", {
@@ -1539,6 +1625,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(deferredXiaohongshuFactsServer);
       await close(nonPinnedDeferredFactsServer);
       await Promise.all(operationRefDriftServers.map(close));
+      await Promise.all(bossContractDriftServers.map(close));
+      await Promise.all(bossAdmissionServers.map(close));
       await Promise.all(blockedIdentityServers.map(close));
       await close(publicIdentityServer);
       await close(offlineServer);
@@ -1563,6 +1651,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(unknownOutcomeHarbor);
     await close(deferredXiaohongshuFactsHarbor);
     await Promise.all(operationRefDriftHarbors.map(close));
+    await Promise.all(bossContractDriftHarbors.map(close));
+    await Promise.all(bossAdmissionHarbors.map(close));
     await Promise.all(blockedIdentityHarbors.map(close));
     await close(publicIdentityHarbor);
     await close(offlineHarbor);

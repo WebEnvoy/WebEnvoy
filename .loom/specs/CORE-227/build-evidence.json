@@ -1,0 +1,22 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-227",
+  "task_goal": "Consume Harbor's real BOSS job search with operation-specific refs-only validation.",
+  "branch": "work/core-227-boss-search-real-read",
+  "head_at_validation": "pending",
+  "current_pointer": "CORE-227 active in .loom/status/current.md",
+  "covered_issues": [227],
+  "excluded_issues": [270],
+  "ownership_constraints": [
+    "Only declared Core runtime/API self-check files and CORE-227 carriers",
+    "No App, Harbor, or Lode mutation",
+    "No live account E2E, writes, sensitive/raw material persistence, merge, or issue closure"
+  ],
+  "delegations": [],
+  "integration_evidence": [],
+  "validation_results": [],
+  "runtime_live_evidence": {
+    "status": "not_in_scope",
+    "boundary": "Local contract/process validation only; live-account E2E is explicitly excluded from this PR."
+  }
+}
