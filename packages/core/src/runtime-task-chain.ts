@@ -259,7 +259,7 @@ function operationPreflightFailure(
   ) {
     return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
-  if (control?.owner !== "core_task") {
+  if (control?.owner !== "core_task" || (control?.lock_owner !== undefined && control.lock_owner !== "core_task")) {
     return failure("resource_admission", "runtime_session_busy", "runtime_binding", "wait_or_request_handoff");
   }
   if (!origin?.startsWith("https://") || !allowedOrigin || !sameOrigin(origin, targetUrl)) {
@@ -1054,6 +1054,7 @@ function coreRuntimeFactsFromSession(value: unknown, identity: HarborIdentityEnv
   }
   const viewerEntry = object(direct.viewer_entry);
   const controlLock = object(direct.control_lock);
+  const lockOwner = string(controlLock?.owner);
   const lastSeen = string(direct.last_seen_at) ?? new Date(0).toISOString();
   const identity_environment_ref = string(direct.identity_environment_ref) ?? string(identity?.identity_environment_ref);
   const execution_identity_ref = string(direct.execution_identity_ref) ?? string(identity?.execution_identity_ref);
@@ -1074,7 +1075,8 @@ function coreRuntimeFactsFromSession(value: unknown, identity: HarborIdentityEnv
       expires_at: string(viewerEntry?.expires_at) ?? lastSeen
     },
     control: {
-      owner: string(direct.control_owner) ?? string(controlLock?.owner) ?? "unknown",
+      owner: string(direct.control_owner) ?? lockOwner ?? "unknown",
+      ...(lockOwner === undefined ? {} : { lock_owner: lockOwner }),
       handoff_reason: null,
       takeover: {
         available: false,

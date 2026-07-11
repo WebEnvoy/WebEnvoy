@@ -926,6 +926,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     { name: "lifecycle_closed", session: { runtime_facts: liveRuntimeFacts({ lifecycle_state: "closed" }) } },
     { name: "control_busy", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "user", takeover: { available: false } } }) } },
     { name: "control_agent_takeover", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "agent", takeover: { available: true } } }) } },
+    { name: "control_lock_agent", session: { runtime_facts: liveRuntimeFacts({ schema_version: undefined, control_owner: "core_task", control_lock: { owner: "agent" } }) } },
     { name: "future_page_unknown", session: {}, siteFacts: factState("page.future_probe.ready", "unknown") },
     { name: "future_network_unknown", session: {}, siteFacts: factState("network.future_probe.available", "unknown") }
   ];

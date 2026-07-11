@@ -30,6 +30,7 @@ export type HarborCoreRuntimeFacts = {
   };
   control: {
     owner: string;
+    lock_owner?: string;
     handoff_reason: string | null;
     takeover: {
       available: boolean;
