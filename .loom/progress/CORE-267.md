@@ -4,10 +4,10 @@
 
 - Item ID: CORE-267
 - Current Checkpoint: merge
-- Current Stop: Implementation and independent semantic review are complete. Allowlisted tasks can succeed only from a Lode-pinned, session-bound Harbor completed operation; unavailable and indeterminate outcomes fail closed without snapshot-success fallback. P0/P1/P2 findings are resolved. A P3 advisory remains to move duplicated trust-boundary parsing and exact contract fixtures into a focused module when a shared schema is available.
-- Next Step: Run hosted checks against the review-bound PR head and merge only after all required gates pass. Keep #267 open pending merged-runtime App live evidence.
+- Current Stop: PR #269 is open at head f114990c455a16e669bdd9e930992bd2aea17b88. Pinned operation identity, exact refs, supervisor bearer action coverage, and core_task ownership are implemented and locally validated.
+- Next Step: Record delta review, consume hosted checks, and merge only after required gates pass. Keep #267 open pending merged-head packaged-App live evidence.
 - Blockers: None
-- Latest Validation Summary: 2026-07-11 UTC current worktree passed focused Core/API typecheck, tests, API build/self-check/process-self-check, root `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and `loom fact-chain`. Independent review found no remaining P0/P1/P2 issues after the `unknown_outcome` HTTP status fix. Evidence is contract/mock validation only; no live site completion is claimed.
+- Latest Validation Summary: 2026-07-11 at f114990c455a16e669bdd9e930992bd2aea17b88: focused Core/API and root `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Branch packaged-App live run app-xiaohongshu-mrgcpit5 succeeded through the supervised Harbor session and pinned Lode package; merged-head replay is pending.
 - Recovery Boundary: Revert branch `work/core-267-harbor-read-operation`; no App/Harbor/Lode mutation, automatic login, sensitive material access, submit/publish/send, bulk collection, hosted browser, account cloud hosting, or risk bypass is permitted.
 - Current Lane: Core #267 Harbor allowlisted read-operation consumption.
 
