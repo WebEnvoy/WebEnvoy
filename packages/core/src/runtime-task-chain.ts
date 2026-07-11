@@ -78,6 +78,10 @@ const resourceFactsBoundary =
 const lodeAllowlistCommit = "e36a4a7";
 const lodeAllowlistAssetPath = "registry/runtime-consumption-allowlist.json";
 const lodeAllowlistSemanticSha256 = "599de2eaa0768810a08e49ef840603dded7240a08d9858049e8ee5a081794db7";
+const deferredProbeFactKeysByOperation = new Map<string, ReadonlySet<string>>([
+  ["xhs_search_notes", new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])],
+  ["boss_job_search", new Set(["page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available"])]
+]);
 
 function failure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
   return { category, code, phase, recovery_hint };
@@ -178,6 +182,54 @@ function sameOrigin(left: string | undefined, right: string | undefined): boolea
   } catch {
     return false;
   }
+}
+
+function operationAdmissionContract(contract: LodePackageAdmissionContract): LodePackageAdmissionContract {
+  const deferredFacts = contract.runtime_consumption && deferredProbeFactKeysByOperation.get(contract.runtime_consumption.operation_id);
+  if (!deferredFacts) return contract;
+  return {
+    ...contract,
+    resource_requirements: {
+      ...contract.resource_requirements,
+      resource_requirement_profiles: contract.resource_requirements.resource_requirement_profiles.map((profile) => ({
+        ...profile,
+        ...(profile.required_harbor_facts === undefined
+          ? {}
+          : { required_harbor_facts: profile.required_harbor_facts.filter((fact) => !deferredFacts.has(fact.fact_key)) })
+      }))
+    }
+  };
+}
+
+function operationPreflightFailure(
+  harbor: HarborAdmissionInput,
+  entry: LodeRuntimeConsumptionEntry,
+  requestedIdentityRef: string | undefined,
+  targetUrl: string | undefined
+): FailureRecord | undefined {
+  const identity = object(harbor.harbor_identity_environment_facts);
+  if (identity?.schema_version !== "harbor-local-identity-environment/v0") {
+    return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "connect_identity_environment");
+  }
+  const login = object(identity?.login_state);
+  const site = object(identity?.site_binding);
+  const origin = safeHttpUrl(site?.origin);
+  const allowedOrigin = origin !== undefined && entry.allowed_origins.some((allowed) => sameOrigin(origin, allowed));
+  if (!requestedIdentityRef || identity.identity_environment_ref !== requestedIdentityRef || site?.site_id !== entry.site_slug) {
+    return failure("resource_admission", "identity_runtime_mismatch", "runtime_binding", "select_matching_runtime");
+  }
+  if (
+    (login?.reason ?? login?.authentication_provenance) !== "user_confirmed_managed_session" ||
+    login?.manual_authentication_state !== "completed" ||
+    login?.state !== "logged_in" ||
+    login?.recovery_required !== false
+  ) {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
+  }
+  if (!origin?.startsWith("https://") || !allowedOrigin || !sameOrigin(origin, targetUrl)) {
+    return failure("resource_admission", "runtime_origin_not_allowed", "resource_matching", "fix_input");
+  }
+  return undefined;
 }
 
 function projectionFromScene(taskIntent: TaskIntentEnvelope, packageRef: string, scene: HarborCoreSceneReference): LodeReadOnlyProjection {
@@ -530,14 +582,22 @@ export async function submitRuntimeTask(
   } catch {
     harbor = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
   }
+  const runtimeConsumption = lode_package_contract.runtime_consumption;
+  const preflightFailure = !isFailure(harbor) && runtimeConsumption
+    ? operationPreflightFailure(harbor, runtimeConsumption, request.harbor?.identity_environment_ref, request.harbor?.url ?? taskUrl(request.task_intent))
+    : undefined;
   const submitted = await acceptReadOnlyTaskSubmission(
     store,
     isFailure(harbor)
       ? { ...base, lode_package_contract, harbor_admission_failure: harbor }
-      : { ...base, lode_package_contract, ...harbor }
+      : {
+          ...base,
+          lode_package_contract: operationAdmissionContract(lode_package_contract),
+          ...harbor,
+          ...(preflightFailure === undefined ? {} : { harbor_admission_failure: preflightFailure })
+        }
   );
   if (!submitted.ok || isFailure(harbor)) return submitted;
-  const runtimeConsumption = lode_package_contract.runtime_consumption;
   if (runtimeConsumption) {
     const query = request.public_query?.query;
     if (!query || query.trim() !== query) {
@@ -892,7 +952,9 @@ function identityFactsFromPublicRecord(value: unknown): HarborIdentityEnvironmen
     },
     login_state: {
       state: string(status?.login_state) ?? "unknown",
-      recovery_required: status?.recovery_required === true
+      authentication_provenance: string(status?.authentication_provenance) ?? "unknown",
+      manual_authentication_state: string(status?.manual_authentication_state) ?? "unknown",
+      recovery_required: status?.recovery_required === false ? false : true
     },
     browser_storage: {
       state: string(status?.browser_storage_state) ?? "unknown"

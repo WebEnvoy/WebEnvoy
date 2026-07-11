@@ -56,6 +56,9 @@ export type HarborIdentityEnvironmentFacts = {
   };
   login_state: {
     state: string;
+    reason?: string;
+    authentication_provenance?: string;
+    manual_authentication_state?: string;
     recovery_required: boolean;
   };
   browser_storage: {
