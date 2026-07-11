@@ -5,7 +5,7 @@
 - Item ID: CORE-267
 - Goal: Drive Harbor's allowlisted real read-operation endpoint and persist only validated public result/evidence refs in Core Run Records.
 - Scope: Core API task input, Lode runtime-consumption allowlist resolution, Harbor read-operation invocation, terminal failure mapping, refs-only result projection, focused self-checks, and CORE-267 Loom carriers. Ownership is limited to the Core repository paths declared below.
-- Execution Path: work/core-267-harbor-read-operation
+- Execution Path: work/core-267-deferred-probe-admission
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-267.md
 - Review Entry: .loom/reviews/CORE-267.json

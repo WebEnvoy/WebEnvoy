@@ -37,6 +37,7 @@ const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const bossLockRef = "lode://lock/site-capability/boss/job-search@0.1.0";
 const bossResourceRef = "boss.job-search.resources";
+const harborSupervisorToken = "runtime-supervisor-self-check-token";
 const readyResourceFacts: JsonObject = {
   schema_version: "harbor-core-resource-facts/v0",
   resource_facts: [
@@ -71,6 +72,8 @@ const readyXiaohongshuSiteFacts: JsonObject = {
     { key: "page.vue_app.ready", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
     { key: "page.pinia_store.ready", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
     { key: "source.refs.available", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "page.future_probe.ready", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
+    { key: "network.future_probe.available", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
     { key: "evidence.snapshot_ref.available", state: "available", source: "validation_evidence", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" },
     { key: "safety.challenge.absent", state: "available", source: "derived", severity: "info", message: "ready", evidence_ref: "evidence_runtime_api_snapshot" }
   ],
@@ -114,6 +117,45 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
 function asRecord(value: unknown): JsonObject {
   assert(value && typeof value === "object" && !Array.isArray(value));
   return value as JsonObject;
+}
+
+function liveSessionIdentity(siteId: string, origin: string, overrides: JsonObject = {}): JsonObject {
+  const loginOverrides = asRecord(overrides.login_state ?? {});
+  return {
+    schema_version: "harbor-local-identity-environment/v0",
+    identity_environment_ref: "identity-env_runtime_api",
+    execution_identity_ref: "identity-env_runtime_api:execution",
+    profile_ref: "profile_runtime_api",
+    site_binding: { site_id: siteId, origin },
+    browser_storage: { state: "present" },
+    provider_binding: { selected_provider_id: "cloakbrowser", binding_status: "default_provider_available" },
+    consumer_boundary: {
+      core: "admission_facts_refs_and_blocking_reasons_only",
+      not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
+    },
+    ...overrides,
+    login_state: { state: "logged_in", reason: "user_confirmed_managed_session", manual_authentication_state: "completed", recovery_required: false, ...loginOverrides }
+  };
+}
+
+function liveRuntimeFacts(overrides: JsonObject = {}): JsonObject {
+  return {
+    schema_version: "harbor-core-runtime-facts/v0",
+    runtime_session_ref: "session_runtime_api_ready",
+    identity_environment_ref: "identity-env_runtime_api",
+    execution_identity_ref: "identity-env_runtime_api:execution",
+    profile_ref: "profile_runtime_api",
+    provider_ref: "harbor:provider/cloakbrowser",
+    provider_mode: "local_dedicated_profile",
+    lifecycle_state: "active",
+    availability: { cdp: "available", viewer: "unsupported", snapshot: "available", evidence: "available" },
+    viewer: { viewer_ref: "viewer_runtime_api", availability: "unsupported", access_mode: "none", expires_at: "2026-07-08T01:00:00.000Z" },
+    control: { owner: "core_task", handoff_reason: null, takeover: { available: false, unavailable_reason: "viewer_unavailable" }, updated_at: "2026-07-08T00:00:00.000Z" },
+    current_error: null,
+    fact_refs: { session: "session_runtime_api_ready", viewer: "viewer_runtime_api" },
+    unavailable: null,
+    ...overrides
+  };
 }
 
 async function postJson(port: number, path: string, body: unknown): Promise<{ status: number; body: unknown }> {
@@ -404,6 +446,8 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
             { fact_key: "page.vue_app.ready", owner: "Harbor", required: true },
             { fact_key: "page.pinia_store.ready", owner: "Harbor", required: true },
             { fact_key: "source.refs.available", owner: "Harbor", required: true },
+            { fact_key: "page.future_probe.ready", owner: "Harbor", required: true },
+            { fact_key: "network.future_probe.available", owner: "Harbor", required: true },
             { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true },
             { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
           ]
@@ -430,9 +474,13 @@ function createHarborMock(
   evidenceBody: JsonObject = { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
   sessionOverrides: JsonObject = {},
   siteResourceBody: JsonObject | undefined = undefined,
-  readOperationOverrides: JsonObject = {}
+  readOperationOverrides: JsonObject = {},
+  identityRecordOverrides: JsonObject = {}
 ): Server {
   const sessionRef = "session_runtime_api_ready";
+  const sitePage = siteResourceBody?.page as JsonObject | undefined;
+  const sessionOrigin = typeof sitePage?.origin === "string" ? sitePage.origin : "https://example.org";
+  const sessionSiteId = typeof siteResourceBody?.site_id === "string" ? siteResourceBody.site_id : "example";
   const scene = {
     schema_version: "harbor-page-scene-refs/v0",
     runtime_session_ref: sessionRef,
@@ -452,6 +500,14 @@ function createHarborMock(
 
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
+    const protectedRequest = request.method === "POST" && (
+      request.url === "/runtime/identity-environment-sessions" ||
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(request.url ?? "")
+    );
+    if (protectedRequest && request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
+      sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });
+      return;
+    }
     void readRequestJson(request).then((body) => {
       if (request.method === "POST") bodies.push({ path: `${request.method} ${request.url}`, body });
       if (request.method === "GET" && request.url === "/readiness") {
@@ -469,12 +525,13 @@ function createHarborMock(
         sendJson(response, 200, {
           schema_version: "harbor-local-identity-environment-store/v0",
           identity_environment_ref: "identity-env_runtime_api",
-          site: { site_id: "example", origin: "https://example.org", display_name: "Example", account_ref: "account_runtime_api" },
+          site: { site_id: sessionSiteId, origin: sessionOrigin, display_name: "Runtime identity", account_ref: "account_runtime_api" },
           status: {
             readiness: "ready",
             login_state: "logged_in",
+            authentication_provenance: "user_confirmed_managed_session",
             browser_storage_state: "present",
-            manual_authentication_state: "not_required",
+            manual_authentication_state: "completed",
             recovery_required: false,
             blocking_reasons: []
           },
@@ -492,42 +549,15 @@ function createHarborMock(
             browser_family: "cloakbrowser",
             fingerprint_summary: "provider_claim"
           },
-          public_boundary: { output: "status_and_redacted_refs_only", raw_material: "not_exposed" }
+          public_boundary: { output: "status_and_redacted_refs_only", raw_material: "not_exposed" },
+          ...identityRecordOverrides
         });
         return;
       }
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
         sendJson(response, 200, {
-          identity_environment_facts: {
-            schema_version: "harbor-local-identity-environment/v0",
-            identity_environment_ref: "identity-env_runtime_api",
-            execution_identity_ref: "identity-env_runtime_api:execution",
-            profile_ref: "profile_runtime_api",
-            site_binding: { site_id: "example", origin: "https://example.org" },
-            login_state: { state: "logged_in", recovery_required: false },
-            browser_storage: { state: "present" },
-            provider_binding: { selected_provider_id: "cloakbrowser", binding_status: "default_provider_available" },
-            consumer_boundary: {
-              core: "admission_facts_refs_and_blocking_reasons_only",
-              not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
-            }
-          },
-          runtime_facts: {
-            schema_version: "harbor-core-runtime-facts/v0",
-            runtime_session_ref: sessionRef,
-            identity_environment_ref: "identity-env_runtime_api",
-            execution_identity_ref: "identity-env_runtime_api:execution",
-            profile_ref: "profile_runtime_api",
-            provider_ref: "harbor:provider/cloakbrowser",
-            provider_mode: "local_dedicated_profile",
-            lifecycle_state: "active",
-            availability: { cdp: "available", viewer: "unsupported", snapshot: "available", evidence: "available" },
-            viewer: { viewer_ref: "viewer_runtime_api", availability: "unsupported", access_mode: "none", expires_at: "2026-07-08T01:00:00.000Z" },
-            control: { owner: "core_task", handoff_reason: null, takeover: { available: false, unavailable_reason: "viewer_unavailable" }, updated_at: "2026-07-08T00:00:00.000Z" },
-            current_error: null,
-            fact_refs: { session: sessionRef, viewer: "viewer_runtime_api" },
-            unavailable: null
-          },
+          identity_environment_facts: liveSessionIdentity(sessionSiteId, sessionOrigin),
+          runtime_facts: liveRuntimeFacts(),
           ...sessionOverrides
         });
         return;
@@ -715,6 +745,8 @@ function createDuplicateRunRaceStore(store: FileRunRecordStore): FileRunRecordSt
 }
 
 export async function assertRuntimeTaskSubmitApi(): Promise<void> {
+  const previousSupervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
   const root = await mkdtemp(join(tmpdir(), "webenvoy-lode-registry-"));
   const runDir = await mkdtemp(join(tmpdir(), "webenvoy-api-submit-runs-"));
   const paths: string[] = [];
@@ -788,9 +820,79 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const driftedSessionOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { runtime_session_ref: "session_other" });
   const driftedBoundaryOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed" } });
   const unknownOutcomeHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { schema_version: "malformed-after-dispatch" });
-  const missingXiaohongshuFactHarbor = createHarborMock(
+  const operationRefDriftCases: Array<{ name: string; override: JsonObject }> = [
+    {
+      name: "extra_source_kind",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" },
+          { kind: "raw_dom_ref", ref: "source_44444444-4444-4444-8444-444444444444" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_source_kind",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" },
+          { kind: "network_summary", ref: "source_44444444-4444-4444-8444-444444444444" }
+        ]
+      }
+    },
+    {
+      name: "extra_evidence_kind",
+      override: {
+        evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111", "evidence_22222222-2222-4222-8222-222222222222"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" },
+          { kind: "har_ref", ref: "evidence_22222222-2222-4222-8222-222222222222" },
+          { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_source_ref",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_evidence_ref",
+      override: {
+        evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111", "evidence_11111111-1111-4111-8111-111111111111"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" },
+          { kind: "post_check_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" }
+        ],
+        post_check: { post_check_ref: "evidence_11111111-1111-4111-8111-111111111111", status: "passed", reason: "managed_provider_read_probe_completed" }
+      }
+    },
+    {
+      name: "source_evidence_ref_reuse",
+      override: {
+        evidence_refs: ["source_11111111-1111-4111-8111-111111111111"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }
+        ]
+      }
+    }
+  ];
+  const operationRefDriftHarbors = operationRefDriftCases.map((entry) =>
+    createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, entry.override)
+  );
+  const deferredXiaohongshuFactsPaths: string[] = [];
+  const deferredXiaohongshuFactsHarbor = createHarborMock(
     true,
-    [],
+    deferredXiaohongshuFactsPaths,
     [],
     xiaohongshuScene,
     { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
@@ -798,10 +900,48 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     {
       ...readyXiaohongshuSiteFacts,
       resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) =>
-        fact.key === "page.pinia_store.ready" ? { ...fact, state: "unknown", severity: "warning", message: "Pinia readiness is not safely observable." } : fact
+        ["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"].includes(String(fact.key))
+          ? { ...fact, state: "unknown", severity: "warning", message: "Read-operation probe fact is not safely observable before dispatch." }
+          : fact
       )
     }
   );
+  const factState = (key: string, state: string): JsonObject => ({
+    ...readyXiaohongshuSiteFacts,
+    resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) => fact.key === key ? { ...fact, state } : fact)
+  });
+  const blockedIdentityCases: Array<{ name: string; session: JsonObject; siteFacts?: JsonObject; identityRef?: string; identityRecord?: JsonObject }> = [
+    { name: "missing_reason", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined } }) } },
+    { name: "auth_incomplete", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { manual_authentication_state: "pending" } }) } },
+    { name: "recovery_required", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { recovery_required: true } }) } },
+    { name: "wrong_origin", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://evil.example") } },
+    {
+      name: "unknown_schema",
+      session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { schema_version: "harbor-local-identity-environment/v999" }) },
+      identityRecord: { schema_version: "harbor-local-identity-environment-store/v999" }
+    },
+    { name: "wrong_site", session: { identity_environment_facts: liveSessionIdentity("boss", "https://www.xiaohongshu.com") } },
+    { name: "wrong_ref", session: {}, identityRef: "identity-env_other" },
+    { name: "challenge_unknown", session: {}, siteFacts: factState("safety.challenge.absent", "unknown") },
+    { name: "lifecycle_closed", session: { runtime_facts: liveRuntimeFacts({ lifecycle_state: "closed" }) } },
+    { name: "control_busy", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "user", takeover: { available: false } } }) } },
+    { name: "control_agent_takeover", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "agent", takeover: { available: true } } }) } },
+    { name: "control_lock_agent", session: { runtime_facts: liveRuntimeFacts({ schema_version: undefined, control_owner: "core_task", control_lock: { owner: "agent" } }) } },
+    { name: "future_page_unknown", session: {}, siteFacts: factState("page.future_probe.ready", "unknown") },
+    { name: "future_network_unknown", session: {}, siteFacts: factState("network.future_probe.available", "unknown") }
+  ];
+  const blockedIdentityPaths = blockedIdentityCases.map(() => [] as string[]);
+  const blockedIdentityHarbors = blockedIdentityCases.map((entry, index) => createHarborMock(
+    true,
+    blockedIdentityPaths[index]!,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    entry.session,
+    entry.siteFacts ?? readyXiaohongshuSiteFacts,
+    {},
+    entry.identityRecord
+  ));
   const publicIdentityPaths: string[] = [];
   const publicIdentityHarbor = createHarborMock(
     true,
@@ -817,6 +957,14 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   try {
     const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root);
     const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256 });
+    const nonPinnedResolver = async (input: Parameters<typeof resolver>[0]) => {
+      const resolved = await resolver(input);
+      if ("category" in resolved || !resolved.runtime_consumption) return resolved;
+      return {
+        ...resolved,
+        runtime_consumption: { ...resolved.runtime_consumption, package_ref: "lode://site-capability/other/search-notes@0.1.0" }
+      };
+    };
     const pinDrift = await createLocalLodePackageResolver({ registryPath })({ package_ref: xiaohongshuPackageRef, task_intent: xiaohongshuTaskIntent("intent_pin_drift") });
     assert("category" in pinDrift && pinDrift.code === "runtime_consumption_allowlist_pin_mismatch");
     const harborPort = await listen(harbor);
@@ -833,11 +981,59 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedSessionOperationHarborPort = await listen(driftedSessionOperationHarbor);
     const driftedBoundaryOperationHarborPort = await listen(driftedBoundaryOperationHarbor);
     const unknownOutcomeHarborPort = await listen(unknownOutcomeHarbor);
-    const missingXiaohongshuFactHarborPort = await listen(missingXiaohongshuFactHarbor);
+    const operationRefDriftHarborPorts = await Promise.all(operationRefDriftHarbors.map(listen));
+    const deferredXiaohongshuFactsHarborPort = await listen(deferredXiaohongshuFactsHarbor);
+    const blockedIdentityHarborPorts = await Promise.all(blockedIdentityHarbors.map(listen));
     const publicIdentityHarborPort = await listen(publicIdentityHarbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
+    delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    const missingTokenClient = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${harborPort}` });
+    process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
+    const missingTokenAdmission = await missingTokenClient.collectAdmissionFacts({
+      run_id: "run_missing_harbor_supervisor_token",
+      task_intent: taskIntent("intent_missing_harbor_supervisor_token"),
+      package_ref: packageRef,
+      harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+    });
+    assert("category" in missingTokenAdmission && missingTokenAdmission.code === "harbor_runtime_supervisor_token_missing");
+    let remoteAuthorization: string | null = null;
+    const remoteClient = createHttpHarborRuntimeClient({
+      baseUrl: "https://harbor.example",
+      fetch: async (_url, init) => {
+        remoteAuthorization = new Headers(init?.headers).get("authorization");
+        return new Response(JSON.stringify({
+          schema_version: "harbor-allowlisted-read-operation/v0",
+          status: "unavailable",
+          runtime_session_ref: "session_remote",
+          site_id: "xiaohongshu",
+          operation_id: "xhs_search_notes",
+          failure_class: "provider_probe_unavailable",
+          retryable: true
+        }), { status: 409, headers: { "content-type": "application/json" } });
+      }
+    });
+    await remoteClient.executeReadOperation({ runtime_session_ref: "session_remote", site_id: "xiaohongshu", operation_id: "xhs_search_notes", query: "city coffee" });
+    assert.equal(remoteAuthorization, null);
+    let ipv6Authorization: string | null = null;
+    const ipv6Client = createHttpHarborRuntimeClient({
+      baseUrl: "http://[::1]:8787",
+      fetch: async (_url, init) => {
+        ipv6Authorization = new Headers(init?.headers).get("authorization");
+        return new Response(JSON.stringify({
+          schema_version: "harbor-allowlisted-read-operation/v0",
+          status: "unavailable",
+          runtime_session_ref: "session_ipv6",
+          site_id: "xiaohongshu",
+          operation_id: "xhs_search_notes",
+          failure_class: "provider_probe_unavailable",
+          retryable: true
+        }), { status: 409, headers: { "content-type": "application/json" } });
+      }
+    });
+    await ipv6Client.executeReadOperation({ runtime_session_ref: "session_ipv6", site_id: "xiaohongshu", operation_id: "xhs_search_notes", query: "city coffee" });
+    assert.equal(ipv6Authorization, `Bearer ${harborSupervisorToken}`);
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({
       runRecordStore: store,
@@ -890,11 +1086,26 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedSessionOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftedSessionOperationHarborPort}` }) });
     const driftedBoundaryOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftedBoundaryOperationHarborPort}` }) });
     const unknownOutcomeServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${unknownOutcomeHarborPort}` }) });
-    const missingXiaohongshuFactServer = createApiServer({
+    const deferredXiaohongshuFactsServer = createApiServer({
       runRecordStore: store,
       lodePackageResolver: resolver,
-      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingXiaohongshuFactHarborPort}` })
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${deferredXiaohongshuFactsHarborPort}` })
     });
+    const nonPinnedDeferredFactsServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: nonPinnedResolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${deferredXiaohongshuFactsHarborPort}` })
+    });
+    const operationRefDriftServers = operationRefDriftHarborPorts.map((driftPort) => createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftPort}` })
+    }));
+    const blockedIdentityServers = blockedIdentityHarborPorts.map((blockedPort) => createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${blockedPort}` })
+    }));
     const publicIdentityServer = createApiServer({
       runRecordStore: store,
       lodePackageResolver: resolver,
@@ -929,7 +1140,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedSessionOperationPort = await listen(driftedSessionOperationServer);
     const driftedBoundaryOperationPort = await listen(driftedBoundaryOperationServer);
     const unknownOutcomePort = await listen(unknownOutcomeServer);
-    const missingXiaohongshuFactPort = await listen(missingXiaohongshuFactServer);
+    const deferredXiaohongshuFactsPort = await listen(deferredXiaohongshuFactsServer);
+    const nonPinnedDeferredFactsPort = await listen(nonPinnedDeferredFactsServer);
+    const operationRefDriftPorts = await Promise.all(operationRefDriftServers.map(listen));
+    const blockedIdentityPorts = await Promise.all(blockedIdentityServers.map(listen));
     const publicIdentityPort = await listen(publicIdentityServer);
     const offlinePort = await listen(offlineServer);
     const badJsonPort = await listen(badJsonServer);
@@ -975,6 +1189,9 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(paths.includes("POST /runtime/sessions/session_runtime_api_ready/snapshot"));
       assert(paths.includes("GET /runtime/evidence/evidence_runtime_api_snapshot"));
       const sessionBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
+      assert.equal(JSON.stringify(sessionBody).includes(harborSupervisorToken), false);
+      const protectedSnapshotBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/snapshot")?.body);
+      assert.equal(JSON.stringify(protectedSnapshotBody).includes(harborSupervisorToken), false);
       assert.equal(sessionBody.run_id, "run_api_submit_runtime_chain");
       assert.equal(sessionBody.package_ref, packageRef);
       assert.equal(sessionBody.holder_ref, "run_api_submit_runtime_chain");
@@ -1026,6 +1243,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
+      assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
@@ -1066,20 +1284,56 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(privateQuery.status, 400);
       assert.equal(asRecord(asRecord(privateQuery.body).error).code, "public_query_invalid");
 
-      const xiaohongshuMissingFact = await postJson(missingXiaohongshuFactPort, "/tasks", {
-        run_id: "run_api_submit_xiaohongshu_missing_fact",
+      const xiaohongshuDeferredFacts = await postJson(deferredXiaohongshuFactsPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_deferred_facts",
         package_ref: xiaohongshuPackageRef,
-        task_intent: xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_missing_fact"),
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_deferred_facts"),
+        public_query: { query: "city coffee" },
         harbor: {
           identity_environment_ref: "identity-env_runtime_api",
           url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
         }
       });
-      assert.equal(xiaohongshuMissingFact.status, 503);
-      const xiaohongshuMissingFactBody = asRecord(xiaohongshuMissingFact.body);
-      assert.equal(xiaohongshuMissingFactBody.ok, false);
-      assert.equal(asRecord(xiaohongshuMissingFactBody.error).code, "resource_fact_missing:page.pinia_store.ready");
-      assert.equal(asRecord(xiaohongshuMissingFactBody.run).status, "failed");
+      assert.equal(xiaohongshuDeferredFacts.status, 202, JSON.stringify(xiaohongshuDeferredFacts.body));
+      assert.equal(asRecord(xiaohongshuDeferredFacts.body).ok, true);
+      assert.equal(asRecord(asRecord(xiaohongshuDeferredFacts.body).run).status, "succeeded");
+      assert(deferredXiaohongshuFactsPaths.includes("GET /runtime/identity-environments/identity-env_runtime_api"));
+      assert(deferredXiaohongshuFactsPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
+
+      const nonPinnedDeferredFacts = await postJson(nonPinnedDeferredFactsPort, "/tasks", {
+        run_id: "run_api_submit_non_pinned_deferred_facts",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_non_pinned_deferred_facts"),
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+      });
+      assert.equal(asRecord(nonPinnedDeferredFacts.body).ok, false);
+      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "resource_fact_missing:page.vue_app.ready");
+
+      for (const [index, driftCase] of operationRefDriftCases.entries()) {
+        const drift = await postJson(operationRefDriftPorts[index]!, "/tasks", {
+          run_id: `run_api_submit_operation_refs_${driftCase.name}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_operation_refs_${driftCase.name}`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+        });
+        assert.equal(asRecord(drift.body).ok, false, driftCase.name);
+        assert.equal(asRecord(asRecord(drift.body).run).status, "failed", driftCase.name);
+        assert.equal(asRecord(asRecord(drift.body).run).result_ref, undefined, driftCase.name);
+      }
+
+      for (const [index, identityCase] of blockedIdentityCases.entries()) {
+        const blockedIdentity = await postJson(blockedIdentityPorts[index]!, "/tasks", {
+          run_id: `run_api_submit_identity_${identityCase.name}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_identity_${identityCase.name}`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: identityCase.identityRef ?? "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+        });
+        assert.equal(asRecord(blockedIdentity.body).ok, false, identityCase.name);
+        assert.equal(blockedIdentityPaths[index]!.some((path) => path.endsWith("/read-operations")), false, identityCase.name);
+      }
 
       const publicIdentitySubmit = await postJson(publicIdentityPort, "/tasks", {
         run_id: "run_api_submit_public_identity_record",
@@ -1228,6 +1482,21 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(privateEvidencePolicy.status, 400);
       assert.equal(asRecord(asRecord(privateEvidencePolicy.body).error).code, "private_field_rejected:token");
 
+      const payloadSupervisorToken = await postJson(port, "/tasks", {
+        run_id: "run_api_submit_payload_supervisor_token",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_payload_supervisor_token"),
+        public_query: { query: "city coffee" },
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+          supervisor_token: harborSupervisorToken
+        }
+      });
+      assert.equal(payloadSupervisorToken.status, 400);
+      assert.equal(asRecord(asRecord(payloadSupervisorToken.body).error).code, "unsupported_harbor_field:supervisor_token");
+      assert.equal(JSON.stringify(payloadSupervisorToken.body).includes(harborSupervisorToken), false);
+
       const raceDuplicate = await postJson(raceDuplicatePort, "/tasks", {
         run_id: "run_api_submit_race_duplicate",
         package_ref: packageRef,
@@ -1267,7 +1536,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(driftedSessionOperationServer);
       await close(driftedBoundaryOperationServer);
       await close(unknownOutcomeServer);
-      await close(missingXiaohongshuFactServer);
+      await close(deferredXiaohongshuFactsServer);
+      await close(nonPinnedDeferredFactsServer);
+      await Promise.all(operationRefDriftServers.map(close));
+      await Promise.all(blockedIdentityServers.map(close));
       await close(publicIdentityServer);
       await close(offlineServer);
       await close(badJsonServer);
@@ -1289,11 +1561,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(driftedSessionOperationHarbor);
     await close(driftedBoundaryOperationHarbor);
     await close(unknownOutcomeHarbor);
-    await close(missingXiaohongshuFactHarbor);
+    await close(deferredXiaohongshuFactsHarbor);
+    await Promise.all(operationRefDriftHarbors.map(close));
+    await Promise.all(blockedIdentityHarbors.map(close));
     await close(publicIdentityHarbor);
     await close(offlineHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);
+    if (previousSupervisorToken === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    else process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = previousSupervisorToken;
     await rm(root, { recursive: true, force: true });
     await rm(runDir, { recursive: true, force: true });
   }

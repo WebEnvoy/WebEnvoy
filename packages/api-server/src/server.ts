@@ -26,6 +26,7 @@ export type ApiServerOptions = {
 
 const serviceName = "webenvoy-api-server";
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
 const privateHarborInputFieldNames = new Set([
   "raw_payload",
   "dom",
@@ -189,6 +190,8 @@ async function validateRuntimeTaskSubmissionRequest(
 
   let harbor: RuntimeTaskSubmissionRequest["harbor"];
   if (harborInput) {
+    const unsupportedHarborField = Object.keys(harborInput).find((field) => !allowedHarborInputFields.has(field));
+    if (unsupportedHarborField) return requestInvalid(`unsupported_harbor_field:${unsupportedHarborField}`, "remove_private_field");
     const identity_environment_ref = optionalString(harborInput.identity_environment_ref, "identity_environment_ref_invalid");
     const url = optionalHttpUrl(harborInput.url);
     const reuse_existing = optionalBoolean(harborInput.reuse_existing, "reuse_existing_invalid");

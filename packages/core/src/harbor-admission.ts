@@ -30,6 +30,7 @@ export type HarborCoreRuntimeFacts = {
   };
   control: {
     owner: string;
+    lock_owner?: string;
     handoff_reason: string | null;
     takeover: {
       available: boolean;
@@ -56,6 +57,9 @@ export type HarborIdentityEnvironmentFacts = {
   };
   login_state: {
     state: string;
+    reason?: string;
+    authentication_provenance?: string;
+    manual_authentication_state?: string;
     recovery_required: boolean;
   };
   browser_storage: {
