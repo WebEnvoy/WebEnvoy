@@ -925,6 +925,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     { name: "challenge_unknown", session: {}, siteFacts: factState("safety.challenge.absent", "unknown") },
     { name: "lifecycle_closed", session: { runtime_facts: liveRuntimeFacts({ lifecycle_state: "closed" }) } },
     { name: "control_busy", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "user", takeover: { available: false } } }) } },
+    { name: "control_agent_takeover", session: { runtime_facts: liveRuntimeFacts({ control: { owner: "agent", takeover: { available: true } } }) } },
     { name: "future_page_unknown", session: {}, siteFacts: factState("page.future_probe.ready", "unknown") },
     { name: "future_network_unknown", session: {}, siteFacts: factState("network.future_probe.available", "unknown") }
   ];
@@ -1014,6 +1015,24 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     });
     await remoteClient.executeReadOperation({ runtime_session_ref: "session_remote", site_id: "xiaohongshu", operation_id: "xhs_search_notes", query: "city coffee" });
     assert.equal(remoteAuthorization, null);
+    let ipv6Authorization: string | null = null;
+    const ipv6Client = createHttpHarborRuntimeClient({
+      baseUrl: "http://[::1]:8787",
+      fetch: async (_url, init) => {
+        ipv6Authorization = new Headers(init?.headers).get("authorization");
+        return new Response(JSON.stringify({
+          schema_version: "harbor-allowlisted-read-operation/v0",
+          status: "unavailable",
+          runtime_session_ref: "session_ipv6",
+          site_id: "xiaohongshu",
+          operation_id: "xhs_search_notes",
+          failure_class: "provider_probe_unavailable",
+          retryable: true
+        }), { status: 409, headers: { "content-type": "application/json" } });
+      }
+    });
+    await ipv6Client.executeReadOperation({ runtime_session_ref: "session_ipv6", site_id: "xiaohongshu", operation_id: "xhs_search_notes", query: "city coffee" });
+    assert.equal(ipv6Authorization, `Bearer ${harborSupervisorToken}`);
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({
       runRecordStore: store,

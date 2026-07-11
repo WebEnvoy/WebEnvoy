@@ -239,6 +239,8 @@ function operationPreflightFailure(
   targetUrl: string | undefined
 ): FailureRecord | undefined {
   const identity = object(harbor.harbor_identity_environment_facts);
+  const runtime = object(harbor.harbor_runtime_facts);
+  const control = object(runtime?.control);
   if (identity?.schema_version !== "harbor-local-identity-environment/v0") {
     return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "connect_identity_environment");
   }
@@ -256,6 +258,9 @@ function operationPreflightFailure(
     login?.recovery_required !== false
   ) {
     return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
+  }
+  if (control?.owner !== "core_task") {
+    return failure("resource_admission", "runtime_session_busy", "runtime_binding", "wait_or_request_handoff");
   }
   if (!origin?.startsWith("https://") || !allowedOrigin || !sameOrigin(origin, targetUrl)) {
     return failure("resource_admission", "runtime_origin_not_allowed", "resource_matching", "fix_input");
@@ -812,7 +817,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       return "";
     }
   })();
-  const localHarbor = harborHost === "localhost" || harborHost === "127.0.0.1" || harborHost === "::1";
+  const localHarbor = harborHost === "localhost" || harborHost === "127.0.0.1" || harborHost === "::1" || harborHost === "[::1]";
 
   function protectedHeaders(method: "GET" | "POST", path: string): Record<string, string> | FailureRecord | undefined {
     const protectedRequest = method === "POST" && (
