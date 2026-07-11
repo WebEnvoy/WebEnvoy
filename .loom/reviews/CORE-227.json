@@ -6,7 +6,7 @@
   "summary": "Current-head review found no P0-P3 after canonical BOSS URL binding was added; the carrier-only delta after product head 921390c does not change runtime semantics.",
   "reviewer": "codex-main-controller",
   "authored_at": "2026-07-11T16:54:01Z",
-  "reviewed_head": "a1d3d9884b8ffad4c27b659aafa3b851848e0daf",
+  "reviewed_head": "0cf9b5a3640b9984f4140394746c1d0a0b93f924",
   "reviewed_validation_summary": "At product head `921390c` and carrier head `6ea5ba2`, focused Core/API typecheck/test/build, canonical BOSS target_ref/harbor.url parser and process-boundary tests, standalone runtime submit/process self-checks, full `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and Loom fact-chain/suite/carrier/evidence validation passed.",
   "reviewed_validation_summary_hash": "460417bce64027c1944d520b24988637bdfe97822da06d5f419b6ab4118f0ff8",
   "validation_summary_source": "recovery.latest_validation_summary",
