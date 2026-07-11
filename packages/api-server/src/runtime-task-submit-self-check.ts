@@ -502,8 +502,7 @@ function createHarborMock(
     paths.push(`${request.method} ${request.url}`);
     const protectedRequest = request.method === "POST" && (
       request.url === "/runtime/identity-environment-sessions" ||
-      request.url?.endsWith("/read-operations") ||
-      request.url?.endsWith("/release")
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(request.url ?? "")
     );
     if (protectedRequest && request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
       sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });
@@ -1171,6 +1170,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(paths.includes("GET /runtime/evidence/evidence_runtime_api_snapshot"));
       const sessionBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(JSON.stringify(sessionBody).includes(harborSupervisorToken), false);
+      const protectedSnapshotBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/snapshot")?.body);
+      assert.equal(JSON.stringify(protectedSnapshotBody).includes(harborSupervisorToken), false);
       assert.equal(sessionBody.run_id, "run_api_submit_runtime_chain");
       assert.equal(sessionBody.package_ref, packageRef);
       assert.equal(sessionBody.holder_ref, "run_api_submit_runtime_chain");

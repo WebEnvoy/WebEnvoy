@@ -239,7 +239,11 @@ function taskIntent(intentId: string): JsonObject {
 function createHarborMock(paths: string[], protectedAuthorization: string[]): Server {
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
-    if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
+    const protectedRequest = request.method === "POST" && (
+      request.url === "/runtime/identity-environment-sessions" ||
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(request.url ?? "")
+    );
+    if (protectedRequest) {
       protectedAuthorization.push(request.headers.authorization ?? "");
       if (request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
         sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });

@@ -817,7 +817,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
   function protectedHeaders(method: "GET" | "POST", path: string): Record<string, string> | FailureRecord | undefined {
     const protectedRequest = method === "POST" && (
       path === "/runtime/identity-environment-sessions" ||
-      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:release|read-operations)$/.test(path)
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(path)
     );
     if (!protectedRequest || !localHarbor) return undefined;
     if (!supervisorToken || supervisorToken.trim() !== supervisorToken || /[\r\n]/.test(supervisorToken)) {
