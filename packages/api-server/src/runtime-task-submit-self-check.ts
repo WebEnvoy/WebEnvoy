@@ -263,8 +263,8 @@ function bossTaskIntent(intentId: string): JsonObject {
     entrypoint: "app",
     user_intent: { summary: "Read BOSS job search through Harbor." },
     capability: { ref: "lode:capability/job-search", version: "0.1.0", source_ref: bossPackageRef, lock_ref: bossLockRef },
-    input: { summary: "Read BOSS job search.", refs: ["https://www.zhipin.com/web/geek/jobs?query=AI"] },
-    scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/jobs?query=AI" },
+    input: { summary: "Read BOSS job search.", refs: ["https://www.zhipin.com/web/geek/job?query=AI&city=101010100"] },
+    scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
     policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
     resource_requirement_refs: [bossResourceRef],
     evidence_policy_ref: "evidence-policy:refs-only"

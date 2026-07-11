@@ -189,7 +189,7 @@ async function validateRuntimeTaskSubmissionRequest(
   const cityCode = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.city_code, "public_query_invalid");
   const page = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.page, "public_query_invalid");
   const limit = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.limit, "public_query_invalid");
-  if (isFailureRecord(publicQuery) || isFailureRecord(cityCode) || isFailureRecord(page) || isFailureRecord(limit) || (publicQueryInput && (
+  if (isFailureRecord(publicQuery) || isFailureRecord(cityCode) || isFailureRecord(page) || isFailureRecord(limit) || (bossJobSearch && publicQueryInput === undefined) || (publicQueryInput && (
     publicQuery === undefined || publicQuery.trim() !== publicQuery || publicQuery.length > (bossJobSearch ? 80 : 256) ||
     Object.keys(publicQueryInput).some((field) => !allowedPublicQueryFields.has(field)) ||
     (bossJobSearch && (cityCode === undefined || !/^\d{6,32}$/.test(cityCode) || page !== 1 || limit === undefined || limit > 15))
@@ -223,6 +223,15 @@ async function validateRuntimeTaskSubmissionRequest(
       ...(timeout_ms === undefined ? {} : { timeout_ms }),
       ...(evidence_policy === undefined ? {} : { evidence_policy })
     };
+  }
+
+  if (bossJobSearch && publicQuery !== undefined && cityCode !== undefined) {
+    const canonicalTarget = new URL("/web/geek/job", "https://www.zhipin.com");
+    canonicalTarget.searchParams.set("query", publicQuery);
+    canonicalTarget.searchParams.set("city", cityCode);
+    if (scope?.target_ref !== canonicalTarget.href || harbor?.url !== canonicalTarget.href) {
+      return requestInvalid("boss_target_invalid");
+    }
   }
 
   return {

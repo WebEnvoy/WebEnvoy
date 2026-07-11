@@ -407,7 +407,8 @@ async function assertDegradedProcessSmoke(): Promise<void> {
       run_id: "run_process_boss_query_valid",
       package_ref: bossPackageRef,
       task_intent: bossTaskIntent("intent_process_boss_query_valid"),
-      public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 }
+      public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
+      harbor: { url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
     });
     assert.equal(validBossQuery.status, 422);
     assert.equal(asRecord(asRecord(validBossQuery.body).error).code, "lode_resolver_unconfigured");
@@ -425,10 +426,42 @@ async function assertDegradedProcessSmoke(): Promise<void> {
         run_id: `run_process_boss_query_${invalid.name}`,
         package_ref: bossPackageRef,
         task_intent: bossTaskIntent(`intent_process_boss_query_${invalid.name}`),
-        public_query: invalid.public_query
+        public_query: invalid.public_query,
+        harbor: { url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
       });
       assert.equal(response.status, 400, invalid.name);
       assert.equal(asRecord(asRecord(response.body).error).code, "public_query_invalid", invalid.name);
+    }
+    const missingBossQuery = await postJson(port, "/tasks", {
+      run_id: "run_process_boss_query_missing",
+      package_ref: bossPackageRef,
+      task_intent: bossTaskIntent("intent_process_boss_query_missing"),
+      harbor: { url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+    });
+    assert.equal(missingBossQuery.status, 400);
+    assert.equal(asRecord(asRecord(missingBossQuery.body).error).code, "public_query_invalid");
+
+    const targetDriftCases: Array<{ name: string; target_ref?: string; harbor_url?: string }> = [
+      { name: "target_ref_missing", harbor_url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
+      { name: "target_ref_path", target_ref: "https://www.zhipin.com/web/geek/jobs?query=AI&city=101010100", harbor_url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
+      { name: "harbor_missing", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
+      { name: "harbor_query", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", harbor_url: "https://www.zhipin.com/web/geek/job?query=other&city=101010100" },
+      { name: "harbor_city", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", harbor_url: "https://www.zhipin.com/web/geek/job?query=AI&city=101020100" },
+      { name: "harbor_extra", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", harbor_url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100&extra=1" },
+      { name: "harbor_duplicate", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", harbor_url: "https://www.zhipin.com/web/geek/job?query=AI&query=AI&city=101010100" }
+    ];
+    for (const drift of targetDriftCases) {
+      const intent = bossTaskIntent(`intent_process_boss_target_${drift.name}`);
+      intent.scope = { ...asRecord(intent.scope), target_ref: drift.target_ref };
+      const response = await postJson(port, "/tasks", {
+        run_id: `run_process_boss_target_${drift.name}`,
+        package_ref: bossPackageRef,
+        task_intent: intent,
+        public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
+        ...(drift.harbor_url === undefined ? {} : { harbor: { url: drift.harbor_url } })
+      });
+      assert.equal(response.status, 400, drift.name);
+      assert.equal(asRecord(asRecord(response.body).error).code, "boss_target_invalid", drift.name);
     }
 
     for (const [name, field] of [["city", { city_code: "101010100" }], ["page", { page: 1 }], ["limit", { limit: 15 }]] as const) {
