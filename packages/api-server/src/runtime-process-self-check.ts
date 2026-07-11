@@ -13,6 +13,7 @@ type JsonResponse = {
 type JsonObject = Record<string, unknown>;
 
 const packageRef = "lode://site-capability/example/read-public-page@0.1.0";
+const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const lockRef = "lode://lock/site-capability/example/read-public-page@0.1.0";
 const resourceRef = "example.read-public-page.resources";
 const requiredHarborFactKeys = [
@@ -238,6 +239,14 @@ function taskIntent(intentId: string): JsonObject {
   };
 }
 
+function bossTaskIntent(intentId: string): JsonObject {
+  return {
+    ...taskIntent(intentId),
+    capability: { ref: "lode:capability/job-search", version: "0.1.0", source_ref: bossPackageRef, lock_ref: "lode://lock/site-capability/boss/job-search@0.1.0" },
+    scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+  };
+}
+
 function createHarborMock(paths: string[], protectedAuthorization: string[]): Server {
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
@@ -393,6 +402,45 @@ async function assertDegradedProcessSmoke(): Promise<void> {
     const missingCapabilityRefBody = asRecord(missingCapabilityRef.body);
     assert.equal(missingCapabilityRefBody.ok, false);
     assert.equal(asRecord(missingCapabilityRefBody.error).code, "capability_ref_required");
+
+    const validBossQuery = await postJson(port, "/tasks", {
+      run_id: "run_process_boss_query_valid",
+      package_ref: bossPackageRef,
+      task_intent: bossTaskIntent("intent_process_boss_query_valid"),
+      public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 }
+    });
+    assert.equal(validBossQuery.status, 422);
+    assert.equal(asRecord(asRecord(validBossQuery.body).error).code, "lode_resolver_unconfigured");
+
+    const invalidBossQueries: Array<{ name: string; public_query: JsonObject }> = [
+      { name: "city_missing", public_query: { query: "AI", page: 1, limit: 15 } },
+      { name: "city_invalid", public_query: { query: "AI", city_code: "beijing", page: 1, limit: 15 } },
+      { name: "page", public_query: { query: "AI", city_code: "101010100", page: 2, limit: 15 } },
+      { name: "limit", public_query: { query: "AI", city_code: "101010100", page: 1, limit: 16 } },
+      { name: "query_length", public_query: { query: "A".repeat(81), city_code: "101010100", page: 1, limit: 15 } },
+      { name: "unknown", public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15, sort: "latest" } }
+    ];
+    for (const invalid of invalidBossQueries) {
+      const response = await postJson(port, "/tasks", {
+        run_id: `run_process_boss_query_${invalid.name}`,
+        package_ref: bossPackageRef,
+        task_intent: bossTaskIntent(`intent_process_boss_query_${invalid.name}`),
+        public_query: invalid.public_query
+      });
+      assert.equal(response.status, 400, invalid.name);
+      assert.equal(asRecord(asRecord(response.body).error).code, "public_query_invalid", invalid.name);
+    }
+
+    for (const [name, field] of [["city", { city_code: "101010100" }], ["page", { page: 1 }], ["limit", { limit: 15 }]] as const) {
+      const response = await postJson(port, "/tasks", {
+        run_id: `run_process_xhs_query_${name}`,
+        package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        task_intent: taskIntent(`intent_process_xhs_query_${name}`),
+        public_query: { query: "coffee", ...field }
+      });
+      assert.equal(response.status, 400, name);
+      assert.equal(asRecord(asRecord(response.body).error).code, "public_query_invalid", name);
+    }
   } catch (error) {
     console.error(output());
     throw error;

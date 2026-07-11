@@ -26,7 +26,7 @@ export type RuntimeTaskSubmissionRequest = {
   run_id: string;
   task_intent: unknown;
   package_ref?: string;
-  public_query?: { query: string };
+  public_query?: { query: string; city_code?: string; page?: number; limit?: number };
   harbor?: {
     identity_environment_ref?: string;
     url?: string;
@@ -662,9 +662,7 @@ export async function submitRuntimeTask(
     }
     const runtimeSessionRef = string(object(harbor.harbor_runtime_facts)?.runtime_session_ref);
     if (!runtimeSessionRef) return completeAcceptedReadTaskWithFailure(store, submitted, "page_not_ready", "Harbor did not provide a runtime session ref for the read operation.");
-    const cityCode = runtimeConsumption.operation_id === "boss_job_search" && request.harbor?.url
-      ? new URL(request.harbor.url).searchParams.get("city") ?? undefined
-      : undefined;
+    const cityCode = runtimeConsumption.operation_id === "boss_job_search" ? request.public_query?.city_code : undefined;
     let operation: unknown;
     try {
       operation = await deps.harborRuntimeClient.executeReadOperation({

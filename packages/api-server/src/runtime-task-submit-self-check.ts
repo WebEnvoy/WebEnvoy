@@ -1302,7 +1302,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         run_id: "run_api_submit_boss_operation",
         package_ref: bossPackageRef,
         task_intent: bossTaskIntent("intent_api_submit_boss_operation"),
-        public_query: { query: "AI" },
+        public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
       });
       assert.equal(bossSubmit.status, 202, JSON.stringify(bossSubmit.body));
@@ -1322,7 +1322,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           run_id: `run_api_submit_boss_${driftCase.name}`,
           package_ref: bossPackageRef,
           task_intent: bossTaskIntent(`intent_api_submit_boss_${driftCase.name}`),
-          public_query: { query: "AI" },
+          public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
         });
         const driftRun = asRecord(asRecord(drift.body).run);
@@ -1339,7 +1339,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           run_id: `run_api_submit_boss_${admissionCase.name}`,
           package_ref: bossPackageRef,
           task_intent: bossTaskIntent(`intent_api_submit_boss_${admissionCase.name}`),
-          public_query: { query: "AI" },
+          public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
         });
         assert.equal(asRecord(blocked.body).ok, false, admissionCase.name);

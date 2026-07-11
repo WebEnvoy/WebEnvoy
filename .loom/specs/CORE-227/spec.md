@@ -2,7 +2,7 @@
 
 ## Goal
 
-Core dispatches the public BOSS query and city to Harbor, then succeeds only when the completed response exactly matches the BOSS operation-specific public-summary, Lode pin, session, boundary, source/evidence ref, and post-check contracts.
+Core accepts the bounded App-facing BOSS query/city/page/limit shape, dispatches the public query and city to Harbor, then succeeds only when the completed response exactly matches the BOSS operation-specific public-summary, Lode pin, session, boundary, source/evidence ref, and post-check contracts.
 
 ## Suite Path
 
@@ -16,12 +16,12 @@ Core dispatches the public BOSS query and city to Harbor, then succeeds only whe
 
 ## Scenarios
 
-- S-001 BOSS success: dispatch exact query/city and accept the pinned BOSS result/surface/signals with positive business code shape and refs-only evidence.
-- S-002 summary trust boundary: reject XHS/arbitrary result kind, wrong surface, query/city drift, extra fields, duplicate/extra/unknown signals, and invalid business/job counts.
-- S-003 pin/session/control/challenge: reject Lode pin drift and any invalid runtime session, control owner, or safety challenge before operation consumption.
-- S-004 refs/post-check: reject missing, duplicate, extra, reused, or unknown source/evidence ref kinds and post-check drift.
-- S-005 unknown outcome: preserve terminal unknown outcome when Harbor dispatch has no trustworthy response.
-- S-006 privacy: persist only the validated public summary and opaque refs.
+- S-001 BOSS input/success: accept exact `query/city_code/page=1/limit<=15`, dispatch exact query/city, and accept the pinned BOSS result/surface/signals with positive business code shape and refs-only evidence.
+- S-002 parser boundary: reject unknown BOSS fields, missing/invalid city, page drift, limit drift, query over 80 characters, and any BOSS-only field on XHS/non-BOSS input.
+- S-003 summary trust boundary: reject XHS/arbitrary result kind, wrong surface, query/city drift, extra fields, duplicate/extra/unknown signals, and invalid business/job counts.
+- S-004 pin/session/control/challenge: reject Lode pin drift and any invalid runtime session, control owner, or safety challenge before operation consumption.
+- S-005 refs/post-check: reject missing, duplicate, extra, reused, or unknown source/evidence ref kinds and post-check drift.
+- S-006 unknown outcome/privacy: preserve terminal unknown outcome when Harbor dispatch has no trustworthy response and persist only the validated public summary and opaque refs.
 
 ## Non-Goals
 
