@@ -1,0 +1,42 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-227",
+  "task_goal": "Consume Harbor's real BOSS job search with operation-specific refs-only validation.",
+  "context_locators": ["https://github.com/WebEnvoy/WebEnvoy/issues/227", "Harbor 387265eb", "Lode e36a4a7"],
+  "read_scope": ["Core API task parser", "Core runtime task chain", "Harbor BOSS read-operation contract", "Lode BOSS package and allowlist pin"],
+  "write_ownership": ["packages/api-server/src/server.ts", "packages/core/src/runtime-task-chain.ts", "packages/api-server/src/runtime-task-submit-self-check.ts", "packages/api-server/src/runtime-process-self-check.ts", "CORE-227 carriers"],
+  "non_goals": ["BOSS detail #270", "write-precheck", "parent FR closeout", "live-account E2E", "merge or issue closure"],
+  "validation_expectation": "Focused Core/API checks, standalone process checks, full workspace typecheck/test/lint, diff and Loom carrier checks",
+  "output_format": "Changed paths, exact command results, PR locator, and residual risks",
+  "integration_target": "CORE-227 ready implementation PR",
+  "branch": "work/core-227-boss-search-real-read",
+  "head_at_validation": "35024277979e9f732799f7a9eb4da7862d18faf8",
+  "current_pointer": "CORE-227 active in .loom/status/current.md",
+  "covered_issues": [227],
+  "excluded_issues": [270],
+  "ownership_constraints": [
+    "Only declared Core runtime/API self-check files and CORE-227 carriers",
+    "No App, Harbor, or Lode mutation",
+    "No live account E2E, writes, sensitive/raw material persistence, merge, or issue closure"
+  ],
+  "delegations": [],
+  "integration_evidence": [],
+  "validation_results": [
+    {"command": "pnpm --filter @webenvoy/core-runtime typecheck", "result": "pass", "evidence": "Core runtime typecheck passed at product head 3502427."},
+    {"command": "pnpm --filter @webenvoy/api-server typecheck", "result": "pass", "evidence": "API Server typecheck passed at product head 3502427."},
+    {"command": "pnpm --filter @webenvoy/core-runtime test", "result": "pass", "evidence": "Core runtime self-checks passed at product head 3502427."},
+    {"command": "pnpm --filter @webenvoy/api-server test", "result": "pass", "evidence": "API submit and process self-checks passed at product head 3502427."},
+    {"command": "pnpm --filter @webenvoy/api-server build", "result": "pass", "evidence": "API Server build passed at product head 3502427."},
+    {"command": "node packages/api-server/dist/runtime-task-submit-self-check.js", "result": "pass", "evidence": "Standalone runtime submit self-check passed from the repository root."},
+    {"command": "node packages/api-server/dist/runtime-process-self-check.js", "result": "pass", "evidence": "Standalone runtime process self-check passed from the repository root."},
+    {"command": "pnpm typecheck", "result": "pass", "evidence": "Workspace typecheck passed."},
+    {"command": "pnpm test", "result": "pass", "evidence": "Workspace tests passed, including schemas and conformance."},
+    {"command": "pnpm lint", "result": "pass", "evidence": "Workspace lint passed."},
+    {"command": "git diff --check", "result": "pass", "evidence": "No whitespace errors."},
+    {"command": "loom fact-chain/suite/carrier/evidence validation", "result": "pass", "evidence": "CORE-227 fact-chain and minimal-suite carrier/evidence validation passed."}
+  ],
+  "runtime_live_evidence": {
+    "status": "not_in_scope",
+    "boundary": "Local contract/process validation only; live-account E2E is explicitly excluded from this PR."
+  }
+}

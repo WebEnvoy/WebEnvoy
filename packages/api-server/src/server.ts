@@ -181,7 +181,19 @@ async function validateRuntimeTaskSubmissionRequest(
   const publicQueryInput = body.public_query === undefined ? undefined : jsonObject(body.public_query);
   if (body.public_query !== undefined && !publicQueryInput) return requestInvalid("public_query_invalid");
   const publicQuery = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.query, "public_query_invalid");
-  if (isFailureRecord(publicQuery) || (publicQueryInput && (publicQuery === undefined || Object.keys(publicQueryInput).length !== 1 || publicQuery.trim() !== publicQuery || publicQuery.length > 256))) {
+  const capability = jsonObject(task_intent.capability);
+  const scope = jsonObject(task_intent.scope);
+  const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
+    capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
+  const allowedPublicQueryFields = bossJobSearch ? new Set(["query", "city_code", "page", "limit"]) : new Set(["query"]);
+  const cityCode = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.city_code, "public_query_invalid");
+  const page = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.page, "public_query_invalid");
+  const limit = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.limit, "public_query_invalid");
+  if (isFailureRecord(publicQuery) || isFailureRecord(cityCode) || isFailureRecord(page) || isFailureRecord(limit) || (bossJobSearch && publicQueryInput === undefined) || (publicQueryInput && (
+    publicQuery === undefined || publicQuery.trim() !== publicQuery || publicQuery.length > (bossJobSearch ? 80 : 256) ||
+    Object.keys(publicQueryInput).some((field) => !allowedPublicQueryFields.has(field)) ||
+    (bossJobSearch && (cityCode === undefined || !/^\d{6,32}$/.test(cityCode) || page !== 1 || limit === undefined || limit > 15))
+  ))) {
     return requestInvalid("public_query_invalid");
   }
 
@@ -213,11 +225,25 @@ async function validateRuntimeTaskSubmissionRequest(
     };
   }
 
+  if (bossJobSearch && publicQuery !== undefined && cityCode !== undefined) {
+    const canonicalTarget = new URL("/web/geek/job", "https://www.zhipin.com");
+    canonicalTarget.searchParams.set("query", publicQuery);
+    canonicalTarget.searchParams.set("city", cityCode);
+    if (scope?.target_ref !== canonicalTarget.href || harbor?.url !== canonicalTarget.href) {
+      return requestInvalid("boss_target_invalid");
+    }
+  }
+
   return {
     run_id: runId,
     task_intent,
     ...(package_ref === undefined ? {} : { package_ref }),
-    ...(publicQuery === undefined ? {} : { public_query: { query: publicQuery } }),
+    ...(publicQuery === undefined ? {} : { public_query: {
+      query: publicQuery,
+      ...(cityCode === undefined ? {} : { city_code: cityCode }),
+      ...(page === undefined ? {} : { page }),
+      ...(limit === undefined ? {} : { limit })
+    } }),
     ...(harbor === undefined ? {} : { harbor })
   };
 }

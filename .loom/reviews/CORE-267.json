@@ -3,12 +3,12 @@
   "item_id": "CORE-267",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Current-head review at 625ff6f found no P0-P3. The only delta from reviewed product head is synchronized Loom carrier metadata; runtime semantics and previously validated safety boundaries are unchanged.",
+  "summary": "Carrier-only PR #272 review at 4a85463 found no P0-P3 after suite_path metadata was aligned to minimal. The diff only synchronizes merged PR #269 facts, preserves Core #267 open for BOSS, and retires the stale current pointer.",
   "reviewer": "codex-main-controller",
-  "authored_at": "2026-07-11T14:38:43Z",
-  "reviewed_head": "625ff6fcec22cc2c120b5a060e0b5ef899d88b36",
-  "reviewed_validation_summary": "2026-07-11 at f114990c455a16e669bdd9e930992bd2aea17b88: focused Core/API and root `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Branch packaged-App live run app-xiaohongshu-mrgcpit5 succeeded through the supervised Harbor session and pinned Lode package; merged-head replay is pending.",
-  "reviewed_validation_summary_hash": "6cec39c375e369273dc3bfc2c6f88b00286ae2e27359a6ce90a3b400c0515819",
+  "authored_at": "2026-07-11T15:54:19Z",
+  "reviewed_head": "4a8546347e091e3f26cec7a55826e4aca662f36e",
+  "reviewed_validation_summary": "PR #269 required checks passed in hosted run `29156681606`; head `34667bb3cabde75b890e3417e83efa8b83080e91` merged as `0feef417e85a6aa0119ce0a7017a6f5164e57804`. The Core #267 post-merge comment at 2026-07-11T15:12:52Z records merged-tree Xiaohongshu run `app-xiaohongshu-mrgi2f0c` succeeded with result kind `search-notes.read_result`, post-check `passed`, and public refs only. BOSS production E2E remains unverified and Core #267 remains open.",
+  "reviewed_validation_summary_hash": "40e117a613ffe9de62bf21954c840952e21775b26f8912c1aff3d3b180209966",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-267.md",
   "fallback_to": null,
@@ -55,6 +55,6 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+    "reason": "Authored carrier-only review approved PR #272 head after confirming no product-code change, no premature Core #267 closure, and a portable retired current pointer."
   }
 }

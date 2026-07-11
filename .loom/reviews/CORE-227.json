@@ -1,0 +1,49 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-227",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Current-head review found no P0-P3 after canonical BOSS URL binding was added; the carrier-only delta after product head 921390c does not change runtime semantics.",
+  "reviewer": "codex-main-controller",
+  "authored_at": "2026-07-11T16:54:01Z",
+  "reviewed_head": "4b8b7799054ed85954d7552f46154c827e9b003c",
+  "reviewed_validation_summary": "At product head `921390c` and carrier head `6ea5ba2`, focused Core/API typecheck/test/build, canonical BOSS target_ref/harbor.url parser and process-boundary tests, standalone runtime submit/process self-checks, full `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and Loom fact-chain/suite/carrier/evidence validation passed.",
+  "reviewed_validation_summary_hash": "460417bce64027c1944d520b24988637bdfe97822da06d5f419b6ab4118f0ff8",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-227.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-227.md",
+    "recovery_entry": ".loom/progress/CORE-227.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "budget_risk": {
+      "schema_version": "loom-execution-budget-risk/v1",
+      "status": "not_applicable",
+      "enforcement": "advisory",
+      "highest_risk": "none",
+      "risk_dimensions": [],
+      "summary": "execution budget is not_applicable; budget risk remains advisory and non-blocking",
+      "budget_summary": "execution budget is not collected for this invocation.",
+      "adapter_evidence_locator": "",
+      "provenance": {"source": "github_host"}
+    },
+    "engine_adapter": null,
+    "engine_evidence": null,
+    "normalized_findings": null,
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-227 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-227 --json",
+    "suite_evidence_map": ".loom/specs/CORE-227/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [".loom/specs/CORE-227/task-carrier.md"]
+    ,"suite_evidence_consumed_contracts": []
+    ,"suite_carrier_consumed_contracts": []
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Independent current-head review approved the exact BOSS contract and refs-only runtime boundary."
+  }
+}
