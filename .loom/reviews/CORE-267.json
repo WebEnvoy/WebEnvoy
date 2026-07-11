@@ -1,0 +1,36 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-267",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Code review allows PR #268 at head 1c529a4. Exact Harbor response binding, Lode pin validation, failure taxonomy mapping, unknown-outcome HTTP semantics, refs-only persistence, and XHS/BOSS contract tests have no remaining P0/P1/P2 findings. Contract duplication remains a non-blocking P3 advisory. This does not close live E2E scope.",
+  "reviewer": "Codex main controller thread 019f3a6c-9bb5-7a80-8095-13751f46cead",
+  "authored_at": "2026-07-11T09:46:00Z",
+  "reviewed_head": "1c529a4314b66de53f84e3de5d9479e5e688bbc8",
+  "reviewed_validation_summary": "2026-07-11 UTC current worktree passed focused Core/API typecheck, tests, API build/self-check/process-self-check, root `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and `loom fact-chain`. Independent review found no remaining P0/P1/P2 issues after the `unknown_outcome` HTTP status fix. Evidence is contract/mock validation only; no live site completion is claimed.",
+  "reviewed_validation_summary_hash": "935413e661cbc0befb0eabaaa0c9c46dfab50d6aa32a27a74fa9a33d5641124e",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-267.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": ["P3 advisory: move duplicated Harbor/Lode trust-boundary parsing and exact response fixtures into a focused shared-schema module in a separately bounded refactor."],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-267.md",
+    "recovery_entry": ".loom/progress/CORE-267.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "engine_adapter": "manual_current_head_review_from_subagent_and_main_controller",
+    "engine_evidence": ".loom/specs/CORE-267/build-evidence.json",
+    "normalized_findings": "P0/P1/P2 resolved; one P3 advisory",
+    "suite_evidence_validation": "loom suite evidence validate --target . --item CORE-267 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-267 --json",
+    "suite_evidence_map": ".loom/specs/CORE-267/evidence-map.md",
+    "suite_consistency_analysis": null,
+    "suite_task_carriers": [".loom/specs/CORE-267/task-carrier.md"]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Authored implementation review approved the reviewed product head; subsequent review-record-only drift is non-semantic."
+  }
+}
