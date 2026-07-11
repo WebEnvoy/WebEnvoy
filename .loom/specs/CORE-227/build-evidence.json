@@ -3,7 +3,7 @@
   "item_id": "CORE-227",
   "task_goal": "Consume Harbor's real BOSS job search with operation-specific refs-only validation.",
   "branch": "work/core-227-boss-search-real-read",
-  "head_at_validation": "pending",
+  "head_at_validation": "e6ecff630d14ee65fcb37df12dd8ee517e21672d",
   "current_pointer": "CORE-227 active in .loom/status/current.md",
   "covered_issues": [227],
   "excluded_issues": [270],
@@ -14,7 +14,20 @@
   ],
   "delegations": [],
   "integration_evidence": [],
-  "validation_results": [],
+  "validation_results": [
+    {"command": "pnpm --filter @webenvoy/core-runtime typecheck", "result": "pass", "evidence": "Core runtime typecheck passed at product head e6ecff6."},
+    {"command": "pnpm --filter @webenvoy/api-server typecheck", "result": "pass", "evidence": "API Server typecheck passed at product head e6ecff6."},
+    {"command": "pnpm --filter @webenvoy/core-runtime test", "result": "pass", "evidence": "Core runtime self-checks passed at product head e6ecff6."},
+    {"command": "pnpm --filter @webenvoy/api-server test", "result": "pass", "evidence": "API submit and process self-checks passed at product head e6ecff6."},
+    {"command": "pnpm --filter @webenvoy/api-server build", "result": "pass", "evidence": "API Server build passed at product head e6ecff6."},
+    {"command": "node packages/api-server/dist/runtime-task-submit-self-check.js", "result": "pass", "evidence": "Standalone runtime submit self-check passed from the repository root."},
+    {"command": "node packages/api-server/dist/runtime-process-self-check.js", "result": "pass", "evidence": "Standalone runtime process self-check passed from the repository root."},
+    {"command": "pnpm typecheck", "result": "pass", "evidence": "Workspace typecheck passed."},
+    {"command": "pnpm test", "result": "pass", "evidence": "Workspace tests passed, including schemas and conformance."},
+    {"command": "pnpm lint", "result": "pass", "evidence": "Workspace lint passed."},
+    {"command": "git diff --check", "result": "pass", "evidence": "No whitespace errors."},
+    {"command": "loom fact-chain/suite/carrier/evidence validation", "result": "pass", "evidence": "CORE-227 fact-chain and minimal-suite carrier/evidence validation passed."}
+  ],
   "runtime_live_evidence": {
     "status": "not_in_scope",
     "boundary": "Local contract/process validation only; live-account E2E is explicitly excluded from this PR."
