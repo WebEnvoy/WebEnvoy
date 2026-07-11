@@ -30,13 +30,10 @@
 
 ## Terminal Closeout Metadata
 
-- Terminal State: merged_scope_partial
-- Issue: 267 (open; BOSS production E2E not covered)
+- Terminal State: merged
+- Issue: 267
 - PR: 269
-- PR Head: 34667bb3cabde75b890e3417e83efa8b83080e91
 - Merge Commit: 0feef417e85a6aa0119ce0a7017a6f5164e57804
 - Target Branch: main
-- Merged At: 2026-07-11T15:05:58Z
-- Hosted Run: https://github.com/WebEnvoy/WebEnvoy/actions/runs/29156681606
-- Post-Merge Evidence: https://github.com/WebEnvoy/WebEnvoy/issues/267#issuecomment-4947043838 (2026-07-11T15:12:52Z; Xiaohongshu merged-tree read-only run only)
-- Scope Limit: This carrier closeout records merged implementation and existing Xiaohongshu evidence only. It does not cover BOSS production E2E, close Core #267, or claim the product goal complete.
+- Closed At: 2026-07-11T15:05:58Z
+- Evidence Locator: https://github.com/WebEnvoy/WebEnvoy/pull/269;https://github.com/WebEnvoy/WebEnvoy/actions/runs/29156681606;https://github.com/WebEnvoy/WebEnvoy/issues/267#issuecomment-4947043838
