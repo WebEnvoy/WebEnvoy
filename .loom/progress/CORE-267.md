@@ -3,9 +3,9 @@
 ## Dynamic Facts
 
 - Item ID: CORE-267
-- Current Checkpoint: build
+- Current Checkpoint: merge
 - Current Stop: Implementation and independent semantic review are complete. Allowlisted tasks can succeed only from a Lode-pinned, session-bound Harbor completed operation; unavailable and indeterminate outcomes fail closed without snapshot-success fallback. P0/P1/P2 findings are resolved. A P3 advisory remains to move duplicated trust-boundary parsing and exact contract fixtures into a focused module when a shared schema is available.
-- Next Step: Commit the bounded CORE-267 implementation/carriers, create the PR, bind review to the committed head, run hosted checks, and merge only after required gates pass. Keep #267 open pending merged-runtime App live evidence.
+- Next Step: Run hosted checks against the review-bound PR head and merge only after all required gates pass. Keep #267 open pending merged-runtime App live evidence.
 - Blockers: None. Harbor PR #249 is merged at `2f112b409ef02e36e6db7d72e02e546b1002d42f`; Harbor #245 remains open only for live convergence evidence.
 - Latest Validation Summary: 2026-07-11 UTC current worktree passed focused Core/API typecheck, tests, API build/self-check/process-self-check, root `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and `loom fact-chain`. Independent review found no remaining P0/P1/P2 issues after the `unknown_outcome` HTTP status fix. Evidence is contract/mock validation only; no live site completion is claimed.
 - Recovery Boundary: Revert branch `work/core-267-harbor-read-operation`; no App/Harbor/Lode mutation, automatic login, sensitive material access, submit/publish/send, bulk collection, hosted browser, account cloud hosting, or risk bypass is permitted.
