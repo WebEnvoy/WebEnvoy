@@ -3,7 +3,7 @@
 ## Dynamic Facts
 
 - Item ID: CORE-267
-- Current Checkpoint: pre_review
+- Current Checkpoint: build
 - Current Stop: Implementation and independent semantic review are complete. Allowlisted tasks can succeed only from a Lode-pinned, session-bound Harbor completed operation; unavailable and indeterminate outcomes fail closed without snapshot-success fallback. P0/P1/P2 findings are resolved. A P3 advisory remains to move duplicated trust-boundary parsing and exact contract fixtures into a focused module when a shared schema is available.
 - Next Step: Commit the bounded CORE-267 implementation/carriers, create the PR, bind review to the committed head, run hosted checks, and merge only after required gates pass. Keep #267 open pending merged-runtime App live evidence.
 - Blockers: None. Harbor PR #249 is merged at `2f112b409ef02e36e6db7d72e02e546b1002d42f`; Harbor #245 remains open only for live convergence evidence.

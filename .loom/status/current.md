@@ -4,14 +4,14 @@
 
 - Item ID: CORE-267
 - Goal: Drive Harbor's allowlisted real read-operation endpoint and persist only validated public result/evidence refs in Core Run Records.
-- Scope: Core API task input, Lode runtime-consumption allowlist resolution, Harbor read-operation invocation, terminal failure mapping, refs-only result projection, focused self-checks, and CORE-267 Loom carriers.
+- Scope: Core API task input, Lode runtime-consumption allowlist resolution, Harbor read-operation invocation, terminal failure mapping, refs-only result projection, focused self-checks, and CORE-267 Loom carriers. Ownership is limited to the Core repository paths declared below.
 - Execution Path: work/core-267-harbor-read-operation
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-267.md
 - Review Entry: .loom/reviews/CORE-267.json
 - Validation Entry: pnpm --filter @webenvoy/core-runtime typecheck; pnpm --filter @webenvoy/api-server typecheck; pnpm --filter @webenvoy/core-runtime test; pnpm --filter @webenvoy/api-server test; pnpm --filter @webenvoy/api-server build; node packages/api-server/dist/runtime-task-submit-self-check.js; node packages/api-server/dist/runtime-process-self-check.js; pnpm typecheck; pnpm test; pnpm lint; git diff --check; Loom suite/fact-chain/build checks
 - Closing Condition: Implementation PR merged and post-merge contract evidence recorded; #267 remains open until an authorized App-driven live operation on the merged runtime produces valid identity/session/run/result/evidence refs.
-- Current Checkpoint: pre_review
+- Current Checkpoint: build
 - Current Stop: Implementation and independent semantic review are complete. Allowlisted tasks can succeed only from a Lode-pinned, session-bound Harbor completed operation; unavailable and indeterminate outcomes fail closed without snapshot-success fallback. P0/P1/P2 findings are resolved. A P3 advisory remains to move duplicated trust-boundary parsing and exact contract fixtures into a focused module when a shared schema is available.
 - Next Step: Commit the bounded CORE-267 implementation/carriers, create the PR, bind review to the committed head, run hosted checks, and merge only after required gates pass. Keep #267 open pending merged-runtime App live evidence.
 - Blockers: None. Harbor PR #249 is merged at `2f112b409ef02e36e6db7d72e02e546b1002d42f`; Harbor #245 remains open only for live convergence evidence.
