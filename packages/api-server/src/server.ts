@@ -149,6 +149,7 @@ function queryStatusCode(failure: FailureRecord): number {
 
 function submitStatusCode(failure: FailureRecord): number {
   if (failure.code === "run_id_already_exists") return 409;
+  if (failure.code === "harbor_read_operation_outcome_unknown") return 202;
   if (failure.category === "request_invalid") return 400;
   if (failure.category === "capability_contract") return 422;
   if (failure.category === "resource_admission" || failure.category === "evidence_reference") return 503;
@@ -176,6 +177,12 @@ async function validateRuntimeTaskSubmissionRequest(
 
   const package_ref = optionalString(body.package_ref, "package_ref_invalid");
   if (isFailureRecord(package_ref)) return package_ref;
+  const publicQueryInput = body.public_query === undefined ? undefined : jsonObject(body.public_query);
+  if (body.public_query !== undefined && !publicQueryInput) return requestInvalid("public_query_invalid");
+  const publicQuery = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.query, "public_query_invalid");
+  if (isFailureRecord(publicQuery) || (publicQueryInput && (publicQuery === undefined || Object.keys(publicQueryInput).length !== 1 || publicQuery.trim() !== publicQuery || publicQuery.length > 256))) {
+    return requestInvalid("public_query_invalid");
+  }
 
   const harborInput = body.harbor === undefined ? undefined : jsonObject(body.harbor);
   if (body.harbor !== undefined && !harborInput) return requestInvalid("harbor_invalid");
@@ -207,6 +214,7 @@ async function validateRuntimeTaskSubmissionRequest(
     run_id: runId,
     task_intent,
     ...(package_ref === undefined ? {} : { package_ref }),
+    ...(publicQuery === undefined ? {} : { public_query: { query: publicQuery } }),
     ...(harbor === undefined ? {} : { harbor })
   };
 }
