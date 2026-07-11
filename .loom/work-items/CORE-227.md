@@ -6,7 +6,7 @@
 - Goal: Consume Harbor's real BOSS `boss_job_search` read operation and accept only operation-specific, refs-only public results bound to the pinned Lode contract.
 - Scope: BOSS query/city/page/limit API parsing, query/city dispatch, exact public-summary validation, Lode pin validation, session/control/challenge failure handling, source/evidence ref validation, focused/process self-checks, and CORE-227 carriers.
 - Execution Path: work/core-227-boss-search-real-read
-- Workspace Entry: /Volumes/2T/dev/WebEnvoy/.worktrees/WebEnvoy-core-227-boss-search-real-read
+- Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-227.md
 - Review Entry: .loom/reviews/CORE-227.json
 - Validation Entry: focused Core/API typecheck and tests; full pnpm typecheck/test/lint; git diff checks; Loom suite/fact-chain/build checks
