@@ -3,7 +3,7 @@
 ## Dynamic Facts
 
 - Item ID: CORE-227
-- Current Checkpoint: merge
+- Current Checkpoint: pre-review
 - Current Stop: Product implementation `921390c` and current-head spec/implementation reviews passed; review carrier committed at `6fac9c5`.
 - Next Step: Consume the hosted merge gate and perform controlled merge; keep #227 open pending live BOSS and detail evidence.
 - Blockers: None. Loom host issue binding reports stale dependency signals for already-merged PR numbers #240/#251; this is classified as a tool/host metadata surface issue and does not alter product scope.

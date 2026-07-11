@@ -11,7 +11,7 @@
 - Review Entry: .loom/reviews/CORE-227.json
 - Validation Entry: focused Core/API typecheck and tests; full pnpm typecheck/test/lint; git diff checks; Loom suite/fact-chain/build checks
 - Closing Condition: Ready PR covers #227 without merge or issue closure.
-- Current Checkpoint: merge
+- Current Checkpoint: pre-review
 - Current Stop: Product implementation `921390c` and current-head spec/implementation reviews passed; review carrier committed at `6fac9c5`.
 - Next Step: Consume the hosted merge gate and perform controlled merge; keep #227 open pending live BOSS and detail evidence.
 - Blockers: None. Loom host issue binding reports stale dependency signals for already-merged PR numbers #240/#251; this is classified as a tool/host metadata surface issue and does not alter product scope.
