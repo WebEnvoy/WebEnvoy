@@ -27,6 +27,29 @@ export type LodePackageAdmissionContract = {
       }[];
     }[];
   };
+  runtime_consumption?: LodeRuntimeConsumptionEntry;
+};
+
+export type LodeRuntimeConsumptionEntry = {
+  allowlist_id: string;
+  allowlist_version: string;
+  asset_owner: string;
+  consumer: { repository: string; issue: string; purpose: string };
+  package_ref: string;
+  lock_ref: string;
+  version: string;
+  site_slug: string;
+  operation_id: string;
+  operation_mode: string;
+  lifecycle: string;
+  allowed_origins: readonly string[];
+  resource_requirements_id: string;
+  failure_mapping_id: string;
+  required_failure_classes: readonly string[];
+  required_source_ref_kinds: readonly string[];
+  required_evidence_ref_kinds: readonly string[];
+  post_check_id: string;
+  required_post_check_fields: readonly string[];
 };
 
 export type LodeRequiredHarborFact = {
@@ -64,6 +87,7 @@ export type LodeAdmission =
       capability_lock_ref?: string;
       resource_requirement_refs: readonly string[];
       required_harbor_facts: readonly LodeRequiredHarborFact[];
+      runtime_consumption?: LodeRuntimeConsumptionEntry;
     }
   | {
       ok: false;
@@ -291,6 +315,7 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
     capability_source_ref: sourceRef,
     ...(lockRef === undefined ? {} : { capability_lock_ref: lockRef }),
     resource_requirement_refs: resourceRequirements.resourceRequirementRefs,
-    required_harbor_facts: resourceRequirements.requiredHarborFacts
+    required_harbor_facts: resourceRequirements.requiredHarborFacts,
+    ...(lodePackage.runtime_consumption === undefined ? {} : { runtime_consumption: lodePackage.runtime_consumption as LodeRuntimeConsumptionEntry })
   };
 }
