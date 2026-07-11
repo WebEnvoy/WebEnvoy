@@ -37,6 +37,7 @@ const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const bossLockRef = "lode://lock/site-capability/boss/job-search@0.1.0";
 const bossResourceRef = "boss.job-search.resources";
+const harborSupervisorToken = "runtime-supervisor-self-check-token";
 const readyResourceFacts: JsonObject = {
   schema_version: "harbor-core-resource-facts/v0",
   resource_facts: [
@@ -499,6 +500,15 @@ function createHarborMock(
 
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
+    const protectedRequest = request.method === "POST" && (
+      request.url === "/runtime/identity-environment-sessions" ||
+      request.url?.endsWith("/read-operations") ||
+      request.url?.endsWith("/release")
+    );
+    if (protectedRequest && request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
+      sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });
+      return;
+    }
     void readRequestJson(request).then((body) => {
       if (request.method === "POST") bodies.push({ path: `${request.method} ${request.url}`, body });
       if (request.method === "GET" && request.url === "/readiness") {
@@ -736,6 +746,8 @@ function createDuplicateRunRaceStore(store: FileRunRecordStore): FileRunRecordSt
 }
 
 export async function assertRuntimeTaskSubmitApi(): Promise<void> {
+  const previousSupervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
   const root = await mkdtemp(join(tmpdir(), "webenvoy-lode-registry-"));
   const runDir = await mkdtemp(join(tmpdir(), "webenvoy-api-submit-runs-"));
   const paths: string[] = [];
@@ -975,6 +987,34 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const offlineHarborPort = await listen(offlineHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
+    delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    const missingTokenClient = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${harborPort}` });
+    process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
+    const missingTokenAdmission = await missingTokenClient.collectAdmissionFacts({
+      run_id: "run_missing_harbor_supervisor_token",
+      task_intent: taskIntent("intent_missing_harbor_supervisor_token"),
+      package_ref: packageRef,
+      harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+    });
+    assert("category" in missingTokenAdmission && missingTokenAdmission.code === "harbor_runtime_supervisor_token_missing");
+    let remoteAuthorization: string | null = null;
+    const remoteClient = createHttpHarborRuntimeClient({
+      baseUrl: "https://harbor.example",
+      fetch: async (_url, init) => {
+        remoteAuthorization = new Headers(init?.headers).get("authorization");
+        return new Response(JSON.stringify({
+          schema_version: "harbor-allowlisted-read-operation/v0",
+          status: "unavailable",
+          runtime_session_ref: "session_remote",
+          site_id: "xiaohongshu",
+          operation_id: "xhs_search_notes",
+          failure_class: "provider_probe_unavailable",
+          retryable: true
+        }), { status: 409, headers: { "content-type": "application/json" } });
+      }
+    });
+    await remoteClient.executeReadOperation({ runtime_session_ref: "session_remote", site_id: "xiaohongshu", operation_id: "xhs_search_notes", query: "city coffee" });
+    assert.equal(remoteAuthorization, null);
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({
       runRecordStore: store,
@@ -1130,6 +1170,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(paths.includes("POST /runtime/sessions/session_runtime_api_ready/snapshot"));
       assert(paths.includes("GET /runtime/evidence/evidence_runtime_api_snapshot"));
       const sessionBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
+      assert.equal(JSON.stringify(sessionBody).includes(harborSupervisorToken), false);
       assert.equal(sessionBody.run_id, "run_api_submit_runtime_chain");
       assert.equal(sessionBody.package_ref, packageRef);
       assert.equal(sessionBody.holder_ref, "run_api_submit_runtime_chain");
@@ -1181,6 +1222,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
+      assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
@@ -1419,6 +1461,21 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(privateEvidencePolicy.status, 400);
       assert.equal(asRecord(asRecord(privateEvidencePolicy.body).error).code, "private_field_rejected:token");
 
+      const payloadSupervisorToken = await postJson(port, "/tasks", {
+        run_id: "run_api_submit_payload_supervisor_token",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_payload_supervisor_token"),
+        public_query: { query: "city coffee" },
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+          supervisor_token: harborSupervisorToken
+        }
+      });
+      assert.equal(payloadSupervisorToken.status, 400);
+      assert.equal(asRecord(asRecord(payloadSupervisorToken.body).error).code, "unsupported_harbor_field:supervisor_token");
+      assert.equal(JSON.stringify(payloadSupervisorToken.body).includes(harborSupervisorToken), false);
+
       const raceDuplicate = await postJson(raceDuplicatePort, "/tasks", {
         run_id: "run_api_submit_race_duplicate",
         package_ref: packageRef,
@@ -1490,6 +1547,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(offlineHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);
+    if (previousSupervisorToken === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    else process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = previousSupervisorToken;
     await rm(root, { recursive: true, force: true });
     await rm(runDir, { recursive: true, force: true });
   }

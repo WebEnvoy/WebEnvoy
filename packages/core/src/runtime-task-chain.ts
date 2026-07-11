@@ -804,12 +804,35 @@ function siteTaskFromPackageRef(packageRef: string): { site_id: SiteRuntimeId; t
 export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOptions): HarborRuntimeClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const fetchJson = options.fetch ?? fetch;
+  const supervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  const harborHost = (() => {
+    try {
+      return new URL(baseUrl).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  const localHarbor = harborHost === "localhost" || harborHost === "127.0.0.1" || harborHost === "::1";
+
+  function protectedHeaders(method: "GET" | "POST", path: string): Record<string, string> | FailureRecord | undefined {
+    const protectedRequest = method === "POST" && (
+      path === "/runtime/identity-environment-sessions" ||
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:release|read-operations)$/.test(path)
+    );
+    if (!protectedRequest || !localHarbor) return undefined;
+    if (!supervisorToken || supervisorToken.trim() !== supervisorToken || /[\r\n]/.test(supervisorToken)) {
+      return failure("resource_admission", "harbor_runtime_supervisor_token_missing", "runtime_binding", "connect_runtime");
+    }
+    return { authorization: `Bearer ${supervisorToken}` };
+  }
 
   async function requestJson(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown | FailureRecord> {
     try {
-      const init: RequestInit = { method };
+      const authorization = protectedHeaders(method, path);
+      if (isFailure(authorization)) return authorization;
+      const init: RequestInit = { method, ...(authorization === undefined ? {} : { headers: authorization }) };
       if (method === "POST") {
-        init.headers = { "content-type": "application/json" };
+        init.headers = { ...authorization, "content-type": "application/json" };
         init.body = JSON.stringify(body ?? {});
       }
       const response = await fetchJson(`${baseUrl}${path}`, init);
@@ -883,9 +906,12 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
     },
     async executeReadOperation(input) {
       try {
-        const response = await fetchJson(`${baseUrl}/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/read-operations`, {
+        const path = `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/read-operations`;
+        const authorization = protectedHeaders("POST", path);
+        if (isFailure(authorization)) return authorization;
+        const response = await fetchJson(`${baseUrl}${path}`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { ...authorization, "content-type": "application/json" },
           body: JSON.stringify({ site_id: input.site_id, operation_id: input.operation_id, query: input.query, ...(input.url === undefined ? {} : { url: input.url }) })
         });
         const payload = await response.json() as unknown;

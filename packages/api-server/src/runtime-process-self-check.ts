@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,7 @@ const requiredHarborFactKeys = [
 ];
 const identityPrivateBoundary = ["password", "verification_code", "cookie_value", "storage_value", "session_token"];
 const expectedRuntimeBindingRefs = ["session_process_ready", "profile_process", "harbor:provider/cloakbrowser", "viewer_process", "identity-env_process", "identity-env_process:execution", "snapshot_process_ready", "refmap_process_ready", "source_trace_process_ready"];
+const harborSupervisorToken = "runtime-process-supervisor-token";
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
@@ -235,9 +236,16 @@ function taskIntent(intentId: string): JsonObject {
   };
 }
 
-function createHarborMock(paths: string[]): Server {
+function createHarborMock(paths: string[], protectedAuthorization: string[]): Server {
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
+    if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
+      protectedAuthorization.push(request.headers.authorization ?? "");
+      if (request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
+        sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });
+        return;
+      }
+    }
     void readRequestJson(request).then((body) => {
       if (request.method === "GET" && request.url === "/readiness") {
         sendJson(response, 200, { status: "ready" });
@@ -393,12 +401,14 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
   const runRecordDir = await mkdtemp(join(tmpdir(), "webenvoy-api-runtime-runs-"));
   const registryPath = await writeLodeRegistry(root);
   const harborPaths: string[] = [];
-  const harbor = createHarborMock(harborPaths);
+  const protectedAuthorization: string[] = [];
+  const harbor = createHarborMock(harborPaths, protectedAuthorization);
   const harborPort = await listen(harbor);
   const apiPort = await reservePort();
   const { child, output } = spawnApiServer(apiPort, runRecordDir, {
     WEBENVOY_LODE_REGISTRY_PATH: registryPath,
-    WEBENVOY_HARBOR_RUNTIME_URL: `http://127.0.0.1:${harborPort}`
+    WEBENVOY_HARBOR_RUNTIME_URL: `http://127.0.0.1:${harborPort}`,
+    HARBOR_RUNTIME_SUPERVISOR_TOKEN: harborSupervisorToken
   });
 
   try {
@@ -479,6 +489,12 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
     assert(harborPaths.includes("POST /runtime/identity-environment-sessions"));
     assert(harborPaths.includes("POST /runtime/sessions/session_process_ready/snapshot"));
     assert(harborPaths.includes("GET /runtime/evidence/evidence_process_snapshot"));
+    assert(protectedAuthorization.length > 0);
+    assert(protectedAuthorization.every((value) => value === `Bearer ${harborSupervisorToken}`));
+    assert.equal(JSON.stringify([submit.body, result.body, evidence.body, session.body]).includes(harborSupervisorToken), false);
+    const persistedRunRecords = await Promise.all((await readdir(runRecordDir)).map((file) => readFile(join(runRecordDir, file), "utf8")));
+    assert.equal(persistedRunRecords.some((record) => record.includes(harborSupervisorToken)), false);
+    assert.equal(output().includes(harborSupervisorToken), false);
   } catch (error) {
     console.error(output());
     throw error;
