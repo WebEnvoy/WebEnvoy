@@ -3,10 +3,10 @@
   "item_id": "CORE-267",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Current-head review at 625ff6f found no P0-P3. The only delta from reviewed product head is synchronized Loom carrier metadata; runtime semantics and previously validated safety boundaries are unchanged.",
+  "summary": "Carrier-only PR #272 review at 4a85463 found no P0-P3 after suite_path metadata was aligned to minimal. The diff only synchronizes merged PR #269 facts, preserves Core #267 open for BOSS, and retires the stale current pointer.",
   "reviewer": "codex-main-controller",
-  "authored_at": "2026-07-11T14:38:43Z",
-  "reviewed_head": "625ff6fcec22cc2c120b5a060e0b5ef899d88b36",
+  "authored_at": "2026-07-11T15:54:19Z",
+  "reviewed_head": "4a8546347e091e3f26cec7a55826e4aca662f36e",
   "reviewed_validation_summary": "2026-07-11 at f114990c455a16e669bdd9e930992bd2aea17b88: focused Core/API and root `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Branch packaged-App live run app-xiaohongshu-mrgcpit5 succeeded through the supervised Harbor session and pinned Lode package; merged-head replay is pending.",
   "reviewed_validation_summary_hash": "6cec39c375e369273dc3bfc2c6f88b00286ae2e27359a6ce90a3b400c0515819",
   "validation_summary_source": "recovery.latest_validation_summary",
@@ -55,6 +55,6 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Authored implementation review approved the current head for merge checkpoint consumption."
+    "reason": "Authored carrier-only review approved PR #272 head after confirming no product-code change, no premature Core #267 closure, and a portable retired current pointer."
   }
 }
