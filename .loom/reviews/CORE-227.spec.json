@@ -1,0 +1,29 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-227",
+  "decision": "allow",
+  "kind": "spec_review",
+  "summary": "CORE-227 spec is bounded to exact BOSS job-search input, canonical query/city URL, current Harbor/Lode pins, operation-specific public refs, and no detail/write/live-account claim.",
+  "reviewer": "codex-main-controller",
+  "authored_at": "2026-07-11T16:54:01Z",
+  "reviewed_head": "a1d3d9884b8ffad4c27b659aafa3b851848e0daf",
+  "reviewed_validation_summary": "At product head `921390c` and carrier head `6ea5ba2`, focused Core/API typecheck/test/build, canonical BOSS target_ref/harbor.url parser and process-boundary tests, standalone runtime submit/process self-checks, full `pnpm typecheck`, `pnpm test`, `pnpm lint`, `git diff --check`, and Loom fact-chain/suite/carrier/evidence validation passed.",
+  "reviewed_validation_summary_hash": "460417bce64027c1944d520b24988637bdfe97822da06d5f419b6ab4118f0ff8",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-227.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-227.md",
+    "recovery_entry": ".loom/progress/CORE-227.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": "pass",
+    "suite_validation": "loom suite validate --target . --item CORE-227 --json",
+    "suite_spec": ".loom/specs/CORE-227/spec.md",
+    "suite_plan": ".loom/specs/CORE-227/plan.md",
+    "suite_evidence_map": ".loom/specs/CORE-227/evidence-map.md",
+    "suite_task_carriers": [".loom/specs/CORE-227/task-carrier.md"]
+  }
+}
