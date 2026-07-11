@@ -78,10 +78,24 @@ const resourceFactsBoundary =
 const lodeAllowlistCommit = "e36a4a7";
 const lodeAllowlistAssetPath = "registry/runtime-consumption-allowlist.json";
 const lodeAllowlistSemanticSha256 = "599de2eaa0768810a08e49ef840603dded7240a08d9858049e8ee5a081794db7";
-const deferredProbeFactKeysByOperation = new Map<string, ReadonlySet<string>>([
-  ["xhs_search_notes", new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])],
-  ["boss_job_search", new Set(["page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available"])]
-]);
+const canonicalDeferredProbeOperations = [
+  {
+    package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+    lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+    site_slug: "xiaohongshu",
+    operation_id: "xhs_search_notes",
+    version: "0.1.0",
+    deferred_facts: new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])
+  },
+  {
+    package_ref: "lode://site-capability/boss/job-search@0.1.0",
+    lock_ref: "lode://lock/site-capability/boss/job-search@0.1.0",
+    site_slug: "boss",
+    operation_id: "boss_job_search",
+    version: "0.1.0",
+    deferred_facts: new Set(["page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available"])
+  }
+] as const;
 
 function failure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
   return { category, code, phase, recovery_hint };
@@ -185,7 +199,24 @@ function sameOrigin(left: string | undefined, right: string | undefined): boolea
 }
 
 function operationAdmissionContract(contract: LodePackageAdmissionContract): LodePackageAdmissionContract {
-  const deferredFacts = contract.runtime_consumption && deferredProbeFactKeysByOperation.get(contract.runtime_consumption.operation_id);
+  const runtime = contract.runtime_consumption;
+  const deferredFacts = runtime && canonicalDeferredProbeOperations.find((operation) =>
+    contract.package_ref === operation.package_ref &&
+    contract.lock_ref === operation.lock_ref &&
+    contract.operation_id === operation.operation_id &&
+    contract.version === operation.version &&
+    runtime.package_ref === operation.package_ref &&
+    runtime.lock_ref === operation.lock_ref &&
+    runtime.site_slug === operation.site_slug &&
+    runtime.operation_id === operation.operation_id &&
+    runtime.version === operation.version &&
+    runtime.allowlist_id === "lode.xhs-boss.read.runtime-consumption" &&
+    runtime.allowlist_version === "0.1.0" &&
+    runtime.asset_owner === "Lode" &&
+    runtime.consumer.repository === "WebEnvoy/WebEnvoy" &&
+    runtime.consumer.issue === "#267" &&
+    runtime.consumer.purpose === "lock-bound read-only task admission and run recording"
+  )?.deferred_facts;
   if (!deferredFacts) return contract;
   return {
     ...contract,
@@ -304,6 +335,11 @@ function validateCompletedReadOperation(
   const summaryKeys = new Set(["schema_version", "operation_id", "result_kind", "surface", "result_state", "response_status", "source_signals"]);
   const opaqueRef = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_]*_[0-9a-f-]{36}$/i.test(value);
   const validRefs = (refs: (JsonObject | undefined)[]) => refs.length > 0 && refs.every((ref) => Boolean(string(ref?.kind) && opaqueRef(ref?.ref)));
+  const exactKinds = (refs: (JsonObject | undefined)[], required: readonly string[]) => {
+    const kinds = refs.map((ref) => string(ref?.kind));
+    return kinds.length === required.length && new Set(kinds).size === kinds.length && required.every((kind) => kinds.includes(kind));
+  };
+  const allRefs = [...sourceRefs, ...evidenceRefs].map((ref) => string(ref?.ref));
   if (
     operation?.schema_version !== "harbor-allowlisted-read-operation/v0" || operation.status !== "completed" ||
     !opaqueRef(operation.operation_ref) || !opaqueRef(operation.public_summary_ref) || !publicSummary || Object.keys(publicSummary).some((key) => !summaryKeys.has(key)) ||
@@ -314,8 +350,8 @@ function validateCompletedReadOperation(
     operation.site_id !== entry.site_slug || operation.operation_id !== entry.operation_id || operation.operation_mode !== "read" ||
     typeof operation.observed_at !== "string" || !Number.isFinite(Date.parse(operation.observed_at)) ||
     !validRefs(sourceRefs) || !validRefs(evidenceRefs) ||
-    !entry.required_source_ref_kinds.every((kind) => sourceRefs.some((ref) => ref?.kind === kind)) ||
-    !entry.required_evidence_ref_kinds.every((kind) => evidenceRefs.some((ref) => ref?.kind === kind)) ||
+    !exactKinds(sourceRefs, entry.required_source_ref_kinds) || !exactKinds(evidenceRefs, entry.required_evidence_ref_kinds) ||
+    new Set(allRefs).size !== allRefs.length ||
     flatEvidenceRefs.length !== bodyEvidenceRefs.length || !flatEvidenceRefs.every((ref, index) => ref === bodyEvidenceRefs[index]?.ref) ||
     postCheck?.status !== "passed" || postCheck.reason !== "managed_provider_read_probe_completed" || !opaqueRef(postCheck.post_check_ref) ||
     postCheck.post_check_ref !== evidenceRefs.find((ref) => ref?.kind === "post_check_ref")?.ref ||

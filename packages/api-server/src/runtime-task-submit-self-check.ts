@@ -809,6 +809,75 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const driftedSessionOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { runtime_session_ref: "session_other" });
   const driftedBoundaryOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed" } });
   const unknownOutcomeHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { schema_version: "malformed-after-dispatch" });
+  const operationRefDriftCases: Array<{ name: string; override: JsonObject }> = [
+    {
+      name: "extra_source_kind",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" },
+          { kind: "raw_dom_ref", ref: "source_44444444-4444-4444-8444-444444444444" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_source_kind",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" },
+          { kind: "network_summary", ref: "source_44444444-4444-4444-8444-444444444444" }
+        ]
+      }
+    },
+    {
+      name: "extra_evidence_kind",
+      override: {
+        evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111", "evidence_22222222-2222-4222-8222-222222222222"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" },
+          { kind: "har_ref", ref: "evidence_22222222-2222-4222-8222-222222222222" },
+          { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_source_ref",
+      override: {
+        source_refs: [
+          { kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "network_summary", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" }
+        ]
+      }
+    },
+    {
+      name: "duplicate_evidence_ref",
+      override: {
+        evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111", "evidence_11111111-1111-4111-8111-111111111111"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" },
+          { kind: "post_check_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" }
+        ],
+        post_check: { post_check_ref: "evidence_11111111-1111-4111-8111-111111111111", status: "passed", reason: "managed_provider_read_probe_completed" }
+      }
+    },
+    {
+      name: "source_evidence_ref_reuse",
+      override: {
+        evidence_refs: ["source_11111111-1111-4111-8111-111111111111"],
+        evidence_ref_kinds: [
+          { kind: "snapshot_ref", ref: "source_11111111-1111-4111-8111-111111111111" },
+          { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }
+        ]
+      }
+    }
+  ];
+  const operationRefDriftHarbors = operationRefDriftCases.map((entry) =>
+    createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, entry.override)
+  );
   const deferredXiaohongshuFactsPaths: string[] = [];
   const deferredXiaohongshuFactsHarbor = createHarborMock(
     true,
@@ -875,6 +944,14 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   try {
     const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root);
     const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256 });
+    const nonPinnedResolver = async (input: Parameters<typeof resolver>[0]) => {
+      const resolved = await resolver(input);
+      if ("category" in resolved || !resolved.runtime_consumption) return resolved;
+      return {
+        ...resolved,
+        runtime_consumption: { ...resolved.runtime_consumption, package_ref: "lode://site-capability/other/search-notes@0.1.0" }
+      };
+    };
     const pinDrift = await createLocalLodePackageResolver({ registryPath })({ package_ref: xiaohongshuPackageRef, task_intent: xiaohongshuTaskIntent("intent_pin_drift") });
     assert("category" in pinDrift && pinDrift.code === "runtime_consumption_allowlist_pin_mismatch");
     const harborPort = await listen(harbor);
@@ -891,6 +968,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedSessionOperationHarborPort = await listen(driftedSessionOperationHarbor);
     const driftedBoundaryOperationHarborPort = await listen(driftedBoundaryOperationHarbor);
     const unknownOutcomeHarborPort = await listen(unknownOutcomeHarbor);
+    const operationRefDriftHarborPorts = await Promise.all(operationRefDriftHarbors.map(listen));
     const deferredXiaohongshuFactsHarborPort = await listen(deferredXiaohongshuFactsHarbor);
     const blockedIdentityHarborPorts = await Promise.all(blockedIdentityHarbors.map(listen));
     const publicIdentityHarborPort = await listen(publicIdentityHarbor);
@@ -954,6 +1032,16 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       lodePackageResolver: resolver,
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${deferredXiaohongshuFactsHarborPort}` })
     });
+    const nonPinnedDeferredFactsServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: nonPinnedResolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${deferredXiaohongshuFactsHarborPort}` })
+    });
+    const operationRefDriftServers = operationRefDriftHarborPorts.map((driftPort) => createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftPort}` })
+    }));
     const blockedIdentityServers = blockedIdentityHarborPorts.map((blockedPort) => createApiServer({
       runRecordStore: store,
       lodePackageResolver: resolver,
@@ -994,6 +1082,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const driftedBoundaryOperationPort = await listen(driftedBoundaryOperationServer);
     const unknownOutcomePort = await listen(unknownOutcomeServer);
     const deferredXiaohongshuFactsPort = await listen(deferredXiaohongshuFactsServer);
+    const nonPinnedDeferredFactsPort = await listen(nonPinnedDeferredFactsServer);
+    const operationRefDriftPorts = await Promise.all(operationRefDriftServers.map(listen));
     const blockedIdentityPorts = await Promise.all(blockedIdentityServers.map(listen));
     const publicIdentityPort = await listen(publicIdentityServer);
     const offlinePort = await listen(offlineServer);
@@ -1146,6 +1236,29 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(asRecord(asRecord(xiaohongshuDeferredFacts.body).run).status, "succeeded");
       assert(deferredXiaohongshuFactsPaths.includes("GET /runtime/identity-environments/identity-env_runtime_api"));
       assert(deferredXiaohongshuFactsPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
+
+      const nonPinnedDeferredFacts = await postJson(nonPinnedDeferredFactsPort, "/tasks", {
+        run_id: "run_api_submit_non_pinned_deferred_facts",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_api_submit_non_pinned_deferred_facts"),
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+      });
+      assert.equal(asRecord(nonPinnedDeferredFacts.body).ok, false);
+      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "resource_fact_missing:page.vue_app.ready");
+
+      for (const [index, driftCase] of operationRefDriftCases.entries()) {
+        const drift = await postJson(operationRefDriftPorts[index]!, "/tasks", {
+          run_id: `run_api_submit_operation_refs_${driftCase.name}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_operation_refs_${driftCase.name}`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+        });
+        assert.equal(asRecord(drift.body).ok, false, driftCase.name);
+        assert.equal(asRecord(asRecord(drift.body).run).status, "failed", driftCase.name);
+        assert.equal(asRecord(asRecord(drift.body).run).result_ref, undefined, driftCase.name);
+      }
 
       for (const [index, identityCase] of blockedIdentityCases.entries()) {
         const blockedIdentity = await postJson(blockedIdentityPorts[index]!, "/tasks", {
@@ -1346,6 +1459,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(driftedBoundaryOperationServer);
       await close(unknownOutcomeServer);
       await close(deferredXiaohongshuFactsServer);
+      await close(nonPinnedDeferredFactsServer);
+      await Promise.all(operationRefDriftServers.map(close));
       await Promise.all(blockedIdentityServers.map(close));
       await close(publicIdentityServer);
       await close(offlineServer);
@@ -1369,6 +1484,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(driftedBoundaryOperationHarbor);
     await close(unknownOutcomeHarbor);
     await close(deferredXiaohongshuFactsHarbor);
+    await Promise.all(operationRefDriftHarbors.map(close));
     await Promise.all(blockedIdentityHarbors.map(close));
     await close(publicIdentityHarbor);
     await close(offlineHarbor);
