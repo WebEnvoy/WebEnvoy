@@ -2,8 +2,8 @@
   "schema_version": "loom-review/v1",
   "item_id": "CORE-275",
   "decision": "allow",
-  "kind": "code_review",
-  "summary": "Independent review found no product correctness or security findings in the pinned Harbor-to-Lode failure normalization; the only stale carrier finding is resolved by this carrier-only sync.",
+  "kind": "spec_review",
+  "summary": "CORE-275 spec is bounded to one pinned Harbor-to-Lode compatibility mapping, preserves unknown and malformed fail-closed behavior, and explicitly excludes BOSS live usability evidence.",
   "reviewer": "codex-main-controller",
   "authored_at": "2026-07-12T09:20:00Z",
   "reviewed_head": "469ba38126cecb6e5fe75793798487359022796b",
@@ -14,19 +14,17 @@
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
-  "follow_ups": ["Do not use this PR as BOSS usability evidence; BOSS restoration remains deferred under Core #277/#279."],
+  "follow_ups": ["Do not use the contract fix as BOSS usability evidence or trigger a BOSS production rerun."],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-275.md",
     "recovery_entry": ".loom/progress/CORE-275.md",
     "status_surface": ".loom/status/current.md",
     "build_checkpoint": "pass",
     "suite_validation": "loom suite validate --target . --item CORE-275 --json",
-    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-275 --json",
+    "suite_spec": ".loom/specs/CORE-275/spec.md",
+    "suite_plan": ".loom/specs/CORE-275/plan.md",
+    "suite_implementation_contract": ".loom/specs/CORE-275/implementation-contract.md",
     "suite_evidence_map": ".loom/specs/CORE-275/evidence-map.md",
     "suite_task_carriers": [".loom/specs/CORE-275/task-carrier.md"]
-  },
-  "semantic_review_disposition": {
-    "status": "passed",
-    "reason": "Current product head review confirmed the one-line compatibility mapping is constrained by the pinned Lode taxonomy and preserves unknown/malformed fail-closed behavior."
   }
 }
