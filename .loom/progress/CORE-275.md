@@ -1,16 +1,8 @@
-# Current Status
+# CORE-275 Progress
 
-## Derived Fact Chain View
+## Dynamic Facts
 
 - Item ID: CORE-275
-- Goal: Normalize Harbor `safety_challenge` to the pinned Lode `captcha_required` failure without weakening fail-closed handling.
-- Scope: Shared Core Harbor-to-Lode failure adapter, focused API integration regressions, and CORE-275 item-specific carriers.
-- Execution Path: work/core-275-safety-challenge
-- Workspace Entry: .
-- Recovery Entry: .loom/progress/CORE-275.md
-- Review Entry: .loom/reviews/CORE-275.json
-- Validation Entry: Core/API targeted checks, full repository checks, diff checks, and Loom item checks.
-- Closing Condition: PR #276 merged after current-head review and hosted gate; no BOSS production rerun.
 - Current Checkpoint: merge
 - Current Stop: Product head `469ba38126cecb6e5fe75793798487359022796b` is pushed in PR #276; independent semantic review found no product correctness or security findings.
 - Next Step: Commit this carrier-only current-head review sync, push, consume the hosted merge gate, and controlled-merge PR #276. Do not run BOSS production E2E; #275 closes only the shared failure-normalization fix and does not prove BOSS usability.
@@ -19,17 +11,11 @@
 - Recovery Boundary: Revert only CORE-275-owned code and carriers. Do not modify Harbor, Lode, App, external runtime state, or use this change as BOSS live evidence.
 - Current Lane: CORE-275 Harbor safety challenge normalization.
 
-## Runtime Evidence
+## Execution Ledger
 
-- Run Entry: not applicable; BOSS live execution is deferred
-- Logs Entry: targeted and full pnpm validation output
-- Diagnostics Entry: packages/core/src/runtime-task-chain.ts; packages/api-server/src/runtime-task-submit-self-check.ts
-- Verification Entry: .loom/specs/CORE-275/evidence-map.md
-- Lane Entry: .loom/specs/CORE-275/plan.md
-
-## Sources
-
-- Static Truth: .loom/work-items/CORE-275.md
-- Dynamic Truth: .loom/progress/CORE-275.md
-- Locator Truth: .loom/bootstrap/init-result.json
-- Fact Chain CLI: loom fact-chain --target . --json
+- Ledger Binding: recovery_entry
+- Plan Locator: .loom/specs/CORE-275/plan.md
+- Acceptance Locator: .loom/specs/CORE-275/spec.md
+- Validation Evidence Locator: .loom/specs/CORE-275/evidence-map.md
+- Handoff Notes Locator: .loom/specs/CORE-275/task-carrier.md
+- Evidence Freshness: current

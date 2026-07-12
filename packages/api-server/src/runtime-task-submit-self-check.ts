@@ -889,6 +889,12 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     post_check: { post_check_ref: "post_check_77777777-7777-4777-8777-777777777777", status: "passed", reason: "managed_provider_read_probe_completed" }
   });
   const unavailableOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { status: "unavailable", failure_class: "provider_probe_unavailable", retryable: true });
+  const safetyChallengeHarbor = createHarborMock(true, [], [], {
+    page_summary: { title: "BOSS verification", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS verification challenge." }
+  }, undefined, {}, readyBossSiteFacts, { site_id: "boss", operation_id: "boss_job_search", status: "unavailable", failure_class: "safety_challenge", retryable: false });
+  const unknownFailureHarbor = createHarborMock(true, [], [], {
+    page_summary: { title: "BOSS jobs", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS job search." }
+  }, undefined, {}, readyBossSiteFacts, { site_id: "boss", operation_id: "boss_job_search", status: "unavailable", failure_class: "future_unknown_failure", retryable: true });
   const missingRefsOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { evidence_ref_kinds: [] });
   const driftedSessionOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { runtime_session_ref: "session_other" });
   const driftedBoundaryOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed" } });
@@ -1104,6 +1110,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
     const bossHarborPort = await listen(bossHarbor);
     const unavailableOperationHarborPort = await listen(unavailableOperationHarbor);
+    const safetyChallengeHarborPort = await listen(safetyChallengeHarbor);
+    const unknownFailureHarborPort = await listen(unknownFailureHarbor);
     const missingRefsOperationHarborPort = await listen(missingRefsOperationHarbor);
     const driftedSessionOperationHarborPort = await listen(driftedSessionOperationHarbor);
     const driftedBoundaryOperationHarborPort = await listen(driftedBoundaryOperationHarbor);
@@ -1255,6 +1263,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     });
     const bossServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${bossHarborPort}` }) });
     const unavailableOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${unavailableOperationHarborPort}` }) });
+    const safetyChallengeServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${safetyChallengeHarborPort}` }) });
+    const unknownFailureServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${unknownFailureHarborPort}` }) });
     const missingRefsOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingRefsOperationHarborPort}` }) });
     const driftedSessionOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftedSessionOperationHarborPort}` }) });
     const driftedBoundaryOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${driftedBoundaryOperationHarborPort}` }) });
@@ -1324,6 +1334,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const xiaohongshuPort = await listen(xiaohongshuServer);
     const bossPort = await listen(bossServer);
     const unavailableOperationPort = await listen(unavailableOperationServer);
+    const safetyChallengePort = await listen(safetyChallengeServer);
+    const unknownFailurePort = await listen(unknownFailureServer);
     const missingRefsOperationPort = await listen(missingRefsOperationServer);
     const driftedSessionOperationPort = await listen(driftedSessionOperationServer);
     const driftedBoundaryOperationPort = await listen(driftedBoundaryOperationServer);
@@ -1508,6 +1520,28 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         assert.equal(asRecord(asRecord(failedOperation.body).run).status, status);
         assert.equal(asRecord(failedOperation.body).ok, false);
       }
+      const challenge = await postJson(safetyChallengePort, "/tasks", {
+        run_id: "run_api_submit_boss_safety_challenge",
+        package_ref: bossPackageRef,
+        task_intent: bossTaskIntent("intent_api_submit_boss_safety_challenge"),
+        public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+      });
+      const challengeRun = asRecord(asRecord(challenge.body).run);
+      assert.equal(asRecord(challengeRun.failure).code, "captcha_required");
+      assert.equal(asRecord(challengeRun.failure).code === "site_changed", false);
+      assert.equal(asRecord(challengeRun.post_check).summary, "Harbor read operation ended with captcha_required.");
+
+      const unknownFailure = await postJson(unknownFailurePort, "/tasks", {
+        run_id: "run_api_submit_boss_unknown_failure",
+        package_ref: bossPackageRef,
+        task_intent: bossTaskIntent("intent_api_submit_boss_unknown_failure"),
+        public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+      });
+      const unknownFailureRun = asRecord(asRecord(unknownFailure.body).run);
+      assert.equal(asRecord(unknownFailureRun.failure).code, "site_changed");
+      assert.equal(asRecord(unknownFailureRun.post_check).summary, "Core rejected a Harbor unavailable response outside the pinned Lode failure taxonomy.");
       for (const [targetPort, runId] of [[driftedSessionOperationPort, "run_api_submit_operation_session_drift"], [driftedBoundaryOperationPort, "run_api_submit_operation_boundary_drift"]] as const) {
         const drift = await postJson(targetPort, "/tasks", { run_id: runId, package_ref: xiaohongshuPackageRef, task_intent: xiaohongshuTaskIntent(`intent_${runId}`), public_query: { query: "city coffee" }, harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" } });
         assert.equal(asRecord(asRecord(drift.body).run).status, "failed");
@@ -1950,6 +1984,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(xiaohongshuServer);
       await close(bossServer);
       await close(unavailableOperationServer);
+      await close(safetyChallengeServer);
+      await close(unknownFailureServer);
       await close(missingRefsOperationServer);
       await close(driftedSessionOperationServer);
       await close(driftedBoundaryOperationServer);
@@ -1983,6 +2019,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(xiaohongshuHarbor);
     await close(bossHarbor);
     await close(unavailableOperationHarbor);
+    await close(safetyChallengeHarbor);
+    await close(unknownFailureHarbor);
     await close(missingRefsOperationHarbor);
     await close(driftedSessionOperationHarbor);
     await close(driftedBoundaryOperationHarbor);
