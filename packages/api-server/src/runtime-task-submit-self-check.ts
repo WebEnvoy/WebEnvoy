@@ -477,10 +477,11 @@ function createHarborMock(
   siteResourceBody: JsonObject | undefined = undefined,
   readOperationOverrides: JsonObject = {},
   identityRecordOverrides: JsonObject = {},
-  cleanupUnavailable = false
+  cleanupBehavior: "success" | "unavailable" | "hang" | "inconsistent" | "owner_none_held" = "success"
 ): Server {
   const sessionRef = "session_runtime_api_ready";
   let currentHolderRef = "";
+  let cleanupState: "held" | "released" | "closed" | "inconsistent" = "held";
   const sitePage = siteResourceBody?.page as JsonObject | undefined;
   const sessionOrigin = typeof sitePage?.origin === "string" ? sitePage.origin : "https://example.org";
   const sessionSiteId = typeof siteResourceBody?.site_id === "string" ? siteResourceBody.site_id : "example";
@@ -559,6 +560,7 @@ function createHarborMock(
       }
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
         currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
+        cleanupState = "held";
         sendJson(response, 200, {
           identity_environment_facts: liveSessionIdentity(sessionSiteId, sessionOrigin),
           runtime_facts: liveRuntimeFacts(),
@@ -567,6 +569,34 @@ function createHarborMock(
         return;
       }
       if (request.method === "GET" && request.url === `/runtime/sessions/${sessionRef}`) {
+        if (cleanupBehavior === "hang") return;
+        if (cleanupBehavior === "owner_none_held") {
+          sendJson(response, 200, {
+            runtime_session_ref: sessionRef,
+            lifecycle_state: "idle",
+            control_owner: "none",
+            control_lock: { owner: "core_task", state: "held", holder_ref: currentHolderRef }
+          });
+          return;
+        }
+        if (cleanupState === "released" || cleanupState === "closed") {
+          sendJson(response, 200, {
+            runtime_session_ref: sessionRef,
+            lifecycle_state: cleanupState === "closed" ? "closed" : "idle",
+            control_owner: "none",
+            control_lock: { owner: "none", state: "released", holder_ref: null }
+          });
+          return;
+        }
+        if (cleanupState === "inconsistent") {
+          sendJson(response, 200, {
+            runtime_session_ref: sessionRef,
+            lifecycle_state: "idle",
+            control_owner: "none",
+            control_lock: { owner: "core_task", state: "held", holder_ref: currentHolderRef }
+          });
+          return;
+        }
         sendJson(response, 200, {
           runtime_session_ref: sessionRef,
           lifecycle_state: "active",
@@ -602,9 +632,19 @@ function createHarborMock(
         return;
       }
       if (request.method === "POST" && (request.url === `/runtime/sessions/${sessionRef}/release` || request.url === `/runtime/sessions/${sessionRef}/stop`)) {
-        sendJson(response, 200, cleanupUnavailable
-          ? { status: "unavailable", failure_class: "session_cleanup_failed", retryable: true }
-          : { status: "released", runtime_session_ref: sessionRef, control_owner: "none", control_lock: { state: "released", holder_ref: null } });
+        if (cleanupBehavior === "unavailable") {
+          sendJson(response, 200, { status: "unavailable", failure_class: "session_cleanup_failed", retryable: true });
+          return;
+        }
+        cleanupState = cleanupBehavior === "inconsistent"
+          ? "inconsistent"
+          : request.url.endsWith("/stop") ? "closed" : "released";
+        sendJson(response, 200, {
+          status: request.url.endsWith("/stop") ? "stopped" : "released",
+          runtime_session_ref: sessionRef,
+          control_owner: "none",
+          control_lock: { owner: "none", state: "released", holder_ref: null }
+        });
         return;
       }
       if (request.method === "GET" && request.url?.startsWith(`/runtime/sessions/${sessionRef}/site-resource-facts`)) {
@@ -1022,7 +1062,23 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   );
   const offlineHarbor = createHarborMock(false, []);
   const cleanupFailureHarborPaths: string[] = [];
-  const cleanupFailureHarbor = createHarborMock(true, cleanupFailureHarborPaths, [], {}, undefined, {}, undefined, {}, {}, true);
+  const cleanupFailureHarbor = createHarborMock(true, cleanupFailureHarborPaths, [], {}, undefined, {}, undefined, {}, {}, "unavailable");
+  const cleanupTimeoutHarborPaths: string[] = [];
+  const cleanupTimeoutHarbor = createHarborMock(true, cleanupTimeoutHarborPaths, [], {}, undefined, {}, undefined, {}, {}, "hang");
+  const inconsistentCleanupHarborPaths: string[] = [];
+  const inconsistentCleanupHarbor = createHarborMock(true, inconsistentCleanupHarborPaths, [], {}, undefined, {}, undefined, {}, {}, "inconsistent");
+  const ownerNoneHeldHarborPaths: string[] = [];
+  const ownerNoneHeldHarbor = createHarborMock(true, ownerNoneHeldHarborPaths, [], {}, undefined, {}, undefined, {}, {}, "owner_none_held");
+  const dualFailureHarborPaths: string[] = [];
+  const dualFailureHarbor = createHarborMock(true, dualFailureHarborPaths, [], {}, undefined, {
+    runtime_facts: {
+      runtime_session_ref: "session_runtime_api_ready",
+      provider_ref: "harbor:provider/cloakbrowser",
+      provider_mode: "local_dedicated_profile",
+      lifecycle_state: "active",
+      viewer_ref: "viewer_runtime_api"
+    }
+  }, undefined, {}, {}, "unavailable");
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
   try {
@@ -1060,6 +1116,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const publicIdentityHarborPort = await listen(publicIdentityHarbor);
     const offlineHarborPort = await listen(offlineHarbor);
     const cleanupFailureHarborPort = await listen(cleanupFailureHarbor);
+    const cleanupTimeoutHarborPort = await listen(cleanupTimeoutHarbor);
+    const inconsistentCleanupHarborPort = await listen(inconsistentCleanupHarbor);
+    const ownerNoneHeldHarborPort = await listen(ownerNoneHeldHarbor);
+    const dualFailureHarborPort = await listen(dualFailureHarbor);
     const badJsonHarborPort = await listen(badJsonHarbor);
     const identityRequiredHarborPort = await listen(identityRequiredHarbor);
     delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
@@ -1140,6 +1200,23 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       runRecordStore: store,
       lodePackageResolver: resolver,
       harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${cleanupFailureHarborPort}` })
+    });
+    const cleanupTimeoutClient = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${cleanupTimeoutHarborPort}`, cleanupTimeoutMs: 25 });
+    const cleanupTimeoutServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: cleanupTimeoutClient });
+    const inconsistentCleanupServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${inconsistentCleanupHarborPort}` })
+    });
+    const ownerNoneHeldServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${ownerNoneHeldHarborPort}` })
+    });
+    const dualFailureServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: resolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${dualFailureHarborPort}` })
     });
     const mismatchedSceneServer = createApiServer({
       runRecordStore: store,
@@ -1260,6 +1337,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const publicIdentityPort = await listen(publicIdentityServer);
     const offlinePort = await listen(offlineServer);
     const cleanupFailurePort = await listen(cleanupFailureServer);
+    const cleanupTimeoutPort = await listen(cleanupTimeoutServer);
+    const inconsistentCleanupPort = await listen(inconsistentCleanupServer);
+    const ownerNoneHeldPort = await listen(ownerNoneHeldServer);
+    const dualFailurePort = await listen(dualFailureServer);
     const badJsonPort = await listen(badJsonServer);
     const identityRequiredPort = await listen(identityRequiredServer);
     const raceDuplicatePort = await listen(raceDuplicateServer);
@@ -1702,6 +1783,98 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(cleanupFailureHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
       assert(cleanupFailureHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/stop"));
 
+      const cleanupTimeoutStarted = Date.now();
+      const cleanupTimeout = await postJson(cleanupTimeoutPort, "/tasks", {
+        run_id: "run_api_submit_cleanup_timeout",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_cleanup_timeout"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert(Date.now() - cleanupTimeoutStarted < 1_000);
+      assert.equal(cleanupTimeout.status, 503);
+      const cleanupTimeoutRun = asRecord(asRecord(cleanupTimeout.body).run);
+      assert.equal(cleanupTimeoutRun.status, "failed");
+      assert.equal(asRecord(cleanupTimeoutRun.failure).code, "core_task_session_cleanup_timeout");
+      assert.deepEqual(asRecord(cleanupTimeoutRun.post_check).source_refs, ["session_runtime_api_ready"]);
+
+      const inconsistentCleanup = await postJson(inconsistentCleanupPort, "/tasks", {
+        run_id: "run_api_submit_inconsistent_cleanup",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_inconsistent_cleanup"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(inconsistentCleanup.status, 503);
+      assert.equal(asRecord(asRecord(asRecord(inconsistentCleanup.body).run).failure).code, "core_task_session_cleanup_failed");
+      assert(inconsistentCleanupHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
+      assert(inconsistentCleanupHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/stop"));
+      assert(inconsistentCleanupHarborPaths.filter((path) => path === "GET /runtime/sessions/session_runtime_api_ready").length >= 3);
+
+      const ownerNoneHeld = await postJson(ownerNoneHeldPort, "/tasks", {
+        run_id: "run_api_submit_owner_none_held",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_owner_none_held"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(ownerNoneHeld.status, 503);
+      assert.equal(asRecord(asRecord(asRecord(ownerNoneHeld.body).run).failure).code, "core_task_session_lock_mismatch");
+      assert.equal(ownerNoneHeldHarborPaths.some((path) => path.endsWith("/release") || path.endsWith("/stop")), false);
+
+      const dualFailure = await postJson(dualFailurePort, "/tasks", {
+        run_id: "run_api_submit_dual_failure",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_dual_failure"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal(dualFailure.status, 503);
+      const dualFailureRun = asRecord(asRecord(dualFailure.body).run);
+      assert.equal(asRecord(dualFailureRun.failure).code, "runtime_ref_missing");
+      assert.equal(asRecord(dualFailureRun.failure).recovery_hint, "connect_runtime");
+      assert.equal(asRecord(dualFailureRun.post_check).code, "core_task_session_cleanup_failed");
+      assert.equal(asRecord(dualFailureRun.post_check).recovery_hint, "retry_session_cleanup");
+      assert.deepEqual(asRecord(dualFailureRun.post_check).source_refs, ["session_runtime_api_ready"]);
+      assert(dualFailureHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
+      assert(dualFailureHarborPaths.includes("POST /runtime/sessions/session_runtime_api_ready/stop"));
+
+      const recoveryTimeoutAdmission = await cleanupTimeoutClient.collectAdmissionFacts({
+        run_id: "run_api_recover_cleanup_timeout",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_recover_cleanup_timeout"),
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://example.org/" }
+      });
+      assert.equal("kind" in recoveryTimeoutAdmission, false);
+      await store.createRunRecord({
+        run_id: "run_api_recover_cleanup_timeout",
+        status: "admitted",
+        task_intent_ref: "intent:recovery/cleanup-timeout",
+        capability_ref: "lode:capability/read-public-page",
+        admission: {
+          decision: "accepted",
+          action_risk: "read",
+          runtime_session_binding: {
+            schema_version: "webenvoy.runtime-session-binding.v0",
+            identity_environment_ref: "identity-env_runtime_api",
+            execution_identity_ref: "identity-env_runtime_api:execution",
+            runtime_session_ref: "session_runtime_api_ready",
+            profile_ref: "profile_runtime_api",
+            provider_ref: "harbor:provider/cloakbrowser",
+            provider_mode: "local_dedicated_profile",
+            lifecycle_state: "active",
+            control_owner: "core_task",
+            session_use: "core_task_run",
+            core_task_run: true,
+            consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+          }
+        }
+      });
+      await store.updateRunRecord("run_api_recover_cleanup_timeout", { status: "running" });
+      const recoveryTimeoutStarted = Date.now();
+      const recoveryTimeout = await recoverInterruptedCoreTaskSessions(store, cleanupTimeoutClient);
+      assert(Date.now() - recoveryTimeoutStarted < 1_000);
+      assert(recoveryTimeout.cleanup_failed.includes("run_api_recover_cleanup_timeout"));
+      const recoveryTimeoutRun = await store.getRunRecord("run_api_recover_cleanup_timeout");
+      assert.equal(recoveryTimeoutRun?.status, "failed");
+      assert.equal(recoveryTimeoutRun?.failure?.code, "core_task_session_cleanup_timeout");
+
       const recoveryClient = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${harborPort}` });
       const recoveryAdmission = await recoveryClient.collectAdmissionFacts({
         run_id: "run_api_recover_interrupted_core_task",
@@ -1790,6 +1963,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(publicIdentityServer);
       await close(offlineServer);
       await close(cleanupFailureServer);
+      await close(cleanupTimeoutServer);
+      await close(inconsistentCleanupServer);
+      await close(ownerNoneHeldServer);
+      await close(dualFailureServer);
       await close(badJsonServer);
       await close(identityRequiredServer);
       await close(raceDuplicateServer);
@@ -1818,6 +1995,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(publicIdentityHarbor);
     await close(offlineHarbor);
     await close(cleanupFailureHarbor);
+    await close(cleanupTimeoutHarbor);
+    await close(inconsistentCleanupHarbor);
+    await close(ownerNoneHeldHarbor);
+    await close(dualFailureHarbor);
     await close(badJsonHarbor);
     await close(identityRequiredHarbor);
     if (previousSupervisorToken === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;

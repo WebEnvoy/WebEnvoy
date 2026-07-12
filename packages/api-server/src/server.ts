@@ -151,7 +151,7 @@ function queryStatusCode(failure: FailureRecord): number {
 function submitStatusCode(failure: FailureRecord): number {
   if (failure.code === "run_id_already_exists") return 409;
   if (failure.code === "harbor_read_operation_outcome_unknown") return 202;
-  if (failure.code.startsWith("core_task_session_cleanup_")) return 503;
+  if (failure.code.startsWith("core_task_session_")) return 503;
   if (failure.category === "request_invalid") return 400;
   if (failure.category === "capability_contract") return 422;
   if (failure.category === "resource_admission" || failure.category === "evidence_reference") return 503;

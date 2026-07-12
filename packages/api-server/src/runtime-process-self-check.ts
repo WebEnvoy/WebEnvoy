@@ -251,6 +251,7 @@ function bossTaskIntent(intentId: string): JsonObject {
 
 function createHarborMock(paths: string[], protectedAuthorization: string[], initialHolderRef = ""): Server {
   let currentHolderRef = initialHolderRef;
+  let cleanupState: "held" | "released" = "held";
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
     const protectedRequest = request.method === "POST" && (
@@ -289,6 +290,7 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
       }
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
         currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
+        cleanupState = "held";
         sendJson(response, 200, {
           runtime_session_ref: "session_process_ready",
           identity_environment_ref: "identity-env_process",
@@ -321,9 +323,11 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
       if (request.method === "GET" && request.url === "/runtime/sessions/session_process_ready") {
         sendJson(response, 200, {
           runtime_session_ref: "session_process_ready",
-          lifecycle_state: "active",
-          control_owner: "core_task",
-          control_lock: { owner: "core_task", state: "held", holder_ref: currentHolderRef }
+          lifecycle_state: cleanupState === "released" ? "idle" : "active",
+          control_owner: cleanupState === "released" ? "none" : "core_task",
+          control_lock: cleanupState === "released"
+            ? { owner: "none", state: "released", holder_ref: null }
+            : { owner: "core_task", state: "held", holder_ref: currentHolderRef }
         });
         return;
       }
@@ -349,11 +353,12 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
         return;
       }
       if (request.method === "POST" && request.url === "/runtime/sessions/session_process_ready/release") {
+        cleanupState = "released";
         sendJson(response, 200, {
           status: "released",
           runtime_session_ref: "session_process_ready",
           control_owner: "none",
-          control_lock: { state: "released", holder_ref: null }
+          control_lock: { owner: "none", state: "released", holder_ref: null }
         });
         return;
       }

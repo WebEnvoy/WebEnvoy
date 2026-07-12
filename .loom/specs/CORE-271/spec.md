@@ -18,14 +18,16 @@ Every Core task path that obtained a Harbor `core_task` session reaches a durabl
 | Stage | Primary terminal truth | Lock cleanup |
 | --- | --- | --- |
 | Pre-session validation/Lode failure | Existing admission failure | No lock exists |
-| Session open/runtime parse failure | Original admission/runtime failure | Verify exact owner/holder, then release; stop fallback |
+| Session open/runtime parse failure | Original failure and recovery hint remain unchanged | Cleanup classification and opaque session ref are separate blocked post-check facts |
 | Site facts/snapshot/evidence/admission failure | Existing structured failure and refs-only post-check | Release before returning terminal projection |
 | Read operation unavailable/unknown/timeout | Original operation failure or unknown outcome | Abort on timeout; release before terminalization |
 | Cancel intent rejected before admission | Existing cancellation/request failure | No session is opened; active-run cancellation is outside the current submit API |
 | Result/evidence persistence failure | Persistence remains authoritative failure | Cleanup occurs before terminal write attempt |
 | Release failure | Original failure remains primary when present | Stop fallback |
 | Release and stop failure | Failed run, never success; `core_task_session_cleanup_failed` in post-check | Opaque session ref only |
-| Process restart with non-terminal run | `core_task_interrupted` terminal failure | Reclaim only exact `core_task` + run-id holder |
+| Cleanup endpoint never responds | `core_task_session_cleanup_timeout` terminal failure/post-check | One bounded sequence deadline covers GET/release/verify/stop/verify |
+| Owner says none but lock is held, or operation response claims released without final proof | `core_task_session_lock_mismatch` or cleanup failure | Never accept top-level status; require final GET proof of idle/closed, owner none, released lock, null holder |
+| Process restart with non-terminal run | `core_task_interrupted` terminal failure, or bounded cleanup timeout | Reclaim only exact `core_task` + run-id holder; startup cannot hang indefinitely |
 | Manual/user/other owner | Unchanged | Never reclaimed |
 
 ## Non-Goals

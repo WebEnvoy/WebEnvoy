@@ -52,8 +52,17 @@ export type HarborRuntimeAdmissionRequest = {
   harbor?: RuntimeTaskSubmissionRequest["harbor"];
 };
 
+type HarborAdmissionCollectionFailure = {
+  kind: "harbor_admission_collection_failure";
+  failure: FailureRecord;
+  cleanup_failure: FailureRecord;
+  runtime_session_ref: string;
+};
+
+type HarborRuntimeAdmissionResult = HarborAdmissionInput | FailureRecord | HarborAdmissionCollectionFailure;
+
 export type HarborRuntimeClient = {
-  collectAdmissionFacts(input: HarborRuntimeAdmissionRequest): Promise<HarborAdmissionInput | FailureRecord>;
+  collectAdmissionFacts(input: HarborRuntimeAdmissionRequest): Promise<HarborRuntimeAdmissionResult>;
   executeReadOperation(input: { runtime_session_ref: string; site_id: string; operation_id: string; query: string; city_code?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
   releaseCoreTaskSession(input: { runtime_session_ref: string; run_id: string }): Promise<FailureRecord | undefined>;
 };
@@ -72,6 +81,7 @@ export type LocalLodePackageResolverOptions = {
 export type HttpHarborRuntimeClientOptions = {
   baseUrl: string;
   fetch?: FetchLike;
+  cleanupTimeoutMs?: number;
 };
 
 const resourceFactsBoundary =
@@ -147,6 +157,10 @@ function safeHttpUrl(value: unknown): string | undefined {
 
 function isFailure(value: unknown): value is FailureRecord {
   return Boolean(value && typeof value === "object" && "category" in value);
+}
+
+function isAdmissionCollectionFailure(value: unknown): value is HarborAdmissionCollectionFailure {
+  return object(value)?.kind === "harbor_admission_collection_failure";
 }
 
 function taskPackageRef(taskIntent: unknown): string | undefined {
@@ -693,17 +707,21 @@ export async function submitRuntimeTask(
     });
   }
 
-  let harbor: HarborAdmissionInput | FailureRecord;
+  let harborResult: HarborRuntimeAdmissionResult;
   try {
-    harbor = await deps.harborRuntimeClient.collectAdmissionFacts({
+    harborResult = await deps.harborRuntimeClient.collectAdmissionFacts({
       run_id: request.run_id,
       task_intent: request.task_intent,
       package_ref,
       harbor: request.harbor
     });
   } catch {
-    harbor = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
+    harborResult = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
   }
+  const collectionFailure = isAdmissionCollectionFailure(harborResult) ? harborResult : undefined;
+  const harbor: HarborAdmissionInput | FailureRecord = collectionFailure
+    ? collectionFailure.failure
+    : harborResult as HarborAdmissionInput | FailureRecord;
   const runtimeConsumption = lode_package_contract.runtime_consumption;
   const preflightFailure = !isFailure(harbor) && runtimeConsumption
     ? operationPreflightFailure(harbor, runtimeConsumption, request.harbor?.identity_environment_ref, request.harbor?.url ?? taskUrl(request.task_intent))
@@ -719,7 +737,7 @@ export async function submitRuntimeTask(
           ...(preflightFailure === undefined ? {} : { harbor_admission_failure: preflightFailure })
         }
   );
-  const runtimeSessionRef = isFailure(harbor) ? undefined : string(object(harbor.harbor_runtime_facts)?.runtime_session_ref);
+  const runtimeSessionRef = collectionFailure?.runtime_session_ref ?? (isFailure(harbor) ? undefined : string(object(harbor.harbor_runtime_facts)?.runtime_session_ref));
   if (!submitted.ok || isFailure(harbor)) {
     const admissionFailure = !submitted.ok
       ? submitted.failure
@@ -728,7 +746,7 @@ export async function submitRuntimeTask(
         : failure("resource_admission", "admission_failed", "admission", "retry_task");
     let returned = submitted;
     if (runtimeSessionRef && submitted.run_record) {
-      const cleanupFailure = await deps.harborRuntimeClient.releaseCoreTaskSession({ runtime_session_ref: runtimeSessionRef, run_id: request.run_id });
+      const cleanupFailure = collectionFailure?.cleanup_failure ?? await deps.harborRuntimeClient.releaseCoreTaskSession({ runtime_session_ref: runtimeSessionRef, run_id: request.run_id });
       if (cleanupFailure) {
         const updated = await store.updateRunRecord(request.run_id, {
           status: submitted.run_record.status,
@@ -983,6 +1001,8 @@ function siteTaskFromPackageRef(packageRef: string): { site_id: SiteRuntimeId; t
 export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOptions): HarborRuntimeClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const fetchJson = options.fetch ?? fetch;
+  const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 5_000;
+  if (!Number.isInteger(cleanupTimeoutMs) || cleanupTimeoutMs <= 0) throw new Error("cleanupTimeoutMs must be a positive integer");
   const supervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
   const harborHost = (() => {
     try {
@@ -1005,11 +1025,11 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
     return { authorization: `Bearer ${supervisorToken}` };
   }
 
-  async function requestJson(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown | FailureRecord> {
+  async function requestJson(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<unknown | FailureRecord> {
     try {
       const authorization = protectedHeaders(method, path);
       if (isFailure(authorization)) return authorization;
-      const init: RequestInit = { method, ...(authorization === undefined ? {} : { headers: authorization }) };
+      const init: RequestInit = { method, ...(authorization === undefined ? {} : { headers: authorization }), ...(signal === undefined ? {} : { signal }) };
       if (method === "POST") {
         init.headers = { ...authorization, "content-type": "application/json" };
         init.body = JSON.stringify(body ?? {});
@@ -1056,10 +1076,15 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const openedSessionRef = isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
         : runtime.runtime_session_ref;
-      const failAfterSession = async (primary: FailureRecord): Promise<FailureRecord> => {
+      const failAfterSession = async (primary: FailureRecord): Promise<FailureRecord | HarborAdmissionCollectionFailure> => {
         if (!openedSessionRef) return primary;
         const cleanup = await releaseCoreTaskSession({ runtime_session_ref: openedSessionRef, run_id: input.run_id });
-        return cleanup ? { ...primary, recovery_hint: cleanup.recovery_hint } : primary;
+        return cleanup ? {
+          kind: "harbor_admission_collection_failure",
+          failure: primary,
+          cleanup_failure: cleanup,
+          runtime_session_ref: openedSessionRef
+        } : primary;
       };
       if (isFailure(runtime)) return failAfterSession(runtime);
       const runtimeSessionRef = runtime.runtime_session_ref;
@@ -1134,23 +1159,44 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
   };
 
   async function releaseCoreTaskSession(input: { runtime_session_ref: string; run_id: string }): Promise<FailureRecord | undefined> {
-      const current = await requestJson("GET", `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}`);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<FailureRecord>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error("core_task_session_cleanup_timeout"));
+        resolve(failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup"));
+      }, cleanupTimeoutMs);
+    });
+    const sequence = async (): Promise<FailureRecord | undefined> => {
+      const path = `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}`;
+      const current = await requestJson("GET", path, undefined, controller.signal);
+      if (controller.signal.aborted) return failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup");
       if (isFailure(current)) return failure("runtime_execution", "core_task_session_cleanup_unverified", "runtime_binding", "retry_session_cleanup");
-      const session = object(current);
-      const control = object(session?.control);
-      const controlLock = object(session?.control_lock);
-      const owner = string(session?.control_owner) ?? string(control?.owner) ?? string(controlLock?.owner);
-      const holderRef = string(controlLock?.holder_ref);
-      if (owner === "none" || controlLock?.state === "released") return undefined;
-      if (owner !== "core_task" || holderRef !== input.run_id) {
+      if (isReleasedSessionProof(current, input.runtime_session_ref)) return undefined;
+      if (!isHeldCoreTaskSessionProof(current, input)) {
         return failure("runtime_execution", "core_task_session_lock_mismatch", "runtime_binding", "inspect_session_owner");
       }
+
       const body = { control_owner: "core_task", holder_ref: input.run_id };
-      const release = await requestJson("POST", `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/release`, body);
-      if (sessionCleanupSucceeded(release)) return undefined;
-      const stop = await requestJson("POST", `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/stop`, body);
-      if (sessionCleanupSucceeded(stop)) return undefined;
-      return failure("runtime_execution", "core_task_session_cleanup_failed", "runtime_binding", "retry_session_cleanup");
+      await requestJson("POST", `${path}/release`, body, controller.signal);
+      if (controller.signal.aborted) return failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup");
+      const afterRelease = await requestJson("GET", path, undefined, controller.signal);
+      if (controller.signal.aborted) return failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup");
+      if (isReleasedSessionProof(afterRelease, input.runtime_session_ref)) return undefined;
+
+      await requestJson("POST", `${path}/stop`, body, controller.signal);
+      if (controller.signal.aborted) return failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup");
+      const afterStop = await requestJson("GET", path, undefined, controller.signal);
+      if (controller.signal.aborted) return failure("runtime_execution", "core_task_session_cleanup_timeout", "runtime_binding", "retry_session_cleanup");
+      return isReleasedSessionProof(afterStop, input.runtime_session_ref)
+        ? undefined
+        : failure("runtime_execution", "core_task_session_cleanup_failed", "runtime_binding", "retry_session_cleanup");
+    };
+    try {
+      return await Promise.race([sequence(), timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async function verifyEvidenceRefs(refs: readonly string[]): Promise<FailureRecord | undefined> {
@@ -1166,16 +1212,26 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
   }
 }
 
-function sessionCleanupSucceeded(value: unknown): boolean {
-  if (isFailure(value)) return false;
+function isHeldCoreTaskSessionProof(value: unknown, input: { runtime_session_ref: string; run_id: string }): boolean {
   const session = object(value);
-  const control = object(session?.control);
   const controlLock = object(session?.control_lock);
-  return session?.status === "released" || session?.status === "stopped" || (
-    (session?.lifecycle_state === "idle" || session?.lifecycle_state === "closed") &&
-    (session?.control_owner === "none" || control?.owner === "none") &&
-    (controlLock === undefined || controlLock.state === "released")
-  );
+  return session?.runtime_session_ref === input.runtime_session_ref &&
+    (session.lifecycle_state === "active" || session.lifecycle_state === "locked") &&
+    session.control_owner === "core_task" &&
+    controlLock?.owner === "core_task" &&
+    controlLock.state === "held" &&
+    controlLock.holder_ref === input.run_id;
+}
+
+function isReleasedSessionProof(value: unknown, runtimeSessionRef: string): boolean {
+  const session = object(value);
+  const controlLock = object(session?.control_lock);
+  return session?.runtime_session_ref === runtimeSessionRef &&
+    (session.lifecycle_state === "idle" || session.lifecycle_state === "closed") &&
+    session.control_owner === "none" &&
+    controlLock?.owner === "none" &&
+    controlLock.state === "released" &&
+    controlLock.holder_ref === null;
 }
 
 function readinessOk(value: unknown): boolean {

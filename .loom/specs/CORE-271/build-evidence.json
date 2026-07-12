@@ -21,5 +21,10 @@
     "pnpm test",
     "pnpm lint",
     "git diff --check"
+  ],
+  "review_findings_resolved": [
+    "Bounded cleanup-sequence deadline with task and startup-recovery never-response tests",
+    "Final explicit released/closed lock proof; inconsistent owner/lock and top-level status responses rejected",
+    "Primary admission failure/remediation preserved with separate refs-only cleanup post-check classification"
   ]
 }
