@@ -4,10 +4,10 @@
 
 - Item ID: CORE-281
 - Current Checkpoint: merge
-- Current Stop: Product head `374fb5ad0f4f009ced54359ce237d1f9d8e0cd67` passed full validation and current-head semantic review with no findings.
-- Next Step: Push the reviewed branch and create a ready PR for #281. Do not merge or close the issue.
+- Current Stop: Product head `c05c071ea7f7102b4071325abe915f092b997b61` passed full validation and independent semantic re-review with no findings.
+- Next Step: Commit/push current-head carriers, update PR #282 metadata, consume hosted gate, and controlled-merge. Keep #281 open until post-merge closeout is written.
 - Blockers: None
-- Latest Validation Summary: 2026-07-12T10:44Z at product head `374fb5ad0f4f009ced54359ce237d1f9d8e0cd67`: API targeted tests, full typecheck/test/lint, diff check, and CORE-281 Loom suite/carrier validation passed. Review confirmed BOSS search/detail/greet-precheck terminalize before Harbor with exact disabled failure; XHS and test-only fixtures remain separated.
+- Latest Validation Summary: 2026-07-12T11:14Z at product head `c05c071ea7f7102b4071325abe915f092b997b61`: targeted Core/API typechecks and tests, full `pnpm test`, full `pnpm lint`, and `git diff --check` passed. Independent review reproduced the detail and validate-only semantic digests from Lode merge `f45b17990a6b1451a7a0ff55ec110c310e66f196`, confirmed coordinated policy drift fails closed, and found no XHS regression.
 - Recovery Boundary: Revert only CORE-281-owned code and carriers. Do not modify Lode, Harbor, App, shared current/status, or external runtime state.
 - Current Lane: CORE-281 BOSS production admission disabled.
 
@@ -16,6 +16,6 @@
 - Ledger Binding: recovery_entry
 - Plan Locator: .loom/specs/CORE-281/plan.md
 - Acceptance Locator: .loom/specs/CORE-281/spec.md
-- Validation Evidence Locator: .loom/specs/CORE-281/evidence-map.md
+- Validation Evidence Locator: .loom/specs/CORE-281/build-evidence.json
 - Handoff Notes Locator: .loom/specs/CORE-281/task-carrier.md
-- Evidence Freshness: current product head review
+- Evidence Freshness: current

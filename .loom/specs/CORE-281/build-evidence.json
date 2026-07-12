@@ -1,0 +1,49 @@
+{
+  "schema_version": "loom-build-evidence/v1",
+  "item_id": "CORE-281",
+  "task_goal": "Fail closed BOSS production search, detail and greet-precheck before Harbor while preserving XHS admission.",
+  "branch": "work/core-281-boss-admission-disabled",
+  "head_at_validation": "c05c071ea7f7102b4071325abe915f092b997b61",
+  "current_pointer": "CORE-281 active in .loom/status/current.md for PR #282",
+  "covered_issues": [281],
+  "ownership_constraints": [
+    "Core/WebEnvoy only",
+    "No App, Harbor, or Lode edits",
+    "No BOSS production page, browser, account, profile, or sensitive material access",
+    "No external action and no BOSS runtime support claim"
+  ],
+  "delegations": [
+    {
+      "id": "rawls-core-281-review-and-fix",
+      "agent": "019f5506-4840-7263-aa3d-4f1348d5b14c",
+      "task_goal": "Review and repair authoritative Lode policy pinning for BOSS detail and greet-precheck.",
+      "read_scope": ["CORE-281 diff", "Lode merge f45b179 policy assets", "targeted Core/API tests"],
+      "write_ownership": ["packages/core/src/runtime-task-chain.ts", "packages/api-server/src/runtime-task-submit-self-check.ts"],
+      "non_goals": ["Loom carriers", "GitHub mutations", "other repositories", "production page access"],
+      "validation_expectation": "Targeted typechecks/tests, digest reproduction, coordinated-drift regression, git diff --check.",
+      "status": "integrated",
+      "result": "P1 fixed at c05c071 and independent re-review returned ALLOW with no findings."
+    }
+  ],
+  "integration_evidence": [
+    {
+      "delegation_id": "rawls-core-281-review-and-fix",
+      "integrated_into": ["packages/core/src/runtime-task-chain.ts", "packages/api-server/src/runtime-task-submit-self-check.ts"],
+      "summary": "Detail and validate-only assets are pinned to canonical digests reproduced from Lode merge f45b179; coordinated policy drift fails closed."
+    }
+  ],
+  "validation_results": [
+    {"command": "pnpm --filter @webenvoy/core-runtime typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/api-server typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/api-server test", "result": "pass"},
+    {"command": "pnpm test", "result": "pass"},
+    {"command": "pnpm lint", "result": "pass"},
+    {"command": "git diff --check", "result": "pass"}
+  ],
+  "runtime_evidence_boundary": {
+    "evidence_type": "local_contract_and_fail_closed_smoke",
+    "not_live_e2e": true,
+    "not_boss_support": true,
+    "no_real_account_profile_cookie_or_production_page": true
+  }
+}
