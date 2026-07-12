@@ -4,7 +4,7 @@
 
 - Item ID: CORE-270
 - Goal: Drive Xiaohongshu note-detail reads from Core-persisted Harbor-minted opaque search refs and record bounded result/evidence facts.
-- Scope: XHS detail intent admission, opaque-ref provenance/lifecycle, Lode detail consumption, Harbor dispatch, Run Record refs, focused regressions, and item-specific carriers.
+- Scope: Ownership remains in Core for XHS detail intent admission, opaque-ref provenance/lifecycle, Lode detail consumption, Harbor dispatch, Run Record refs, focused regressions, and item-specific carriers.
 - Execution Path: work/core-270-xhs-detail
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-270.md
