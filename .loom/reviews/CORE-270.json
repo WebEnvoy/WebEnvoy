@@ -1,0 +1,32 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-270",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Independent review found no blocking correctness, security, privacy, or scope findings after integrating atomic target publication and reserve/release/commit lifecycle fixes.",
+  "reviewer": "codex-main-controller",
+  "authored_at": "2026-07-12T13:32:14Z",
+  "reviewed_head": "ec3a698fcb65fddf7ca2f00ebe7df9267a877a25",
+  "reviewed_validation_summary": "2026-07-12T13:32Z at product head `ec3a698fcb65fddf7ca2f00ebe7df9267a877a25`: Core/API targeted typechecks and tests, full `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Independent review returned ALLOW after validating atomic search-target publication, opaque-ref binding, reserve/release/commit lifecycle, failure cleanup, and zero Harbor detail dispatch for rejected inputs.",
+  "reviewed_validation_summary_hash": "fe4a42ecfe4073f2b4aa3a686e111d0b663a48b88b53d6e582380e4400362c3f",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-270.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": ["Do not close #270 until merged packaged App Xiaohongshu search-to-detail live E2E supplies real run/result/source/evidence/post-check refs."],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-270.md",
+    "recovery_entry": ".loom/progress/CORE-270.md",
+    "status_surface": ".loom/status/current.md",
+    "build_checkpoint": ".loom/specs/CORE-270/build-evidence.json",
+    "suite_validation": "loom suite validate --target . --item CORE-270 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-270 --json",
+    "suite_evidence_map": ".loom/specs/CORE-270/evidence-map.md",
+    "suite_task_carriers": [".loom/specs/CORE-270/task-carrier.md"]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Search targets publish atomically, detail refs are bound and single-use, rejection paths issue zero Harbor detail calls, and persistence exceptions terminalize with session cleanup."
+  }
+}
