@@ -2,8 +2,8 @@
   "schema_version": "loom-review/v1",
   "item_id": "CORE-270",
   "decision": "allow",
-  "kind": "code_review",
-  "summary": "Independent review found no blocking correctness, security, privacy, or scope findings after integrating atomic target publication and reserve/release/commit lifecycle fixes.",
+  "kind": "spec_review",
+  "summary": "CORE-270 is bounded to Core-persisted Xiaohongshu opaque detail refs, exact Lode and Harbor contracts, refs-only results, fail-closed lifecycle handling, and packaged App live evidence before issue closeout.",
   "reviewer": "codex-main-controller",
   "authored_at": "2026-07-12T13:45:00Z",
   "reviewed_head": "235916fa58e4b559e376aae1dc9c3be74c4602fb",
@@ -14,19 +14,17 @@
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
-  "follow_ups": ["Do not close #270 until merged packaged App Xiaohongshu search-to-detail live E2E supplies real run/result/source/evidence/post-check refs."],
+  "follow_ups": ["Do not use local contract evidence to close #270; merged packaged App live search-to-detail evidence remains required."],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-270.md",
     "recovery_entry": ".loom/progress/CORE-270.md",
     "status_surface": ".loom/status/current.md",
     "build_checkpoint": ".loom/specs/CORE-270/build-evidence.json",
     "suite_validation": "loom suite validate --target . --item CORE-270 --json",
-    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-270 --json",
+    "suite_spec": ".loom/specs/CORE-270/spec.md",
+    "suite_plan": ".loom/specs/CORE-270/plan.md",
+    "suite_implementation_contract": ".loom/specs/CORE-270/implementation-contract.md",
     "suite_evidence_map": ".loom/specs/CORE-270/evidence-map.md",
     "suite_task_carriers": [".loom/specs/CORE-270/task-carrier.md"]
-  },
-  "semantic_review_disposition": {
-    "status": "passed",
-    "reason": "Search targets publish atomically, detail refs are bound and single-use, rejection paths issue zero Harbor detail calls, and persistence exceptions terminalize with session cleanup."
   }
 }
