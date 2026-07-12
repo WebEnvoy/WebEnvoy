@@ -10,6 +10,7 @@ export type LodePackageAdmissionContract = {
   operation_mode: string;
   version: string;
   lifecycle?: string;
+  runtime_admission?: LodeRuntimeAdmissionPolicy;
   resource_requirements: {
     schema_version?: string;
     resource_requirements_id: string;
@@ -28,6 +29,14 @@ export type LodePackageAdmissionContract = {
     }[];
   };
   runtime_consumption?: LodeRuntimeConsumptionEntry;
+};
+
+export type LodeRuntimeAdmissionPolicy = {
+  enabled: boolean;
+  status: "current" | "deferred_experimental";
+  recheck_condition:
+    | "not_applicable"
+    | "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence";
 };
 
 export type LodeRuntimeConsumptionEntry = {
@@ -171,6 +180,49 @@ function invalidLodeContract(code = "invalid_contract", phase: FailureRecord["ph
   return admissionFailure("capability_contract", code, phase, "repair_package_contract");
 }
 
+export function parseLodeRuntimeAdmissionPolicy(
+  packageRef: string,
+  value: unknown
+): LodeRuntimeAdmissionPolicy | FailureRecord | undefined {
+  const sitePackage = /^lode:\/\/site-capability\/(xiaohongshu|boss)\//.test(packageRef);
+  if (value === undefined) {
+    return sitePackage ? invalidLodeContract("runtime_admission_policy_missing") : undefined;
+  }
+  const policy = contractObject(value);
+  if (!policy || Object.keys(policy).sort().join(",") !== "enabled,recheck_condition,status") {
+    return invalidLodeContract("runtime_admission_policy_invalid");
+  }
+  const current =
+    policy.enabled === true &&
+    policy.status === "current" &&
+    policy.recheck_condition === "not_applicable";
+  const deferred =
+    policy.enabled === false &&
+    policy.status === "deferred_experimental" &&
+    policy.recheck_condition ===
+      "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence";
+  if (!current && !deferred) {
+    return invalidLodeContract("runtime_admission_policy_invalid");
+  }
+  return policy as LodeRuntimeAdmissionPolicy;
+}
+
+export function lodeRuntimeAdmissionFailure(
+  packageRef: string,
+  value: unknown
+): FailureRecord | undefined {
+  const policy = parseLodeRuntimeAdmissionPolicy(packageRef, value);
+  if (policy === undefined || "category" in policy) return policy;
+  return policy.enabled
+    ? undefined
+    : admissionFailure(
+        "capability_contract",
+        "runtime_admission_disabled",
+        "admission",
+        "wait_for_scope_activation"
+      );
+}
+
 function lifecycleFailure(lifecycle: string): FailureRecord | undefined {
   if (!lodeAllowedLifecycleStates.has(lifecycle)) {
     return invalidLodeContract("invalid_lifecycle");
@@ -264,6 +316,10 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   }
   if (packageRef !== requestedPackageRef) {
     return { ok: false, failure: invalidLodeContract("package_ref_mismatch"), package_ref: requestedPackageRef };
+  }
+  const runtimeAdmissionFailure = lodeRuntimeAdmissionFailure(packageRef, lodePackage.runtime_admission);
+  if (runtimeAdmissionFailure) {
+    return { ok: false, failure: runtimeAdmissionFailure, package_ref: packageRef };
   }
   if (!contractString(lodePackage.lock_ref)) {
     return { ok: false, failure: invalidLodeContract("package_lock_missing"), package_ref: packageRef };

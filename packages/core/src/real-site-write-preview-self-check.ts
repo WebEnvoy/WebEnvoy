@@ -130,6 +130,11 @@ function lodeContract(value: SiteConfig): LodePackageAdmissionContract {
     operation_mode: value.execution_intent,
     version: "0.1.0",
     lifecycle: "active",
+    runtime_admission: {
+      enabled: true,
+      status: "current",
+      recheck_condition: "not_applicable"
+    },
     resource_requirements: {
       schema_version: "lode.resource-requirements.v0",
       resource_requirements_id: value.resource_ref,
