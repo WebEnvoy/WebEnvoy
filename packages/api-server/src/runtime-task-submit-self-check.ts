@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -10,8 +10,10 @@ import {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   recoverInterruptedCoreTaskSessions,
+  submitRuntimeTask,
   type CreateRunRecordInput,
   type FileRunRecordStore,
+  type HarborRuntimeClient,
   type RunRecord
 } from "@webenvoy/core-runtime";
 import { createApiServer } from "./server.js";
@@ -38,6 +40,14 @@ const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const bossLockRef = "lode://lock/site-capability/boss/job-search@0.1.0";
 const bossResourceRef = "boss.job-search.resources";
+const bossDetailPackageRef = "lode://site-capability/boss/read-job-detail@0.1.1";
+const bossPrecheckPackageRef = "lode://site-capability/boss/greet-precheck@0.1.0";
+const currentRuntimeAdmission = { enabled: true, status: "current", recheck_condition: "not_applicable" } as const;
+const deferredRuntimeAdmission = {
+  enabled: false,
+  status: "deferred_experimental",
+  recheck_condition: "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence"
+} as const;
 const harborSupervisorToken = "runtime-supervisor-self-check-token";
 const readyResourceFacts: JsonObject = {
   schema_version: "harbor-core-resource-facts/v0",
@@ -272,7 +282,11 @@ function bossTaskIntent(intentId: string): JsonObject {
   };
 }
 
-async function writeLodeRegistry(root: string): Promise<{ registryPath: string; allowlistAssetSha256: string }> {
+async function writeLodeRegistry(
+  root: string,
+  options: { bossFixtureEnabled?: boolean } = {}
+): Promise<{ registryPath: string; allowlistAssetSha256: string; runtimeAdmissionAssetSha256: Record<string, string> }> {
+  const bossRuntimeAdmission = options.bossFixtureEnabled ? currentRuntimeAdmission : deferredRuntimeAdmission;
   await mkdir(join(root, "registry"), { recursive: true });
   await mkdir(join(root, "sites", "example", "read-public-page"), { recursive: true });
   await mkdir(join(root, "sites", "xiaohongshu", "search-notes"), { recursive: true });
@@ -305,7 +319,8 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
           operation_mode: "read",
           version: "0.1.0",
           lifecycle: "proposed",
-          task_kind: "real_site_read"
+          task_kind: "real_site_read",
+          runtime_admission: currentRuntimeAdmission
         },
         {
           package_ref: bossPackageRef,
@@ -318,7 +333,20 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
           operation_mode: "read",
           version: "0.1.0",
           lifecycle: "proposed",
-          task_kind: "real_site_read"
+          task_kind: "real_site_read",
+          runtime_admission: bossRuntimeAdmission
+        },
+        {
+          package_ref: bossDetailPackageRef,
+          site_slug: "boss",
+          operation_id: "boss_read_job_detail",
+          runtime_admission: bossRuntimeAdmission
+        },
+        {
+          package_ref: bossPrecheckPackageRef,
+          site_slug: "boss",
+          operation_id: "boss_greet_precheck",
+          runtime_admission: bossRuntimeAdmission
         }
       ]
     })
@@ -337,6 +365,7 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
         operation_id: "xhs_search_notes",
         operation_mode: "read",
         lifecycle: "proposed",
+        runtime_admission: currentRuntimeAdmission,
         allowed_origins: ["https://www.xiaohongshu.com"],
         resource_requirements: { resource_requirements_id: xiaohongshuResourceRef },
         failure_taxonomy: { failure_mapping_id: "xiaohongshu.search-notes.failure-mapping", required_classes: ["invalid_contract", "resource_unavailable", "site_changed", "not_logged_in", "login_expired", "page_not_ready", "safety_challenge", "field_missing", "network_resource_unavailable"] },
@@ -353,6 +382,7 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
         operation_id: "boss_job_search",
         operation_mode: "read",
         lifecycle: "proposed",
+        runtime_admission: bossRuntimeAdmission,
         allowed_origins: ["https://www.zhipin.com"],
         resource_requirements: { resource_requirements_id: bossResourceRef },
         failure_taxonomy: { failure_mapping_id: "boss.job-search.failure-mapping", required_classes: ["invalid_contract", "resource_unavailable", "site_changed", "not_logged_in", "identity_insufficient", "captcha_required", "page_not_ready", "field_missing", "network_resource_unavailable"] },
@@ -361,6 +391,14 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
       fail_closed: { unknown_operation: "reject" }
     };
   await writeFile(join(root, "registry", "runtime-consumption-allowlist.json"), JSON.stringify(runtimeAllowlist));
+  const detailRuntimeConsumption = {
+    entries: [{ package_ref: bossDetailPackageRef, runtime_admission: bossRuntimeAdmission }]
+  };
+  const validateOnlyRuntimeConsumption = {
+    entries: [{ package_ref: bossPrecheckPackageRef, runtime_admission: bossRuntimeAdmission }]
+  };
+  await writeFile(join(root, "registry", "detail-runtime-consumption.json"), JSON.stringify(detailRuntimeConsumption));
+  await writeFile(join(root, "registry", "validate-only-runtime-consumption.json"), JSON.stringify(validateOnlyRuntimeConsumption));
   await writeFile(
     join(root, "sites", "example", "read-public-page", "manifest.json"),
     JSON.stringify({
@@ -464,7 +502,14 @@ async function writeLodeRegistry(root: string): Promise<{ registryPath: string; 
     operation_mode: "read",
     resource_requirement_profiles: [{ requirement_profile_id: "boss-job-search-live-runtime", operation_boundary: "read", required_harbor_facts: ["runtime.execution_surface.available", "runtime.origin.www_zhipin_com.available", "identity.boss_geek_logged_in.confirmed", "page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent"].map((fact_key) => ({ fact_key, owner: "Harbor", required: true })) }]
   }));
-  return { registryPath: join(root, "registry", "local-packages.json"), allowlistAssetSha256: fixtureAllowlistSha256(runtimeAllowlist) };
+  return {
+    registryPath: join(root, "registry", "local-packages.json"),
+    allowlistAssetSha256: fixtureAllowlistSha256(runtimeAllowlist),
+    runtimeAdmissionAssetSha256: {
+      "registry/detail-runtime-consumption.json": createHash("sha256").update(canonicalJson(detailRuntimeConsumption)).digest("hex"),
+      "registry/validate-only-runtime-consumption.json": createHash("sha256").update(canonicalJson(validateOnlyRuntimeConsumption)).digest("hex")
+    }
+  };
 }
 
 function createHarborMock(
@@ -787,6 +832,144 @@ async function assertLodeResolverStaysUnderRoot(): Promise<void> {
   }
 }
 
+function bossDeferredTaskIntent(packageRef: string, entrypoint: "api" | "cli" | "mcp" | "sdk" | "app", intentId: string): JsonObject {
+  const detail = packageRef === bossDetailPackageRef;
+  const precheck = packageRef === bossPrecheckPackageRef;
+  const targetRef = detail || precheck
+    ? "https://www.zhipin.com/"
+    : "https://www.zhipin.com/web/geek/job?query=AI&city=101010100";
+  return {
+    schema_version: "webenvoy.task-intent.v0",
+    intent_id: intentId,
+    entrypoint,
+    user_intent: { summary: "Exercise the BOSS production admission gate." },
+    capability: {
+      ref: `lode:capability/${detail ? "read-job-detail" : precheck ? "greet-precheck" : "job-search"}`,
+      version: detail ? "0.1.1" : "0.1.0",
+      source_ref: packageRef
+    },
+    input: { summary: "Refs-only admission check." },
+    scope: { target_type: precheck ? "boss_greet_precheck" : detail ? "boss_job_detail" : "boss_job_search", target_ref: targetRef },
+    policy: { risk: precheck ? "write" : "read", execution_intent: precheck ? "validate_only" : "read" },
+    resource_requirement_refs: [`${detail ? "boss.read-job-detail" : precheck ? "boss.greet-precheck" : "boss.job-search"}.resources`],
+    evidence_policy_ref: "evidence-policy:refs-only"
+  };
+}
+
+async function assertBossProductionAdmissionDisabled(): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "webenvoy-boss-production-policy-"));
+  const runDir = await mkdtemp(join(tmpdir(), "webenvoy-boss-production-runs-"));
+  let harborCalls = 0;
+  const harborRuntimeClient: HarborRuntimeClient = {
+    async collectAdmissionFacts() { harborCalls += 1; throw new Error("Harbor must not be called"); },
+    async executeReadOperation() { harborCalls += 1; throw new Error("Harbor must not be called"); },
+    async releaseCoreTaskSession() { harborCalls += 1; throw new Error("Harbor must not be called"); }
+  };
+  try {
+    const { registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 } = await writeLodeRegistry(root);
+    const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 });
+    const store = createFileRunRecordStore({ directory: runDir });
+    const server = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient });
+    const port = await listen(server);
+    try {
+      const entrypoints = ["api", "cli", "mcp", "sdk", "app"] as const;
+      const packageRefs = [bossPackageRef, bossDetailPackageRef, bossPrecheckPackageRef];
+      for (const entrypoint of entrypoints) {
+        for (const packageRef of packageRefs) {
+          const suffix = `${entrypoint}_${packageRef.includes("read-job-detail") ? "detail" : packageRef.includes("greet-precheck") ? "precheck" : "search"}`;
+          const response = await postJson(port, "/tasks", {
+            run_id: `run_boss_disabled_${suffix}`,
+            package_ref: packageRef,
+            task_intent: bossDeferredTaskIntent(packageRef, entrypoint, `intent_boss_disabled_${suffix}`),
+            ...(packageRef === bossPackageRef ? { public_query: { query: "AI", city_code: "101010100", page: 1, limit: 15 }, harbor: { url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" } } : {})
+          });
+          assert.equal(response.status, 422, suffix);
+          const body = asRecord(response.body);
+          const error = asRecord(body.error);
+          const run = asRecord(body.run);
+          assert.equal(error.category, "capability_contract", suffix);
+          assert.equal(error.code, "runtime_admission_disabled", suffix);
+          assert.equal(error.recovery_hint, "wait_for_scope_activation", suffix);
+          assert.equal(run.status, "failed", suffix);
+          assert.equal(asRecord(run.admission).decision, "blocked_pre_admission", suffix);
+          assert.equal(run.result_ref, undefined, suffix);
+          assert.deepEqual(run.evidence_refs ?? [], [], suffix);
+        }
+      }
+      const direct = await submitRuntimeTask(store, {
+        run_id: "run_boss_disabled_direct_core",
+        package_ref: bossPackageRef,
+        task_intent: bossDeferredTaskIntent(bossPackageRef, "sdk", "intent_boss_disabled_direct_core")
+      }, { lodePackageResolver: resolver, harborRuntimeClient });
+      assert.equal(direct.ok, false);
+      if (direct.ok) throw new Error("Direct Core BOSS task must be blocked");
+      assert.equal(direct.failure.code, "runtime_admission_disabled");
+      assert.equal(direct.run_record?.admission.decision, "blocked_pre_admission");
+      const unknownPackageRef = "lode://site-capability/boss/unknown-operation@0.1.0";
+      const unknown = await postJson(port, "/tasks", {
+        run_id: "run_boss_disabled_unknown_operation",
+        package_ref: unknownPackageRef,
+        task_intent: bossDeferredTaskIntent(unknownPackageRef, "api", "intent_boss_disabled_unknown_operation")
+      });
+      assert.equal(unknown.status, 422);
+      assert.equal(asRecord(asRecord(unknown.body).error).code, "package_not_found");
+      assert.equal(harborCalls, 0);
+    } finally {
+      await close(server);
+    }
+
+    for (const [name, mutate, code] of [
+      ["missing", (entry: JsonObject) => { delete entry.runtime_admission; }, "runtime_admission_policy_missing"],
+      ["unknown", (entry: JsonObject) => { entry.runtime_admission = { enabled: false, status: "unknown", recheck_condition: "not_applicable" }; }, "runtime_admission_policy_invalid"],
+      ["drift", (_entry: JsonObject, operation: JsonObject) => { operation.runtime_admission = currentRuntimeAdmission; }, "runtime_admission_policy_drift"]
+    ] as const) {
+      const caseRoot = join(root, name);
+      const fixture = await writeLodeRegistry(caseRoot);
+      const registry = JSON.parse(await readFile(fixture.registryPath, "utf8")) as JsonObject;
+      const registryEntry = (registry.entries as JsonObject[]).find((entry) => entry.package_ref === bossPackageRef)!;
+      const allowlistPath = join(caseRoot, "registry", "runtime-consumption-allowlist.json");
+      const allowlist = JSON.parse(await readFile(allowlistPath, "utf8")) as JsonObject;
+      const operationEntry = (allowlist.entries as JsonObject[]).find((entry) => entry.package_ref === bossPackageRef)!;
+      mutate(registryEntry, operationEntry);
+      await writeFile(fixture.registryPath, JSON.stringify(registry));
+      await writeFile(allowlistPath, JSON.stringify(allowlist));
+      const result = await createLocalLodePackageResolver({ registryPath: fixture.registryPath, allowlistAssetSha256: fixtureAllowlistSha256(allowlist) })({
+        package_ref: bossPackageRef,
+        task_intent: bossDeferredTaskIntent(bossPackageRef, "api", `intent_boss_policy_${name}`)
+      });
+      assert("category" in result);
+      assert.equal(result.code, code, name);
+    }
+
+    for (const [packageRef, assetName] of [
+      [bossDetailPackageRef, "detail-runtime-consumption.json"],
+      [bossPrecheckPackageRef, "validate-only-runtime-consumption.json"]
+    ] as const) {
+      const caseRoot = join(root, `coordinated-${assetName}`);
+      const fixture = await writeLodeRegistry(caseRoot);
+      const registry = JSON.parse(await readFile(fixture.registryPath, "utf8")) as JsonObject;
+      const registryEntry = (registry.entries as JsonObject[]).find((entry) => entry.package_ref === packageRef)!;
+      registryEntry.runtime_admission = currentRuntimeAdmission;
+      await writeFile(fixture.registryPath, JSON.stringify(registry));
+      const operationPath = join(caseRoot, "registry", assetName);
+      const operationAsset = JSON.parse(await readFile(operationPath, "utf8")) as JsonObject;
+      const operationEntry = (operationAsset.entries as JsonObject[]).find((entry) => entry.package_ref === packageRef)!;
+      operationEntry.runtime_admission = currentRuntimeAdmission;
+      await writeFile(operationPath, JSON.stringify(operationAsset));
+      const result = await createLocalLodePackageResolver({
+        registryPath: fixture.registryPath,
+        allowlistAssetSha256: fixture.allowlistAssetSha256,
+        runtimeAdmissionAssetSha256: fixture.runtimeAdmissionAssetSha256
+      })({ package_ref: packageRef, task_intent: bossDeferredTaskIntent(packageRef, "api", `intent_boss_coordinated_${assetName}`) });
+      assert("category" in result);
+      assert.equal(result.code, "runtime_admission_policy_pin_mismatch", assetName);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(runDir, { recursive: true, force: true });
+  }
+}
+
 function createDuplicateRunRaceStore(store: FileRunRecordStore): FileRunRecordStore {
   return {
     ...store,
@@ -818,6 +1001,7 @@ function createTransientFinalizationFailureStore(store: FileRunRecordStore): Fil
 }
 
 export async function assertRuntimeTaskSubmitApi(): Promise<void> {
+  await assertBossProductionAdmissionDisabled();
   const previousSupervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
   process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
   const root = await mkdtemp(join(tmpdir(), "webenvoy-lode-registry-"));
@@ -1088,7 +1272,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
   try {
-    const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root);
+    const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root, { bossFixtureEnabled: true });
     const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256 });
     const nonPinnedResolver = async (input: Parameters<typeof resolver>[0]) => {
       const resolved = await resolver(input);
@@ -1443,7 +1627,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
         }
       });
-      assert.equal(xiaohongshuSubmit.status, 202);
+      assert.equal(xiaohongshuSubmit.status, 202, JSON.stringify(xiaohongshuSubmit.body));
       const xiaohongshuRun = asRecord(asRecord(xiaohongshuSubmit.body).run);
       assert.equal(xiaohongshuRun.status, "succeeded");
       assert.equal(xiaohongshuRun.package_ref, xiaohongshuPackageRef);

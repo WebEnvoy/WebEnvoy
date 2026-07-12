@@ -11,7 +11,13 @@ import type {
   HarborResourceFacts,
   HarborUnavailable
 } from "./harbor-admission.js";
-import type { LodePackageAdmissionContract, LodeRuntimeConsumptionEntry } from "./lode-admission.js";
+import {
+  lodeRuntimeAdmissionFailure,
+  parseLodeRuntimeAdmissionPolicy,
+  type LodePackageAdmissionContract,
+  type LodeRuntimeAdmissionPolicy,
+  type LodeRuntimeConsumptionEntry
+} from "./lode-admission.js";
 import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore } from "./run-record-store.js";
@@ -76,6 +82,7 @@ export type LocalLodePackageResolverOptions = {
   registryPath: string;
   rootDir?: string;
   allowlistAssetSha256?: string;
+  runtimeAdmissionAssetSha256?: Readonly<Record<string, string>>;
 };
 
 export type HttpHarborRuntimeClientOptions = {
@@ -88,7 +95,16 @@ const resourceFactsBoundary =
   "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material." as const;
 const lodeAllowlistCommit = "e36a4a7";
 const lodeAllowlistAssetPath = "registry/runtime-consumption-allowlist.json";
-const lodeAllowlistSemanticSha256 = "599de2eaa0768810a08e49ef840603dded7240a08d9858049e8ee5a081794db7";
+const lodeAllowlistSemanticSha256 = "0e36e0844fa917d84c47db619929e345e8b95463f3d2e74186488d7e3a34a987";
+const lodeRuntimeAdmissionAssetPaths = [
+  lodeAllowlistAssetPath,
+  "registry/detail-runtime-consumption.json",
+  "registry/validate-only-runtime-consumption.json"
+] as const;
+const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
+  "registry/detail-runtime-consumption.json": "8d68ec1c56faf5b24d5194c283bd72c7698c9ba2f71e00fd860628a206e54cb5",
+  "registry/validate-only-runtime-consumption.json": "bac6450102af029a35b863d8f7154e5184806daeed30e8207bfe7439d556ad86"
+};
 const canonicalDeferredProbeOperations = [
   {
     package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
@@ -700,6 +716,14 @@ export async function submitRuntimeTask(
     });
   }
 
+  const runtimeAdmissionFailure = lodeRuntimeAdmissionFailure(
+    lode_package_contract.package_ref,
+    lode_package_contract.runtime_admission
+  );
+  if (runtimeAdmissionFailure && isFailure(runtimeAdmissionFailure)) {
+    return acceptReadOnlyTaskSubmission(store, { ...base, lode_resolution_failure: runtimeAdmissionFailure });
+  }
+
   if (!deps.harborRuntimeClient) {
     return acceptReadOnlyTaskSubmission(store, {
       ...base,
@@ -884,6 +908,8 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
       const entries = Array.isArray(registry?.entries) ? registry.entries.map(object) : [];
       const entry = entries.find((candidate) => candidate?.package_ref === package_ref);
       if (!entry) return failure("capability_contract", "package_not_found", "admission", "select_capability_version");
+      const runtimeAdmission = await resolveRuntimeAdmissionPolicy(entry, package_ref);
+      if (runtimeAdmission && isFailure(runtimeAdmission)) return runtimeAdmission;
 
       const manifestPath = string(entry.manifest_path);
       const packagePath = string(entry.package_path);
@@ -920,6 +946,7 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         operation_mode,
         version,
         ...(lifecycle === undefined ? {} : { lifecycle }),
+        ...(runtimeAdmission === undefined ? {} : { runtime_admission: runtimeAdmission }),
         resource_requirements: resource_requirements as LodePackageAdmissionContract["resource_requirements"],
         ...(runtime_consumption === undefined ? {} : { runtime_consumption })
       };
@@ -927,6 +954,38 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
       return failure("capability_contract", "lode_registry_unavailable", "admission", "connect_lode_registry");
     }
   };
+
+  async function resolveRuntimeAdmissionPolicy(
+    registryEntry: JsonObject,
+    packageRef: string
+  ): Promise<LodeRuntimeAdmissionPolicy | FailureRecord | undefined> {
+    const registryPolicy = parseLodeRuntimeAdmissionPolicy(packageRef, registryEntry.runtime_admission);
+    if (registryPolicy === undefined || isFailure(registryPolicy)) return registryPolicy;
+    let operationPolicy: unknown;
+    for (const assetPath of lodeRuntimeAdmissionAssetPaths) {
+      const path = await pathUnderRoot(assetPath).catch(() => undefined);
+      if (!path) continue;
+      const asset = object(JSON.parse(await readFile(path, "utf8")));
+      const entries = Array.isArray(asset?.entries) ? asset.entries.map(object) : [];
+      const operationEntry = entries.find((candidate) => candidate?.package_ref === packageRef);
+      if (operationEntry) {
+        const expectedSha256 = options.runtimeAdmissionAssetSha256?.[assetPath] ?? lodeRuntimeAdmissionAssetSemanticSha256[assetPath];
+        if (expectedSha256 && createHash("sha256").update(canonicalJson(asset)).digest("hex") !== expectedSha256) {
+          return failure("capability_contract", "runtime_admission_policy_pin_mismatch", "admission", "repair_package_contract");
+        }
+        operationPolicy = operationEntry.runtime_admission;
+        break;
+      }
+    }
+    const operationAdmission = parseLodeRuntimeAdmissionPolicy(packageRef, operationPolicy);
+    if (operationAdmission === undefined || isFailure(operationAdmission)) return operationAdmission;
+    if (canonicalJson(registryPolicy) !== canonicalJson(operationAdmission)) {
+      return failure("capability_contract", "runtime_admission_policy_drift", "admission", "repair_package_contract");
+    }
+    return registryPolicy.enabled
+      ? registryPolicy
+      : failure("capability_contract", "runtime_admission_disabled", "admission", "wait_for_scope_activation");
+  }
 
   async function resolveRuntimeConsumption(packageRef: string, lockRef: string, version: string, operationId: string | undefined, required: boolean): Promise<LodeRuntimeConsumptionEntry | undefined | Error> {
     const path = await pathUnderRoot(lodeAllowlistAssetPath).catch(() => undefined);

@@ -158,6 +158,11 @@ function lodeContract(spec: ReadOnlySiteSpec): LodePackageAdmissionContract {
     operation_mode: "read",
     version: "0.1.0",
     lifecycle: "proposed",
+    runtime_admission: {
+      enabled: true,
+      status: "current",
+      recheck_condition: "not_applicable"
+    },
     resource_requirements: {
       schema_version: "lode.resource-requirements.v0",
       resource_requirements_id: spec.resourceRequirementRef,

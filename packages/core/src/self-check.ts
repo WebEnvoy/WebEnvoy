@@ -710,6 +710,42 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(brokenLifecycle.failure.code, "capability_broken");
     assert.equal(brokenLifecycle.failure.attribution, "capability");
 
+    const disabledBossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
+    const disabledBoss = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_boss_runtime_admission_disabled",
+      task_intent: {
+        ...taskIntent,
+        intent_id: "intent_self_check_boss_runtime_admission_disabled",
+        capability: {
+          ref: "lode:capability/read-public-page",
+          version: "0.1.0",
+          source_ref: disabledBossPackageRef
+        }
+      },
+      package_ref: disabledBossPackageRef,
+      lode_package_contract: {
+        ...lodeReadPublicPageContract,
+        package_ref: disabledBossPackageRef,
+        source_ref: disabledBossPackageRef,
+        runtime_admission: {
+          enabled: false,
+          status: "deferred_experimental",
+          recheck_condition: "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence"
+        },
+        resource_requirements: {
+          ...lodeReadPublicPageContract.resource_requirements,
+          package_ref: disabledBossPackageRef
+        }
+      }
+    });
+    assert.equal(disabledBoss.ok, false);
+    assert.equal(disabledBoss.failure.category, "capability_contract");
+    assert.equal(disabledBoss.failure.code, "runtime_admission_disabled");
+    assert.equal(disabledBoss.failure.recovery_hint, "wait_for_scope_activation");
+    assert.equal(disabledBoss.run_record?.admission.decision, "blocked_pre_admission");
+    assert.equal(disabledBoss.run_record?.result_ref, undefined);
+    assert.deepEqual(disabledBoss.run_record?.evidence_refs ?? [], []);
+
     const writeContract = {
       ...lodeReadPublicPageContract,
       operation_mode: "write",
