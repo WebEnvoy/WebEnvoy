@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { createFileRunRecordStore, createHttpHarborRuntimeClient, createLocalLodePackageResolver } from "@webenvoy/core-runtime";
+import { createFileRunRecordStore, createHttpHarborRuntimeClient, createLocalLodePackageResolver, recoverInterruptedCoreTaskSessions } from "@webenvoy/core-runtime";
 
 import { createApiServer } from "./server.js";
 
@@ -18,19 +18,22 @@ const entrypoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : undef
 
 if (import.meta.url === entrypoint) {
   const port = parsePort(process.env.PORT);
-  const server = createApiServer(
-    process.env.WEBENVOY_RUN_RECORD_DIR
-      ? {
-          runRecordStore: createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR }),
-          ...(process.env.WEBENVOY_LODE_REGISTRY_PATH === undefined
-            ? {}
-            : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: process.env.WEBENVOY_LODE_REGISTRY_PATH }) }),
-          ...(process.env.WEBENVOY_HARBOR_RUNTIME_URL === undefined
-            ? {}
-            : { harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL }) })
-        }
-      : {}
-  );
+  const runRecordStore = process.env.WEBENVOY_RUN_RECORD_DIR
+    ? createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR })
+    : undefined;
+  const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
+    ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
+    : undefined;
+  if (runRecordStore && harborRuntimeClient) {
+    await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
+  }
+  const server = createApiServer(runRecordStore ? {
+    runRecordStore,
+    ...(process.env.WEBENVOY_LODE_REGISTRY_PATH === undefined
+      ? {}
+      : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: process.env.WEBENVOY_LODE_REGISTRY_PATH }) }),
+    ...(harborRuntimeClient === undefined ? {} : { harborRuntimeClient })
+  } : {});
 
   server.listen(port, () => {
     console.log(`WebEnvoy API Server listening on http://127.0.0.1:${port}`);

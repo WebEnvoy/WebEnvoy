@@ -247,9 +247,9 @@
     "mode": "active",
     "read_entry": "loom fact-chain --target . --json",
     "entry_points": {
-      "current_item_id": "CORE-227",
-      "work_item": ".loom/work-items/CORE-227.md",
-      "recovery_entry": ".loom/progress/CORE-227.md",
+      "current_item_id": "CORE-271",
+      "work_item": ".loom/work-items/CORE-271.md",
+      "recovery_entry": ".loom/progress/CORE-271.md",
       "status_surface": ".loom/status/current.md"
     }
   },

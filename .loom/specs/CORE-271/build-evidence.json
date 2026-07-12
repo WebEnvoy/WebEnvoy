@@ -1,0 +1,30 @@
+{
+  "task_goal": "Terminalize failed Core tasks and release or safely recover exact core_task Harbor session locks.",
+  "branch": "work/core-271-failure-lock-cleanup",
+  "workspace_entry": ".",
+  "write_ownership": [
+    "Core runtime task failure finalization and session cleanup",
+    "API startup recovery",
+    "targeted Core/API tests",
+    "CORE-271 item-specific Loom carriers"
+  ],
+  "non_goals": [
+    "App, Harbor, or Lode changes",
+    "shared current/status carrier changes",
+    "live browser, account, or page actions",
+    "merge or issue closeout"
+  ],
+  "validation": [
+    "pnpm --filter @webenvoy/core-runtime test",
+    "pnpm --filter @webenvoy/api-server test",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm lint",
+    "git diff --check"
+  ],
+  "review_findings_resolved": [
+    "Bounded cleanup-sequence deadline with task and startup-recovery never-response tests",
+    "Final explicit released/closed lock proof; inconsistent owner/lock and top-level status responses rejected",
+    "Primary admission failure/remediation preserved with separate refs-only cleanup post-check classification"
+  ]
+}

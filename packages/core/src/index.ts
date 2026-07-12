@@ -119,6 +119,7 @@ export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
+  recoverInterruptedCoreTaskSessions,
   submitRuntimeTask,
   type HarborRuntimeAdmissionRequest,
   type HarborRuntimeClient,

@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createFileRunRecordStore } from "@webenvoy/core-runtime";
+
 type JsonResponse = {
   status: number;
   body: unknown;
@@ -247,7 +249,9 @@ function bossTaskIntent(intentId: string): JsonObject {
   };
 }
 
-function createHarborMock(paths: string[], protectedAuthorization: string[]): Server {
+function createHarborMock(paths: string[], protectedAuthorization: string[], initialHolderRef = ""): Server {
+  let currentHolderRef = initialHolderRef;
+  let cleanupState: "held" | "released" = "held";
   return createServer((request, response) => {
     paths.push(`${request.method} ${request.url}`);
     const protectedRequest = request.method === "POST" && (
@@ -285,6 +289,8 @@ function createHarborMock(paths: string[], protectedAuthorization: string[]): Se
         return;
       }
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
+        currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
+        cleanupState = "held";
         sendJson(response, 200, {
           runtime_session_ref: "session_process_ready",
           identity_environment_ref: "identity-env_process",
@@ -314,6 +320,17 @@ function createHarborMock(paths: string[], protectedAuthorization: string[]): Se
         });
         return;
       }
+      if (request.method === "GET" && request.url === "/runtime/sessions/session_process_ready") {
+        sendJson(response, 200, {
+          runtime_session_ref: "session_process_ready",
+          lifecycle_state: cleanupState === "released" ? "idle" : "active",
+          control_owner: cleanupState === "released" ? "none" : "core_task",
+          control_lock: cleanupState === "released"
+            ? { owner: "none", state: "released", holder_ref: null }
+            : { owner: "core_task", state: "held", holder_ref: currentHolderRef }
+        });
+        return;
+      }
       if (request.method === "POST" && request.url === "/runtime/sessions/session_process_ready/snapshot") {
         const runId = typeof body.run_id === "string" ? body.run_id : "";
         sendJson(response, 200, {
@@ -332,6 +349,16 @@ function createHarborMock(paths: string[], protectedAuthorization: string[]): Se
             },
             unavailable: null
           }
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/runtime/sessions/session_process_ready/release") {
+        cleanupState = "released";
+        sendJson(response, 200, {
+          status: "released",
+          runtime_session_ref: "session_process_ready",
+          control_owner: "none",
+          control_lock: { owner: "none", state: "released", holder_ref: null }
         });
         return;
       }
@@ -489,9 +516,36 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
   const registryPath = await writeLodeRegistry(root);
   const harborPaths: string[] = [];
   const protectedAuthorization: string[] = [];
-  const harbor = createHarborMock(harborPaths, protectedAuthorization);
+  const interruptedRunId = "run_process_recover_interrupted_core_task";
+  const harbor = createHarborMock(harborPaths, protectedAuthorization, interruptedRunId);
   const harborPort = await listen(harbor);
   const apiPort = await reservePort();
+  const recoveryStore = createFileRunRecordStore({ directory: runRecordDir });
+  await recoveryStore.createRunRecord({
+    run_id: interruptedRunId,
+    status: "admitted",
+    task_intent_ref: "intent:process/recover-interrupted-core-task",
+    capability_ref: "lode:capability/read-public-page",
+    admission: {
+      decision: "accepted",
+      action_risk: "read",
+      runtime_session_binding: {
+        schema_version: "webenvoy.runtime-session-binding.v0",
+        identity_environment_ref: "identity-env_process",
+        execution_identity_ref: "identity-env_process:execution",
+        runtime_session_ref: "session_process_ready",
+        profile_ref: "profile_process",
+        provider_ref: "harbor:provider/cloakbrowser",
+        provider_mode: "local",
+        lifecycle_state: "active",
+        control_owner: "core_task",
+        session_use: "core_task_run",
+        core_task_run: true,
+        consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+      }
+    }
+  });
+  await recoveryStore.updateRunRecord(interruptedRunId, { status: "running" });
   const { child, output } = spawnApiServer(apiPort, runRecordDir, {
     WEBENVOY_LODE_REGISTRY_PATH: registryPath,
     WEBENVOY_HARBOR_RUNTIME_URL: `http://127.0.0.1:${harborPort}`,
@@ -500,6 +554,11 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
 
   try {
     await waitForJson(apiPort, "/health", child);
+    const recoveredRun = await getJson(apiPort, `/runs/${interruptedRunId}`);
+    assert.equal(recoveredRun.status, 200);
+    const recoveredRunBody = asRecord(asRecord(recoveredRun.body).run);
+    assert.equal(recoveredRunBody.status, "failed");
+    assert.equal(asRecord(asRecord(recoveredRunBody.terminal_summary).failure).code, "core_task_interrupted");
     const admission = await getJson(apiPort, "/admission/health");
     assert.equal(admission.status, 200);
     const admissionBody = asRecord(admission.body);
