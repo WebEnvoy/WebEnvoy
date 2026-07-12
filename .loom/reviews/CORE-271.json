@@ -1,0 +1,32 @@
+{
+  "schema_version": "loom-review/v1",
+  "item_id": "CORE-271",
+  "decision": "allow",
+  "kind": "code_review",
+  "summary": "Current-head review found no P0-P3 correctness, privacy, or ownership findings in the bounded Core failure-finalization and lock-cleanup change.",
+  "reviewer": "codex-core-271-lane",
+  "authored_at": "2026-07-12T04:36:00Z",
+  "reviewed_head": "1d733f24ec5a1e9608cf4669c0bbd2f20475893c",
+  "reviewed_validation_summary": "At product head 1d733f2, targeted Core/API typecheck and tests, full pnpm typecheck/test/lint, process restart recovery, fault injection, Loom minimal suite/carrier validation, and git diff check passed.",
+  "reviewed_validation_summary_hash": "cab164ff1f93b97bd927be0da0a37d70337d11562d92562c2c4eeaee99d86347",
+  "validation_summary_source": "recovery.latest_validation_summary",
+  "validation_summary_locator": ".loom/progress/CORE-271.md",
+  "fallback_to": null,
+  "findings": [],
+  "blocking_issues": [],
+  "follow_ups": [],
+  "consumed_inputs": {
+    "work_item": ".loom/work-items/CORE-271.md",
+    "recovery_entry": ".loom/progress/CORE-271.md",
+    "status_surface": "controller-owned and intentionally unchanged",
+    "build_checkpoint": "pass",
+    "suite_validation": "loom suite validate --target . --item CORE-271 --json",
+    "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-271 --json",
+    "suite_evidence_map": ".loom/specs/CORE-271/evidence-map.md",
+    "suite_task_carriers": [".loom/specs/CORE-271/task-carrier.md"]
+  },
+  "semantic_review_disposition": {
+    "status": "passed",
+    "reason": "Exact owner/holder validation, release/stop fallback, terminal failure preservation, restart recovery, and no-private-material boundaries are covered by current-head tests."
+  }
+}
