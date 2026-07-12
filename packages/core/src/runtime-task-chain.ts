@@ -649,6 +649,7 @@ function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEn
     session_user_controlled: "page_not_ready",
     fixture_runtime: "page_not_ready",
     provider_probe_unavailable: "network_resource_unavailable",
+    safety_challenge: "captcha_required",
     origin_drift: "site_changed",
     public_summary_missing: "field_missing",
     source_refs_missing: "field_missing",
