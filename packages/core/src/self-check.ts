@@ -40,20 +40,21 @@ async function assertDetailTargetStore(): Promise<void> {
     const input = {
       ...expected,
       detail_refs: Object.values(refs),
-      search_run_ref: "run-search-detail",
+      search_run_ref: "app-xiaohongshu-search-e2e",
       search_result_ref: "result-search-detail",
       observed_at: observedAt.toISOString()
     };
     const batch = await stageSearchDetailTargets(directory, input, observedAt);
     assert.deepEqual(await inspectDetailTarget(directory, refs.positive, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
     await publishSearchDetailTargets(batch);
+    await assert.rejects(() => claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "app-token-detail" }, observedAt), /detail run ref is invalid/);
     assert.deepEqual(await claimDetailTarget(directory, "detail_ref_forged", { ...expected, detail_run_ref: "run-forged" }, observedAt), { ok: false, code: "detail_ref_unknown" });
     assert.deepEqual(await claimDetailTarget(directory, refs.crossIdentity, { ...expected, identity_environment_ref: "identity-env-other", detail_run_ref: "run-cross-identity" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
     assert.deepEqual(await claimDetailTarget(directory, refs.crossSession, { ...expected, runtime_session_ref: "session-other", detail_run_ref: "run-cross-session" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
-    const claimed = await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-detail" }, observedAt);
+    const claimed = await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "app-xiaohongshu-detail-e2e" }, observedAt);
     assert.equal(claimed.ok, true);
     if (claimed.ok) {
-      assert.equal(claimed.binding.search_run_ref, "run-search-detail");
+      assert.equal(claimed.binding.search_run_ref, "app-xiaohongshu-search-e2e");
       assert.equal(claimed.binding.search_result_ref, "result-search-detail");
     }
     assert.deepEqual(await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-replay" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
@@ -115,6 +116,7 @@ async function assertDetailTargetStore(): Promise<void> {
     await compensatePublishedSearchDetailTargets(cleanupBatch);
 
     await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-sensitive", search_result_ref: "https://example.test/xsec_token", detail_refs: ["detail_ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] }, observedAt), /search result ref is invalid/);
+    await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "app-cookie-search", detail_refs: ["detail_ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] }, observedAt), /search run ref is invalid/);
 
     const skewRef = "detail_ref_77777777-7777-4777-8777-777777777777";
     await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-stale", detail_refs: [skewRef], observed_at: new Date(observedAt.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString() }, observedAt), /skew/);
@@ -1333,6 +1335,10 @@ try {
   const invalidRefId = "run_self_check_invalid_ref_patch";
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
+  await assert.rejects(
+    () => store.updateRunRecord(invalidRefId, { public_result_summary: { summary: "界".repeat(30_000) } }),
+    /public_result_summary exceeds 64 KiB/
+  );
   const pendingResultQuery = await getRunResult(store, invalidRefId);
   assert.equal(pendingResultQuery.ok, true);
   if (!pendingResultQuery.ok) {

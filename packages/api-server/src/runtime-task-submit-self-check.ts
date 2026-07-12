@@ -588,7 +588,7 @@ async function writeLodeRegistry(
         operation_boundary: "read",
         required_harbor_facts: [
           "runtime.execution_surface.available", "runtime.origin.www_xiaohongshu_com.available", "identity.user_logged_in.confirmed",
-          "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent"
+          "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent", "input.signed_note_ref.available"
         ].map((fact_key) => ({ fact_key, owner: "Harbor", required: true }))
       }]
     })
@@ -1237,7 +1237,14 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     xiaohongshuScene,
     { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
     {},
-    readyXiaohongshuSiteFacts,
+    {
+      ...readyXiaohongshuSiteFacts,
+      resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) =>
+        ["page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "input.signed_note_ref.available"].includes(String(fact.key))
+          ? { ...fact, state: "unknown", severity: "warning", message: "Target-page fact is observable only after detail navigation." }
+          : fact
+      ).concat([{ key: "input.signed_note_ref.available", state: "unknown", source: "validation_evidence", severity: "warning", message: "Opaque detail ref is validated by Core before dispatch." }])
+    },
     xiaohongshuDetailOperation
   );
   const bossPaths: string[] = [];

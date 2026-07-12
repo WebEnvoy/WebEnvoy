@@ -113,6 +113,7 @@ export async function completeRunWithReadOnlyProjection(store: FileRunRecordStor
     result_kind: projection.result_kind,
     output_schema_id: input.output_schema_id,
     data: { projection },
+    persisted_public_summary: { projection },
     source_refs: projectionRefs(projection.source_refs, "projection.source_refs"),
     evidence_refs: evidenceRefs,
     ...(input.projection_ref === undefined ? {} : { projection_ref: input.projection_ref }),

@@ -128,7 +128,25 @@ const canonicalDeferredProbeOperations = [
     site_slug: "xiaohongshu",
     operation_id: "xhs_search_notes",
     version: "0.1.0",
+    allowlist_id: "lode.xhs-boss.read.runtime-consumption",
+    allowlist_version: "0.1.0",
+    asset_owner: "Lode",
+    consumer_issue: "#267",
+    consumer_purpose: "lock-bound read-only task admission and run recording",
     deferred_facts: new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])
+  },
+  {
+    package_ref: xhsDetailPackageRef,
+    lock_ref: xhsDetailLockRef,
+    site_slug: "xiaohongshu",
+    operation_id: "xhs_read_note_detail",
+    version: "0.1.0",
+    allowlist_id: "lode.xhs-boss.detail-read.runtime-consumption",
+    allowlist_version: "0.1.0",
+    asset_owner: "Lode",
+    consumer_issue: "#270",
+    consumer_purpose: "persisted opaque detail ref consumption",
+    deferred_facts: new Set(["page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "input.signed_note_ref.available"])
   },
   {
     package_ref: "lode://site-capability/boss/job-search@0.1.0",
@@ -136,6 +154,11 @@ const canonicalDeferredProbeOperations = [
     site_slug: "boss",
     operation_id: "boss_job_search",
     version: "0.1.0",
+    allowlist_id: "lode.xhs-boss.read.runtime-consumption",
+    allowlist_version: "0.1.0",
+    asset_owner: "Lode",
+    consumer_issue: "#267",
+    consumer_purpose: "lock-bound read-only task admission and run recording",
     deferred_facts: new Set(["page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available"])
   }
 ] as const;
@@ -271,7 +294,7 @@ function sameOrigin(left: string | undefined, right: string | undefined): boolea
 
 function operationAdmissionContract(contract: LodePackageAdmissionContract): LodePackageAdmissionContract {
   const runtime = contract.runtime_consumption;
-  const deferredFacts = runtime && canonicalDeferredProbeOperations.find((operation) =>
+  const operation = runtime && canonicalDeferredProbeOperations.find((operation) =>
     contract.package_ref === operation.package_ref &&
     contract.lock_ref === operation.lock_ref &&
     contract.operation_id === operation.operation_id &&
@@ -281,14 +304,14 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
     runtime.site_slug === operation.site_slug &&
     runtime.operation_id === operation.operation_id &&
     runtime.version === operation.version &&
-    runtime.allowlist_id === "lode.xhs-boss.read.runtime-consumption" &&
-    runtime.allowlist_version === "0.1.0" &&
-    runtime.asset_owner === "Lode" &&
+    runtime.allowlist_id === operation.allowlist_id &&
+    runtime.allowlist_version === operation.allowlist_version &&
+    runtime.asset_owner === operation.asset_owner &&
     runtime.consumer.repository === "WebEnvoy/WebEnvoy" &&
-    runtime.consumer.issue === "#267" &&
-    runtime.consumer.purpose === "lock-bound read-only task admission and run recording"
-  )?.deferred_facts;
-  if (!deferredFacts) return contract;
+    runtime.consumer.issue === operation.consumer_issue &&
+    runtime.consumer.purpose === operation.consumer_purpose
+  );
+  if (!operation) return contract;
   return {
     ...contract,
     resource_requirements: {
@@ -297,7 +320,7 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
         ...profile,
         ...(profile.required_harbor_facts === undefined
           ? {}
-          : { required_harbor_facts: profile.required_harbor_facts.filter((fact) => !deferredFacts.has(fact.fact_key)) })
+          : { required_harbor_facts: profile.required_harbor_facts.filter((fact) => !operation.deferred_facts.has(fact.fact_key)) })
       }))
     }
   };

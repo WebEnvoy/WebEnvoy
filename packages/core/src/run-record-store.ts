@@ -170,6 +170,7 @@ export type RunRecord = {
   result_kind?: string;
   output_schema_id?: string;
   projection_ref?: string;
+  public_result_summary?: Record<string, unknown>;
   source_refs?: string[];
   preview_result?: PreviewResult;
   evidence_refs?: string[];
@@ -196,6 +197,7 @@ export type CreateRunRecordInput = {
   result_kind?: string;
   output_schema_id?: string;
   projection_ref?: string;
+  public_result_summary?: Record<string, unknown>;
   source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
@@ -213,6 +215,7 @@ export type RunRecordPatch = {
   result_kind?: string;
   output_schema_id?: string;
   projection_ref?: string;
+  public_result_summary?: Record<string, unknown>;
   source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
@@ -260,6 +263,10 @@ export const runLifecycleTransitions: Readonly<Record<RunRecordStatus, readonly 
 };
 
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function isValidRunId(value: string): boolean {
+  return runIdPattern.test(value);
+}
 const forbiddenRunRecordFieldNames = new Set([
   "raw_payload",
   "dom",
@@ -331,10 +338,16 @@ function validatePreviewResult(preview: PreviewResult): void {
 }
 
 function validateRunId(runId: string): string {
-  if (!runIdPattern.test(runId)) {
+  if (!isValidRunId(runId)) {
     throw new Error("run_id must use 1-128 characters from A-Z, a-z, 0-9, dot, underscore, or hyphen");
   }
   return runId;
+}
+
+function copyPublicResultSummary(value: Record<string, unknown>): Record<string, unknown> {
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json, "utf8") > 64 * 1024) throw new Error("public_result_summary exceeds 64 KiB");
+  return JSON.parse(json) as Record<string, unknown>;
 }
 
 function runRecordPath(directory: string, runId: string): string {
@@ -392,6 +405,7 @@ function assertRunRecord(record: RunRecord): void {
   if (record.projection_ref !== undefined) {
     requireRef(record.projection_ref, "projection_ref");
   }
+  if (record.public_result_summary !== undefined) copyPublicResultSummary(record.public_result_summary);
   copyRefs(record.source_refs, "source_refs");
   if (record.preview_result !== undefined) {
     validatePreviewResult(record.preview_result);
@@ -525,6 +539,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   if (patch.projection_ref !== undefined) {
     next.projection_ref = requireRef(patch.projection_ref, "projection_ref");
   }
+  if (patch.public_result_summary !== undefined) {
+    next.public_result_summary = copyPublicResultSummary(patch.public_result_summary);
+  }
   if (patch.source_refs !== undefined) {
     next.source_refs = copyRequiredRefs(patch.source_refs, "source_refs");
   }
@@ -598,6 +615,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.projection_ref !== undefined) {
     record.projection_ref = requireRef(input.projection_ref, "projection_ref");
+  }
+  if (input.public_result_summary !== undefined) {
+    record.public_result_summary = copyPublicResultSummary(input.public_result_summary);
   }
   if (input.source_refs !== undefined) {
     record.source_refs = copyRequiredRefs(input.source_refs, "source_refs");

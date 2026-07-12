@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, rm, unlink } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { isValidRunId } from "./run-record-store.js";
 
 export const detailTargetTtlMs = 10 * 60 * 1000;
 const allowedObservationSkewMs = 24 * 60 * 60 * 1000;
@@ -270,7 +271,7 @@ async function releaseBatchReservations(root: string, batchPath: string): Promis
 
 async function validateClaimReservation(reservation: DetailTargetReservation): Promise<{ root: string; binding: DetailTargetBinding }> {
   if (!isOpaqueDetailRef(reservation.detail_ref)) throw new Error("detail target reservation is invalid");
-  assertSafeRef(reservation.detail_run_ref, "run", /^(?:run[_-])[A-Za-z0-9._:-]{1,200}$/);
+  assertRunRef(reservation.detail_run_ref, "run");
   const root = await secureStoreRoot(reservation.directory);
   const path = claimPath(root, reservation.detail_ref);
   const claim = JSON.parse(await readNoFollow(root, path)) as { detail_ref?: unknown; detail_run_ref?: unknown };
@@ -383,14 +384,18 @@ async function readNoFollow(root: string, path: string): Promise<string> {
 function assertBindingRefs(input: PersistInput): void {
   assertSafeRef(input.identity_environment_ref, "identity environment", /^identity-env[_-][A-Za-z0-9._:-]{1,200}$/);
   assertSafeRef(input.runtime_session_ref, "runtime session", /^session[_-][A-Za-z0-9._:-]{1,200}$/);
-  assertSafeRef(input.search_run_ref, "search run", /^run[_-][A-Za-z0-9._:-]{1,200}$/);
+  assertRunRef(input.search_run_ref, "search run");
   assertSafeRef(input.search_result_ref, "search result", /^(?:read_result_|result[_:-])[A-Za-z0-9._:/-]{1,240}$/);
 }
 
 function assertClaimRefs(input: { identity_environment_ref: string; runtime_session_ref: string; detail_run_ref: string }): void {
   assertSafeRef(input.identity_environment_ref, "identity environment", /^identity-env[_-][A-Za-z0-9._:-]{1,200}$/);
   assertSafeRef(input.runtime_session_ref, "runtime session", /^session[_-][A-Za-z0-9._:-]{1,200}$/);
-  assertSafeRef(input.detail_run_ref, "detail run", /^run[_-][A-Za-z0-9._:-]{1,200}$/);
+  assertRunRef(input.detail_run_ref, "detail run");
+}
+
+function assertRunRef(value: string, label: string): void {
+  if (!isValidRunId(value) || sensitiveRefPattern.test(value)) throw new Error(`${label} ref is invalid`);
 }
 
 function assertSafeRef(value: string, label: string, pattern: RegExp): void {
