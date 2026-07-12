@@ -1,16 +1,21 @@
 # CORE-271 Progress
 
-- State: review findings fixed; independent re-review pending
-- Branch: `work/core-271-failure-lock-cleanup`
-- Workspace: `.`
-- Scope: #271 only; shared current/status carrier untouched.
-- Implemented: exact owner/holder verification, bounded cleanup-sequence deadline, release/stop plus final GET proof, fail-closed cleanup result, operation timeout abort, and startup recovery for interrupted non-terminal Core runs.
-- Latest Validation Summary: after fixing all three independent P1 findings, targeted Core/API typecheck/tests plus full `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` pass on the current implementation tree.
-- Review Finding Resolution: cleanup GET/release/verify/stop/verify uses one bounded deadline and returns refs-only `core_task_session_cleanup_timeout`; task and restart recovery never-response tests pass.
-- Review Finding Resolution: success requires final explicit idle/closed + owner none + lock owner none/released + null holder proof; owner-none/held and false top-level released/stopped regressions fail closed.
-- Review Finding Resolution: session parsing primary failure/remediation remain unchanged while cleanup classification and opaque session ref are separately persisted in blocked post-check; dual-failure regression passes.
-- Fault coverage: admission/snapshot/evidence terminalization, read-operation unknown/timeout, exact lock proof, cleanup timeout/double failure, inconsistent responses, transient terminal persistence failure, restart recovery, and manual-owner preservation.
-- Product Head: `6e3ca53e6bb0358d6d085860fe7cd63b875f6414`
-- Semantic Review: implementation-lane allow at current product head; independent REQUEST CHANGES requires fresh independent re-review before merge readiness.
-- Remaining: commit review carrier, push, update PR metadata, and request independent re-review.
-- Blockers: None.
+## Dynamic Facts
+
+- Item ID: CORE-271
+- Current Checkpoint: merge
+- Current Stop: Product head `6e3ca53e6bb0358d6d085860fe7cd63b875f6414` passed all targeted/full checks and independent re-review; carrier head binds that review without product drift.
+- Next Step: Consume the hosted merge gate and perform controlled merge; keep #271 open until merged-runtime failure cleanup is observed in packaged E2E.
+- Blockers: None
+- Latest Validation Summary: 2026-07-12T05:14Z: At product head `6e3ca53e6bb0358d6d085860fe7cd63b875f6414`, targeted Core/API tests, `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Independent re-review confirmed bounded cleanup deadlines, strict final GET proof of closed/idle owner-none released lock with null holder, primary-failure preservation with separate refs-only cleanup post-check, and manual-owner protection. No live account or external write occurred.
+- Recovery Boundary: Revert only CORE-271-owned code and carriers. Do not modify App, Harbor, or Lode; do not close #271 before merged-runtime evidence; do not access credentials or perform external writes.
+- Current Lane: CORE-271 terminal failure and core_task session-lock cleanup.
+
+## Execution Ledger
+
+- Ledger Binding: recovery_entry
+- Plan Locator: .loom/specs/CORE-271/plan.md
+- Acceptance Locator: .loom/specs/CORE-271/spec.md
+- Validation Evidence Locator: .loom/specs/CORE-271/build-evidence.json
+- Handoff Notes Locator: .loom/specs/CORE-271/task-carrier.md
+- Evidence Freshness: current

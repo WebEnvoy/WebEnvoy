@@ -3,22 +3,22 @@
   "item_id": "CORE-271",
   "decision": "allow",
   "kind": "code_review",
-  "summary": "Implementation-lane current-head review found all three independent P1 findings fixed with no remaining P0-P3 in the changed cleanup boundary; independent re-review is still required before merge readiness.",
-  "reviewer": "codex-core-271-lane",
-  "authored_at": "2026-07-12T05:02:00Z",
+  "summary": "Independent re-review found all three P1 findings fixed with no remaining P0-P3 in the bounded cleanup, final lock-proof, and dual-failure boundary.",
+  "reviewer": "codex-main-controller",
+  "authored_at": "2026-07-12T05:14:00Z",
   "reviewed_head": "6e3ca53e6bb0358d6d085860fe7cd63b875f6414",
-  "reviewed_validation_summary": "At product head 6e3ca53, all three P1 review findings are fixed; targeted Core/API tests, full pnpm typecheck/test/lint, never-response cleanup deadline tests, strict final lock-proof regressions, dual-failure preservation, and git diff check passed.",
-  "reviewed_validation_summary_hash": "28e3769809be6a535e4261eba8fa6d691fd844036c2df89173d06a69151fcc47",
+  "reviewed_validation_summary": "2026-07-12T05:14Z: At product head `6e3ca53e6bb0358d6d085860fe7cd63b875f6414`, targeted Core/API tests, `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `git diff --check` passed. Independent re-review confirmed bounded cleanup deadlines, strict final GET proof of closed/idle owner-none released lock with null holder, primary-failure preservation with separate refs-only cleanup post-check, and manual-owner protection. No live account or external write occurred.",
+  "reviewed_validation_summary_hash": "35176edd82efc751a0ec10d0f8ebc0e021d352085307ffc9dc318e26286158d9",
   "validation_summary_source": "recovery.latest_validation_summary",
   "validation_summary_locator": ".loom/progress/CORE-271.md",
   "fallback_to": null,
   "findings": [],
   "blocking_issues": [],
-  "follow_ups": ["Obtain independent re-review of PR #274 before marking merge ready."],
+  "follow_ups": ["Require packaged merged-runtime failure cleanup evidence before closing #271."],
   "consumed_inputs": {
     "work_item": ".loom/work-items/CORE-271.md",
     "recovery_entry": ".loom/progress/CORE-271.md",
-    "status_surface": "controller-owned and intentionally unchanged",
+    "status_surface": ".loom/status/current.md",
     "build_checkpoint": "pass",
     "suite_validation": "loom suite validate --target . --item CORE-271 --json",
     "suite_carrier_validation": "loom suite carrier validate --target . --item CORE-271 --json",
@@ -27,6 +27,6 @@
   },
   "semantic_review_disposition": {
     "status": "passed",
-    "reason": "Bounded cleanup deadline, strict final released-lock proof, and dual-failure preservation are covered by current-head tests; this implementation-lane allow does not replace independent re-review."
+    "reason": "Independent current-head review confirmed bounded cleanup deadline, strict final released-lock proof, primary-failure preservation, and manual-owner protection."
   }
 }

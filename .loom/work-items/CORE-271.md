@@ -22,3 +22,15 @@
 - Product writes: `packages/core/src/runtime-task-chain.ts`, `packages/core/src/index.ts`, `packages/api-server/src/index.ts`, and targeted API self-checks only.
 - Governance writes: CORE-271 item-specific carriers only.
 - Recovery may release only a public Harbor lock whose owner is `core_task` and holder ref exactly matches the Core run id.
+
+## Associated Artifacts
+
+- .loom/specs/CORE-271/spec.md
+- .loom/specs/CORE-271/plan.md
+- .loom/specs/CORE-271/implementation-contract.md
+- .loom/specs/CORE-271/evidence-map.md
+- .loom/specs/CORE-271/build-evidence.json
+- .loom/specs/CORE-271/task-carrier.md
+- packages/core/src/runtime-task-chain.ts
+- packages/api-server/src/runtime-process-self-check.ts
+- packages/api-server/src/runtime-task-submit-self-check.ts
