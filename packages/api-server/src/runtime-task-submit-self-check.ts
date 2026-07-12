@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -31,12 +31,37 @@ function fixtureAllowlistSha256(value: JsonObject): string {
   return createHash("sha256").update(canonicalJson(semantic)).digest("hex");
 }
 
+function detailRefForRun(runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex");
+  return `detail_ref_${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function opaqueRefForRun(prefix: string, runId: string): string {
+  return detailRefForRun(`${prefix}:${runId}`).replace("detail_ref_", `${prefix}_`);
+}
+
+async function publishedDetailTargetPath(runDir: string, detailRef: string): Promise<string> {
+  const root = join(runDir, ".detail-targets", "published");
+  const fileName = `${createHash("sha256").update(detailRef).digest("hex")}.json`;
+  for (const batch of await readdir(root)) {
+    const path = join(root, batch, fileName);
+    try {
+      await readFile(path);
+      return path;
+    } catch {}
+  }
+  throw new Error(`published detail target not found: ${detailRef}`);
+}
+
 const packageRef = "lode://site-capability/example/read-public-page@0.1.0";
 const lockRef = "lode://lock/site-capability/example/read-public-page@0.1.0";
 const resourceRef = "example.read-public-page.resources";
 const xiaohongshuPackageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
 const xiaohongshuLockRef = "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0";
 const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
+const xiaohongshuDetailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
+const xiaohongshuDetailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
+const xiaohongshuDetailResourceRef = "xiaohongshu.read-note-detail.resources";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const bossLockRef = "lode://lock/site-capability/boss/job-search@0.1.0";
 const bossResourceRef = "boss.job-search.resources";
@@ -267,6 +292,21 @@ function xiaohongshuTaskIntent(intentId: string): JsonObject {
   };
 }
 
+function xiaohongshuDetailTaskIntent(intentId: string, detailRef: string): JsonObject {
+  return {
+    schema_version: "webenvoy.task-intent.v0",
+    intent_id: intentId,
+    entrypoint: "app",
+    user_intent: { summary: "Read one Xiaohongshu note detail from a persisted search ref." },
+    capability: { ref: "lode:capability/read-note-detail", version: "0.1.0", source_ref: xiaohongshuDetailPackageRef, lock_ref: xiaohongshuDetailLockRef },
+    input: { summary: "Read the selected note detail.", refs: [detailRef] },
+    scope: { target_type: "xiaohongshu_note_detail", target_ref: detailRef },
+    policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
+    resource_requirement_refs: [xiaohongshuDetailResourceRef],
+    evidence_policy_ref: "evidence-policy:refs-only"
+  };
+}
+
 function bossTaskIntent(intentId: string): JsonObject {
   return {
     schema_version: "webenvoy.task-intent.v0",
@@ -290,6 +330,7 @@ async function writeLodeRegistry(
   await mkdir(join(root, "registry"), { recursive: true });
   await mkdir(join(root, "sites", "example", "read-public-page"), { recursive: true });
   await mkdir(join(root, "sites", "xiaohongshu", "search-notes"), { recursive: true });
+  await mkdir(join(root, "sites", "xiaohongshu", "read-note-detail"), { recursive: true });
   await mkdir(join(root, "sites", "boss", "job-search"), { recursive: true });
   await writeFile(
     join(root, "registry", "local-packages.json"),
@@ -316,6 +357,20 @@ async function writeLodeRegistry(
           lock_ref: xiaohongshuLockRef,
           capability_id: "xiaohongshu-search-notes",
           operation_id: "xhs_search_notes",
+          operation_mode: "read",
+          version: "0.1.0",
+          lifecycle: "proposed",
+          task_kind: "real_site_read",
+          runtime_admission: currentRuntimeAdmission
+        },
+        {
+          package_ref: xiaohongshuDetailPackageRef,
+          package_type: "site-capability",
+          package_path: "sites/xiaohongshu/read-note-detail",
+          manifest_path: "sites/xiaohongshu/read-note-detail/manifest.json",
+          lock_ref: xiaohongshuDetailLockRef,
+          capability_id: "read-note-detail",
+          operation_id: "xhs_read_note_detail",
           operation_mode: "read",
           version: "0.1.0",
           lifecycle: "proposed",
@@ -392,7 +447,20 @@ async function writeLodeRegistry(
     };
   await writeFile(join(root, "registry", "runtime-consumption-allowlist.json"), JSON.stringify(runtimeAllowlist));
   const detailRuntimeConsumption = {
-    entries: [{ package_ref: bossDetailPackageRef, runtime_admission: bossRuntimeAdmission }]
+    schema_version: "lode.detail-runtime-consumption.v0",
+    truth_id: "lode.xhs-boss.detail-read.runtime-consumption",
+    asset_owner: "Lode",
+    entries: [{
+      package_ref: xiaohongshuDetailPackageRef,
+      lock_ref: xiaohongshuDetailLockRef,
+      version: "0.1.0",
+      operation_id: "xhs_read_note_detail",
+      operation_mode: "read",
+      site_slug: "xiaohongshu",
+      lifecycle: "proposed",
+      required_ref_kinds: ["pinia_store_summary", "network_summary", "dom_snapshot_summary", "snapshot_ref", "post_check_ref"],
+      runtime_admission: currentRuntimeAdmission
+    }, { package_ref: bossDetailPackageRef, runtime_admission: bossRuntimeAdmission }]
   };
   const validateOnlyRuntimeConsumption = {
     entries: [{ package_ref: bossPrecheckPackageRef, runtime_admission: bossRuntimeAdmission }]
@@ -434,6 +502,19 @@ async function writeLodeRegistry(
       asset_refs: [
         { role: "resource_requirements", path: "resource-requirements.json", status: "present" },
         { role: "package_lock", path: "package-lock.json", status: "present", lock_ref: xiaohongshuLockRef }
+      ]
+    })
+  );
+  await writeFile(
+    join(root, "sites", "xiaohongshu", "read-note-detail", "manifest.json"),
+    JSON.stringify({
+      manifest_version: "lode.site-capability.manifest.v0",
+      package_ref: xiaohongshuDetailPackageRef,
+      package_type: "site-capability",
+      capability: { capability_id: "read-note-detail", operation_id: "xhs_read_note_detail", operation_mode: "read", version: "0.1.0", lifecycle: "proposed" },
+      asset_refs: [
+        { role: "resource_requirements", path: "resource-requirements.json", status: "present" },
+        { role: "package_lock", path: "package-lock.json", status: "present", lock_ref: xiaohongshuDetailLockRef }
       ]
     })
   );
@@ -494,6 +575,24 @@ async function writeLodeRegistry(
       ]
     })
   );
+  await writeFile(
+    join(root, "sites", "xiaohongshu", "read-note-detail", "resource-requirements.json"),
+    JSON.stringify({
+      schema_version: "lode.resource-requirements.v0",
+      resource_requirements_id: xiaohongshuDetailResourceRef,
+      resource_requirements_version: "0.1.0",
+      package_ref: xiaohongshuDetailPackageRef,
+      operation_mode: "read",
+      resource_requirement_profiles: [{
+        requirement_profile_id: "xiaohongshu-read-note-detail-live-runtime",
+        operation_boundary: "read",
+        required_harbor_facts: [
+          "runtime.execution_surface.available", "runtime.origin.www_xiaohongshu_com.available", "identity.user_logged_in.confirmed",
+          "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent"
+        ].map((fact_key) => ({ fact_key, owner: "Harbor", required: true }))
+      }]
+    })
+  );
   await writeFile(join(root, "sites", "boss", "job-search", "resource-requirements.json"), JSON.stringify({
     schema_version: "lode.resource-requirements.v0",
     resource_requirements_id: bossResourceRef,
@@ -520,7 +619,7 @@ function createHarborMock(
   evidenceBody: JsonObject = { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
   sessionOverrides: JsonObject = {},
   siteResourceBody: JsonObject | undefined = undefined,
-  readOperationOverrides: JsonObject = {},
+  readOperationOverrides: JsonObject | ((body: JsonObject, holderRef: string) => JsonObject) = {},
   identityRecordOverrides: JsonObject = {},
   cleanupBehavior: "success" | "unavailable" | "hang" | "inconsistent" | "owner_none_held" = "success"
 ): Server {
@@ -655,6 +754,9 @@ function createHarborMock(
         return;
       }
       if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/read-operations`) {
+        const operationOverrides = typeof readOperationOverrides === "function"
+          ? readOperationOverrides(body, currentHolderRef)
+          : readOperationOverrides;
         sendJson(response, 200, {
           schema_version: "harbor-allowlisted-read-operation/v0",
           status: "completed",
@@ -663,16 +765,16 @@ function createHarborMock(
           site_id: "xiaohongshu",
           operation_id: "xhs_search_notes",
           operation_mode: "read",
-          observed_at: "2026-07-11T00:00:00.000Z",
+          observed_at: new Date().toISOString(),
           public_summary_ref: "read_result_22222222-2222-4222-8222-222222222222",
-          public_summary: { schema_version: "harbor-read-operation-public-summary/v0", operation_id: "xhs_search_notes", result_kind: "xiaohongshu_search_notes_surface", surface: "search_result", result_state: "operation_read_response_observed", response_status: 200, source_signals: ["pinia_store", "xhs_search_read_network"] },
+          public_summary: { schema_version: "harbor-read-operation-public-summary/v0", operation_id: "xhs_search_notes", result_kind: "xiaohongshu_search_notes_surface", surface: "search_result", result_state: "operation_read_response_observed", response_status: 200, result_count: 1, detail_refs: [detailRefForRun(currentHolderRef)], source_signals: ["pinia_store", "xhs_search_read_network"] },
           source_refs: [{ kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" }, { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" }, { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" }],
           evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111"],
           evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" }, { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }],
           post_check: { post_check_ref: "post_check_11111111-1111-4111-8111-111111111111", status: "passed", reason: "managed_provider_read_probe_completed" },
           lode_pin: { repository: "WebEnvoy/Lode", commit: "e36a4a7", asset_path: "registry/runtime-consumption-allowlist.json", asset_sha256: "5aa6be8bd416bbd19f73dcfab995f62f769849923f2aa2e995da974b0f329184", mirror_payload_sha256: "3b32e37e04cb008c7e1c072ead35919cde6e498ebfcea34a57de889559a0f141", allowlist_id: "lode.xhs-boss.read.runtime-consumption", allowlist_version: "0.1.0", asset_owner: "Lode", consumer: { repository: "WebEnvoy/Harbor", issue: "#245", purpose: "allowlisted one-shot read-only operation admission" } },
           public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed", raw_profile_storage: "not_exposed", raw_cdp_endpoint: "not_exposed", raw_dom: "not_exposed", raw_har: "not_exposed", raw_network_bodies: "not_exposed", screenshot_body: "not_exposed", external_write_actions: "not_performed" },
-          ...readOperationOverrides
+          ...operationOverrides
         });
         return;
       }
@@ -1050,6 +1152,84 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       summary: "Xiaohongshu search page summary captured by Harbor refs."
     }
   };
+  const xiaohongshuDetailOperation = (body: JsonObject, holderRef: string): JsonObject => {
+    if (body.operation_id !== "xhs_read_note_detail") {
+      const searchEvidenceRef = opaqueRefForRun("evidence", holderRef);
+      const searchPostCheckRef = opaqueRefForRun("post_check", holderRef);
+      return {
+        operation_ref: opaqueRefForRun("read_operation", holderRef),
+        public_summary_ref: opaqueRefForRun("read_result", holderRef),
+        source_refs: ["pinia_store_summary", "network_summary", "dom_snapshot_summary"].map((kind) => ({ kind, ref: opaqueRefForRun("source", `${kind}:${holderRef}`) })),
+        evidence_refs: [searchEvidenceRef],
+        evidence_ref_kinds: [{ kind: "snapshot_ref", ref: searchEvidenceRef }, { kind: "post_check_ref", ref: searchPostCheckRef }],
+        post_check: { post_check_ref: searchPostCheckRef, status: "passed", reason: "managed_provider_read_probe_completed" }
+      };
+    }
+    if (holderRef.includes("challenge")) return { status: "unavailable", failure_class: "safety_challenge", retryable: false };
+    if (holderRef.includes("unavailable")) return { status: "unavailable", failure_class: "provider_probe_unavailable", retryable: true };
+    if (holderRef.includes("malformed")) return { schema_version: "malformed-detail-operation" };
+    const sourceRefs = ["pinia_store_summary", "network_summary", "dom_snapshot_summary"].map((kind) => ({
+      kind,
+      ref: opaqueRefForRun("source", `${kind}:${holderRef}`)
+    }));
+    const evidenceRefs = [opaqueRefForRun("evidence", holderRef)];
+    const postCheckRef = opaqueRefForRun("post_check", holderRef);
+    const evidenceRefKinds = [
+      { kind: "snapshot_ref", ref: evidenceRefs[0] },
+      { kind: "post_check_ref", ref: postCheckRef }
+    ];
+    return {
+      operation_ref: opaqueRefForRun("read_operation", holderRef),
+      public_summary_ref: opaqueRefForRun("read_result", holderRef),
+      site_id: "xiaohongshu",
+      operation_id: "xhs_read_note_detail",
+      public_summary: {
+        schema_version: "harbor-read-operation-public-summary/v0",
+        operation_id: "xhs_read_note_detail",
+        result_kind: "xiaohongshu_note_detail_surface",
+        surface: "note_detail",
+        result_state: "operation_read_response_observed",
+        response_status: 200,
+        normalized: {
+          kind: "xiaohongshu_note_detail",
+          canonical_url: "https://www.xiaohongshu.com/explore/0123456789abcdef01234567",
+          note_id: "0123456789abcdef01234567",
+          title: "公开笔记标题",
+          summary: "公开笔记摘要",
+          body_summary: "公开正文摘要",
+          author: { display_name: "公开作者", author_id: "author_270", profile_url: "https://www.xiaohongshu.com/user/profile/author_270" },
+          interaction_metrics: { likes: "10", comments: "2", collects: "3", shares: "1" },
+          source_citation: {
+            kind: "xhs_note_detail_ref",
+            note_id: "0123456789abcdef01234567",
+            url: "https://www.xiaohongshu.com/explore/0123456789abcdef01234567",
+            field_sources: ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]
+          },
+          source_status: "located"
+        },
+        source_signals: ["pinia_note_store_ready", "xhs_note_detail_document", "xhs_note_detail_rendered"]
+      },
+      source_refs: holderRef.includes("missing_refs") ? sourceRefs.slice(0, 2) : holderRef.includes("extra_refs")
+        ? [...sourceRefs, { kind: "raw_dom_ref", ref: opaqueRefForRun("source", `raw:${holderRef}`) }]
+        : sourceRefs,
+      evidence_refs: evidenceRefs,
+      evidence_ref_kinds: evidenceRefKinds,
+      post_check: {
+        post_check_ref: postCheckRef,
+        status: holderRef.includes("post_check_failure") ? "failed" : "passed",
+        reason: "managed_provider_read_probe_completed"
+      },
+      lode_pin: {
+        repository: "WebEnvoy/Lode",
+        issue: "#268",
+        merge_commit: "66d79b4e600565a00515b1c801e84291edc7b0c1",
+        asset_path: "registry/detail-runtime-consumption.json",
+        asset_sha256: "dca2761b7feb09a0ab86f7202e153da3c97b21a75299af6adaf64eade319deef",
+        truth_id: "lode.xhs-boss.detail-read.runtime-consumption",
+        asset_owner: "Lode"
+      }
+    };
+  };
   const xiaohongshuHarbor = createHarborMock(
     true,
     xiaohongshuPaths,
@@ -1057,7 +1237,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     xiaohongshuScene,
     { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
     {},
-    readyXiaohongshuSiteFacts
+    readyXiaohongshuSiteFacts,
+    xiaohongshuDetailOperation
   );
   const bossPaths: string[] = [];
   const bossBodies: Array<{ path: string; body: JsonObject }> = [];
@@ -1272,8 +1453,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const badJsonHarbor = createBadJsonHarborMock();
   const identityRequiredHarbor = createIdentityRequiredHarborMock();
   try {
-    const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root, { bossFixtureEnabled: true });
-    const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256 });
+    const { registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 } = await writeLodeRegistry(root, { bossFixtureEnabled: true });
+    const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 });
     const nonPinnedResolver = async (input: Parameters<typeof resolver>[0]) => {
       const resolved = await resolver(input);
       if ("category" in resolved || !resolved.runtime_consumption) return resolved;
@@ -1643,6 +1824,144 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+
+      const submitXiaohongshuSearch = async (suffix: string) => {
+        const runId = `run_api_xhs_detail_search_${suffix}`;
+        const submitted = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: runId,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_${runId}`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+        });
+        assert.equal(asRecord(asRecord(submitted.body).run).status, "succeeded", suffix);
+        return { runId, detailRef: detailRefForRun(runId) };
+      };
+      const submitXiaohongshuDetail = (suffix: string, detailRef: string) => postJson(xiaohongshuPort, "/tasks", {
+        run_id: `run_api_xhs_detail_${suffix}`,
+        package_ref: xiaohongshuDetailPackageRef,
+        task_intent: xiaohongshuDetailTaskIntent(`intent_api_xhs_detail_${suffix}`, detailRef),
+        harbor: { identity_environment_ref: "identity-env_runtime_api" }
+      });
+      const assertNoSuccessRefs = (value: unknown, name: string) => {
+        const run = asRecord(asRecord(value).run);
+        assert(["blocked", "failed", "unknown_outcome"].includes(String(run.status)), `${name}: ${JSON.stringify(run)}`);
+        assert.equal(run.result_ref, undefined, name);
+        assert.equal(run.projection_ref, undefined, name);
+        assert.equal(Array.isArray(run.source_refs) && run.source_refs.length > 0, false, name);
+        assert.equal(Array.isArray(run.evidence_refs) && run.evidence_refs.some((ref) => String(ref).startsWith("post_check_")), false, name);
+        assert.notEqual(asRecord(run.post_check ?? {}).status, "passed", name);
+      };
+      const assertRejectedBeforeReadOperation = (value: unknown, name: string) => {
+        const run = asRecord(asRecord(value).run);
+        assert(["blocked", "failed"].includes(String(run.status)), name);
+        assert.equal(run.result_ref, undefined, name);
+        assert.equal(run.projection_ref, undefined, name);
+        assert.equal(Array.isArray(run.source_refs) && run.source_refs.length > 0, false, name);
+        assert.notEqual(asRecord(run.post_check ?? {}).status, "passed", name);
+      };
+
+      const successfulSearch = await submitXiaohongshuSearch("success");
+      const successfulDetail = await submitXiaohongshuDetail("success", successfulSearch.detailRef);
+      assert.equal(successfulDetail.status, 202, JSON.stringify(successfulDetail.body));
+      const successfulDetailRun = asRecord(asRecord(successfulDetail.body).run);
+      assert.equal(successfulDetailRun.status, "succeeded");
+      assert.equal(successfulDetailRun.result_kind, "read-note-detail.read_result");
+      assert.equal(successfulDetailRun.result_ref, "result:core/intent_api_xhs_detail_success");
+      assert.deepEqual(successfulDetailRun.source_refs, [
+        opaqueRefForRun("source", "pinia_store_summary:run_api_xhs_detail_success"),
+        opaqueRefForRun("source", "network_summary:run_api_xhs_detail_success"),
+        opaqueRefForRun("source", "dom_snapshot_summary:run_api_xhs_detail_success")
+      ]);
+      assert.deepEqual(successfulDetailRun.evidence_refs, [
+        opaqueRefForRun("evidence", "run_api_xhs_detail_success"),
+        opaqueRefForRun("post_check", "run_api_xhs_detail_success")
+      ]);
+      assert.equal(asRecord(successfulDetailRun.post_check).status, "passed");
+      const successfulDetailRead = asRecord(xiaohongshuBodies.find((entry) =>
+        entry.path.endsWith("/read-operations") && entry.body.operation_id === "xhs_read_note_detail" && entry.body.detail_ref === successfulSearch.detailRef
+      )?.body);
+      assert.equal(successfulDetailRead.detail_ref, successfulSearch.detailRef);
+      assert.equal(successfulDetailRead.query, undefined);
+      assert.equal(successfulDetailRead.url, undefined);
+
+      const readOperationsBeforeForgedRefs = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      for (const [name, forgedRef] of [
+        ["raw_url", "https://www.xiaohongshu.com/explore/0123456789abcdef01234567"],
+        ["raw_note_id", "0123456789abcdef01234567"],
+        ["xsec", "xsec_token=forbidden"],
+        ["unknown_ref", detailRefForRun("unknown-search-run")]
+      ] as const) {
+        const forged = await submitXiaohongshuDetail(name, forgedRef);
+        assertRejectedBeforeReadOperation(forged.body, name);
+      }
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeForgedRefs);
+
+      const crossBinding = await submitXiaohongshuSearch("cross_binding");
+      const crossBindingPath = await publishedDetailTargetPath(runDir, crossBinding.detailRef);
+      const crossBindingRecord = asRecord(JSON.parse(await readFile(crossBindingPath, "utf8")));
+      await writeFile(crossBindingPath, `${JSON.stringify({ ...crossBindingRecord, identity_environment_ref: "identity-env_other" })}\n`);
+      const readOperationsBeforeCrossBinding = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("cross_binding", crossBinding.detailRef)).body, "cross_binding");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeCrossBinding);
+
+      const expired = await submitXiaohongshuSearch("expired");
+      const expiredPath = await publishedDetailTargetPath(runDir, expired.detailRef);
+      const expiredRecord = asRecord(JSON.parse(await readFile(expiredPath, "utf8")));
+      await writeFile(expiredPath, `${JSON.stringify({ ...expiredRecord, expires_at: "2000-01-01T00:00:00.000Z" })}\n`);
+      const readOperationsBeforeExpired = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("expired", expired.detailRef)).body, "expired");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeExpired);
+
+      const readOperationsBeforeReplay = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("replay", successfulSearch.detailRef)).body, "replay");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeReplay);
+
+      for (const name of ["challenge", "unavailable", "malformed", "missing_refs", "extra_refs", "post_check_failure"] as const) {
+        const search = await submitXiaohongshuSearch(name);
+        const terminal = await submitXiaohongshuDetail(name, search.detailRef);
+        assertNoSuccessRefs(terminal.body, name);
+        if (name === "unavailable") {
+          const retry = await submitXiaohongshuDetail("recovered", search.detailRef);
+          assert.equal(asRecord(asRecord(retry.body).run).status, "succeeded", JSON.stringify(retry.body));
+        }
+        if (name === "malformed") {
+          const readsBeforeUnknownRetry = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+          assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("unknown_retry", search.detailRef)).body, "unknown_retry");
+          assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeUnknownRetry);
+        }
+        if (["missing_refs", "extra_refs", "post_check_failure"].includes(name)) {
+          const retry = await submitXiaohongshuDetail(`contract_recovered_${["missing_refs", "extra_refs", "post_check_failure"].indexOf(name)}`, search.detailRef);
+          assert.equal(asRecord(asRecord(retry.body).run).status, "succeeded", JSON.stringify(retry.body));
+        }
+      }
+
+      const reserveFailure = await submitXiaohongshuSearch("reserve_failure");
+      const lookupFailure = await submitXiaohongshuSearch("lookup_failure");
+      const searchRunPath = join(runDir, `${lookupFailure.runId}.json`);
+      const searchRunRecord = await readFile(searchRunPath, "utf8");
+      await writeFile(searchRunPath, "{invalid-json\n");
+      const readsBeforeLookupFailure = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      const releasesBeforeLookupFailure = xiaohongshuPaths.filter((path) => path.endsWith("/release")).length;
+      const lookupFailureRun = await submitXiaohongshuDetail("lookup_failure", lookupFailure.detailRef);
+      assertNoSuccessRefs(lookupFailureRun.body, "lookup_failure");
+      assert.equal(asRecord(asRecord(lookupFailureRun.body).run).status, "unknown_outcome");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeLookupFailure);
+      assert.equal(xiaohongshuPaths.filter((path) => path.endsWith("/release")).length, releasesBeforeLookupFailure + 1);
+      await writeFile(searchRunPath, searchRunRecord);
+
+      const claimsPath = join(runDir, ".detail-targets", "claims");
+      await rm(claimsPath, { recursive: true });
+      await symlink(runDir, claimsPath);
+      const readsBeforeReserveFailure = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      const releasesBeforeReserveFailure = xiaohongshuPaths.filter((path) => path.endsWith("/release")).length;
+      const reserveFailureRun = await submitXiaohongshuDetail("reserve_failure", reserveFailure.detailRef);
+      assertNoSuccessRefs(reserveFailureRun.body, "reserve_failure");
+      assert.equal(asRecord(asRecord(reserveFailureRun.body).run).status, "unknown_outcome");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeReserveFailure);
+      assert.equal(xiaohongshuPaths.filter((path) => path.endsWith("/release")).length, releasesBeforeReserveFailure + 1);
+      await rm(claimsPath);
+      await mkdir(claimsPath, { mode: 0o700 });
 
       const bossSubmit = await postJson(bossPort, "/tasks", {
         run_id: "run_api_submit_boss_operation",
