@@ -285,7 +285,7 @@ function bossTaskIntent(intentId: string): JsonObject {
 async function writeLodeRegistry(
   root: string,
   options: { bossFixtureEnabled?: boolean } = {}
-): Promise<{ registryPath: string; allowlistAssetSha256: string }> {
+): Promise<{ registryPath: string; allowlistAssetSha256: string; runtimeAdmissionAssetSha256: Record<string, string> }> {
   const bossRuntimeAdmission = options.bossFixtureEnabled ? currentRuntimeAdmission : deferredRuntimeAdmission;
   await mkdir(join(root, "registry"), { recursive: true });
   await mkdir(join(root, "sites", "example", "read-public-page"), { recursive: true });
@@ -391,12 +391,14 @@ async function writeLodeRegistry(
       fail_closed: { unknown_operation: "reject" }
     };
   await writeFile(join(root, "registry", "runtime-consumption-allowlist.json"), JSON.stringify(runtimeAllowlist));
-  await writeFile(join(root, "registry", "detail-runtime-consumption.json"), JSON.stringify({
+  const detailRuntimeConsumption = {
     entries: [{ package_ref: bossDetailPackageRef, runtime_admission: bossRuntimeAdmission }]
-  }));
-  await writeFile(join(root, "registry", "validate-only-runtime-consumption.json"), JSON.stringify({
+  };
+  const validateOnlyRuntimeConsumption = {
     entries: [{ package_ref: bossPrecheckPackageRef, runtime_admission: bossRuntimeAdmission }]
-  }));
+  };
+  await writeFile(join(root, "registry", "detail-runtime-consumption.json"), JSON.stringify(detailRuntimeConsumption));
+  await writeFile(join(root, "registry", "validate-only-runtime-consumption.json"), JSON.stringify(validateOnlyRuntimeConsumption));
   await writeFile(
     join(root, "sites", "example", "read-public-page", "manifest.json"),
     JSON.stringify({
@@ -500,7 +502,14 @@ async function writeLodeRegistry(
     operation_mode: "read",
     resource_requirement_profiles: [{ requirement_profile_id: "boss-job-search-live-runtime", operation_boundary: "read", required_harbor_facts: ["runtime.execution_surface.available", "runtime.origin.www_zhipin_com.available", "identity.boss_geek_logged_in.confirmed", "page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent"].map((fact_key) => ({ fact_key, owner: "Harbor", required: true })) }]
   }));
-  return { registryPath: join(root, "registry", "local-packages.json"), allowlistAssetSha256: fixtureAllowlistSha256(runtimeAllowlist) };
+  return {
+    registryPath: join(root, "registry", "local-packages.json"),
+    allowlistAssetSha256: fixtureAllowlistSha256(runtimeAllowlist),
+    runtimeAdmissionAssetSha256: {
+      "registry/detail-runtime-consumption.json": createHash("sha256").update(canonicalJson(detailRuntimeConsumption)).digest("hex"),
+      "registry/validate-only-runtime-consumption.json": createHash("sha256").update(canonicalJson(validateOnlyRuntimeConsumption)).digest("hex")
+    }
+  };
 }
 
 function createHarborMock(
@@ -857,8 +866,8 @@ async function assertBossProductionAdmissionDisabled(): Promise<void> {
     async releaseCoreTaskSession() { harborCalls += 1; throw new Error("Harbor must not be called"); }
   };
   try {
-    const { registryPath, allowlistAssetSha256 } = await writeLodeRegistry(root);
-    const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256 });
+    const { registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 } = await writeLodeRegistry(root);
+    const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 });
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient });
     const port = await listen(server);
@@ -930,6 +939,30 @@ async function assertBossProductionAdmissionDisabled(): Promise<void> {
       });
       assert("category" in result);
       assert.equal(result.code, code, name);
+    }
+
+    for (const [packageRef, assetName] of [
+      [bossDetailPackageRef, "detail-runtime-consumption.json"],
+      [bossPrecheckPackageRef, "validate-only-runtime-consumption.json"]
+    ] as const) {
+      const caseRoot = join(root, `coordinated-${assetName}`);
+      const fixture = await writeLodeRegistry(caseRoot);
+      const registry = JSON.parse(await readFile(fixture.registryPath, "utf8")) as JsonObject;
+      const registryEntry = (registry.entries as JsonObject[]).find((entry) => entry.package_ref === packageRef)!;
+      registryEntry.runtime_admission = currentRuntimeAdmission;
+      await writeFile(fixture.registryPath, JSON.stringify(registry));
+      const operationPath = join(caseRoot, "registry", assetName);
+      const operationAsset = JSON.parse(await readFile(operationPath, "utf8")) as JsonObject;
+      const operationEntry = (operationAsset.entries as JsonObject[]).find((entry) => entry.package_ref === packageRef)!;
+      operationEntry.runtime_admission = currentRuntimeAdmission;
+      await writeFile(operationPath, JSON.stringify(operationAsset));
+      const result = await createLocalLodePackageResolver({
+        registryPath: fixture.registryPath,
+        allowlistAssetSha256: fixture.allowlistAssetSha256,
+        runtimeAdmissionAssetSha256: fixture.runtimeAdmissionAssetSha256
+      })({ package_ref: packageRef, task_intent: bossDeferredTaskIntent(packageRef, "api", `intent_boss_coordinated_${assetName}`) });
+      assert("category" in result);
+      assert.equal(result.code, "runtime_admission_policy_pin_mismatch", assetName);
     }
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -82,6 +82,7 @@ export type LocalLodePackageResolverOptions = {
   registryPath: string;
   rootDir?: string;
   allowlistAssetSha256?: string;
+  runtimeAdmissionAssetSha256?: Readonly<Record<string, string>>;
 };
 
 export type HttpHarborRuntimeClientOptions = {
@@ -100,6 +101,10 @@ const lodeRuntimeAdmissionAssetPaths = [
   "registry/detail-runtime-consumption.json",
   "registry/validate-only-runtime-consumption.json"
 ] as const;
+const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
+  "registry/detail-runtime-consumption.json": "8d68ec1c56faf5b24d5194c283bd72c7698c9ba2f71e00fd860628a206e54cb5",
+  "registry/validate-only-runtime-consumption.json": "bac6450102af029a35b863d8f7154e5184806daeed30e8207bfe7439d556ad86"
+};
 const canonicalDeferredProbeOperations = [
   {
     package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
@@ -964,6 +969,10 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
       const entries = Array.isArray(asset?.entries) ? asset.entries.map(object) : [];
       const operationEntry = entries.find((candidate) => candidate?.package_ref === packageRef);
       if (operationEntry) {
+        const expectedSha256 = options.runtimeAdmissionAssetSha256?.[assetPath] ?? lodeRuntimeAdmissionAssetSemanticSha256[assetPath];
+        if (expectedSha256 && createHash("sha256").update(canonicalJson(asset)).digest("hex") !== expectedSha256) {
+          return failure("capability_contract", "runtime_admission_policy_pin_mismatch", "admission", "repair_package_contract");
+        }
         operationPolicy = operationEntry.runtime_admission;
         break;
       }
