@@ -3,13 +3,14 @@
 ## Static Facts
 
 - Item ID: CORE-275
-- Goal: Normalize Harbor `safety_challenge` to the pinned Lode BOSS `captcha_required` failure without weakening unknown-response handling.
+- Goal: Normalize Harbor `safety_challenge` to the pinned Lode `captcha_required` failure without weakening fail-closed handling.
 - Scope: Shared Core Harbor-to-Lode failure adapter, focused API integration regressions, and CORE-275 item-specific carriers.
 - Execution Path: work/core-275-safety-challenge
 - Workspace Entry: .
 - Recovery Entry: .loom/progress/CORE-275.md
+- Review Entry: .loom/reviews/CORE-275.json
 - Validation Entry: Core/API targeted checks, full repository checks, diff checks, and Loom item checks.
-- Closing Condition: Ready PR for #275; no merge, issue closure, packaged rebuild, or live rerun.
+- Closing Condition: PR #276 merged after current-head review and hosted gate; no BOSS production rerun.
 
 ## Non-Goals
 
