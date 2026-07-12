@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,8 +17,159 @@ import { assertRealSiteReadOnlyTaskExecution } from "./real-site-readonly-self-c
 import { assertRealSiteReadOnlyResultProjection } from "./real-site-readonly-result-self-check.js";
 import { assertRealRunQueryEvidence } from "./real-run-query-self-check.js";
 import { assertRealSiteWritePreviewResults } from "./real-site-write-preview-self-check.js";
+import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
+import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
 
 let tick = 0;
+
+async function assertDetailTargetStore(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-detail-target-"));
+  const observedAt = new Date("2026-07-12T00:00:00.000Z");
+  const refs = {
+    positive: "detail_ref_11111111-1111-4111-8111-111111111111",
+    crossIdentity: "detail_ref_22222222-2222-4222-8222-222222222222",
+    crossSession: "detail_ref_33333333-3333-4333-8333-333333333333",
+    expired: "detail_ref_44444444-4444-4444-8444-444444444444"
+  };
+  const expected = {
+    site_slug: "xiaohongshu" as const,
+    identity_environment_ref: "identity-env-detail",
+    runtime_session_ref: "session-detail"
+  };
+  try {
+    const input = {
+      ...expected,
+      detail_refs: Object.values(refs),
+      search_run_ref: "run-search-detail",
+      search_result_ref: "result-search-detail",
+      observed_at: observedAt.toISOString()
+    };
+    const batch = await stageSearchDetailTargets(directory, input, observedAt);
+    assert.deepEqual(await inspectDetailTarget(directory, refs.positive, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
+    await publishSearchDetailTargets(batch);
+    assert.deepEqual(await claimDetailTarget(directory, "detail_ref_forged", { ...expected, detail_run_ref: "run-forged" }, observedAt), { ok: false, code: "detail_ref_unknown" });
+    assert.deepEqual(await claimDetailTarget(directory, refs.crossIdentity, { ...expected, identity_environment_ref: "identity-env-other", detail_run_ref: "run-cross-identity" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
+    assert.deepEqual(await claimDetailTarget(directory, refs.crossSession, { ...expected, runtime_session_ref: "session-other", detail_run_ref: "run-cross-session" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
+    const claimed = await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-detail" }, observedAt);
+    assert.equal(claimed.ok, true);
+    if (claimed.ok) {
+      assert.equal(claimed.binding.search_run_ref, "run-search-detail");
+      assert.equal(claimed.binding.search_result_ref, "result-search-detail");
+    }
+    assert.deepEqual(await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-replay" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
+    assert.deepEqual(
+      await claimDetailTarget(directory, refs.expired, { ...expected, detail_run_ref: "run-expired" }, new Date(observedAt.getTime() + detailTargetTtlMs)),
+      { ok: false, code: "detail_ref_expired" }
+    );
+    await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-republish", detail_refs: [refs.positive] }, observedAt), /already exists/);
+
+    const rollbackRef = "detail_ref_55555555-5555-4555-8555-555555555555";
+    const rollbackBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-rollback", detail_refs: [rollbackRef] }, observedAt);
+    const [claimWhileStaged] = await Promise.all([
+      claimDetailTarget(directory, rollbackRef, { ...expected, detail_run_ref: "run-concurrent-claim" }, observedAt),
+      rollbackSearchDetailTargets(rollbackBatch)
+    ]);
+    assert.deepEqual(claimWhileStaged, { ok: false, code: "detail_ref_unknown" });
+    assert.deepEqual(await inspectDetailTarget(directory, rollbackRef, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
+
+    const concurrentRef = "detail_ref_66666666-6666-4666-8666-666666666666";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-concurrent", detail_refs: [concurrentRef] }, observedAt);
+    const concurrentClaims = await Promise.all([
+      claimDetailTarget(directory, concurrentRef, { ...expected, detail_run_ref: "run-claim-a" }, observedAt),
+      claimDetailTarget(directory, concurrentRef, { ...expected, detail_run_ref: "run-claim-b" }, observedAt)
+    ]);
+    assert.equal(concurrentClaims.filter((claim) => claim.ok).length, 1);
+    assert.equal(concurrentClaims.filter((claim) => !claim.ok && claim.code === "detail_ref_already_consumed").length, 1);
+
+    const reservableRef = "detail_ref_99999999-9999-4999-8999-999999999999";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-reservable", detail_refs: [reservableRef] }, observedAt);
+    const reservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-a" }, observedAt);
+    assert.equal(reservation.ok, true);
+    assert.deepEqual(await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-b" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
+    if (!reservation.ok) throw new Error("detail target reservation failed");
+    // Unknown outcomes intentionally retain this reservation until reconciliation.
+    assert.equal((await inspectDetailTarget(directory, reservableRef, expected, observedAt)).ok, true);
+    await releaseDetailTargetReservation(reservation.reservation);
+    const retryReservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-retry" }, observedAt);
+    if (!retryReservation.ok) throw new Error("released detail target could not be reserved again");
+    assert.equal((await commitDetailTargetReservation(retryReservation.reservation, observedAt)).ok, true);
+    assert.deepEqual(await claimDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-replay" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
+
+    const compensatedRef = "detail_ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const compensatedBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-compensate", detail_refs: [compensatedRef] }, observedAt);
+    await publishSearchDetailTargets(compensatedBatch);
+    assert.equal((await inspectDetailTarget(directory, compensatedRef, expected, observedAt)).ok, true);
+    await compensatePublishedSearchDetailTargets(compensatedBatch);
+    assert.deepEqual(await inspectDetailTarget(directory, compensatedRef, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
+    await assert.rejects(() => compensatePublishedSearchDetailTargets({ directory, batch_id: "../../outside" }), /batch is invalid/);
+
+    const cleanupRef = "detail_ref_cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const cleanupBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-cleanup-recovery", detail_refs: [cleanupRef] }, observedAt);
+    const cleanupReservation = join(directory, ".detail-targets", "reservations", createHash("sha256").update(cleanupRef).digest("hex"));
+    await unlink(cleanupReservation);
+    await mkdir(cleanupReservation);
+    await publishSearchDetailTargets(cleanupBatch);
+    assert.equal((await inspectDetailTarget(directory, cleanupRef, expected, observedAt)).ok, true);
+    await rm(cleanupReservation, { recursive: true, force: true });
+    await recoverPublishedSearchDetailTargetReservations(cleanupBatch);
+    await compensatePublishedSearchDetailTargets(cleanupBatch);
+
+    await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-sensitive", search_result_ref: "https://example.test/xsec_token", detail_refs: ["detail_ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] }, observedAt), /search result ref is invalid/);
+
+    const skewRef = "detail_ref_77777777-7777-4777-8777-777777777777";
+    await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-stale", detail_refs: [skewRef], observed_at: new Date(observedAt.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString() }, observedAt), /skew/);
+    await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-future", detail_refs: [skewRef], observed_at: new Date(observedAt.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString() }, observedAt), /skew/);
+    const consumedDirectory = join(directory, ".detail-targets", "consumed");
+    const persisted = (await Promise.all((await readdir(consumedDirectory)).map((name) => readFile(join(consumedDirectory, name), "utf8")))).join("\n");
+    assert(!/(https?:\/\/|xsec|cookie|token|raw_dom|raw_har)/i.test(persisted));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+
+  const symlinkDirectory = await mkdtemp(join(tmpdir(), "webenvoy-detail-target-symlink-"));
+  const outside = await mkdtemp(join(tmpdir(), "webenvoy-detail-target-outside-"));
+  try {
+    await symlink(outside, join(symlinkDirectory, ".detail-targets"));
+    await assert.rejects(() => persistSearchDetailTargets(symlinkDirectory, {
+      site_slug: "xiaohongshu", identity_environment_ref: "identity", runtime_session_ref: "session",
+      search_run_ref: "run-symlink", search_result_ref: "result-symlink",
+      detail_refs: ["detail_ref_88888888-8888-4888-8888-888888888888"], observed_at: observedAt.toISOString()
+    }, observedAt), /secure directory/);
+    assert.deepEqual(await readdir(outside), []);
+  } finally {
+    await rm(symlinkDirectory, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+}
+
+async function assertDetailRequestOmitsRawUrl(): Promise<void> {
+  let body = "";
+  const previousToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = "core-detail-self-check-token";
+  const server = createServer((request, response) => {
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "unavailable" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const client = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${address.port}` });
+    await client.executeReadOperation({
+      runtime_session_ref: "session-detail", site_id: "xiaohongshu", operation_id: "xhs_read_note_detail",
+      detail_ref: "detail_ref_99999999-9999-4999-8999-999999999999", url: "https://www.xiaohongshu.com/explore/forbidden"
+    });
+    assert.equal(JSON.parse(body).url, undefined);
+  } finally {
+    if (previousToken === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    else process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = previousToken;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
 
 function nextInstant(): Date {
   const instant = new Date(Date.UTC(2026, 6, 1, 0, 0, tick));
@@ -1213,6 +1366,10 @@ try {
 
 await assertTaskSubmissionAdmission();
 console.log("Validated read-only task submission admission.");
+await assertDetailTargetStore();
+console.log("Validated bound, expiring, single-use detail targets.");
+await assertDetailRequestOmitsRawUrl();
+console.log("Validated detail dispatch omits caller-provided Harbor URL.");
 await assertRealSiteReadOnlyTaskExecution();
 console.log("Validated real-site read-only task execution.");
 await assertRealSiteReadOnlyResultProjection();

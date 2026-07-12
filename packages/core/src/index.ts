@@ -1,4 +1,25 @@
 export {
+  claimDetailTarget,
+  commitDetailTargetReservation,
+  compensatePublishedSearchDetailTargets,
+  detailTargetTtlMs,
+  inspectDetailTarget,
+  isOpaqueDetailRef,
+  persistSearchDetailTargets,
+  publishSearchDetailTargets,
+  recoverPublishedSearchDetailTargetReservations,
+  releaseDetailTargetReservation,
+  reserveDetailTarget,
+  rollbackSearchDetailTargets,
+  stageSearchDetailTargets,
+  type DetailTargetBatch,
+  type DetailTargetBinding,
+  type DetailTargetClaim,
+  type DetailTargetLookup,
+  type DetailTargetReservation,
+  type DetailTargetReserve
+} from "./detail-target-store.js";
+export {
   capabilityRunQuerySchemaVersion,
   getCapabilityRunSummary,
   type CapabilityFailureSummary,
