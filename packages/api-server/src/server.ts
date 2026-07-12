@@ -27,6 +27,9 @@ export type ApiServerOptions = {
 const serviceName = "webenvoy-api-server";
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
+const validateOnlyFields = new Set(["url", "target_ref", "no_submit_guard", "requested_fields", "include_source_refs", "proposed_input_summary"]);
+const validateOnlyRequestedFields = new Set(["title", "summary", "canonical_url", "source_status"]);
+const runtimeTaskFields = new Set(["run_id", "task_intent", "package_ref", "public_query", "validate_only", "harbor"]);
 const privateHarborInputFieldNames = new Set([
   "raw_payload",
   "dom",
@@ -150,7 +153,7 @@ function queryStatusCode(failure: FailureRecord): number {
 
 function submitStatusCode(failure: FailureRecord): number {
   if (failure.code === "run_id_already_exists") return 409;
-  if (failure.code === "harbor_read_operation_outcome_unknown") return 202;
+  if (failure.code === "harbor_read_operation_outcome_unknown" || failure.code === "harbor_write_precheck_outcome_unknown" || failure.code === "timeout") return 202;
   if (failure.code.startsWith("core_task_session_")) return 503;
   if (failure.category === "request_invalid") return 400;
   if (failure.category === "capability_contract") return 422;
@@ -171,6 +174,8 @@ async function validateRuntimeTaskSubmissionRequest(
   body: JsonBody,
   store: FileRunRecordStore
 ): Promise<RuntimeTaskSubmissionRequest | FailureRecord> {
+  const unsupportedField = Object.keys(body).find((field) => !runtimeTaskFields.has(field));
+  if (unsupportedField) return requestInvalid(`unsupported_task_field:${unsupportedField}`);
   const runId = optionalString(body.run_id, "run_id_invalid");
   if (runId === undefined || isFailureRecord(runId) || !runIdPattern.test(runId)) return requestInvalid("run_id_invalid");
   if (await store.getRunRecord(runId)) return requestInvalid("run_id_already_exists", "choose_new_run_id");
@@ -185,6 +190,33 @@ async function validateRuntimeTaskSubmissionRequest(
   const publicQuery = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.query, "public_query_invalid");
   const capability = jsonObject(task_intent.capability);
   const scope = jsonObject(task_intent.scope);
+  const xhsWritePrecheck = package_ref === "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0" &&
+    capability?.ref === "lode:capability/publish-note-precheck" && capability.source_ref === package_ref && scope?.target_type === "xiaohongshu_publish_note_precheck";
+  const validateOnlyInput = body.validate_only === undefined ? undefined : jsonObject(body.validate_only);
+  if (body.validate_only !== undefined && !validateOnlyInput) return requestInvalid("validate_only_input_invalid");
+  let validate_only: RuntimeTaskSubmissionRequest["validate_only"];
+  if (validateOnlyInput) {
+    const url = optionalHttpUrl(validateOnlyInput.url);
+    const targetRef = optionalString(validateOnlyInput.target_ref, "validate_only_target_ref_invalid");
+    const requestedFields = validateOnlyInput.requested_fields;
+    const proposedSummary = optionalString(validateOnlyInput.proposed_input_summary, "validate_only_summary_invalid");
+    if (!xhsWritePrecheck || isFailureRecord(url) || isFailureRecord(targetRef) || isFailureRecord(proposedSummary) || url === undefined || targetRef === undefined ||
+      Object.keys(validateOnlyInput).some((field) => !validateOnlyFields.has(field)) || validateOnlyInput.no_submit_guard !== "active" ||
+      (requestedFields !== undefined && (!Array.isArray(requestedFields) || requestedFields.length < 1 || requestedFields.length > 4 || new Set(requestedFields).size !== requestedFields.length || !requestedFields.every((field) => typeof field === "string" && validateOnlyRequestedFields.has(field)))) ||
+      (validateOnlyInput.include_source_refs !== undefined && typeof validateOnlyInput.include_source_refs !== "boolean") ||
+      targetRef.length > 200 || /[\u0000-\u001f\u007f]/.test(targetRef) ||
+      (typeof proposedSummary === "string" && (proposedSummary.length > 500 || proposedSummary.trim() !== proposedSummary || /[\u0000-\u001f\u007f]/.test(proposedSummary)))
+    ) return requestInvalid("validate_only_input_invalid");
+    const parsedUrl = new URL(url);
+    if (parsedUrl.origin !== "https://creator.xiaohongshu.com" || parsedUrl.pathname !== "/publish/publish" || parsedUrl.username || parsedUrl.password || parsedUrl.hash) return requestInvalid("validate_only_input_invalid");
+    validate_only = {
+      url: parsedUrl.href, target_ref: targetRef, no_submit_guard: "active",
+      ...(requestedFields === undefined ? {} : { requested_fields: requestedFields as ("title" | "summary" | "canonical_url" | "source_status")[] }),
+      ...(validateOnlyInput.include_source_refs === undefined ? {} : { include_source_refs: validateOnlyInput.include_source_refs as boolean }),
+      ...(proposedSummary === undefined ? {} : { proposed_input_summary: proposedSummary })
+    };
+  }
+  if (xhsWritePrecheck !== Boolean(validate_only)) return requestInvalid("validate_only_input_required");
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
   const allowedPublicQueryFields = bossJobSearch ? new Set(["query", "city_code", "page", "limit"]) : new Set(["query"]);
@@ -235,6 +267,7 @@ async function validateRuntimeTaskSubmissionRequest(
       return requestInvalid("boss_target_invalid");
     }
   }
+  if (validate_only && (scope?.target_ref !== validate_only.url || harbor?.url !== validate_only.url || publicQueryInput !== undefined)) return requestInvalid("validate_only_target_invalid");
 
   return {
     run_id: runId,
@@ -246,6 +279,7 @@ async function validateRuntimeTaskSubmissionRequest(
       ...(page === undefined ? {} : { page }),
       ...(limit === undefined ? {} : { limit })
     } }),
+    ...(validate_only === undefined ? {} : { validate_only }),
     ...(harbor === undefined ? {} : { harbor })
   };
 }
