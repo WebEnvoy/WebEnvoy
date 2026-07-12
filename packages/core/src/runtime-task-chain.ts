@@ -1421,6 +1421,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         run_id: input.run_id,
         package_ref: input.package_ref,
         control_owner: "core_task",
+        headless: false,
         holder_ref: input.run_id,
         reuse_existing: input.harbor?.reuse_existing ?? true,
         timeout_ms: input.harbor?.timeout_ms

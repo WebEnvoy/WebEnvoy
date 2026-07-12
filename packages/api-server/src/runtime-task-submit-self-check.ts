@@ -1776,6 +1776,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(sessionBody.run_id, "run_api_submit_runtime_chain");
       assert.equal(sessionBody.package_ref, packageRef);
       assert.equal(sessionBody.holder_ref, "run_api_submit_runtime_chain");
+      assert.equal(sessionBody.headless, false);
       assert.equal(sessionBody.url, "https://example.org/");
       const snapshotBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/snapshot")?.body);
       assert.equal(snapshotBody.run_id, "run_api_submit_runtime_chain");
@@ -1830,6 +1831,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
+      assert.equal(xiaohongshuSessionBody.headless, false);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
 
       const submitXiaohongshuSearch = async (suffix: string) => {
