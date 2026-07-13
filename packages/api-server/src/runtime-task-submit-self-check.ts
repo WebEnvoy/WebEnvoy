@@ -62,6 +62,9 @@ const xiaohongshuResourceRef = "xiaohongshu.search-notes.resources";
 const xiaohongshuDetailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
 const xiaohongshuDetailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
 const xiaohongshuDetailResourceRef = "xiaohongshu.read-note-detail.resources";
+const xiaohongshuWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+const xiaohongshuWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const xiaohongshuWritePrecheckResourceRef = "xiaohongshu.publish-note-precheck.resources";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
 const bossLockRef = "lode://lock/site-capability/boss/job-search@0.1.0";
 const bossResourceRef = "boss.job-search.resources";
@@ -305,6 +308,198 @@ function xiaohongshuDetailTaskIntent(intentId: string, detailRef: string): JsonO
     resource_requirement_refs: [xiaohongshuDetailResourceRef],
     evidence_policy_ref: "evidence-policy:refs-only"
   };
+}
+
+function xiaohongshuWritePrecheckTaskIntent(intentId: string, url: string): JsonObject {
+  return {
+    schema_version: "webenvoy.task-intent.v0", intent_id: intentId, entrypoint: "app",
+    user_intent: { summary: "Validate the Xiaohongshu creator page without publishing." },
+    capability: { ref: "lode:capability/publish-note-precheck", version: "0.1.0", source_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef },
+    input: { summary: "Validate public creator fields without storing draft content." },
+    scope: { target_type: "xiaohongshu_publish_note_precheck", target_ref: url },
+    policy: { risk: "write", execution_intent: "validate_only" },
+    resource_requirement_refs: [xiaohongshuWritePrecheckResourceRef], evidence_policy_ref: "evidence-policy:refs-only"
+  };
+}
+
+async function assertXiaohongshuValidateOnlyTask(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-xhs-write-precheck-"));
+  const url = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+  const targetRef = "writable-target:xiaohongshu/creator-publish-note";
+  const sourceRefs = ["source_11111111-1111-4111-8111-111111111111", "source_22222222-2222-4222-8222-222222222222"];
+  const snapshotRef = "screenshot_11111111-1111-4111-8111-111111111111";
+  const postCheckRef = "post_check_11111111-1111-4111-8111-111111111111";
+  const pageRef = "page_11111111-1111-4111-8111-111111111111";
+  let capturedRequest: unknown;
+  let responseIdentity = "identity-env_runtime_api";
+  let responseTarget = targetRef;
+  let legacyFieldSuccess = false;
+  let operationMode: "completed" | "unknown" | "timeout" = "completed";
+  let cleanupFailure = false;
+  let pinVersion = "0.1.0";
+  let pinOrigin = "https://creator.xiaohongshu.com";
+  const runtimeConsumption = {
+    allowlist_id: "lode.xhs-boss.write-precheck.runtime-consumption", allowlist_version: "0.1.0", asset_owner: "Lode",
+    consumer: { repository: "WebEnvoy/WebEnvoy", issue: "#231", purpose: "admit and record an exact validate-only precheck" },
+    package_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef, version: "0.1.0", site_slug: "xiaohongshu",
+    operation_id: "xhs_publish_note_precheck", operation_mode: "validate_only", lifecycle: "proposed",
+    allowed_origins: ["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"], resource_requirements_id: xiaohongshuWritePrecheckResourceRef,
+    failure_mapping_id: "xiaohongshu.publish-note-precheck.failure-mapping", required_failure_classes: ["invalid_contract", "resource_unavailable", "site_changed", "empty_result", "preview_unavailable", "page_changed", "user_cancelled", "post_check_failed", "evidence_expired", "login_required", "permission_insufficient", "composition_not_initialized", "target_not_writable", "safety_challenge"],
+    required_source_ref_kinds: ["creator_publish_page_summary", "dom_snapshot_summary"], required_evidence_ref_kinds: ["snapshot_ref", "post_check_ref"],
+    post_check_id: "xiaohongshu.publish-note-precheck.post-check", required_post_check_fields: ["status", "reason", "source_refs", "evidence_refs", "submitted"]
+  } as const;
+  const resolver = async () => ({
+    package_ref: xiaohongshuWritePrecheckPackageRef, source_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef,
+    capability_id: "publish-note-precheck", operation_id: "xhs_publish_note_precheck", operation_mode: "validate_only", version: "0.1.0", lifecycle: "proposed",
+    runtime_admission: currentRuntimeAdmission,
+    resource_requirements: {
+      schema_version: "lode.resource-requirements.v0", resource_requirements_id: xiaohongshuWritePrecheckResourceRef, package_ref: xiaohongshuWritePrecheckPackageRef, operation_mode: "validate_only",
+      resource_requirement_profiles: [{ requirement_profile_id: "xhs-creator-publish-page-precheck", operation_boundary: "validate_only", required_harbor_facts: [
+        "runtime.execution_surface.available", "runtime.public_https_navigation.allowed", "runtime.site_identity.logged_in", "snapshot.creator_publish_entrypoint.available", "refmap.entrypoint_refs.available", "evidence.snapshot_ref.available"
+      ].map((fact_key) => ({ fact_key, owner: "Harbor" as const, required: true, freshness: "current_execution_window" })) }]
+    }, runtime_consumption: runtimeConsumption
+  });
+  const client: HarborRuntimeClient = {
+    async collectAdmissionFacts() {
+      return {
+        harbor_identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com"),
+        harbor_provider_status: { schema_version: "harbor-browser-provider-status/v0", providers: [{ provider_id: "cloakbrowser", install: { status: "installed", launchability: "launchable" } }] },
+        harbor_runtime_facts: liveRuntimeFacts(), harbor_scene_ref: { status: "unavailable", failure_class: "not_required", retryable: false },
+        harbor_resource_facts: { schema_version: "harbor-core-resource-facts/v0", resource_facts: ["runtime.execution_surface.available", "runtime.public_https_navigation.allowed", "runtime.site_identity.logged_in", "snapshot.creator_publish_entrypoint.available", "refmap.entrypoint_refs.available", "evidence.snapshot_ref.available"].map((fact_key) => ({ fact_key, state: "available" })), consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material." },
+        harbor_write_precheck_facts: {
+          schema_version: "harbor-write-precheck-facts/v0", runtime_session_ref: "session_runtime_api_ready", provider_ref: "harbor:provider/cloakbrowser", profile_ref: "profile_runtime_api",
+          writable_target: { target_ref: targetRef, runtime_session_ref: "session_runtime_api_ready", snapshot_ref: snapshotRef, refmap_ref: "refmap_write_precheck", evidence_refs: [snapshotRef] },
+          form_state: { snapshot_ref: snapshotRef, fields: [{ field_ref: "field_title", target_ref: targetRef, input_kind: "text", required: true, sensitivity: "public", export_policy: "safe_summary", value_state: "empty" }], state_summary: "Public field states only." },
+          pre_write_guard: { status: "active", no_submit_guard: "active", blocked_events: ["publish", "save", "upload", "submit", "schedule"], enforcement: "facts_only_no_real_submit", runtime_ready: true, blocking_reasons: [] },
+          privacy_boundary: { raw_values: "not_exposed", credential_profile_storage: "not_exposed", page_network_capture: "not_exposed", export_boundary: "refs_and_redacted_field_state_only" }, unavailable: null
+        }
+      } as unknown as Awaited<ReturnType<HarborRuntimeClient["collectAdmissionFacts"]>>;
+    },
+    async executeReadOperation() { throw new Error("read operation must not run"); },
+    async executeValidateOnlyWritePrecheck(input) {
+      capturedRequest = input.request;
+      if (operationMode === "unknown") return { category: "runtime_execution", code: "harbor_write_precheck_outcome_unknown", phase: "verification", recovery_hint: "reconcile_status" };
+      if (operationMode === "timeout") return new Promise((resolve) => input.signal?.addEventListener("abort", () => resolve({ category: "runtime_execution", code: "timeout", phase: "verification", recovery_hint: "reconcile_status" }), { once: true }));
+      const sources = [{ kind: "creator_publish_page_summary", ref: sourceRefs[0] }, { kind: "dom_snapshot_summary", ref: sourceRefs[1] }];
+      const evidence = [{ kind: "snapshot_ref", ref: snapshotRef }, { kind: "post_check_ref", ref: postCheckRef }];
+      return {
+        schema_version: "harbor-validate-only-write-precheck/v0", status: "completed", runtime_session_ref: input.runtime_session_ref,
+        identity_ref: responseIdentity, page_ref: pageRef, merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459",
+        operation_ref: "write_precheck_11111111-1111-4111-8111-111111111111", result_ref: "write_precheck_result_11111111-1111-4111-8111-111111111111", submitted_result_ref: "submitted_result_11111111-1111-4111-8111-111111111111",
+        observed_at: "2026-07-13T00:00:00.000Z", submitted: false, source_refs: sources, evidence_ref_kinds: evidence, target_ref: responseTarget,
+        precheck_scope: "entrypoint_only", classification: "partial_result", composition_state: "composition_not_initialized",
+        entrypoint_observations: { route_loaded: true, user_confirmed_identity: true, challenge_absent: true, publish_vue_container_visible: true, upload_image_tab_active: true, upload_image_entry_visible: true, text_image_entry_visible: true },
+        field_states: Object.fromEntries(["title_input", "content_editor", "publish_control"].map((field) => [field, legacyFieldSuccess ? { state: "available" } : { availability: "unavailable", observation: "not_observed" }])),
+        prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false }, no_submit_guard: "active",
+        post_check: { status: "passed", reason: "validated_creator_entrypoint_without_submission", source_refs: sources, evidence_refs: [evidence[0]], post_check_ref: postCheckRef, submitted: false, no_submit_guard: "active" },
+        lode_pin: { package_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef, version: pinVersion, operation_id: "xhs_publish_note_precheck", operation_mode: "validate_only", origin: pinOrigin, repository: "WebEnvoy/Lode", commit: "749aff88309b26013cbd24ce1308ca213804a459", asset_path: "registry/validate-only-runtime-consumption.json", asset_sha256: "9852721d7b4f803c9a206ab86cacf8a0ae7b33ff1163d354c0fdeaee79173d2f" },
+        public_boundary: { raw_dom: "not_exposed", raw_har: "not_exposed", screenshot_body: "not_exposed", credentials: "not_exposed", external_write_actions: "not_performed" }
+      };
+    },
+    async releaseCoreTaskSession() { return cleanupFailure ? { category: "runtime_execution", code: "session_release_failed", phase: "verification", recovery_hint: "retry_cleanup" } : undefined; }
+  };
+  try {
+    const store = createFileRunRecordStore({ directory });
+    const server = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: client });
+    const port = await listen(server);
+    try {
+      const validate_only = { url, target_ref: targetRef, no_submit_guard: "active", requested_fields: ["title", "summary", "canonical_url", "source_status"], include_source_refs: true, proposed_input_summary: "Validate creator fields without saving, uploading, or publishing." };
+      const response = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(response.status, 202, JSON.stringify(response.body));
+      assert.deepEqual(capturedRequest, validate_only);
+      const record = await store.getRunRecord("run_xhs_validate_only");
+      assert.equal(record?.status, "succeeded"); assert.equal(record?.preview_result?.submitted, false);
+      assert.deepEqual(record?.preview_result?.expected_change && {
+        identity_ref: record.preview_result.expected_change.identity_ref,
+        page_ref: record.preview_result.expected_change.page_ref,
+        merged_head_ref: record.preview_result.expected_change.merged_head_ref,
+        run_ref: record.preview_result.expected_change.run_ref
+      }, { identity_ref: "identity-env_runtime_api", page_ref: pageRef, merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459", run_ref: "run_xhs_validate_only" });
+      assert.equal(record?.preview_result?.expected_change?.classification, "partial_result");
+      assert.equal(record?.preview_result?.expected_change?.precheck_scope, "entrypoint_only");
+      assert.equal(record?.preview_result?.expected_change?.composition_state, "composition_not_initialized");
+      assert.deepEqual(record?.source_refs, sourceRefs); assert.deepEqual(record?.evidence_refs, [snapshotRef, postCheckRef]);
+      responseIdentity = "identity-env_wrong";
+      const mismatched = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_identity_mismatch", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_identity_mismatch", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(mismatched.status, 503); assert.equal(asRecord(asRecord(mismatched.body).error).code, "write_precheck_contract_drift");
+      responseIdentity = "identity-env_runtime_api"; responseTarget = "writable-target:xiaohongshu/other-target";
+      const targetMismatch = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_target_mismatch", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_target_mismatch", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(targetMismatch.status, 503); assert.equal(asRecord(asRecord(targetMismatch.body).error).code, "write_precheck_contract_drift");
+      responseTarget = targetRef; legacyFieldSuccess = true;
+      const legacyFields = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_legacy_fields", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_legacy_fields", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(legacyFields.status, 503); assert.equal(asRecord(asRecord(legacyFields.body).error).code, "write_precheck_contract_drift");
+      legacyFieldSuccess = false; operationMode = "unknown";
+      cleanupFailure = true;
+      const unknown = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_unknown", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_unknown", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(unknown.status, 202); assert.equal(asRecord(asRecord(unknown.body).run).status, "unknown_outcome");
+      const unknownRecord = await store.getRunRecord("run_xhs_validate_only_unknown");
+      assert.equal(unknownRecord?.status, "unknown_outcome"); assert.match(unknownRecord?.post_check?.summary ?? "", /session cleanup also failed with session_release_failed/);
+      cleanupFailure = false;
+      operationMode = "timeout";
+      const timeout = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_timeout", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_timeout", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url, timeout_ms: 5 }, validate_only });
+      assert.equal(timeout.status, 202); assert.equal(asRecord(asRecord(timeout.body).run).status, "unknown_outcome"); assert.equal(asRecord(asRecord(timeout.body).error).code, "timeout");
+      operationMode = "completed"; pinVersion = "9.9.9";
+      const versionMismatch = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_pin_version_mismatch", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_pin_version_mismatch", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(versionMismatch.status, 503); assert.equal(asRecord(asRecord(versionMismatch.body).error).code, "write_precheck_contract_drift");
+      pinVersion = "0.1.0"; pinOrigin = "https://www.xiaohongshu.com";
+      const originMismatch = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_pin_origin_mismatch", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_pin_origin_mismatch", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only });
+      assert.equal(originMismatch.status, 503); assert.equal(asRecord(asRecord(originMismatch.body).error).code, "write_precheck_contract_drift");
+      const drifted = await postJson(port, "/tasks", { run_id: "run_xhs_validate_only_bad", package_ref: xiaohongshuWritePrecheckPackageRef, task_intent: xiaohongshuWritePrecheckTaskIntent("intent_xhs_validate_only_bad", url), harbor: { identity_environment_ref: "identity-env_runtime_api", url }, validate_only: { ...validate_only, no_submit_guard: "inactive" } });
+      assert.equal(drifted.status, 400);
+    } finally { await close(server); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+async function assertWritePrecheckEvidenceReadback(): Promise<void> {
+  const refs = [
+    "page_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "write_precheck_result_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "submitted_result_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "source_dddddddd-dddd-4ddd-8ddd-dddddddddddd", "source_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "screenshot_ffffffff-ffff-4fff-8fff-ffffffffffff", "post_check_11111111-1111-4111-8111-111111111111"
+  ];
+  let unavailableRef: string | undefined;
+  let evidenceIdentity = "identity-env_runtime_api";
+  let responseMode: "completed" | "malformed" = "completed";
+  const reads: string[] = [];
+  let authorization: string | undefined;
+  const server = createServer(async (request, response) => {
+    if (request.method === "POST" && request.url === "/runtime/sessions/session_write_precheck/validate-only-write-precheck") {
+      authorization = request.headers.authorization;
+      await readRequestJson(request);
+      if (responseMode === "malformed") { sendJson(response, 200, { status: "completed" }); return; }
+      const sources = [{ kind: "creator_publish_page_summary", ref: refs[3] }, { kind: "dom_snapshot_summary", ref: refs[4] }];
+      const evidence = [{ kind: "snapshot_ref", ref: refs[5] }, { kind: "post_check_ref", ref: refs[6] }];
+      sendJson(response, 200, { schema_version: "harbor-validate-only-write-precheck/v0", status: "completed", runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", page_ref: refs[0], merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459", operation_ref: "write_precheck_22222222-2222-4222-8222-222222222222", result_ref: refs[1], submitted_result_ref: refs[2], observed_at: "2026-07-13T00:00:00.000Z", submitted: false, source_refs: sources, evidence_ref_kinds: evidence, target_ref: "writable-target:xiaohongshu/creator-publish-note", precheck_scope: "entrypoint_only", classification: "partial_result", composition_state: "composition_not_initialized", field_states: Object.fromEntries(["title_input", "content_editor", "publish_control"].map((field) => [field, { availability: "unavailable", observation: "not_observed" }])), no_submit_guard: "active", post_check: { status: "passed", reason: "validated_creator_entrypoint_without_submission", source_refs: sources, evidence_refs: [evidence[0]], post_check_ref: refs[6], submitted: false, no_submit_guard: "active" }, lode_pin: {}, public_boundary: {} });
+      return;
+    }
+    const match = /^\/runtime\/evidence\/(.+)$/.exec(request.url ?? "");
+    if (request.method === "GET" && match) {
+      const ref = decodeURIComponent(match[1]!); reads.push(ref);
+      sendJson(response, 200, { evidence_ref: ref, access_state: ref === unavailableRef ? "expired" : "available", runtime_session_ref: "session_write_precheck", identity_ref: evidenceIdentity });
+      return;
+    }
+    sendJson(response, 404, { error: "not_found" });
+  });
+  const previous = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
+  try {
+    const port = await listen(server);
+    const client = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${port}` });
+    const request = { url: "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image", target_ref: "writable-target:xiaohongshu/creator-publish-note", no_submit_guard: "active" as const };
+    const completed = await client.executeValidateOnlyWritePrecheck({ runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", request });
+    assert.equal(asRecord(completed).status, "completed"); assert.deepEqual(reads, refs); assert.equal(authorization, `Bearer ${harborSupervisorToken}`);
+    evidenceIdentity = "identity-env_wrong"; reads.length = 0;
+    const wrongBinding = await client.executeValidateOnlyWritePrecheck({ runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", request });
+    assert.equal(asRecord(wrongBinding).code, "evidence_unavailable");
+    evidenceIdentity = "identity-env_runtime_api";
+    unavailableRef = refs[0]; reads.length = 0;
+    const unavailable = await client.executeValidateOnlyWritePrecheck({ runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", request });
+    assert.equal(asRecord(unavailable).code, "evidence_unavailable");
+    unavailableRef = undefined; responseMode = "malformed";
+    const malformed = await client.executeValidateOnlyWritePrecheck({ runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", request });
+    assert.equal(asRecord(malformed).code, "harbor_write_precheck_outcome_unknown");
+  } finally {
+    await close(server);
+    if (previous === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN; else process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = previous;
+  }
 }
 
 function bossTaskIntent(intentId: string): JsonObject {
@@ -650,7 +845,7 @@ function createHarborMock(
     paths.push(`${request.method} ${request.url}`);
     const protectedRequest = request.method === "POST" && (
       request.url === "/runtime/identity-environment-sessions" ||
-      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(request.url ?? "")
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|write-precheck-facts|read-operations|validate-only-write-precheck)$/.test(request.url ?? "")
     );
     if (protectedRequest && request.headers.authorization !== `Bearer ${harborSupervisorToken}`) {
       sendJson(response, 401, { status: "unavailable", failure_class: "supervisor_authorization_required", retryable: false });
@@ -751,6 +946,16 @@ function createHarborMock(
       }
       if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/snapshot`) {
         sendJson(response, 200, { status: "captured", core_scene_ref: scene, evidence_refs: scene.evidence_refs });
+        return;
+      }
+      if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/write-precheck-facts`) {
+        sendJson(response, 200, {
+          schema_version: "harbor-write-precheck-facts/v0", runtime_session_ref: sessionRef, provider_ref: "harbor:provider/cloakbrowser", profile_ref: "profile_runtime_api",
+          writable_target: { target_ref: body.target_ref, runtime_session_ref: sessionRef, snapshot_ref: "snapshot_runtime_api_ready", refmap_ref: "refmap_runtime_api_ready", evidence_refs: ["evidence_runtime_api_snapshot"] },
+          form_state: { snapshot_ref: "snapshot_runtime_api_ready", fields: [], state_summary: "Public field states only." },
+          pre_write_guard: { status: "active", no_submit_guard: "active", blocked_events: ["publish", "save", "upload", "submit", "schedule"], enforcement: "facts_only_no_real_submit", runtime_ready: true, blocking_reasons: [] },
+          privacy_boundary: { raw_values: "not_exposed", credential_profile_storage: "not_exposed", page_network_capture: "not_exposed", export_boundary: "refs_and_redacted_field_state_only" }, unavailable: null
+        });
         return;
       }
       if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/read-operations`) {
@@ -965,6 +1170,7 @@ async function assertBossProductionAdmissionDisabled(): Promise<void> {
   const harborRuntimeClient: HarborRuntimeClient = {
     async collectAdmissionFacts() { harborCalls += 1; throw new Error("Harbor must not be called"); },
     async executeReadOperation() { harborCalls += 1; throw new Error("Harbor must not be called"); },
+    async executeValidateOnlyWritePrecheck() { harborCalls += 1; throw new Error("Harbor must not be called"); },
     async releaseCoreTaskSession() { harborCalls += 1; throw new Error("Harbor must not be called"); }
   };
   try {
@@ -1103,6 +1309,8 @@ function createTransientFinalizationFailureStore(store: FileRunRecordStore): Fil
 }
 
 export async function assertRuntimeTaskSubmitApi(): Promise<void> {
+  await assertXiaohongshuValidateOnlyTask();
+  await assertWritePrecheckEvidenceReadback();
   await assertBossProductionAdmissionDisabled();
   const previousSupervisorToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
   process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = harborSupervisorToken;
@@ -1565,6 +1773,17 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     timeoutController.abort(new Error("timeout"));
     const timedFailure = await timedOperation;
     assert.equal(asRecord(timedFailure).code, "timeout");
+    const legacyWriteFactsClient = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${xiaohongshuHarborPort}` });
+    const creatorUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+    const legacyWriteFacts = await legacyWriteFactsClient.collectAdmissionFacts({
+      run_id: "run_legacy_write_facts_token",
+      task_intent: xiaohongshuWritePrecheckTaskIntent("intent_legacy_write_facts_token", creatorUrl),
+      package_ref: xiaohongshuWritePrecheckPackageRef,
+      harbor: { identity_environment_ref: "identity-env_runtime_api", url: creatorUrl },
+      validate_only: { url: creatorUrl, target_ref: "writable-target:xiaohongshu/creator-publish-note", no_submit_guard: "active" }
+    });
+    assert.equal(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/write-precheck-facts"), true);
+    assert.equal("harbor_write_precheck_facts" in legacyWriteFacts, true);
     const store = createFileRunRecordStore({ directory: runDir });
     const server = createApiServer({
       runRecordStore: store,
@@ -1829,7 +2048,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
       assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
-      const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
+      const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions" && entry.body.package_ref === xiaohongshuPackageRef)?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.headless, false);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
