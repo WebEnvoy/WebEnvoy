@@ -119,7 +119,8 @@ const resourceFactsBoundary =
 const lodeAllowlistCommit = "e36a4a7";
 const lodeAllowlistAssetPath = "registry/runtime-consumption-allowlist.json";
 const lodeAllowlistSemanticSha256 = "0e36e0844fa917d84c47db619929e345e8b95463f3d2e74186488d7e3a34a987";
-const lodeWritePrecheckTruthAssetSha256 = "9852721d7b4f803c9a206ab86cacf8a0ae7b33ff1163d354c0fdeaee79173d2f";
+const lodeWritePrecheckTruthCanonicalSha256 = "9852721d7b4f803c9a206ab86cacf8a0ae7b33ff1163d354c0fdeaee79173d2f";
+const lodeWritePrecheckMergedAssetRawSha256 = "f03577c3290fc8c7b52ed8157b0411d66242f18acdf334200968901ee6121dcd";
 const lodeRuntimeAdmissionAssetPaths = [
   lodeAllowlistAssetPath,
   "registry/detail-runtime-consumption.json",
@@ -127,13 +128,13 @@ const lodeRuntimeAdmissionAssetPaths = [
 ] as const;
 const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
   "registry/detail-runtime-consumption.json": "8d68ec1c56faf5b24d5194c283bd72c7698c9ba2f71e00fd860628a206e54cb5",
-  "registry/validate-only-runtime-consumption.json": lodeWritePrecheckTruthAssetSha256
+  "registry/validate-only-runtime-consumption.json": lodeWritePrecheckTruthCanonicalSha256
 };
 const xhsDetailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
 const xhsDetailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
 const xhsWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
 const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
-const lodeWritePrecheckCommit = "749aff88309b26013cbd24ce1308ca213804a459";
+const lodeWritePrecheckCommit = "d18d79cbe280d93b3e855ca906e254bcb9eadf00";
 const lodeDetailTruthAssetSha256 = "dca2761b7feb09a0ab86f7202e153da3c97b21a75299af6adaf64eade319deef";
 const canonicalDeferredProbeOperations = [
   {
@@ -312,7 +313,7 @@ function validateCompletedWritePrecheck(value: unknown, entry: LodeRuntimeConsum
     postCheck.post_check_ref !== evidenceRefs.find((ref) => ref?.kind === "post_check_ref")?.ref ||
     pin?.package_ref !== entry.package_ref || pin.lock_ref !== entry.lock_ref || pin.version !== entry.version || pin.operation_id !== entry.operation_id || pin.operation_mode !== "validate_only" ||
     pin.origin !== "https://creator.xiaohongshu.com" ||
-    pin.repository !== "WebEnvoy/Lode" || pin.commit !== lodeWritePrecheckCommit || pin.asset_path !== "registry/validate-only-runtime-consumption.json" || pin.asset_sha256 !== lodeWritePrecheckTruthAssetSha256 ||
+    pin.repository !== "WebEnvoy/Lode" || pin.commit !== lodeWritePrecheckCommit || pin.asset_path !== "registry/validate-only-runtime-consumption.json" || pin.asset_sha256 !== lodeWritePrecheckMergedAssetRawSha256 ||
     boundary?.raw_dom !== "not_exposed" || boundary.raw_har !== "not_exposed" || boundary.screenshot_body !== "not_exposed" || boundary.credentials !== "not_exposed" || boundary.external_write_actions !== "not_performed"
   ) return undefined;
   return operation;
@@ -701,7 +702,7 @@ async function completeAcceptedWritePrecheck(
       identity_ref: operation.identity_ref,
       page_ref: operation.page_ref,
       merged_head_ref: operation.merged_head_ref,
-      semantic_sha256: lodeWritePrecheckTruthAssetSha256,
+      semantic_sha256: lodeWritePrecheckMergedAssetRawSha256,
       run_ref: result.run_record.run_id,
       target_ref: operation.target_ref,
       entrypoint_observations: operation.entrypoint_observations,

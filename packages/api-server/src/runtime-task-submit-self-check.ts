@@ -384,7 +384,7 @@ async function assertXiaohongshuValidateOnlyTask(): Promise<void> {
       const evidence = [{ kind: "snapshot_ref", ref: snapshotRef }, { kind: "post_check_ref", ref: postCheckRef }];
       return {
         schema_version: "harbor-validate-only-write-precheck/v0", status: "completed", runtime_session_ref: input.runtime_session_ref,
-        identity_ref: responseIdentity, page_ref: pageRef, merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459",
+        identity_ref: responseIdentity, page_ref: pageRef, merged_head_ref: "d18d79cbe280d93b3e855ca906e254bcb9eadf00",
         operation_ref: "write_precheck_11111111-1111-4111-8111-111111111111", result_ref: "write_precheck_result_11111111-1111-4111-8111-111111111111", submitted_result_ref: "submitted_result_11111111-1111-4111-8111-111111111111",
         observed_at: "2026-07-13T00:00:00.000Z", submitted: false, source_refs: sources, evidence_ref_kinds: evidence, target_ref: responseTarget,
         precheck_scope: "entrypoint_only", classification: "partial_result", composition_state: "composition_not_initialized",
@@ -392,7 +392,7 @@ async function assertXiaohongshuValidateOnlyTask(): Promise<void> {
         field_states: Object.fromEntries(["title_input", "content_editor", "publish_control"].map((field) => [field, legacyFieldSuccess ? { state: "available" } : { availability: "unavailable", observation: "not_observed" }])),
         prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false }, no_submit_guard: "active",
         post_check: { status: "passed", reason: "validated_creator_entrypoint_without_submission", source_refs: sources, evidence_refs: [evidence[0]], post_check_ref: postCheckRef, submitted: false, no_submit_guard: "active" },
-        lode_pin: { package_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef, version: pinVersion, operation_id: "xhs_publish_note_precheck", operation_mode: "validate_only", origin: pinOrigin, repository: "WebEnvoy/Lode", commit: "749aff88309b26013cbd24ce1308ca213804a459", asset_path: "registry/validate-only-runtime-consumption.json", asset_sha256: "9852721d7b4f803c9a206ab86cacf8a0ae7b33ff1163d354c0fdeaee79173d2f" },
+        lode_pin: { package_ref: xiaohongshuWritePrecheckPackageRef, lock_ref: xiaohongshuWritePrecheckLockRef, version: pinVersion, operation_id: "xhs_publish_note_precheck", operation_mode: "validate_only", origin: pinOrigin, repository: "WebEnvoy/Lode", commit: "d18d79cbe280d93b3e855ca906e254bcb9eadf00", asset_path: "registry/validate-only-runtime-consumption.json", asset_sha256: "f03577c3290fc8c7b52ed8157b0411d66242f18acdf334200968901ee6121dcd" },
         public_boundary: { raw_dom: "not_exposed", raw_har: "not_exposed", screenshot_body: "not_exposed", credentials: "not_exposed", external_write_actions: "not_performed" }
       };
     },
@@ -414,7 +414,8 @@ async function assertXiaohongshuValidateOnlyTask(): Promise<void> {
         page_ref: record.preview_result.expected_change.page_ref,
         merged_head_ref: record.preview_result.expected_change.merged_head_ref,
         run_ref: record.preview_result.expected_change.run_ref
-      }, { identity_ref: "identity-env_runtime_api", page_ref: pageRef, merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459", run_ref: "run_xhs_validate_only" });
+      }, { identity_ref: "identity-env_runtime_api", page_ref: pageRef, merged_head_ref: "d18d79cbe280d93b3e855ca906e254bcb9eadf00", run_ref: "run_xhs_validate_only" });
+      assert.equal(record?.preview_result?.expected_change?.semantic_sha256, "f03577c3290fc8c7b52ed8157b0411d66242f18acdf334200968901ee6121dcd");
       assert.equal(record?.preview_result?.expected_change?.classification, "partial_result");
       assert.equal(record?.preview_result?.expected_change?.precheck_scope, "entrypoint_only");
       assert.equal(record?.preview_result?.expected_change?.composition_state, "composition_not_initialized");
@@ -467,7 +468,7 @@ async function assertWritePrecheckEvidenceReadback(): Promise<void> {
       if (responseMode === "malformed") { sendJson(response, 200, { status: "completed" }); return; }
       const sources = [{ kind: "creator_publish_page_summary", ref: refs[3] }, { kind: "dom_snapshot_summary", ref: refs[4] }];
       const evidence = [{ kind: "snapshot_ref", ref: refs[5] }, { kind: "post_check_ref", ref: refs[6] }];
-      sendJson(response, 200, { schema_version: "harbor-validate-only-write-precheck/v0", status: "completed", runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", page_ref: refs[0], merged_head_ref: "749aff88309b26013cbd24ce1308ca213804a459", operation_ref: "write_precheck_22222222-2222-4222-8222-222222222222", result_ref: refs[1], submitted_result_ref: refs[2], observed_at: "2026-07-13T00:00:00.000Z", submitted: false, source_refs: sources, evidence_ref_kinds: evidence, target_ref: "writable-target:xiaohongshu/creator-publish-note", precheck_scope: "entrypoint_only", classification: "partial_result", composition_state: "composition_not_initialized", field_states: Object.fromEntries(["title_input", "content_editor", "publish_control"].map((field) => [field, { availability: "unavailable", observation: "not_observed" }])), no_submit_guard: "active", post_check: { status: "passed", reason: "validated_creator_entrypoint_without_submission", source_refs: sources, evidence_refs: [evidence[0]], post_check_ref: refs[6], submitted: false, no_submit_guard: "active" }, lode_pin: {}, public_boundary: {} });
+      sendJson(response, 200, { schema_version: "harbor-validate-only-write-precheck/v0", status: "completed", runtime_session_ref: "session_write_precheck", identity_ref: "identity-env_runtime_api", page_ref: refs[0], merged_head_ref: "d18d79cbe280d93b3e855ca906e254bcb9eadf00", operation_ref: "write_precheck_22222222-2222-4222-8222-222222222222", result_ref: refs[1], submitted_result_ref: refs[2], observed_at: "2026-07-13T00:00:00.000Z", submitted: false, source_refs: sources, evidence_ref_kinds: evidence, target_ref: "writable-target:xiaohongshu/creator-publish-note", precheck_scope: "entrypoint_only", classification: "partial_result", composition_state: "composition_not_initialized", field_states: Object.fromEntries(["title_input", "content_editor", "publish_control"].map((field) => [field, { availability: "unavailable", observation: "not_observed" }])), no_submit_guard: "active", post_check: { status: "passed", reason: "validated_creator_entrypoint_without_submission", source_refs: sources, evidence_refs: [evidence[0]], post_check_ref: refs[6], submitted: false, no_submit_guard: "active" }, lode_pin: {}, public_boundary: {} });
       return;
     }
     const match = /^\/runtime\/evidence\/(.+)$/.exec(request.url ?? "");
