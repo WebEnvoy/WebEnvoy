@@ -55,7 +55,7 @@ export async function stageSearchDetailTargets(directory: string, input: Persist
       await writeNoFollow(reservation, `${input.search_run_ref}\n`);
       reservationPaths.push(reservation);
     }
-    await rejectExistingRefs(root, input.detail_refs);
+    await rejectExistingRefs(root, input.detail_refs, createdAt);
   } catch (error) {
     await releaseReservations(reservationPaths);
     throw error;
@@ -168,17 +168,30 @@ export async function reserveDetailTarget(
   now = new Date()
 ): Promise<DetailTargetReserve> {
   assertClaimRefs(expected);
-  const inspected = await inspectDetailTarget(directory, detailRef, expected, now);
-  if (!inspected.ok) return inspected;
   const root = await secureStoreRoot(directory);
-  const reservation: DetailTargetReservation = { directory: await realpath(directory), detail_ref: detailRef, detail_run_ref: expected.detail_run_ref };
+  const arbitrationPath = join(root, "reservations", refKey(detailRef));
   try {
-    await writeNoFollow(claimPath(root, detailRef), `${JSON.stringify({ detail_ref: detailRef, detail_run_ref: expected.detail_run_ref })}\n`);
+    await writeNoFollow(arbitrationPath, `${expected.detail_run_ref}\n`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     return { ok: false, code: "detail_ref_already_consumed" };
   }
-  return { ok: true, binding: inspected.binding, reservation };
+  try {
+    const inspected = await inspectDetailTarget(directory, detailRef, expected, now);
+    if (!inspected.ok) return inspected;
+    const reservation: DetailTargetReservation = { directory: await realpath(directory), detail_ref: detailRef, detail_run_ref: expected.detail_run_ref };
+    try {
+      await writeNoFollow(claimPath(root, detailRef), `${JSON.stringify({ detail_ref: detailRef, detail_run_ref: expected.detail_run_ref })}\n`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return { ok: false, code: "detail_ref_already_consumed" };
+    }
+    return { ok: true, binding: inspected.binding, reservation };
+  } finally {
+    await unlink(arbitrationPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
 }
 
 export async function commitDetailTargetReservation(reservation: DetailTargetReservation, now = new Date()): Promise<DetailTargetClaim> {
@@ -330,9 +343,27 @@ async function secureExists(root: string, path: string): Promise<boolean> {
   }
 }
 
-async function rejectExistingRefs(root: string, refs: readonly string[]): Promise<void> {
+async function rejectExistingRefs(root: string, refs: readonly string[], now: Date): Promise<void> {
   for (const ref of refs) {
-    if (await secureExists(root, consumedPath(root, ref)) || await findPublishedPath(root, ref)) throw new Error("detail target ref already exists");
+    if (await secureExists(root, consumedPath(root, ref))) throw new Error("detail target ref already exists");
+    if (await secureExists(root, claimPath(root, ref))) throw new Error("detail target ref already exists");
+    const published = await findPublishedPath(root, ref);
+    if (!published) continue;
+    const binding = await readBinding(root, published);
+    assertRecyclableBinding(binding, ref);
+    if (Date.parse(binding.expires_at) > now.getTime()) throw new Error("detail target ref already exists");
+    await unlink(published);
+  }
+}
+
+function assertRecyclableBinding(binding: DetailTargetBinding, detailRef: string): void {
+  if (binding.detail_ref !== detailRef || binding.site_slug !== "xiaohongshu") throw new Error("detail target binding is invalid");
+  assertBindingRefs({ ...binding, detail_refs: [detailRef] });
+  const observedAt = validClock(new Date(binding.observed_at), "detail target observed_at");
+  const createdAt = validClock(new Date(binding.created_at), "detail target created_at");
+  const expiresAt = validClock(new Date(binding.expires_at), "detail target expires_at");
+  if (Math.abs(observedAt.getTime() - createdAt.getTime()) > allowedObservationSkewMs || expiresAt.getTime() - createdAt.getTime() !== detailTargetTtlMs) {
+    throw new Error("detail target binding is invalid");
   }
 }
 

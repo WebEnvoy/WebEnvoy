@@ -62,15 +62,52 @@ async function assertDetailTargetStore(): Promise<void> {
       await claimDetailTarget(directory, refs.expired, { ...expected, detail_run_ref: "run-expired" }, new Date(observedAt.getTime() + detailTargetTtlMs)),
       { ok: false, code: "detail_ref_expired" }
     );
+    const republishedAt = new Date(observedAt.getTime() + detailTargetTtlMs);
+    await persistSearchDetailTargets(directory, {
+      ...input,
+      search_run_ref: "run-republish-expired",
+      search_result_ref: "result-republish-expired",
+      detail_refs: [refs.expired],
+      observed_at: republishedAt.toISOString()
+    }, republishedAt);
+    const republished = await inspectDetailTarget(directory, refs.expired, expected, republishedAt);
+    assert.equal(republished.ok, true);
+    if (republished.ok) {
+      assert.equal(republished.binding.search_run_ref, "run-republish-expired");
+      assert.equal(republished.binding.search_result_ref, "result-republish-expired");
+    }
+    const unexpiredRef = "detail_ref_dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-unexpired", detail_refs: [unexpiredRef] }, observedAt);
+    await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-unexpired-republish", detail_refs: [unexpiredRef] }, new Date(observedAt.getTime() + detailTargetTtlMs - 1)), /already exists/);
+
+    const reservedExpiredRef = "detail_ref_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-reserved-expired", detail_refs: [reservedExpiredRef] }, observedAt);
+    const expiredReservation = await reserveDetailTarget(directory, reservedExpiredRef, { ...expected, detail_run_ref: "run-reserved-expired-detail" }, observedAt);
+    if (!expiredReservation.ok) throw new Error("expired detail target reservation failed");
+    await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-reserved-expired-republish", detail_refs: [reservedExpiredRef] }, republishedAt), /already exists/);
+    await releaseDetailTargetReservation(expiredReservation.reservation);
+
+    const arbitrationRef = "detail_ref_abababab-abab-4aba-8aba-abababababab";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-arbitration-expired", detail_refs: [arbitrationRef] }, observedAt);
+    const arbitrationBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-arbitration-republish", detail_refs: [arbitrationRef], observed_at: republishedAt.toISOString() }, republishedAt);
+    assert.deepEqual(await reserveDetailTarget(directory, arbitrationRef, { ...expected, detail_run_ref: "run-arbitration-old-claim" }, republishedAt), { ok: false, code: "detail_ref_already_consumed" });
+    await publishSearchDetailTargets(arbitrationBatch);
+    assert.equal((await inspectDetailTarget(directory, arbitrationRef, expected, republishedAt)).ok, true);
+
+    const invalidRef = "detail_ref_ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const invalidRunRef = "run-invalid-binding";
+    await persistSearchDetailTargets(directory, { ...input, search_run_ref: invalidRunRef, detail_refs: [invalidRef] }, observedAt);
+    const invalidBindingPath = join(directory, ".detail-targets", "published", createHash("sha256").update(invalidRunRef).digest("hex"), `${createHash("sha256").update(invalidRef).digest("hex")}.json`);
+    const invalidBinding = JSON.parse(await readFile(invalidBindingPath, "utf8"));
+    await writeFile(invalidBindingPath, `${JSON.stringify({ ...invalidBinding, detail_ref: refs.expired })}\n`);
+    await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-invalid-binding-republish", detail_refs: [invalidRef] }, republishedAt), /binding is invalid/);
     await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-republish", detail_refs: [refs.positive] }, observedAt), /already exists/);
 
     const rollbackRef = "detail_ref_55555555-5555-4555-8555-555555555555";
     const rollbackBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-rollback", detail_refs: [rollbackRef] }, observedAt);
-    const [claimWhileStaged] = await Promise.all([
-      claimDetailTarget(directory, rollbackRef, { ...expected, detail_run_ref: "run-concurrent-claim" }, observedAt),
-      rollbackSearchDetailTargets(rollbackBatch)
-    ]);
-    assert.deepEqual(claimWhileStaged, { ok: false, code: "detail_ref_unknown" });
+    const claimWhileStaged = await claimDetailTarget(directory, rollbackRef, { ...expected, detail_run_ref: "run-concurrent-claim" }, observedAt);
+    assert.deepEqual(claimWhileStaged, { ok: false, code: "detail_ref_already_consumed" });
+    await rollbackSearchDetailTargets(rollbackBatch);
     assert.deepEqual(await inspectDetailTarget(directory, rollbackRef, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
 
     const concurrentRef = "detail_ref_66666666-6666-4666-8666-666666666666";

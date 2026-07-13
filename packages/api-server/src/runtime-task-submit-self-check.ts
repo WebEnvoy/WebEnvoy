@@ -9,6 +9,8 @@ import {
   createFileRunRecordStore,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
+  detailTargetTtlMs,
+  persistSearchDetailTargets,
   recoverInterruptedCoreTaskSessions,
   submitRuntimeTask,
   type CreateRunRecordInput,
@@ -2053,6 +2055,29 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.headless, false);
       assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+
+      const republishedRunId = "run_api_xhs_expired_detail_ref";
+      const expiredAt = new Date(Date.now() - detailTargetTtlMs);
+      await persistSearchDetailTargets(runDir, {
+        site_slug: "xiaohongshu",
+        identity_environment_ref: "identity-env_runtime_api",
+        runtime_session_ref: "session_runtime_api_ready",
+        search_run_ref: "run_api_xhs_expired_seed",
+        search_result_ref: "read_result_33333333-3333-4333-8333-333333333333",
+        detail_refs: [detailRefForRun(republishedRunId)],
+        observed_at: expiredAt.toISOString()
+      }, expiredAt);
+      const republishedSearch = await postJson(xiaohongshuPort, "/tasks", {
+        run_id: republishedRunId,
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent(`intent_${republishedRunId}`),
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+      });
+      assert.equal(republishedSearch.status, 202, JSON.stringify(republishedSearch.body));
+      const republishedRun = asRecord(asRecord(republishedSearch.body).run);
+      assert.equal(republishedRun.status, "succeeded");
+      assert.equal(Object.hasOwn(republishedRun, "failure"), false);
 
       const submitXiaohongshuSearch = async (suffix: string) => {
         const runId = `run_api_xhs_detail_search_${suffix}`;
