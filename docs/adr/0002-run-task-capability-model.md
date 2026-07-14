@@ -4,6 +4,10 @@
 
 拟议。
 
+> 2026-07-14 correction: [ADR 0009](0009-unified-authorization-policy.md)
+> supersedes this draft's action-risk enum, approval evidence and App approval ownership.
+> Task/run/result/admission/resource and cross-repo owner boundaries remain useful input.
+
 ## 背景
 
 WebEnvoy Core 必须让 API、SDK、CLI、MCP 和 WebEnvoy App 进入同一条任务路径，而不是让每个入口各自运行浏览器动作。核心问题不是打开浏览器，而是判断一个站点能力是否已定义、已版本化、资源满足、可执行、可记录，并且能作为公共任务安全暴露。

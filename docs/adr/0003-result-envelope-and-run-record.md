@@ -4,6 +4,12 @@
 
 拟议。
 
+> 2026-07-14 correction: [ADR 0009](0009-unified-authorization-policy.md)
+> supersedes this draft's `action_risk`, `approval_required` and `request_approval`
+> vocabulary. Result/Run Record, failure, unknown outcome and reference boundaries remain;
+> task authorization uses Authorization Decision summaries, while non-task environment
+> decisions are referenced by Harbor operation records.
+
 ## 背景
 
 WebEnvoy Core 需要一个对智能体和程序有用、但不暴露原始浏览器现场的结果合同。它也需要一个持久记录，用来回答运行了什么、为什么允许运行、用了哪些资源、发生了什么、失败在哪里，以及如何恢复或对账。
