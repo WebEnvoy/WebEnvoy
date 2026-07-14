@@ -4,6 +4,11 @@
 
 拟议。
 
+动作风险与 approval-request-first 产品模型已由
+[ADR 0009](0009-unified-authorization-policy.md) supersede，2026-07-14。
+能力/资源准入、target binding、idempotency、unknown outcome 和 reconciliation
+边界继续有效。
+
 ## 背景
 
 WebEnvoy Core 必须在真实浏览器执行前拦住不安全或规格不足的工作。对于上传、发布、编辑、删除、提交、取消，以及任何可能触达外部系统的动作，这一点尤其重要。

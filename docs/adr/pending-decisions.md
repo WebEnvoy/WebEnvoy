@@ -103,24 +103,24 @@
 - 问题：动作风险、执行意图、审批证据和幂等追踪的最终 Schema。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
 - 阻塞什么：写侧准入、审批记录和幂等实现。
-- 当前状态：待规格化。
-- 后续归属/下一步：写侧安全 / 准入 Schema ADR 或规格文档收敛。
+- 当前状态：部分解决。动作类别、策略层级和 owner 已由 [ADR 0009](0009-unified-authorization-policy.md) 接受；持久化/API Schema 仍待 #292/#293 实现规格化。
+- 后续归属/下一步：Core #292/#293 收敛实现字段。
 
 ## PD-0014
 
 - 问题：四个最小风险类别是否足够支撑 App 策略和 MCP/CLI 展示。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
 - 阻塞什么：App 审批展示、MCP/CLI 风险提示和策略配置。
-- 当前状态：待决策。
-- 后续归属/下一步：App 策略与 Core 准入设计时确认。
+- 当前状态：已由 [ADR 0009](0009-unified-authorization-policy.md) 取代。稳定动作类别为 `read`、`prepare`、`commit`、`destructive`、`environment`。
+- 后续归属/下一步：无；新增类别需新 ADR。
 
 ## PD-0015
 
 - 问题：审批有效期、撤销行为，以及与操作、目标、载荷和身份的绑定方式。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
 - 阻塞什么：审批证据校验和写侧安全实现。
-- 当前状态：待决策。
-- 后续归属/下一步：App 审批流与 Core 写侧准入共同确认。
+- 当前状态：部分解决。绑定和一次性 grant 由 [ADR 0009](0009-unified-authorization-policy.md) 接受；#291 只固化语义，精确 expiry 字段由 Core #293 实现时规格化。
+- 后续归属/下一步：Core #293。
 
 ## PD-0016
 
@@ -132,11 +132,11 @@
 
 ## PD-0017
 
-- 问题：每个动作风险类别的最小证据要求。
+- 问题：每个权威动作声明类别和有效授权决定的最小运行记录要求。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
-- 阻塞什么：写侧证据策略、运行记录字段和 App 审计展示。
+- 阻塞什么：写侧运行记录策略、Authorization Decision/Run Record 字段和按需诊断展示。
 - 当前状态：待决策。
-- 后续归属/下一步：证据策略与动作风险规格共同确认。
+- 后续归属/下一步：运行记录策略与统一授权实现共同确认，不要求 App 默认展示技术记录。
 
 ## PD-0018
 

@@ -104,13 +104,24 @@ accepted → running → succeeded / failed / unknown_outcome / manual_recovery_
 
 - dry_run；
 - validate_only；
-- execute_after_approval；
+- commit with an effective authorization policy；
 - reconcile_status；
 - request_cancel。
 
 写侧任务应支持幂等 key、write operation ref、写入后验证、unknown outcome、manual recovery 和后续状态对账。
 
 无法确认结果的写入不能伪装成成功，也不能丢失现场。
+
+### 统一授权策略
+
+所有入口共用 Core 的授权策略。Lode 为站点 capability 声明 `read`、`prepare`、
+`commit` 或 `destructive`；Harbor operation catalog 声明 `environment`。Core 按全局
+默认、当前 task/operation scope 覆盖和单次授权解析有效决定；Harbor 只执行已允许
+动作；App、CLI、MCP、API 和 SDK 只配置或投影同一语义。个人本机产品不因为一次
+外部变更就建立多级审批流。
+
+Core 统一 Authorization Decision 摘要由 task Run Record 或 Harbor environment
+operation record 引用。完整工具调用和 refs 是诊断记录，不是上游必须展示的业务结果。
 
 ### 失败归因
 
