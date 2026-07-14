@@ -1,0 +1,55 @@
+name: Loom delivery gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+
+jobs:
+  host-facts:
+    name: loom-delivery-host-facts
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      host_facts: ${{ steps.collect.outputs.host_facts }}
+    steps:
+      - name: Read host facts
+        id: collect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const facts = {
+              schema_version: "loom-delivery-gate-host-facts/v1",
+              event: context.eventName,
+              repository: { owner: context.repo.owner, name: context.repo.repo },
+            };
+            const pull = context.payload.pull_request;
+            if (context.eventName === "pull_request_target" && pull) {
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pull.number,
+                per_page: 100,
+              });
+              facts.change = { number: pull.number, base_sha: pull.base.sha, head_sha: pull.head.sha };
+              facts.changed_paths = [...new Set(files.map((file) => file.filename))].sort();
+            } else if (context.eventName !== "merge_group") {
+              core.setFailed("pull_request_target or merge_group payload is required");
+              return;
+            }
+            core.setOutput("host_facts", JSON.stringify(facts));
+
+  loom-delivery-gate:
+    needs: host-facts
+    uses: MC-and-his-Agents/Loom/.github/workflows/loom-delivery-gate.yml@122ac2e1ae9787bda92e9ac42132e8742c386622
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    with:
+      host_facts: ${{ needs.host-facts.outputs.host_facts }}
+      profile: light
+      validation_command: py-compile
+      loom_ref: 122ac2e1ae9787bda92e9ac42132e8742c386622
+      enforcement: enforce
