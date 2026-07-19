@@ -7,6 +7,27 @@
     "closeout": []
   },
   "specialized_gates": [],
+  "host_planning_taxonomy": {
+    "availability": "present",
+    "object_type_mapping": [
+      {
+        "loom_type": "fr",
+        "labels": [
+          "类型：FR"
+        ],
+        "title_prefixes": []
+      },
+      {
+        "loom_type": "work_item",
+        "labels": [
+          "类型：Work Item"
+        ],
+        "title_prefixes": []
+      }
+    ],
+    "missing_type_policy": "block_unknown",
+    "summary": "GitHub planning object types use the repository's canonical Chinese labels."
+  },
   "review_instruction_locators": {
     "spec_review": {
       "locator": "loom_default",

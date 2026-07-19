@@ -2,7 +2,7 @@ name: Loom delivery gate
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   merge_group:
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
             }
             core.setOutput("host_facts", JSON.stringify(facts));
 
-  loom-delivery-gate:
+  trusted-delivery-validation:
     needs: host-facts
     uses: MC-and-his-Agents/Loom/.github/workflows/loom-delivery-gate.yml@122ac2e1ae9787bda92e9ac42132e8742c386622
     permissions:
@@ -53,3 +53,14 @@ jobs:
       validation_command: py-compile
       loom_ref: 122ac2e1ae9787bda92e9ac42132e8742c386622
       enforcement: enforce
+
+  loom-delivery-gate:
+    name: loom-delivery-gate
+    needs: trusted-delivery-validation
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require trusted delivery validation
+        env:
+          VALIDATION_RESULT: ${{ needs.trusted-delivery-validation.result }}
+        run: test "$VALIDATION_RESULT" = success
