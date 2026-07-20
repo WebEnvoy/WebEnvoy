@@ -179,31 +179,41 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
   const ownerRefCheckTimeoutMs = options.ownerRefCheckTimeoutMs ?? 5_000;
   let activeOwnerRefChecks = 0;
   const ownerRefCheckWaiters: Array<{
-    active: boolean;
+    deadline: number;
     resolve: (acquired: boolean) => void;
+    timeout?: ReturnType<typeof setTimeout>;
   }> = [];
 
-  async function acquireOwnerRefCheck(): Promise<boolean> {
+  async function acquireOwnerRefCheck(deadline: number): Promise<boolean> {
+    if (Date.now() >= deadline) return false;
     if (activeOwnerRefChecks < ownerRefCheckConcurrency) {
       activeOwnerRefChecks += 1;
       return true;
     }
     return new Promise<boolean>((resolve) => {
-      const waiter = { active: true, resolve };
+      const waiter: (typeof ownerRefCheckWaiters)[number] = {
+        deadline,
+        resolve
+      };
       ownerRefCheckWaiters.push(waiter);
-      setTimeout(() => {
-        if (!waiter.active) return;
-        waiter.active = false;
+      waiter.timeout = setTimeout(() => {
+        const index = ownerRefCheckWaiters.indexOf(waiter);
+        if (index < 0) return;
+        ownerRefCheckWaiters.splice(index, 1);
         resolve(false);
-      }, ownerRefCheckTimeoutMs);
+      }, Math.max(0, deadline - Date.now()));
     });
   }
 
   function releaseOwnerRefCheck(): void {
     while (ownerRefCheckWaiters.length > 0) {
       const next = ownerRefCheckWaiters.shift();
-      if (!next?.active) continue;
-      next.active = false;
+      if (!next) continue;
+      if (next.timeout) clearTimeout(next.timeout);
+      if (Date.now() >= next.deadline) {
+        next.resolve(false);
+        continue;
+      }
       next.resolve(true);
       return;
     }
@@ -212,13 +222,17 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
 
   async function checkOwnerRef(ownerRef: string): Promise<boolean | undefined> {
     if (!options.checkOwnerRef) return undefined;
-    const startedAt = Date.now();
-    if (!await acquireOwnerRefCheck()) return undefined;
+    const deadline = Date.now() + ownerRefCheckTimeoutMs;
+    if (!await acquireOwnerRefCheck(deadline)) return undefined;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      releaseOwnerRefCheck();
+      return undefined;
+    }
     const check = Promise.resolve()
       .then(() => options.checkOwnerRef!(ownerRef))
       .catch(() => undefined)
       .finally(releaseOwnerRefCheck);
-    const remainingMs = Math.max(0, ownerRefCheckTimeoutMs - (Date.now() - startedAt));
     let timeout: number | undefined;
     try {
       return await Promise.race([

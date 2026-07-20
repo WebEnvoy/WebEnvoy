@@ -273,6 +273,51 @@ async function assertOwnerCheckTimeoutBound(directory: string, runStore: FileRun
   await probe("hanging-owner-check", undefined);
 }
 
+async function assertExpiredOwnerChecksDoNotStart(directory: string, runStore: FileRunRecordStore): Promise<void> {
+  let calls = 0;
+  const releases: Array<() => void> = [];
+  const name = "expired-owner-check";
+  const store = createFileTaskThreadStore({
+    directory: join(directory, name),
+    runRecordStore: runStore,
+    ownerRefCheckTimeoutMs: 5,
+    resolveInputPolicy: async ({ package_ref, capability_ref }) => ({
+      package_ref,
+      capability_ref,
+      input_schema_ref: `lode://schema/test/${name}@0.1.0`,
+      fields: new Map(Array.from({ length: 16 }, (_, index) => [
+        `file_${index}`,
+        { field_id: `file_${index}`, projection: "owner_ref" as const }
+      ]))
+    }),
+    checkOwnerRef: async () => {
+      calls += 1;
+      return new Promise<boolean>((resolve) => releases.push(() => resolve(true)));
+    }
+  });
+  const thread = await store.createOrGetTaskThread({
+    capability_ref: `lode:capability/${name}`,
+    identity_environment_ref: `identity-env:${name}`
+  });
+  const fields = Array.from({ length: 16 }, (_, index) => ({
+    field_id: `file_${index}`,
+    kind: "file",
+    owner_ref: `attachment:${name}/${index}`
+  }));
+  const reservation = store.reserveTaskTurn(thread.thread.thread_id, {
+    ...turnInput(`run_${name}`, fields),
+    input: { schema_version: taskTurnInputSchemaVersion, fields }
+  });
+  while (calls < 8) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const blockedUntil = Date.now() + 20;
+  while (Date.now() < blockedUntil) {
+    // Simulate an event-loop stall after the queued checks have expired.
+  }
+  releases.splice(0).forEach((release) => release());
+  await assert.rejects(() => reservation, /owner_ref_check_unavailable/);
+  assert.equal(calls, 8);
+}
+
 export async function assertTaskTurnInputPolicy(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-input-policy-"));
   const runStore = createFileRunRecordStore({ directory: join(directory, "runs") });
@@ -283,6 +328,7 @@ export async function assertTaskTurnInputPolicy(): Promise<void> {
     await assertOwnerCheckConcurrency(directory, runStore);
     await assertResolverRaceReplay(directory, runStore, registryPath);
     await assertOwnerCheckTimeoutBound(directory, runStore);
+    await assertExpiredOwnerChecksDoNotStart(directory, runStore);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
