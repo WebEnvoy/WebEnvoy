@@ -341,16 +341,29 @@ export async function assertTaskThreadStore(): Promise<void> {
       }),
       /field_property_unsupported:content/
     );
+    const boundaryTurn = await recoveredStore.reserveTaskTurn(threadId, {
+      ...turnInput("run_thread_boundary", "submit-boundary", "hash-boundary"),
+      input: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "keyword", kind: "scalar", summary: "AI tools" }],
+        consumer_boundary: taskTurnInputConsumerBoundary
+      }
+    });
+    assert.equal(boundaryTurn.turn.input.consumer_boundary, taskTurnInputConsumerBoundary);
+    await runStore.createRunRecord(runInput("run_thread_boundary"), boundaryTurn.run_claim_token);
+    await runStore.updateRunRecord("run_thread_boundary", { status: "admitted" });
+    await runStore.updateRunRecord("run_thread_boundary", { status: "running" });
+    await runStore.updateRunRecord("run_thread_boundary", { status: "succeeded" });
     await assert.rejects(
       () => recoveredStore.reserveTaskTurn(threadId, {
-        ...turnInput("run_thread_boundary", "submit-boundary", "hash-boundary"),
+        ...turnInput("run_thread_invalid_boundary", "submit-invalid-boundary", "hash-invalid-boundary"),
         input: {
           schema_version: taskTurnInputSchemaVersion,
           fields: [{ field_id: "keyword", kind: "scalar", summary: "AI tools" }],
           consumer_boundary: "caller-controlled"
         }
       }),
-      /input_snapshot_property_unsupported:consumer_boundary/
+      /consumer_boundary_invalid/
     );
     await assert.rejects(
       () => recoveredStore.reserveTaskTurn(threadId, {
@@ -444,7 +457,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     assert.equal(terminalRace.filter((result) => result.status === "rejected").length, 1);
 
     const finalThread = await recoveredStore.getTaskThread(threadId);
-    assert.deepEqual(finalThread?.turns.map((turn) => turn.sequence), [1, 2, 3, 4, 5, 6]);
+    assert.deepEqual(finalThread?.turns.map((turn) => turn.sequence), [1, 2, 3, 4, 5, 6, 7]);
     assert.equal(finalThread?.schema_version, "webenvoy.task-thread.v0");
     assert.equal(finalThread?.turns.some((turn) => Object.hasOwn(turn, "request_hash")), false);
     assert.equal((await recoveredStore.listTaskThreads()).some((thread) => thread.thread_id === threadId), true);

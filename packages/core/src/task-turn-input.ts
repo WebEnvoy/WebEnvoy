@@ -126,11 +126,16 @@ function normalizeTaskTurnInputSnapshot(value: unknown, persisted: boolean): Tas
   const input = requireObject(value, "input_snapshot_invalid");
   const privateField = findPrivateField(input);
   if (privateField) throw new TaskThreadStoreError(`private_field_rejected:${privateField}`);
-  rejectUnknownProperties(input, new Set(["schema_version", "fields", "attachment_refs", ...(persisted ? ["consumer_boundary"] : [])]), "input_snapshot_property_unsupported");
+  rejectUnknownProperties(input, new Set(["schema_version", "fields", "attachment_refs", "consumer_boundary"]), "input_snapshot_property_unsupported");
   if (input.schema_version !== taskTurnInputSchemaVersion || !Array.isArray(input.fields)) {
     throw new TaskThreadStoreError("input_snapshot_invalid");
   }
-  if (persisted && input.consumer_boundary !== taskTurnInputConsumerBoundary) throw new TaskThreadStoreError("consumer_boundary_invalid");
+  if (
+    (persisted || input.consumer_boundary !== undefined) &&
+    input.consumer_boundary !== taskTurnInputConsumerBoundary
+  ) {
+    throw new TaskThreadStoreError("consumer_boundary_invalid");
+  }
   const fieldIds = new Set<string>();
   const fields = input.fields.map((value) => {
     const field = requireObject(value, "input_field_invalid");

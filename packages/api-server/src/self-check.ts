@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
+import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
 import { assertRuntimeTaskSubmitApi } from "./runtime-task-submit-self-check.js";
 import { assertTaskThreadApiRaces } from "./task-thread-api-self-check.js";
@@ -35,6 +36,7 @@ function nextInstant(): Date {
 }
 
 async function main(): Promise<void> {
+  assert.equal(apiServerHost, "127.0.0.1");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-api-server-"));
   const store = createFileRunRecordStore({ directory, clock: nextInstant });
   const taskThreadStore = createFileTaskThreadStore({
@@ -388,7 +390,8 @@ async function main(): Promise<void> {
         fields: [
           { field_id: "keyword", kind: "scalar", summary: "AI tools" },
           { field_id: "count", kind: "scalar", summary: "8" }
-        ]
+        ],
+        consumer_boundary: taskTurnInputConsumerBoundary
       },
       task_intent: {
         schema_version: "webenvoy.task-intent.v0",
@@ -420,6 +423,18 @@ async function main(): Promise<void> {
     assert.equal(replayBody.replayed, true);
     assert.equal(asRecord(replayBody.turn).turn_id, asRecord(turnBody.turn).turn_id);
     assert.equal(Object.hasOwn(asRecord(replayBody.turn), "run_claim_token"), false);
+
+    const invalidBoundaryResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-invalid-boundary",
+      run_id: "run_api_thread_invalid_boundary",
+      input_snapshot: {
+        ...taskTurnRequest.input_snapshot,
+        consumer_boundary: "caller-controlled"
+      }
+    });
+    assert.equal(invalidBoundaryResponse.status, 400);
+    assert.equal(asRecord(asRecord(invalidBoundaryResponse.body).error).code, "consumer_boundary_invalid");
 
     const invalidIntentResponse = await postJson(port, `/threads/${threadId}/turns`, {
       ...taskTurnRequest,

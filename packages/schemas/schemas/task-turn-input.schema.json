@@ -19,7 +19,7 @@
       "consumer_boundary": "Core"
     }
   },
-  "required": ["schema_version", "fields", "consumer_boundary"],
+  "required": ["schema_version", "fields"],
   "properties": {
     "schema_version": {
       "const": "webenvoy.task-turn-input.v0"

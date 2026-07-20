@@ -94,7 +94,10 @@
             "enum": ["api", "cli", "mcp", "sdk", "app"]
           },
           "input": {
-            "$ref": "task-turn-input.schema.json"
+            "allOf": [
+              { "$ref": "https://schemas.webenvoy.dev/core/task-turn-input.v0.schema.json" },
+              { "required": ["consumer_boundary"] }
+            ]
           },
           "created_at": {
             "type": "string",

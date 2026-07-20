@@ -13,6 +13,8 @@ import { createApiServer } from "./server.js";
 
 export { createApiServer } from "./server.js";
 
+export const apiServerHost = "127.0.0.1";
+
 function parsePort(value: string | undefined): number {
   const port = Number(value ?? "8787");
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -49,7 +51,7 @@ if (import.meta.url === entrypoint) {
     ...(harborRuntimeClient === undefined ? {} : { harborRuntimeClient })
   } : {});
 
-  server.listen(port, () => {
-    console.log(`WebEnvoy API Server listening on http://127.0.0.1:${port}`);
+  server.listen(port, apiServerHost, () => {
+    console.log(`WebEnvoy API Server listening on http://${apiServerHost}:${port}`);
   });
 }
