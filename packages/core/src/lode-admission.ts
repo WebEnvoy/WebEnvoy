@@ -1,5 +1,6 @@
 import type { FailureRecord } from "./run-record-store.js";
 import { normalizeFailureRecord } from "./failure-attribution.js";
+import { parseBusinessActionOwnerMatch, type BusinessActionOwnerMatch } from "./execution-policy.js";
 
 export type LodePackageAdmissionContract = {
   package_ref: string;
@@ -104,6 +105,16 @@ export type LodeAdmission =
       failure: FailureRecord;
       package_ref?: string;
     };
+
+export function createLodeBusinessActionOwnerMatch(admission: LodeAdmission, value: unknown): BusinessActionOwnerMatch | undefined {
+  const match = parseBusinessActionOwnerMatch(value);
+  if (!admission.ok || !match || match.matcher !== "lode_package_admission" ||
+    match.owner_declaration_version !== admission.capability_version ||
+    match.owner_declaration_ref !== `${admission.package_ref}#${match.action_id}` ||
+    match.resource_requirement_refs.length !== admission.resource_requirement_refs.length ||
+    !match.resource_requirement_refs.every((ref) => admission.resource_requirement_refs.includes(ref))) return undefined;
+  return match;
+}
 
 const lodeForbiddenFieldNames = new Set([
   "raw_payload",

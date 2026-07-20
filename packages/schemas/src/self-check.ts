@@ -143,4 +143,42 @@ for (const file of invalidFixtureFiles) {
   }
 }
 
+const executionPolicySchemaPath = join(schemaDir, "execution-policy-evaluation.schema.json");
+const executionPolicyFixturePath = join(fixtureDir, "execution-policy-destructive-auto.fixture.json");
+const executionPolicySchema = schemasByFile.get(basename(executionPolicySchemaPath));
+assert(executionPolicySchema, "execution policy schema must exist");
+const validateExecutionPolicy = ajv.getSchema(asString(executionPolicySchema.$id, "execution policy schema $id"));
+assert(validateExecutionPolicy, "execution policy schema must compile as Draft 2020-12 JSON Schema");
+const { $schema: _executionPolicySchemaRef, ...executionPolicyFixture } = await readJson(executionPolicyFixturePath);
+const confirm = structuredClone(executionPolicyFixture);
+const action = asObject(confirm.action, "execution policy fixture action");
+const effectivePolicy = asObject(confirm.effective_policy, "execution policy fixture effective_policy");
+effectivePolicy.mode = "confirm";
+confirm.next_step = "request_confirmation";
+confirm.confirmation_request = {
+  scope: "current_action",
+  action_instance_ref: action.action_instance_ref,
+  action_id: action.action_id,
+  target: action.target,
+  category: action.category,
+  owner_matcher: action.owner_matcher,
+  owner_declaration_ref: action.owner_declaration_ref,
+  owner_declaration_version: action.owner_declaration_version,
+  resource_match_ref: action.resource_match_ref,
+  resource_match_version: action.resource_match_version,
+  effective_policy_source_ref: effectivePolicy.source_ref,
+  effective_policy_source_version: effectivePolicy.source_version,
+  effective_policy_source: effectivePolicy.source,
+  choices: ["allow_once", "deny_once"]
+};
+assert(validateExecutionPolicy(confirm), `confirm execution policy must validate: ${ajv.errorsText(validateExecutionPolicy.errors)}`);
+assert(validateExecutionPolicy({
+  schema_version: "webenvoy.execution-policy-evaluation.v0",
+  status: "stopped",
+  next_step: "stop",
+  stop_reason: "invalid_input"
+}), `stopped execution policy must validate: ${ajv.errorsText(validateExecutionPolicy.errors)}`);
+delete confirm.confirmation_request;
+assert.equal(validateExecutionPolicy(confirm), false, "confirm execution policy without confirmation_request must be rejected");
+
 console.log(`Validated ${schemaFiles.length} schemas, ${fixtureFiles.length} positive fixtures, and ${invalidFixtureFiles.length} negative fixture sets.`);

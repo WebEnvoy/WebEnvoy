@@ -8,26 +8,27 @@
     "owner": "Core Runtime",
     "status": "accepted-v0",
     "schema_version": "webenvoy.execution-policy-evaluation.v0",
-    "compatibility_boundary": "Core evaluates declared business actions only. Confirmation coordination, decision persistence/query, browser atomic actions, raw evidence, credentials, and App UI state are outside this contract.",
+    "compatibility_boundary": "Core evaluates versioned Lode/Harbor owner-match proofs for declared business actions only. Confirmation coordination, decision persistence/query, browser atomic actions, raw evidence, credentials, and App UI state are outside this contract.",
     "source_adrs": [
       "docs/adr/0008-core-technical-architecture-baseline.md",
       "docs/adr/0009-unified-authorization-policy.md"
     ],
     "field_owners": {
-      "action": "Core projection of the Lode or Harbor owner declaration and current target binding",
+      "action": "Core projection of the unique Lode or Harbor owner match and current target/resource binding",
       "effective_policy": "Core evaluator",
       "confirmation_request": "Core evaluator contract; lifecycle coordination belongs to Core #293"
     },
     "policy_precedence": [
-      "single_action_decision",
+      "single_action_decision_when_current_policy_is_confirm",
       "thread_revision",
       "installed_skill_user_version",
       "global_user_config"
     ],
     "excluded_policy_sources": ["skill_recommendation"]
   },
-  "required": ["schema_version", "evaluated_at", "status", "next_step"],
+  "required": ["schema_version", "status", "next_step"],
   "properties": {
+    "$schema": { "const": "execution-policy-evaluation.schema.json" },
     "schema_version": { "const": "webenvoy.execution-policy-evaluation.v0" },
     "evaluated_at": { "type": "string", "format": "date-time" },
     "status": { "enum": ["evaluated", "stopped"] },
@@ -38,11 +39,10 @@
     "stop_reason": {
       "enum": [
         "policy_denied",
+        "invalid_input",
         "action_undeclared",
         "action_unclassifiable",
-        "declaration_invalid",
-        "declaration_not_yet_valid",
-        "declaration_expired",
+        "owner_match_conflict",
         "target_mismatch",
         "policy_unavailable"
       ]
@@ -52,7 +52,7 @@
   "oneOf": [
     {
       "properties": { "status": { "const": "evaluated" } },
-      "required": ["action", "risk_marker", "effective_policy"],
+      "required": ["evaluated_at", "action", "risk_marker", "effective_policy"],
       "allOf": [
         {
           "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "auto" } } } } },
@@ -69,22 +69,17 @@
       ]
     },
     {
+      "properties": { "status": { "const": "stopped" }, "next_step": { "const": "stop" }, "stop_reason": { "const": "invalid_input" } },
+      "required": ["stop_reason"],
+      "not": { "anyOf": [{ "required": ["evaluated_at"] }, { "required": ["action"] }, { "required": ["risk_marker"] }, { "required": ["effective_policy"] }, { "required": ["confirmation_request"] }] }
+    },
+    {
       "properties": {
         "status": { "const": "stopped" },
         "next_step": { "const": "stop" },
-        "stop_reason": {
-          "enum": [
-            "action_undeclared",
-            "action_unclassifiable",
-            "declaration_invalid",
-            "declaration_not_yet_valid",
-            "declaration_expired",
-            "target_mismatch",
-            "policy_unavailable"
-          ]
-        }
+        "stop_reason": { "enum": ["action_undeclared", "action_unclassifiable", "owner_match_conflict", "target_mismatch", "policy_unavailable"] }
       },
-      "required": ["stop_reason"],
+      "required": ["evaluated_at", "stop_reason"],
       "not": { "anyOf": [{ "required": ["effective_policy"] }, { "required": ["confirmation_request"] }] }
     }
   ],
@@ -93,37 +88,48 @@
     "action": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["action_instance_ref", "action_id", "target_ref", "category", "declaration_ref"],
+      "required": ["action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version"],
       "properties": {
         "action_instance_ref": { "type": "string", "minLength": 1 },
         "action_id": { "type": "string", "minLength": 1 },
-        "target_ref": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "#/$defs/target" },
         "category": { "$ref": "#/$defs/category" },
-        "declaration_ref": { "type": "string", "minLength": 1 }
+        "owner_matcher": { "enum": ["lode_package_admission", "harbor_admission"] },
+        "owner_declaration_ref": { "type": "string", "minLength": 1 },
+        "owner_declaration_version": { "type": "string", "minLength": 1 },
+        "resource_match_ref": { "type": "string", "minLength": 1 },
+        "resource_match_version": { "type": "string", "minLength": 1 }
       }
     },
     "effective_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "source", "source_ref"],
+      "required": ["mode", "source", "source_ref", "source_version"],
       "properties": {
         "mode": { "enum": ["auto", "confirm", "deny"] },
-        "source": {
-          "enum": ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"]
-        },
-        "source_ref": { "type": "string", "minLength": 1 }
+        "source": { "enum": ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"] },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": { "type": "string", "minLength": 1 }
       }
     },
     "confirmation_request": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope", "action_instance_ref", "action_id", "target_ref", "category", "choices"],
+      "required": ["scope", "action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "choices"],
       "properties": {
         "scope": { "const": "current_action" },
         "action_instance_ref": { "type": "string", "minLength": 1 },
         "action_id": { "type": "string", "minLength": 1 },
-        "target_ref": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "#/$defs/target" },
         "category": { "$ref": "#/$defs/category" },
+        "owner_matcher": { "enum": ["lode_package_admission", "harbor_admission"] },
+        "owner_declaration_ref": { "type": "string", "minLength": 1 },
+        "owner_declaration_version": { "type": "string", "minLength": 1 },
+        "resource_match_ref": { "type": "string", "minLength": 1 },
+        "resource_match_version": { "type": "string", "minLength": 1 },
+        "effective_policy_source_ref": { "type": "string", "minLength": 1 },
+        "effective_policy_source_version": { "type": "string", "minLength": 1 },
+        "effective_policy_source": { "enum": ["thread_revision", "installed_skill_user_version", "global_user_config"] },
         "choices": {
           "type": "array",
           "prefixItems": [{ "const": "allow_once" }, { "const": "deny_once" }],
@@ -131,6 +137,17 @@
           "minItems": 2,
           "maxItems": 2
         }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_ref", "target_type"],
+      "properties": {
+        "target_ref": { "type": "string", "minLength": 1 },
+        "target_type": { "type": "string", "minLength": 1 },
+        "site_slug": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "format": "uri", "pattern": "^https://" }
       }
     }
   }

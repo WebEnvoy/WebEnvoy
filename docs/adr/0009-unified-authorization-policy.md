@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted for Core #290/#291, 2026-07-14.
+Accepted for Core #290/#291, 2026-07-14. Clarified by Core #292, 2026-07-21.
 
 本 ADR supersede ADR 0004 中 approval-request-first 的产品模型。ADR 0004 的
 resource matching、target binding、idempotency、unknown outcome 和结果对账边界继续
@@ -14,88 +14,92 @@ App、CLI、MCP、API、SDK 和 Agent 共用 Core 任务路径，但旧合同把
 risk classification、approval request、expiry 和 evidence display。不同入口容易形成
 各自的确认流程，个人本机产品也被迫模拟组织审批。
 
-授权的核心问题只有两个：用户允许什么动作，以及允许范围有多大。授权决定必须由
-Core 统一解析，不能由 App、Harbor 或单个 Lode capability 分别实现。
+授权的核心问题只有两个：当前具体业务动作是什么，以及用户当前允许以何种方式执行。
+授权决定必须由 Core 统一解析，不能由 App、Harbor、调用入口或单个 Lode capability
+分别实现。
 
 ## 决策
 
-### 动作类别
+### 业务动作与方式
+
+统一业务动作只有四类：
 
 | 类别 | 含义 | 示例 |
 | --- | --- | --- |
-| `read` | 不产生目标网站外部变化 | 导航、搜索、读取页面 |
-| `prepare` | 只在本机或页面内准备变更，不向外部系统传输材料或产生持久变化 | 本地生成草稿、在确认无自动保存/上传时填写表单、生成预览 |
-| `commit` | 向外部系统传输材料或产生外部变化 | 上传、发布、发送、提交、创建或修改对象 |
-| `destructive` | 删除、撤销或其他破坏性变化 | 删除、取消、移除 |
-| `environment` | 改变本机运行环境 | 安装 provider、修改环境配置 |
+| `read` | 读取或下载，不产生目标系统外部变化 | 导航、搜索、读取页面、下载文件 |
+| `prepare` | 填写或准备但不提交，不上传、不自动保存、不向外部系统传输材料 | 本地草稿、无自动保存的表单填写、预览 |
+| `commit` | 发布、发送、提交、上传或产生其他外部变化 | 发布内容、发送消息、提交表单、创建或修改对象 |
+| `destructive` | 删除、撤销或其他破坏性变化 | 删除、取消、移除、撤销 |
 
-Lode capability 声明站点任务可能使用的动作类别、目标范围和外部变化；Harbor 的
-稳定 operation catalog 声明 provider/session 生命周期中的 `environment` 动作。Core
-只消费这些权威声明，不从 UI 文案、站点名称或运行时行为临时猜测动作类别。若页面
-填写可能自动保存、上传或向外部发送材料，声明必须使用 `commit`，不能降级为
-`prepare`。
+每类只允许 `auto`、`confirm`、`deny`。用户可以将 `destructive` 配置为 `auto`；
+Core 不静默升级为更严格方式，但决定必须保留 `destructive` 风险标记、有效方式和来源。
 
-### 策略层级
+Harbor provider/session 生命周期等系统环境操作不形成第五类 `environment`。Harbor
+operation catalog 必须按其业务影响映射到上述四类，例如只读检测为 `read`、安装或修改
+环境为 `commit`、删除环境为 `destructive`。Core 不按 click、type、scroll 等浏览器原子
+动作分类或授权。
 
-Core 从低到高按以下优先级解析有效策略：
+### Owner 声明与硬边界
 
-1. **全局默认**：用户对所有入口的默认授权模式；
-2. **当前 scope 覆盖**：task 绑定账号身份、站点、capability、目标和输入摘要；
-   非 task environment operation 绑定 provider/session operation、目标环境和参数摘要；
-3. **单次授权**：仅允许当前待执行动作一次。
+Lode 声明站点 capability 的具体 `action_id`、类别、目标范围和资源要求；Harbor 声明
+系统 operation 的同类事实。Core evaluator 不接受调用方自称 owner 的裸声明，只消费
+Lode package admission 或 Harbor admission matcher 产出的唯一匹配证明。证明至少绑定：
 
-第一版全局模式：
+- owner declaration ref/version；
+- 具体 `action_id` 与唯一业务类别；
+- 当前目标范围；
+- resource match ref/version 与资源要求 refs。
 
-- `read_only`：只允许 `read`；
-- `ask_before_change`：允许 `read` 和 `prepare`，`commit`、`destructive`、
-  `environment` 在执行前确认；
-- `scope_authorized`：在 task 创建或 environment operation 发起时确认声明范围，
-  当前 scope 内自动执行该范围。
+缺少证明、证明冲突、重复类别、目标或资源不匹配、无法分类，或出现 click/type/scroll
+原子动作类别时一律停止，不能通过确认扩大 owner 声明边界。
 
-在声明范围、目标绑定和有效期等硬边界内，更具体的显式决定覆盖较宽泛决定：有效的
-scope 覆盖可以覆盖全局默认，有效的单次决定可以覆盖 scope 覆盖；同一层级冲突时拒绝优先。
-因此 `read_only` 下可以由用户对一个已声明且精确绑定的 `commit` 动作授予单次权限，
-但不会扩大为后续动作或整个任务权限。任何超出权威动作声明、task/operation scope、
-目标绑定或有效期的动作属于硬拒绝，不能由更具体策略覆盖。
+### 策略来源与优先级
+
+Core 先解析不含单次决定的当前有效策略，从高到低固定为：
+
+1. 当前线程修订；
+2. 已安装技能用户版本；
+3. 全局用户配置。
+
+每个来源按动作类别保存 `auto`、`confirm` 或 `deny`，并携带稳定 source ref/version。
+不适用于当前线程、技能或动作类别的来源显式跳过。技能推荐只用于安装初始化；安装后
+形成已安装技能用户版本，不作为运行时第五个策略来源。
+
+只有当前有效策略仍为 `confirm` 时，Core 才消费当前动作的单次 `allow_once` 或
+`deny_once`。单次决定必须精确绑定：owner matcher 与 declaration ref/version、当前有效策略
+source 类型/ref/version、action instance/id/category、完整目标、resource match ref/version、
+issued_at 和 expires_at。完成、取消、过期、目标变化，或任一绑定/version 变化后直接
+失效并回到当前有效策略。单次决定不能绕过当前 `deny`，也不能收紧或覆盖当前 `auto`。
 
 ### 入口一致性
 
-App、CLI、MCP、API、SDK 和 Agent 只能提供策略选择、任务覆盖或单次决定。API Server
-归一化这些输入，Core 计算唯一有效决定。入口不得建立私有 risk enum、approval store
-或绕过 Core evaluator。
+App、CLI、MCP、API、SDK、Agent 和非 task 系统操作只提供当前事实与策略来源。公共入口
+必须经过同一严格 parser 和 Core evaluator；未知 caller、字段、枚举、非法 RFC3339
+时间或低层浏览器原子动作稳定返回 `invalid_input` 并停止，不抛异常，不建立入口特例。
 
-### 跨仓职责
-
-- Lode 声明站点 capability 动作和目标范围；Harbor 声明 provider/session operation
-  的 `environment` 动作和目标范围；
-- Core 对 task 和非 task environment intent 使用同一 evaluator，解析策略、请求确认、
-  记录决定并控制 progression；
-- Harbor 只执行 Core 已允许且符合 session/resource facts 的浏览器或环境动作；用户在
-  App 中点击安装、修复或启动是授权输入，不是绕过 Core evaluator 的执行许可；
-- App/CLI/MCP/API/SDK 投影同一授权语义。
-
-登录确认、验证码处理、session control ownership 和 provider 安装权限可以触发用户
-动作，但它们不等同于站点任务授权。
+真正执行前的动态重新计算、确认/拒绝协调和单次决定生命周期接入由 Core #293 完成。
+#292 提供确定性纯 evaluator、匹配证明输入和可消费的当前动作确认合同。
 
 ### 决定记录
 
-Core 为 task 和非 task environment operation 生成统一 Authorization Decision 摘要：
-策略来源、允许动作类别、绑定 scope、决定时间、有效期（如有）、一次性 grant 是否已
-消费和拒绝原因。Task 决定由 Run Record 引用；非 task environment 决定由 Harbor
-operation record 引用同一 decision ref。完整 UI 交互、工具调用和内部 trace 属于诊断
-记录，不要求 App 默认展示。精确持久化 schema 和 API 由 Core #293 实现，不由本 ADR
-伪定字段。
+Core 为 task 和非 task operation 生成统一 Authorization Decision 摘要：具体业务动作、
+目标、风险类别、有效方式、有效来源及版本、owner declaration 与 resource match refs、
+决定时间和停止原因。Task 决定由 Run Record 引用；非 task operation 决定由 Harbor
+operation record 引用同一 decision ref。精确持久化、查询与失效历史由 Core #293 实现。
+
+完整 UI 交互、工具调用和内部 trace 属于诊断记录，不要求 App 默认展示。Core 不保存
+Cookie、token、password、Profile storage、raw evidence、完整 DOM/HAR/截图/视频或网络正文。
 
 ## 影响
 
-- Core #233 迁移小红书写前验证的旧 approval 状态。
+- Core #292 实现唯一 deterministic evaluator 和公共合同。
+- Core #293 接入执行时重算、确认生命周期、决定记录与查询。
 - App #246 消费统一策略，不保存授权 truth。
-- Lode #281 为当前能力声明动作类别。
-- Harbor 只消费有效 Core grant，不拥有授权决策。
-- `execute_after_approval` 逐步迁移为 `commit` 动作加有效授权，不继续作为独立产品模式扩散。
+- Lode #281 提供当前 capability 的动作声明。
+- Harbor 只执行 Core 已允许且符合 session/resource facts 的动作，不拥有授权决策。
 
 ## 非目标
 
 - 不建立 RBAC、多级审批、组织策略服务或 hosted policy control plane。
-- 不在本 ADR 中定义持久化 schema、API 路由或 UI 布局。
+- 不按浏览器原子动作授权。
 - 不降低 target binding、idempotency、post-check、unknown outcome 或 reconciliation 要求。

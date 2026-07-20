@@ -1,6 +1,7 @@
 import type { FailureRecord } from "./run-record-store.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import type { LodeRequiredHarborFact } from "./lode-admission.js";
+import { parseBusinessActionOwnerMatch, type BusinessActionOwnerMatch } from "./execution-policy.js";
 
 export type HarborUnavailable = {
   status: "unavailable";
@@ -137,6 +138,13 @@ export type HarborAdmission =
       evidence_refs?: readonly string[];
       runtime_session_binding?: RuntimeSessionBindingFacts;
     };
+
+export function createHarborBusinessActionOwnerMatch(admission: HarborAdmission, value: unknown): BusinessActionOwnerMatch | undefined {
+  const match = parseBusinessActionOwnerMatch(value);
+  return admission.ok && match?.matcher === "harbor_admission" && match.owner_declaration_ref.startsWith("harbor://")
+    ? match
+    : undefined;
+}
 
 type RuntimeAdmission =
   | {

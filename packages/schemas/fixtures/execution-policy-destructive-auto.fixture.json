@@ -6,15 +6,25 @@
   "action": {
     "action_instance_ref": "action-instance:delete-note/1",
     "action_id": "xhs_delete_note",
-    "target_ref": "target:note/1",
+    "target": {
+      "target_ref": "target:note/1",
+      "target_type": "published_note",
+      "site_slug": "xiaohongshu",
+      "origin": "https://www.xiaohongshu.com/explore/note-1"
+    },
     "category": "destructive",
-    "declaration_ref": "lode://site-capability/xiaohongshu/delete-note@1.0.0#xhs_delete_note"
+    "owner_matcher": "lode_package_admission",
+    "owner_declaration_ref": "lode://site-capability/xiaohongshu/delete-note@1.0.0#xhs_delete_note",
+    "owner_declaration_version": "1.0.0",
+    "resource_match_ref": "resource-match:xhs/delete/1",
+    "resource_match_version": "1"
   },
   "risk_marker": "destructive",
   "effective_policy": {
     "mode": "auto",
     "source": "thread_revision",
-    "source_ref": "policy:thread/2"
+    "source_ref": "policy:thread/2",
+    "source_version": "2"
   },
   "next_step": "execute"
 }
