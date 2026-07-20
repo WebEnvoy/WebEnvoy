@@ -63,9 +63,10 @@ function normalizeTargetRef(
   targetRef: string,
   targetOrigin: string
 ): string | undefined {
+  if (isOpaqueDetailOperationContract(runtime)) return isOpaqueDetailRef(targetRef) ? targetRef : undefined;
   const publicTarget = normalizePublicHttpTarget(targetRef);
   if (publicTarget.ok) return publicTarget.target_origin === targetOrigin ? publicTarget.target_ref : undefined;
-  return isOpaqueDetailOperationContract(runtime) && isOpaqueDetailRef(targetRef) ? targetRef : undefined;
+  return undefined;
 }
 
 export function matchLockedLodeOperation(

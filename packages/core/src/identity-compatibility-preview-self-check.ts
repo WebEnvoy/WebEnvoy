@@ -234,9 +234,23 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(detailPreview.candidates[0]?.status, "compatible");
   assert.equal(detailPreview.target_ref, detailRef);
 
+  const detailUrlPreview = await previewIdentityCompatibility(request(["identity-compatible"], {
+    package_ref: detailPackageRef,
+    lock_ref: detailLockRef,
+    operation_id: "xhs_read_note_detail",
+    target_ref: "https://www.xiaohongshu.com/explore/note-123",
+    resource_requirement_ref: "xiaohongshu.read-note-detail.resources",
+    resource_requirement_profile_id: "identity-detail-preview"
+  }), {
+    ...baseDependencies,
+    lodePackageResolver: async () => detailPackageContract()
+  });
+  assert("category" in detailUrlPreview);
+  assert.equal(detailUrlPreview.code, "identity_compatibility_request_invalid");
+
   const unsupportedOpaque = await previewIdentityCompatibility(request(["identity-compatible"], { target_ref: detailRef }), baseDependencies);
-  assert(!("category" in unsupportedOpaque));
-  assert.deepEqual(unsupportedOpaque.candidates[0]?.reason_codes, ["target_origin_mismatch"]);
+  assert("category" in unsupportedOpaque);
+  assert.equal(unsupportedOpaque.code, "identity_compatibility_request_invalid");
 
   const multiProfilePreview = await previewIdentityCompatibility(request(["identity-compatible"]), {
     ...baseDependencies,

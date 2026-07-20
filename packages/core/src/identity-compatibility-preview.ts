@@ -16,6 +16,7 @@ import {
 import {
   matchLockedLodeOperation,
   matchLockedOperationIdentity,
+  opaqueDetailOperationContract,
   type LockedOperationMatch
 } from "./operation-identity-matcher.js";
 import type { LodePackageResolver } from "./runtime-task-chain.js";
@@ -154,7 +155,12 @@ export function parseIdentityCompatibilityPreviewRequest(value: unknown): Identi
   const rawTargetRef = boundedString(input.target_ref, 2048);
   const rawTargetOrigin = boundedString(input.target_origin, 512);
   const publicTarget = rawTargetRef === undefined ? undefined : normalizePublicHttpTarget(rawTargetRef);
-  const targetRef = publicTarget?.ok ? publicTarget.target_ref : isOpaqueDetailRef(rawTargetRef) ? rawTargetRef : undefined;
+  const opaqueDetailRequest = packageRef === opaqueDetailOperationContract.package_ref &&
+    lockRef === opaqueDetailOperationContract.lock_ref && version === opaqueDetailOperationContract.version &&
+    operationId === opaqueDetailOperationContract.operation_id && operationMode === opaqueDetailOperationContract.operation_mode;
+  const targetRef = opaqueDetailRequest
+    ? isOpaqueDetailRef(rawTargetRef) ? rawTargetRef : undefined
+    : publicTarget?.ok ? publicTarget.target_ref : undefined;
   const targetOrigin = rawTargetOrigin === undefined ? undefined : normalizePublicOrigin(rawTargetOrigin);
   const resourceRequirementRef = boundedString(input.resource_requirement_ref, 256);
   const resourceRequirementProfileId = boundedString(input.resource_requirement_profile_id, 256);

@@ -96,6 +96,22 @@
         "resource_requirement_profile_id": "identity-preview",
         "identity_environment_refs": ["identity-env-candidate"]
       }
+    },
+    {
+      "name": "detail-operation-with-public-url",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_read_note_detail",
+        "operation_mode": "read",
+        "target_ref": "https://www.xiaohongshu.com/explore/note-123",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.read-note-detail.resources",
+        "resource_requirement_profile_id": "identity-detail-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
     }
   ]
 }

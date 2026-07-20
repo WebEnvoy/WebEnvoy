@@ -9,6 +9,16 @@
       "properties": {
         "target_ref": { "type": "string", "format": "webenvoy-public-http-target" },
         "target_origin": { "type": "string", "format": "webenvoy-public-origin" }
+      },
+      "not": {
+        "properties": {
+          "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "version": { "const": "0.1.0" },
+          "operation_id": { "const": "xhs_read_note_detail" },
+          "operation_mode": { "const": "read" }
+        },
+        "required": ["package_ref", "lock_ref", "version", "operation_id", "operation_mode"]
       }
     },
     {
