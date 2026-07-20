@@ -19,7 +19,7 @@
     "resource_match_ref": "resource-match:xhs/delete/1",
     "resource_match_version": "1"
   },
-  "risk_marker": "destructive",
+  "risk_marker": null,
   "effective_policy": {
     "mode": "auto",
     "source": "thread_revision",

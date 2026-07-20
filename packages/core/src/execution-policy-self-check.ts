@@ -1,44 +1,68 @@
 import assert from "node:assert/strict";
 
 import {
-  actionOwnerMatchSchemaVersion,
   evaluateExecutionPolicy,
+  type BusinessActionCategory,
+  type BusinessActionOwnerProof,
   type ExecutionPolicyCaller,
   type ExecutionPolicyEvaluation,
   type ExecutionPolicyEvaluationInput,
   type SingleActionDecision
 } from "./execution-policy.js";
-import { createLodeBusinessActionOwnerMatch } from "./lode-admission.js";
-import { createHarborBusinessActionOwnerMatch } from "./harbor-admission.js";
+import {
+  matchHarborBusinessOperationOwner,
+  matchLodeBusinessActionOwner,
+  type HarborResourceMatchContract,
+  type LodeBusinessActionOwnerContract
+} from "./execution-policy-owner-proof.js";
 
 const allCallers: readonly ExecutionPolicyCaller[] = ["api", "cli", "mcp", "sdk", "app", "agent", "environment"];
+const packageRef = "lode://site-capability/xiaohongshu/publish-note@1.0.0";
+const requirementRef = "xiaohongshu.publish-note.resources";
 
-function input(category: "read" | "prepare" | "commit" | "destructive" = "commit"): ExecutionPolicyEvaluationInput {
-  const packageRef = "lode://site-capability/xiaohongshu/publish-note@1.0.0";
-  const resourceRequirementRefs = ["xiaohongshu.publish-note.resources"];
-  const ownerMatch = createLodeBusinessActionOwnerMatch({
-    ok: true,
+function resourceMatch(overrides: Partial<HarborResourceMatchContract> = {}): HarborResourceMatchContract {
+  return {
+    schema_version: "webenvoy.harbor-resource-match.v0",
+    match_ref: "resource-match:xhs/publish/1",
+    match_version: "1",
+    matched_requirement_refs: [requirementRef],
+    ...overrides
+  };
+}
+
+function lodeContract(category: BusinessActionCategory = "commit"): LodeBusinessActionOwnerContract {
+  return {
     package_ref: packageRef,
-    capability_version: "1.0.0",
-    resource_requirement_refs: resourceRequirementRefs,
-    required_harbor_facts: []
-  }, {
-    schema_version: actionOwnerMatchSchemaVersion,
-    matcher: "lode_package_admission",
-    owner_declaration_ref: `${packageRef}#xhs_publish_note`,
-    owner_declaration_version: "1.0.0",
-    resource_match_ref: "resource-match:xhs/publish/1",
-    resource_match_version: "1",
-    action_id: "xhs_publish_note",
-    categories: [category],
-    target_scope: {
-      target_types: ["creator_publish_page"],
-      site_slug: "xiaohongshu",
-      supported_origins: ["https://creator.xiaohongshu.com"]
-    },
-    resource_requirement_refs: resourceRequirementRefs
-  });
-  if (!ownerMatch) throw new Error("Lode owner match fixture is invalid");
+    version: "1.0.0",
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [{
+        action_id: "xhs_publish_note",
+        category,
+        target_scope: {
+          site_slug: "xiaohongshu",
+          target_types: ["creator_publish_page"],
+          supported_origins: ["https://creator.xiaohongshu.com/owner-contract-path?not-echoed=true"]
+        },
+        resource_requirements: {
+          path: "resource-requirements.json",
+          id: requirementRef,
+          profile_ids: ["xhs-creator-publish-page"]
+        },
+        external_effects: category === "commit" ? ["submit"] : category === "destructive" ? ["delete"] : []
+      }]
+    }
+  };
+}
+
+function lodeProof(category: BusinessActionCategory = "commit", contract = lodeContract(category)): BusinessActionOwnerProof {
+  const proof = matchLodeBusinessActionOwner(contract, "xhs_publish_note", resourceMatch());
+  if (!proof) throw new Error("authoritative Lode owner contract did not match");
+  return proof;
+}
+
+function input(category: BusinessActionCategory = "commit", ownerProof = lodeProof(category)): ExecutionPolicyEvaluationInput {
   return {
     caller: "api",
     evaluated_at: "2026-07-21T00:00:00.000Z",
@@ -49,14 +73,14 @@ function input(category: "read" | "prepare" | "commit" | "destructive" = "commit
         target_ref: "target:creator-note/1",
         target_type: "creator_publish_page",
         site_slug: "xiaohongshu",
-        origin: "https://creator.xiaohongshu.com/publish"
+        origin: "https://creator.xiaohongshu.com/current/path?credential=never-echoed"
       }
     },
-    owner_match: ownerMatch,
+    owner_proof: ownerProof,
     context: { thread_ref: "thread:1", skill_ref: "skill:user/xhs@3" },
     policies: {
-      thread_revision: { source_ref: "policy:thread/2", source_version: "2", thread_ref: "thread:1", modes: { commit: "confirm" } },
-      installed_skill_user_version: { source_ref: "policy:skill/3", source_version: "3", skill_ref: "skill:user/xhs@3", modes: { commit: "auto" } },
+      thread_revision: { source_ref: "policy:thread/2", source_version: "2", thread_ref: "thread:1", modes: { [category]: "confirm" } },
+      installed_skill_user_version: { source_ref: "policy:skill/3", source_version: "3", skill_ref: "skill:user/xhs@3", modes: { [category]: "auto" } },
       global_user_config: {
         source_ref: "policy:global/4",
         source_version: "4",
@@ -66,35 +90,11 @@ function input(category: "read" | "prepare" | "commit" | "destructive" = "commit
   };
 }
 
-function single(value: ExecutionPolicyEvaluationInput, mode: "auto" | "deny" = "auto"): SingleActionDecision {
-  return {
-    source_ref: "decision:once/1",
-    source_version: "1",
-    action_instance_ref: value.action.action_instance_ref,
-    action_id: value.action.action_id,
-    category: value.owner_match.categories[0]!,
-    target: { ...value.action.target },
-    owner_matcher: value.owner_match.matcher,
-    owner_declaration_ref: value.owner_match.owner_declaration_ref,
-    owner_declaration_version: value.owner_match.owner_declaration_version,
-    resource_match_ref: value.owner_match.resource_match_ref,
-    resource_match_version: value.owner_match.resource_match_version,
-    effective_policy_source_ref: value.policies.thread_revision!.source_ref,
-    effective_policy_source_version: value.policies.thread_revision!.source_version,
-    effective_policy_source: "thread_revision",
-    mode,
-    state: "active",
-    issued_at: "2026-07-20T23:59:00.000Z",
-    expires_at: "2026-07-21T00:05:00.000Z"
-  };
-}
-
-function assertCurrentConfirm(result: ExecutionPolicyEvaluation): void {
+function assertCurrentConfirm(result: ExecutionPolicyEvaluation, source: "thread_revision" | "installed_skill_user_version" = "thread_revision"): void {
   assert.equal(result.status, "evaluated");
   if (result.status !== "evaluated") throw new Error("policy must be evaluated");
   assert.equal(result.next_step, "request_confirmation");
-  assert.equal(result.effective_policy.source, "thread_revision");
-  assert.equal(result.effective_policy.source_version, "2");
+  assert.equal(result.effective_policy.source, source);
 }
 
 function assertInvalid(value: unknown): void {
@@ -106,6 +106,33 @@ function assertInvalid(value: unknown): void {
   });
 }
 
+function single(value: ExecutionPolicyEvaluationInput, mode: "auto" | "deny" = "auto"): SingleActionDecision {
+  const current = evaluateExecutionPolicy(value);
+  assertCurrentConfirm(current);
+  if (current.status !== "evaluated" || !current.confirmation_request) throw new Error("confirmation contract is required");
+  const confirmation = current.confirmation_request;
+  return {
+    source_ref: "decision:once/1",
+    source_version: "1",
+    action_instance_ref: confirmation.action_instance_ref,
+    action_id: confirmation.action_id,
+    category: confirmation.category,
+    target: { ...confirmation.target },
+    owner_matcher: confirmation.owner_matcher,
+    owner_declaration_ref: confirmation.owner_declaration_ref,
+    owner_declaration_version: confirmation.owner_declaration_version,
+    resource_match_ref: confirmation.resource_match_ref,
+    resource_match_version: confirmation.resource_match_version,
+    effective_policy_source_ref: confirmation.effective_policy_source_ref,
+    effective_policy_source_version: confirmation.effective_policy_source_version,
+    effective_policy_source: confirmation.effective_policy_source,
+    mode,
+    state: "active",
+    issued_at: "2026-07-20T23:59:59.999Z",
+    expires_at: "2026-07-21T00:00:00.001Z"
+  };
+}
+
 function assertSingleDecisionRules(): void {
   const confirm = input();
   confirm.policies.single_action_decision = single(confirm);
@@ -113,21 +140,24 @@ function assertSingleDecisionRules(): void {
   assert.equal(allowedOnce.status === "evaluated" && allowedOnce.next_step, "execute");
   assert.equal(allowedOnce.status === "evaluated" && allowedOnce.effective_policy.source, "single_action_decision");
 
-  confirm.policies.single_action_decision = single(confirm, "deny");
-  const deniedOnce = evaluateExecutionPolicy(confirm);
+  const deniedOnceInput = input();
+  deniedOnceInput.policies.single_action_decision = single(deniedOnceInput, "deny");
+  const deniedOnce = evaluateExecutionPolicy(deniedOnceInput);
   assert.equal(deniedOnce.status === "evaluated" && deniedOnce.next_step, "stop");
   assert.equal(deniedOnce.status === "evaluated" && deniedOnce.effective_policy.source, "single_action_decision");
 
   const denied = input();
+  const allowDecision = single(denied);
   denied.policies.thread_revision!.modes.commit = "deny";
-  denied.policies.single_action_decision = single(denied, "auto");
+  denied.policies.single_action_decision = allowDecision;
   const stillDenied = evaluateExecutionPolicy(denied);
   assert.equal(stillDenied.status === "evaluated" && stillDenied.next_step, "stop");
   assert.equal(stillDenied.status === "evaluated" && stillDenied.effective_policy.source, "thread_revision");
 
   const automatic = input();
+  const denyDecision = single(automatic, "deny");
   automatic.policies.thread_revision!.modes.commit = "auto";
-  automatic.policies.single_action_decision = single(automatic, "deny");
+  automatic.policies.single_action_decision = denyDecision;
   const stillAutomatic = evaluateExecutionPolicy(automatic);
   assert.equal(stillAutomatic.status === "evaluated" && stillAutomatic.next_step, "execute");
   assert.equal(stillAutomatic.status === "evaluated" && stillAutomatic.effective_policy.source, "thread_revision");
@@ -140,7 +170,7 @@ function assertSingleDecisionRules(): void {
     (decision) => { decision.target.target_type = "other_target"; },
     (decision) => { decision.target.site_slug = "other-site"; },
     (decision) => { decision.target.origin = "https://www.xiaohongshu.com"; },
-    (decision) => { decision.owner_matcher = "harbor_admission"; },
+    (decision) => { decision.owner_matcher = "harbor_operation_catalog"; },
     (decision) => { decision.owner_declaration_ref = "lode://other"; },
     (decision) => { decision.owner_declaration_version = "2.0.0"; },
     (decision) => { decision.resource_match_ref = "resource-match:other"; },
@@ -148,7 +178,7 @@ function assertSingleDecisionRules(): void {
     (decision) => { decision.effective_policy_source_ref = "policy:other"; },
     (decision) => { decision.effective_policy_source_version = "3"; },
     (decision) => { decision.effective_policy_source = "global_user_config"; },
-    (decision) => { decision.issued_at = "2026-07-21T00:01:00.000Z"; },
+    (decision) => { decision.issued_at = "2026-07-21T00:00:00.001Z"; },
     (decision) => { decision.expires_at = "2026-07-21T00:00:00.000Z"; }
   ];
   for (const invalidate of invalidations) {
@@ -163,13 +193,16 @@ function assertSingleDecisionRules(): void {
     assertCurrentConfirm(evaluateExecutionPolicy(current));
   }
 
+  const exactMillisecond = input();
+  exactMillisecond.evaluated_at = "2026-07-21T00:00:00.001Z";
+  exactMillisecond.policies.single_action_decision = { ...single(input()), expires_at: exactMillisecond.evaluated_at };
+  assertCurrentConfirm(evaluateExecutionPolicy(exactMillisecond));
+
   const changedPolicySource = input();
   changedPolicySource.policies.single_action_decision = single(changedPolicySource);
   changedPolicySource.policies.thread_revision!.thread_ref = "thread:other";
   changedPolicySource.policies.installed_skill_user_version!.modes.commit = "confirm";
-  const recalculated = evaluateExecutionPolicy(changedPolicySource);
-  assert.equal(recalculated.status === "evaluated" && recalculated.effective_policy.source, "installed_skill_user_version");
-  assert.equal(recalculated.status === "evaluated" && recalculated.next_step, "request_confirmation");
+  assertCurrentConfirm(evaluateExecutionPolicy(changedPolicySource), "installed_skill_user_version");
 
   const changedCurrentTarget = input();
   changedCurrentTarget.policies.single_action_decision = single(changedCurrentTarget);
@@ -177,26 +210,110 @@ function assertSingleDecisionRules(): void {
   assertCurrentConfirm(evaluateExecutionPolicy(changedCurrentTarget));
 }
 
-function assertOwnerMatchAndParser(): void {
-  const conflict = input();
-  conflict.owner_match.categories = ["commit", "commit"];
-  assert.equal(evaluateExecutionPolicy(conflict).status === "stopped" && evaluateExecutionPolicy(conflict).stop_reason, "owner_match_conflict");
+function assertOwnerProofBoundary(): void {
+  const valid = input();
+  const oldBareMatch = {
+    matcher: "lode_action_declaration",
+    owner_declaration_ref: `${packageRef}#xhs_publish_note`,
+    owner_declaration_version: "1.0.0",
+    resource_match_ref: "resource-match:xhs/publish/1",
+    resource_match_version: "1",
+    action_id: "xhs_publish_note",
+    category: "commit",
+    target_scope: lodeContract().action_declaration.actions[0]!.target_scope,
+    resource_requirement_refs: [requirementRef]
+  };
+  assertInvalid({ ...valid, owner_proof: oldBareMatch });
+  assertInvalid({ ...valid, owner_match: oldBareMatch });
+  assertInvalid({ ...valid, owner_proof: { ...valid.owner_proof } });
+  assertInvalid(JSON.parse(JSON.stringify(valid)));
+  assertInvalid({ ...valid, action: { ...valid.action, category: "read" } });
+  assertInvalid({ ...valid, action: { ...valid.action, resource_match_ref: "resource-match:forged" } });
 
-  const resourceConflict = input();
-  resourceConflict.owner_match.resource_requirement_refs = ["same", "same"];
-  assert.equal(evaluateExecutionPolicy(resourceConflict).status === "stopped" && evaluateExecutionPolicy(resourceConflict).stop_reason, "owner_match_conflict");
+  const duplicate = structuredClone(lodeContract());
+  duplicate.action_declaration.actions = [
+    ...duplicate.action_declaration.actions,
+    { ...structuredClone(duplicate.action_declaration.actions[0]!), category: "read", external_effects: [] }
+  ];
+  assert.equal(matchLodeBusinessActionOwner(duplicate, "xhs_publish_note", resourceMatch()), undefined);
+  assert.equal(matchLodeBusinessActionOwner(lodeContract(), "xhs_publish_note", resourceMatch({ matched_requirement_refs: ["other.resources"] })), undefined);
+  const credentialOwner = structuredClone(lodeContract());
+  credentialOwner.action_declaration.actions[0]!.target_scope.supported_origins = ["https://owner:password@creator.xiaohongshu.com/path"];
+  assert.equal(matchLodeBusinessActionOwner(credentialOwner, "xhs_publish_note", resourceMatch()), undefined);
+  const emptyUserinfoOwner = structuredClone(lodeContract());
+  emptyUserinfoOwner.action_declaration.actions[0]!.target_scope.supported_origins = ["https://@creator.xiaohongshu.com/path"];
+  assert.equal(matchLodeBusinessActionOwner(emptyUserinfoOwner, "xhs_publish_note", resourceMatch()), undefined);
+  const malformedSibling = structuredClone(lodeContract());
+  malformedSibling.action_declaration.actions = [
+    ...malformedSibling.action_declaration.actions,
+    { ...structuredClone(malformedSibling.action_declaration.actions[0]!), action_id: "browser_fill" }
+  ];
+  assert.equal(matchLodeBusinessActionOwner(malformedSibling, "xhs_publish_note", resourceMatch()), undefined);
 
-  const scopeConflict = input();
-  scopeConflict.owner_match.target_scope.target_types = ["creator_publish_page", "creator_publish_page"];
-  assert.equal(evaluateExecutionPolicy(scopeConflict).status === "stopped" && evaluateExecutionPolicy(scopeConflict).stop_reason, "owner_match_conflict");
+  for (const actionId of ["browser_fill", "click", "browser.type", "page_scroll"] as const) {
+    const primitive = structuredClone(lodeContract());
+    primitive.action_declaration.actions[0]!.action_id = actionId;
+    assert.equal(matchLodeBusinessActionOwner(primitive, actionId, resourceMatch()), undefined);
+    assertInvalid({ ...valid, action: { ...valid.action, action_id: actionId }, owner_proof: oldBareMatch });
+  }
 
-  const targetMismatch = input();
-  targetMismatch.action.target.origin = "https://www.xiaohongshu.com";
-  assert.equal(evaluateExecutionPolicy(targetMismatch).status === "stopped" && evaluateExecutionPolicy(targetMismatch).stop_reason, "target_mismatch");
+  const harborProof = matchHarborBusinessOperationOwner({
+    schema_version: "webenvoy.harbor-operation-catalog.v0",
+    catalog_ref: "harbor://operation-catalog/local",
+    catalog_version: "1",
+    operations: [{
+      operation_id: "install_provider",
+      category: "commit",
+      target_scope: { target_types: ["provider_installation"] },
+      resource_requirement_refs: ["harbor.provider.installable"]
+    }]
+  }, "install_provider", resourceMatch({
+    match_ref: "resource-match:harbor/provider/1",
+    matched_requirement_refs: ["harbor.provider.installable"]
+  }));
+  assert(harborProof);
+  assert.equal(matchHarborBusinessOperationOwner({
+    schema_version: "webenvoy.harbor-operation-catalog.v0",
+    catalog_ref: "harbor://operation-catalog/local",
+    catalog_version: "1",
+    operations: [
+      { operation_id: "install_provider", category: "commit", target_scope: { target_types: ["provider_installation"] }, resource_requirement_refs: ["harbor.provider.installable"] },
+      { operation_id: "install_provider", category: "destructive", target_scope: { target_types: ["provider_installation"] }, resource_requirement_refs: ["harbor.provider.installable"] }
+    ]
+  }, "install_provider", resourceMatch({ matched_requirement_refs: ["harbor.provider.installable"] })), undefined);
+  const environment = input("commit", harborProof);
+  environment.caller = "environment";
+  environment.action = {
+    action_instance_ref: "action-instance:install-provider/1",
+    action_id: "install_provider",
+    target: { target_ref: "target:provider/chrome", target_type: "provider_installation" }
+  };
+  assert.equal(evaluateExecutionPolicy(environment).next_step, "request_confirmation");
+}
 
-  const undeclared = input();
-  undeclared.owner_match.action_id = "other_action";
-  assert.equal(evaluateExecutionPolicy(undeclared).status === "stopped" && evaluateExecutionPolicy(undeclared).stop_reason, "action_undeclared");
+function assertTargetAndParserBoundary(): void {
+  const normalized = evaluateExecutionPolicy(input());
+  assert.equal(normalized.status === "evaluated" && normalized.action.target.origin, "https://creator.xiaohongshu.com");
+  assert.equal(JSON.stringify(normalized).includes("credential=never-echoed"), false);
+  assert.equal(JSON.stringify(normalized).includes("owner-contract-path"), false);
+
+  for (const target of [
+    { target_ref: "https://preview-user:preview-password@example.test/path", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
+    { target_ref: "ftp://preview-user:preview-password@example.test/path", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
+    { target_ref: "target:creator-note/1", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://preview-user:preview-password@creator.xiaohongshu.com/path?token=secret" },
+    { target_ref: "target:creator-note/1", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://@creator.xiaohongshu.com/path" }
+  ]) {
+    const candidate = input();
+    candidate.action.target = target;
+    const result = evaluateExecutionPolicy(candidate);
+    assert.equal(result.status === "stopped" && result.stop_reason, "invalid_input");
+    assert.equal(JSON.stringify(result).includes("preview-password"), false);
+    assert.equal(JSON.stringify(result).includes("secret"), false);
+  }
+
+  const mismatch = input();
+  mismatch.action.target.origin = "https://www.xiaohongshu.com/path";
+  assert.equal(evaluateExecutionPolicy(mismatch).status === "stopped" && evaluateExecutionPolicy(mismatch).stop_reason, "target_mismatch");
 
   const base = input();
   assertInvalid({ ...base, caller: "web" });
@@ -205,51 +322,29 @@ function assertOwnerMatchAndParser(): void {
   assertInvalid({ ...base, evaluated_at: Number.NaN });
   assertInvalid({ ...base, evaluated_at: "2026-02-30T00:00:00Z" });
   assertInvalid({ ...base, evaluated_at: "2026-07-21T00:00:00+24:00" });
+  assertInvalid({ ...base, evaluated_at: "2026-07-21T00:00:00.0001Z" });
+  assertInvalid({ ...base, evaluated_at: "2026-07-21T00:00:00.000000001Z" });
   assertInvalid({ ...base, unknown: true });
-  assertInvalid({ ...base, action: { ...base.action, click: true } });
-  assertInvalid({ ...base, owner: "Lode", declaration: { action_id: base.action.action_id } });
-  assertInvalid({ ...base, owner_match: { ...base.owner_match, unknown: true } });
-  assertInvalid({ ...base, owner_match: { ...base.owner_match, categories: ["click"] } });
+  assertInvalid({ ...base, action: { ...base.action, target: { ...base.action.target, target_type: " " } } });
   assertInvalid({ ...base, policies: { ...base.policies, skill_recommendation: { commit: "auto" } } });
   assertInvalid({ ...base, policies: { ...base.policies, thread_revision: { ...base.policies.thread_revision, source_version: undefined } } });
-  assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), issued_at: "2026-07-21" } } });
+  assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), issued_at: "2026-07-20T23:59:59.9999Z" } } });
+  assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), expires_at: "2026-07-21T00:00:00.000000001Z" } } });
   assertInvalid(null);
-
-  for (const actionId of ["click", "browser.type", "page_scroll"] as const) {
-    const atomic = input();
-    atomic.action.action_id = actionId;
-    atomic.owner_match.action_id = actionId;
-    const result = evaluateExecutionPolicy(atomic);
-    assert.equal(result.status === "stopped" && result.stop_reason, "action_unclassifiable");
-  }
-}
-
-function assertOwnerMatcherProofs(): void {
-  const valid = input().owner_match;
-  const admission = {
-    ok: true as const,
-    package_ref: "lode://site-capability/xiaohongshu/publish-note@1.0.0",
-    capability_version: "1.0.0",
-    resource_requirement_refs: ["xiaohongshu.publish-note.resources"],
-    required_harbor_facts: []
-  };
-  assert(createLodeBusinessActionOwnerMatch(admission, valid));
-  assert.equal(createLodeBusinessActionOwnerMatch({ ...admission, capability_version: "2.0.0" }, valid), undefined);
-  assert.equal(createLodeBusinessActionOwnerMatch(admission, { ...valid, resource_requirement_refs: ["other.resources"] }), undefined);
-  assert.equal(createLodeBusinessActionOwnerMatch({ ok: false, failure: { category: "resource_admission", code: "missing", phase: "resource_matching", recovery_hint: "repair" } }, valid), undefined);
-  assert.equal(createHarborBusinessActionOwnerMatch({ ok: true, runtime_binding_refs: [], evidence_refs: [] }, valid), undefined);
-  assert.equal(createHarborBusinessActionOwnerMatch({ ok: true, runtime_binding_refs: [], evidence_refs: [] }, { ...valid, matcher: "harbor_admission", owner_declaration_ref: "lode://not-harbor" }), undefined);
 }
 
 export function assertExecutionPolicyEvaluator(): void {
   const confirmation = evaluateExecutionPolicy(input());
   assertCurrentConfirm(confirmation);
   assert.equal(confirmation.status === "evaluated" && confirmation.confirmation_request?.effective_policy_source_version, "2");
-  assert.deepEqual(confirmation.status === "evaluated" && confirmation.confirmation_request?.target, input().action.target);
+  assert.deepEqual(confirmation.status === "evaluated" && confirmation.confirmation_request?.target, {
+    ...input().action.target,
+    origin: "https://creator.xiaohongshu.com"
+  });
 
   assertSingleDecisionRules();
-  assertOwnerMatchAndParser();
-  assertOwnerMatcherProofs();
+  assertOwnerProofBoundary();
+  assertTargetAndParserBoundary();
 
   const skillFallback = input();
   skillFallback.policies.thread_revision!.thread_ref = "thread:other";
@@ -262,21 +357,6 @@ export function assertExecutionPolicyEvaluator(): void {
   const dangerousAuto = evaluateExecutionPolicy(destructive);
   assert.equal(dangerousAuto.status === "evaluated" && dangerousAuto.next_step, "execute");
   assert.equal(dangerousAuto.status === "evaluated" && dangerousAuto.risk_marker, "destructive");
-
-  const environment = input();
-  environment.caller = "environment";
-  environment.action = { action_instance_ref: "action-instance:install-provider/1", action_id: "install_provider", target: { target_ref: "target:provider/chrome", target_type: "provider_installation" } };
-  const harborMatch = createHarborBusinessActionOwnerMatch({ ok: true, runtime_binding_refs: [], evidence_refs: [] }, {
-    ...environment.owner_match,
-    matcher: "harbor_admission",
-    owner_declaration_ref: "harbor://operation/install-provider",
-    action_id: "install_provider",
-    categories: ["commit"],
-    target_scope: { target_types: ["provider_installation"] }
-  });
-  if (!harborMatch) throw new Error("Harbor owner match fixture is invalid");
-  environment.owner_match = harborMatch;
-  assert.equal(evaluateExecutionPolicy(environment).next_step, "request_confirmation");
 
   for (const caller of allCallers) {
     const current = input("read");

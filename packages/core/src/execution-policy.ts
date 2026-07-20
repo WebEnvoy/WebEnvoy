@@ -1,7 +1,22 @@
-export const executionPolicyEvaluationSchemaVersion = "webenvoy.execution-policy-evaluation.v0";
-export const actionOwnerMatchSchemaVersion = "webenvoy.action-owner-match.v0";
+import {
+  isBrowserPrimitiveAction,
+  normalizeExecutionPolicyOrigin,
+  readBusinessActionOwnerProof,
+  type BusinessActionCategory,
+  type BusinessActionOwnerMatcher,
+  type BusinessActionOwnerProof,
+  type BusinessActionOwnerProofFields,
+  type BusinessActionTargetScope
+} from "./execution-policy-owner-proof.js";
 
-export type BusinessActionCategory = "read" | "prepare" | "commit" | "destructive";
+export type {
+  BusinessActionCategory,
+  BusinessActionOwnerMatcher,
+  BusinessActionOwnerProof
+} from "./execution-policy-owner-proof.js";
+
+export const executionPolicyEvaluationSchemaVersion = "webenvoy.execution-policy-evaluation.v0";
+
 export type ExecutionPolicyMode = "auto" | "confirm" | "deny";
 export type ExecutionPolicySource =
   | "single_action_decision"
@@ -15,23 +30,6 @@ export type BusinessActionTarget = {
   target_type: string;
   site_slug?: string;
   origin?: string;
-};
-
-export type BusinessActionOwnerMatch = {
-  schema_version: typeof actionOwnerMatchSchemaVersion;
-  matcher: "lode_package_admission" | "harbor_admission";
-  owner_declaration_ref: string;
-  owner_declaration_version: string;
-  resource_match_ref: string;
-  resource_match_version: string;
-  action_id: string;
-  categories: readonly BusinessActionCategory[];
-  target_scope: {
-    target_types: readonly string[];
-    site_slug?: string;
-    supported_origins?: readonly string[];
-  };
-  resource_requirement_refs: readonly string[];
 };
 
 export type BusinessActionRequest = {
@@ -50,7 +48,7 @@ export type SingleActionDecision = {
   action_id: string;
   category: BusinessActionCategory;
   target: BusinessActionTarget;
-  owner_matcher: BusinessActionOwnerMatch["matcher"];
+  owner_matcher: BusinessActionOwnerMatcher;
   owner_declaration_ref: string;
   owner_declaration_version: string;
   resource_match_ref: string;
@@ -75,7 +73,7 @@ export type ExecutionPolicyEvaluationInput = {
   caller: ExecutionPolicyCaller;
   evaluated_at: string;
   action: BusinessActionRequest;
-  owner_match: BusinessActionOwnerMatch;
+  owner_proof: BusinessActionOwnerProof;
   context: ExecutionPolicyContext;
   policies: ExecutionPolicySources;
 };
@@ -85,7 +83,7 @@ export type EvaluatedBusinessAction = {
   action_id: string;
   target: BusinessActionTarget;
   category: BusinessActionCategory;
-  owner_matcher: BusinessActionOwnerMatch["matcher"];
+  owner_matcher: BusinessActionOwnerMatcher;
   owner_declaration_ref: string;
   owner_declaration_version: string;
   resource_match_ref: string;
@@ -105,7 +103,7 @@ export type SingleActionConfirmationRequest = {
   action_id: string;
   target: BusinessActionTarget;
   category: BusinessActionCategory;
-  owner_matcher: BusinessActionOwnerMatch["matcher"];
+  owner_matcher: BusinessActionOwnerMatcher;
   owner_declaration_ref: string;
   owner_declaration_version: string;
   resource_match_ref: string;
@@ -121,7 +119,6 @@ type StopReason =
   | "invalid_input"
   | "action_undeclared"
   | "action_unclassifiable"
-  | "owner_match_conflict"
   | "target_mismatch"
   | "policy_unavailable";
 
@@ -150,13 +147,13 @@ export type ExecutionPolicyEvaluation =
     };
 
 type JsonObject = Record<string, unknown>;
+type ParsedExecutionPolicyEvaluationInput = Omit<ExecutionPolicyEvaluationInput, "owner_proof"> & { owner_proof: BusinessActionOwnerProofFields };
 const actionCategories = new Set<BusinessActionCategory>(["read", "prepare", "commit", "destructive"]);
 const policyModes = new Set<ExecutionPolicyMode>(["auto", "confirm", "deny"]);
 const callers = new Set<ExecutionPolicyCaller>(["api", "cli", "mcp", "sdk", "app", "agent", "environment"]);
 const singleStates = new Set<SingleActionDecision["state"]>(["active", "consumed", "cancelled", "expired", "target_changed"]);
 const currentPolicySources = new Set<Exclude<ExecutionPolicySource, "single_action_decision">>(["thread_revision", "installed_skill_user_version", "global_user_config"]);
 const businessActionIdPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
-const browserAtomicActionPattern = /(?:^|[._-])(?:click|type|scroll)(?:$|[._-])/;
 const privateRefPattern = /(https?:\/\/|[\r\n\0]|cookie|token|password|raw[_-]?(?:evidence|dom|har))/i;
 
 function exactObject(value: unknown, required: readonly string[], optional: readonly string[] = []): JsonObject | undefined {
@@ -167,7 +164,7 @@ function exactObject(value: unknown, required: readonly string[], optional: read
 }
 
 function string(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0 && value.trim() === value ? value : undefined;
 }
 
 function persistentRef(value: unknown): string | undefined {
@@ -175,13 +172,14 @@ function persistentRef(value: unknown): string | undefined {
   return ref && !privateRefPattern.test(ref) ? ref : undefined;
 }
 
-function stringArray(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0) ? value : undefined;
+function persistentTargetRef(value: unknown): string | undefined {
+  const ref = persistentRef(value);
+  return ref && !ref.includes("://") ? ref : undefined;
 }
 
 function rfc3339(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value);
   if (!match) return undefined;
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -196,68 +194,20 @@ function rfc3339(value: unknown): string | undefined {
   return value;
 }
 
-function httpsOrigin(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  try {
-    return new URL(value).protocol === "https:" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function sameOrigin(left: string | undefined, right: string | undefined): boolean {
-  if (!left || !right) return false;
-  try {
-    return new URL(left).origin === new URL(right).origin;
-  } catch {
-    return false;
-  }
+  const leftOrigin = normalizeExecutionPolicyOrigin(left);
+  const rightOrigin = normalizeExecutionPolicyOrigin(right);
+  return leftOrigin !== undefined && leftOrigin === rightOrigin;
 }
 
 function parseTarget(value: unknown): BusinessActionTarget | undefined {
   const object = exactObject(value, ["target_ref", "target_type"], ["site_slug", "origin"]);
-  const targetRef = persistentRef(object?.target_ref);
+  const targetRef = persistentTargetRef(object?.target_ref);
   const targetType = string(object?.target_type);
   const siteSlug = object?.site_slug === undefined ? undefined : string(object.site_slug);
-  const origin = object?.origin === undefined ? undefined : httpsOrigin(object.origin);
+  const origin = object?.origin === undefined ? undefined : normalizeExecutionPolicyOrigin(object.origin);
   if (!object || !targetRef || !targetType || (object.site_slug !== undefined && !siteSlug) || (object.origin !== undefined && !origin)) return undefined;
   return { target_ref: targetRef, target_type: targetType, ...(siteSlug ? { site_slug: siteSlug } : {}), ...(origin ? { origin } : {}) };
-}
-
-function parseTargetScope(value: unknown): BusinessActionOwnerMatch["target_scope"] | undefined {
-  const object = exactObject(value, ["target_types"], ["site_slug", "supported_origins"]);
-  const targetTypes = stringArray(object?.target_types);
-  const siteSlug = object?.site_slug === undefined ? undefined : string(object.site_slug);
-  const origins = object?.supported_origins === undefined ? undefined : stringArray(object.supported_origins);
-  if (!object || !targetTypes?.length || (object.site_slug !== undefined && !siteSlug) ||
-    (object.supported_origins !== undefined && (!origins?.length || origins.some((origin) => !httpsOrigin(origin))))) return undefined;
-  return { target_types: targetTypes, ...(siteSlug ? { site_slug: siteSlug } : {}), ...(origins ? { supported_origins: origins } : {}) };
-}
-
-export function parseBusinessActionOwnerMatch(value: unknown): BusinessActionOwnerMatch | undefined {
-  const object = exactObject(value, ["schema_version", "matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "action_id", "categories", "target_scope", "resource_requirement_refs"]);
-  const categories = stringArray(object?.categories);
-  const targetScope = parseTargetScope(object?.target_scope);
-  const requirementRefs = stringArray(object?.resource_requirement_refs);
-  if (!object || object.schema_version !== actionOwnerMatchSchemaVersion ||
-    (object.matcher !== "lode_package_admission" && object.matcher !== "harbor_admission") ||
-    !persistentRef(object.owner_declaration_ref) || !string(object.owner_declaration_version) ||
-    !persistentRef(object.resource_match_ref) || !string(object.resource_match_version) ||
-    !string(object.action_id) || !businessActionIdPattern.test(object.action_id as string) || !categories ||
-    !categories.every((category) => actionCategories.has(category as BusinessActionCategory)) ||
-    !targetScope || !requirementRefs) return undefined;
-  return {
-    schema_version: actionOwnerMatchSchemaVersion,
-    matcher: object.matcher,
-    owner_declaration_ref: object.owner_declaration_ref as string,
-    owner_declaration_version: object.owner_declaration_version as string,
-    resource_match_ref: object.resource_match_ref as string,
-    resource_match_version: object.resource_match_version as string,
-    action_id: object.action_id as string,
-    categories: categories as BusinessActionCategory[],
-    target_scope: targetScope,
-    resource_requirement_refs: requirementRefs
-  };
 }
 
 function parseModes(value: unknown): ExecutionPolicyModes | undefined {
@@ -283,7 +233,7 @@ function parseSingleDecision(value: unknown): SingleActionDecision | undefined {
   const target = parseTarget(object?.target);
   if (!object || !persistentRef(object.source_ref) || !string(object.source_version) || !persistentRef(object.action_instance_ref) ||
     !string(object.action_id) || !businessActionIdPattern.test(object.action_id as string) || !actionCategories.has(object.category as BusinessActionCategory) || !target ||
-    (object.owner_matcher !== "lode_package_admission" && object.owner_matcher !== "harbor_admission") ||
+    (object.owner_matcher !== "lode_action_declaration" && object.owner_matcher !== "harbor_operation_catalog") ||
     !persistentRef(object.owner_declaration_ref) || !string(object.owner_declaration_version) ||
     !persistentRef(object.resource_match_ref) || !string(object.resource_match_version) ||
     !persistentRef(object.effective_policy_source_ref) || !string(object.effective_policy_source_version) ||
@@ -293,13 +243,13 @@ function parseSingleDecision(value: unknown): SingleActionDecision | undefined {
   return object as SingleActionDecision;
 }
 
-function parseInput(value: unknown): ExecutionPolicyEvaluationInput | undefined {
-  const object = exactObject(value, ["caller", "evaluated_at", "action", "owner_match", "context", "policies"]);
+function parseInput(value: unknown): ParsedExecutionPolicyEvaluationInput | undefined {
+  const object = exactObject(value, ["caller", "evaluated_at", "action", "owner_proof", "context", "policies"]);
   const action = exactObject(object?.action, ["action_instance_ref", "action_id", "target"]);
   const context = exactObject(object?.context, [], ["thread_ref", "skill_ref"]);
   const policies = exactObject(object?.policies, [], ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"]);
   const target = parseTarget(action?.target);
-  const ownerMatch = parseBusinessActionOwnerMatch(object?.owner_match);
+  const ownerProof = readBusinessActionOwnerProof(object?.owner_proof);
   const evaluatedAt = rfc3339(object?.evaluated_at);
   const threadRef = context?.thread_ref === undefined ? undefined : persistentRef(context.thread_ref);
   const skillRef = context?.skill_ref === undefined ? undefined : persistentRef(context.skill_ref);
@@ -308,7 +258,7 @@ function parseInput(value: unknown): ExecutionPolicyEvaluationInput | undefined 
   const skill = policies?.installed_skill_user_version === undefined ? undefined : parsePolicy(policies.installed_skill_user_version, "skill_ref");
   const global = policies?.global_user_config === undefined ? undefined : parsePolicy(policies.global_user_config);
   if (!object || !callers.has(object.caller as ExecutionPolicyCaller) || !evaluatedAt || !action || !persistentRef(action.action_instance_ref) ||
-    !string(action.action_id) || !businessActionIdPattern.test(action.action_id as string) || !target || !ownerMatch || !context || !policies ||
+    !string(action.action_id) || !businessActionIdPattern.test(action.action_id as string) || !target || !ownerProof || !context || !policies ||
     (context.thread_ref !== undefined && !threadRef) || (context.skill_ref !== undefined && !skillRef) ||
     (policies.single_action_decision !== undefined && !single) || (policies.thread_revision !== undefined && !thread) ||
     (policies.installed_skill_user_version !== undefined && !skill) || (policies.global_user_config !== undefined && !global)) return undefined;
@@ -321,13 +271,13 @@ function parseInput(value: unknown): ExecutionPolicyEvaluationInput | undefined 
     caller: object.caller as ExecutionPolicyCaller,
     evaluated_at: evaluatedAt,
     action: { action_instance_ref: action.action_instance_ref as string, action_id: action.action_id as string, target },
-    owner_match: ownerMatch,
+    owner_proof: ownerProof,
     context: { ...(threadRef ? { thread_ref: threadRef } : {}), ...(skillRef ? { skill_ref: skillRef } : {}) },
     policies: parsedPolicies
   };
 }
 
-export function matchesBusinessActionTarget(scope: BusinessActionOwnerMatch["target_scope"], target: BusinessActionTarget): boolean {
+function matchesBusinessActionTarget(scope: BusinessActionTargetScope, target: BusinessActionTarget): boolean {
   if (!scope.target_types.includes(target.target_type)) return false;
   if (scope.site_slug !== undefined && scope.site_slug !== target.site_slug) return false;
   if (scope.supported_origins === undefined) return true;
@@ -338,27 +288,21 @@ function invalidInput(): ExecutionPolicyEvaluation {
   return { schema_version: executionPolicyEvaluationSchemaVersion, status: "stopped", next_step: "stop", stop_reason: "invalid_input" };
 }
 
-function stopped(input: ExecutionPolicyEvaluationInput, stopReason: Exclude<StopReason, "invalid_input">, action?: EvaluatedBusinessAction): ExecutionPolicyEvaluation {
+function stopped(input: ParsedExecutionPolicyEvaluationInput, stopReason: Exclude<StopReason, "invalid_input">, action?: EvaluatedBusinessAction): ExecutionPolicyEvaluation {
   return { schema_version: executionPolicyEvaluationSchemaVersion, evaluated_at: input.evaluated_at, status: "stopped", next_step: "stop", stop_reason: stopReason,
     ...(action ? { action, risk_marker: action.category === "destructive" ? "destructive" as const : null } : {}) };
 }
 
-function matchedAction(input: ExecutionPolicyEvaluationInput): EvaluatedBusinessAction | ExecutionPolicyEvaluation {
-  const match = input.owner_match;
+function matchedAction(input: ParsedExecutionPolicyEvaluationInput): EvaluatedBusinessAction | ExecutionPolicyEvaluation {
+  const match = input.owner_proof;
   if (match.action_id !== input.action.action_id) return stopped(input, "action_undeclared");
-  if (browserAtomicActionPattern.test(input.action.action_id)) return stopped(input, "action_unclassifiable");
-  if (match.categories.length !== 1 || new Set(match.categories).size !== 1 ||
-    match.target_scope.target_types.length !== new Set(match.target_scope.target_types).size ||
-    (match.target_scope.supported_origins !== undefined && match.target_scope.supported_origins.length !== new Set(match.target_scope.supported_origins).size) ||
-    match.resource_requirement_refs.length === 0 || new Set(match.resource_requirement_refs).size !== match.resource_requirement_refs.length) {
-    return stopped(input, "owner_match_conflict");
-  }
+  if (isBrowserPrimitiveAction(input.action.action_id)) return stopped(input, "action_unclassifiable");
   if (!matchesBusinessActionTarget(match.target_scope, input.action.target)) return stopped(input, "target_mismatch");
   return {
     action_instance_ref: input.action.action_instance_ref,
     action_id: input.action.action_id,
     target: { ...input.action.target },
-    category: match.categories[0]!,
+    category: match.category,
     owner_matcher: match.matcher,
     owner_declaration_ref: match.owner_declaration_ref,
     owner_declaration_version: match.owner_declaration_version,
@@ -367,7 +311,7 @@ function matchedAction(input: ExecutionPolicyEvaluationInput): EvaluatedBusiness
   };
 }
 
-function currentPolicy(input: ExecutionPolicyEvaluationInput, category: BusinessActionCategory): EffectiveExecutionPolicy | undefined {
+function currentPolicy(input: ParsedExecutionPolicyEvaluationInput, category: BusinessActionCategory): EffectiveExecutionPolicy | undefined {
   const candidates: readonly [ExecutionPolicySource, { source_ref: string; source_version: string; modes: ExecutionPolicyModes } | undefined, boolean][] = [
     ["thread_revision", input.policies.thread_revision, input.policies.thread_revision?.thread_ref === input.context.thread_ref],
     ["installed_skill_user_version", input.policies.installed_skill_user_version, input.policies.installed_skill_user_version?.skill_ref === input.context.skill_ref],
@@ -384,7 +328,7 @@ function targetsEqual(left: BusinessActionTarget, right: BusinessActionTarget): 
   return left.target_ref === right.target_ref && left.target_type === right.target_type && left.site_slug === right.site_slug && left.origin === right.origin;
 }
 
-function validSingleDecision(input: ExecutionPolicyEvaluationInput, action: EvaluatedBusinessAction, current: EffectiveExecutionPolicy): SingleActionDecision | undefined {
+function validSingleDecision(input: ParsedExecutionPolicyEvaluationInput, action: EvaluatedBusinessAction, current: EffectiveExecutionPolicy): SingleActionDecision | undefined {
   const single = input.policies.single_action_decision;
   if (!single || current.mode !== "confirm" || single.state !== "active") return undefined;
   const now = Date.parse(input.evaluated_at);
@@ -398,7 +342,7 @@ function validSingleDecision(input: ExecutionPolicyEvaluationInput, action: Eval
     single.effective_policy_source_version === current.source_version && single.effective_policy_source === current.source ? single : undefined;
 }
 
-function evaluated(input: ExecutionPolicyEvaluationInput, action: EvaluatedBusinessAction, policy: EffectiveExecutionPolicy): ExecutionPolicyEvaluation {
+function evaluated(input: ParsedExecutionPolicyEvaluationInput, action: EvaluatedBusinessAction, policy: EffectiveExecutionPolicy): ExecutionPolicyEvaluation {
   const base: EvaluationBase & { status: "evaluated"; action: EvaluatedBusinessAction; risk_marker: "destructive" | null; effective_policy: EffectiveExecutionPolicy } = {
     schema_version: executionPolicyEvaluationSchemaVersion, evaluated_at: input.evaluated_at, status: "evaluated", action,
     risk_marker: action.category === "destructive" ? "destructive" as const : null, effective_policy: policy };

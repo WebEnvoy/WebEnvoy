@@ -145,7 +145,6 @@ export {
   type IdentityCompatibilityStatus
 } from "./identity-compatibility-preview.js";
 export {
-  createHarborBusinessActionOwnerMatch,
   type HarborIdentityEnvironmentFacts,
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
@@ -155,7 +154,7 @@ export {
   type RuntimeSessionBindingFacts,
   type RuntimeSessionUse
 } from "./harbor-admission.js";
-export { createLodeBusinessActionOwnerMatch, type LodePackageAdmissionContract } from "./lode-admission.js";
+export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
   matchLockedLodeOperation,
   matchLockedOperationIdentity,
@@ -169,13 +168,10 @@ export {
 } from "./public-target-reference.js";
 export {
   evaluateExecutionPolicy,
-  actionOwnerMatchSchemaVersion,
   executionPolicyEvaluationSchemaVersion,
-  matchesBusinessActionTarget,
-  parseBusinessActionOwnerMatch,
-  sameOrigin,
   type BusinessActionCategory,
-  type BusinessActionOwnerMatch,
+  type BusinessActionOwnerMatcher,
+  type BusinessActionOwnerProof,
   type BusinessActionRequest,
   type BusinessActionTarget,
   type ExecutionPolicyCaller,

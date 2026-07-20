@@ -42,4 +42,4 @@ Run:
 pnpm --filter @webenvoy/schemas test
 ```
 
-This package does not add Ajv or generated TypeScript types yet. Full JSON Schema validation and conformance cases belong to GH-100.
+The self-check uses declared test-only Ajv dependencies for reproducible Draft 2020-12 validation of the execution-policy fixture, negative fixtures, and real evaluator outputs. Generated TypeScript types and broader conformance expansion remain outside this package change.
