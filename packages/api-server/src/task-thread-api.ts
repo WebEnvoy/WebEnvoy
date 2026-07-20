@@ -106,15 +106,16 @@ function requestHash(body: JsonBody): string {
 
 function errorStatus(error: TaskThreadStoreError): number {
   if (error.code === "thread_not_found" || error.code === "turn_not_found") return 404;
-  if (error.code === "thread_lock_timeout" || error.code.startsWith("owner_ref_check_unavailable:")) return 503;
+  if (error.code === "thread_lock_timeout" || error.code === "lode_input_policy_unavailable" || error.code.startsWith("owner_ref_check_unavailable:")) return 503;
+  if (error.code === "input_schema_invalid" || error.code === "input_schema_ref_mismatch" || error.code === "input_package_not_found") return 422;
   if (error.code.startsWith("owner_ref_unavailable:")) return 409;
-  if (error.code === "thread_has_active_turn" || error.code === "idempotency_payload_mismatch" || error.code === "run_id_already_linked" || error.code === "turn_not_active" || error.code === "turn_run_still_active") return 409;
+  if (error.code === "thread_has_active_turn" || error.code === "idempotency_payload_mismatch" || error.code === "run_id_already_linked" || error.code === "turn_not_active" || error.code === "turn_run_still_active" || error.code === "input_capability_mismatch") return 409;
   return 400;
 }
 
 function errorResult(error: unknown): TaskThreadApiResult {
   if (!(error instanceof TaskThreadStoreError)) throw error;
-  const retryable = error.code === "thread_lock_timeout" || error.code.startsWith("owner_ref_check_unavailable:");
+  const retryable = error.code === "thread_lock_timeout" || error.code === "lode_input_policy_unavailable" || error.code.startsWith("owner_ref_check_unavailable:");
   return {
     handled: true,
     status: errorStatus(error),
@@ -208,11 +209,16 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
       if (capability.ref !== thread.capability_ref || harbor?.identity_environment_ref !== thread.identity_environment_ref) {
         return { handled: true, status: 409, body: requestError("thread_binding_mismatch") };
       }
+      const packageRef = nonEmptyString(body.package_ref);
+      if (!packageRef || capability.source_ref !== packageRef) {
+        return { handled: true, status: 400, body: requestError("package_ref_mismatch") };
+      }
       const reserved = await input.store.reserveTaskTurn(threadId, {
         idempotency_key: idempotencyKey,
         request_hash: requestHash(body),
         run_id: runId,
         creation_channel: entrypoint as "api" | "cli" | "mcp" | "sdk" | "app",
+        package_ref: packageRef,
         input: inputSnapshotValue
       });
       if (reserved.replayed) {

@@ -26,6 +26,7 @@
     },
     "fields": {
       "type": "array",
+      "maxItems": 64,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -54,14 +55,22 @@
         "allOf": [
           {
             "if": { "properties": { "kind": { "enum": ["long_text", "file", "attachment"] } } },
-            "then": { "required": ["owner_ref"] },
-            "else": { "required": ["summary"] }
+            "then": {
+              "required": ["owner_ref"],
+              "not": { "required": ["summary"] }
+            },
+            "else": {
+              "required": ["summary"],
+              "not": { "required": ["owner_ref"] }
+            }
           }
         ]
       }
     },
     "attachment_refs": {
       "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
       "items": {
         "type": "string",
         "minLength": 1,

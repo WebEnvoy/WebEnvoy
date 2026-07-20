@@ -25,6 +25,8 @@ export class TaskThreadStoreError extends Error {
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const inlineSummaryLimit = 512;
+const inputFieldLimit = 64;
+const attachmentRefLimit = 32;
 const privateFieldNames = new Set([
   "cookie", "cookies", "token", "tokens", "password", "profile", "profile_path",
   "storage", "storage_value", "dom", "har", "video", "raw_payload", "network_body",
@@ -130,6 +132,7 @@ function normalizeTaskTurnInputSnapshot(value: unknown, persisted: boolean): Tas
   if (input.schema_version !== taskTurnInputSchemaVersion || !Array.isArray(input.fields)) {
     throw new TaskThreadStoreError("input_snapshot_invalid");
   }
+  if (input.fields.length > inputFieldLimit) throw new TaskThreadStoreError("input_fields_limit_exceeded");
   if (
     (persisted || input.consumer_boundary !== undefined) &&
     input.consumer_boundary !== taskTurnInputConsumerBoundary
@@ -149,7 +152,9 @@ function normalizeTaskTurnInputSnapshot(value: unknown, persisted: boolean): Tas
     }
     const usesOwnerRef = field.kind === "long_text" || field.kind === "file" || field.kind === "attachment";
     if (usesOwnerRef && field.owner_ref === undefined) throw new TaskThreadStoreError("field_owner_ref_required");
+    if (usesOwnerRef && field.summary !== undefined) throw new TaskThreadStoreError("field_summary_forbidden");
     if (!usesOwnerRef && field.summary === undefined) throw new TaskThreadStoreError("field_summary_required");
+    if (!usesOwnerRef && field.owner_ref !== undefined) throw new TaskThreadStoreError("field_owner_ref_forbidden");
     const summary = field.summary === undefined
       ? undefined
       : field.kind === "url"
@@ -166,7 +171,13 @@ function normalizeTaskTurnInputSnapshot(value: unknown, persisted: boolean): Tas
   if (input.attachment_refs !== undefined && !Array.isArray(input.attachment_refs)) {
     throw new TaskThreadStoreError("attachment_refs_invalid");
   }
+  if ((input.attachment_refs?.length ?? 0) > attachmentRefLimit) {
+    throw new TaskThreadStoreError("attachment_refs_limit_exceeded");
+  }
   const attachmentRefs = input.attachment_refs?.map((ref) => requireOwnerRef(ref, "attachment_ref"));
+  if (attachmentRefs && new Set(attachmentRefs).size !== attachmentRefs.length) {
+    throw new TaskThreadStoreError("attachment_ref_duplicate");
+  }
   return {
     schema_version: taskTurnInputSchemaVersion,
     fields,

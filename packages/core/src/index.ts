@@ -176,3 +176,12 @@ export {
   type TaskTurnSubmissionError,
   type TaskTurnView
 } from "./task-thread-store.js";
+export {
+  createLocalTaskTurnInputPolicyResolver,
+  validateTaskTurnInputAgainstPolicy,
+  type LocalTaskTurnInputPolicyResolverOptions,
+  type TaskTurnInputFieldPolicy,
+  type TaskTurnInputPolicy,
+  type TaskTurnInputPolicyResolver,
+  type TaskTurnInputSummaryConstraint
+} from "./task-turn-input-policy.js";

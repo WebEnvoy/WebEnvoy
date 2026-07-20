@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createFileRunRecordStore, taskTurnInputSchemaVersion } from "@webenvoy/core-runtime";
+import { createFileRunRecordStore, taskTurnInputSchemaVersion, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { createApiServer } from "./server.js";
 import { handleTaskThreadApi } from "./task-thread-api.js";
@@ -29,6 +29,14 @@ function requestHash(body: Record<string, unknown>): string {
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
 
+const packageRef = "lode://site-capability/test/thread@0.1.0";
+const resolveInputPolicy: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
+  package_ref,
+  capability_ref,
+  input_schema_ref: "lode://schema/test/thread-input@0.1.0",
+  fields: new Map([["keyword", { field_id: "keyword", projection: "safe_summary" }]])
+});
+
 async function waitForTurn(store: ReturnType<typeof createFileTaskThreadStore>, threadId: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if ((await store.getTaskThread(threadId))?.turns.length === 1) return;
@@ -41,7 +49,7 @@ async function assertInFlightReplay(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-thread-api-in-flight-"));
   const runDirectory = join(directory, "runs");
   const runStore = createFileRunRecordStore({ directory: runDirectory });
-  const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore });
+  const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore, resolveInputPolicy });
   let releaseSubmit: (() => void) | undefined;
   const submitGate = new Promise<void>((resolve) => { releaseSubmit = resolve; });
   try {
@@ -52,11 +60,12 @@ async function assertInFlightReplay(): Promise<void> {
     const body = {
       idempotency_key: "submit-in-flight",
       run_id: "run_api_in_flight",
+      package_ref: packageRef,
       input_snapshot: {
         schema_version: taskTurnInputSchemaVersion,
         fields: [{ field_id: "keyword", kind: "scalar", summary: "AI tools" }]
       },
-      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/in-flight" } },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/in-flight", source_ref: packageRef } },
       harbor: { identity_environment_ref: "identity-env:in-flight" }
     };
     const submit = handleTaskThreadApi({
@@ -120,7 +129,7 @@ async function assertInFlightReplay(): Promise<void> {
       ...body,
       idempotency_key: "submit-recovered",
       run_id: "run_api_recovered",
-      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/recovered" } },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/recovered", source_ref: packageRef } },
       harbor: { identity_environment_ref: "identity-env:recovered" }
     };
     const recoveredTurn = await store.reserveTaskTurn(recoveredThread.thread.thread_id, {
@@ -128,6 +137,7 @@ async function assertInFlightReplay(): Promise<void> {
       request_hash: requestHash(recoveredBody),
       run_id: recoveredBody.run_id,
       creation_channel: "app",
+      package_ref: packageRef,
       input: recoveredBody.input_snapshot
     });
     await runStore.createRunRecord({
@@ -159,7 +169,7 @@ async function assertInFlightReplay(): Promise<void> {
       ...body,
       idempotency_key: "submit-waiting-recovered",
       run_id: "run_api_waiting_recovered",
-      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/waiting-recovered" } },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/waiting-recovered", source_ref: packageRef } },
       harbor: { identity_environment_ref: "identity-env:waiting-recovered" }
     };
     const waitingTurn = await store.reserveTaskTurn(waitingThread.thread.thread_id, {
@@ -167,6 +177,7 @@ async function assertInFlightReplay(): Promise<void> {
       request_hash: requestHash(waitingBody),
       run_id: waitingBody.run_id,
       creation_channel: "app",
+      package_ref: packageRef,
       input: waitingBody.input_snapshot
     });
     await runStore.createRunRecord({
@@ -206,7 +217,7 @@ async function assertInFlightReplay(): Promise<void> {
       ...body,
       idempotency_key: "submit-interrupted",
       run_id: "run_api_interrupted",
-      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/interrupted" } },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/interrupted", source_ref: packageRef } },
       harbor: { identity_environment_ref: "identity-env:interrupted" }
     };
     const interrupted = await handleTaskThreadApi({
@@ -243,7 +254,7 @@ async function assertInFlightReplay(): Promise<void> {
       ...body,
       idempotency_key: "submit-unknown-replay",
       run_id: "run_api_unknown_replay",
-      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/unknown-replay" } },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/unknown-replay", source_ref: packageRef } },
       harbor: { identity_environment_ref: "identity-env:unknown-replay" }
     };
     const unknownTurn = await store.reserveTaskTurn(unknownThread.thread.thread_id, {
@@ -251,6 +262,7 @@ async function assertInFlightReplay(): Promise<void> {
       request_hash: requestHash(unknownBody),
       run_id: unknownBody.run_id,
       creation_channel: "app",
+      package_ref: packageRef,
       input: unknownBody.input_snapshot
     });
     const claimPath = join(`${runDirectory}.run-id-claims`, `${unknownBody.run_id}.claim`);
@@ -298,7 +310,9 @@ async function assertMissingRunStorePrecedesBodyParsing(): Promise<void> {
     assert.equal(threadResponse.status, 503);
     assert.equal(record(record(await threadResponse.json()).error).code, "task_thread_store_unavailable");
   } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   }
 }
 
@@ -321,7 +335,9 @@ async function assertInternalErrorsAreRedacted(): Promise<void> {
       error: { code: "internal_error", message: "Internal server error" }
     });
   } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
     await rm(directory, { recursive: true, force: true });
   }
 }

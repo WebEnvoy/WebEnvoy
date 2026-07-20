@@ -1,5 +1,6 @@
 import type { FileRunRecordStore, RunRecordStatus } from "./run-record-store.js";
 import type { TaskTurnInputField, TaskTurnInputSnapshot } from "./task-turn-input.js";
+import type { TaskTurnInputPolicyResolver } from "./task-turn-input-policy.js";
 
 export const taskThreadSchemaVersion = "webenvoy.task-thread.v0";
 export const taskThreadStoreSchemaVersion = "webenvoy.task-thread-store.v0";
@@ -73,6 +74,7 @@ export type ReserveTaskTurnInput = {
   request_hash: string;
   run_id: string;
   creation_channel: TaskTurnRecord["creation_channel"];
+  package_ref: string;
   input: unknown;
 };
 
@@ -83,6 +85,7 @@ export type FileTaskThreadStoreOptions = {
   lockTimeoutMs?: number;
   ownerRefCheckTimeoutMs?: number;
   checkOwnerRef?: (ownerRef: string) => Promise<boolean>;
+  resolveInputPolicy?: TaskTurnInputPolicyResolver;
 };
 
 export type FileTaskThreadStore = {

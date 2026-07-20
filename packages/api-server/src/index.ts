@@ -5,6 +5,7 @@ import {
   createFileRunRecordStore,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
+  createLocalTaskTurnInputPolicyResolver,
   recoverInterruptedCoreTaskSessions
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
@@ -30,10 +31,14 @@ if (import.meta.url === entrypoint) {
   const runRecordStore = process.env.WEBENVOY_RUN_RECORD_DIR
     ? createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR })
     : undefined;
+  const lodeRegistryPath = process.env.WEBENVOY_LODE_REGISTRY_PATH;
   const taskThreadStore = runRecordStore
     ? createFileTaskThreadStore({
         directory: process.env.WEBENVOY_TASK_THREAD_DIR ?? join(runRecordStore.directory, "threads"),
-        runRecordStore
+        runRecordStore,
+        ...(lodeRegistryPath === undefined
+          ? {}
+          : { resolveInputPolicy: createLocalTaskTurnInputPolicyResolver({ registryPath: lodeRegistryPath }) })
       })
     : undefined;
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
@@ -45,9 +50,9 @@ if (import.meta.url === entrypoint) {
   const server = createApiServer(runRecordStore ? {
     runRecordStore,
     ...(taskThreadStore === undefined ? {} : { taskThreadStore }),
-    ...(process.env.WEBENVOY_LODE_REGISTRY_PATH === undefined
+    ...(lodeRegistryPath === undefined
       ? {}
-      : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: process.env.WEBENVOY_LODE_REGISTRY_PATH }) }),
+      : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: lodeRegistryPath }) }),
     ...(harborRuntimeClient === undefined ? {} : { harborRuntimeClient })
   } : {});
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { readFileOwnership } from "./file-ownership.js";
 import { createFileRunRecordStore, type CreateRunRecordInput } from "./run-record-store.js";
+import type { TaskTurnInputPolicyResolver } from "./task-turn-input-policy.js";
 import {
   createFileTaskThreadStore,
   taskTurnInputConsumerBoundary,
@@ -16,6 +17,18 @@ import {
 } from "./task-thread-store.js";
 
 let tick = 0;
+const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
+const resolveInputPolicy: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
+  package_ref,
+  capability_ref,
+  input_schema_ref: "lode://schema/test/input@0.1.0",
+  fields: new Map([
+    ["keyword", { field_id: "keyword", projection: "safe_summary" }],
+    ["count", { field_id: "count", projection: "safe_summary" }],
+    ["reference_file", { field_id: "reference_file", projection: "owner_ref" }],
+    ["url", { field_id: "url", projection: "sanitized_url" }]
+  ])
+});
 
 function nextInstant(): Date {
   const instant = new Date(Date.UTC(2026, 6, 19, 6, 0, tick));
@@ -42,6 +55,7 @@ function turnInput(runId: string, idempotencyKey: string, requestHash: string): 
     request_hash: requestHash,
     run_id: runId,
     creation_channel: "app",
+    package_ref: packageRef,
     input: {
       schema_version: taskTurnInputSchemaVersion,
       fields: [
@@ -107,7 +121,7 @@ export async function assertTaskThreadStore(): Promise<void> {
   const runStore = createFileRunRecordStore({ directory: runDirectory, clock: nextInstant });
   const unavailableOwnerRefs = new Set<string>();
   const checkOwnerRef = async (ownerRef: string) => !unavailableOwnerRefs.has(ownerRef);
-  const store = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef });
+  const store = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef, resolveInputPolicy });
 
   try {
     const publicUrl = validateTaskTurnInputSnapshot({
@@ -133,7 +147,8 @@ export async function assertTaskThreadStore(): Promise<void> {
 
     const uncheckedStore = createFileTaskThreadStore({
       directory: join(directory, "unchecked-owner-refs"),
-      runRecordStore: runStore
+      runRecordStore: runStore,
+      resolveInputPolicy
     });
     const uncheckedThread = await uncheckedStore.createOrGetTaskThread({
       capability_ref: "lode:capability/unchecked-owner-refs",
@@ -148,7 +163,8 @@ export async function assertTaskThreadStore(): Promise<void> {
       directory: join(directory, "hanging-owner-check"),
       runRecordStore: runStore,
       ownerRefCheckTimeoutMs: 10,
-      checkOwnerRef: async () => new Promise<boolean>(() => {})
+      checkOwnerRef: async () => new Promise<boolean>(() => {}),
+      resolveInputPolicy
     });
     const hangingThread = await hangingStore.createOrGetTaskThread({
       capability_ref: "lode:capability/hanging-owner-check",
@@ -170,7 +186,8 @@ export async function assertTaskThreadStore(): Promise<void> {
       runRecordStore: runStore,
       clock: nextInstant,
       lockTimeoutMs: 20,
-      checkOwnerRef
+      checkOwnerRef,
+      resolveInputPolicy
     });
     await assert.rejects(
       () => lockContender.createOrGetTaskThread({
@@ -260,7 +277,7 @@ export async function assertTaskThreadStore(): Promise<void> {
       turnInput("run_thread_003", "submit-003", "hash-003")
     );
     await runStore.createRunRecord(runInput("run_thread_003"), acceptedBeforeThreadUpdate.run_claim_token);
-    const recoveredStore = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef });
+    const recoveredStore = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef, resolveInputPolicy });
     const recoveredAccepted = await recoveredStore.getTaskThread(threadId);
     assert.equal(recoveredAccepted?.turns.at(2)?.submission_state, "accepted");
     assert.equal(recoveredAccepted?.turns.at(2)?.status, "accepted");

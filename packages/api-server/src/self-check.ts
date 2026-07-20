@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
@@ -39,10 +39,33 @@ async function main(): Promise<void> {
   assert.equal(apiServerHost, "127.0.0.1");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-api-server-"));
   const store = createFileRunRecordStore({ directory, clock: nextInstant });
+  const threadInputPolicyResolver: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
+    package_ref,
+    capability_ref,
+    input_schema_ref: "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
+    fields: new Map([
+      ["keyword", { field_id: "keyword", projection: "safe_summary" }],
+      ["limit", { field_id: "limit", projection: "safe_summary" }],
+      ["url", { field_id: "url", projection: "sanitized_url" }]
+    ])
+  });
   const taskThreadStore = createFileTaskThreadStore({
     directory: join(directory, "threads"),
     runRecordStore: store,
-    clock: nextInstant
+    clock: nextInstant,
+    resolveInputPolicy: threadInputPolicyResolver
+  });
+  const threadLodeResolver: LodePackageResolver = async () => ({
+    package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+    capability_id: "search-notes",
+    operation_mode: "read",
+    version: "0.1.0",
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.search-notes.resources",
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      operation_mode: "read",
+      resource_requirement_profiles: [{ requirement_profile_id: "fixture" }]
+    }
   });
   const runId = "run_api_query_001";
 
@@ -136,7 +159,7 @@ async function main(): Promise<void> {
     retention_state: "redacted"
   });
 
-  const server = createApiServer({ runRecordStore: store, taskThreadStore });
+  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -171,7 +194,7 @@ async function main(): Promise<void> {
         checks: {
           runRecordStore: "configured",
           taskThreadStore: "configured",
-          lodePackageResolver: "missing",
+          lodePackageResolver: "configured",
           harborRuntimeClient: "missing"
         },
         consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
@@ -389,17 +412,22 @@ async function main(): Promise<void> {
         schema_version: taskTurnInputSchemaVersion,
         fields: [
           { field_id: "keyword", kind: "scalar", summary: "AI tools" },
-          { field_id: "count", kind: "scalar", summary: "8" }
+          { field_id: "limit", kind: "scalar", summary: "8" }
         ],
         consumer_boundary: taskTurnInputConsumerBoundary
       },
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
       task_intent: {
         schema_version: "webenvoy.task-intent.v0",
         intent_id: "intent_api_thread_001",
         entrypoint: "app",
         user_intent: { summary: "Prepare a guarded task turn." },
-        capability: { ref: "lode:capability/search-notes", version: "0.1.0" },
-        input: { summary: "keyword=AI tools; count=8" },
+        capability: {
+          ref: "lode:capability/search-notes",
+          version: "0.1.0",
+          source_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0"
+        },
+        input: { summary: "keyword=AI tools; limit=8" },
         scope: { target_type: "xiaohongshu_notes", target_ref: "xhs:search/ai-tools" },
         policy: { risk: "submit", execution_intent: "execute_after_approval" },
         resource_requirement_refs: [],
@@ -435,6 +463,18 @@ async function main(): Promise<void> {
     });
     assert.equal(invalidBoundaryResponse.status, 400);
     assert.equal(asRecord(asRecord(invalidBoundaryResponse.body).error).code, "consumer_boundary_invalid");
+
+    const undeclaredDraftResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-undeclared-draft",
+      run_id: "run_api_thread_undeclared_draft",
+      input_snapshot: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "draft_body", kind: "scalar", summary: "RAW DRAFT BODY" }]
+      }
+    });
+    assert.equal(undeclaredDraftResponse.status, 400);
+    assert.equal(asRecord(asRecord(undeclaredDraftResponse.body).error).code, "input_field_not_declared:draft_body");
 
     const invalidIntentResponse = await postJson(port, `/threads/${threadId}/turns`, {
       ...taskTurnRequest,
@@ -476,6 +516,7 @@ async function main(): Promise<void> {
       request_hash: "interrupted-hash",
       run_id: "run_api_thread_interrupted",
       creation_channel: "api",
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
       input: {
         schema_version: taskTurnInputSchemaVersion,
         fields: [{ field_id: "url", kind: "url", summary: "https://example.org/" }]
@@ -506,9 +547,11 @@ async function main(): Promise<void> {
     await assertRuntimeTaskSubmitApi();
     await assertTaskThreadApiRaces();
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
     await rm(directory, { recursive: true, force: true });
   }
 }

@@ -14,6 +14,7 @@ import {
   type TaskTurnInputField,
   type TaskTurnInputSnapshot
 } from "./task-turn-input.js";
+import { validateTaskTurnInputAgainstPolicy } from "./task-turn-input-policy.js";
 import {
   taskThreadSchemaVersion,
   taskThreadStoreSchemaVersion,
@@ -53,7 +54,9 @@ export {
 
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const capabilityRefPattern = /^lode:capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,2030}$/;
+const packageRefPattern = /^lode:\/\/site-capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const identityEnvironmentRefPattern = /^identity-env:[A-Za-z0-9][A-Za-z0-9._~:/-]{0,2030}$/;
+const ownerRefCheckConcurrency = 8;
 function requireThreadBindingRef(value: unknown, label: string, pattern: RegExp): string {
   const ref = requireText(value, label, 2048);
   if (!pattern.test(ref)) throw new TaskThreadStoreError(`${label}_invalid`);
@@ -170,6 +173,19 @@ async function withFileLock<T>(directory: string, key: string, timeoutMs: number
   }
 }
 
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, action: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await action(items[index] as T);
+    }
+  }));
+  return results;
+}
+
 export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): FileTaskThreadStore {
   const clock = options.clock ?? (() => new Date());
   const lockTimeoutMs = options.lockTimeoutMs ?? 30_000;
@@ -196,8 +212,13 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       ...input.fields.flatMap((field) => field.owner_ref === undefined ? [] : [{ ref: field.owner_ref, location: `field:${field.field_id}` as const, attachment: field.kind === "attachment" || field.kind === "file" }]),
       ...(input.attachment_refs ?? []).map((ref, index) => ({ ref, location: `attachment:${index}` as const, attachment: true }))
     ];
-    const gaps = await Promise.all(refs.map(async (item): Promise<TaskTurnInputGap | undefined> => {
-      const available = await checkOwnerRef(item.ref);
+    const availability = new Map((await mapWithConcurrency(
+      [...new Set(refs.map((item) => item.ref))],
+      ownerRefCheckConcurrency,
+      async (ref) => [ref, await checkOwnerRef(ref)] as const
+    )));
+    const gaps = refs.map((item): TaskTurnInputGap | undefined => {
+      const available = availability.get(item.ref);
       if (available === true) return undefined;
       return {
         location: item.location,
@@ -206,7 +227,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
           ? item.attachment ? "reselect_attachment" : "restore_owner_content"
           : "retry_owner_check"
       };
-    }));
+    });
     return gaps.filter((gap): gap is TaskTurnInputGap => gap !== undefined);
   }
 
@@ -382,8 +403,9 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       const idempotencyKey = requireIdentifier(input.idempotency_key, "idempotency_key");
       const requestHash = requireText(input.request_hash, "request_hash");
       const runId = requireText(input.run_id, "run_id", 128);
+      const packageRef = requireThreadBindingRef(input.package_ref, "package_ref", packageRefPattern);
       if (!runIdPattern.test(runId)) throw new TaskThreadStoreError("run_id_invalid");
-      const validatedInput = validateTaskTurnInputSnapshot(input.input);
+      const shapeInput = validateTaskTurnInputSnapshot(input.input);
       const initial = await getRecord(threadId);
       if (!initial) throw new TaskThreadStoreError("thread_not_found");
       const initialReplay = initial.turns.find((turn) => turn.idempotency_key === idempotencyKey);
@@ -391,6 +413,15 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         if (initialReplay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
         return reservationView(initial, initialReplay, true);
       }
+      if (!options.resolveInputPolicy) throw new TaskThreadStoreError("lode_input_policy_unavailable");
+      const inputPolicy = await options.resolveInputPolicy({
+        package_ref: packageRef,
+        capability_ref: initial.capability_ref
+      });
+      if (inputPolicy.package_ref !== packageRef || inputPolicy.capability_ref !== initial.capability_ref) {
+        throw new TaskThreadStoreError("input_capability_mismatch");
+      }
+      const validatedInput = validateTaskTurnInputAgainstPolicy(shapeInput, inputPolicy);
       try {
         await assertInputRefsAvailable(validatedInput);
       } catch (error) {
