@@ -8,6 +8,13 @@ import {
   type BusinessActionOwnerProofFields,
   type BusinessActionTargetScope
 } from "./execution-policy-owner-proof.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
+import {
+  normalizeBoundedText,
+  normalizeNonSensitiveText,
+  persistentReferenceMaxLength,
+  persistentVersionMaxLength
+} from "./sensitive-field-taxonomy.js";
 
 export type {
   BusinessActionCategory,
@@ -154,7 +161,7 @@ const callers = new Set<ExecutionPolicyCaller>(["api", "cli", "mcp", "sdk", "app
 const singleStates = new Set<SingleActionDecision["state"]>(["active", "consumed", "cancelled", "expired", "target_changed"]);
 const currentPolicySources = new Set<Exclude<ExecutionPolicySource, "single_action_decision">>(["thread_revision", "installed_skill_user_version", "global_user_config"]);
 const businessActionIdPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
-const privateRefPattern = /(https?:\/\/|[\r\n\0]|cookie|token|password|raw[_-]?(?:evidence|dom|har))/i;
+const privateRefPattern = /https?:\/\//i;
 
 function exactObject(value: unknown, required: readonly string[], optional: readonly string[] = []): JsonObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -163,17 +170,18 @@ function exactObject(value: unknown, required: readonly string[], optional: read
   return required.every((key) => Object.hasOwn(object, key)) && Object.keys(object).every((key) => allowed.has(key)) ? object : undefined;
 }
 
-function string(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.trim() === value ? value : undefined;
+function string(value: unknown, maxLength = persistentVersionMaxLength): string | undefined {
+  return normalizeBoundedText(value, maxLength);
 }
 
 function persistentRef(value: unknown): string | undefined {
-  const ref = string(value);
+  const ref = normalizeNonSensitiveText(value, persistentReferenceMaxLength);
   return ref && !privateRefPattern.test(ref) ? ref : undefined;
 }
 
 function persistentTargetRef(value: unknown): string | undefined {
-  const ref = persistentRef(value);
+  if (typeof value !== "string" || value.length > persistentReferenceMaxLength) return undefined;
+  const ref = normalizeStoredTargetRef(value);
   return ref && !ref.includes("://") ? ref : undefined;
 }
 
@@ -203,8 +211,8 @@ export function sameOrigin(left: string | undefined, right: string | undefined):
 function parseTarget(value: unknown): BusinessActionTarget | undefined {
   const object = exactObject(value, ["target_ref", "target_type"], ["site_slug", "origin"]);
   const targetRef = persistentTargetRef(object?.target_ref);
-  const targetType = string(object?.target_type);
-  const siteSlug = object?.site_slug === undefined ? undefined : string(object.site_slug);
+  const targetType = string(object?.target_type, persistentVersionMaxLength);
+  const siteSlug = object?.site_slug === undefined ? undefined : string(object.site_slug, persistentVersionMaxLength);
   const origin = object?.origin === undefined ? undefined : normalizeExecutionPolicyOrigin(object.origin);
   if (!object || !targetRef || !targetType || (object.site_slug !== undefined && !siteSlug) || (object.origin !== undefined && !origin)) return undefined;
   return { target_ref: targetRef, target_type: targetType, ...(siteSlug ? { site_slug: siteSlug } : {}), ...(origin ? { origin } : {}) };
@@ -232,7 +240,7 @@ function parseSingleDecision(value: unknown): SingleActionDecision | undefined {
   const object = exactObject(value, fields);
   const target = parseTarget(object?.target);
   if (!object || !persistentRef(object.source_ref) || !string(object.source_version) || !persistentRef(object.action_instance_ref) ||
-    !string(object.action_id) || !businessActionIdPattern.test(object.action_id as string) || !actionCategories.has(object.category as BusinessActionCategory) || !target ||
+    !normalizeNonSensitiveText(object.action_id, persistentVersionMaxLength) || !businessActionIdPattern.test(object.action_id as string) || !actionCategories.has(object.category as BusinessActionCategory) || !target ||
     (object.owner_matcher !== "lode_action_declaration" && object.owner_matcher !== "harbor_operation_catalog") ||
     !persistentRef(object.owner_declaration_ref) || !string(object.owner_declaration_version) ||
     !persistentRef(object.resource_match_ref) || !string(object.resource_match_version) ||
@@ -258,7 +266,7 @@ function parseInput(value: unknown): ParsedExecutionPolicyEvaluationInput | unde
   const skill = policies?.installed_skill_user_version === undefined ? undefined : parsePolicy(policies.installed_skill_user_version, "skill_ref");
   const global = policies?.global_user_config === undefined ? undefined : parsePolicy(policies.global_user_config);
   if (!object || !callers.has(object.caller as ExecutionPolicyCaller) || !evaluatedAt || !action || !persistentRef(action.action_instance_ref) ||
-    !string(action.action_id) || !businessActionIdPattern.test(action.action_id as string) || !target || !ownerProof || !context || !policies ||
+    !normalizeNonSensitiveText(action.action_id, persistentVersionMaxLength) || !businessActionIdPattern.test(action.action_id as string) || !target || !ownerProof || !context || !policies ||
     (context.thread_ref !== undefined && !threadRef) || (context.skill_ref !== undefined && !skillRef) ||
     (policies.single_action_decision !== undefined && !single) || (policies.thread_revision !== undefined && !thread) ||
     (policies.installed_skill_user_version !== undefined && !skill) || (policies.global_user_config !== undefined && !global)) return undefined;

@@ -15,6 +15,9 @@ const sensitiveFieldFragments = [
 
 const sensitiveFieldSegments = new Set(["auth", "otp"]);
 
+export const persistentReferenceMaxLength = 512;
+export const persistentVersionMaxLength = 128;
+
 export function isSensitiveFieldName(value: string): boolean {
   const lower = value.toLowerCase();
   const segments = lower.split(/[^a-z0-9]+/).filter(Boolean);
@@ -22,4 +25,15 @@ export function isSensitiveFieldName(value: string): boolean {
   return sensitiveFieldNames.has(lower) ||
     segments.some((segment) => sensitiveFieldSegments.has(segment)) ||
     sensitiveFieldFragments.some((name) => normalized.includes(name));
+}
+
+export function normalizeBoundedText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || value.trim() !== value ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value)) return undefined;
+  return value;
+}
+
+export function normalizeNonSensitiveText(value: unknown, maxLength: number): string | undefined {
+  const normalized = normalizeBoundedText(value, maxLength);
+  return normalized && !isSensitiveFieldName(normalized) ? normalized : undefined;
 }

@@ -1,3 +1,11 @@
+import { normalizePublicHttpTarget } from "./public-target-reference.js";
+import {
+  normalizeBoundedText,
+  normalizeNonSensitiveText,
+  persistentReferenceMaxLength,
+  persistentVersionMaxLength
+} from "./sensitive-field-taxonomy.js";
+
 export type BusinessActionCategory = "read" | "prepare" | "commit" | "destructive";
 export type BusinessActionOwnerMatcher = "lode_action_declaration" | "harbor_operation_catalog";
 
@@ -77,8 +85,8 @@ const targetTypePattern = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 const profileIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const resourcePathPattern = /^[A-Za-z0-9._/-]+\.json$/;
 const lodePackageRefPattern = /^lode:\/\/site-capability\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$/;
-const browserPrimitivePattern = /(?:^|[._-])(?:browser_?)?(?:click|fill|type|scroll)(?:$|[._-])/;
-const privateRefPattern = /(https?:\/\/|[\r\n\0]|cookie|token|password|raw[_-]?(?:evidence|dom|har))/i;
+const browserPrimitivePattern = /(?:^|[._-])(?:browser_?)?(?:click|fill|input|type|scroll)(?:$|[._-])/;
+const maxListItems = 32;
 
 function exactObject(value: unknown, fields: readonly string[]): JsonObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -86,28 +94,25 @@ function exactObject(value: unknown, fields: readonly string[]): JsonObject | un
   return fields.every((field) => Object.hasOwn(object, field)) && Object.keys(object).every((field) => fields.includes(field)) ? object : undefined;
 }
 
-function text(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.trim() === value ? value : undefined;
+function text(value: unknown, maxLength = persistentVersionMaxLength): string | undefined {
+  return normalizeBoundedText(value, maxLength);
 }
 
 function ref(value: unknown): string | undefined {
-  const parsed = text(value);
-  return parsed && !privateRefPattern.test(parsed) ? parsed : undefined;
+  return normalizeNonSensitiveText(value, persistentReferenceMaxLength);
 }
 
-function strings(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || !value.every((entry) => text(entry))) return undefined;
+function strings(value: unknown, maxLength = persistentReferenceMaxLength): string[] | undefined {
+  if (!Array.isArray(value) || value.length > maxListItems || !value.every((entry) => text(entry, maxLength))) return undefined;
   return [...value] as string[];
 }
 
 export function normalizeExecutionPolicyOrigin(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !/^https:\/\/[^/?#]*@/i.test(value) && !url.username && !url.password ? url.origin : undefined;
-  } catch {
-    return undefined;
-  }
+  if (typeof value !== "string") return undefined;
+  const normalized = normalizePublicHttpTarget(value);
+  return normalized.ok && normalized.target_origin.startsWith("https://") && normalized.target_origin.length <= persistentReferenceMaxLength
+    ? normalized.target_origin
+    : undefined;
 }
 
 export function isBrowserPrimitiveAction(actionId: string): boolean {
@@ -119,9 +124,9 @@ function parseScope(value: unknown, requireSite: boolean): BusinessActionTargetS
     ?? (!requireSite ? exactObject(value, ["target_types"]) : undefined)
     ?? (!requireSite ? exactObject(value, ["target_types", "site_slug"]) : undefined)
     ?? (!requireSite ? exactObject(value, ["target_types", "supported_origins"]) : undefined);
-  const targetTypes = strings(object?.target_types);
+  const targetTypes = strings(object?.target_types, persistentVersionMaxLength);
   const siteSlug = object?.site_slug === undefined ? undefined : text(object.site_slug);
-  const rawOrigins = object?.supported_origins === undefined ? undefined : strings(object.supported_origins);
+  const rawOrigins = object?.supported_origins === undefined ? undefined : strings(object.supported_origins, 2048);
   const origins = rawOrigins?.map(normalizeExecutionPolicyOrigin);
   if (!object || !targetTypes?.length || new Set(targetTypes).size !== targetTypes.length ||
     targetTypes.some((targetType) => !targetTypePattern.test(targetType)) ||
@@ -179,13 +184,13 @@ type ParsedLodeAction = {
 function parseLodeAction(value: unknown): ParsedLodeAction | undefined {
   const action = exactObject(value, ["action_id", "category", "target_scope", "resource_requirements", "external_effects"]);
   const requirements = exactObject(action?.resource_requirements, ["path", "id", "profile_ids"]);
-  const actionId = text(action?.action_id);
+  const actionId = normalizeNonSensitiveText(action?.action_id, persistentVersionMaxLength);
   const category = action?.category as BusinessActionCategory;
   const scope = parseScope(action?.target_scope, true);
   const requirementId = ref(requirements?.id);
   const requirementPath = text(requirements?.path);
-  const profileIds = strings(requirements?.profile_ids);
-  const effects = strings(action?.external_effects);
+  const profileIds = strings(requirements?.profile_ids, persistentVersionMaxLength);
+  const effects = strings(action?.external_effects, persistentVersionMaxLength);
   if (!action || !actionId || !actionIdPattern.test(actionId) || isBrowserPrimitiveAction(actionId) || !categories.has(category) || !scope ||
     !requirementId || !requirementPath || !resourcePathPattern.test(requirementPath) || !profileIds?.length ||
     profileIds.some((profileId) => !profileIdPattern.test(profileId)) || new Set(profileIds).size !== profileIds.length ||
@@ -202,7 +207,7 @@ type ParsedHarborOperation = {
 
 function parseHarborOperation(value: unknown): ParsedHarborOperation | undefined {
   const operation = exactObject(value, ["operation_id", "category", "target_scope", "resource_requirement_refs"]);
-  const operationId = text(operation?.operation_id);
+  const operationId = normalizeNonSensitiveText(operation?.operation_id, persistentVersionMaxLength);
   const category = operation?.category as BusinessActionCategory;
   const scope = parseScope(operation?.target_scope, false);
   const requirementRefs = strings(operation?.resource_requirement_refs);
@@ -234,9 +239,11 @@ export function matchLodeBusinessActionOwner(
     if (new Set(actions.map((action) => action.action_id)).size !== actions.length) return undefined;
     const action = actions.find((candidate) => candidate.action_id === actionId);
     if (!action || !sameRefs([action.requirement_ref], resourceMatch.matched_requirement_refs)) return undefined;
+    const ownerDeclarationRef = ref(`${packageRef}#${action.action_id}`);
+    if (!ownerDeclarationRef) return undefined;
     return brandedProof({
       matcher: "lode_action_declaration",
-      owner_declaration_ref: `${packageRef}#${action.action_id}`,
+      owner_declaration_ref: ownerDeclarationRef,
       owner_declaration_version: version,
       resource_match_ref: resourceMatch.match_ref,
       resource_match_version: resourceMatch.match_version,
@@ -268,9 +275,11 @@ export function matchHarborBusinessOperationOwner(
     if (new Set(operations.map((operation) => operation.operation_id)).size !== operations.length) return undefined;
     const operation = operations.find((candidate) => candidate.operation_id === operationId);
     if (!operation || !sameRefs(operation.requirement_refs, resourceMatch.matched_requirement_refs)) return undefined;
+    const ownerDeclarationRef = ref(`${catalogRef}#${operation.operation_id}`);
+    if (!ownerDeclarationRef) return undefined;
     return brandedProof({
       matcher: "harbor_operation_catalog",
-      owner_declaration_ref: `${catalogRef}#${operation.operation_id}`,
+      owner_declaration_ref: ownerDeclarationRef,
       owner_declaration_version: catalogVersion,
       resource_match_ref: resourceMatch.match_ref,
       resource_match_version: resourceMatch.match_version,

@@ -73,7 +73,7 @@ function input(category: BusinessActionCategory = "commit", ownerProof = lodePro
         target_ref: "target:creator-note/1",
         target_type: "creator_publish_page",
         site_slug: "xiaohongshu",
-        origin: "https://creator.xiaohongshu.com/current/path?credential=never-echoed"
+        origin: "https://creator.xiaohongshu.com/current/path?view=compose"
       }
     },
     owner_proof: ownerProof,
@@ -249,8 +249,10 @@ function assertOwnerProofBoundary(): void {
     { ...structuredClone(malformedSibling.action_declaration.actions[0]!), action_id: "browser_fill" }
   ];
   assert.equal(matchLodeBusinessActionOwner(malformedSibling, "xhs_publish_note", resourceMatch()), undefined);
+  assert.equal(matchLodeBusinessActionOwner(lodeContract(), "xhs_publish_note", resourceMatch({ match_ref: "resource-match:credential/1" })), undefined);
+  assert.equal(matchLodeBusinessActionOwner(lodeContract(), "xhs_publish_note", resourceMatch({ match_ref: "x".repeat(513) })), undefined);
 
-  for (const actionId of ["browser_fill", "click", "browser.type", "page_scroll"] as const) {
+  for (const actionId of ["browser_fill", "click", "browser_input", "page.input", "browser.type", "page_scroll"] as const) {
     const primitive = structuredClone(lodeContract());
     primitive.action_declaration.actions[0]!.action_id = actionId;
     assert.equal(matchLodeBusinessActionOwner(primitive, actionId, resourceMatch()), undefined);
@@ -272,6 +274,17 @@ function assertOwnerProofBoundary(): void {
     matched_requirement_refs: ["harbor.provider.installable"]
   }));
   assert(harborProof);
+  assert.equal(matchHarborBusinessOperationOwner({
+    schema_version: "webenvoy.harbor-operation-catalog.v0",
+    catalog_ref: "harbor://operation-catalog/local",
+    catalog_version: "1",
+    operations: [{
+      operation_id: "browser_input",
+      category: "prepare",
+      target_scope: { target_types: ["browser_surface"] },
+      resource_requirement_refs: ["harbor.surface.available"]
+    }]
+  }, "browser_input", resourceMatch({ matched_requirement_refs: ["harbor.surface.available"] })), undefined);
   assert.equal(matchHarborBusinessOperationOwner({
     schema_version: "webenvoy.harbor-operation-catalog.v0",
     catalog_ref: "harbor://operation-catalog/local",
@@ -301,6 +314,7 @@ function assertTargetAndParserBoundary(): void {
     { target_ref: "https://preview-user:preview-password@example.test/path", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
     { target_ref: "ftp://preview-user:preview-password@example.test/path", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
     { target_ref: "target:creator-note/1", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://preview-user:preview-password@creator.xiaohongshu.com/path?token=secret" },
+    { target_ref: "target:creator-note/1", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com/path?credential=secret" },
     { target_ref: "target:creator-note/1", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://@creator.xiaohongshu.com/path" }
   ]) {
     const candidate = input();
@@ -328,6 +342,12 @@ function assertTargetAndParserBoundary(): void {
   assertInvalid({ ...base, action: { ...base.action, target: { ...base.action.target, target_type: " " } } });
   assertInvalid({ ...base, policies: { ...base.policies, skill_recommendation: { commit: "auto" } } });
   assertInvalid({ ...base, policies: { ...base.policies, thread_revision: { ...base.policies.thread_revision, source_version: undefined } } });
+  assertInvalid({ ...base, action: { ...base.action, action_instance_ref: "action-instance:credential/1" } });
+  assertInvalid({ ...base, action: { ...base.action, target: { ...base.action.target, target_ref: "target:secret/1" } } });
+  assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "policy:credential/1" } } });
+  assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "x".repeat(1_000_000) } } });
+  assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_version: "1".repeat(129) } } });
+  assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "policy:\u0001invalid" } } });
   assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), issued_at: "2026-07-20T23:59:59.9999Z" } } });
   assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), expires_at: "2026-07-21T00:00:00.000000001Z" } } });
   assertInvalid(null);

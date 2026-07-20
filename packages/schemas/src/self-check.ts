@@ -134,6 +134,9 @@ const executionPolicySchema = schemasByFile.get("execution-policy-evaluation.sch
 assert(executionPolicySchema, "execution policy schema must exist");
 const validateExecutionPolicy = ajv.getSchema(asString(executionPolicySchema.$id, "execution policy schema.$id"));
 assert(validateExecutionPolicy, "execution policy validator must compile");
+const oversizedExecutionPolicy = await readJson(join(fixtureDir, "execution-policy-destructive-auto.fixture.json"));
+asObject(oversizedExecutionPolicy.effective_policy, "execution policy effective_policy").source_ref = "x".repeat(513);
+assert.equal(validateExecutionPolicy(oversizedExecutionPolicy), false, "execution policy refs over 512 characters must be rejected");
 for (const file of executionPolicyInvalidFixtureFiles) {
   assert.equal(validateExecutionPolicy(await readJson(file)), false, `${file} must fail Draft 2020-12 validation`);
 }
