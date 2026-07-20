@@ -222,6 +222,57 @@ async function assertResolverRaceReplay(
   assert.equal(replayed.turn.turn_id, reserved.turn.turn_id);
 }
 
+async function assertOwnerCheckTimeoutBound(directory: string, runStore: FileRunRecordStore): Promise<void> {
+  async function probe(name: string, delayMs: number | undefined): Promise<void> {
+    let activeChecks = 0;
+    let maximumChecks = 0;
+    let calls = 0;
+    const store = createFileTaskThreadStore({
+      directory: join(directory, name),
+      runRecordStore: runStore,
+      ownerRefCheckTimeoutMs: 5,
+      resolveInputPolicy: async ({ package_ref, capability_ref }) => ({
+        package_ref,
+        capability_ref,
+        input_schema_ref: `lode://schema/test/${name}@0.1.0`,
+        fields: new Map(Array.from({ length: 16 }, (_, index) => [
+          `file_${index}`,
+          { field_id: `file_${index}`, projection: "owner_ref" as const }
+        ]))
+      }),
+      checkOwnerRef: async () => {
+        calls += 1;
+        activeChecks += 1;
+        maximumChecks = Math.max(maximumChecks, activeChecks);
+        if (delayMs === undefined) return new Promise<boolean>(() => {});
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        activeChecks -= 1;
+        return true;
+      }
+    });
+    const thread = await store.createOrGetTaskThread({
+      capability_ref: `lode:capability/${name}`,
+      identity_environment_ref: `identity-env:${name}`
+    });
+    const fields = Array.from({ length: 16 }, (_, index) => ({
+      field_id: `file_${index}`,
+      kind: "file",
+      owner_ref: `attachment:${name}/${index}`
+    }));
+    await assert.rejects(() => store.reserveTaskTurn(thread.thread.thread_id, {
+      ...turnInput(`run_${name}`, fields),
+      package_ref: packageRef,
+      input: { schema_version: taskTurnInputSchemaVersion, fields }
+    }), /owner_ref_check_unavailable/);
+    if (delayMs !== undefined) await new Promise<void>((resolve) => setTimeout(resolve, delayMs + 5));
+    assert(maximumChecks <= 8);
+    assert.equal(calls, 8);
+  }
+
+  await probe("slow-owner-check", 50);
+  await probe("hanging-owner-check", undefined);
+}
+
 export async function assertTaskTurnInputPolicy(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-input-policy-"));
   const runStore = createFileRunRecordStore({ directory: join(directory, "runs") });
@@ -231,6 +282,7 @@ export async function assertTaskTurnInputPolicy(): Promise<void> {
     await assertUnavailablePolicy(directory, runStore);
     await assertOwnerCheckConcurrency(directory, runStore);
     await assertResolverRaceReplay(directory, runStore, registryPath);
+    await assertOwnerCheckTimeoutBound(directory, runStore);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -178,36 +178,55 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
   const lockTimeoutMs = options.lockTimeoutMs ?? 30_000;
   const ownerRefCheckTimeoutMs = options.ownerRefCheckTimeoutMs ?? 5_000;
   let activeOwnerRefChecks = 0;
-  const ownerRefCheckWaiters: Array<() => void> = [];
+  const ownerRefCheckWaiters: Array<{
+    active: boolean;
+    resolve: (acquired: boolean) => void;
+  }> = [];
 
-  async function acquireOwnerRefCheck(): Promise<void> {
+  async function acquireOwnerRefCheck(): Promise<boolean> {
     if (activeOwnerRefChecks < ownerRefCheckConcurrency) {
       activeOwnerRefChecks += 1;
-      return;
+      return true;
     }
-    await new Promise<void>((resolve) => ownerRefCheckWaiters.push(resolve));
+    return new Promise<boolean>((resolve) => {
+      const waiter = { active: true, resolve };
+      ownerRefCheckWaiters.push(waiter);
+      setTimeout(() => {
+        if (!waiter.active) return;
+        waiter.active = false;
+        resolve(false);
+      }, ownerRefCheckTimeoutMs);
+    });
   }
 
   function releaseOwnerRefCheck(): void {
-    const next = ownerRefCheckWaiters.shift();
-    if (next) next();
-    else activeOwnerRefChecks -= 1;
+    while (ownerRefCheckWaiters.length > 0) {
+      const next = ownerRefCheckWaiters.shift();
+      if (!next?.active) continue;
+      next.active = false;
+      next.resolve(true);
+      return;
+    }
+    activeOwnerRefChecks -= 1;
   }
 
   async function checkOwnerRef(ownerRef: string): Promise<boolean | undefined> {
     if (!options.checkOwnerRef) return undefined;
-    await acquireOwnerRefCheck();
+    const startedAt = Date.now();
+    if (!await acquireOwnerRefCheck()) return undefined;
+    const check = Promise.resolve()
+      .then(() => options.checkOwnerRef!(ownerRef))
+      .catch(() => undefined)
+      .finally(releaseOwnerRefCheck);
+    const remainingMs = Math.max(0, ownerRefCheckTimeoutMs - (Date.now() - startedAt));
     let timeout: number | undefined;
     try {
       return await Promise.race([
-        options.checkOwnerRef(ownerRef),
-        new Promise<undefined>((resolve) => { timeout = setTimeout(resolve, ownerRefCheckTimeoutMs); })
+        check,
+        new Promise<undefined>((resolve) => { timeout = setTimeout(resolve, remainingMs); })
       ]);
-    } catch {
-      return undefined;
     } finally {
       if (timeout) clearTimeout(timeout);
-      releaseOwnerRefCheck();
     }
   }
 
