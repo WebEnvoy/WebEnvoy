@@ -2,12 +2,24 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import * as addFormatsModule from "ajv-formats";
+import { normalizePublicHttpTarget, normalizePublicOrigin, normalizeStoredTargetRef } from "@webenvoy/core-runtime";
 
 type JsonObject = Record<string, unknown>;
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const schemaDir = join(packageRoot, "schemas");
 const fixtureDir = join(packageRoot, "fixtures");
+const invalidFixtureDir = join(packageRoot, "invalid-fixtures");
+
+function isPublicHttpTarget(value: string): boolean {
+  return normalizePublicHttpTarget(value).ok;
+}
+
+function isPublicOrigin(value: string): boolean {
+  return normalizePublicOrigin(value) !== undefined;
+}
 
 function asObject(value: unknown, label: string): JsonObject {
   assert(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
@@ -41,11 +53,26 @@ async function jsonFiles(dir: string): Promise<string[]> {
 
 const schemaFiles = await jsonFiles(schemaDir);
 const fixtureFiles = await jsonFiles(fixtureDir);
+const invalidFixtureFiles = await jsonFiles(invalidFixtureDir);
 
 assert(schemaFiles.length > 0, "at least one schema is required");
 assert(fixtureFiles.length > 0, "at least one fixture is required");
 
 const schemasByFile = new Map<string, JsonObject>();
+const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, strictTypes: false });
+const addFormats = addFormatsModule.default as unknown as (instance: Ajv2020) => Ajv2020;
+addFormats(ajv);
+ajv.addKeyword({ keyword: "x-webenvoy" });
+ajv.addFormat("webenvoy-public-http-target", { type: "string", validate: isPublicHttpTarget });
+ajv.addFormat("webenvoy-public-origin", { type: "string", validate: isPublicOrigin });
+ajv.addFormat("webenvoy-stored-target-ref", {
+  type: "string",
+  validate: (value: string) => normalizeStoredTargetRef(value) === value
+});
+ajv.addFormat("webenvoy-xhs-detail-ref", {
+  type: "string",
+  validate: /^detail_ref_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/
+});
 
 function localRefs(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(localRefs);
@@ -69,6 +96,10 @@ for (const file of schemaFiles) {
   asString(metadata.compatibility_boundary, `${file}.x-webenvoy.compatibility_boundary`);
   asString(metadata.schema_version, `${file}.x-webenvoy.schema_version`);
   asStringArray(metadata.source_adrs, `${file}.x-webenvoy.source_adrs`);
+  ajv.addSchema(schema);
+  const schemaId = asString(schema.$id, `${file}.$id`);
+  const filenameAlias = new URL(basename(file), schemaId).href;
+  if (filenameAlias !== schemaId) ajv.addSchema({ $ref: schemaId }, filenameAlias);
 }
 
 const taskThreadSchemaFile = "task-thread.schema.json";
@@ -91,13 +122,25 @@ for (const file of fixtureFiles) {
   const schemaVersion = asString(asObject(schema["x-webenvoy"], `${schemaRef}.x-webenvoy`).schema_version, `${schemaRef}.schema_version`);
   assert.equal(fixtureVersion, schemaVersion, `${file} schema_version must match ${schemaRef}`);
 
-  const required = schema.required;
-  if (Array.isArray(required)) {
-    for (const field of required) {
-      const key = asString(field, `${schemaRef}.required[]`);
-      assert(Object.hasOwn(fixture, key), `${file} missing required field ${key}`);
-    }
+  const validate = ajv.getSchema(asString(schema.$id, `${schemaRef}.$id`));
+  assert(validate, `${schemaRef} must compile as Draft 2020-12 JSON Schema`);
+  const { $schema: _fixtureSchemaRef, ...instance } = fixture;
+  assert(validate(instance), `${file} must satisfy ${schemaRef}: ${ajv.errorsText(validate.errors)}`);
+}
+
+for (const file of invalidFixtureFiles) {
+  const fixtureSet = await readJson(file);
+  const schemaFile = asString(fixtureSet.schema, `${file}.schema`);
+  const schema = schemasByFile.get(schemaFile);
+  assert(schema, `${file} must reference a local schema file`);
+  const validate = ajv.getSchema(asString(schema.$id, `${schemaFile}.$id`));
+  assert(validate, `${schemaFile} must compile as Draft 2020-12 JSON Schema`);
+  assert(Array.isArray(fixtureSet.cases) && fixtureSet.cases.length > 0, `${file}.cases must be non-empty`);
+  for (const [index, entry] of fixtureSet.cases.entries()) {
+    const invalidCase = asObject(entry, `${file}.cases[${index}]`);
+    const name = asString(invalidCase.name, `${file}.cases[${index}].name`);
+    assert.equal(validate(invalidCase.instance), false, `${file} case ${name} must be rejected`);
   }
 }
 
-console.log(`Validated ${schemaFiles.length} schemas and ${fixtureFiles.length} fixtures.`);
+console.log(`Validated ${schemaFiles.length} schemas, ${fixtureFiles.length} positive fixtures, and ${invalidFixtureFiles.length} negative fixture sets.`);

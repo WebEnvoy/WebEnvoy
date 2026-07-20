@@ -74,7 +74,11 @@ function multiProfilePackageContract(): LodePackageAdmissionContract {
       ...contract.resource_requirements,
       resource_requirement_profiles: [
         ...contract.resource_requirements.resource_requirement_profiles,
-        { requirement_profile_id: "runtime-fallback", operation_boundary: "read", required_harbor_facts: [] }
+        {
+          requirement_profile_id: "runtime-fallback",
+          operation_boundary: "read",
+          required_harbor_facts: [{ fact_key: "identity.fallback_only.confirmed", owner: "Harbor", required: true }]
+        }
       ]
     }
   };
@@ -240,6 +244,14 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   assert(!("category" in multiProfilePreview));
   assert.equal(multiProfilePreview.candidates[0]?.status, "compatible");
+  const fallbackProfilePreview = await previewIdentityCompatibility(request(["identity-compatible"], {
+    resource_requirement_profile_id: "runtime-fallback"
+  }), {
+    ...baseDependencies,
+    lodePackageResolver: async () => multiProfilePackageContract()
+  });
+  assert(!("category" in fallbackProfilePreview));
+  assert.equal(fallbackProfilePreview.candidates[0]?.status, "unknown_until_runtime");
   const formalMultiProfileMatch = matchLockedLodeOperation(multiProfilePackageContract(), {
     package_ref: packageRef,
     lock_ref: lockRef,
@@ -248,7 +260,8 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
     operation_mode: "read",
     target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
     target_origin: "https://www.xiaohongshu.com",
-    resource_requirement_ref: "xiaohongshu.search-notes.resources"
+    resource_requirement_ref: "xiaohongshu.search-notes.resources",
+    resource_requirement_profile_id: "identity-preview"
   });
   assert(!("category" in formalMultiProfileMatch));
   assert.equal(matchLockedOperationIdentity(formalMultiProfileMatch, identityFacts("identity-compatible"), "identity-compatible"), undefined);
@@ -422,4 +435,37 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   const declaredOversizedResult = await declaredOversizedReader("identity-http");
   assert.equal(declaredOversizedResult.ok, false);
   assert(declaredLengthCancels > 0, "oversized Content-Length must cancel before reading");
+
+  let oversizedOverrideCancels = 0;
+  const oversizedOverrideReader = createHttpHarborIdentityFactsReader({
+    baseUrl: "http://127.0.0.1:18787",
+    maxResponseBytes: 70 * 1024,
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024 + 1));
+      },
+      cancel() {
+        oversizedOverrideCancels += 1;
+      }
+    }), { status: 200, headers: { "content-type": "application/json" } })
+  });
+  const oversizedOverrideResult = await oversizedOverrideReader("identity-http");
+  assert.equal(oversizedOverrideResult.ok, false);
+  assert(oversizedOverrideCancels > 0, "caller overrides must not raise the 64 KiB hard cap");
+
+  let errorBodyCancels = 0;
+  const errorBodyReader = createHttpHarborIdentityFactsReader({
+    baseUrl: "http://127.0.0.1:18787",
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024 + 1));
+      },
+      cancel() {
+        errorBodyCancels += 1;
+      }
+    }), { status: 503, headers: { "content-type": "application/json" } })
+  });
+  const errorBodyResult = await errorBodyReader("identity-http");
+  assert.equal(errorBodyResult.ok, false);
+  assert(errorBodyCancels > 0, "non-2xx Harbor response streams must be cancelled before returning");
 }

@@ -27,5 +27,6 @@
     "timeout_ms": 30000
   },
   "resource_requirement_refs": ["example.read-public-page.resources"],
+  "resource_requirement_profile_id": "public-page-read-with-snapshot-refmap-evidence",
   "evidence_policy_ref": "evidence-policy:summary-only"
 }

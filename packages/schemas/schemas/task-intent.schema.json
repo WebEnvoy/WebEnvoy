@@ -23,6 +23,7 @@
       "scope": "Caller declares; Core validates",
       "policy": "Caller/App declare public constraints; Core enforces",
       "resource_requirement_refs": "Lode owns refs; Harbor owns runtime facts",
+      "resource_requirement_profile_id": "Lode owns the profile identifier; caller selects one exact profile and Core enforces it",
       "evidence_policy_ref": "Lode/Core/App contract input"
     }
   },
@@ -101,7 +102,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "format": "webenvoy-stored-target-ref"
           }
         }
       }
@@ -117,7 +119,9 @@
         },
         "target_ref": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 2048,
+          "format": "webenvoy-stored-target-ref"
         }
       }
     },
@@ -154,6 +158,11 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "resource_requirement_profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
     },
     "evidence_policy_ref": {
       "type": "string",

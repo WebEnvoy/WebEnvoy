@@ -237,6 +237,7 @@ function taskIntent(intentId: string): JsonObject {
       timeout_ms: 5000
     },
     resource_requirement_refs: [resourceRef],
+    resource_requirement_profile_id: "example-read-with-snapshot",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -245,7 +246,8 @@ function bossTaskIntent(intentId: string): JsonObject {
   return {
     ...taskIntent(intentId),
     capability: { ref: "lode:capability/job-search", version: "0.1.0", source_ref: bossPackageRef, lock_ref: "lode://lock/site-capability/boss/job-search@0.1.0" },
-    scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
+    scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
+    resource_requirement_profile_id: "boss-job-search-live-runtime"
   };
 }
 

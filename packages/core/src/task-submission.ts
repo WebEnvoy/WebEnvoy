@@ -38,6 +38,7 @@ export type TaskIntentEnvelope = {
     timeout_ms?: number;
   };
   resource_requirement_refs: string[];
+  resource_requirement_profile_id?: string;
   evidence_policy_ref: string;
 };
 
@@ -77,6 +78,7 @@ type ParsedTaskIntentFields = {
   scope: Record<string, unknown>;
   policy: Record<string, unknown>;
   resourceRequirementRefs: string[];
+  resourceRequirementProfileId?: string;
   evidencePolicyRef: string;
 };
 
@@ -97,6 +99,7 @@ const allowedTaskIntentFields = new Set([
   "scope",
   "policy",
   "resource_requirement_refs",
+  "resource_requirement_profile_id",
   "evidence_policy_ref"
 ]);
 const privateFieldNames = new Set(["raw_payload", "dom", "har", "screenshot", "video", "cookie", "token", "local_path", "ui_state", "runtime_session"]);
@@ -201,6 +204,9 @@ function parseTaskIntentFields(taskIntent: Record<string, unknown>): ParsedTaskI
   const scope = asObject(taskIntent.scope, "scope_required");
   const policy = asObject(taskIntent.policy, "policy_required");
   const resourceRequirementRefs = asStringArray(taskIntent.resource_requirement_refs, "resource_requirement_refs_required");
+  const resourceRequirementProfileId = taskIntent.resource_requirement_profile_id === undefined
+    ? undefined
+    : asNonEmptyString(taskIntent.resource_requirement_profile_id, "resource_requirement_profile_id_invalid");
   const evidencePolicyRef = asNonEmptyString(taskIntent.evidence_policy_ref, "evidence_policy_ref_required");
 
   if (isFailure(intentId)) return intentId;
@@ -211,6 +217,7 @@ function parseTaskIntentFields(taskIntent: Record<string, unknown>): ParsedTaskI
   if (isFailure(scope)) return scope;
   if (isFailure(policy)) return policy;
   if (isFailure(resourceRequirementRefs)) return resourceRequirementRefs;
+  if (isFailure(resourceRequirementProfileId)) return resourceRequirementProfileId;
   if (isFailure(evidencePolicyRef)) return evidencePolicyRef;
 
   return {
@@ -224,6 +231,7 @@ function parseTaskIntentFields(taskIntent: Record<string, unknown>): ParsedTaskI
     scope,
     policy,
     resourceRequirementRefs,
+    ...(resourceRequirementProfileId === undefined ? {} : { resourceRequirementProfileId }),
     evidencePolicyRef
   };
 }
@@ -290,6 +298,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
       ...(typeof fields.policy.timeout_ms === "number" ? { timeout_ms: fields.policy.timeout_ms } : {})
     },
     resource_requirement_refs: fields.resourceRequirementRefs,
+    ...(fields.resourceRequirementProfileId === undefined ? {} : { resource_requirement_profile_id: fields.resourceRequirementProfileId }),
     evidence_policy_ref: fields.evidencePolicyRef
   };
 }
@@ -429,7 +438,10 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       failure: taskIntent
     };
   }
-  const createRunRecord = (record: CreateRunRecordInput) => store.createRunRecord(record, input.run_claim_token);
+  const createRunRecord = (record: CreateRunRecordInput) => store.createRunRecord({
+    ...record,
+    scope_target_ref: taskIntent.scope.target_ref
+  }, input.run_claim_token);
 
   const writeGuardrail = writeGuardrailFailure(taskIntent);
   if (writeGuardrail) {

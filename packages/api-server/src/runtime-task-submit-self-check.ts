@@ -258,6 +258,7 @@ function taskIntent(intentId: string): JsonObject {
       timeout_ms: 5000
     },
     resource_requirement_refs: [resourceRef],
+    resource_requirement_profile_id: "example-read-with-snapshot",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -288,6 +289,7 @@ function xiaohongshuTaskIntent(intentId: string): JsonObject {
       timeout_ms: 5000
     },
     resource_requirement_refs: [xiaohongshuResourceRef],
+    resource_requirement_profile_id: "xiaohongshu-search-notes-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -303,6 +305,7 @@ function xiaohongshuDetailTaskIntent(intentId: string, detailRef: string): JsonO
     scope: { target_type: "xiaohongshu_note_detail", target_ref: detailRef },
     policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
     resource_requirement_refs: [xiaohongshuDetailResourceRef],
+    resource_requirement_profile_id: "xiaohongshu-read-note-detail-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -318,6 +321,7 @@ function bossTaskIntent(intentId: string): JsonObject {
     scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
     policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
     resource_requirement_refs: [bossResourceRef],
+    resource_requirement_profile_id: "boss-job-search-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -572,7 +576,11 @@ async function writeLodeRegistry(
             { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
           ]
         },
-        { requirement_profile_id: "xiaohongshu-search-notes-empty-fallback", operation_boundary: "read", required_harbor_facts: [] }
+        {
+          requirement_profile_id: "xiaohongshu-search-notes-empty-fallback",
+          operation_boundary: "read",
+          required_harbor_facts: [{ fact_key: "identity.fallback_only.confirmed", owner: "Harbor", required: true }]
+        }
       ]
     })
   );
@@ -1814,6 +1822,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const xiaohongshuRun = asRecord(asRecord(xiaohongshuSubmit.body).run);
       assert.equal(xiaohongshuRun.status, "succeeded");
       assert.equal(xiaohongshuRun.package_ref, xiaohongshuPackageRef);
+      assert.equal(xiaohongshuRun.scope_target_ref, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
       assert.equal(xiaohongshuRun.result_ref, "result:core/intent_api_submit_xiaohongshu_site_facts");
       assert(xiaohongshuPaths.some((entry) =>
         entry === "GET /runtime/sessions/session_runtime_api_ready/site-resource-facts?site_id=xiaohongshu&task_kind=search_notes"
@@ -1822,10 +1831,48 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
+      assert.equal(readOperationBody.url, xiaohongshuRun.scope_target_ref);
       assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
-      assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+      assert.equal(xiaohongshuSessionBody.url, xiaohongshuRun.scope_target_ref);
+
+      const readsBeforeFallbackProfile = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      const fallbackProfileIntent = xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_fallback_profile");
+      fallbackProfileIntent.resource_requirement_profile_id = "xiaohongshu-search-notes-empty-fallback";
+      const fallbackProfileSubmit = await postJson(xiaohongshuPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_fallback_profile",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: fallbackProfileIntent,
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: xiaohongshuRun.scope_target_ref }
+      });
+      const fallbackProfileRun = asRecord(asRecord(fallbackProfileSubmit.body).run);
+      assert.equal(fallbackProfileRun.status, "failed");
+      assert.equal(asRecord(fallbackProfileRun.failure).code, "resource_fact_missing:identity.fallback_only.confirmed");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeFallbackProfile);
+
+      const sessionsBeforeTargetDrift = xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length;
+      for (const [name, harborUrl] of [
+        ["path", "https://www.xiaohongshu.com/explore/?keyword=city%20coffee"],
+        ["query", "https://www.xiaohongshu.com/search_result/?keyword=other"]
+      ] as const) {
+        const drift = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_submit_xiaohongshu_target_${name}_drift`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_xiaohongshu_target_${name}_drift`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: harborUrl }
+        });
+        const driftRun = asRecord(asRecord(drift.body).run);
+        assert.equal(driftRun.status, "failed", name);
+        assert.equal(asRecord(driftRun.failure).code, "operation_selection_invalid", name);
+      }
+      assert.equal(
+        xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length,
+        sessionsBeforeTargetDrift,
+        "path/query drift must fail before Harbor session admission"
+      );
 
       const submitXiaohongshuSearch = async (suffix: string) => {
         const runId = `run_api_xhs_detail_search_${suffix}`;

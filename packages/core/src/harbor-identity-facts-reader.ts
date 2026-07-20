@@ -3,7 +3,7 @@ import {
   type HarborBrowserProviderCatalog
 } from "./harbor-admission.js";
 import type { HarborIdentityFactsReader } from "./identity-compatibility-preview.js";
-import { BoundedJsonResponseError, readBoundedJsonResponse } from "./bounded-json-response.js";
+import { BoundedJsonResponseError, cancelResponseBody, readBoundedJsonResponse } from "./bounded-json-response.js";
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -43,9 +43,10 @@ function projectProviderCatalog(value: unknown): HarborBrowserProviderCatalog | 
 
 export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityFactsReaderOptions): HarborIdentityFactsReader {
   const fetchJson = options.fetch ?? fetch;
-  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  const requestedMaxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  const maxResponseBytes = Math.min(requestedMaxResponseBytes, 64 * 1024);
   const timeoutMs = options.timeoutMs ?? 5_000;
-  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes <= 0 || maxResponseBytes > 1024 * 1024) throw new Error("maxResponseBytes must be between 1 and 1048576");
+  if (!Number.isInteger(requestedMaxResponseBytes) || requestedMaxResponseBytes <= 0) throw new Error("maxResponseBytes must be a positive integer");
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) throw new Error("timeoutMs must be between 1 and 30000");
   const base = new URL(options.baseUrl);
   if ((base.protocol !== "http:" && base.protocol !== "https:") || base.username || base.password || base.search || base.hash) throw new Error("baseUrl must be an HTTP(S) URL without credentials, query, or fragment");
@@ -58,7 +59,10 @@ export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityF
       signal: AbortSignal.timeout(timeoutMs),
       headers: { accept: "application/json" }
     });
-    if (!response.ok) throw new Error(response.status === 404 ? notFoundCode : "owner_unavailable");
+    if (!response.ok) {
+      await cancelResponseBody(response);
+      throw new Error(response.status === 404 ? notFoundCode : "owner_unavailable");
+    }
     return readBoundedJsonResponse(response, maxResponseBytes);
   }
 

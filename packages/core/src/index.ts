@@ -162,6 +162,11 @@ export {
   type LockedOperationSelection
 } from "./operation-identity-matcher.js";
 export {
+  normalizePublicHttpTarget,
+  normalizePublicOrigin,
+  normalizeStoredTargetRef
+} from "./public-target-reference.js";
+export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   recoverInterruptedCoreTaskSessions,

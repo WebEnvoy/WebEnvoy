@@ -14,7 +14,7 @@ function hasJsonMediaType(response: Response): boolean {
   return response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
 
-async function cancelBody(response: Response, reader?: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+export async function cancelResponseBody(response: Response, reader?: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
   try {
     if (reader) await reader.cancel();
     else await response.body?.cancel();
@@ -26,13 +26,13 @@ async function cancelBody(response: Response, reader?: ReadableStreamDefaultRead
 export async function readBoundedJsonResponse(response: Response, maxBytes: number): Promise<unknown> {
   if (!Number.isInteger(maxBytes) || maxBytes <= 0) throw new RangeError("maxBytes must be a positive integer");
   if (!hasJsonMediaType(response)) {
-    await cancelBody(response);
+    await cancelResponseBody(response);
     throw new BoundedJsonResponseError("response_media_type_unsupported");
   }
 
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
-    await cancelBody(response);
+    await cancelResponseBody(response);
     throw new BoundedJsonResponseError("response_too_large");
   }
 
@@ -45,7 +45,7 @@ export async function readBoundedJsonResponse(response: Response, maxBytes: numb
     if (done) break;
     size += value.byteLength;
     if (size > maxBytes) {
-      await cancelBody(response, reader);
+      await cancelResponseBody(response, reader);
       throw new BoundedJsonResponseError("response_too_large");
     }
     chunks.push(value);

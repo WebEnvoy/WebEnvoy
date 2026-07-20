@@ -4,6 +4,25 @@
   "title": "WebEnvoy Identity Compatibility Preview Request v0",
   "type": "object",
   "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "target_ref": { "type": "string", "format": "webenvoy-public-http-target" },
+        "target_origin": { "type": "string", "format": "webenvoy-public-origin" }
+      }
+    },
+    {
+      "properties": {
+        "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "version": { "const": "0.1.0" },
+        "operation_id": { "const": "xhs_read_note_detail" },
+        "operation_mode": { "const": "read" },
+        "target_ref": { "type": "string", "format": "webenvoy-xhs-detail-ref" },
+        "target_origin": { "const": "https://www.xiaohongshu.com" }
+      }
+    }
+  ],
   "x-webenvoy": {
     "owner": "Core API",
     "status": "accepted-v0",
@@ -27,13 +46,9 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 2048,
-      "description": "A credential-free, non-sensitive HTTP(S) URL normalized by Core, or a validated detail_ref only for the explicitly allowlisted detail operation.",
-      "oneOf": [
-        { "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://" },
-        { "pattern": "^detail_ref_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$" }
-      ]
+      "description": "A credential-free, non-sensitive HTTP(S) URL normalized by Core, or a validated detail_ref only for the explicitly allowlisted detail operation. The webenvoy-public-http-target format rejects URL userinfo and decoded sensitive query keys or values using Core's public target taxonomy."
     },
-    "target_origin": { "type": "string", "format": "uri", "pattern": "^https?://[^/]+$", "maxLength": 512 },
+    "target_origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "description": "An exact normalized HTTP(S) origin without userinfo, path, query, or fragment." },
     "resource_requirement_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
     "resource_requirement_profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },
     "identity_environment_refs": {

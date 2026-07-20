@@ -28,6 +28,7 @@ import {
   type LockedOperationSelection
 } from "./operation-identity-matcher.js";
 import { readBoundedJsonResponse } from "./bounded-json-response.js";
+import { normalizePublicHttpTarget } from "./public-target-reference.js";
 import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore } from "./run-record-store.js";
@@ -213,12 +214,10 @@ function taskPackageRef(taskIntent: unknown): string | undefined {
 
 function taskUrl(taskIntent: unknown): string | undefined {
   const intent = object(taskIntent);
-  const refs = object(intent?.input)?.refs;
-  if (Array.isArray(refs)) {
-    const ref = refs.map(safeHttpUrl).find((entry): entry is string => entry !== undefined);
-    if (ref) return ref;
-  }
-  return safeHttpUrl(object(intent?.scope)?.target_ref);
+  const targetRef = string(object(intent?.scope)?.target_ref);
+  if (!targetRef) return undefined;
+  const normalized = normalizePublicHttpTarget(targetRef);
+  return normalized.ok ? normalized.target_ref : undefined;
 }
 
 function xhsDetailRefFromIntent(taskIntent: unknown): string | FailureRecord | undefined {
@@ -321,18 +320,21 @@ function operationSelectionFromTask(
   requestedTargetRef: string | undefined
 ): LockedOperationSelection | FailureRecord {
   const resourceRef = taskIntent.resource_requirement_refs.length === 1 ? taskIntent.resource_requirement_refs[0] : undefined;
-  const scopeTargetUrl = safeHttpUrl(taskIntent.scope.target_ref);
-  const targetUrl = requestedTargetRef ?? scopeTargetUrl ?? (detailOperation ? contract.runtime_consumption?.allowed_origins[0] : undefined);
-  let targetOrigin: string | undefined;
-  try {
-    targetOrigin = targetUrl ? new URL(targetUrl).origin : undefined;
-  } catch {
-    targetOrigin = undefined;
-  }
-  if (
-    !contract.lock_ref || !contract.operation_id || !resourceRef || !targetUrl || !targetOrigin ||
-    (!detailOperation && (!scopeTargetUrl || !sameOrigin(scopeTargetUrl, targetUrl)))
-  ) {
+  const profileId = taskIntent.resource_requirement_profile_id;
+  const scopeTarget = detailOperation ? undefined : normalizePublicHttpTarget(taskIntent.scope.target_ref);
+  const requestedTarget = requestedTargetRef === undefined ? scopeTarget : normalizePublicHttpTarget(requestedTargetRef);
+  const detailOrigin = detailOperation ? contract.runtime_consumption?.allowed_origins[0] : undefined;
+  const targetRef = detailOperation
+    ? taskIntent.scope.target_ref
+    : scopeTarget?.ok && requestedTarget?.ok && scopeTarget.target_ref === requestedTarget.target_ref
+      ? scopeTarget.target_ref
+      : undefined;
+  const targetOrigin = detailOperation
+    ? detailOrigin
+    : scopeTarget?.ok && requestedTarget?.ok && scopeTarget.target_ref === requestedTarget.target_ref
+      ? scopeTarget.target_origin
+      : undefined;
+  if (!contract.lock_ref || !contract.operation_id || !resourceRef || !profileId || !targetRef || !targetOrigin) {
     return failure("capability_contract", "operation_selection_invalid", "resource_matching", "fix_input");
   }
   return {
@@ -341,9 +343,10 @@ function operationSelectionFromTask(
     version: taskIntent.capability.version,
     operation_id: contract.operation_id,
     operation_mode: taskIntent.policy.execution_intent,
-    target_ref: detailOperation ? taskIntent.scope.target_ref : targetUrl,
+    target_ref: targetRef,
     target_origin: targetOrigin,
-    resource_requirement_ref: resourceRef
+    resource_requirement_ref: resourceRef,
+    resource_requirement_profile_id: profileId
   };
 }
 
@@ -586,12 +589,14 @@ async function completeAcceptedReadTask(
       sceneEvidenceRefs(scene)
     );
   }
-  if (!sameOrigin(safeHttpUrl(object(scene.page_summary)?.url), taskUrl(taskIntent))) {
+  const sceneTarget = string(object(scene.page_summary)?.url);
+  const normalizedSceneTarget = sceneTarget === undefined ? undefined : normalizePublicHttpTarget(sceneTarget);
+  if (!normalizedSceneTarget?.ok || normalizedSceneTarget.target_ref !== taskUrl(taskIntent)) {
     return completeAcceptedReadTaskWithFailure(
       store,
       result,
       "page_changed",
-      "Core rejected the Harbor page scene because its page URL was not same-origin with the submitted task target.",
+      "Core rejected the Harbor page scene because its page URL did not exactly match the submitted task target.",
       scene.evidence_refs
     );
   }
@@ -894,13 +899,24 @@ export async function submitRuntimeTask(
     });
   }
 
+  const operationHarbor = operationMatch
+    ? (() => {
+        const { url: _discardedUrl, ...rest } = request.harbor ?? {};
+        return {
+          ...rest,
+          ...(isXhsDetailOperation(operationMatch.runtime_consumption)
+            ? {}
+            : { url: operationMatch.selection.target_ref })
+        };
+      })()
+    : request.harbor;
   let harborResult: HarborRuntimeAdmissionResult;
   try {
     harborResult = await deps.harborRuntimeClient.collectAdmissionFacts({
       run_id: request.run_id,
-      task_intent: request.task_intent,
+      task_intent: validatedTaskIntent,
       package_ref,
-      harbor: request.harbor
+      harbor: operationHarbor
     });
   } catch {
     harborResult = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
@@ -1044,7 +1060,7 @@ export async function submitRuntimeTask(
         operation_id: runtimeConsumption.operation_id,
         ...(detailOperation ? { detail_ref: detailRef as string } : { query: query as string }),
         ...(cityCode === undefined ? {} : { city_code: cityCode }),
-        ...(!detailOperation && request.harbor?.url !== undefined ? { url: request.harbor.url } : {}),
+        ...(!detailOperation && operationMatch ? { url: operationMatch.selection.target_ref } : {}),
         signal: operationController.signal
       });
     } catch {
@@ -1424,6 +1440,13 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
   return {
     async collectAdmissionFacts(input) {
+      const taskTargetUrl = taskUrl(input.task_intent);
+      const requestedTarget = input.harbor?.url === undefined
+        ? undefined
+        : normalizePublicHttpTarget(input.harbor.url);
+      if (requestedTarget && (!requestedTarget.ok || requestedTarget.target_ref !== taskTargetUrl)) {
+        return failure("capability_contract", "operation_selection_invalid", "resource_matching", "fix_input");
+      }
       const readiness = await requestJson("GET", "/readiness");
       if (isFailure(readiness)) return readiness;
       if (!readinessOk(readiness)) return failure("resource_admission", "harbor_runtime_not_ready", "runtime_binding", "connect_runtime");
@@ -1438,7 +1461,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
       const session = await requestJson("POST", "/runtime/identity-environment-sessions", {
         identity_environment_ref: identityRef,
-        url: input.harbor?.url ?? taskUrl(input.task_intent),
+        url: taskTargetUrl,
         run_id: input.run_id,
         package_ref: input.package_ref,
         control_owner: "core_task",

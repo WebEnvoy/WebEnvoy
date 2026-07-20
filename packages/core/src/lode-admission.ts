@@ -368,6 +368,13 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   if (operationMode !== "read" && taskIntent.policy.risk === "read") {
     return { ok: false, failure: admissionFailure("action_risk", "write_precheck_risk_required", "admission", "use_validate_or_preview"), package_ref: packageRef };
   }
+  if (lodePackage.runtime_consumption !== undefined && taskIntent.resource_requirement_profile_id === undefined) {
+    return {
+      ok: false,
+      failure: admissionFailure("resource_admission", "resource_requirement_profile_mismatch", "resource_matching", "select_matching_resource_requirements"),
+      package_ref: packageRef
+    };
+  }
   const resourceRequirements = validateLodeResourceRequirements(taskIntent, packageRef, operationMode, lodePackage.resource_requirements);
   if ("category" in resourceRequirements) {
     return { ok: false, failure: resourceRequirements, package_ref: packageRef };

@@ -1,0 +1,27 @@
+{
+  "schema": "task-intent.schema.json",
+  "cases": [{
+    "name": "credential-and-token-target",
+    "instance": {
+      "schema_version": "webenvoy.task-intent.v0",
+      "intent_id": "intent_invalid_sensitive_target",
+      "entrypoint": "api",
+      "user_intent": { "summary": "Invalid sensitive target fixture." },
+      "capability": {
+        "ref": "lode:capability/read-public-page",
+        "version": "0.1.0",
+        "source_ref": "lode://site-capability/example/read-public-page@0.1.0",
+        "lock_ref": "lode://lock/site-capability/example/read-public-page@0.1.0"
+      },
+      "input": { "summary": "Invalid sensitive target fixture." },
+      "scope": {
+        "target_type": "web_page",
+        "target_ref": "https://user:password@example.org/?session_token=redacted"
+      },
+      "policy": { "risk": "read", "execution_intent": "read" },
+      "resource_requirement_refs": ["example.read-public-page.resources"],
+      "resource_requirement_profile_id": "example-read-with-snapshot",
+      "evidence_policy_ref": "evidence-policy:summary-only"
+    }
+  }]
+}

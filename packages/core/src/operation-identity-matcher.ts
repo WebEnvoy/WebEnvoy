@@ -17,7 +17,7 @@ export type LockedOperationSelection = {
   target_ref: string;
   target_origin: string;
   resource_requirement_ref: string;
-  resource_requirement_profile_id?: string;
+  resource_requirement_profile_id: string;
 };
 
 export type LockedOperationMatch = {
@@ -76,7 +76,7 @@ export function matchLockedLodeOperation(
     !bounded(selection.package_ref, 512) || !bounded(selection.lock_ref, 512) || !bounded(selection.version, 64) ||
     !bounded(selection.operation_id, 128) || !bounded(selection.operation_mode, 32) || !bounded(selection.target_ref, 2048) ||
     !bounded(selection.target_origin, 512) || !bounded(selection.resource_requirement_ref, 256) ||
-    (selection.resource_requirement_profile_id !== undefined && !bounded(selection.resource_requirement_profile_id, 256)) ||
+    !bounded(selection.resource_requirement_profile_id, 256) ||
     !normalizePublicOrigin(selection.target_origin)
   ) return failure("target_contract_invalid", "resource_matching", "fix_input");
 
@@ -92,12 +92,11 @@ export function matchLockedLodeOperation(
     resource.package_ref !== selection.package_ref || resource.operation_mode !== selection.operation_mode ||
     resource.resource_requirements_id !== selection.resource_requirement_ref
   ) return failure("resource_requirement_mismatch", "resource_matching", "repair_package_contract");
-  const profiles = selection.resource_requirement_profile_id === undefined
-    ? resource.resource_requirement_profiles
-    : resource.resource_requirement_profiles.filter((profile) => profile.requirement_profile_id === selection.resource_requirement_profile_id);
+  const profiles = resource.resource_requirement_profiles.filter(
+    (profile) => profile.requirement_profile_id === selection.resource_requirement_profile_id
+  );
   if (
-    profiles.length === 0 ||
-    (selection.resource_requirement_profile_id !== undefined && profiles.length !== 1) ||
+    profiles.length !== 1 ||
     profiles.some((profile) => !bounded(profile.requirement_profile_id, 256) || (profile.operation_boundary !== undefined && profile.operation_boundary !== selection.operation_mode))
   ) {
     return failure("resource_requirement_profile_mismatch", "resource_matching", "repair_package_contract");
