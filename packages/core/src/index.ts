@@ -155,8 +155,33 @@ export {
   actionRequestSchemaVersion,
   acceptReadOnlyTaskSubmission,
   taskIntentSchemaVersion,
+  validateTaskIntent,
   type TaskEntrypoint,
   type TaskIntentEnvelope,
   type TaskSubmissionInput,
   type TaskSubmissionResult
 } from "./task-submission.js";
+export {
+  taskThreadSchemaVersion,
+  taskTurnInputConsumerBoundary,
+  taskTurnInputSchemaVersion,
+  TaskThreadStoreError,
+  validateTaskTurnInputSnapshot,
+  type TaskThreadView,
+  type TaskTurnFieldKind,
+  type TaskTurnInputField,
+  type TaskTurnInputGap,
+  type TaskTurnInputSnapshot,
+  type TaskTurnStatus,
+  type TaskTurnSubmissionError,
+  type TaskTurnView
+} from "./task-thread-store.js";
+export {
+  createLocalTaskTurnInputPolicyResolver,
+  validateTaskTurnInputAgainstPolicy,
+  type LocalTaskTurnInputPolicyResolverOptions,
+  type TaskTurnInputFieldPolicy,
+  type TaskTurnInputPolicy,
+  type TaskTurnInputPolicyResolver,
+  type TaskTurnInputSummaryConstraint
+} from "./task-turn-input-policy.js";

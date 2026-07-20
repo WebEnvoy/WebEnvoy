@@ -3,23 +3,30 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
+import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
 import { assertRuntimeTaskSubmitApi } from "./runtime-task-submit-self-check.js";
+import { assertTaskThreadApiRaces } from "./task-thread-api-self-check.js";
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
-  return {
-    status: response.status,
-    body: await response.json()
-  };
+  return { status: response.status, body: await response.json() };
 }
 
+async function postJson(port: number, path: string, body?: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  return { status: response.status, body: await response.json() };
+}
 function asRecord(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
   return value as Record<string, unknown>;
 }
-
 let tick = 0;
 
 function nextInstant(): Date {
@@ -29,8 +36,37 @@ function nextInstant(): Date {
 }
 
 async function main(): Promise<void> {
+  assert.equal(apiServerHost, "127.0.0.1");
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-api-server-"));
   const store = createFileRunRecordStore({ directory, clock: nextInstant });
+  const threadInputPolicyResolver: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
+    package_ref,
+    capability_ref,
+    input_schema_ref: "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
+    fields: new Map([
+      ["keyword", { field_id: "keyword", projection: "safe_summary" }],
+      ["limit", { field_id: "limit", projection: "safe_summary" }],
+      ["url", { field_id: "url", projection: "sanitized_url" }]
+    ])
+  });
+  const taskThreadStore = createFileTaskThreadStore({
+    directory: join(directory, "threads"),
+    runRecordStore: store,
+    clock: nextInstant,
+    resolveInputPolicy: threadInputPolicyResolver
+  });
+  const threadLodeResolver: LodePackageResolver = async () => ({
+    package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+    capability_id: "search-notes",
+    operation_mode: "read",
+    version: "0.1.0",
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.search-notes.resources",
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      operation_mode: "read",
+      resource_requirement_profiles: [{ requirement_profile_id: "fixture" }]
+    }
+  });
   const runId = "run_api_query_001";
 
   await store.createRunRecord({
@@ -123,7 +159,7 @@ async function main(): Promise<void> {
     retention_state: "redacted"
   });
 
-  const server = createApiServer({ runRecordStore: store });
+  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -157,7 +193,8 @@ async function main(): Promise<void> {
         status: "degraded",
         checks: {
           runRecordStore: "configured",
-          lodePackageResolver: "missing",
+          taskThreadStore: "configured",
+          lodePackageResolver: "configured",
           harborRuntimeClient: "missing"
         },
         consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
@@ -353,6 +390,150 @@ async function main(): Promise<void> {
       }
     });
 
+    const createThreadResponse = await postJson(port, "/threads", {
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env:xhs-brand"
+    });
+    assert.equal(createThreadResponse.status, 201);
+    const createThreadBody = asRecord(createThreadResponse.body);
+    const createdThread = asRecord(createThreadBody.thread);
+    const threadId = createdThread.thread_id as string;
+    assert.equal((createdThread.turns as unknown[]).length, 0);
+
+    assert.equal((await postJson(port, "/threads", {
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env:xhs-brand"
+    })).status, 200);
+
+    const taskTurnRequest = {
+      idempotency_key: "api-thread-submit-001",
+      run_id: "run_api_thread_001",
+      input_snapshot: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [
+          { field_id: "keyword", kind: "scalar", summary: "AI tools" },
+          { field_id: "limit", kind: "scalar", summary: "8" }
+        ],
+        consumer_boundary: taskTurnInputConsumerBoundary
+      },
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      task_intent: {
+        schema_version: "webenvoy.task-intent.v0",
+        intent_id: "intent_api_thread_001",
+        entrypoint: "app",
+        user_intent: { summary: "Prepare a guarded task turn." },
+        capability: {
+          ref: "lode:capability/search-notes",
+          version: "0.1.0",
+          source_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0"
+        },
+        input: { summary: "keyword=AI tools; limit=8" },
+        scope: { target_type: "xiaohongshu_notes", target_ref: "xhs:search/ai-tools" },
+        policy: { risk: "submit", execution_intent: "execute_after_approval" },
+        resource_requirement_refs: [],
+        evidence_policy_ref: "policy:no-raw-evidence"
+      },
+      harbor: { identity_environment_ref: "identity-env:xhs-brand" }
+    };
+    const turnResponse = await postJson(port, `/threads/${threadId}/turns`, taskTurnRequest);
+    assert.equal(turnResponse.status, 409);
+    const turnBody = asRecord(turnResponse.body);
+    assert.equal(turnBody.replayed, false);
+    assert.equal(asRecord(turnBody.turn).status, "failed");
+    assert.equal(asRecord(turnBody.turn).failure_code, "true_write_deferred");
+    assert.equal(asRecord(turnBody.turn).sequence, 1);
+    assert.equal(asRecord(asRecord(turnBody.turn).input).consumer_boundary, taskTurnInputConsumerBoundary);
+
+    const replayResponse = await postJson(port, `/threads/${threadId}/turns`, taskTurnRequest);
+    assert.equal(replayResponse.status, 409);
+    const replayBody = asRecord(replayResponse.body);
+    assert.equal(replayBody.ok, false);
+    assert.equal(replayBody.replayed, true);
+    assert.equal(asRecord(replayBody.turn).turn_id, asRecord(turnBody.turn).turn_id);
+    assert.equal(Object.hasOwn(asRecord(replayBody.turn), "run_claim_token"), false);
+
+    const invalidBoundaryResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-invalid-boundary",
+      run_id: "run_api_thread_invalid_boundary",
+      input_snapshot: {
+        ...taskTurnRequest.input_snapshot,
+        consumer_boundary: "caller-controlled"
+      }
+    });
+    assert.equal(invalidBoundaryResponse.status, 400);
+    assert.equal(asRecord(asRecord(invalidBoundaryResponse.body).error).code, "consumer_boundary_invalid");
+
+    const undeclaredDraftResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-undeclared-draft",
+      run_id: "run_api_thread_undeclared_draft",
+      input_snapshot: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "draft_body", kind: "scalar", summary: "RAW DRAFT BODY" }]
+      }
+    });
+    assert.equal(undeclaredDraftResponse.status, 400);
+    assert.equal(asRecord(asRecord(undeclaredDraftResponse.body).error).code, "input_field_not_declared:draft_body");
+
+    const invalidIntentResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-invalid-intent",
+      run_id: "run_api_thread_invalid",
+      task_intent: {
+        ...taskTurnRequest.task_intent,
+        entrypoint: "agent"
+      }
+    });
+    assert.equal(invalidIntentResponse.status, 400);
+    assert.equal(asRecord(asRecord(invalidIntentResponse.body).error).code, "entrypoint_unsupported");
+    assert.equal((asRecord(asRecord((await getJson(port, `/threads/${threadId}`)).body).thread).turns as unknown[]).length, 1);
+
+    const invalidSnapshotBeforeBinding = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-invalid-snapshot",
+      run_id: "run_api_thread_invalid_snapshot",
+      input_snapshot: {
+        ...taskTurnRequest.input_snapshot,
+        fields: [{ field_id: "draft", kind: "long_text", owner_ref: "draft:fixture", content: "RAW-SECRET" }]
+      },
+      harbor: { identity_environment_ref: "identity-env:other" }
+    });
+    assert.equal(invalidSnapshotBeforeBinding.status, 400);
+    assert.equal(asRecord(asRecord(invalidSnapshotBeforeBinding.body).error).code, "field_property_unsupported:content");
+
+    const bindingMismatch = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-submit-mismatch",
+      run_id: "run_api_thread_mismatch",
+      harbor: { identity_environment_ref: "identity-env:other" }
+    });
+    assert.equal(bindingMismatch.status, 409);
+    assert.equal(asRecord(asRecord(bindingMismatch.body).error).code, "thread_binding_mismatch");
+
+    const reserved = await taskThreadStore.reserveTaskTurn(threadId, {
+      idempotency_key: "api-thread-interrupted",
+      request_hash: "interrupted-hash",
+      run_id: "run_api_thread_interrupted",
+      creation_channel: "api",
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      input: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "url", kind: "url", summary: "https://example.org/" }]
+      }
+    });
+    assert.equal(reserved.turn.status, "submitting");
+    const terminateResponse = await postJson(port, `/threads/${threadId}/turns/${reserved.turn.turn_id}/terminate`);
+    assert.equal(terminateResponse.status, 409);
+    assert.equal(asRecord(asRecord(terminateResponse.body).error).code, "turn_run_still_active");
+
+    const threadResponse = await getJson(port, `/threads/${threadId}`);
+    assert.equal(threadResponse.status, 200);
+    const threadView = asRecord(asRecord(threadResponse.body).thread);
+    assert.deepEqual((threadView.turns as unknown[]).map((turn) => asRecord(turn).sequence), [1, 2]);
+    const threadList = asRecord(await getJson(port, "/threads").then((result) => result.body));
+    assert.equal((threadList.threads as unknown[]).length, 1);
+
     assert.deepEqual(await getJson(port, "/missing"), {
       status: 404,
       body: {
@@ -364,10 +545,13 @@ async function main(): Promise<void> {
     });
 
     await assertRuntimeTaskSubmitApi();
+    await assertTaskThreadApiRaces();
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
     await rm(directory, { recursive: true, force: true });
   }
 }

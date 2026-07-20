@@ -47,6 +47,16 @@ assert(fixtureFiles.length > 0, "at least one fixture is required");
 
 const schemasByFile = new Map<string, JsonObject>();
 
+function localRefs(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(localRefs);
+  if (!value || typeof value !== "object") return [];
+  const object = value as JsonObject;
+  return [
+    ...(typeof object.$ref === "string" && !object.$ref.startsWith("#") ? [object.$ref] : []),
+    ...Object.values(object).flatMap(localRefs)
+  ];
+}
+
 for (const file of schemaFiles) {
   const schema = await readJson(file);
   schemasByFile.set(basename(file), schema);
@@ -59,6 +69,16 @@ for (const file of schemaFiles) {
   asString(metadata.compatibility_boundary, `${file}.x-webenvoy.compatibility_boundary`);
   asString(metadata.schema_version, `${file}.x-webenvoy.schema_version`);
   asStringArray(metadata.source_adrs, `${file}.x-webenvoy.source_adrs`);
+}
+
+const taskThreadSchemaFile = "task-thread.schema.json";
+const taskThreadSchema = schemasByFile.get(taskThreadSchemaFile);
+assert(taskThreadSchema, `${taskThreadSchemaFile} must exist`);
+const taskThreadSchemaId = asString(taskThreadSchema.$id, `${taskThreadSchemaFile}.$id`);
+for (const ref of localRefs(taskThreadSchema)) {
+  const resolvedRef = new URL(ref, taskThreadSchemaId).href;
+  const target = [...schemasByFile.values()].find((schema) => schema.$id === resolvedRef);
+  assert(target, `${taskThreadSchemaFile} reference ${ref} must resolve to a local schema $id`);
 }
 
 for (const file of fixtureFiles) {

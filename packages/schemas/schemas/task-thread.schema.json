@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/task-thread.v0.schema.json",
+  "title": "WebEnvoy Task Thread View v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.task-thread.v0",
+    "surface": "api_projection",
+    "compatibility_boundary": "This schema describes the public API projection, not Core's private persistence record. Thread binding and accepted turn identity are immutable. Additive optional fields are allowed; ordering, idempotency, status_unknown, and owner-ref boundaries require an explicit contract revision.",
+    "source_adrs": [
+      "docs/adr/0005-task-intent-and-run-lifecycle-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "thread_id": "Core",
+      "capability_ref": "Lode owns referenced capability; Core binds the thread",
+      "identity_environment_ref": "Harbor owns referenced identity environment; Core binds the thread",
+      "turns": "Core",
+      "run_id": "Core Run Record"
+    }
+  },
+  "required": [
+    "schema_version",
+    "thread_id",
+    "capability_ref",
+    "identity_environment_ref",
+    "created_at",
+    "updated_at",
+    "turns"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.task-thread.v0"
+    },
+    "thread_id": {
+      "type": "string",
+      "pattern": "^thread_[a-f0-9]{32}$"
+    },
+    "capability_ref": {
+      "type": "string",
+      "pattern": "^lode:capability/[A-Za-z0-9][A-Za-z0-9._~/-]{0,2030}$"
+    },
+    "identity_environment_ref": {
+      "type": "string",
+      "pattern": "^identity-env:[A-Za-z0-9][A-Za-z0-9._~:/-]{0,2030}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "turn_id",
+          "sequence",
+          "idempotency_key",
+          "run_id",
+          "creation_channel",
+          "input",
+          "created_at",
+          "updated_at",
+          "submission_state",
+          "status"
+        ],
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "pattern": "^turn_[a-f0-9]{32}$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "creation_channel": {
+            "type": "string",
+            "enum": ["api", "cli", "mcp", "sdk", "app"]
+          },
+          "input": {
+            "allOf": [
+              { "$ref": "https://schemas.webenvoy.dev/core/task-turn-input.v0.schema.json" },
+              { "required": ["consumer_boundary"] }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submission_state": {
+            "type": "string",
+            "enum": ["submitting", "accepted", "rejected"]
+          },
+          "failure_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "submission_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["category", "code", "phase", "recovery_hint"],
+            "properties": {
+              "category": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "code": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "phase": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "recovery_hint": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          },
+          "terminated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "terminal_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["submitting", "accepted", "running", "waiting_for_user", "completed", "failed", "cancelled", "status_unknown"]
+          },
+          "run_status": {
+            "type": "string",
+            "enum": ["pending", "admitted", "running", "succeeded", "failed", "blocked", "requires_user_action", "manual_recovery_required", "unknown_outcome", "cancelled", "expired"]
+          },
+          "input_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["location", "code", "recovery_action"],
+              "properties": {
+                "location": {
+                  "type": "string",
+                  "pattern": "^(field:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}|attachment:[0-9]+)$"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": ["owner_ref_unavailable", "owner_ref_check_unavailable"]
+                },
+                "recovery_action": {
+                  "type": "string",
+                  "enum": ["restore_owner_content", "reselect_attachment", "retry_owner_check"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

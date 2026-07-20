@@ -1,10 +1,20 @@
 import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 
-import { createFileRunRecordStore, createHttpHarborRuntimeClient, createLocalLodePackageResolver, recoverInterruptedCoreTaskSessions } from "@webenvoy/core-runtime";
+import {
+  createFileRunRecordStore,
+  createHttpHarborRuntimeClient,
+  createLocalLodePackageResolver,
+  createLocalTaskTurnInputPolicyResolver,
+  recoverInterruptedCoreTaskSessions
+} from "@webenvoy/core-runtime";
+import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 
 import { createApiServer } from "./server.js";
 
 export { createApiServer } from "./server.js";
+
+export const apiServerHost = "127.0.0.1";
 
 function parsePort(value: string | undefined): number {
   const port = Number(value ?? "8787");
@@ -21,6 +31,16 @@ if (import.meta.url === entrypoint) {
   const runRecordStore = process.env.WEBENVOY_RUN_RECORD_DIR
     ? createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR })
     : undefined;
+  const lodeRegistryPath = process.env.WEBENVOY_LODE_REGISTRY_PATH;
+  const taskThreadStore = runRecordStore
+    ? createFileTaskThreadStore({
+        directory: process.env.WEBENVOY_TASK_THREAD_DIR ?? join(runRecordStore.directory, "threads"),
+        runRecordStore,
+        ...(lodeRegistryPath === undefined
+          ? {}
+          : { resolveInputPolicy: createLocalTaskTurnInputPolicyResolver({ registryPath: lodeRegistryPath }) })
+      })
+    : undefined;
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
@@ -29,13 +49,14 @@ if (import.meta.url === entrypoint) {
   }
   const server = createApiServer(runRecordStore ? {
     runRecordStore,
-    ...(process.env.WEBENVOY_LODE_REGISTRY_PATH === undefined
+    ...(taskThreadStore === undefined ? {} : { taskThreadStore }),
+    ...(lodeRegistryPath === undefined
       ? {}
-      : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: process.env.WEBENVOY_LODE_REGISTRY_PATH }) }),
+      : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: lodeRegistryPath }) }),
     ...(harborRuntimeClient === undefined ? {} : { harborRuntimeClient })
   } : {});
 
-  server.listen(port, () => {
-    console.log(`WebEnvoy API Server listening on http://127.0.0.1:${port}`);
+  server.listen(port, apiServerHost, () => {
+    console.log(`WebEnvoy API Server listening on http://${apiServerHost}:${port}`);
   });
 }

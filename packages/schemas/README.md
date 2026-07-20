@@ -17,6 +17,8 @@ The files intentionally stay small:
 - `schemas/run-record.schema.json`
 - `schemas/result-envelope.schema.json`
 - `schemas/evidence-ref.schema.json`
+- `schemas/task-turn-input.schema.json`
+- `schemas/task-thread.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -25,6 +27,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 `fixtures/write-action-guardrail-run-record.fixture.json` captures the minimal write-side guardrail shape: true-write submission is deferred as a failed Run Record with `deferred_true_write` admission and a structured `action_risk` failure, without raw evidence or write execution state.
 
 `fixtures/real-site-*-write-preview-run-record.fixture.json` captures the refs-only real-page write-preview shape for Xiaohongshu draft preview and BOSS greeting preview, including action requests, approval requests, preview results, no-submit state, and cancelled/expired/page-changed terminal states.
+
+`fixtures/task-thread.fixture.json` captures an ordered App-created task turn. Bounded scalar summaries remain visible after restart, while files and long text are represented by owner refs.
 
 Run:
 

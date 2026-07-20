@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/task-turn-input.v0.schema.json",
+  "title": "WebEnvoy Task Turn Input Snapshot v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core API Server",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.task-turn-input.v0",
+    "compatibility_boundary": "Inline summaries are bounded, non-sensitive display values. Long text, files, attachments, credentials, profiles, runtime material, and raw evidence remain owner refs.",
+    "source_adrs": [
+      "docs/adr/0005-task-intent-and-run-lifecycle-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ],
+    "field_owners": {
+      "fields": "Caller submits; Core validates and snapshots",
+      "attachment_refs": "Attachment owner retains content; Core stores refs",
+      "consumer_boundary": "Core"
+    }
+  },
+  "required": ["schema_version", "fields"],
+  "properties": {
+    "schema_version": {
+      "const": "webenvoy.task-turn-input.v0"
+    },
+    "fields": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field_id", "kind"],
+        "properties": {
+          "field_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["scalar", "url", "long_text", "file", "attachment"]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "owner_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "^(attachment|draft|owner):[A-Za-z0-9][A-Za-z0-9._~:/%-]{0,2047}$"
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "enum": ["long_text", "file", "attachment"] } } },
+            "then": {
+              "required": ["owner_ref"],
+              "not": { "required": ["summary"] }
+            },
+            "else": {
+              "required": ["summary"],
+              "not": { "required": ["owner_ref"] }
+            }
+          }
+        ]
+      }
+    },
+    "attachment_refs": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2048,
+        "pattern": "^(attachment|draft|owner):[A-Za-z0-9][A-Za-z0-9._~:/%-]{0,2047}$"
+      }
+    },
+    "consumer_boundary": {
+      "type": "string",
+      "const": "Core stores bounded field summaries and owner refs only; raw content remains with its owner."
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/task-thread.schema.json",
+  "schema_version": "webenvoy.task-thread.v0",
+  "thread_id": "thread_0123456789abcdef0123456789abcdef",
+  "capability_ref": "lode:capability/search-notes",
+  "identity_environment_ref": "identity-env:xhs-brand",
+  "created_at": "2026-07-19T06:00:00.000Z",
+  "updated_at": "2026-07-19T06:00:01.000Z",
+  "turns": [
+    {
+      "turn_id": "turn_0123456789abcdef0123456789abcdef",
+      "sequence": 1,
+      "idempotency_key": "app-submit-001",
+      "run_id": "run_thread_fixture_001",
+      "creation_channel": "app",
+      "input": {
+        "schema_version": "webenvoy.task-turn-input.v0",
+        "fields": [
+          {
+            "field_id": "keyword",
+            "kind": "scalar",
+            "summary": "AI tools"
+          },
+          {
+            "field_id": "reference_file",
+            "kind": "file",
+            "owner_ref": "attachment:fixture/reference-file"
+          }
+        ],
+        "attachment_refs": ["attachment:fixture/reference-file"],
+        "consumer_boundary": "Core stores bounded field summaries and owner refs only; raw content remains with its owner."
+      },
+      "created_at": "2026-07-19T06:00:01.000Z",
+      "updated_at": "2026-07-19T06:00:02.000Z",
+      "submission_state": "accepted",
+      "status": "completed",
+      "run_status": "succeeded",
+      "terminal_at": "2026-07-19T06:00:02.000Z"
+    }
+  ]
+}
