@@ -19,6 +19,8 @@ The files intentionally stay small:
 - `schemas/evidence-ref.schema.json`
 - `schemas/task-turn-input.schema.json`
 - `schemas/task-thread.schema.json`
+- `schemas/identity-compatibility-preview-request.schema.json`
+- `schemas/identity-compatibility-preview.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 

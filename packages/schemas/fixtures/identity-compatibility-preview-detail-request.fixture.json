@@ -1,0 +1,14 @@
+{
+  "$schema": "../schemas/identity-compatibility-preview-request.schema.json",
+  "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+  "package_ref": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
+  "lock_ref": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0",
+  "version": "0.1.0",
+  "operation_id": "xhs_read_note_detail",
+  "operation_mode": "read",
+  "target_ref": "detail_ref_123e4567-e89b-42d3-a456-426614174000",
+  "target_origin": "https://www.xiaohongshu.com",
+  "resource_requirement_ref": "xiaohongshu.read-note-detail.resources",
+  "resource_requirement_profile_id": "identity-detail-preview",
+  "identity_environment_refs": ["identity-env-library-candidate"]
+}

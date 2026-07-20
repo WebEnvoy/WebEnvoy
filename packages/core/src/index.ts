@@ -128,15 +128,44 @@ export {
   type ResultUnavailableReason
 } from "./result-query.js";
 export {
+  createHttpHarborIdentityFactsReader,
+  identityCompatibilityPreviewRequestSchemaVersion,
+  identityCompatibilityPreviewSchemaVersion,
+  parseIdentityCompatibilityPreviewRequest,
+  previewIdentityCompatibility,
+  type HarborIdentityFactsReader,
+  type HarborIdentityFactsReadResult,
+  type HttpHarborIdentityFactsReaderOptions,
+  type IdentityCompatibilityCandidate,
+  type IdentityCompatibilityOwnerStatus,
+  type IdentityCompatibilityPreviewDependencies,
+  type IdentityCompatibilityPreviewRequest,
+  type IdentityCompatibilityPreviewResponse,
+  type IdentityCompatibilityRecoveryAction,
+  type IdentityCompatibilityStatus
+} from "./identity-compatibility-preview.js";
+export {
   type HarborIdentityEnvironmentFacts,
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
+  type HarborPublicIdentityEnvironmentSnapshot,
   type HarborUnavailable,
   type HarborWritePrecheckFacts,
   type RuntimeSessionBindingFacts,
   type RuntimeSessionUse
 } from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
+export {
+  matchLockedLodeOperation,
+  matchLockedOperationIdentity,
+  type LockedOperationMatch,
+  type LockedOperationSelection
+} from "./operation-identity-matcher.js";
+export {
+  normalizePublicHttpTarget,
+  normalizePublicOrigin,
+  normalizeStoredTargetRef
+} from "./public-target-reference.js";
 export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,

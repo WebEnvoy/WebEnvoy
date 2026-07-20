@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./run-record-store.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import type { LodeRequiredHarborFact } from "./lode-admission.js";
 
 export type HarborUnavailable = {
@@ -73,6 +74,11 @@ export type HarborIdentityEnvironmentFacts = {
     core: string;
     not_exposed: readonly string[];
   };
+};
+
+export type HarborPublicIdentityEnvironmentSnapshot = {
+  facts: HarborIdentityEnvironmentFacts;
+  observed_at?: string;
 };
 
 export type RuntimeSessionUse = "manual_browsing" | "agent_direct_browsing" | "direct_session" | "core_task_run";
@@ -219,6 +225,12 @@ const harborForbiddenFieldNames = new Set([
   "cookies",
   "token",
   "tokens",
+  "password",
+  "verification_code",
+  "storage_value",
+  "session_token",
+  "profile_storage",
+  "raw_body",
   "local_path",
   "profile_path",
   "runtime_session",
@@ -319,7 +331,14 @@ function validateProviderStatus(input: HarborAdmissionInput, identity: HarborIde
   return undefined;
 }
 
-function validateIdentityFacts(identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"]): HarborIdentityEnvironmentFacts | FailureRecord {
+export function validateHarborIdentityProviderStatus(
+  identity: HarborIdentityEnvironmentFacts,
+  providerStatus: HarborBrowserProviderCatalog | HarborUnavailable
+): FailureRecord | undefined {
+  return validateProviderStatus({ harbor_provider_status: providerStatus }, identity);
+}
+
+export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"]): HarborIdentityEnvironmentFacts | FailureRecord {
   if (!identityFacts) {
     return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
   }
@@ -354,6 +373,61 @@ function validateIdentityFacts(identityFacts: HarborAdmissionInput["harbor_ident
     return failure("resource_admission", "private_boundary_invalid", "runtime_binding", "remove_private_field");
   }
   return identityFacts as HarborIdentityEnvironmentFacts;
+}
+
+export function projectHarborPublicIdentityEnvironmentRecord(
+  value: unknown,
+  options: { requireComplete?: boolean } = {}
+): HarborPublicIdentityEnvironmentSnapshot | undefined {
+  if (findForbiddenField(value)) return undefined;
+  const direct = contractObject(value);
+  if (direct?.schema_version !== "harbor-local-identity-environment-store/v0") return undefined;
+  const site = contractObject(direct.site);
+  const status = contractObject(direct.status);
+  const refs = contractObject(direct.refs);
+  const environment = contractObject(direct.environment_summary);
+  const identityEnvironmentRef = contractString(direct.identity_environment_ref);
+  const executionIdentityRef = contractString(refs?.execution_identity_ref);
+  const profileRef = contractString(refs?.profile_ref);
+  const siteId = contractString(site?.site_id);
+  const origin = contractString(site?.origin);
+  const loginState = contractString(status?.login_state);
+  const authenticationProvenance = contractString(status?.authentication_provenance);
+  const manualAuthenticationState = contractString(status?.manual_authentication_state);
+  const browserStorageState = contractString(status?.browser_storage_state);
+  if (!identityEnvironmentRef || !executionIdentityRef || !profileRef || !origin) return undefined;
+  if (options.requireComplete && (
+    !siteId || !loginState || !authenticationProvenance || !manualAuthenticationState || !browserStorageState ||
+    typeof status?.recovery_required !== "boolean"
+  )) return undefined;
+  const selectedProviderId = environment?.provider_id === null ? null : contractString(environment?.provider_id);
+  if (options.requireComplete && environment?.provider_id !== null && selectedProviderId === undefined) return undefined;
+  const observedAt = contractString(direct.updated_at) ?? contractString(status?.updated_at) ?? contractString(direct.observed_at);
+  return {
+    facts: {
+      schema_version: "harbor-local-identity-environment/v0",
+      identity_environment_ref: identityEnvironmentRef,
+      execution_identity_ref: executionIdentityRef,
+      profile_ref: profileRef,
+      site_binding: { site_id: siteId ?? "unknown", origin },
+      login_state: {
+        state: loginState ?? "unknown",
+        authentication_provenance: authenticationProvenance ?? "unknown",
+        manual_authentication_state: manualAuthenticationState ?? "unknown",
+        recovery_required: status?.recovery_required === false ? false : true
+      },
+      browser_storage: { state: browserStorageState ?? "unknown" },
+      provider_binding: {
+        selected_provider_id: selectedProviderId ?? null,
+        binding_status: selectedProviderId ? "public_record_provider_available" : "no_launchable_provider"
+      },
+      consumer_boundary: {
+        core: "admission_facts_refs_and_blocking_reasons_only",
+        not_exposed: identityRequiredPrivateBoundary
+      }
+    },
+    ...(observedAt === undefined ? {} : { observed_at: observedAt })
+  };
 }
 
 function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime_facts"], identity: HarborIdentityEnvironmentFacts): RuntimeAdmission {
@@ -488,7 +562,8 @@ function validateWritePrecheckFacts(
   const formState = contractObject(facts?.form_state);
   const guard = contractObject(facts?.pre_write_guard);
   const privacy = contractObject(facts?.privacy_boundary);
-  const targetRef = contractString(target?.target_ref);
+  const rawTargetRef = contractString(target?.target_ref);
+  const targetRef = rawTargetRef === undefined ? undefined : normalizeStoredTargetRef(rawTargetRef);
   const snapshotRef = contractString(target?.snapshot_ref) ?? contractString(formState?.snapshot_ref);
   const refmapRef = contractString(target?.refmap_ref);
   const evidenceRefs = Array.isArray(target?.evidence_refs) ? target.evidence_refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];
@@ -562,6 +637,12 @@ function addInferredResourceFacts(input: HarborAdmissionInput, facts: Set<string
   }
 }
 
+export function inferHarborIdentityResourceFacts(identity: HarborIdentityEnvironmentFacts): readonly string[] {
+  const facts = new Set<string>();
+  addInferredResourceFacts({ harbor_identity_environment_facts: identity }, facts);
+  return [...facts].sort();
+}
+
 function publicResourceFacts(input: HarborAdmissionInput): Set<string> | FailureRecord {
   if (isUnavailable(input.harbor_resource_facts)) {
     return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", input.harbor_resource_facts.retryable ? "rerun_with_fresh_runtime" : "open_manual_auth");
@@ -602,7 +683,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
   }
 
-  const identity = validateIdentityFacts(input.harbor_identity_environment_facts);
+  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts);
   if ("category" in identity) {
     return { ok: false, failure: identity };
   }

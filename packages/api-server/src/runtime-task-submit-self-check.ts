@@ -258,6 +258,7 @@ function taskIntent(intentId: string): JsonObject {
       timeout_ms: 5000
     },
     resource_requirement_refs: [resourceRef],
+    resource_requirement_profile_id: "example-read-with-snapshot",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -288,6 +289,7 @@ function xiaohongshuTaskIntent(intentId: string): JsonObject {
       timeout_ms: 5000
     },
     resource_requirement_refs: [xiaohongshuResourceRef],
+    resource_requirement_profile_id: "xiaohongshu-search-notes-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -303,6 +305,7 @@ function xiaohongshuDetailTaskIntent(intentId: string, detailRef: string): JsonO
     scope: { target_type: "xiaohongshu_note_detail", target_ref: detailRef },
     policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
     resource_requirement_refs: [xiaohongshuDetailResourceRef],
+    resource_requirement_profile_id: "xiaohongshu-read-note-detail-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -318,6 +321,7 @@ function bossTaskIntent(intentId: string): JsonObject {
     scope: { target_type: "boss_job_search", target_ref: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" },
     policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
     resource_requirement_refs: [bossResourceRef],
+    resource_requirement_profile_id: "boss-job-search-live-runtime",
     evidence_policy_ref: "evidence-policy:refs-only"
   };
 }
@@ -571,6 +575,11 @@ async function writeLodeRegistry(
             { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true },
             { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
           ]
+        },
+        {
+          requirement_profile_id: "xiaohongshu-search-notes-empty-fallback",
+          operation_boundary: "read",
+          required_harbor_facts: [{ fact_key: "identity.fallback_only.confirmed", owner: "Harbor", required: true }]
         }
       ]
     })
@@ -1392,6 +1401,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   });
   const blockedIdentityCases: Array<{ name: string; session: JsonObject; siteFacts?: JsonObject; identityRef?: string; identityRecord?: JsonObject }> = [
     { name: "missing_reason", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined } }) } },
+    { name: "unknown_provenance_manual_pending", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined, authentication_provenance: "unknown", manual_authentication_state: "pending" } }) } },
     { name: "auth_incomplete", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { manual_authentication_state: "pending" } }) } },
     { name: "recovery_required", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { recovery_required: true } }) } },
     { name: "wrong_origin", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://evil.example") } },
@@ -1812,6 +1822,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const xiaohongshuRun = asRecord(asRecord(xiaohongshuSubmit.body).run);
       assert.equal(xiaohongshuRun.status, "succeeded");
       assert.equal(xiaohongshuRun.package_ref, xiaohongshuPackageRef);
+      assert.equal(xiaohongshuRun.scope_target_ref, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
       assert.equal(xiaohongshuRun.result_ref, "result:core/intent_api_submit_xiaohongshu_site_facts");
       assert(xiaohongshuPaths.some((entry) =>
         entry === "GET /runtime/sessions/session_runtime_api_ready/site-resource-facts?site_id=xiaohongshu&task_kind=search_notes"
@@ -1820,10 +1831,48 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
+      assert.equal(readOperationBody.url, xiaohongshuRun.scope_target_ref);
       assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
-      assert.equal(xiaohongshuSessionBody.url, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+      assert.equal(xiaohongshuSessionBody.url, xiaohongshuRun.scope_target_ref);
+
+      const readsBeforeFallbackProfile = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      const fallbackProfileIntent = xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_fallback_profile");
+      fallbackProfileIntent.resource_requirement_profile_id = "xiaohongshu-search-notes-empty-fallback";
+      const fallbackProfileSubmit = await postJson(xiaohongshuPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_fallback_profile",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: fallbackProfileIntent,
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: xiaohongshuRun.scope_target_ref }
+      });
+      const fallbackProfileRun = asRecord(asRecord(fallbackProfileSubmit.body).run);
+      assert.equal(fallbackProfileRun.status, "failed");
+      assert.equal(asRecord(fallbackProfileRun.failure).code, "resource_fact_missing:identity.fallback_only.confirmed");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeFallbackProfile);
+
+      const sessionsBeforeTargetDrift = xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length;
+      for (const [name, harborUrl] of [
+        ["path", "https://www.xiaohongshu.com/explore/?keyword=city%20coffee"],
+        ["query", "https://www.xiaohongshu.com/search_result/?keyword=other"]
+      ] as const) {
+        const drift = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_submit_xiaohongshu_target_${name}_drift`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_xiaohongshu_target_${name}_drift`),
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: harborUrl }
+        });
+        const driftRun = asRecord(asRecord(drift.body).run);
+        assert.equal(driftRun.status, "failed", name);
+        assert.equal(asRecord(driftRun.failure).code, "operation_selection_invalid", name);
+      }
+      assert.equal(
+        xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length,
+        sessionsBeforeTargetDrift,
+        "path/query drift must fail before Harbor session admission"
+      );
 
       const submitXiaohongshuSearch = async (suffix: string) => {
         const runId = `run_api_xhs_detail_search_${suffix}`;
@@ -1853,7 +1902,13 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         assert.notEqual(asRecord(run.post_check ?? {}).status, "passed", name);
       };
       const assertRejectedBeforeReadOperation = (value: unknown, name: string) => {
-        const run = asRecord(asRecord(value).run);
+        const body = asRecord(value);
+        if (body.run === undefined) {
+          assert.equal(body.ok, false, name);
+          assert.equal(typeof asRecord(body.error).code, "string", name);
+          return;
+        }
+        const run = asRecord(body.run);
         assert(["blocked", "failed"].includes(String(run.status)), name);
         assert.equal(run.result_ref, undefined, name);
         assert.equal(run.projection_ref, undefined, name);
@@ -1862,6 +1917,27 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       };
 
       const successfulSearch = await submitXiaohongshuSearch("success");
+      const readsBeforeUnsafeTargets = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      for (const [name, unsafeTarget] of [
+        ["credential_url", "https://preview-user:preview-password@www.xiaohongshu.com/search_result/"],
+        ["sensitive_query", "https://www.xiaohongshu.com/search_result/?access_token=must-not-echo"],
+        ["illegal_opaque", "arbitrary-opaque-target"]
+      ] as const) {
+        const unsafeIntent = xiaohongshuTaskIntent(`intent_api_xhs_unsafe_target_${name}`);
+        unsafeIntent.input = { ...asRecord(unsafeIntent.input), refs: [unsafeTarget] };
+        unsafeIntent.scope = { ...asRecord(unsafeIntent.scope), target_ref: unsafeTarget };
+        const rejectedTarget = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_xhs_unsafe_target_${name}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: unsafeIntent,
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api" }
+        });
+        assert.equal(asRecord(rejectedTarget.body).ok, false, name);
+        assert.equal(JSON.stringify(rejectedTarget.body).includes("must-not-echo"), false, name);
+        assert.equal(JSON.stringify(rejectedTarget.body).includes("preview-password"), false, name);
+      }
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeUnsafeTargets);
       const successfulDetail = await submitXiaohongshuDetail("success", successfulSearch.detailRef);
       assert.equal(successfulDetail.status, 202, JSON.stringify(successfulDetail.body));
       const successfulDetailRun = asRecord(asRecord(successfulDetail.body).run);
@@ -2081,7 +2157,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
       });
       assert.equal(asRecord(nonPinnedDeferredFacts.body).ok, false);
-      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "resource_fact_missing:page.vue_app.ready");
+      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "runtime_consumption_mismatch");
 
       for (const [index, driftCase] of operationRefDriftCases.entries()) {
         const drift = await postJson(operationRefDriftPorts[index]!, "/tasks", {

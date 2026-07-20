@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/identity-compatibility-preview-request.v0.schema.json",
+  "title": "WebEnvoy Identity Compatibility Preview Request v0",
+  "type": "object",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "target_ref": { "type": "string", "format": "webenvoy-public-http-target" },
+        "target_origin": { "type": "string", "format": "webenvoy-public-origin" }
+      },
+      "not": {
+        "properties": {
+          "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "version": { "const": "0.1.0" },
+          "operation_id": { "const": "xhs_read_note_detail" },
+          "operation_mode": { "const": "read" }
+        },
+        "required": ["package_ref", "lock_ref", "version", "operation_id", "operation_mode"]
+      }
+    },
+    {
+      "properties": {
+        "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "version": { "const": "0.1.0" },
+        "operation_id": { "const": "xhs_read_note_detail" },
+        "operation_mode": { "const": "read" },
+        "target_ref": { "type": "string", "format": "webenvoy-xhs-detail-ref" },
+        "target_origin": { "const": "https://www.xiaohongshu.com" }
+      }
+    }
+  ],
+  "x-webenvoy": {
+    "owner": "Core API",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+    "compatibility_boundary": "The request identifies an exact version-locked Lode operation, target origin, resource requirement profile, and bounded Harbor identity environment refs only; it cannot carry task input, credentials, browser state, evidence, or raw owner bodies.",
+    "source_adrs": [
+      "docs/adr/0004-admission-and-action-risk.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ]
+  },
+  "required": ["schema_version", "package_ref", "lock_ref", "version", "operation_id", "operation_mode", "target_ref", "target_origin", "resource_requirement_ref", "resource_requirement_profile_id", "identity_environment_refs"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.identity-compatibility-preview-request.v0" },
+    "package_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "lock_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "operation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "operation_mode": { "enum": ["read", "validate_only", "draft", "preview"] },
+    "target_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "A credential-free, non-sensitive HTTP(S) URL normalized by Core, or a validated detail_ref only for the explicitly allowlisted detail operation. The webenvoy-public-http-target format rejects URL userinfo and decoded sensitive query keys or values using Core's public target taxonomy."
+    },
+    "target_origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "description": "An exact normalized HTTP(S) origin without userinfo, path, query, or fragment." },
+    "resource_requirement_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "resource_requirement_profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "identity_environment_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    }
+  }
+}

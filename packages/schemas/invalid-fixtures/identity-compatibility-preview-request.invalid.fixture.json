@@ -1,0 +1,117 @@
+{
+  "schema": "identity-compatibility-preview-request.schema.json",
+  "cases": [
+    {
+      "name": "url-userinfo",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "https://user:password@www.xiaohongshu.com/search_result/",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "sensitive-query-key",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "https://www.xiaohongshu.com/search_result/?session%5Ftoken=redacted",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "sensitive-query-value",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "https://www.xiaohongshu.com/search_result/?kind=authorization",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "origin-with-path",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "https://www.xiaohongshu.com/search_result/",
+        "target_origin": "https://www.xiaohongshu.com/search_result/",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "arbitrary-opaque-target",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "arbitrary-opaque-target",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "detail-ref-with-wrong-contract",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_search_notes",
+        "operation_mode": "read",
+        "target_ref": "detail_ref_123e4567-e89b-42d3-a456-426614174000",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+        "resource_requirement_profile_id": "identity-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    },
+    {
+      "name": "detail-operation-with-public-url",
+      "instance": {
+        "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+        "package_ref": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
+        "lock_ref": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0",
+        "version": "0.1.0",
+        "operation_id": "xhs_read_note_detail",
+        "operation_mode": "read",
+        "target_ref": "https://www.xiaohongshu.com/explore/note-123",
+        "target_origin": "https://www.xiaohongshu.com",
+        "resource_requirement_ref": "xiaohongshu.read-note-detail.resources",
+        "resource_requirement_profile_id": "identity-detail-preview",
+        "identity_environment_refs": ["identity-env-candidate"]
+      }
+    }
+  ]
+}

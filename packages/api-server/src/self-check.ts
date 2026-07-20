@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, identityCompatibilityPreviewRequestSchemaVersion, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type HarborIdentityFactsReader, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
@@ -20,6 +20,14 @@ async function postJson(port: number, path: string, body?: Record<string, unknow
     method: "POST",
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  return { status: response.status, body: await response.json() };
+}
+async function requestBody(port: number, path: string, method: string, body?: string, contentType?: string): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: contentType === undefined ? {} : { "content-type": contentType },
+    ...(body === undefined ? {} : { body })
   });
   return { status: response.status, body: await response.json() };
 }
@@ -57,16 +65,59 @@ async function main(): Promise<void> {
   });
   const threadLodeResolver: LodePackageResolver = async () => ({
     package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+    source_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+    lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
     capability_id: "search-notes",
+    operation_id: "xhs_search_notes",
     operation_mode: "read",
     version: "0.1.0",
+    lifecycle: "active",
+    runtime_admission: { enabled: true, status: "current", recheck_condition: "not_applicable" },
     resource_requirements: {
       resource_requirements_id: "xiaohongshu.search-notes.resources",
       package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
       operation_mode: "read",
-      resource_requirement_profiles: [{ requirement_profile_id: "fixture" }]
+      resource_requirement_profiles: [{
+        requirement_profile_id: "fixture",
+        required_harbor_facts: [{ fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true, freshness: "current_execution_window" }]
+      }]
+    },
+    runtime_consumption: {
+      allowlist_id: "lode.runtime-consumption.v0", allowlist_version: "0.1.0", asset_owner: "Lode",
+      consumer: { repository: "WebEnvoy/WebEnvoy", issue: "299", purpose: "identity compatibility preview" },
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0", version: "0.1.0",
+      site_slug: "xiaohongshu", operation_id: "xhs_search_notes", operation_mode: "read", lifecycle: "active",
+      allowed_origins: ["https://www.xiaohongshu.com"], resource_requirements_id: "xiaohongshu.search-notes.resources",
+      failure_mapping_id: "xhs-search-failures", required_failure_classes: ["resource_requirement_unmatched"],
+      required_source_ref_kinds: ["source_trace_ref"], required_evidence_ref_kinds: ["snapshot_ref"],
+      post_check_id: "xhs-search-post-check", required_post_check_fields: ["status"]
     }
   });
+  let compatibilityFactReads = 0;
+  const harborIdentityFactsReader: HarborIdentityFactsReader = async (identityEnvironmentRef) => {
+    compatibilityFactReads += 1;
+    return {
+      ok: true,
+      owner_readiness: "ready",
+      provider_status: {
+        schema_version: "harbor-browser-provider-status/v0",
+        providers: [{ provider_id: "cloakbrowser", install: { status: "installed", launchability: "launchable" } }]
+      },
+      observed_at: new Date().toISOString(),
+      facts: {
+        schema_version: "harbor-local-identity-environment/v0",
+        identity_environment_ref: identityEnvironmentRef,
+        execution_identity_ref: `execution:${identityEnvironmentRef}`,
+        profile_ref: `profile:${identityEnvironmentRef}`,
+        site_binding: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" },
+        login_state: { state: "logged_in", authentication_provenance: "user_confirmed_managed_session", manual_authentication_state: "completed", recovery_required: false },
+        browser_storage: { state: "present" },
+        provider_binding: { selected_provider_id: "cloakbrowser", binding_status: "public_record_provider_available" },
+        consumer_boundary: { core: "admission_facts_refs_and_blocking_reasons_only", not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"] }
+      }
+    };
+  };
   const runId = "run_api_query_001";
 
   await store.createRunRecord({
@@ -159,7 +210,7 @@ async function main(): Promise<void> {
     retention_state: "redacted"
   });
 
-  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver });
+  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver, harborIdentityFactsReader });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -195,11 +246,112 @@ async function main(): Promise<void> {
           runRecordStore: "configured",
           taskThreadStore: "configured",
           lodePackageResolver: "configured",
+          harborIdentityFactsReader: "configured",
           harborRuntimeClient: "missing"
         },
         consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
       }
     });
+
+    const recordsBeforePreview = (await store.listRunRecords()).length;
+    const compatibility = await postJson(port, "/identity-compatibility-preview", {
+      schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+      version: "0.1.0",
+      operation_id: "xhs_search_notes",
+      operation_mode: "read",
+      target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+      target_origin: "https://www.xiaohongshu.com",
+      resource_requirement_ref: "xiaohongshu.search-notes.resources",
+      resource_requirement_profile_id: "fixture",
+      identity_environment_refs: ["identity-env-preview"]
+    });
+    assert.equal(compatibility.status, 200);
+    const compatibilityBody = asRecord(compatibility.body);
+    assert.equal(compatibilityBody.schema_version, "webenvoy.identity-compatibility-preview.v0");
+    assert.equal(asRecord((compatibilityBody.candidates as unknown[])[0]).status, "unknown_until_runtime");
+    assert.equal(compatibilityFactReads, 1);
+    assert.equal((await store.listRunRecords()).length, recordsBeforePreview, "compatibility preview must not create a Run Record");
+    const rejectedCompatibility = await postJson(port, "/identity-compatibility-preview", {
+      schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+      version: "0.1.0",
+      operation_id: "xhs_search_notes",
+      operation_mode: "read",
+      target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+      target_origin: "https://www.xiaohongshu.com",
+      resource_requirement_ref: "xiaohongshu.search-notes.resources",
+      resource_requirement_profile_id: "fixture",
+      identity_environment_refs: ["identity-env-preview"],
+      cookies: []
+    });
+    assert.equal(rejectedCompatibility.status, 400);
+    assert.equal(asRecord(asRecord(rejectedCompatibility.body).error).code, "private_field_rejected:cookies");
+
+    for (const unsafeTarget of [
+      "https://preview-user:preview-password@www.xiaohongshu.com/search_result/",
+      "https://www.xiaohongshu.com/search_result/?access_token=must-not-echo",
+      "arbitrary-opaque-target"
+    ]) {
+      const unsafeCompatibility = await postJson(port, "/identity-compatibility-preview", {
+        schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+        package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        version: "0.1.0",
+        operation_id: "xhs_search_notes",
+        operation_mode: "read",
+        target_ref: unsafeTarget,
+        target_origin: "https://www.xiaohongshu.com",
+        resource_requirement_ref: "xiaohongshu.search-notes.resources",
+        resource_requirement_profile_id: "fixture",
+        identity_environment_refs: ["identity-env-preview"]
+      });
+      assert.equal(unsafeCompatibility.status, 400);
+      assert.equal(asRecord(asRecord(unsafeCompatibility.body).error).code, "identity_compatibility_request_invalid");
+      assert.equal(JSON.stringify(unsafeCompatibility.body).includes("must-not-echo"), false);
+      assert.equal(JSON.stringify(unsafeCompatibility.body).includes("preview-password"), false);
+    }
+
+    const previewPath = "/identity-compatibility-preview";
+    const missingMediaType = await requestBody(port, previewPath, "POST", "{}");
+    assert.equal(missingMediaType.status, 415);
+    assert.equal(asRecord(asRecord(missingMediaType.body).error).code, "content_type_unsupported");
+    assert.equal((await requestBody(port, previewPath, "POST", "{}", "text/plain")).status, 415);
+    const malformedPreview = await requestBody(port, previewPath, "POST", "{", "application/json; charset=utf-8");
+    assert.equal(malformedPreview.status, 400);
+    assert.equal(asRecord(asRecord(malformedPreview.body).error).code, "invalid_json_body");
+    const oversizedPreview = await requestBody(port, previewPath, "POST", JSON.stringify({ padding: "x".repeat(64 * 1024) }), "application/json");
+    assert.equal(oversizedPreview.status, 413);
+    assert.equal(asRecord(asRecord(oversizedPreview.body).error).code, "request_body_too_large");
+    const previewGet = await getJson(port, previewPath);
+    assert.equal(previewGet.status, 405);
+    assert.equal(asRecord(asRecord(previewGet.body).error).code, "method_not_allowed");
+
+    const unavailableServer = createApiServer({});
+    await new Promise<void>((resolve) => unavailableServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const unavailableAddress = unavailableServer.address();
+      assert(unavailableAddress && typeof unavailableAddress === "object");
+      const ownerUnavailable = await postJson(unavailableAddress.port, previewPath, {
+        schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+        package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        version: "0.1.0",
+        operation_id: "xhs_search_notes",
+        operation_mode: "read",
+        target_ref: "https://www.xiaohongshu.com/search_result/",
+        target_origin: "https://www.xiaohongshu.com",
+        resource_requirement_ref: "xiaohongshu.search-notes.resources",
+        resource_requirement_profile_id: "fixture",
+        identity_environment_refs: ["identity-env-preview"]
+      });
+      assert.equal(ownerUnavailable.status, 503);
+      assert.equal(asRecord(asRecord(ownerUnavailable.body).error).code, "identity_compatibility_owner_unavailable");
+    } finally {
+      await new Promise<void>((resolve, reject) => unavailableServer.close((error) => error ? reject(error) : resolve()));
+    }
 
     assert.deepEqual(await getJson(port, `/runs/${runId}`), {
       status: 200,

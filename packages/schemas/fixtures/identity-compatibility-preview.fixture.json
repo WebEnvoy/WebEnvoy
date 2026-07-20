@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/identity-compatibility-preview.schema.json",
+  "schema_version": "webenvoy.identity-compatibility-preview.v0",
+  "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+  "version": "0.1.0",
+  "operation_id": "xhs_search_notes",
+  "operation_mode": "read",
+  "target_ref": "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+  "target_origin": "https://www.xiaohongshu.com",
+  "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+  "resource_requirement_profile_id": "identity-preview",
+  "generated_at": "2026-07-21T08:00:00.000Z",
+  "candidates": [{
+    "identity_environment_ref": "identity-env-library-candidate",
+    "status": "unknown_until_runtime",
+    "reason_codes": ["runtime_facts_require_task_admission"],
+    "missing_requirement_categories": ["runtime_facts"],
+    "fact_freshness": [{
+      "fact_key": "runtime.execution_surface.available",
+      "required_freshness": "current_execution_window",
+      "state": "unknown_until_runtime"
+    }],
+    "owner_status": { "lode": "available", "harbor": "available" },
+    "freshness": { "state": "fresh", "observed_at": "2026-07-21T07:59:30.000Z", "age_ms": 30000 },
+    "recovery_action": "retry_at_task_submission"
+  }],
+  "consumer_boundary": "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed."
+}

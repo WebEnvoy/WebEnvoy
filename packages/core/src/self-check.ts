@@ -21,6 +21,7 @@ import { assertTaskThreadStore } from "./task-thread-store-self-check.js";
 import { assertTaskTurnInputPolicy } from "./task-turn-input-policy-self-check.js";
 import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
 import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
+import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 
 let tick = 0;
 
@@ -656,6 +657,36 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.deepEqual(validateOnlyActionRequest.run_record.action_request?.no_submit_guard.blocked_execution_intents, ["execute_after_approval", "reconcile_status", "request_cancel"]);
     assert.equal(validateOnlyActionRequest.run_record.action_request?.target_refs?.writable_target_ref, "target:fixture/contact-form");
     assert.deepEqual(validateOnlyActionRequest.run_record.evidence_refs, ["evidence_fixture_write_precheck"]);
+    const sensitiveWritableTarget = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_sensitive_writable_target",
+      task_intent: {
+        ...taskIntent,
+        intent_id: "intent_fixture_sensitive_writable_target",
+        capability: {
+          ref: "lode:capability/preview-contact-form",
+          version: "0.1.0",
+          source_ref: lodePreviewContactFormContract.source_ref,
+          lock_ref: lodePreviewContactFormContract.lock_ref
+        },
+        resource_requirement_refs: ["example.preview-contact-form.resources"],
+        policy: { risk: "write", execution_intent: "validate_only" }
+      },
+      package_ref: lodePreviewContactFormContract.package_ref,
+      lode_package_contract: lodePreviewContactFormContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
+      harbor_runtime_facts: harborRuntimeFacts,
+      harbor_write_precheck_facts: {
+        ...harborWritePrecheckFacts,
+        writable_target: {
+          ...harborWritePrecheckFacts.writable_target,
+          target_ref: "https://preview-user:preview-password@example.test/form"
+        }
+      },
+      harbor_resource_facts: harborResourceFacts
+    });
+    assert.equal(sensitiveWritableTarget.ok, false);
+    assert.equal(JSON.stringify(sensitiveWritableTarget).includes("preview-password"), false);
     const actionRequest = validateOnlyActionRequest.run_record.action_request;
     assert(actionRequest, "validate-only run must carry action request");
     const approvalEvidenceRefs = [...(actionRequest.evidence_refs ?? [])];
@@ -1384,3 +1415,5 @@ await assertTaskTurnInputPolicy();
 console.log("Validated Lode-owned input projection policy and bounded owner-ref checks.");
 await assertTaskThreadStore();
 console.log("Validated durable task threads, ordered turns, idempotency, recovery, and status_unknown handling.");
+await assertIdentityCompatibilityPreview();
+console.log("Validated read-only Lode and Harbor identity compatibility preview boundaries.");

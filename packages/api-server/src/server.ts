@@ -7,8 +7,10 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
+  previewIdentityCompatibility,
   type FailureRecord,
   type FileRunRecordStore,
+  type HarborIdentityFactsReader,
   type HarborRuntimeClient,
   type LodePackageResolver
 } from "@webenvoy/core-runtime";
@@ -23,6 +25,7 @@ export type ApiServerOptions = {
   runRecordStore?: FileRunRecordStore;
   taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
+  harborIdentityFactsReader?: HarborIdentityFactsReader;
   harborRuntimeClient?: HarborRuntimeClient;
 };
 
@@ -56,6 +59,19 @@ function invalidRunId(): FailureRecord {
 
 function isFailureRecord(value: unknown): value is FailureRecord {
   return Boolean(value && typeof value === "object" && "category" in value);
+}
+
+function hasJsonMediaType(request: IncomingMessage): boolean {
+  return request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
+
+function previewRequestFailure(code: string): FailureRecord {
+  return {
+    category: "request_invalid",
+    code,
+    phase: "pre_admission",
+    recovery_hint: "fix_input"
+  };
 }
 
 function queryStatusCode(failure: FailureRecord): number {
@@ -125,6 +141,7 @@ function admissionHealth(options: ApiServerOptions): JsonBody {
     runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
     taskThreadStore: options.taskThreadStore === undefined ? "missing" : "configured",
     lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
+    harborIdentityFactsReader: options.harborIdentityFactsReader === undefined ? "missing" : "configured",
     harborRuntimeClient: options.harborRuntimeClient === undefined ? "missing" : "configured"
   };
   return {
@@ -182,6 +199,44 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     }
     const result = await submitTaskBody(body, options);
     sendJson(response, result.status, result.body);
+    return;
+  }
+
+  if (path === "/identity-compatibility-preview") {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { ok: false, error: previewRequestFailure("method_not_allowed") });
+      return;
+    }
+    if (!hasJsonMediaType(request)) {
+      sendJson(response, 415, { ok: false, error: previewRequestFailure("content_type_unsupported") });
+      return;
+    }
+    const body = await readJsonBody(request, 64 * 1024);
+    if (isFailureRecord(body)) {
+      sendJson(response, body.code === "request_body_too_large" ? 413 : 400, { ok: false, error: body });
+      return;
+    }
+    if (!options.lodePackageResolver || !options.harborIdentityFactsReader) {
+      sendJson(response, 503, {
+        ok: false,
+        error: {
+          category: "resource_admission",
+          code: "identity_compatibility_owner_unavailable",
+          phase: "resource_matching",
+          recovery_hint: "contact_operator"
+        }
+      });
+      return;
+    }
+    const result = await previewIdentityCompatibility(body, {
+      lodePackageResolver: options.lodePackageResolver,
+      harborIdentityFactsReader: options.harborIdentityFactsReader
+    });
+    if (isFailureRecord(result)) {
+      sendJson(response, 400, { ok: false, error: result });
+      return;
+    }
+    sendJson(response, 200, result as unknown as JsonBody);
     return;
   }
 

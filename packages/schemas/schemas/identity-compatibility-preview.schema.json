@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/identity-compatibility-preview.v0.schema.json",
+  "title": "WebEnvoy Identity Compatibility Preview v0",
+  "type": "object",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "target_ref": { "type": "string", "format": "webenvoy-public-http-target" },
+        "target_origin": { "type": "string", "format": "webenvoy-public-origin" }
+      },
+      "not": {
+        "properties": {
+          "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+          "version": { "const": "0.1.0" },
+          "operation_id": { "const": "xhs_read_note_detail" },
+          "operation_mode": { "const": "read" }
+        },
+        "required": ["package_ref", "lock_ref", "version", "operation_id", "operation_mode"]
+      }
+    },
+    {
+      "properties": {
+        "package_ref": { "const": "lode://site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "lock_ref": { "const": "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0" },
+        "version": { "const": "0.1.0" },
+        "operation_id": { "const": "xhs_read_note_detail" },
+        "operation_mode": { "const": "read" },
+        "target_ref": { "type": "string", "format": "webenvoy-xhs-detail-ref" },
+        "target_origin": { "const": "https://www.xiaohongshu.com" }
+      }
+    }
+  ],
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.identity-compatibility-preview.v0",
+    "compatibility_boundary": "Core projects bounded Lode and Harbor owner facts without creating a task, thread, run, runtime session, snapshot, evidence, or browser action and without exposing private owner material.",
+    "source_adrs": [
+      "docs/adr/0004-admission-and-action-risk.md",
+      "docs/adr/0007-reference-version-ownership-v0.md",
+      "docs/adr/0008-core-technical-architecture-baseline.md"
+    ]
+  },
+  "required": ["schema_version", "package_ref", "lock_ref", "version", "operation_id", "operation_mode", "target_ref", "target_origin", "resource_requirement_ref", "resource_requirement_profile_id", "generated_at", "candidates", "consumer_boundary"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.identity-compatibility-preview.v0" },
+    "package_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "lock_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "operation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "operation_mode": { "enum": ["read", "validate_only", "draft", "preview"] },
+    "target_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "The canonical credential-free HTTP(S) target or a validated detail_ref for the explicitly allowlisted detail operation; sensitive input is never echoed."
+    },
+    "target_origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "description": "An exact normalized HTTP(S) origin without userinfo, path, query, or fragment." },
+    "resource_requirement_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "resource_requirement_profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identity_environment_ref", "status", "reason_codes", "missing_requirement_categories", "fact_freshness", "owner_status", "freshness", "recovery_action"],
+        "properties": {
+          "identity_environment_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "status": { "enum": ["compatible", "requires_setup", "incompatible", "unknown_until_runtime"] },
+          "reason_codes": { "type": "array", "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+          "missing_requirement_categories": { "type": "array", "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+          "fact_freshness": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["fact_key", "required_freshness", "state"],
+              "properties": {
+                "fact_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "required_freshness": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "state": { "enum": ["satisfied", "missing", "unknown_until_runtime"] }
+              }
+            }
+          },
+          "owner_status": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lode", "harbor"],
+            "properties": {
+              "lode": { "enum": ["available", "unavailable", "malformed", "stale", "not_checked"] },
+              "harbor": { "enum": ["available", "unavailable", "malformed", "stale", "not_checked"] }
+            }
+          },
+          "freshness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state"],
+            "properties": {
+              "state": { "enum": ["fresh", "stale", "unavailable"] },
+              "observed_at": { "type": "string", "format": "date-time" },
+              "age_ms": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "recovery_action": {
+            "enum": ["none", "select_supported_package_version", "repair_package_contract", "refresh_owner_facts", "select_matching_identity", "open_manual_auth", "install_or_select_provider", "connect_identity_environment", "fix_target", "select_matching_resource_requirements", "retry_at_task_submission"]
+          }
+        }
+      }
+    },
+    "consumer_boundary": { "const": "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed." }
+  }
+}

@@ -2,6 +2,7 @@ import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import {
   isFileOwnershipOwnerAlive,
   readFileOwnership,
@@ -170,6 +171,7 @@ export type RunRecord = {
   capability_source_ref?: string;
   capability_lock_ref?: string;
   package_ref?: string;
+  scope_target_ref?: string;
   admission: AdmissionDecision;
   runtime_binding_refs?: string[];
   action_request?: ActionRequest;
@@ -197,6 +199,7 @@ export type CreateRunRecordInput = {
   capability_source_ref?: string;
   capability_lock_ref?: string;
   package_ref?: string;
+  scope_target_ref?: string;
   runtime_binding_refs?: readonly string[];
   action_request?: ActionRequest;
   approval_request?: ApprovalRequest;
@@ -401,6 +404,9 @@ function assertRunRecord(record: RunRecord): void {
   if (record.package_ref !== undefined) {
     requireRef(record.package_ref, "package_ref");
   }
+  if (record.scope_target_ref !== undefined && normalizeStoredTargetRef(record.scope_target_ref) !== record.scope_target_ref) {
+    throw new Error("scope_target_ref must be a normalized non-sensitive target reference");
+  }
   if (record.result_ref !== undefined) {
     requireRef(record.result_ref, "result_ref");
   }
@@ -598,6 +604,11 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.package_ref !== undefined) {
     record.package_ref = requireRef(input.package_ref, "package_ref");
+  }
+  if (input.scope_target_ref !== undefined) {
+    const normalizedTargetRef = normalizeStoredTargetRef(input.scope_target_ref);
+    if (normalizedTargetRef !== input.scope_target_ref) throw new Error("scope_target_ref must be a normalized non-sensitive target reference");
+    record.scope_target_ref = normalizedTargetRef;
   }
   if (input.runtime_binding_refs !== undefined) {
     record.runtime_binding_refs = copyRequiredRefs(input.runtime_binding_refs, "runtime_binding_refs");
