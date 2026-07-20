@@ -173,26 +173,30 @@ async function withFileLock<T>(directory: string, key: string, timeoutMs: number
   }
 }
 
-async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, action: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await action(items[index] as T);
-    }
-  }));
-  return results;
-}
-
 export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): FileTaskThreadStore {
   const clock = options.clock ?? (() => new Date());
   const lockTimeoutMs = options.lockTimeoutMs ?? 30_000;
   const ownerRefCheckTimeoutMs = options.ownerRefCheckTimeoutMs ?? 5_000;
+  let activeOwnerRefChecks = 0;
+  const ownerRefCheckWaiters: Array<() => void> = [];
+
+  async function acquireOwnerRefCheck(): Promise<void> {
+    if (activeOwnerRefChecks < ownerRefCheckConcurrency) {
+      activeOwnerRefChecks += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => ownerRefCheckWaiters.push(resolve));
+  }
+
+  function releaseOwnerRefCheck(): void {
+    const next = ownerRefCheckWaiters.shift();
+    if (next) next();
+    else activeOwnerRefChecks -= 1;
+  }
 
   async function checkOwnerRef(ownerRef: string): Promise<boolean | undefined> {
     if (!options.checkOwnerRef) return undefined;
+    await acquireOwnerRefCheck();
     let timeout: number | undefined;
     try {
       return await Promise.race([
@@ -203,22 +207,29 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       return undefined;
     } finally {
       if (timeout) clearTimeout(timeout);
+      releaseOwnerRefCheck();
     }
   }
 
-  async function inputGaps(input: TaskTurnInputSnapshot): Promise<TaskTurnInputGap[]> {
+  async function inputGaps(
+    input: TaskTurnInputSnapshot,
+    availability = new Map<string, Promise<boolean | undefined>>()
+  ): Promise<TaskTurnInputGap[]> {
     if (!options.checkOwnerRef) return [];
     const refs = [
       ...input.fields.flatMap((field) => field.owner_ref === undefined ? [] : [{ ref: field.owner_ref, location: `field:${field.field_id}` as const, attachment: field.kind === "attachment" || field.kind === "file" }]),
       ...(input.attachment_refs ?? []).map((ref, index) => ({ ref, location: `attachment:${index}` as const, attachment: true }))
     ];
-    const availability = new Map((await mapWithConcurrency(
-      [...new Set(refs.map((item) => item.ref))],
-      ownerRefCheckConcurrency,
-      async (ref) => [ref, await checkOwnerRef(ref)] as const
-    )));
+    const uniqueRefs = [...new Set(refs.map((item) => item.ref))];
+    for (const ref of uniqueRefs) {
+      if (!availability.has(ref)) availability.set(ref, checkOwnerRef(ref));
+    }
+    const checked = new Map(await Promise.all(uniqueRefs.map(async (ref) => [
+      ref,
+      await availability.get(ref)
+    ] as const)));
     const gaps = refs.map((item): TaskTurnInputGap | undefined => {
-      const available = availability.get(item.ref);
+      const available = checked.get(item.ref);
       if (available === true) return undefined;
       return {
         location: item.location,
@@ -231,8 +242,11 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     return gaps.filter((gap): gap is TaskTurnInputGap => gap !== undefined);
   }
 
-  async function assertInputRefsAvailable(input: TaskTurnInputSnapshot): Promise<void> {
-    const [gap] = await inputGaps(input);
+  async function assertInputRefsAvailable(
+    input: TaskTurnInputSnapshot,
+    availability: Map<string, Promise<boolean | undefined>>
+  ): Promise<void> {
+    const [gap] = await inputGaps(input, availability);
     if (gap) throw new TaskThreadStoreError(`${gap.code}:${gap.location}`);
   }
 
@@ -261,8 +275,11 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     };
   }
 
-  async function turnView(turn: TaskTurnRecord): Promise<TaskTurnView> {
-    const [state, gaps] = await Promise.all([turnState(turn), inputGaps(turn.input)]);
+  async function turnView(
+    turn: TaskTurnRecord,
+    availability: Map<string, Promise<boolean | undefined>>
+  ): Promise<TaskTurnView> {
+    const [state, gaps] = await Promise.all([turnState(turn), inputGaps(turn.input, availability)]);
     const {
       request_hash: _requestHash,
       run_claim_token: _runClaimToken,
@@ -287,9 +304,12 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     };
   }
 
-  async function project(thread: TaskThreadRecord): Promise<TaskThreadView> {
+  async function project(
+    thread: TaskThreadRecord,
+    availability = new Map<string, Promise<boolean | undefined>>()
+  ): Promise<TaskThreadView> {
     const { schema_version: _storeSchemaVersion, ...publicThread } = thread;
-    const turns = await Promise.all(thread.turns.map(turnView));
+    const turns = await Promise.all(thread.turns.map((turn) => turnView(turn, availability)));
     const updatedAt = turns.reduce(
       (latest, turn) => turn.updated_at > latest ? turn.updated_at : latest,
       thread.updated_at
@@ -332,9 +352,10 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     thread: TaskThreadRecord,
     turn: TaskTurnRecord,
     replayed: boolean,
-    runClaimToken?: string
+    runClaimToken?: string,
+    availability = new Map<string, Promise<boolean | undefined>>()
   ) {
-    const view = await project(thread);
+    const view = await project(thread, availability);
     const publicTurn = view.turns.find((candidate) => candidate.turn_id === turn.turn_id);
     if (!publicTurn) throw new TaskThreadStoreError("turn_sequence_invalid");
     return {
@@ -392,9 +413,10 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       await mkdir(options.directory, { recursive: true });
       const names = (await readdir(options.directory)).filter((name) => name.endsWith(".json")).sort();
       const threads: TaskThreadView[] = [];
+      const availability = new Map<string, Promise<boolean | undefined>>();
       for (const name of names) {
         const thread = await getRecord(basename(name, ".json"));
-        if (thread) threads.push(await project(thread));
+        if (thread) threads.push(await project(thread, availability));
       }
       return threads.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
     },
@@ -405,7 +427,6 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       const runId = requireText(input.run_id, "run_id", 128);
       const packageRef = requireThreadBindingRef(input.package_ref, "package_ref", packageRefPattern);
       if (!runIdPattern.test(runId)) throw new TaskThreadStoreError("run_id_invalid");
-      const shapeInput = validateTaskTurnInputSnapshot(input.input);
       const initial = await getRecord(threadId);
       if (!initial) throw new TaskThreadStoreError("thread_not_found");
       const initialReplay = initial.turns.find((turn) => turn.idempotency_key === idempotencyKey);
@@ -413,23 +434,26 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         if (initialReplay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
         return reservationView(initial, initialReplay, true);
       }
-      if (!options.resolveInputPolicy) throw new TaskThreadStoreError("lode_input_policy_unavailable");
-      const inputPolicy = await options.resolveInputPolicy({
-        package_ref: packageRef,
-        capability_ref: initial.capability_ref
-      });
-      if (inputPolicy.package_ref !== packageRef || inputPolicy.capability_ref !== initial.capability_ref) {
-        throw new TaskThreadStoreError("input_capability_mismatch");
-      }
-      const validatedInput = validateTaskTurnInputAgainstPolicy(shapeInput, inputPolicy);
+      const shapeInput = validateTaskTurnInputSnapshot(input.input);
+      const availability = new Map<string, Promise<boolean | undefined>>();
+      let validatedInput: TaskTurnInputSnapshot;
       try {
-        await assertInputRefsAvailable(validatedInput);
+        if (!options.resolveInputPolicy) throw new TaskThreadStoreError("lode_input_policy_unavailable");
+        const inputPolicy = await options.resolveInputPolicy({
+          package_ref: packageRef,
+          capability_ref: initial.capability_ref
+        });
+        if (inputPolicy.package_ref !== packageRef || inputPolicy.capability_ref !== initial.capability_ref) {
+          throw new TaskThreadStoreError("input_capability_mismatch");
+        }
+        validatedInput = validateTaskTurnInputAgainstPolicy(shapeInput, inputPolicy);
+        await assertInputRefsAvailable(validatedInput, availability);
       } catch (error) {
         const latest = await getRecord(threadId);
         const replay = latest?.turns.find((turn) => turn.idempotency_key === idempotencyKey);
         if (latest && replay) {
           if (replay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
-          return reservationView(latest, replay, true);
+          return reservationView(latest, replay, true, undefined, availability);
         }
         throw error;
       }
@@ -473,7 +497,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         }
         return { record: next, turn, replayed: false, run_claim_token: runClaimToken };
       });
-      return reservationView(reserved.record, reserved.turn, reserved.replayed, reserved.run_claim_token);
+      return reservationView(reserved.record, reserved.turn, reserved.replayed, reserved.run_claim_token, availability);
     },
 
     async recordTaskTurnSubmission(threadId, turnId, input) {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-store.js";
 import { createFileTaskThreadStore } from "./task-thread-store.js";
-import { taskTurnInputSchemaVersion } from "./task-turn-input.js";
+import { taskTurnInputSchemaVersion, TaskThreadStoreError } from "./task-turn-input.js";
 import { createLocalTaskTurnInputPolicyResolver } from "./task-turn-input-policy.js";
 
 const packageRef = "lode://site-capability/test/search-notes@0.1.0";
@@ -30,6 +30,7 @@ async function writeLodeFixture(root: string): Promise<string> {
       keyword: { type: "string", maxLength: 80 },
       limit: { type: "integer", minimum: 1, maximum: 20 },
       url: { type: "string", format: "uri" },
+      public_url: { type: "string", format: "uri" },
       mode: { type: "string", enum: ["latest", "general"] },
       draft_body: { type: "string", maxLength: 512 }
     },
@@ -39,6 +40,7 @@ async function writeLodeFixture(root: string): Promise<string> {
         keyword: "user_provided",
         limit: "user_provided",
         url: "user_provided",
+        public_url: "public",
         mode: "user_provided",
         draft_body: "user_provided"
       }
@@ -89,6 +91,10 @@ async function assertProjectionPolicy(directory: string, runStore: FileRunRecord
     "run_policy_owner_summary",
     [{ field_id: "draft_body", kind: "long_text", owner_ref: "draft:fixture", summary: "RAW DRAFT BODY" }]
   )), /field_summary_forbidden/);
+  await assert.rejects(() => policyStore.reserveTaskTurn(thread.thread.thread_id, turnInput(
+    "run_policy_private_url_path",
+    [{ field_id: "url", kind: "url", summary: "https://example.test/reset/SECRET-TOKEN" }]
+  )), /input_field_summary_forbidden:url/);
   await assert.rejects(() => policyStore.reserveTaskTurn(thread.thread.thread_id, {
     ...turnInput("run_policy_too_many_refs", []),
     input: {
@@ -101,9 +107,11 @@ async function assertProjectionPolicy(directory: string, runStore: FileRunRecord
   const safeTurn = await policyStore.reserveTaskTurn(thread.thread.thread_id, turnInput("run_policy_safe", [
     { field_id: "keyword", kind: "long_text", owner_ref: "owner:input/keyword" },
     { field_id: "limit", kind: "scalar", summary: "8" },
-    { field_id: "url", kind: "url", summary: "https://example.test/search?q=private" }
+    { field_id: "url", kind: "long_text", owner_ref: "owner:input/url" },
+    { field_id: "public_url", kind: "url", summary: "https://example.test/search?q=public" }
   ]));
-  assert.equal(safeTurn.turn.input.fields[2]?.summary, "https://example.test/search");
+  assert.equal(safeTurn.turn.input.fields[2]?.owner_ref, "owner:input/url");
+  assert.equal(safeTurn.turn.input.fields[3]?.summary, "https://example.test/search");
 }
 
 async function assertUnavailablePolicy(directory: string, runStore: FileRunRecordStore): Promise<void> {
@@ -151,21 +159,67 @@ async function assertOwnerCheckConcurrency(directory: string, runStore: FileRunR
     capability_ref: "lode:capability/owner-check-concurrency",
     identity_environment_ref: "identity-env:owner-check-concurrency"
   });
-  const fields = Array.from({ length: 16 }, (_, index) => ({
-    field_id: `file_${index}`,
-    kind: "file",
-    owner_ref: `attachment:fixture/${index}`
-  }));
-  await store.reserveTaskTurn(thread.thread.thread_id, {
-    ...turnInput("run_owner_check_concurrency", fields),
-    input: {
-      schema_version: taskTurnInputSchemaVersion,
-      fields,
-      attachment_refs: Array.from({ length: 4 }, (_, index) => `attachment:fixture/${index}`)
+  for (let index = 0; index < 12; index += 1) {
+    const ownerRef = `attachment:fixture/${index}`;
+    const fields = [{ field_id: `file_${index}`, kind: "file", owner_ref: ownerRef }];
+    const reserved = await store.reserveTaskTurn(thread.thread.thread_id, {
+      ...turnInput(`run_owner_check_concurrency_${index}`, fields),
+      input: { schema_version: taskTurnInputSchemaVersion, fields, attachment_refs: [ownerRef] }
+    });
+    await store.recordTaskTurnSubmission(thread.thread.thread_id, reserved.turn.turn_id, {
+      accepted: false,
+      http_status: 400,
+      ok: false
+    });
+  }
+  activeChecks = 0;
+  maximumChecks = 0;
+  calls.clear();
+  await store.getTaskThread(thread.thread.thread_id);
+  assert(maximumChecks <= 8);
+  assert.equal(calls.size, 12);
+  assert([...calls.values()].every((count) => count === 1));
+}
+
+async function assertResolverRaceReplay(
+  directory: string,
+  runStore: FileRunRecordStore,
+  registryPath: string
+): Promise<void> {
+  const threadDirectory = join(directory, "resolver-race");
+  const successResolver = createLocalTaskTurnInputPolicyResolver({ registryPath });
+  const successStore = createFileTaskThreadStore({
+    directory: threadDirectory,
+    runRecordStore: runStore,
+    resolveInputPolicy: successResolver
+  });
+  const thread = await successStore.createOrGetTaskThread({
+    capability_ref: "lode:capability/search-notes",
+    identity_environment_ref: "identity-env:resolver-race"
+  });
+  let signalStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  let releaseFailure: () => void = () => {};
+  const failureGate = new Promise<void>((resolve) => { releaseFailure = resolve; });
+  const failingStore = createFileTaskThreadStore({
+    directory: threadDirectory,
+    runRecordStore: runStore,
+    resolveInputPolicy: async () => {
+      signalStarted();
+      await failureGate;
+      throw new TaskThreadStoreError("lode_input_policy_unavailable");
     }
   });
-  assert(maximumChecks <= 8);
-  assert.equal(calls.get("attachment:fixture/0"), 2);
+  const input = turnInput("run_policy_resolver_race", [
+    { field_id: "limit", kind: "scalar", summary: "8" }
+  ]);
+  const racingReplay = failingStore.reserveTaskTurn(thread.thread.thread_id, input);
+  await started;
+  const reserved = await successStore.reserveTaskTurn(thread.thread.thread_id, input);
+  releaseFailure();
+  const replayed = await racingReplay;
+  assert.equal(replayed.replayed, true);
+  assert.equal(replayed.turn.turn_id, reserved.turn.turn_id);
 }
 
 export async function assertTaskTurnInputPolicy(): Promise<void> {
@@ -176,6 +230,7 @@ export async function assertTaskTurnInputPolicy(): Promise<void> {
     await assertProjectionPolicy(directory, runStore, registryPath);
     await assertUnavailablePolicy(directory, runStore);
     await assertOwnerCheckConcurrency(directory, runStore);
+    await assertResolverRaceReplay(directory, runStore, registryPath);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

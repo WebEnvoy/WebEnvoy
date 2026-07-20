@@ -56,7 +56,7 @@ function closedPublicValue(schema: JsonObject): boolean {
 
 function fieldProjection(schema: JsonObject, sensitivity: string | undefined): TaskTurnInputProjection {
   if (schemaTypes(schema).has("string") && (schema.format === "uri" || schema.format === "uri-reference")) {
-    return sensitivity === "public" || sensitivity === "user_provided" ? "sanitized_url" : "owner_ref";
+    return sensitivity === "public" ? "sanitized_url" : "owner_ref";
   }
   if (sensitivity === "public" || sensitivity === "public_safe_summary" || closedPublicValue(schema)) {
     return "safe_summary";
