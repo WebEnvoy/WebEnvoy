@@ -12,6 +12,11 @@ import {
   type LodePackageAdmissionContract,
   type LodeRequiredHarborFact
 } from "./lode-admission.js";
+import {
+  matchLockedLodeOperation,
+  matchLockedOperationIdentity,
+  type LockedOperationMatch
+} from "./operation-identity-matcher.js";
 import type { LodePackageResolver } from "./runtime-task-chain.js";
 export { createHttpHarborIdentityFactsReader, type HttpHarborIdentityFactsReaderOptions } from "./harbor-identity-facts-reader.js";
 
@@ -29,6 +34,8 @@ export type IdentityCompatibilityRecoveryAction =
   | "open_manual_auth"
   | "install_or_select_provider"
   | "connect_identity_environment"
+  | "fix_target"
+  | "select_matching_resource_requirements"
   | "retry_at_task_submission";
 
 export type IdentityCompatibilityPreviewRequest = {
@@ -38,6 +45,10 @@ export type IdentityCompatibilityPreviewRequest = {
   version: string;
   operation_id: string;
   operation_mode: "read" | "validate_only" | "draft" | "preview";
+  target_ref: string;
+  target_origin: string;
+  resource_requirement_ref: string;
+  resource_requirement_profile_id: string;
   identity_environment_refs: readonly string[];
 };
 
@@ -69,6 +80,10 @@ export type IdentityCompatibilityPreviewResponse = {
   version: string;
   operation_id: string;
   operation_mode: IdentityCompatibilityPreviewRequest["operation_mode"];
+  target_ref: string;
+  target_origin: string;
+  resource_requirement_ref: string;
+  resource_requirement_profile_id: string;
   generated_at: string;
   candidates: readonly IdentityCompatibilityCandidate[];
   consumer_boundary: "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed.";
@@ -81,7 +96,10 @@ export type IdentityCompatibilityPreviewDependencies = {
   maxFactAgeMs?: number;
 };
 
-const requestFields = new Set(["schema_version", "package_ref", "lock_ref", "version", "operation_id", "operation_mode", "identity_environment_refs"]);
+const requestFields = new Set([
+  "schema_version", "package_ref", "lock_ref", "version", "operation_id", "operation_mode", "target_ref", "target_origin",
+  "resource_requirement_ref", "resource_requirement_profile_id", "identity_environment_refs"
+]);
 const operationModes = new Set(["read", "validate_only", "draft", "preview"]);
 const privateFieldNames = new Set([
   "cookie", "cookies", "token", "tokens", "password", "verification_code", "profile_storage", "profile_state",
@@ -135,10 +153,15 @@ export function parseIdentityCompatibilityPreviewRequest(value: unknown): Identi
   const version = boundedString(input.version, 64);
   const operationId = boundedString(input.operation_id, 128);
   const operationMode = boundedString(input.operation_mode, 32);
+  const targetRef = boundedString(input.target_ref, 2048);
+  const targetOrigin = boundedString(input.target_origin, 512);
+  const resourceRequirementRef = boundedString(input.resource_requirement_ref, 256);
+  const resourceRequirementProfileId = boundedString(input.resource_requirement_profile_id, 256);
   const refs = input.identity_environment_refs;
   if (
     input.schema_version !== identityCompatibilityPreviewRequestSchemaVersion || !packageRef || !lockRef || !version || !operationId ||
-    !operationMode || !operationModes.has(operationMode) || !Array.isArray(refs) || refs.length === 0 || refs.length > maxCandidates
+    !operationMode || !operationModes.has(operationMode) || !targetRef || !targetOrigin || !resourceRequirementRef ||
+    !resourceRequirementProfileId || !Array.isArray(refs) || refs.length === 0 || refs.length > maxCandidates
   ) return failure("identity_compatibility_request_invalid");
   const identityRefs = refs.map((entry) => boundedString(entry, 256));
   if (identityRefs.some((entry) => entry === undefined) || new Set(identityRefs).size !== identityRefs.length) {
@@ -151,6 +174,10 @@ export function parseIdentityCompatibilityPreviewRequest(value: unknown): Identi
     version,
     operation_id: operationId,
     operation_mode: operationMode as IdentityCompatibilityPreviewRequest["operation_mode"],
+    target_ref: targetRef,
+    target_origin: targetOrigin,
+    resource_requirement_ref: resourceRequirementRef,
+    resource_requirement_profile_id: resourceRequirementProfileId,
     identity_environment_refs: identityRefs as string[]
   };
 }
@@ -171,6 +198,12 @@ function packageReason(code: string): { reason: string; recovery: IdentityCompat
   }
   if (code === "package_not_found" || code === "package_ref_mismatch") {
     return { reason: "package_not_found", recovery: "select_supported_package_version", owner: "available" };
+  }
+  if (code === "target_contract_invalid" || code === "target_origin_not_allowed") {
+    return { reason: "target_origin_mismatch", recovery: "fix_target", owner: "available" };
+  }
+  if (code === "resource_requirement_mismatch" || code === "resource_requirement_profile_mismatch") {
+    return { reason: "resource_requirement_mismatch", recovery: "select_matching_resource_requirements", owner: "available" };
   }
   const owner = packageOwnerStatus(code);
   return {
@@ -202,37 +235,22 @@ function response(request: IdentityCompatibilityPreviewRequest, generatedAt: str
     version: request.version,
     operation_id: request.operation_id,
     operation_mode: request.operation_mode,
+    target_ref: request.target_ref,
+    target_origin: request.target_origin,
+    resource_requirement_ref: request.resource_requirement_ref,
+    resource_requirement_profile_id: request.resource_requirement_profile_id,
     generated_at: generatedAt,
     candidates,
     consumer_boundary: consumerBoundary
   };
 }
 
-function validRuntimeConsumption(contract: LodePackageAdmissionContract, request: IdentityCompatibilityPreviewRequest): boolean {
-  const runtime = contract.runtime_consumption;
-  if (runtime === undefined) return true;
-  if (
-    runtime.package_ref !== contract.package_ref || runtime.lock_ref !== contract.lock_ref || runtime.version !== contract.version ||
-    runtime.operation_id !== contract.operation_id || runtime.operation_mode !== contract.operation_mode ||
-    !boundedString(runtime.site_slug, 128) || !Array.isArray(runtime.allowed_origins) || runtime.allowed_origins.length === 0 || runtime.allowed_origins.length > 16
-  ) return false;
-  return runtime.allowed_origins.every((origin) => {
-    if (!boundedString(origin, 512)) return false;
-    try {
-      const url = new URL(origin);
-      return (url.protocol === "https:" || url.protocol === "http:") && url.origin === origin;
-    } catch {
-      return false;
-    }
-  });
-}
-
-function validateResolvedPackage(contract: LodePackageAdmissionContract, request: IdentityCompatibilityPreviewRequest): FailureRecord | readonly LodeRequiredHarborFact[] {
-  if (contract.operation_id !== request.operation_id) return { category: "capability_contract", code: "operation_id_mismatch", phase: "admission", recovery_hint: "select_capability_version" };
-  if (contract.operation_mode !== request.operation_mode) return { category: "capability_contract", code: "operation_mode_mismatch", phase: "admission", recovery_hint: "select_capability_version" };
-  if (!validRuntimeConsumption(contract, request)) return { category: "capability_contract", code: "runtime_consumption_invalid", phase: "admission", recovery_hint: "repair_package_contract" };
-  const resourceRequirementRef = boundedString(contract.resource_requirements?.resource_requirements_id, 256);
-  if (!resourceRequirementRef) return { category: "capability_contract", code: "invalid_contract", phase: "resource_matching", recovery_hint: "repair_package_contract" };
+function validateResolvedPackage(
+  contract: LodePackageAdmissionContract,
+  request: IdentityCompatibilityPreviewRequest
+): FailureRecord | { operation: LockedOperationMatch; requiredFacts: readonly LodeRequiredHarborFact[] } {
+  const operation = matchLockedLodeOperation(contract, request);
+  if ("category" in operation) return operation;
   const admission = validateLodePackageAdmission({
     capability: {
       ref: `lode:capability/${contract.capability_id}`,
@@ -244,14 +262,15 @@ function validateResolvedPackage(contract: LodePackageAdmissionContract, request
       risk: request.operation_mode === "read" ? "read" : "write",
       execution_intent: request.operation_mode
     },
-    resource_requirement_refs: [resourceRequirementRef]
+    resource_requirement_refs: [request.resource_requirement_ref],
+    resource_requirement_profile_id: request.resource_requirement_profile_id
   }, { package_ref: request.package_ref, lode_package_contract: contract });
   if (!admission.ok) return admission.failure;
   if (
     admission.required_harbor_facts.length > maxRequiredFacts ||
     admission.required_harbor_facts.some((fact) => !boundedString(fact.fact_key, 128) || (fact.freshness !== undefined && !boundedString(fact.freshness, 64)))
   ) return { category: "capability_contract", code: "resource_requirements_unbounded", phase: "resource_matching", recovery_hint: "repair_package_contract" };
-  return admission.required_harbor_facts;
+  return { operation, requiredFacts: admission.required_harbor_facts };
 }
 
 function strictIdentityFacts(facts: HarborIdentityEnvironmentFacts, expectedRef: string): boolean {
@@ -293,24 +312,10 @@ function evaluateFreshCandidate(
   identityRef: string,
   facts: HarborIdentityEnvironmentFacts,
   providerStatus: HarborBrowserProviderCatalog,
-  contract: LodePackageAdmissionContract,
+  operation: LockedOperationMatch,
   requiredFacts: readonly LodeRequiredHarborFact[],
   freshness: IdentityCompatibilityCandidate["freshness"]
 ): IdentityCompatibilityCandidate {
-  const runtime = contract.runtime_consumption;
-  if (runtime && (facts.site_binding.site_id !== runtime.site_slug || !runtime.allowed_origins.includes(facts.site_binding.origin))) {
-    const siteMismatch = facts.site_binding.site_id !== runtime.site_slug;
-    return {
-      identity_environment_ref: identityRef,
-      status: "incompatible",
-      reason_codes: [siteMismatch ? "identity_site_mismatch" : "identity_origin_mismatch"],
-      missing_requirement_categories: [siteMismatch ? "site_binding" : "origin_binding"],
-      fact_freshness: [],
-      owner_status: { lode: "available", harbor: "available" },
-      freshness,
-      recovery_action: "select_matching_identity"
-    };
-  }
   const identityAdmission = validateHarborIdentityEnvironmentFacts(facts);
   if ("category" in identityAdmission) {
     const setup = setupProjection(identityAdmission.code);
@@ -324,6 +329,20 @@ function evaluateFreshCandidate(
       owner_status: { lode: "available", harbor: "available" },
       freshness,
       recovery_action: setup.recovery
+    };
+  }
+  const operationIdentityFailure = matchLockedOperationIdentity(operation, facts, identityRef);
+  if (operationIdentityFailure) {
+    const setup = setupProjection(operationIdentityFailure.code);
+    return {
+      identity_environment_ref: identityRef,
+      status: setup ? "requires_setup" : "incompatible",
+      reason_codes: [setup?.reason ?? (operationIdentityFailure.code === "identity_runtime_mismatch" ? "identity_site_mismatch" : "identity_origin_mismatch")],
+      missing_requirement_categories: [setup?.category ?? (operationIdentityFailure.code === "identity_runtime_mismatch" ? "site_binding" : "origin_binding")],
+      fact_freshness: [],
+      owner_status: { lode: "available", harbor: "available" },
+      freshness,
+      recovery_action: setup?.recovery ?? "select_matching_identity"
     };
   }
   const providerFailure = validateHarborIdentityProviderStatus(facts, providerStatus);
@@ -364,7 +383,7 @@ function evaluateFreshCandidate(
 
 async function evaluateCandidate(
   identityRef: string,
-  contract: LodePackageAdmissionContract,
+  operation: LockedOperationMatch,
   requiredFacts: readonly LodeRequiredHarborFact[],
   readFacts: HarborIdentityFactsReader,
   now: Date,
@@ -390,7 +409,7 @@ async function evaluateCandidate(
     };
   }
 
-  return evaluateFreshCandidate(identityRef, read.facts, read.provider_status, contract, requiredFacts, {
+  return evaluateFreshCandidate(identityRef, read.facts, read.provider_status, operation, requiredFacts, {
     state: "fresh",
     observed_at: read.observed_at,
     age_ms: Math.max(0, ageMs)
@@ -414,8 +433,8 @@ export async function previewIdentityCompatibility(
     return packageFailureCandidates(request, generatedAt, "lode_registry_unavailable");
   }
   if ("category" in resolved) return packageFailureCandidates(request, generatedAt, resolved.code);
-  const requiredFacts = validateResolvedPackage(resolved, request);
-  if ("category" in requiredFacts) return packageFailureCandidates(request, generatedAt, requiredFacts.code);
+  const packageMatch = validateResolvedPackage(resolved, request);
+  if ("category" in packageMatch) return packageFailureCandidates(request, generatedAt, packageMatch.code);
   const candidates = new Array<IdentityCompatibilityCandidate>(request.identity_environment_refs.length);
   let nextCandidate = 0;
   const workers = Array.from({ length: Math.min(4, request.identity_environment_refs.length) }, async () => {
@@ -423,7 +442,7 @@ export async function previewIdentityCompatibility(
       const index = nextCandidate;
       nextCandidate += 1;
       const identityRef = request.identity_environment_refs[index];
-      if (identityRef) candidates[index] = await evaluateCandidate(identityRef, resolved, requiredFacts, dependencies.harborIdentityFactsReader, now, maxFactAgeMs);
+      if (identityRef) candidates[index] = await evaluateCandidate(identityRef, packageMatch.operation, packageMatch.requiredFacts, dependencies.harborIdentityFactsReader, now, maxFactAgeMs);
     }
   });
   await Promise.all(workers);

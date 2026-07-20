@@ -61,6 +61,19 @@ function isFailureRecord(value: unknown): value is FailureRecord {
   return Boolean(value && typeof value === "object" && "category" in value);
 }
 
+function hasJsonMediaType(request: IncomingMessage): boolean {
+  return request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
+
+function previewRequestFailure(code: string): FailureRecord {
+  return {
+    category: "request_invalid",
+    code,
+    phase: "pre_admission",
+    recovery_hint: "fix_input"
+  };
+}
+
 function queryStatusCode(failure: FailureRecord): number {
   if (failure.code === "run_not_found") return 404;
   if (failure.code === "run_store_unavailable") return 503;
@@ -189,7 +202,20 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return;
   }
 
-  if (request.method === "POST" && path === "/identity-compatibility-preview") {
+  if (path === "/identity-compatibility-preview") {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { ok: false, error: previewRequestFailure("method_not_allowed") });
+      return;
+    }
+    if (!hasJsonMediaType(request)) {
+      sendJson(response, 415, { ok: false, error: previewRequestFailure("content_type_unsupported") });
+      return;
+    }
+    const body = await readJsonBody(request, 64 * 1024);
+    if (isFailureRecord(body)) {
+      sendJson(response, body.code === "request_body_too_large" ? 413 : 400, { ok: false, error: body });
+      return;
+    }
     if (!options.lodePackageResolver || !options.harborIdentityFactsReader) {
       sendJson(response, 503, {
         ok: false,
@@ -200,11 +226,6 @@ async function route(request: IncomingMessage, response: ServerResponse, options
           recovery_hint: "contact_operator"
         }
       });
-      return;
-    }
-    const body = await readJsonBody(request, 64 * 1024);
-    if (isFailureRecord(body)) {
-      sendJson(response, 400, { ok: false, error: body });
       return;
     }
     const result = await previewIdentityCompatibility(body, {

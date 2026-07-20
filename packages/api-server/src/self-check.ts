@@ -23,6 +23,14 @@ async function postJson(port: number, path: string, body?: Record<string, unknow
   });
   return { status: response.status, body: await response.json() };
 }
+async function requestBody(port: number, path: string, method: string, body?: string, contentType?: string): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: contentType === undefined ? {} : { "content-type": contentType },
+    ...(body === undefined ? {} : { body })
+  });
+  return { status: response.status, body: await response.json() };
+}
 function asRecord(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
   return value as Record<string, unknown>;
@@ -103,7 +111,7 @@ async function main(): Promise<void> {
         execution_identity_ref: `execution:${identityEnvironmentRef}`,
         profile_ref: `profile:${identityEnvironmentRef}`,
         site_binding: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" },
-        login_state: { state: "logged_in", authentication_provenance: "manual", manual_authentication_state: "confirmed", recovery_required: false },
+        login_state: { state: "logged_in", authentication_provenance: "user_confirmed_managed_session", manual_authentication_state: "completed", recovery_required: false },
         browser_storage: { state: "present" },
         provider_binding: { selected_provider_id: "cloakbrowser", binding_status: "public_record_provider_available" },
         consumer_boundary: { core: "admission_facts_refs_and_blocking_reasons_only", not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"] }
@@ -253,6 +261,10 @@ async function main(): Promise<void> {
       version: "0.1.0",
       operation_id: "xhs_search_notes",
       operation_mode: "read",
+      target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+      target_origin: "https://www.xiaohongshu.com",
+      resource_requirement_ref: "xiaohongshu.search-notes.resources",
+      resource_requirement_profile_id: "fixture",
       identity_environment_refs: ["identity-env-preview"]
     });
     assert.equal(compatibility.status, 200);
@@ -268,11 +280,54 @@ async function main(): Promise<void> {
       version: "0.1.0",
       operation_id: "xhs_search_notes",
       operation_mode: "read",
+      target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+      target_origin: "https://www.xiaohongshu.com",
+      resource_requirement_ref: "xiaohongshu.search-notes.resources",
+      resource_requirement_profile_id: "fixture",
       identity_environment_refs: ["identity-env-preview"],
       cookies: []
     });
     assert.equal(rejectedCompatibility.status, 400);
     assert.equal(asRecord(asRecord(rejectedCompatibility.body).error).code, "private_field_rejected:cookies");
+
+    const previewPath = "/identity-compatibility-preview";
+    const missingMediaType = await requestBody(port, previewPath, "POST", "{}");
+    assert.equal(missingMediaType.status, 415);
+    assert.equal(asRecord(asRecord(missingMediaType.body).error).code, "content_type_unsupported");
+    assert.equal((await requestBody(port, previewPath, "POST", "{}", "text/plain")).status, 415);
+    const malformedPreview = await requestBody(port, previewPath, "POST", "{", "application/json; charset=utf-8");
+    assert.equal(malformedPreview.status, 400);
+    assert.equal(asRecord(asRecord(malformedPreview.body).error).code, "invalid_json_body");
+    const oversizedPreview = await requestBody(port, previewPath, "POST", JSON.stringify({ padding: "x".repeat(64 * 1024) }), "application/json");
+    assert.equal(oversizedPreview.status, 413);
+    assert.equal(asRecord(asRecord(oversizedPreview.body).error).code, "request_body_too_large");
+    const previewGet = await getJson(port, previewPath);
+    assert.equal(previewGet.status, 405);
+    assert.equal(asRecord(asRecord(previewGet.body).error).code, "method_not_allowed");
+
+    const unavailableServer = createApiServer({});
+    await new Promise<void>((resolve) => unavailableServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const unavailableAddress = unavailableServer.address();
+      assert(unavailableAddress && typeof unavailableAddress === "object");
+      const ownerUnavailable = await postJson(unavailableAddress.port, previewPath, {
+        schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+        package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        version: "0.1.0",
+        operation_id: "xhs_search_notes",
+        operation_mode: "read",
+        target_ref: "https://www.xiaohongshu.com/search_result/",
+        target_origin: "https://www.xiaohongshu.com",
+        resource_requirement_ref: "xiaohongshu.search-notes.resources",
+        resource_requirement_profile_id: "fixture",
+        identity_environment_refs: ["identity-env-preview"]
+      });
+      assert.equal(ownerUnavailable.status, 503);
+      assert.equal(asRecord(asRecord(ownerUnavailable.body).error).code, "identity_compatibility_owner_unavailable");
+    } finally {
+      await new Promise<void>((resolve, reject) => unavailableServer.close((error) => error ? reject(error) : resolve()));
+    }
 
     assert.deepEqual(await getJson(port, `/runs/${runId}`), {
       status: 200,

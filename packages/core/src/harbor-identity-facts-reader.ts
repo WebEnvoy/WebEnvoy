@@ -3,6 +3,7 @@ import {
   type HarborBrowserProviderCatalog
 } from "./harbor-admission.js";
 import type { HarborIdentityFactsReader } from "./identity-compatibility-preview.js";
+import { BoundedJsonResponseError, readBoundedJsonResponse } from "./bounded-json-response.js";
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -58,11 +59,7 @@ export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityF
       headers: { accept: "application/json" }
     });
     if (!response.ok) throw new Error(response.status === 404 ? notFoundCode : "owner_unavailable");
-    const declaredLength = Number(response.headers.get("content-length") ?? "0");
-    if (Number.isFinite(declaredLength) && declaredLength > maxResponseBytes) throw new Error("response_too_large");
-    const text = await response.text();
-    if (Buffer.byteLength(text) > maxResponseBytes) throw new Error("response_too_large");
-    return JSON.parse(text) as unknown;
+    return readBoundedJsonResponse(response, maxResponseBytes);
   }
 
   let ownerFactsCache: { expiresAt: number; value: Promise<{ readiness: unknown; providers: unknown }> } | undefined;
@@ -90,7 +87,13 @@ export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityF
       if (!providers || !snapshot) return { ok: false, owner_status: "malformed", reason_code: "harbor_identity_facts_malformed" };
       return { ok: true, owner_readiness: "ready", provider_status: providers, ...snapshot };
     } catch (error) {
-      if (error instanceof Error && error.message === "response_too_large") return { ok: false, owner_status: "malformed", reason_code: "harbor_response_too_large" };
+      if (error instanceof BoundedJsonResponseError) {
+        return {
+          ok: false,
+          owner_status: "malformed",
+          reason_code: error.code === "response_too_large" ? "harbor_response_too_large" : "harbor_identity_facts_malformed"
+        };
+      }
       if (error instanceof Error && error.message === "identity_not_found") return { ok: false, owner_status: "unavailable", reason_code: "identity_environment_not_found" };
       return { ok: false, owner_status: "unavailable", reason_code: "harbor_owner_unavailable" };
     }

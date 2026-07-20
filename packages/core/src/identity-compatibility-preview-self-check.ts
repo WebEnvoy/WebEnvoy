@@ -9,6 +9,7 @@ import {
   type IdentityCompatibilityPreviewRequest
 } from "./identity-compatibility-preview.js";
 import type { LodePackageAdmissionContract } from "./lode-admission.js";
+import { matchLockedLodeOperation, matchLockedOperationIdentity } from "./operation-identity-matcher.js";
 
 const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
 const lockRef = "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0";
@@ -71,8 +72,8 @@ function identityFacts(identityRef: string, overrides: Partial<HarborIdentityEnv
     site_binding: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" },
     login_state: {
       state: "logged_in",
-      authentication_provenance: "manual",
-      manual_authentication_state: "confirmed",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
       recovery_required: false
     },
     browser_storage: { state: "present" },
@@ -93,6 +94,10 @@ function request(identityRefs: readonly string[], overrides: Partial<IdentityCom
     version: "0.1.0",
     operation_id: "xhs_search_notes",
     operation_mode: "read",
+    target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+    target_origin: "https://www.xiaohongshu.com",
+    resource_requirement_ref: "xiaohongshu.search-notes.resources",
+    resource_requirement_profile_id: "identity-preview",
     identity_environment_refs: identityRefs,
     ...overrides
   };
@@ -142,6 +147,27 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(deterministic.candidates[3]?.status, "requires_setup");
   assert.equal(deterministic.candidates[3]?.recovery_action, "open_manual_auth");
 
+  const uncertainAuthentication = identityFacts("identity-auth-uncertain", {
+    login_state: {
+      state: "logged_in",
+      authentication_provenance: "unknown",
+      manual_authentication_state: "pending",
+      recovery_required: false
+    }
+  });
+  const operation = matchLockedLodeOperation(packageContract(), request(["identity-auth-uncertain"]));
+  assert(!("category" in operation));
+  assert.equal(matchLockedOperationIdentity(operation, uncertainAuthentication, "identity-auth-uncertain")?.code, "identity_auth_required");
+  const uncertainPreview = await previewIdentityCompatibility(request(["identity-auth-uncertain"]), {
+    ...baseDependencies,
+    harborIdentityFactsReader: reader({
+      "identity-auth-uncertain": availableRead(uncertainAuthentication, "2026-07-21T07:59:30.000Z")
+    })
+  });
+  assert(!("category" in uncertainPreview));
+  assert.equal(uncertainPreview.candidates[0]?.status, "requires_setup");
+  assert.deepEqual(uncertainPreview.candidates[0]?.reason_codes, ["identity_auth_required"]);
+
   const runtimeUnknown = await previewIdentityCompatibility(request(["identity-runtime"]), {
     ...baseDependencies,
     lodePackageResolver: async () => packageContract("current_execution_window")
@@ -188,7 +214,20 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   assert(!("category" in versionMismatch));
   assert.deepEqual(versionMismatch.candidates[0]?.reason_codes, ["package_version_mismatch"]);
-  assert.equal(reads, 0, "lock/version mismatch must not read Harbor");
+  const selectionMismatches = [
+    { target_origin: "https://example.org" },
+    { resource_requirement_ref: "xiaohongshu.other.resources" },
+    { resource_requirement_profile_id: "other-profile" }
+  ];
+  for (const mismatch of selectionMismatches) {
+    const result = await previewIdentityCompatibility(request(["identity-compatible"], mismatch), {
+      ...baseDependencies,
+      harborIdentityFactsReader: noRead
+    });
+    assert(!("category" in result));
+    assert.equal(result.candidates[0]?.owner_status.harbor, "not_checked");
+  }
+  assert.equal(reads, 0, "lock, version, target, and resource mismatch must not read Harbor");
 
   const rejected = await previewIdentityCompatibility({ ...request(["identity-compatible"]), token: "private" }, baseDependencies);
   assert("category" in rejected);
@@ -218,7 +257,7 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
       const body = url.endsWith("/readiness") ? { status: "ready" }
         : url.endsWith("/runtime/browser-providers") ? providerStatus
         : publicRecord;
-      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json; charset=utf-8" } });
     }
   });
   const httpResult = await httpReader("identity-http");
@@ -243,4 +282,33 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   const privateResult = await privateReader("identity-http");
   assert.equal(privateResult.ok, false);
   if (!privateResult.ok) assert.equal(privateResult.owner_status, "malformed");
+
+  let streamingCancels = 0;
+  const oversizedReader = createHttpHarborIdentityFactsReader({
+    baseUrl: "http://127.0.0.1:18787",
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024 + 1));
+      },
+      cancel() {
+        streamingCancels += 1;
+      }
+    }), { status: 200, headers: { "content-type": "application/json" } })
+  });
+  const oversizedResult = await oversizedReader("identity-http");
+  assert.equal(oversizedResult.ok, false);
+  assert(streamingCancels > 0, "oversized Harbor responses must cancel their streams");
+
+  let declaredLengthCancels = 0;
+  const declaredOversizedReader = createHttpHarborIdentityFactsReader({
+    baseUrl: "http://127.0.0.1:18787",
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        declaredLengthCancels += 1;
+      }
+    }), { status: 200, headers: { "content-type": "application/json", "content-length": String(64 * 1024 + 1) } })
+  });
+  const declaredOversizedResult = await declaredOversizedReader("identity-http");
+  assert.equal(declaredOversizedResult.ok, false);
+  assert(declaredLengthCancels > 0, "oversized Content-Length must cancel before reading");
 }

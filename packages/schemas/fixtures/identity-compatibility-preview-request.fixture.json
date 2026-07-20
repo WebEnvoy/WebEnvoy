@@ -6,5 +6,9 @@
   "version": "0.1.0",
   "operation_id": "xhs_search_notes",
   "operation_mode": "read",
+  "target_ref": "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+  "target_origin": "https://www.xiaohongshu.com",
+  "resource_requirement_ref": "xiaohongshu.search-notes.resources",
+  "resource_requirement_profile_id": "identity-preview",
   "identity_environment_refs": ["identity-env-library-candidate"]
 }

@@ -156,6 +156,12 @@ export {
 } from "./harbor-admission.js";
 export { type LodePackageAdmissionContract } from "./lode-admission.js";
 export {
+  matchLockedLodeOperation,
+  matchLockedOperationIdentity,
+  type LockedOperationMatch,
+  type LockedOperationSelection
+} from "./operation-identity-matcher.js";
+export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   recoverInterruptedCoreTaskSessions,

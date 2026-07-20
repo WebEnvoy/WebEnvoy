@@ -19,10 +19,17 @@ import {
   type LodeRuntimeAdmissionPolicy,
   type LodeRuntimeConsumptionEntry
 } from "./lode-admission.js";
+import {
+  matchLockedLodeOperation,
+  matchLockedOperationIdentity,
+  type LockedOperationMatch,
+  type LockedOperationSelection
+} from "./operation-identity-matcher.js";
+import { readBoundedJsonResponse } from "./bounded-json-response.js";
 import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore } from "./run-record-store.js";
-import { acceptReadOnlyTaskSubmission, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
+import { acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 import {
   commitDetailTargetReservation,
   compensatePublishedSearchDetailTargets,
@@ -305,38 +312,56 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
   };
 }
 
+function operationSelectionFromTask(
+  contract: LodePackageAdmissionContract,
+  taskIntent: TaskIntentEnvelope,
+  detailOperation: boolean,
+  requestedTargetRef: string | undefined
+): LockedOperationSelection | FailureRecord {
+  const profile = contract.resource_requirements.resource_requirement_profiles;
+  const resourceRef = taskIntent.resource_requirement_refs.length === 1 ? taskIntent.resource_requirement_refs[0] : undefined;
+  const scopeTargetUrl = safeHttpUrl(taskIntent.scope.target_ref);
+  const targetUrl = requestedTargetRef ?? scopeTargetUrl ?? (detailOperation ? contract.runtime_consumption?.allowed_origins[0] : undefined);
+  let targetOrigin: string | undefined;
+  try {
+    targetOrigin = targetUrl ? new URL(targetUrl).origin : undefined;
+  } catch {
+    targetOrigin = undefined;
+  }
+  if (
+    !contract.lock_ref || !contract.operation_id || profile.length !== 1 || !resourceRef || !targetUrl || !targetOrigin ||
+    (!detailOperation && (!scopeTargetUrl || !sameOrigin(scopeTargetUrl, targetUrl)))
+  ) {
+    return failure("capability_contract", "operation_selection_invalid", "resource_matching", "fix_input");
+  }
+  return {
+    package_ref: contract.package_ref,
+    lock_ref: taskIntent.capability.lock_ref ?? "",
+    version: taskIntent.capability.version,
+    operation_id: contract.operation_id,
+    operation_mode: taskIntent.policy.execution_intent,
+    target_ref: detailOperation ? taskIntent.scope.target_ref : targetUrl,
+    target_origin: targetOrigin,
+    resource_requirement_ref: resourceRef,
+    resource_requirement_profile_id: profile[0]!.requirement_profile_id
+  };
+}
+
 function operationPreflightFailure(
   harbor: HarborAdmissionInput,
-  entry: LodeRuntimeConsumptionEntry,
-  requestedIdentityRef: string | undefined,
-  targetUrl: string | undefined
+  operation: LockedOperationMatch,
+  requestedIdentityRef: string | undefined
 ): FailureRecord | undefined {
   const identity = object(harbor.harbor_identity_environment_facts);
   const runtime = object(harbor.harbor_runtime_facts);
   const control = object(runtime?.control);
-  if (identity?.schema_version !== "harbor-local-identity-environment/v0") {
+  if (identity?.schema_version !== "harbor-local-identity-environment/v0" || !requestedIdentityRef) {
     return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "connect_identity_environment");
   }
-  const login = object(identity?.login_state);
-  const site = object(identity?.site_binding);
-  const origin = safeHttpUrl(site?.origin);
-  const allowedOrigin = origin !== undefined && entry.allowed_origins.some((allowed) => sameOrigin(origin, allowed));
-  if (!requestedIdentityRef || identity.identity_environment_ref !== requestedIdentityRef || site?.site_id !== entry.site_slug) {
-    return failure("resource_admission", "identity_runtime_mismatch", "runtime_binding", "select_matching_runtime");
-  }
-  if (
-    (login?.reason ?? login?.authentication_provenance) !== "user_confirmed_managed_session" ||
-    login?.manual_authentication_state !== "completed" ||
-    login?.state !== "logged_in" ||
-    login?.recovery_required !== false
-  ) {
-    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
-  }
+  const identityFailure = matchLockedOperationIdentity(operation, identity as HarborIdentityEnvironmentFacts, requestedIdentityRef);
+  if (identityFailure) return identityFailure;
   if (control?.owner !== "core_task" || (control?.lock_owner !== undefined && control.lock_owner !== "core_task")) {
     return failure("resource_admission", "runtime_session_busy", "runtime_binding", "wait_or_request_handoff");
-  }
-  if (!origin?.startsWith("https://") || !allowedOrigin || !sameOrigin(origin, targetUrl)) {
-    return failure("resource_admission", "runtime_origin_not_allowed", "resource_matching", "fix_input");
   }
   return undefined;
 }
@@ -843,6 +868,24 @@ export async function submitRuntimeTask(
     });
   }
 
+  const validatedTaskIntent = validateTaskIntent(request.task_intent);
+  if (isFailure(validatedTaskIntent)) return acceptReadOnlyTaskSubmission(store, base);
+  const runtimeConsumption = lode_package_contract.runtime_consumption;
+  let operationMatch: LockedOperationMatch | undefined;
+  if (runtimeConsumption) {
+    const detailOperation = isXhsDetailOperation(runtimeConsumption);
+    const requestedTargetRef = detailOperation ? undefined : request.harbor?.url ?? taskUrl(validatedTaskIntent);
+    const selection = operationSelectionFromTask(lode_package_contract, validatedTaskIntent, detailOperation, requestedTargetRef);
+    if (isFailure(selection)) {
+      return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, lode_resolution_failure: selection });
+    }
+    const matched = matchLockedLodeOperation(lode_package_contract, selection);
+    if (isFailure(matched)) {
+      return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, lode_resolution_failure: matched });
+    }
+    operationMatch = matched;
+  }
+
   if (!deps.harborRuntimeClient) {
     return acceptReadOnlyTaskSubmission(store, {
       ...base,
@@ -866,13 +909,11 @@ export async function submitRuntimeTask(
   const harbor: HarborAdmissionInput | FailureRecord = collectionFailure
     ? collectionFailure.failure
     : harborResult as HarborAdmissionInput | FailureRecord;
-  const runtimeConsumption = lode_package_contract.runtime_consumption;
-  const preflightFailure = !isFailure(harbor) && runtimeConsumption
+  const preflightFailure = !isFailure(harbor) && operationMatch
     ? operationPreflightFailure(
         harbor,
-        runtimeConsumption,
-        request.harbor?.identity_environment_ref,
-        isXhsDetailOperation(runtimeConsumption) ? runtimeConsumption.allowed_origins[0] : request.harbor?.url ?? taskUrl(request.task_intent)
+        operationMatch,
+        request.harbor?.identity_environment_ref
       )
     : undefined;
   const submitted = await acceptReadOnlyTaskSubmission(
@@ -1371,7 +1412,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         init.body = JSON.stringify(body ?? {});
       }
       const response = await fetchJson(`${baseUrl}${path}`, init);
-      const payload = await response.json() as unknown;
+      const payload = await readBoundedJsonResponse(response, 1024 * 1024);
       if (!response.ok) {
         return failureFromHarborPayload(payload) ?? failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
       }
@@ -1486,7 +1527,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
             ...(input.detail_ref !== undefined || input.url === undefined ? {} : { url: input.url })
           })
         });
-        const payload = await response.json() as unknown;
+        const payload = await readBoundedJsonResponse(response, 1024 * 1024);
         const body = object(payload);
         if (body?.schema_version === "harbor-allowlisted-read-operation/v0" && (body.status === "completed" || body.status === "unavailable")) return payload;
         return failure("runtime_execution", "harbor_read_operation_outcome_unknown", "verification", "reconcile_status");

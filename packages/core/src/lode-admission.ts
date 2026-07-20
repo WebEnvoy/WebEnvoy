@@ -85,6 +85,7 @@ export type LodeAdmissionTaskIntent = {
     execution_intent: "read" | "validate_only" | "draft" | "preview" | "execute_after_approval" | "reconcile_status" | "request_cancel";
   };
   resource_requirement_refs: readonly string[];
+  resource_requirement_profile_id?: string;
 };
 
 export type LodeAdmission =
@@ -260,11 +261,15 @@ function validateLodeResourceRequirements(
     return invalidLodeContract("invalid_contract", "resource_matching");
   }
   const requiredHarborFacts: LodeRequiredHarborFact[] = [];
+  let selectedProfileCount = 0;
   for (const profileValue of profiles) {
     const profile = contractObject(profileValue);
-    if (!profile || !contractString(profile.requirement_profile_id)) {
+    const profileId = contractString(profile?.requirement_profile_id);
+    if (!profile || !profileId) {
       return invalidLodeContract("invalid_contract", "resource_matching");
     }
+    if (taskIntent.resource_requirement_profile_id !== undefined && profileId !== taskIntent.resource_requirement_profile_id) continue;
+    selectedProfileCount += 1;
     if (profile.operation_boundary !== undefined && profile.operation_boundary !== operationMode) {
       return admissionFailure("action_risk", "true_write_deferred", "admission", "use_read_intent");
     }
@@ -287,6 +292,9 @@ function validateLodeResourceRequirements(
         }
       }
     }
+  }
+  if (taskIntent.resource_requirement_profile_id !== undefined && selectedProfileCount !== 1) {
+    return admissionFailure("resource_admission", "resource_requirement_profile_mismatch", "resource_matching", "repair_package_contract");
   }
   if (taskIntent.resource_requirement_refs.length === 0 || !taskIntent.resource_requirement_refs.every((ref) => ref === resourceId)) {
     return admissionFailure("resource_admission", "resource_requirement_missing", "resource_matching", "repair_package_contract");

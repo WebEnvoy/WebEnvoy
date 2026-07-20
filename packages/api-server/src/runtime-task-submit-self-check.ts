@@ -1392,6 +1392,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   });
   const blockedIdentityCases: Array<{ name: string; session: JsonObject; siteFacts?: JsonObject; identityRef?: string; identityRecord?: JsonObject }> = [
     { name: "missing_reason", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined } }) } },
+    { name: "unknown_provenance_manual_pending", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined, authentication_provenance: "unknown", manual_authentication_state: "pending" } }) } },
     { name: "auth_incomplete", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { manual_authentication_state: "pending" } }) } },
     { name: "recovery_required", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { recovery_required: true } }) } },
     { name: "wrong_origin", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://evil.example") } },
@@ -2081,7 +2082,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
       });
       assert.equal(asRecord(nonPinnedDeferredFacts.body).ok, false);
-      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "resource_fact_missing:page.vue_app.ready");
+      assert.equal(asRecord(asRecord(nonPinnedDeferredFacts.body).error).code, "runtime_consumption_mismatch");
 
       for (const [index, driftCase] of operationRefDriftCases.entries()) {
         const drift = await postJson(operationRefDriftPorts[index]!, "/tasks", {
