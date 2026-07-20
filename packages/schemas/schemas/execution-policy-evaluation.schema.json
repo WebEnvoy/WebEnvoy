@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/execution-policy-evaluation.v0.schema.json",
+  "title": "WebEnvoy Execution Policy Evaluation v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.execution-policy-evaluation.v0",
+    "compatibility_boundary": "Core evaluates versioned Lode/Harbor owner-match proofs for declared business actions only. Confirmation coordination, decision persistence/query, browser atomic actions, raw evidence, credentials, and App UI state are outside this contract.",
+    "source_adrs": [
+      "docs/adr/0008-core-technical-architecture-baseline.md",
+      "docs/adr/0009-unified-authorization-policy.md"
+    ],
+    "field_owners": {
+      "action": "Core projection of the unique Lode or Harbor owner match and current target/resource binding",
+      "effective_policy": "Core evaluator",
+      "confirmation_request": "Core evaluator contract; lifecycle coordination belongs to Core #293"
+    },
+    "policy_precedence": [
+      "single_action_decision_when_current_policy_is_confirm",
+      "thread_revision",
+      "installed_skill_user_version",
+      "global_user_config"
+    ],
+    "excluded_policy_sources": ["skill_recommendation"]
+  },
+  "required": ["schema_version", "status", "next_step"],
+  "properties": {
+    "$schema": { "const": "execution-policy-evaluation.schema.json" },
+    "schema_version": { "const": "webenvoy.execution-policy-evaluation.v0" },
+    "evaluated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$"
+    },
+    "status": { "enum": ["evaluated", "stopped"] },
+    "action": { "$ref": "#/$defs/action" },
+    "risk_marker": { "type": ["string", "null"], "enum": ["destructive", null] },
+    "effective_policy": { "$ref": "#/$defs/effective_policy" },
+    "next_step": { "enum": ["execute", "request_confirmation", "stop"] },
+    "stop_reason": {
+      "enum": [
+        "policy_denied",
+        "invalid_input",
+        "action_undeclared",
+        "action_unclassifiable",
+        "target_mismatch",
+        "policy_unavailable"
+      ]
+    },
+    "confirmation_request": { "$ref": "#/$defs/confirmation_request" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "required": ["category"],
+            "properties": { "category": { "const": "destructive" } }
+          }
+        }
+      },
+      "then": {
+        "required": ["risk_marker"],
+        "properties": { "risk_marker": { "const": "destructive" } }
+      },
+      "else": {
+        "properties": { "risk_marker": { "const": null } }
+      }
+    }
+  ],
+  "oneOf": [
+    {
+      "properties": { "status": { "const": "evaluated" } },
+      "required": ["evaluated_at", "action", "risk_marker", "effective_policy"],
+      "allOf": [
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "auto" } } } } },
+          "then": { "properties": { "next_step": { "const": "execute" } }, "not": { "anyOf": [{ "required": ["stop_reason"] }, { "required": ["confirmation_request"] }] } }
+        },
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "confirm" } } } } },
+          "then": { "properties": { "next_step": { "const": "request_confirmation" } }, "required": ["confirmation_request"], "not": { "required": ["stop_reason"] } }
+        },
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "deny" } } } } },
+          "then": { "properties": { "next_step": { "const": "stop" }, "stop_reason": { "const": "policy_denied" } }, "required": ["stop_reason"], "not": { "required": ["confirmation_request"] } }
+        },
+        {
+          "if": {
+            "required": ["effective_policy"],
+            "properties": { "effective_policy": { "required": ["source"], "properties": { "source": { "const": "single_action_decision" } } } }
+          },
+          "then": {
+            "properties": {
+              "effective_policy": { "properties": { "mode": { "enum": ["auto", "deny"] } } },
+              "next_step": { "enum": ["execute", "stop"] }
+            },
+            "not": { "required": ["confirmation_request"] }
+          }
+        }
+      ]
+    },
+    {
+      "properties": { "status": { "const": "stopped" }, "next_step": { "const": "stop" }, "stop_reason": { "const": "invalid_input" } },
+      "required": ["stop_reason"],
+      "not": { "anyOf": [{ "required": ["evaluated_at"] }, { "required": ["action"] }, { "required": ["risk_marker"] }, { "required": ["effective_policy"] }, { "required": ["confirmation_request"] }] }
+    },
+    {
+      "properties": {
+        "status": { "const": "stopped" },
+        "next_step": { "const": "stop" },
+        "stop_reason": { "enum": ["action_undeclared", "action_unclassifiable", "target_mismatch", "policy_unavailable"] }
+      },
+      "required": ["evaluated_at", "stop_reason"],
+      "not": { "anyOf": [{ "required": ["effective_policy"] }, { "required": ["confirmation_request"] }] }
+    }
+  ],
+  "$defs": {
+    "category": { "enum": ["read", "prepare", "commit", "destructive"] },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version"],
+      "properties": {
+        "action_instance_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "action_id": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "target": { "$ref": "#/$defs/target" },
+        "category": { "$ref": "#/$defs/category" },
+        "owner_matcher": { "enum": ["lode_action_declaration", "harbor_operation_catalog"] },
+        "owner_declaration_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "owner_declaration_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
+      }
+    },
+    "effective_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "source", "source_ref", "source_version"],
+      "properties": {
+        "mode": { "enum": ["auto", "confirm", "deny"] },
+        "source": { "enum": ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"] },
+        "source_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "source_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
+      }
+    },
+    "confirmation_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "choices"],
+      "properties": {
+        "scope": { "const": "current_action" },
+        "action_instance_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "action_id": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "target": { "$ref": "#/$defs/target" },
+        "category": { "$ref": "#/$defs/category" },
+        "owner_matcher": { "enum": ["lode_action_declaration", "harbor_operation_catalog"] },
+        "owner_declaration_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "owner_declaration_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "effective_policy_source_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "effective_policy_source_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "effective_policy_source": { "enum": ["thread_revision", "installed_skill_user_version", "global_user_config"] },
+        "choices": {
+          "type": "array",
+          "prefixItems": [{ "const": "allow_once" }, { "const": "deny_once" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_ref", "target_type"],
+      "properties": {
+        "target_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "target_type": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "site_slug": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "pattern": "^https://[^@/?#]+$" }
+      }
+    }
+  }
+}

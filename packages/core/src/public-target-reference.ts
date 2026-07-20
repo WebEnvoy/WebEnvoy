@@ -13,14 +13,18 @@ function decodedFragment(url: URL): string | undefined {
 }
 
 export function normalizePublicHttpTarget(value: string): PublicHttpTargetResult {
+  if (!value || value.length > 2048 || value.trim() !== value || /[\u0000-\u001f\u007f-\u009f]/.test(value)) {
+    return { ok: false, reason: "invalid" };
+  }
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     return { ok: false, reason: "invalid" };
   }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    return { ok: false, reason: url.username || url.password ? "sensitive" : "invalid" };
+  const hasAuthorityUserInfo = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*@/.test(value);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || hasAuthorityUserInfo || url.username || url.password) {
+    return { ok: false, reason: hasAuthorityUserInfo || url.username || url.password ? "sensitive" : "invalid" };
   }
   for (const [key, queryValue] of url.searchParams) {
     if (isSensitiveFieldName(key) || isSensitiveFieldName(queryValue)) return { ok: false, reason: "sensitive" };
@@ -41,7 +45,7 @@ export function normalizePublicOrigin(value: string): string | undefined {
 }
 
 export function normalizeStoredTargetRef(value: string): string | undefined {
-  if (!value || value.length > 2048 || value.trim() !== value || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  if (!value || value.length > 2048 || value.trim() !== value || /[\u0000-\u001f\u007f-\u009f]/.test(value)) return undefined;
   if (value.includes("://")) {
     if (!/^https?:/i.test(value)) return undefined;
     const normalized = normalizePublicHttpTarget(value);

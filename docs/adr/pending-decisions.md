@@ -111,7 +111,7 @@
 - 问题：四个最小风险类别是否足够支撑 App 策略和 MCP/CLI 展示。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
 - 阻塞什么：App 审批展示、MCP/CLI 风险提示和策略配置。
-- 当前状态：已由 [ADR 0009](0009-unified-authorization-policy.md) 取代。稳定动作类别为 `read`、`prepare`、`commit`、`destructive`、`environment`。
+- 当前状态：已由 [ADR 0009](0009-unified-authorization-policy.md) 取代。稳定业务动作类别为 `read`、`prepare`、`commit`、`destructive`；系统环境操作映射到同一四类，不形成第五类。
 - 后续归属/下一步：无；新增类别需新 ADR。
 
 ## PD-0015
@@ -119,8 +119,8 @@
 - 问题：审批有效期、撤销行为，以及与操作、目标、载荷和身份的绑定方式。
 - 来源 ADR：[0004](0004-admission-and-action-risk.md)
 - 阻塞什么：审批证据校验和写侧安全实现。
-- 当前状态：部分解决。绑定和一次性 grant 由 [ADR 0009](0009-unified-authorization-policy.md) 接受；#291 只固化语义，精确 expiry 字段由 Core #293 实现时规格化。
-- 后续归属/下一步：Core #293。
+- 当前状态：部分解决。精确 ref/version、action/category/target/resource match、issued/expires 绑定由 [ADR 0009](0009-unified-authorization-policy.md) 与 Core #292 接受；动态失效、持久化和查询由 Core #293 接入。
+- 后续归属/下一步：Core #293 完成运行时生命周期接入。
 
 ## PD-0016
 

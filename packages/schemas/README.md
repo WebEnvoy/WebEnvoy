@@ -10,6 +10,7 @@ The JSON Schema files are the contract truth for the current repository. They ar
 - `docs/adr/0006-common-task-entry-v0.md`
 - `docs/adr/0007-reference-version-ownership-v0.md`
 - `docs/adr/0008-core-technical-architecture-baseline.md`
+- `docs/adr/0009-unified-authorization-policy.md`
 
 The files intentionally stay small:
 
@@ -21,6 +22,7 @@ The files intentionally stay small:
 - `schemas/task-thread.schema.json`
 - `schemas/identity-compatibility-preview-request.schema.json`
 - `schemas/identity-compatibility-preview.schema.json`
+- `schemas/execution-policy-evaluation.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -32,10 +34,12 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 
 `fixtures/task-thread.fixture.json` captures an ordered App-created task turn. Bounded scalar summaries remain visible after restart, while files and long text are represented by owner refs.
 
+`fixtures/execution-policy-destructive-auto.fixture.json` proves that Core preserves a user's explicit `auto` mode for a declared destructive action while retaining its risk marker and effective source.
+
 Run:
 
 ```bash
 pnpm --filter @webenvoy/schemas test
 ```
 
-This package does not add Ajv or generated TypeScript types yet. Full JSON Schema validation and conformance cases belong to GH-100.
+The self-check uses declared test-only Ajv dependencies for reproducible Draft 2020-12 validation of the execution-policy fixture, negative fixtures, and real evaluator outputs. Generated TypeScript types and broader conformance expansion remain outside this package change.

@@ -46,6 +46,7 @@ import {
   type DetailTargetBatch,
   type DetailTargetReservation
 } from "./detail-target-store.js";
+import { sameOrigin } from "./execution-policy.js";
 
 type JsonObject = Record<string, unknown>;
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -268,15 +269,6 @@ function packageOutputSchemaId(packageRef: string, fallbackVersion: string): str
 
 function readOnlyResultKind(taskIntent: TaskIntentEnvelope): string {
   return `${taskIntent.capability.ref.replace(/^lode:capability\//, "")}.read_result`;
-}
-
-function sameOrigin(left: string | undefined, right: string | undefined): boolean {
-  if (!left || !right) return false;
-  try {
-    return new URL(left).origin === new URL(right).origin;
-  } catch {
-    return false;
-  }
 }
 
 function operationAdmissionContract(contract: LodePackageAdmissionContract): LodePackageAdmissionContract {

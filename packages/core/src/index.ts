@@ -167,6 +167,32 @@ export {
   normalizeStoredTargetRef
 } from "./public-target-reference.js";
 export {
+  normalizeNonSensitiveText,
+  persistentReferenceMaxLength,
+  persistentVersionMaxLength
+} from "./sensitive-field-taxonomy.js";
+export {
+  evaluateExecutionPolicy,
+  executionPolicyEvaluationSchemaVersion,
+  type BusinessActionCategory,
+  type BusinessActionOwnerMatcher,
+  type BusinessActionOwnerProof,
+  type BusinessActionRequest,
+  type BusinessActionTarget,
+  type ExecutionPolicyCaller,
+  type ExecutionPolicyContext,
+  type ExecutionPolicyEvaluation,
+  type ExecutionPolicyEvaluationInput,
+  type ExecutionPolicyMode,
+  type ExecutionPolicyModes,
+  type ExecutionPolicySource,
+  type ExecutionPolicySources,
+  type EffectiveExecutionPolicy,
+  type EvaluatedBusinessAction,
+  type SingleActionConfirmationRequest,
+  type SingleActionDecision
+} from "./execution-policy.js";
+export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   recoverInterruptedCoreTaskSessions,

@@ -22,6 +22,7 @@ import { assertTaskTurnInputPolicy } from "./task-turn-input-policy-self-check.j
 import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
 import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
 import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
+import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
 
 let tick = 0;
 
@@ -1417,3 +1418,5 @@ await assertTaskThreadStore();
 console.log("Validated durable task threads, ordered turns, idempotency, recovery, and status_unknown handling.");
 await assertIdentityCompatibilityPreview();
 console.log("Validated read-only Lode and Harbor identity compatibility preview boundaries.");
+assertExecutionPolicyEvaluator();
+console.log("Validated unified execution policy evaluation and fail-closed action matching.");

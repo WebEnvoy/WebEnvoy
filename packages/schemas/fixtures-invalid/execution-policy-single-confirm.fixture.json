@@ -1,0 +1,51 @@
+{
+  "$schema": "execution-policy-evaluation.schema.json",
+  "schema_version": "webenvoy.execution-policy-evaluation.v0",
+  "evaluated_at": "2026-07-21T00:00:00.000Z",
+  "status": "evaluated",
+  "action": {
+    "action_instance_ref": "action-instance:publish-note/1",
+    "action_id": "xhs_publish_note",
+    "target": {
+      "target_ref": "target:note/1",
+      "target_type": "creator_publish_page",
+      "site_slug": "xiaohongshu",
+      "origin": "https://creator.xiaohongshu.com"
+    },
+    "category": "commit",
+    "owner_matcher": "lode_action_declaration",
+    "owner_declaration_ref": "lode://site-capability/xiaohongshu/publish-note@1.0.0#xhs_publish_note",
+    "owner_declaration_version": "1.0.0",
+    "resource_match_ref": "resource-match:xhs/publish/1",
+    "resource_match_version": "1"
+  },
+  "risk_marker": null,
+  "effective_policy": {
+    "mode": "confirm",
+    "source": "single_action_decision",
+    "source_ref": "decision:once/1",
+    "source_version": "1"
+  },
+  "next_step": "request_confirmation",
+  "confirmation_request": {
+    "scope": "current_action",
+    "action_instance_ref": "action-instance:publish-note/1",
+    "action_id": "xhs_publish_note",
+    "target": {
+      "target_ref": "target:note/1",
+      "target_type": "creator_publish_page",
+      "site_slug": "xiaohongshu",
+      "origin": "https://creator.xiaohongshu.com"
+    },
+    "category": "commit",
+    "owner_matcher": "lode_action_declaration",
+    "owner_declaration_ref": "lode://site-capability/xiaohongshu/publish-note@1.0.0#xhs_publish_note",
+    "owner_declaration_version": "1.0.0",
+    "resource_match_ref": "resource-match:xhs/publish/1",
+    "resource_match_version": "1",
+    "effective_policy_source_ref": "policy:thread/2",
+    "effective_policy_source_version": "2",
+    "effective_policy_source": "thread_revision",
+    "choices": ["allow_once", "deny_once"]
+  }
+}
