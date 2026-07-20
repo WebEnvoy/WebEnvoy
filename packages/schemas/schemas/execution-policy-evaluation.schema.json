@@ -126,15 +126,15 @@
       "additionalProperties": false,
       "required": ["action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version"],
       "properties": {
-        "action_instance_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "action_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "action_instance_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "action_id": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
         "target": { "$ref": "#/$defs/target" },
         "category": { "$ref": "#/$defs/category" },
         "owner_matcher": { "enum": ["lode_action_declaration", "harbor_operation_catalog"] },
-        "owner_declaration_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "owner_declaration_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "resource_match_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "resource_match_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
+        "owner_declaration_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "owner_declaration_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
       }
     },
     "effective_policy": {
@@ -144,8 +144,8 @@
       "properties": {
         "mode": { "enum": ["auto", "confirm", "deny"] },
         "source": { "enum": ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"] },
-        "source_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "source_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
+        "source_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "source_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" }
       }
     },
     "confirmation_request": {
@@ -154,17 +154,17 @@
       "required": ["scope", "action_instance_ref", "action_id", "target", "category", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "choices"],
       "properties": {
         "scope": { "const": "current_action" },
-        "action_instance_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "action_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "action_instance_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "action_id": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
         "target": { "$ref": "#/$defs/target" },
         "category": { "$ref": "#/$defs/category" },
         "owner_matcher": { "enum": ["lode_action_declaration", "harbor_operation_catalog"] },
-        "owner_declaration_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "owner_declaration_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "resource_match_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "resource_match_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "effective_policy_source_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "effective_policy_source_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "owner_declaration_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "owner_declaration_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "resource_match_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "effective_policy_source_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "effective_policy_source_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
         "effective_policy_source": { "enum": ["thread_revision", "installed_skill_user_version", "global_user_config"] },
         "choices": {
           "type": "array",
@@ -180,10 +180,10 @@
       "additionalProperties": false,
       "required": ["target_ref", "target_type"],
       "properties": {
-        "target_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "target_type": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "site_slug": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
-        "origin": { "type": "string", "format": "uri", "maxLength": 512, "pattern": "^https://[^@/?#]+$" }
+        "target_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "target_type": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "site_slug": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$" },
+        "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "pattern": "^https://[^@/?#]+$" }
       }
     }
   }

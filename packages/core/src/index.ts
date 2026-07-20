@@ -167,6 +167,11 @@ export {
   normalizeStoredTargetRef
 } from "./public-target-reference.js";
 export {
+  normalizeNonSensitiveText,
+  persistentReferenceMaxLength,
+  persistentVersionMaxLength
+} from "./sensitive-field-taxonomy.js";
+export {
   evaluateExecutionPolicy,
   executionPolicyEvaluationSchemaVersion,
   type BusinessActionCategory,

@@ -10,7 +10,6 @@ import {
 } from "./execution-policy-owner-proof.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import {
-  normalizeBoundedText,
   normalizeNonSensitiveText,
   persistentReferenceMaxLength,
   persistentVersionMaxLength
@@ -171,7 +170,7 @@ function exactObject(value: unknown, required: readonly string[], optional: read
 }
 
 function string(value: unknown, maxLength = persistentVersionMaxLength): string | undefined {
-  return normalizeBoundedText(value, maxLength);
+  return normalizeNonSensitiveText(value, maxLength);
 }
 
 function persistentRef(value: unknown): string | undefined {

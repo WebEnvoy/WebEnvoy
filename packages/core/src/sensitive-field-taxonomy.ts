@@ -27,13 +27,8 @@ export function isSensitiveFieldName(value: string): boolean {
     sensitiveFieldFragments.some((name) => normalized.includes(name));
 }
 
-export function normalizeBoundedText(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || value.trim() !== value ||
-    /[\u0000-\u001f\u007f-\u009f]/.test(value)) return undefined;
-  return value;
-}
-
 export function normalizeNonSensitiveText(value: unknown, maxLength: number): string | undefined {
-  const normalized = normalizeBoundedText(value, maxLength);
-  return normalized && !isSensitiveFieldName(normalized) ? normalized : undefined;
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || value.trim() !== value ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value) || isSensitiveFieldName(value)) return undefined;
+  return value;
 }

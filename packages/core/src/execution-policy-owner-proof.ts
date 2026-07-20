@@ -1,6 +1,5 @@
 import { normalizePublicHttpTarget } from "./public-target-reference.js";
 import {
-  normalizeBoundedText,
   normalizeNonSensitiveText,
   persistentReferenceMaxLength,
   persistentVersionMaxLength
@@ -95,7 +94,7 @@ function exactObject(value: unknown, fields: readonly string[]): JsonObject | un
 }
 
 function text(value: unknown, maxLength = persistentVersionMaxLength): string | undefined {
-  return normalizeBoundedText(value, maxLength);
+  return normalizeNonSensitiveText(value, maxLength);
 }
 
 function ref(value: unknown): string | undefined {

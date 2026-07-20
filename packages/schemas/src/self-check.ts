@@ -5,7 +5,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import * as addFormatsModule from "ajv-formats";
-import { normalizePublicHttpTarget, normalizePublicOrigin, normalizeStoredTargetRef } from "@webenvoy/core-runtime";
+import {
+  normalizeNonSensitiveText,
+  normalizePublicHttpTarget,
+  normalizePublicOrigin,
+  normalizeStoredTargetRef
+} from "@webenvoy/core-runtime";
 
 type JsonObject = Record<string, unknown>;
 
@@ -71,6 +76,7 @@ ajv.addKeyword({ keyword: "x-webenvoy" });
 ajv.addFormat("webenvoy-public-http-target", { type: "string", validate: (value: string) => normalizePublicHttpTarget(value).ok });
 ajv.addFormat("webenvoy-public-origin", { type: "string", validate: (value: string) => normalizePublicOrigin(value) !== undefined });
 ajv.addFormat("webenvoy-stored-target-ref", { type: "string", validate: (value: string) => normalizeStoredTargetRef(value) === value });
+ajv.addFormat("webenvoy-nonsensitive-text", { type: "string", validate: (value: string) => normalizeNonSensitiveText(value, 512) === value });
 ajv.addFormat("webenvoy-xhs-detail-ref", {
   type: "string",
   validate: /^detail_ref_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/
@@ -137,6 +143,12 @@ assert(validateExecutionPolicy, "execution policy validator must compile");
 const oversizedExecutionPolicy = await readJson(join(fixtureDir, "execution-policy-destructive-auto.fixture.json"));
 asObject(oversizedExecutionPolicy.effective_policy, "execution policy effective_policy").source_ref = "x".repeat(513);
 assert.equal(validateExecutionPolicy(oversizedExecutionPolicy), false, "execution policy refs over 512 characters must be rejected");
+const sensitiveVersionExecutionPolicy = await readJson(join(fixtureDir, "execution-policy-destructive-auto.fixture.json"));
+asObject(sensitiveVersionExecutionPolicy.effective_policy, "execution policy effective_policy").source_version = "credential-secret";
+assert.equal(validateExecutionPolicy(sensitiveVersionExecutionPolicy), false, "execution policy sensitive versions must be rejected");
+const sensitiveTargetExecutionPolicy = await readJson(join(fixtureDir, "execution-policy-destructive-auto.fixture.json"));
+asObject(asObject(sensitiveTargetExecutionPolicy.action, "execution policy action").target, "execution policy target").target_type = "secret";
+assert.equal(validateExecutionPolicy(sensitiveTargetExecutionPolicy), false, "execution policy sensitive target fields must be rejected");
 for (const file of executionPolicyInvalidFixtureFiles) {
   assert.equal(validateExecutionPolicy(await readJson(file)), false, `${file} must fail Draft 2020-12 validation`);
 }

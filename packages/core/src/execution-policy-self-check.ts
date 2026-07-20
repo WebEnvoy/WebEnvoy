@@ -251,6 +251,12 @@ function assertOwnerProofBoundary(): void {
   assert.equal(matchLodeBusinessActionOwner(malformedSibling, "xhs_publish_note", resourceMatch()), undefined);
   assert.equal(matchLodeBusinessActionOwner(lodeContract(), "xhs_publish_note", resourceMatch({ match_ref: "resource-match:credential/1" })), undefined);
   assert.equal(matchLodeBusinessActionOwner(lodeContract(), "xhs_publish_note", resourceMatch({ match_ref: "x".repeat(513) })), undefined);
+  const sensitiveTargetType = structuredClone(lodeContract());
+  sensitiveTargetType.action_declaration.actions[0]!.target_scope.target_types = ["secret"];
+  assert.equal(matchLodeBusinessActionOwner(sensitiveTargetType, "xhs_publish_note", resourceMatch()), undefined);
+  const sensitiveSiteSlug = structuredClone(lodeContract());
+  sensitiveSiteSlug.action_declaration.actions[0]!.target_scope.site_slug = "credential";
+  assert.equal(matchLodeBusinessActionOwner(sensitiveSiteSlug, "xhs_publish_note", resourceMatch()), undefined);
 
   for (const actionId of ["browser_fill", "click", "browser_input", "page.input", "browser.type", "page_scroll"] as const) {
     const primitive = structuredClone(lodeContract());
@@ -274,6 +280,18 @@ function assertOwnerProofBoundary(): void {
     matched_requirement_refs: ["harbor.provider.installable"]
   }));
   assert(harborProof);
+  assert.equal(matchHarborBusinessOperationOwner({
+    schema_version: "webenvoy.harbor-operation-catalog.v0",
+    catalog_ref: "harbor://operation-catalog/local",
+    catalog_version: "credential-secret",
+    operations: [{ operation_id: "install_provider", category: "commit", target_scope: { target_types: ["provider_installation"] }, resource_requirement_refs: ["harbor.provider.installable"] }]
+  }, "install_provider", resourceMatch({ matched_requirement_refs: ["harbor.provider.installable"] })), undefined);
+  assert.equal(matchHarborBusinessOperationOwner({
+    schema_version: "webenvoy.harbor-operation-catalog.v0",
+    catalog_ref: "harbor://operation-catalog/local",
+    catalog_version: "1",
+    operations: [{ operation_id: "install_provider", category: "commit", target_scope: { target_types: ["provider_installation"] }, resource_requirement_refs: ["harbor.provider.installable"] }]
+  }, "install_provider", resourceMatch({ match_version: "credential-secret", matched_requirement_refs: ["harbor.provider.installable"] })), undefined);
   assert.equal(matchHarborBusinessOperationOwner({
     schema_version: "webenvoy.harbor-operation-catalog.v0",
     catalog_ref: "harbor://operation-catalog/local",
@@ -347,6 +365,9 @@ function assertTargetAndParserBoundary(): void {
   assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "policy:credential/1" } } });
   assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "x".repeat(1_000_000) } } });
   assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_version: "1".repeat(129) } } });
+  assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_version: "credential-secret" } } });
+  assertInvalid({ ...base, action: { ...base.action, target: { ...base.action.target, target_type: "secret" } } });
+  assertInvalid({ ...base, action: { ...base.action, target: { ...base.action.target, site_slug: "credential" } } });
   assertInvalid({ ...base, policies: { ...base.policies, global_user_config: { ...base.policies.global_user_config, source_ref: "policy:\u0001invalid" } } });
   assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), issued_at: "2026-07-20T23:59:59.9999Z" } } });
   assertInvalid({ ...base, policies: { ...base.policies, single_action_decision: { ...single(base), expires_at: "2026-07-21T00:00:00.000000001Z" } } });
