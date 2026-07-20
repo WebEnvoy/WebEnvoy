@@ -11,6 +11,7 @@ import type {
   HarborResourceFacts,
   HarborUnavailable
 } from "./harbor-admission.js";
+import { projectHarborPublicIdentityEnvironmentRecord } from "./harbor-admission.js";
 import {
   lodeRuntimeAdmissionFailure,
   parseLodeRuntimeAdmissionPolicy,
@@ -1406,7 +1407,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       });
       if (isFailure(session)) return session;
 
-      const identity = identityFactsFromSession(session) ?? (isFailure(identityRecord) ? undefined : identityFactsFromPublicRecord(identityRecord));
+      const identity = identityFactsFromSession(session) ?? (isFailure(identityRecord) ? undefined : projectHarborPublicIdentityEnvironmentRecord(identityRecord, { requireComplete: false })?.facts);
       const runtime = coreRuntimeFactsFromSession(session, identity);
       const openedSessionRef = isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
@@ -1627,48 +1628,6 @@ function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hin
 function identityFactsFromSession(value: unknown): HarborIdentityEnvironmentFacts | undefined {
   const direct = pickObject(value, "harbor_identity_environment_facts", "identity_environment_facts", "identity_environment");
   return direct?.schema_version === "harbor-local-identity-environment/v0" ? (direct as HarborIdentityEnvironmentFacts) : undefined;
-}
-
-function identityFactsFromPublicRecord(value: unknown): HarborIdentityEnvironmentFacts | undefined {
-  const direct = object(value);
-  if (direct?.schema_version !== "harbor-local-identity-environment-store/v0") return undefined;
-  const site = object(direct.site);
-  const status = object(direct.status);
-  const refs = object(direct.refs);
-  const environment = object(direct.environment_summary);
-  const identity_environment_ref = string(direct.identity_environment_ref);
-  const execution_identity_ref = string(refs?.execution_identity_ref);
-  const profile_ref = string(refs?.profile_ref);
-  const origin = string(site?.origin);
-  if (!identity_environment_ref || !execution_identity_ref || !profile_ref || !origin) return undefined;
-  const selected_provider_id = string(environment?.provider_id) ?? null;
-  return {
-    schema_version: "harbor-local-identity-environment/v0",
-    identity_environment_ref,
-    execution_identity_ref,
-    profile_ref,
-    site_binding: {
-      site_id: string(site?.site_id) ?? "unknown",
-      origin
-    },
-    login_state: {
-      state: string(status?.login_state) ?? "unknown",
-      authentication_provenance: string(status?.authentication_provenance) ?? "unknown",
-      manual_authentication_state: string(status?.manual_authentication_state) ?? "unknown",
-      recovery_required: status?.recovery_required === false ? false : true
-    },
-    browser_storage: {
-      state: string(status?.browser_storage_state) ?? "unknown"
-    },
-    provider_binding: {
-      selected_provider_id,
-      binding_status: selected_provider_id ? "public_record_provider_available" : "no_launchable_provider"
-    },
-    consumer_boundary: {
-      core: "admission_facts_refs_and_blocking_reasons_only",
-      not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
-    }
-  };
 }
 
 function coreRuntimeFactsFromSession(value: unknown, identity: HarborIdentityEnvironmentFacts | undefined): HarborCoreRuntimeFacts | FailureRecord {

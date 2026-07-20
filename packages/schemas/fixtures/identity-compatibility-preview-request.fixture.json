@@ -1,0 +1,10 @@
+{
+  "$schema": "../schemas/identity-compatibility-preview-request.schema.json",
+  "schema_version": "webenvoy.identity-compatibility-preview-request.v0",
+  "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+  "version": "0.1.0",
+  "operation_id": "xhs_search_notes",
+  "operation_mode": "read",
+  "identity_environment_refs": ["identity-env-library-candidate"]
+}

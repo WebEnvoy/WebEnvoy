@@ -21,6 +21,7 @@ import { assertTaskThreadStore } from "./task-thread-store-self-check.js";
 import { assertTaskTurnInputPolicy } from "./task-turn-input-policy-self-check.js";
 import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
 import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
+import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 
 let tick = 0;
 
@@ -1384,3 +1385,5 @@ await assertTaskTurnInputPolicy();
 console.log("Validated Lode-owned input projection policy and bounded owner-ref checks.");
 await assertTaskThreadStore();
 console.log("Validated durable task threads, ordered turns, idempotency, recovery, and status_unknown handling.");
+await assertIdentityCompatibilityPreview();
+console.log("Validated read-only Lode and Harbor identity compatibility preview boundaries.");

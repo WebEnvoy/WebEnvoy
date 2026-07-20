@@ -7,8 +7,10 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
+  previewIdentityCompatibility,
   type FailureRecord,
   type FileRunRecordStore,
+  type HarborIdentityFactsReader,
   type HarborRuntimeClient,
   type LodePackageResolver
 } from "@webenvoy/core-runtime";
@@ -23,6 +25,7 @@ export type ApiServerOptions = {
   runRecordStore?: FileRunRecordStore;
   taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
+  harborIdentityFactsReader?: HarborIdentityFactsReader;
   harborRuntimeClient?: HarborRuntimeClient;
 };
 
@@ -125,6 +128,7 @@ function admissionHealth(options: ApiServerOptions): JsonBody {
     runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
     taskThreadStore: options.taskThreadStore === undefined ? "missing" : "configured",
     lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
+    harborIdentityFactsReader: options.harborIdentityFactsReader === undefined ? "missing" : "configured",
     harborRuntimeClient: options.harborRuntimeClient === undefined ? "missing" : "configured"
   };
   return {
@@ -182,6 +186,36 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     }
     const result = await submitTaskBody(body, options);
     sendJson(response, result.status, result.body);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/identity-compatibility-preview") {
+    if (!options.lodePackageResolver || !options.harborIdentityFactsReader) {
+      sendJson(response, 503, {
+        ok: false,
+        error: {
+          category: "resource_admission",
+          code: "identity_compatibility_owner_unavailable",
+          phase: "resource_matching",
+          recovery_hint: "contact_operator"
+        }
+      });
+      return;
+    }
+    const body = await readJsonBody(request, 64 * 1024);
+    if (isFailureRecord(body)) {
+      sendJson(response, 400, { ok: false, error: body });
+      return;
+    }
+    const result = await previewIdentityCompatibility(body, {
+      lodePackageResolver: options.lodePackageResolver,
+      harborIdentityFactsReader: options.harborIdentityFactsReader
+    });
+    if (isFailureRecord(result)) {
+      sendJson(response, 400, { ok: false, error: result });
+      return;
+    }
+    sendJson(response, 200, result as unknown as JsonBody);
     return;
   }
 

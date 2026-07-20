@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import {
   createFileRunRecordStore,
+  createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
@@ -44,17 +45,21 @@ if (import.meta.url === entrypoint) {
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
+  const harborIdentityFactsReader = process.env.WEBENVOY_HARBOR_RUNTIME_URL
+    ? createHttpHarborIdentityFactsReader({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
+    : undefined;
   if (runRecordStore && harborRuntimeClient) {
     await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
   }
-  const server = createApiServer(runRecordStore ? {
-    runRecordStore,
+  const server = createApiServer({
+    ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(taskThreadStore === undefined ? {} : { taskThreadStore }),
     ...(lodeRegistryPath === undefined
       ? {}
       : { lodePackageResolver: createLocalLodePackageResolver({ registryPath: lodeRegistryPath }) }),
+    ...(harborIdentityFactsReader === undefined ? {} : { harborIdentityFactsReader }),
     ...(harborRuntimeClient === undefined ? {} : { harborRuntimeClient })
-  } : {});
+  });
 
   server.listen(port, apiServerHost, () => {
     console.log(`WebEnvoy API Server listening on http://${apiServerHost}:${port}`);

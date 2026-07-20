@@ -128,9 +128,27 @@ export {
   type ResultUnavailableReason
 } from "./result-query.js";
 export {
+  createHttpHarborIdentityFactsReader,
+  identityCompatibilityPreviewRequestSchemaVersion,
+  identityCompatibilityPreviewSchemaVersion,
+  parseIdentityCompatibilityPreviewRequest,
+  previewIdentityCompatibility,
+  type HarborIdentityFactsReader,
+  type HarborIdentityFactsReadResult,
+  type HttpHarborIdentityFactsReaderOptions,
+  type IdentityCompatibilityCandidate,
+  type IdentityCompatibilityOwnerStatus,
+  type IdentityCompatibilityPreviewDependencies,
+  type IdentityCompatibilityPreviewRequest,
+  type IdentityCompatibilityPreviewResponse,
+  type IdentityCompatibilityRecoveryAction,
+  type IdentityCompatibilityStatus
+} from "./identity-compatibility-preview.js";
+export {
   type HarborIdentityEnvironmentFacts,
   type HarborCoreRuntimeFacts,
   type HarborCoreSceneReference,
+  type HarborPublicIdentityEnvironmentSnapshot,
   type HarborUnavailable,
   type HarborWritePrecheckFacts,
   type RuntimeSessionBindingFacts,

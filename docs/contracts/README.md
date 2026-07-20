@@ -13,6 +13,7 @@
 | 任务意图与运行生命周期 v0 | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md) | Task Intent Envelope、Run lifecycle、Run Record 创建规则。 |
 | 共用任务入口 v0 | [ADR 0006](../adr/0006-common-task-entry-v0.md) | API、CLI、MCP、SDK 和 App 的共同入口投影。 |
 | 持久任务线程与有序回合 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) | 一个 Lode capability 与一个 Harbor identity environment 形成稳定线程；回合按序、幂等、单活动并可恢复，敏感正文与文件只保存 owner refs。 |
+| 身份兼容性只读预检查 | [`identity-compatibility-preview-request.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview-request.schema.json), [`identity-compatibility-preview.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview.schema.json) | Core 对版本锁定的 Lode operation 与 Harbor 公共身份事实做有界投影；`current_execution_window` 只返回运行时未知，不创建 task、run、session 或浏览器动作。 |
 | 引用和版本归属合同 v0 | [ADR 0007](../adr/0007-reference-version-ownership-v0.md) | Lode/Harbor/App/Core 引用、版本、失效和 failure mapping。 |
 | Core 技术架构基线 | [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | TypeScript / Node.js / pnpm 默认、JSON Schema / Zod / Ajv 边界、API Server / Core Runtime / Run Record 代码边界、跨入口 fixture 规划和跨仓 no-copy 约束。 |
 
