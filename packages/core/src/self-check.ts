@@ -17,6 +17,7 @@ import { assertRealSiteReadOnlyTaskExecution } from "./real-site-readonly-self-c
 import { assertRealSiteReadOnlyResultProjection } from "./real-site-readonly-result-self-check.js";
 import { assertRealRunQueryEvidence } from "./real-run-query-self-check.js";
 import { assertRealSiteWritePreviewResults } from "./real-site-write-preview-self-check.js";
+import { assertTaskThreadStore } from "./task-thread-store-self-check.js";
 import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
 import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
 
@@ -1378,3 +1379,5 @@ await assertRealRunQueryEvidence();
 console.log("Validated real run query evidence and failure reasons.");
 await assertRealSiteWritePreviewResults();
 console.log("Validated real-site write preview records.");
+await assertTaskThreadStore();
+console.log("Validated durable task threads, ordered turns, idempotency, recovery, and status_unknown handling.");

@@ -7,52 +7,26 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
-  submitRuntimeTask,
   type FailureRecord,
   type FileRunRecordStore,
   type HarborRuntimeClient,
-  type LodePackageResolver,
-  type RuntimeTaskSubmissionRequest,
-  type TaskSubmissionResult
+  type LodePackageResolver
 } from "@webenvoy/core-runtime";
+import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
+import { submitTaskBody, validateThreadTaskBody } from "./task-api.js";
+import { handleTaskThreadApi } from "./task-thread-api.js";
 
 type JsonBody = Record<string, unknown>;
+type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
 
 export type ApiServerOptions = {
   runRecordStore?: FileRunRecordStore;
+  taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
   harborRuntimeClient?: HarborRuntimeClient;
 };
 
 const serviceName = "webenvoy-api-server";
-const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
-const privateHarborInputFieldNames = new Set([
-  "raw_payload",
-  "dom",
-  "har",
-  "screenshot",
-  "video",
-  "cookie",
-  "cookies",
-  "token",
-  "tokens",
-  "password",
-  "verification_code",
-  "local_path",
-  "profile_path",
-  "storage_value",
-  "session_token",
-  "runtime_session",
-  "cdp_endpoint",
-  "vnc_url",
-  "viewer_url",
-  "webSocketDebuggerUrl",
-  "raw_evidence_body",
-  "full_dom",
-  "network_response_body",
-  "provider_private_object"
-]);
 
 function sendJson(response: ServerResponse, statusCode: number, body: JsonBody): void {
   response.writeHead(statusCode, {
@@ -80,66 +54,8 @@ function invalidRunId(): FailureRecord {
   };
 }
 
-function requestInvalid(code: string, recovery_hint = "fix_input"): FailureRecord {
-  return {
-    category: "request_invalid",
-    code,
-    phase: "pre_admission",
-    recovery_hint
-  };
-}
-
 function isFailureRecord(value: unknown): value is FailureRecord {
   return Boolean(value && typeof value === "object" && "category" in value);
-}
-
-function jsonObject(value: unknown): JsonBody | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonBody) : undefined;
-}
-
-function findForbiddenField(value: unknown, forbiddenFields: ReadonlySet<string>): string | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const found = findForbiddenField(entry, forbiddenFields);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  for (const [key, entry] of Object.entries(value as JsonBody)) {
-    if (forbiddenFields.has(key)) return key;
-    const found = findForbiddenField(entry, forbiddenFields);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-function optionalString(value: unknown, code: string): string | FailureRecord | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) return requestInvalid(code);
-  return value;
-}
-
-function optionalHttpUrl(value: unknown): string | FailureRecord | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) return requestInvalid("harbor_url_invalid");
-  try {
-    const url = new URL(value);
-    if (url.protocol === "http:" || url.protocol === "https:") return value;
-  } catch {
-    // handled below
-  }
-  return requestInvalid("harbor_url_invalid");
-}
-
-function optionalBoolean(value: unknown, code: string): boolean | FailureRecord | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "boolean" ? value : requestInvalid(code);
-}
-
-function optionalPositiveInteger(value: unknown, code: string): number | FailureRecord | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : requestInvalid(code);
 }
 
 function queryStatusCode(failure: FailureRecord): number {
@@ -148,107 +64,6 @@ function queryStatusCode(failure: FailureRecord): number {
   return 400;
 }
 
-function submitStatusCode(failure: FailureRecord): number {
-  if (failure.code === "run_id_already_exists") return 409;
-  if (failure.code === "harbor_read_operation_outcome_unknown") return 202;
-  if (failure.code.startsWith("core_task_session_")) return 503;
-  if (failure.category === "request_invalid") return 400;
-  if (failure.category === "capability_contract") return 422;
-  if (failure.category === "resource_admission" || failure.category === "evidence_reference") return 503;
-  if (failure.category === "persistence_observability") return 500;
-  if (failure.category === "action_risk") return 409;
-  return 400;
-}
-
-function submitDuplicateRunId(): TaskSubmissionResult {
-  return {
-    ok: false,
-    failure: requestInvalid("run_id_already_exists", "choose_new_run_id")
-  };
-}
-
-async function validateRuntimeTaskSubmissionRequest(
-  body: JsonBody,
-  store: FileRunRecordStore
-): Promise<RuntimeTaskSubmissionRequest | FailureRecord> {
-  const runId = optionalString(body.run_id, "run_id_invalid");
-  if (runId === undefined || isFailureRecord(runId) || !runIdPattern.test(runId)) return requestInvalid("run_id_invalid");
-  if (await store.getRunRecord(runId)) return requestInvalid("run_id_already_exists", "choose_new_run_id");
-
-  const task_intent = jsonObject(body.task_intent);
-  if (!task_intent) return requestInvalid("task_intent_required");
-
-  const package_ref = optionalString(body.package_ref, "package_ref_invalid");
-  if (isFailureRecord(package_ref)) return package_ref;
-  const publicQueryInput = body.public_query === undefined ? undefined : jsonObject(body.public_query);
-  if (body.public_query !== undefined && !publicQueryInput) return requestInvalid("public_query_invalid");
-  const publicQuery = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.query, "public_query_invalid");
-  const capability = jsonObject(task_intent.capability);
-  const scope = jsonObject(task_intent.scope);
-  const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
-    capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
-  const allowedPublicQueryFields = bossJobSearch ? new Set(["query", "city_code", "page", "limit"]) : new Set(["query"]);
-  const cityCode = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.city_code, "public_query_invalid");
-  const page = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.page, "public_query_invalid");
-  const limit = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.limit, "public_query_invalid");
-  if (isFailureRecord(publicQuery) || isFailureRecord(cityCode) || isFailureRecord(page) || isFailureRecord(limit) || (bossJobSearch && publicQueryInput === undefined) || (publicQueryInput && (
-    publicQuery === undefined || publicQuery.trim() !== publicQuery || publicQuery.length > (bossJobSearch ? 80 : 256) ||
-    Object.keys(publicQueryInput).some((field) => !allowedPublicQueryFields.has(field)) ||
-    (bossJobSearch && (cityCode === undefined || !/^\d{6,32}$/.test(cityCode) || page !== 1 || limit === undefined || limit > 15))
-  ))) {
-    return requestInvalid("public_query_invalid");
-  }
-
-  const harborInput = body.harbor === undefined ? undefined : jsonObject(body.harbor);
-  if (body.harbor !== undefined && !harborInput) return requestInvalid("harbor_invalid");
-
-  let harbor: RuntimeTaskSubmissionRequest["harbor"];
-  if (harborInput) {
-    const unsupportedHarborField = Object.keys(harborInput).find((field) => !allowedHarborInputFields.has(field));
-    if (unsupportedHarborField) return requestInvalid(`unsupported_harbor_field:${unsupportedHarborField}`, "remove_private_field");
-    const identity_environment_ref = optionalString(harborInput.identity_environment_ref, "identity_environment_ref_invalid");
-    const url = optionalHttpUrl(harborInput.url);
-    const reuse_existing = optionalBoolean(harborInput.reuse_existing, "reuse_existing_invalid");
-    const timeout_ms = optionalPositiveInteger(harborInput.timeout_ms, "timeout_ms_invalid");
-    const evidence_policy = harborInput.evidence_policy === undefined ? undefined : jsonObject(harborInput.evidence_policy);
-    if (isFailureRecord(identity_environment_ref)) return identity_environment_ref;
-    if (isFailureRecord(url)) return url;
-    if (isFailureRecord(reuse_existing)) return reuse_existing;
-    if (isFailureRecord(timeout_ms)) return timeout_ms;
-    if (harborInput.evidence_policy !== undefined && !evidence_policy) return requestInvalid("evidence_policy_invalid");
-    const privateEvidencePolicyField = findForbiddenField(evidence_policy, privateHarborInputFieldNames);
-    if (privateEvidencePolicyField) return requestInvalid(`private_field_rejected:${privateEvidencePolicyField}`, "remove_private_field");
-    harbor = {
-      ...(identity_environment_ref === undefined ? {} : { identity_environment_ref }),
-      ...(url === undefined ? {} : { url }),
-      ...(reuse_existing === undefined ? {} : { reuse_existing }),
-      ...(timeout_ms === undefined ? {} : { timeout_ms }),
-      ...(evidence_policy === undefined ? {} : { evidence_policy })
-    };
-  }
-
-  if (bossJobSearch && publicQuery !== undefined && cityCode !== undefined) {
-    const canonicalTarget = new URL("/web/geek/job", "https://www.zhipin.com");
-    canonicalTarget.searchParams.set("query", publicQuery);
-    canonicalTarget.searchParams.set("city", cityCode);
-    if (scope?.target_ref !== canonicalTarget.href || harbor?.url !== canonicalTarget.href) {
-      return requestInvalid("boss_target_invalid");
-    }
-  }
-
-  return {
-    run_id: runId,
-    task_intent,
-    ...(package_ref === undefined ? {} : { package_ref }),
-    ...(publicQuery === undefined ? {} : { public_query: {
-      query: publicQuery,
-      ...(cityCode === undefined ? {} : { city_code: cityCode }),
-      ...(page === undefined ? {} : { page }),
-      ...(limit === undefined ? {} : { limit })
-    } }),
-    ...(harbor === undefined ? {} : { harbor })
-  };
-}
 
 async function readJsonBody(request: IncomingMessage, limitBytes = 1_000_000): Promise<Record<string, unknown> | FailureRecord> {
   const chunks: Buffer[] = [];
@@ -308,6 +123,7 @@ function capabilityQueryMissing(): FailureRecord {
 function admissionHealth(options: ApiServerOptions): JsonBody {
   const checks = {
     runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
+    taskThreadStore: options.taskThreadStore === undefined ? "missing" : "configured",
     lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
     harborRuntimeClient: options.harborRuntimeClient === undefined ? "missing" : "configured"
   };
@@ -328,12 +144,32 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const runSessionRefsMatch = /^\/runs\/([^/]+)\/session-refs$/.exec(path);
   const runFailureMatch = /^\/runs\/([^/]+)\/failure$/.exec(path);
 
+  if (path === "/threads" || path.startsWith("/threads/")) {
+    const taskThreadInput = {
+      method: request.method,
+      path,
+      ...(options.taskThreadStore === undefined ? {} : { store: options.taskThreadStore }),
+      validateTask: (taskBody: JsonBody) => validateThreadTaskBody(taskBody, options),
+      submitTask: (taskBody: JsonBody, runClaimToken: string) => submitTaskBody(taskBody, options, runClaimToken)
+    };
+    let result = await handleTaskThreadApi(taskThreadInput);
+    if (!result.handled && result.requires_body) {
+      const parsed = await readJsonBody(request);
+      if (isFailureRecord(parsed)) {
+        sendJson(response, 400, { ok: false, error: parsed });
+        return;
+      }
+      result = await handleTaskThreadApi({ ...taskThreadInput, body: parsed });
+    }
+    if (result.handled) {
+      sendJson(response, result.status, result.body);
+      return;
+    }
+  }
+
   if (request.method === "POST" && path === "/tasks") {
     if (!options.runRecordStore) {
-      sendJson(response, 503, {
-        ok: false,
-        error: runStoreUnavailable()
-      });
+      sendJson(response, 503, { ok: false, error: runStoreUnavailable() });
       return;
     }
     const body = await readJsonBody(request);
@@ -344,37 +180,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       });
       return;
     }
-    const validated = await validateRuntimeTaskSubmissionRequest(body, options.runRecordStore);
-    if (isFailureRecord(validated)) {
-      sendJson(response, submitStatusCode(validated), {
-        ok: false,
-        error: validated
-      });
-      return;
-    }
-    const result = await submitRuntimeTask(options.runRecordStore, validated, {
-      ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
-      ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient })
-    }).catch((error: unknown) =>
-      error instanceof Error && /^run record already exists: /.test(error.message)
-        ? submitDuplicateRunId()
-        : Promise.reject(error)
-    );
-    if (result.ok) {
-      sendJson(response, 202, {
-        ok: true,
-        task_intent: result.task_intent,
-        run: result.run_record,
-        evidence_refs: result.run_record.evidence_refs ?? [],
-        runtime_binding_refs: result.run_record.runtime_binding_refs ?? []
-      });
-      return;
-    }
-    sendJson(response, submitStatusCode(result.failure), {
-      ok: false,
-      error: result.failure,
-      ...(result.run_record === undefined ? {} : { run: result.run_record })
-    });
+    const result = await submitTaskBody(body, options);
+    sendJson(response, result.status, result.body);
     return;
   }
 
@@ -382,7 +189,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     sendJson(response, 405, {
       error: {
         code: "method_not_allowed",
-        message: "Only GET and POST /tasks are supported by the API Server"
+        message: "Only supported task, thread, and query methods are allowed by the API Server"
       }
     });
     return;
@@ -564,11 +371,11 @@ async function route(request: IncomingMessage, response: ServerResponse, options
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
   return createServer((request, response) => {
-    void route(request, response, options).catch((error: unknown) => {
+    void route(request, response, options).catch(() => {
       sendJson(response, 500, {
         error: {
           code: "internal_error",
-          message: error instanceof Error ? error.message : "unknown internal error"
+          message: "Internal server error"
         }
       });
     });

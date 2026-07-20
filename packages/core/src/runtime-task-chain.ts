@@ -43,6 +43,7 @@ type SiteRuntimeId = "xiaohongshu" | "boss";
 
 export type RuntimeTaskSubmissionRequest = {
   run_id: string;
+  run_claim_token?: string;
   task_intent: unknown;
   package_ref?: string;
   public_query?: { query: string; city_code?: string; page?: number; limit?: number };
@@ -790,6 +791,7 @@ export async function submitRuntimeTask(
   const package_ref = request.package_ref ?? taskPackageRef(request.task_intent);
   const base = {
     run_id: request.run_id,
+    ...(request.run_claim_token === undefined ? {} : { run_claim_token: request.run_claim_token }),
     task_intent: request.task_intent,
     ...(package_ref === undefined ? {} : { package_ref })
   };

@@ -1,7 +1,15 @@
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
+import {
+  isFileOwnershipOwnerAlive,
+  readFileOwnership,
+  recoverDeadFileOwnership,
+  releaseFileOwnership,
+  tryAcquireFileOwnership,
+  withFileOwnershipLock
+} from "./file-ownership.js";
 import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
@@ -224,11 +232,16 @@ export type RunRecordPatch = {
 export type FileRunRecordStoreOptions = {
   directory: string;
   clock?: () => Date;
+  lockTimeoutMs?: number;
 };
 
 export type FileRunRecordStore = {
   readonly directory: string;
-  createRunRecord(input: CreateRunRecordInput): Promise<RunRecord>;
+  claimRunId(runId: string, ownerRef?: string): Promise<string | undefined>;
+  getRunIdClaim(runId: string): Promise<{ owner_ref: string; owner_alive: boolean } | undefined>;
+  recoverRunIdClaim(runId: string, expectedOwnerRef: string): Promise<boolean>;
+  releaseRunIdClaim(runId: string, claimToken: string): Promise<void>;
+  createRunRecord(input: CreateRunRecordInput, claimToken?: string): Promise<RunRecord>;
   getRunRecord(runId: string): Promise<RunRecord | undefined>;
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
   listRunRecords(): Promise<RunRecord[]>;
@@ -339,6 +352,14 @@ function validateRunId(runId: string): string {
 
 function runRecordPath(directory: string, runId: string): string {
   return join(directory, `${validateRunId(runId)}.json`);
+}
+
+function runClaimPath(directory: string, runId: string): string {
+  return join(`${directory}.run-id-claims`, `${validateRunId(runId)}.claim`);
+}
+
+function runLockPath(directory: string, runId: string): string {
+  return join(`${directory}.locks`, `${validateRunId(runId)}.lock`);
 }
 
 function assertTransition(current: RunRecordStatus, next: RunRecordStatus): void {
@@ -644,9 +665,23 @@ async function writeRecord(directory: string, record: RunRecord): Promise<void> 
   await rename(temp, target);
 }
 
+async function createRecord(directory: string, record: RunRecord): Promise<void> {
+  assertRunRecord(record);
+  await mkdir(directory, { recursive: true });
+  const target = runRecordPath(directory, record.run_id);
+  const temp = join(directory, `.${record.run_id}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+  await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  try {
+    await link(temp, target);
+  } finally {
+    await unlink(temp).catch(() => undefined);
+  }
+}
+
 export function createFileRunRecordStore(options: FileRunRecordStoreOptions): FileRunRecordStore {
   const clock = options.clock ?? (() => new Date());
   const directory = options.directory;
+  const lockTimeoutMs = options.lockTimeoutMs ?? 30_000;
 
   async function getRunRecord(runId: string): Promise<RunRecord | undefined> {
     const record = await readRecord(runRecordPath(directory, runId));
@@ -656,44 +691,77 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
     return record;
   }
 
+  async function claimRunId(runId: string, ownerRef = `direct-run:${runId}`): Promise<string | undefined> {
+    const target = runRecordPath(directory, runId);
+    if (await readRecord(target)) return undefined;
+    const claimPath = runClaimPath(directory, runId);
+    const owner = await tryAcquireFileOwnership(claimPath, ownerRef);
+    if (!owner) return undefined;
+    if (await readRecord(target)) {
+      await releaseFileOwnership(claimPath, owner.token).catch(() => false);
+      return undefined;
+    }
+    return owner.token;
+  }
+
+  async function getRunIdClaim(runId: string): Promise<{ owner_ref: string; owner_alive: boolean } | undefined> {
+    const owner = await readFileOwnership(runClaimPath(directory, runId));
+    return owner ? { owner_ref: owner.owner_ref, owner_alive: await isFileOwnershipOwnerAlive(owner) } : undefined;
+  }
+
+  async function recoverRunIdClaim(runId: string, expectedOwnerRef: string): Promise<boolean> {
+    if (await getRunRecord(runId)) return false;
+    return recoverDeadFileOwnership(runClaimPath(directory, runId), expectedOwnerRef);
+  }
+
+  async function releaseRunIdClaim(runId: string, claimToken: string): Promise<void> {
+    await releaseFileOwnership(runClaimPath(directory, runId), claimToken).catch(() => false);
+  }
+
   return {
     directory,
+    claimRunId,
+    getRunIdClaim,
+    recoverRunIdClaim,
+    releaseRunIdClaim,
 
-    async createRunRecord(input) {
-      const path = runRecordPath(directory, input.run_id);
-      const existing = await readRecord(path);
-      if (existing) {
+    async createRunRecord(input, claimedToken) {
+      const record = makeRecord(input, clock().toISOString());
+      let claimToken = claimedToken ?? await claimRunId(record.run_id);
+      if (claimToken === undefined && claimedToken === undefined) {
+        const directOwnerRef = `direct-run:${record.run_id}`;
+        if (await recoverRunIdClaim(record.run_id, directOwnerRef)) claimToken = await claimRunId(record.run_id, directOwnerRef);
+      }
+      const claimOwner = claimToken === undefined ? undefined : await readFileOwnership(runClaimPath(directory, record.run_id));
+      if (claimToken === undefined || claimOwner?.token !== claimToken) {
         throw new Error(`run record already exists: ${input.run_id}`);
       }
-      const record = makeRecord(input, clock().toISOString());
-      await writeRecord(directory, record);
+      try {
+        await createRecord(directory, record);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+          throw new Error(`run record already exists: ${input.run_id}`);
+        }
+        throw error;
+      }
       return record;
     },
 
     getRunRecord,
 
     async updateRunRecord(runId, patch) {
-      const record = await getRunRecord(runId);
-      if (!record) {
-        throw new Error(`run record not found: ${runId}`);
-      }
-      const nextStatus = patch.status ?? record.status;
-      assertTransition(record.status, nextStatus);
-      const now = clock().toISOString();
-      const next = withOptionalFields(
-        {
-          ...record,
-          status: nextStatus,
-          updated_at: now
-        },
-        patch
-      );
-      if (terminalRunRecordStatuses.has(nextStatus) && !next.terminal_at) {
-        next.terminal_at = now;
-      }
-      assertRunRecord(next);
-      await writeRecord(directory, next);
-      return next;
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        const nextStatus = patch.status ?? record.status;
+        assertTransition(record.status, nextStatus);
+        const now = clock().toISOString();
+        const next = withOptionalFields({ ...record, status: nextStatus, updated_at: now }, patch);
+        if (terminalRunRecordStatuses.has(nextStatus) && !next.terminal_at) next.terminal_at = now;
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
     },
 
     async listRunRecords() {

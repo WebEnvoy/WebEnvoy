@@ -1,4 +1,4 @@
-import type { ActionRequest, AdmissionDecision, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
 
@@ -42,6 +42,7 @@ export type TaskIntentEnvelope = {
 
 export type TaskSubmissionInput = HarborAdmissionInput & {
   run_id: string;
+  run_claim_token?: string;
   task_intent: unknown;
   package_ref?: string;
   lode_package_contract?: LodePackageAdmissionContract;
@@ -288,7 +289,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   };
 }
 
-function parseTaskIntent(value: unknown): TaskIntentEnvelope | FailureRecord {
+export function validateTaskIntent(value: unknown): TaskIntentEnvelope | FailureRecord {
   const privateField = findForbiddenField(value, privateFieldNames);
   if (privateField) {
     return requestInvalid(`private_field_rejected:${privateField}`, "remove_private_field");
@@ -415,17 +416,18 @@ function harborFailureRequiresUserAction(code: string): boolean {
 }
 
 export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, input: TaskSubmissionInput): Promise<TaskSubmissionResult> {
-  const taskIntent = parseTaskIntent(input.task_intent);
+  const taskIntent = validateTaskIntent(input.task_intent);
   if (isFailure(taskIntent)) {
     return {
       ok: false,
       failure: taskIntent
     };
   }
+  const createRunRecord = (record: CreateRunRecordInput) => store.createRunRecord(record, input.run_claim_token);
 
   const writeGuardrail = writeGuardrailFailure(taskIntent);
   if (writeGuardrail) {
-    const runRecord = await store.createRunRecord({
+    const runRecord = await createRunRecord({
       run_id: input.run_id,
       status: "failed",
       task_intent_ref: taskIntent.intent_id,
@@ -453,7 +455,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
   }
 
   if (input.lode_resolution_failure) {
-    const runRecord = await store.createRunRecord({
+    const runRecord = await createRunRecord({
       run_id: input.run_id,
       status: "failed",
       task_intent_ref: taskIntent.intent_id,
@@ -480,7 +482,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
 
   const lodeAdmission = validateLodePackageAdmission(taskIntent, input);
   if (!lodeAdmission.ok) {
-    const runRecord = await store.createRunRecord({
+    const runRecord = await createRunRecord({
       run_id: input.run_id,
       status: "failed",
       task_intent_ref: taskIntent.intent_id,
@@ -506,7 +508,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
   }
 
   if (input.harbor_admission_failure) {
-    const runRecord = await store.createRunRecord({
+    const runRecord = await createRunRecord({
       run_id: input.run_id,
       status: harborAdmissionStatus(input.harbor_admission_failure),
       task_intent_ref: taskIntent.intent_id,
@@ -544,7 +546,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
         failure: harborAdmission.failure
       };
     }
-    const runRecord = await store.createRunRecord({
+    const runRecord = await createRunRecord({
       run_id: input.run_id,
       status: harborAdmissionStatus(harborAdmission.failure),
       task_intent_ref: taskIntent.intent_id,
@@ -600,7 +602,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
         evidence_refs: harborAdmission.evidence_refs
       })
     : undefined;
-  const runRecord = await store.createRunRecord({
+  const runRecord = await createRunRecord({
     ...runRecordInput,
     runtime_binding_refs: harborAdmission.runtime_binding_refs,
     evidence_refs: harborAdmission.evidence_refs,
