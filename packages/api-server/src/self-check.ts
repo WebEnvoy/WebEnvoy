@@ -290,6 +290,30 @@ async function main(): Promise<void> {
     assert.equal(rejectedCompatibility.status, 400);
     assert.equal(asRecord(asRecord(rejectedCompatibility.body).error).code, "private_field_rejected:cookies");
 
+    for (const unsafeTarget of [
+      "https://preview-user:preview-password@www.xiaohongshu.com/search_result/",
+      "https://www.xiaohongshu.com/search_result/?access_token=must-not-echo",
+      "arbitrary-opaque-target"
+    ]) {
+      const unsafeCompatibility = await postJson(port, "/identity-compatibility-preview", {
+        schema_version: identityCompatibilityPreviewRequestSchemaVersion,
+        package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+        version: "0.1.0",
+        operation_id: "xhs_search_notes",
+        operation_mode: "read",
+        target_ref: unsafeTarget,
+        target_origin: "https://www.xiaohongshu.com",
+        resource_requirement_ref: "xiaohongshu.search-notes.resources",
+        resource_requirement_profile_id: "fixture",
+        identity_environment_refs: ["identity-env-preview"]
+      });
+      assert.equal(unsafeCompatibility.status, 400);
+      assert.equal(asRecord(asRecord(unsafeCompatibility.body).error).code, "identity_compatibility_request_invalid");
+      assert.equal(JSON.stringify(unsafeCompatibility.body).includes("must-not-echo"), false);
+      assert.equal(JSON.stringify(unsafeCompatibility.body).includes("preview-password"), false);
+    }
+
     const previewPath = "/identity-compatibility-preview";
     const missingMediaType = await requestBody(port, previewPath, "POST", "{}");
     assert.equal(missingMediaType.status, 415);

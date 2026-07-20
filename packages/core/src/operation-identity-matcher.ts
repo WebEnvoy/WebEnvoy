@@ -1,10 +1,12 @@
 import type { HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
+import { isOpaqueDetailRef } from "./detail-target-store.js";
 import type {
   LodePackageAdmissionContract,
   LodeRequiredHarborFact,
   LodeRuntimeConsumptionEntry
 } from "./lode-admission.js";
 import type { FailureRecord } from "./run-record-store.js";
+import { normalizePublicHttpTarget, normalizePublicOrigin } from "./public-target-reference.js";
 
 export type LockedOperationSelection = {
   package_ref: string;
@@ -15,7 +17,7 @@ export type LockedOperationSelection = {
   target_ref: string;
   target_origin: string;
   resource_requirement_ref: string;
-  resource_requirement_profile_id: string;
+  resource_requirement_profile_id?: string;
 };
 
 export type LockedOperationMatch = {
@@ -24,21 +26,21 @@ export type LockedOperationMatch = {
   required_harbor_facts: readonly LodeRequiredHarborFact[];
 };
 
+export const opaqueDetailOperationContract = {
+  package_ref: "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
+  lock_ref: "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0",
+  version: "0.1.0",
+  site_slug: "xiaohongshu",
+  operation_id: "xhs_read_note_detail",
+  operation_mode: "read"
+} as const;
+
 function failure(code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
   return { category: code.startsWith("identity_") || code.startsWith("runtime_") ? "resource_admission" : "capability_contract", code, phase, recovery_hint };
 }
 
 function bounded(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
-}
-
-function exactOrigin(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value;
-  } catch {
-    return false;
-  }
 }
 
 function sameOrigin(left: string, right: string): boolean {
@@ -49,13 +51,21 @@ function sameOrigin(left: string, right: string): boolean {
   }
 }
 
-function targetRefMatchesOrigin(targetRef: string, targetOrigin: string): boolean {
-  try {
-    const target = new URL(targetRef);
-    return (target.protocol === "https:" || target.protocol === "http:") && target.origin === targetOrigin;
-  } catch {
-    return !targetRef.includes("://");
-  }
+export function isOpaqueDetailOperationContract(runtime: LodeRuntimeConsumptionEntry | undefined): boolean {
+  return runtime?.package_ref === opaqueDetailOperationContract.package_ref &&
+    runtime.lock_ref === opaqueDetailOperationContract.lock_ref &&
+    runtime.version === opaqueDetailOperationContract.version && runtime.site_slug === opaqueDetailOperationContract.site_slug &&
+    runtime.operation_id === opaqueDetailOperationContract.operation_id && runtime.operation_mode === opaqueDetailOperationContract.operation_mode;
+}
+
+function normalizeTargetRef(
+  runtime: LodeRuntimeConsumptionEntry,
+  targetRef: string,
+  targetOrigin: string
+): string | undefined {
+  const publicTarget = normalizePublicHttpTarget(targetRef);
+  if (publicTarget.ok) return publicTarget.target_origin === targetOrigin ? publicTarget.target_ref : undefined;
+  return isOpaqueDetailOperationContract(runtime) && isOpaqueDetailRef(targetRef) ? targetRef : undefined;
 }
 
 export function matchLockedLodeOperation(
@@ -66,8 +76,8 @@ export function matchLockedLodeOperation(
     !bounded(selection.package_ref, 512) || !bounded(selection.lock_ref, 512) || !bounded(selection.version, 64) ||
     !bounded(selection.operation_id, 128) || !bounded(selection.operation_mode, 32) || !bounded(selection.target_ref, 2048) ||
     !bounded(selection.target_origin, 512) || !bounded(selection.resource_requirement_ref, 256) ||
-    !bounded(selection.resource_requirement_profile_id, 256) || !exactOrigin(selection.target_origin) ||
-    !targetRefMatchesOrigin(selection.target_ref, selection.target_origin)
+    (selection.resource_requirement_profile_id !== undefined && !bounded(selection.resource_requirement_profile_id, 256)) ||
+    !normalizePublicOrigin(selection.target_origin)
   ) return failure("target_contract_invalid", "resource_matching", "fix_input");
 
   if (contract.package_ref !== selection.package_ref) return failure("package_ref_mismatch", "admission", "select_capability_version");
@@ -82,8 +92,14 @@ export function matchLockedLodeOperation(
     resource.package_ref !== selection.package_ref || resource.operation_mode !== selection.operation_mode ||
     resource.resource_requirements_id !== selection.resource_requirement_ref
   ) return failure("resource_requirement_mismatch", "resource_matching", "repair_package_contract");
-  const profiles = resource.resource_requirement_profiles.filter((profile) => profile.requirement_profile_id === selection.resource_requirement_profile_id);
-  if (profiles.length !== 1 || (profiles[0]?.operation_boundary !== undefined && profiles[0].operation_boundary !== selection.operation_mode)) {
+  const profiles = selection.resource_requirement_profile_id === undefined
+    ? resource.resource_requirement_profiles
+    : resource.resource_requirement_profiles.filter((profile) => profile.requirement_profile_id === selection.resource_requirement_profile_id);
+  if (
+    profiles.length === 0 ||
+    (selection.resource_requirement_profile_id !== undefined && profiles.length !== 1) ||
+    profiles.some((profile) => !bounded(profile.requirement_profile_id, 256) || (profile.operation_boundary !== undefined && profile.operation_boundary !== selection.operation_mode))
+  ) {
     return failure("resource_requirement_profile_mismatch", "resource_matching", "repair_package_contract");
   }
 
@@ -96,14 +112,20 @@ export function matchLockedLodeOperation(
   ) return failure("runtime_consumption_mismatch", "admission", "repair_package_contract");
   if (
     !bounded(runtime.site_slug, 128) || !Array.isArray(runtime.allowed_origins) || runtime.allowed_origins.length === 0 ||
-    runtime.allowed_origins.length > 16 || !runtime.allowed_origins.every((origin) => bounded(origin, 512) && exactOrigin(origin))
+    runtime.allowed_origins.length > 16 || !runtime.allowed_origins.every((origin) => bounded(origin, 512) && Boolean(normalizePublicOrigin(origin)))
   ) return failure("runtime_consumption_invalid", "admission", "repair_package_contract");
   if (!runtime.allowed_origins.some((origin) => sameOrigin(origin, selection.target_origin))) {
     return failure("target_origin_not_allowed", "resource_matching", "fix_input");
   }
 
-  const requiredFacts = (profiles[0]?.required_harbor_facts ?? []).filter((fact) => fact.required !== false);
-  return { selection, runtime_consumption: runtime, required_harbor_facts: requiredFacts as readonly LodeRequiredHarborFact[] };
+  const normalizedTargetRef = normalizeTargetRef(runtime, selection.target_ref, selection.target_origin);
+  if (!normalizedTargetRef) return failure("target_contract_invalid", "resource_matching", "fix_input");
+  const requiredFacts = profiles.flatMap((profile) => profile.required_harbor_facts ?? []).filter((fact) => fact.required !== false);
+  return {
+    selection: { ...selection, target_ref: normalizedTargetRef },
+    runtime_consumption: runtime,
+    required_harbor_facts: requiredFacts as readonly LodeRequiredHarborFact[]
+  };
 }
 
 export function matchLockedOperationIdentity(
@@ -126,7 +148,7 @@ export function matchLockedOperationIdentity(
 
   const origin = identity.site_binding.origin;
   if (
-    !origin.startsWith("https://") || !exactOrigin(origin) || !sameOrigin(origin, operation.selection.target_origin) ||
+    !origin.startsWith("https://") || !normalizePublicOrigin(origin) || !sameOrigin(origin, operation.selection.target_origin) ||
     !operation.runtime_consumption.allowed_origins.some((allowed) => sameOrigin(origin, allowed))
   ) return failure("runtime_origin_not_allowed", "resource_matching", "fix_input");
   return undefined;

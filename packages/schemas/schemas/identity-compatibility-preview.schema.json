@@ -23,7 +23,16 @@
     "version": { "type": "string", "minLength": 1, "maxLength": 64 },
     "operation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
     "operation_mode": { "enum": ["read", "validate_only", "draft", "preview"] },
-    "target_ref": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "target_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "The canonical credential-free HTTP(S) target or a validated detail_ref for the explicitly allowlisted detail operation; sensitive input is never echoed.",
+      "oneOf": [
+        { "format": "uri", "pattern": "^https?://" },
+        { "pattern": "^detail_ref_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$" }
+      ]
+    },
     "target_origin": { "type": "string", "format": "uri", "pattern": "^https?://[^/]+$", "maxLength": 512 },
     "resource_requirement_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
     "resource_requirement_profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },

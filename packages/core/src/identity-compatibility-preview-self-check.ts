@@ -13,6 +13,9 @@ import { matchLockedLodeOperation, matchLockedOperationIdentity } from "./operat
 
 const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
 const lockRef = "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0";
+const detailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
+const detailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
+const detailRef = "detail_ref_12345678-1234-4123-8123-123456789abc";
 const now = new Date("2026-07-21T08:00:00.000Z");
 const providerStatus = {
   schema_version: "harbor-browser-provider-status/v0" as const,
@@ -59,6 +62,48 @@ function packageContract(freshness = "owner_current"): LodePackageAdmissionContr
       required_evidence_ref_kinds: ["snapshot_ref"],
       post_check_id: "xhs-search-post-check",
       required_post_check_fields: ["status"]
+    }
+  };
+}
+
+function multiProfilePackageContract(): LodePackageAdmissionContract {
+  const contract = packageContract();
+  return {
+    ...contract,
+    resource_requirements: {
+      ...contract.resource_requirements,
+      resource_requirement_profiles: [
+        ...contract.resource_requirements.resource_requirement_profiles,
+        { requirement_profile_id: "runtime-fallback", operation_boundary: "read", required_harbor_facts: [] }
+      ]
+    }
+  };
+}
+
+function detailPackageContract(): LodePackageAdmissionContract {
+  return {
+    ...packageContract(),
+    package_ref: detailPackageRef,
+    source_ref: detailPackageRef,
+    lock_ref: detailLockRef,
+    capability_id: "read-note-detail",
+    operation_id: "xhs_read_note_detail",
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.read-note-detail.resources",
+      package_ref: detailPackageRef,
+      operation_mode: "read",
+      resource_requirement_profiles: [{
+        requirement_profile_id: "identity-detail-preview",
+        operation_boundary: "read",
+        required_harbor_facts: [{ fact_key: "identity.user_logged_in.confirmed", owner: "Harbor", required: true, freshness: "owner_current" }]
+      }]
+    },
+    runtime_consumption: {
+      ...packageContract().runtime_consumption!,
+      package_ref: detailPackageRef,
+      lock_ref: detailLockRef,
+      operation_id: "xhs_read_note_detail",
+      resource_requirements_id: "xiaohongshu.read-note-detail.resources"
     }
   };
 }
@@ -146,6 +191,67 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.deepEqual(deterministic.candidates[2]?.reason_codes, ["identity_origin_mismatch"]);
   assert.equal(deterministic.candidates[3]?.status, "requires_setup");
   assert.equal(deterministic.candidates[3]?.recovery_action, "open_manual_auth");
+  assert.equal(deterministic.target_ref, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+
+  const canonicalTarget = await previewIdentityCompatibility(request(["identity-compatible"], {
+    target_ref: "HTTPS://WWW.XIAOHONGSHU.COM:443/search_result/../search_result/?keyword=city%20coffee"
+  }), baseDependencies);
+  assert(!("category" in canonicalTarget));
+  assert.equal(canonicalTarget.target_ref, "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee");
+
+  for (const sensitiveTarget of [
+    "https://preview-user:preview-password@www.xiaohongshu.com/search_result/",
+    "https://www.xiaohongshu.com/search_result/?access_token=must-not-echo",
+    "https://www.xiaohongshu.com/search_result/?next=secret"
+  ]) {
+    const rejectedTarget = await previewIdentityCompatibility(request(["identity-compatible"], { target_ref: sensitiveTarget }), baseDependencies);
+    assert("category" in rejectedTarget);
+    assert.equal(rejectedTarget.code, "identity_compatibility_request_invalid");
+    assert.equal(JSON.stringify(rejectedTarget).includes("must-not-echo"), false);
+    assert.equal(JSON.stringify(rejectedTarget).includes("preview-password"), false);
+  }
+
+  const invalidOpaque = await previewIdentityCompatibility(request(["identity-compatible"], { target_ref: "arbitrary-opaque-target" }), baseDependencies);
+  assert("category" in invalidOpaque);
+  assert.equal(invalidOpaque.code, "identity_compatibility_request_invalid");
+
+  const detailPreview = await previewIdentityCompatibility(request(["identity-compatible"], {
+    package_ref: detailPackageRef,
+    lock_ref: detailLockRef,
+    operation_id: "xhs_read_note_detail",
+    target_ref: detailRef,
+    resource_requirement_ref: "xiaohongshu.read-note-detail.resources",
+    resource_requirement_profile_id: "identity-detail-preview"
+  }), {
+    ...baseDependencies,
+    lodePackageResolver: async () => detailPackageContract()
+  });
+  assert(!("category" in detailPreview));
+  assert.equal(detailPreview.candidates[0]?.status, "compatible");
+  assert.equal(detailPreview.target_ref, detailRef);
+
+  const unsupportedOpaque = await previewIdentityCompatibility(request(["identity-compatible"], { target_ref: detailRef }), baseDependencies);
+  assert(!("category" in unsupportedOpaque));
+  assert.deepEqual(unsupportedOpaque.candidates[0]?.reason_codes, ["target_origin_mismatch"]);
+
+  const multiProfilePreview = await previewIdentityCompatibility(request(["identity-compatible"]), {
+    ...baseDependencies,
+    lodePackageResolver: async () => multiProfilePackageContract()
+  });
+  assert(!("category" in multiProfilePreview));
+  assert.equal(multiProfilePreview.candidates[0]?.status, "compatible");
+  const formalMultiProfileMatch = matchLockedLodeOperation(multiProfilePackageContract(), {
+    package_ref: packageRef,
+    lock_ref: lockRef,
+    version: "0.1.0",
+    operation_id: "xhs_search_notes",
+    operation_mode: "read",
+    target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee",
+    target_origin: "https://www.xiaohongshu.com",
+    resource_requirement_ref: "xiaohongshu.search-notes.resources"
+  });
+  assert(!("category" in formalMultiProfileMatch));
+  assert.equal(matchLockedOperationIdentity(formalMultiProfileMatch, identityFacts("identity-compatible"), "identity-compatible"), undefined);
 
   const uncertainAuthentication = identityFacts("identity-auth-uncertain", {
     login_state: {
@@ -214,8 +320,13 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   assert(!("category" in versionMismatch));
   assert.deepEqual(versionMismatch.candidates[0]?.reason_codes, ["package_version_mismatch"]);
+  const targetMismatch = await previewIdentityCompatibility(request(["identity-compatible"], { target_origin: "https://example.org" }), {
+    ...baseDependencies,
+    harborIdentityFactsReader: noRead
+  });
+  assert("category" in targetMismatch);
+  assert.equal(targetMismatch.code, "identity_compatibility_request_invalid");
   const selectionMismatches = [
-    { target_origin: "https://example.org" },
     { resource_requirement_ref: "xiaohongshu.other.resources" },
     { resource_requirement_profile_id: "other-profile" }
   ];

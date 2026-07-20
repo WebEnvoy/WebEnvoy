@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./run-record-store.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import type { LodeRequiredHarborFact } from "./lode-admission.js";
 
 export type HarborUnavailable = {
@@ -561,7 +562,8 @@ function validateWritePrecheckFacts(
   const formState = contractObject(facts?.form_state);
   const guard = contractObject(facts?.pre_write_guard);
   const privacy = contractObject(facts?.privacy_boundary);
-  const targetRef = contractString(target?.target_ref);
+  const rawTargetRef = contractString(target?.target_ref);
+  const targetRef = rawTargetRef === undefined ? undefined : normalizeStoredTargetRef(rawTargetRef);
   const snapshotRef = contractString(target?.snapshot_ref) ?? contractString(formState?.snapshot_ref);
   const refmapRef = contractString(target?.refmap_ref);
   const evidenceRefs = Array.isArray(target?.evidence_refs) ? target.evidence_refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];

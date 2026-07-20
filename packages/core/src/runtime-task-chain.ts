@@ -22,6 +22,8 @@ import {
 import {
   matchLockedLodeOperation,
   matchLockedOperationIdentity,
+  isOpaqueDetailOperationContract,
+  opaqueDetailOperationContract,
   type LockedOperationMatch,
   type LockedOperationSelection
 } from "./operation-identity-matcher.js";
@@ -127,8 +129,8 @@ const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> 
   "registry/detail-runtime-consumption.json": "8d68ec1c56faf5b24d5194c283bd72c7698c9ba2f71e00fd860628a206e54cb5",
   "registry/validate-only-runtime-consumption.json": "bac6450102af029a35b863d8f7154e5184806daeed30e8207bfe7439d556ad86"
 };
-const xhsDetailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
-const xhsDetailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
+const xhsDetailPackageRef = opaqueDetailOperationContract.package_ref;
+const xhsDetailLockRef = opaqueDetailOperationContract.lock_ref;
 const lodeDetailTruthAssetSha256 = "dca2761b7feb09a0ab86f7202e153da3c97b21a75299af6adaf64eade319deef";
 const canonicalDeferredProbeOperations = [
   {
@@ -240,7 +242,7 @@ function xhsDetailRefFromIntent(taskIntent: unknown): string | FailureRecord | u
 }
 
 function isXhsDetailOperation(entry: LodeRuntimeConsumptionEntry | undefined): boolean {
-  return entry?.package_ref === xhsDetailPackageRef && entry.operation_id === "xhs_read_note_detail";
+  return isOpaqueDetailOperationContract(entry);
 }
 
 function isHarborSceneReference(value: unknown): value is HarborCoreSceneReference {
@@ -318,7 +320,6 @@ function operationSelectionFromTask(
   detailOperation: boolean,
   requestedTargetRef: string | undefined
 ): LockedOperationSelection | FailureRecord {
-  const profile = contract.resource_requirements.resource_requirement_profiles;
   const resourceRef = taskIntent.resource_requirement_refs.length === 1 ? taskIntent.resource_requirement_refs[0] : undefined;
   const scopeTargetUrl = safeHttpUrl(taskIntent.scope.target_ref);
   const targetUrl = requestedTargetRef ?? scopeTargetUrl ?? (detailOperation ? contract.runtime_consumption?.allowed_origins[0] : undefined);
@@ -329,7 +330,7 @@ function operationSelectionFromTask(
     targetOrigin = undefined;
   }
   if (
-    !contract.lock_ref || !contract.operation_id || profile.length !== 1 || !resourceRef || !targetUrl || !targetOrigin ||
+    !contract.lock_ref || !contract.operation_id || !resourceRef || !targetUrl || !targetOrigin ||
     (!detailOperation && (!scopeTargetUrl || !sameOrigin(scopeTargetUrl, targetUrl)))
   ) {
     return failure("capability_contract", "operation_selection_invalid", "resource_matching", "fix_input");
@@ -342,8 +343,7 @@ function operationSelectionFromTask(
     operation_mode: taskIntent.policy.execution_intent,
     target_ref: detailOperation ? taskIntent.scope.target_ref : targetUrl,
     target_origin: targetOrigin,
-    resource_requirement_ref: resourceRef,
-    resource_requirement_profile_id: profile[0]!.requirement_profile_id
+    resource_requirement_ref: resourceRef
   };
 }
 

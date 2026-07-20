@@ -571,7 +571,8 @@ async function writeLodeRegistry(
             { fact_key: "evidence.snapshot_ref.available", owner: "Harbor", required: true },
             { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
           ]
-        }
+        },
+        { requirement_profile_id: "xiaohongshu-search-notes-empty-fallback", operation_boundary: "read", required_harbor_facts: [] }
       ]
     })
   );
@@ -1854,7 +1855,13 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         assert.notEqual(asRecord(run.post_check ?? {}).status, "passed", name);
       };
       const assertRejectedBeforeReadOperation = (value: unknown, name: string) => {
-        const run = asRecord(asRecord(value).run);
+        const body = asRecord(value);
+        if (body.run === undefined) {
+          assert.equal(body.ok, false, name);
+          assert.equal(typeof asRecord(body.error).code, "string", name);
+          return;
+        }
+        const run = asRecord(body.run);
         assert(["blocked", "failed"].includes(String(run.status)), name);
         assert.equal(run.result_ref, undefined, name);
         assert.equal(run.projection_ref, undefined, name);
@@ -1863,6 +1870,27 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       };
 
       const successfulSearch = await submitXiaohongshuSearch("success");
+      const readsBeforeUnsafeTargets = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      for (const [name, unsafeTarget] of [
+        ["credential_url", "https://preview-user:preview-password@www.xiaohongshu.com/search_result/"],
+        ["sensitive_query", "https://www.xiaohongshu.com/search_result/?access_token=must-not-echo"],
+        ["illegal_opaque", "arbitrary-opaque-target"]
+      ] as const) {
+        const unsafeIntent = xiaohongshuTaskIntent(`intent_api_xhs_unsafe_target_${name}`);
+        unsafeIntent.input = { ...asRecord(unsafeIntent.input), refs: [unsafeTarget] };
+        unsafeIntent.scope = { ...asRecord(unsafeIntent.scope), target_ref: unsafeTarget };
+        const rejectedTarget = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_xhs_unsafe_target_${name}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: unsafeIntent,
+          public_query: { query: "city coffee" },
+          harbor: { identity_environment_ref: "identity-env_runtime_api" }
+        });
+        assert.equal(asRecord(rejectedTarget.body).ok, false, name);
+        assert.equal(JSON.stringify(rejectedTarget.body).includes("must-not-echo"), false, name);
+        assert.equal(JSON.stringify(rejectedTarget.body).includes("preview-password"), false, name);
+      }
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeUnsafeTargets);
       const successfulDetail = await submitXiaohongshuDetail("success", successfulSearch.detailRef);
       assert.equal(successfulDetail.status, 202, JSON.stringify(successfulDetail.body));
       const successfulDetailRun = asRecord(asRecord(successfulDetail.body).run);

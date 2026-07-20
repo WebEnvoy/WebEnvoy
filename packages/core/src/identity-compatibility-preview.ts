@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./run-record-store.js";
+import { isOpaqueDetailRef } from "./detail-target-store.js";
 import {
   inferHarborIdentityResourceFacts,
   validateHarborIdentityEnvironmentFacts,
@@ -18,6 +19,8 @@ import {
   type LockedOperationMatch
 } from "./operation-identity-matcher.js";
 import type { LodePackageResolver } from "./runtime-task-chain.js";
+import { normalizePublicHttpTarget, normalizePublicOrigin } from "./public-target-reference.js";
+import { isSensitiveFieldName } from "./sensitive-field-taxonomy.js";
 export { createHttpHarborIdentityFactsReader, type HttpHarborIdentityFactsReaderOptions } from "./harbor-identity-facts-reader.js";
 
 export const identityCompatibilityPreviewRequestSchemaVersion = "webenvoy.identity-compatibility-preview-request.v0" as const;
@@ -101,11 +104,6 @@ const requestFields = new Set([
   "resource_requirement_ref", "resource_requirement_profile_id", "identity_environment_refs"
 ]);
 const operationModes = new Set(["read", "validate_only", "draft", "preview"]);
-const privateFieldNames = new Set([
-  "cookie", "cookies", "token", "tokens", "password", "verification_code", "profile_storage", "profile_state",
-  "storage_value", "session_token", "raw_payload", "raw_body", "raw_evidence_body", "dom", "har", "screenshot",
-  "network_response_body", "cdp_endpoint", "viewer_url", "webSocketDebuggerUrl"
-]);
 const consumerBoundary =
   "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed." as const;
 const maxCandidates = 32;
@@ -136,7 +134,7 @@ function findPrivateField(value: unknown): string | undefined {
     return undefined;
   }
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (privateFieldNames.has(key)) return key;
+    if (isSensitiveFieldName(key)) return key;
     const found = findPrivateField(entry);
     if (found) return found;
   }
@@ -153,15 +151,19 @@ export function parseIdentityCompatibilityPreviewRequest(value: unknown): Identi
   const version = boundedString(input.version, 64);
   const operationId = boundedString(input.operation_id, 128);
   const operationMode = boundedString(input.operation_mode, 32);
-  const targetRef = boundedString(input.target_ref, 2048);
-  const targetOrigin = boundedString(input.target_origin, 512);
+  const rawTargetRef = boundedString(input.target_ref, 2048);
+  const rawTargetOrigin = boundedString(input.target_origin, 512);
+  const publicTarget = rawTargetRef === undefined ? undefined : normalizePublicHttpTarget(rawTargetRef);
+  const targetRef = publicTarget?.ok ? publicTarget.target_ref : isOpaqueDetailRef(rawTargetRef) ? rawTargetRef : undefined;
+  const targetOrigin = rawTargetOrigin === undefined ? undefined : normalizePublicOrigin(rawTargetOrigin);
   const resourceRequirementRef = boundedString(input.resource_requirement_ref, 256);
   const resourceRequirementProfileId = boundedString(input.resource_requirement_profile_id, 256);
   const refs = input.identity_environment_refs;
   if (
     input.schema_version !== identityCompatibilityPreviewRequestSchemaVersion || !packageRef || !lockRef || !version || !operationId ||
     !operationMode || !operationModes.has(operationMode) || !targetRef || !targetOrigin || !resourceRequirementRef ||
-    !resourceRequirementProfileId || !Array.isArray(refs) || refs.length === 0 || refs.length > maxCandidates
+    !resourceRequirementProfileId || (publicTarget?.ok === true && publicTarget.target_origin !== targetOrigin) ||
+    !Array.isArray(refs) || refs.length === 0 || refs.length > maxCandidates
   ) return failure("identity_compatibility_request_invalid");
   const identityRefs = refs.map((entry) => boundedString(entry, 256));
   if (identityRefs.some((entry) => entry === undefined) || new Set(identityRefs).size !== identityRefs.length) {
@@ -227,7 +229,12 @@ function packageFailureCandidates(request: IdentityCompatibilityPreviewRequest, 
   })));
 }
 
-function response(request: IdentityCompatibilityPreviewRequest, generatedAt: string, candidates: readonly IdentityCompatibilityCandidate[]): IdentityCompatibilityPreviewResponse {
+function response(
+  request: IdentityCompatibilityPreviewRequest,
+  generatedAt: string,
+  candidates: readonly IdentityCompatibilityCandidate[],
+  normalizedTargetRef = request.target_ref
+): IdentityCompatibilityPreviewResponse {
   return {
     schema_version: identityCompatibilityPreviewSchemaVersion,
     package_ref: request.package_ref,
@@ -235,7 +242,7 @@ function response(request: IdentityCompatibilityPreviewRequest, generatedAt: str
     version: request.version,
     operation_id: request.operation_id,
     operation_mode: request.operation_mode,
-    target_ref: request.target_ref,
+    target_ref: normalizedTargetRef,
     target_origin: request.target_origin,
     resource_requirement_ref: request.resource_requirement_ref,
     resource_requirement_profile_id: request.resource_requirement_profile_id,
@@ -446,5 +453,5 @@ export async function previewIdentityCompatibility(
     }
   });
   await Promise.all(workers);
-  return response(request, generatedAt, candidates);
+  return response(request, generatedAt, candidates, packageMatch.operation.selection.target_ref);
 }

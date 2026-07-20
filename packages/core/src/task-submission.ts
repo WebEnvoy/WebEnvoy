@@ -1,6 +1,7 @@
 import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
 export const actionRequestSchemaVersion = "webenvoy.action-request.v0";
@@ -247,7 +248,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   const capabilityLockRef = fields.capability.lock_ref === undefined ? undefined : asNonEmptyString(fields.capability.lock_ref, "capability_lock_ref_invalid");
   const inputSummary = asNonEmptyString(fields.input.summary, "input_summary_required");
   const scopeTargetType = asNonEmptyString(fields.scope.target_type, "scope_target_type_required");
-  const scopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
+  const rawScopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
   if (isFailure(userIntentSummary)) return userIntentSummary;
   if (isFailure(capabilityRef)) return capabilityRef;
   if (isFailure(capabilityVersion)) return capabilityVersion;
@@ -255,7 +256,11 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   if (isFailure(capabilityLockRef)) return capabilityLockRef;
   if (isFailure(inputSummary)) return inputSummary;
   if (isFailure(scopeTargetType)) return scopeTargetType;
-  if (isFailure(scopeTargetRef)) return scopeTargetRef;
+  if (isFailure(rawScopeTargetRef)) return rawScopeTargetRef;
+  const scopeTargetRef = normalizeStoredTargetRef(rawScopeTargetRef);
+  if (!scopeTargetRef) return requestInvalid("scope_target_ref_sensitive_or_invalid", "fix_input");
+  const normalizedInputRefs = inputRefs?.map(normalizeStoredTargetRef);
+  if (normalizedInputRefs?.some((ref) => ref === undefined)) return requestInvalid("input_ref_sensitive_or_invalid", "fix_input");
 
   return {
     schema_version: fields.schemaVersion,
@@ -273,7 +278,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
     },
     input: {
       summary: inputSummary,
-      ...(inputRefs === undefined ? {} : { refs: inputRefs })
+      ...(normalizedInputRefs === undefined ? {} : { refs: normalizedInputRefs as string[] })
     },
     scope: {
       target_type: scopeTargetType,
@@ -356,6 +361,7 @@ function buildActionRequest(
     ...taskIntent.resource_requirement_refs
   ].filter((ref): ref is string => Boolean(ref));
   const writeFacts = input.harbor_write_precheck_facts && "writable_target" in input.harbor_write_precheck_facts ? input.harbor_write_precheck_facts : undefined;
+  const writableTargetRef = writeFacts === undefined ? undefined : normalizeStoredTargetRef(writeFacts.writable_target.target_ref);
   return {
     schema_version: actionRequestSchemaVersion,
     action_request_id: `action-request:${taskIntent.intent_id}`,
@@ -381,7 +387,7 @@ function buildActionRequest(
     },
     target_refs: {
       scope_target_ref: taskIntent.scope.target_ref,
-      ...(writeFacts === undefined ? {} : { writable_target_ref: writeFacts.writable_target.target_ref, form_state_ref: writeFacts.form_state.snapshot_ref })
+      ...(writeFacts === undefined || writableTargetRef === undefined ? {} : { writable_target_ref: writableTargetRef, form_state_ref: writeFacts.form_state.snapshot_ref })
     },
     ...(refs.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: refs.runtime_binding_refs }),
     ...(refs.evidence_refs === undefined ? {} : { evidence_refs: refs.evidence_refs }),
