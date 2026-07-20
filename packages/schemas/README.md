@@ -10,6 +10,7 @@ The JSON Schema files are the contract truth for the current repository. They ar
 - `docs/adr/0006-common-task-entry-v0.md`
 - `docs/adr/0007-reference-version-ownership-v0.md`
 - `docs/adr/0008-core-technical-architecture-baseline.md`
+- `docs/adr/0009-unified-authorization-policy.md`
 
 The files intentionally stay small:
 
@@ -21,6 +22,7 @@ The files intentionally stay small:
 - `schemas/task-thread.schema.json`
 - `schemas/identity-compatibility-preview-request.schema.json`
 - `schemas/identity-compatibility-preview.schema.json`
+- `schemas/execution-policy-evaluation.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -31,6 +33,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 `fixtures/real-site-*-write-preview-run-record.fixture.json` captures the refs-only real-page write-preview shape for Xiaohongshu draft preview and BOSS greeting preview, including action requests, approval requests, preview results, no-submit state, and cancelled/expired/page-changed terminal states.
 
 `fixtures/task-thread.fixture.json` captures an ordered App-created task turn. Bounded scalar summaries remain visible after restart, while files and long text are represented by owner refs.
+
+`fixtures/execution-policy-destructive-auto.fixture.json` proves that Core preserves a user's explicit `auto` mode for a declared destructive action while retaining its risk marker and effective source.
 
 Run:
 

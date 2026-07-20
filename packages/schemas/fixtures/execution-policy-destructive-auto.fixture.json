@@ -1,0 +1,20 @@
+{
+  "$schema": "execution-policy-evaluation.schema.json",
+  "schema_version": "webenvoy.execution-policy-evaluation.v0",
+  "evaluated_at": "2026-07-21T00:00:00.000Z",
+  "status": "evaluated",
+  "action": {
+    "action_instance_ref": "action-instance:delete-note/1",
+    "action_id": "xhs_delete_note",
+    "target_ref": "target:note/1",
+    "category": "destructive",
+    "declaration_ref": "lode://site-capability/xiaohongshu/delete-note@1.0.0#xhs_delete_note"
+  },
+  "risk_marker": "destructive",
+  "effective_policy": {
+    "mode": "auto",
+    "source": "thread_revision",
+    "source_ref": "policy:thread/2"
+  },
+  "next_step": "execute"
+}

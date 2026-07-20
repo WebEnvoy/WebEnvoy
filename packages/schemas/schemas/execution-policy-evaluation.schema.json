@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/execution-policy-evaluation.v0.schema.json",
+  "title": "WebEnvoy Execution Policy Evaluation v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.execution-policy-evaluation.v0",
+    "compatibility_boundary": "Core evaluates declared business actions only. Confirmation coordination, decision persistence/query, browser atomic actions, raw evidence, credentials, and App UI state are outside this contract.",
+    "source_adrs": [
+      "docs/adr/0008-core-technical-architecture-baseline.md",
+      "docs/adr/0009-unified-authorization-policy.md"
+    ],
+    "field_owners": {
+      "action": "Core projection of the Lode or Harbor owner declaration and current target binding",
+      "effective_policy": "Core evaluator",
+      "confirmation_request": "Core evaluator contract; lifecycle coordination belongs to Core #293"
+    },
+    "policy_precedence": [
+      "single_action_decision",
+      "thread_revision",
+      "installed_skill_user_version",
+      "global_user_config"
+    ],
+    "excluded_policy_sources": ["skill_recommendation"]
+  },
+  "required": ["schema_version", "evaluated_at", "status", "next_step"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.execution-policy-evaluation.v0" },
+    "evaluated_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["evaluated", "stopped"] },
+    "action": { "$ref": "#/$defs/action" },
+    "risk_marker": { "type": ["string", "null"], "enum": ["destructive", null] },
+    "effective_policy": { "$ref": "#/$defs/effective_policy" },
+    "next_step": { "enum": ["execute", "request_confirmation", "stop"] },
+    "stop_reason": {
+      "enum": [
+        "policy_denied",
+        "action_undeclared",
+        "action_unclassifiable",
+        "declaration_invalid",
+        "declaration_not_yet_valid",
+        "declaration_expired",
+        "target_mismatch",
+        "policy_unavailable"
+      ]
+    },
+    "confirmation_request": { "$ref": "#/$defs/confirmation_request" }
+  },
+  "oneOf": [
+    {
+      "properties": { "status": { "const": "evaluated" } },
+      "required": ["action", "risk_marker", "effective_policy"],
+      "allOf": [
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "auto" } } } } },
+          "then": { "properties": { "next_step": { "const": "execute" } }, "not": { "anyOf": [{ "required": ["stop_reason"] }, { "required": ["confirmation_request"] }] } }
+        },
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "confirm" } } } } },
+          "then": { "properties": { "next_step": { "const": "request_confirmation" } }, "required": ["confirmation_request"], "not": { "required": ["stop_reason"] } }
+        },
+        {
+          "if": { "properties": { "effective_policy": { "properties": { "mode": { "const": "deny" } } } } },
+          "then": { "properties": { "next_step": { "const": "stop" }, "stop_reason": { "const": "policy_denied" } }, "required": ["stop_reason"], "not": { "required": ["confirmation_request"] } }
+        }
+      ]
+    },
+    {
+      "properties": {
+        "status": { "const": "stopped" },
+        "next_step": { "const": "stop" },
+        "stop_reason": {
+          "enum": [
+            "action_undeclared",
+            "action_unclassifiable",
+            "declaration_invalid",
+            "declaration_not_yet_valid",
+            "declaration_expired",
+            "target_mismatch",
+            "policy_unavailable"
+          ]
+        }
+      },
+      "required": ["stop_reason"],
+      "not": { "anyOf": [{ "required": ["effective_policy"] }, { "required": ["confirmation_request"] }] }
+    }
+  ],
+  "$defs": {
+    "category": { "enum": ["read", "prepare", "commit", "destructive"] },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_instance_ref", "action_id", "target_ref", "category", "declaration_ref"],
+      "properties": {
+        "action_instance_ref": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "target_ref": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/category" },
+        "declaration_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "effective_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "source", "source_ref"],
+      "properties": {
+        "mode": { "enum": ["auto", "confirm", "deny"] },
+        "source": {
+          "enum": ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"]
+        },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "confirmation_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "action_instance_ref", "action_id", "target_ref", "category", "choices"],
+      "properties": {
+        "scope": { "const": "current_action" },
+        "action_instance_ref": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "target_ref": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/category" },
+        "choices": {
+          "type": "array",
+          "prefixItems": [{ "const": "allow_once" }, { "const": "deny_once" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}

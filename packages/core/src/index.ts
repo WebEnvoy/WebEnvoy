@@ -167,6 +167,27 @@ export {
   normalizeStoredTargetRef
 } from "./public-target-reference.js";
 export {
+  evaluateExecutionPolicy,
+  executionPolicyEvaluationSchemaVersion,
+  matchesBusinessActionTarget,
+  sameOrigin,
+  type BusinessActionCategory,
+  type BusinessActionDeclaration,
+  type BusinessActionRequest,
+  type BusinessActionTarget,
+  type ExecutionPolicyCaller,
+  type ExecutionPolicyContext,
+  type ExecutionPolicyEvaluation,
+  type ExecutionPolicyEvaluationInput,
+  type ExecutionPolicyMode,
+  type ExecutionPolicySource,
+  type ExecutionPolicySources,
+  type EffectiveExecutionPolicy,
+  type EvaluatedBusinessAction,
+  type SingleActionConfirmationRequest,
+  type SingleActionDecision
+} from "./execution-policy.js";
+export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
   recoverInterruptedCoreTaskSessions,
