@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/authorization-decision-ref.v0.schema.json",
+  "title": "WebEnvoy Authorization Decision Ref v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.authorization-decision-ref.v0",
+    "compatibility_boundary": "Core owns the decision body; Run Record, task turn, and Harbor operation records persist only this opaque ref contract.",
+    "source_adrs": ["docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": ["schema_version", "decision_ref"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.authorization-decision-ref.v0" },
+    "decision_ref": {
+      "type": "string",
+      "pattern": "^authorization-decision:[a-f0-9]{32}:[a-f0-9]{32}$",
+      "maxLength": 89
+    }
+  }
+}

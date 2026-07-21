@@ -23,6 +23,7 @@ import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSe
 import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
 import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
+import { assertAuthorizationDecisionStore } from "./authorization-decision-self-check.js";
 
 let tick = 0;
 
@@ -1419,4 +1420,5 @@ console.log("Validated durable task threads, ordered turns, idempotency, recover
 await assertIdentityCompatibilityPreview();
 console.log("Validated read-only Lode and Harbor identity compatibility preview boundaries.");
 assertExecutionPolicyEvaluator();
+await assertAuthorizationDecisionStore();
 console.log("Validated unified execution policy evaluation and fail-closed action matching.");

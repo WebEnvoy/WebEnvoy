@@ -9,6 +9,7 @@ import {
   getRunSummary,
   previewIdentityCompatibility,
   type FailureRecord,
+  type FileAuthorizationDecisionStore,
   type FileRunRecordStore,
   type HarborIdentityFactsReader,
   type HarborRuntimeClient,
@@ -16,6 +17,7 @@ import {
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { submitTaskBody, validateThreadTaskBody } from "./task-api.js";
+import { handleAuthorizationDecisionApi } from "./authorization-decision-api.js";
 import { handleTaskThreadApi } from "./task-thread-api.js";
 
 type JsonBody = Record<string, unknown>;
@@ -23,6 +25,7 @@ type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
 
 export type ApiServerOptions = {
   runRecordStore?: FileRunRecordStore;
+  authorizationDecisionStore?: FileAuthorizationDecisionStore;
   taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
   harborIdentityFactsReader?: HarborIdentityFactsReader;
@@ -139,6 +142,7 @@ function capabilityQueryMissing(): FailureRecord {
 function admissionHealth(options: ApiServerOptions): JsonBody {
   const checks = {
     runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
+    authorizationDecisionStore: options.authorizationDecisionStore === undefined ? "missing" : "configured",
     taskThreadStore: options.taskThreadStore === undefined ? "missing" : "configured",
     lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
     harborIdentityFactsReader: options.harborIdentityFactsReader === undefined ? "missing" : "configured",
@@ -160,6 +164,16 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);
   const runSessionRefsMatch = /^\/runs\/([^/]+)\/session-refs$/.exec(path);
   const runFailureMatch = /^\/runs\/([^/]+)\/failure$/.exec(path);
+
+  const authorizationResult = await handleAuthorizationDecisionApi({
+    method: request.method,
+    url: requestUrl,
+    ...(options.authorizationDecisionStore === undefined ? {} : { store: options.authorizationDecisionStore })
+  });
+  if (authorizationResult.handled) {
+    sendJson(response, authorizationResult.status, authorizationResult.body);
+    return;
+  }
 
   if (path === "/threads" || path.startsWith("/threads/")) {
     const taskThreadInput = {

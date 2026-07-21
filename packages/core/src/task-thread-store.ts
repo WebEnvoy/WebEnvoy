@@ -289,6 +289,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     runFailure?: TaskTurnSubmissionError;
     updatedAt?: string;
     terminalAt?: string;
+    authorizationDecisionRefs?: string[];
   }> {
     const run = await options.runRecordStore.getRunRecord(turn.run_id);
     let status: TaskTurnStatus;
@@ -304,7 +305,8 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       ...(run?.status === undefined ? {} : { runStatus: run.status }),
       ...(run?.failure === undefined ? {} : { runFailure: normalizeSubmissionError(run.failure) }),
       ...(run?.updated_at === undefined ? {} : { updatedAt: run.updated_at }),
-      ...(run?.terminal_at === undefined ? {} : { terminalAt: run.terminal_at })
+      ...(run?.terminal_at === undefined ? {} : { terminalAt: run.terminal_at }),
+      ...(run?.authorization_decision_refs === undefined ? {} : { authorizationDecisionRefs: [...run.authorization_decision_refs] })
     };
   }
 
@@ -333,7 +335,8 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       status: state.status,
       ...(gaps.length === 0 ? {} : { input_gaps: gaps }),
       ...(state.runStatus === undefined ? {} : { run_status: state.runStatus }),
-      ...(state.terminalAt === undefined ? {} : { terminal_at: state.terminalAt })
+      ...(state.terminalAt === undefined ? {} : { terminal_at: state.terminalAt }),
+      ...(state.authorizationDecisionRefs === undefined ? {} : { authorization_decision_refs: state.authorizationDecisionRefs })
     };
   }
 

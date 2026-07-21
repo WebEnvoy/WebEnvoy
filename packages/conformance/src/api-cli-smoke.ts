@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { createApiServer } from "@webenvoy/api-server";
 import {
   createFileRunRecordStore,
+  createFileAuthorizationDecisionStore,
+  evaluateExecutionPolicy,
   getRunEvidenceRefs,
   getRunResult,
   getRunSummary,
@@ -61,6 +63,7 @@ function queryFailureEnvelope(failure: unknown): JsonObject {
 
 async function queryStore(directory: string, runId: string): Promise<JsonObject> {
   const store = createFileRunRecordStore({ directory });
+  const decisionStore = createFileAuthorizationDecisionStore({ directory: `${directory}.authorization-decisions`, runRecordStore: store });
   const run = await getRunSummary(store, runId);
   if (!run.ok) return queryFailureEnvelope(run.failure);
 
@@ -69,12 +72,14 @@ async function queryStore(directory: string, runId: string): Promise<JsonObject>
 
   const evidence = await getRunEvidenceRefs(store, runId);
   if (!evidence.ok) return queryFailureEnvelope(evidence.failure);
+  const authorizationDecisions = await decisionStore.listAuthorizationDecisions({ run_id: runId });
 
   return {
     ok: true,
     run: run.run,
     result: result.result,
-    evidence: evidence.evidence
+    evidence: evidence.evidence,
+    authorization_decisions: authorizationDecisions
   };
 }
 
@@ -139,6 +144,11 @@ function assertCliShape(cliOutput: JsonObject, golden: RunRecord): void {
   assert(Array.isArray(evidenceRefs), "CLI evidence.evidence_refs must be an array");
   assert.equal(evidenceRefs.length, 1);
   assert.equal(asObject(evidenceRefs[0], "CLI evidence.evidence_refs[0]").ref, golden.evidence_refs?.[0]);
+
+  const decisions = cliOutput.authorization_decisions;
+  assert(Array.isArray(decisions) && decisions.length === 1, "CLI authorization_decisions must contain the Core summary");
+  assert.equal(asObject(decisions[0], "CLI authorization decision").schema_version, "webenvoy.authorization-decision.v0");
+  assert.equal(asObject(asObject(decisions[0], "CLI authorization decision").reason, "CLI authorization reason").kind, "system_stop");
 }
 
 async function runSmokeMode(): Promise<void> {
@@ -147,7 +157,18 @@ async function runSmokeMode(): Promise<void> {
   await seedRunRecord(directory, golden);
 
   const store = createFileRunRecordStore({ directory });
-  const server = createApiServer({ runRecordStore: store });
+  const decisionStore = createFileAuthorizationDecisionStore({ directory: `${directory}.authorization-decisions`, runRecordStore: store });
+  const decision = await decisionStore.recordAuthorizationDecision({
+    idempotency_key: "cli-system-stop",
+    evaluation: evaluateExecutionPolicy({}),
+    subject: {
+      scope: "task",
+      run_id: golden.run_id,
+      thread_id: "thread_0123456789abcdef0123456789abcdef",
+      turn_id: "turn_0123456789abcdef0123456789abcdef"
+    }
+  });
+  const server = createApiServer({ runRecordStore: store, authorizationDecisionStore: decisionStore });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -179,6 +200,23 @@ async function runSmokeMode(): Promise<void> {
         evidence: asObject(cliOutput.evidence, "CLI evidence")
       }
     });
+    assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/authorization-decisions`), {
+      status: 200,
+      body: {
+        ok: true,
+        authorization_decisions: cliOutput.authorization_decisions
+      }
+    });
+    assert.deepEqual(await getJson(port, `/authorization-decisions/${encodeURIComponent(decision.decision_ref)}`), {
+      status: 200,
+      body: {
+        ok: true,
+        authorization_decision: decision
+      }
+    });
+    const oversizedDecisionQuery = await getJson(port, "/authorization-decisions?limit=101");
+    assert.equal(oversizedDecisionQuery.status, 400);
+    assert.equal(asObject(asObject(oversizedDecisionQuery.body, "decision query").error, "decision query error").code, "authorization_decision_query_limit_invalid");
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error: Error | undefined) => (error ? reject(error) : resolve()));

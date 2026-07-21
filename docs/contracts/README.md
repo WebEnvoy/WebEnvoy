@@ -10,6 +10,7 @@
 | 结果封装与运行记录 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md) | ADR 内标为 `accepted` 的 Result Envelope、Run Record、引用边界、失败分类；候选字段名不是最终 Schema。 |
 | 准入与旧动作风险基线 | [ADR 0004](../adr/0004-admission-and-action-risk.md) | Admission、resource matching、target binding、idempotency、unknown outcome 与对账边界继续有效；旧 action risk enum 和 approval-first 模型由 ADR 0009 supersede。 |
 | 统一任务授权策略 | [ADR 0009](../adr/0009-unified-authorization-policy.md) | 动作类别、全局默认、任务覆盖、单次授权、入口一致性和跨仓职责；supersede approval-request-first 产品模型。 |
+| 授权决定摘要与引用 | [`authorization-decision.schema.json`](../../packages/schemas/schemas/authorization-decision.schema.json), [`authorization-decision-ref.schema.json`](../../packages/schemas/schemas/authorization-decision-ref.schema.json) | Core 持久化不可变业务决定和 append-only 失效历史；Run Record/turn 与 Harbor operation record 只引用统一 opaque ref。 |
 | 任务意图与运行生命周期 v0 | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md) | Task Intent Envelope、Run lifecycle、Run Record 创建规则。 |
 | 共用任务入口 v0 | [ADR 0006](../adr/0006-common-task-entry-v0.md) | API、CLI、MCP、SDK 和 App 的共同入口投影。 |
 | 持久任务线程与有序回合 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) | 一个 Lode capability 与一个 Harbor identity environment 形成稳定线程；回合按序、幂等、单活动并可恢复，敏感正文与文件只保存 owner refs。 |

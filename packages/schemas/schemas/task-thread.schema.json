@@ -142,6 +142,16 @@
             "type": "string",
             "enum": ["pending", "admitted", "running", "succeeded", "failed", "blocked", "requires_user_action", "manual_recovery_required", "unknown_outcome", "cancelled", "expired"]
           },
+          "authorization_decision_refs": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^authorization-decision:[a-f0-9]{32}:[a-f0-9]{32}$",
+              "maxLength": 89
+            }
+          },
           "input_gaps": {
             "type": "array",
             "items": {

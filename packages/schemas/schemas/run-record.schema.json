@@ -30,6 +30,7 @@
       "source_refs": "Harbor or Lode owns referenced source body; Core records refs only",
       "preview_result": "Core projected validate-only preview result; submitted result truth is out of boundary",
       "evidence_refs": "Harbor or evidence producer owns ref body; Core records refs only",
+      "authorization_decision_refs": "Core owns referenced Authorization Decision summaries",
       "failure": "Core"
     }
   },
@@ -272,6 +273,16 @@
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "authorization_decision_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^authorization-decision:[a-f0-9]{32}:[a-f0-9]{32}$",
+        "maxLength": 89
       }
     },
     "failure": {

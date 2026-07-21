@@ -23,6 +23,8 @@ The files intentionally stay small:
 - `schemas/identity-compatibility-preview-request.schema.json`
 - `schemas/identity-compatibility-preview.schema.json`
 - `schemas/execution-policy-evaluation.schema.json`
+- `schemas/authorization-decision.schema.json`
+- `schemas/authorization-decision-ref.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -35,6 +37,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 `fixtures/task-thread.fixture.json` captures an ordered App-created task turn. Bounded scalar summaries remain visible after restart, while files and long text are represented by owner refs.
 
 `fixtures/execution-policy-destructive-auto.fixture.json` proves that Core preserves a user's explicit `auto` mode for a declared destructive action while retaining its risk marker and effective source.
+
+`fixtures/authorization-decision.fixture.json` and the ref fixture cover the business summary shared by API/CLI/MCP/SDK/Agent consumers and the opaque ref embedded by task and environment operation records.
 
 Run:
 

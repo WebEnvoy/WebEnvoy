@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import {
   createFileRunRecordStore,
+  createFileAuthorizationDecisionStore,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
@@ -42,6 +43,13 @@ if (import.meta.url === entrypoint) {
           : { resolveInputPolicy: createLocalTaskTurnInputPolicyResolver({ registryPath: lodeRegistryPath }) })
       })
     : undefined;
+  const authorizationDecisionStore = runRecordStore
+    ? createFileAuthorizationDecisionStore({
+        directory: process.env.WEBENVOY_AUTHORIZATION_DECISION_DIR ?? `${runRecordStore.directory}.authorization-decisions`,
+        runRecordStore,
+        ...(taskThreadStore === undefined ? {} : { taskThreadStore })
+      })
+    : undefined;
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
@@ -53,6 +61,7 @@ if (import.meta.url === entrypoint) {
   }
   const server = createApiServer({
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
+    ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),
     ...(taskThreadStore === undefined ? {} : { taskThreadStore }),
     ...(lodeRegistryPath === undefined
       ? {}

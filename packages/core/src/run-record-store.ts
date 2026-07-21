@@ -2,6 +2,7 @@ import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
+import { parseAuthorizationDecisionRef } from "./authorization-decision.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import {
   isFileOwnershipOwnerAlive,
@@ -183,6 +184,7 @@ export type RunRecord = {
   source_refs?: string[];
   preview_result?: PreviewResult;
   evidence_refs?: string[];
+  authorization_decision_refs?: string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
@@ -210,6 +212,7 @@ export type CreateRunRecordInput = {
   source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
+  authorization_decision_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
@@ -227,6 +230,7 @@ export type RunRecordPatch = {
   source_refs?: readonly string[];
   preview_result?: PreviewResult;
   evidence_refs?: readonly string[];
+  authorization_decision_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
@@ -246,6 +250,7 @@ export type FileRunRecordStore = {
   releaseRunIdClaim(runId: string, claimToken: string): Promise<void>;
   createRunRecord(input: CreateRunRecordInput, claimToken?: string): Promise<RunRecord>;
   getRunRecord(runId: string): Promise<RunRecord | undefined>;
+  appendAuthorizationDecisionRef(runId: string, decisionRef: string): Promise<RunRecord>;
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
   listRunRecords(): Promise<RunRecord[]>;
 };
@@ -320,6 +325,11 @@ function copyRequiredRefs(values: readonly string[], label: string): string[] {
 
 function copyRefs(values: readonly string[] | undefined, label: string): string[] | undefined {
   return values ? copyRequiredRefs(values, label) : undefined;
+}
+
+function copyAuthorizationDecisionRefs(values: readonly string[]): string[] {
+  if (values.length > 64 || new Set(values).size !== values.length) throw new Error("authorization_decision_refs_invalid");
+  return values.map(parseAuthorizationDecisionRef);
 }
 
 function validatePreviewResult(preview: PreviewResult): void {
@@ -484,6 +494,7 @@ function assertRunRecord(record: RunRecord): void {
     requireRef(record.approval_request.consumer_boundary, "approval_request.consumer_boundary");
   }
   copyRefs(record.evidence_refs, "evidence_refs");
+  if (record.authorization_decision_refs !== undefined) copyAuthorizationDecisionRefs(record.authorization_decision_refs);
   if (record.post_check !== undefined) {
     requireRef(record.post_check.schema_version, "post_check.schema_version");
     if (record.post_check.schema_version !== "webenvoy.post-check-result.v0") {
@@ -560,6 +571,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   }
   if (patch.evidence_refs !== undefined) {
     next.evidence_refs = copyRequiredRefs(patch.evidence_refs, "evidence_refs");
+  }
+  if (patch.authorization_decision_refs !== undefined) {
+    next.authorization_decision_refs = copyAuthorizationDecisionRefs(patch.authorization_decision_refs);
   }
   if (patch.failure !== undefined) {
     next.failure = normalizeFailureRecord(patch.failure);
@@ -639,6 +653,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.evidence_refs !== undefined) {
     record.evidence_refs = copyRequiredRefs(input.evidence_refs, "evidence_refs");
+  }
+  if (input.authorization_decision_refs !== undefined) {
+    record.authorization_decision_refs = copyAuthorizationDecisionRefs(input.authorization_decision_refs);
   }
   if (input.failure !== undefined) {
     record.failure = normalizeFailureRecord(input.failure);
@@ -759,6 +776,22 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
     },
 
     getRunRecord,
+
+    async appendAuthorizationDecisionRef(runId, decisionRef) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        const ref = parseAuthorizationDecisionRef(decisionRef);
+        if (record.authorization_decision_refs?.includes(ref)) return record;
+        const next = {
+          ...record,
+          updated_at: clock().toISOString(),
+          authorization_decision_refs: copyAuthorizationDecisionRefs([...(record.authorization_decision_refs ?? []), ref])
+        };
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
 
     async updateRunRecord(runId, patch) {
       return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {

@@ -153,6 +153,26 @@ for (const file of executionPolicyInvalidFixtureFiles) {
   assert.equal(validateExecutionPolicy(await readJson(file)), false, `${file} must fail Draft 2020-12 validation`);
 }
 
+const authorizationDecisionSchema = schemasByFile.get("authorization-decision.schema.json");
+assert(authorizationDecisionSchema, "authorization decision schema must exist");
+const validateAuthorizationDecision = ajv.getSchema(asString(authorizationDecisionSchema.$id, "authorization decision schema.$id"));
+assert(validateAuthorizationDecision, "authorization decision validator must compile");
+const authorizationFixture = await readJson(join(fixtureDir, "authorization-decision.fixture.json"));
+delete authorizationFixture.$schema;
+for (const mutate of [
+  (value: JsonObject) => { value.raw_dom = "forbidden"; },
+  (value: JsonObject) => { asObject(asObject(value.business_action, "action").target, "target").target_ref = "https://user:password@example.test/private"; },
+  (value: JsonObject) => { asObject(value.applicability, "applicability").config_refs = ["a", "b", "c", "d", "e"]; },
+  (value: JsonObject) => {
+    value.outcome = "stop";
+    value.reason = { kind: "system_stop", code: "target_mismatch" };
+  }
+]) {
+  const invalid = structuredClone(authorizationFixture);
+  mutate(invalid);
+  assert.equal(validateAuthorizationDecision(invalid), false, "invalid authorization decision must be rejected");
+}
+
 type CorePolicyModule = { evaluateExecutionPolicy(input: unknown): JsonObject };
 type CoreOwnerProofModule = { matchLodeBusinessActionOwner(owner: unknown, actionId: string, resourceMatch: unknown): unknown };
 const coreModuleUrl = pathToFileURL(join(packageRoot, "..", "core", "dist", "execution-policy.js")).href;
