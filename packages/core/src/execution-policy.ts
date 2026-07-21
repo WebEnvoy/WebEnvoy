@@ -159,7 +159,6 @@ export type TrustedExecutionPolicyEvaluationFacts = {
   requested_action?: BusinessActionRequest;
   owner_proof?: BusinessActionOwnerProofFields;
   single_action_expires_at?: string;
-  single_action_policy_ref?: string;
 };
 
 const trustedEvaluationFacts = new WeakMap<object, TrustedExecutionPolicyEvaluationFacts>();
@@ -316,8 +315,7 @@ function rememberEvaluation(
       owner_proof: structuredClone(input.owner_proof)
     }),
     ...(singleActionExpiresAt === undefined ? {} : {
-      single_action_expires_at: singleActionExpiresAt,
-      single_action_policy_ref: input!.policies.single_action_decision!.effective_policy_source_ref
+      single_action_expires_at: singleActionExpiresAt
     })
   });
   return evaluation;

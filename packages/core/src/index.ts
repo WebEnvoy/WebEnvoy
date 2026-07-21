@@ -2,6 +2,8 @@ export {
   authorizationDecisionRef,
   authorizationDecisionRefSchemaVersion,
   authorizationDecisionSchemaVersion,
+  authorizationDecisionTimeOrderValid,
+  normalizeAuthorizationDecisionSummary,
   parseAuthorizationDecisionRef,
   type AuthorizationDecisionApplicability,
   type AuthorizationDecisionInvalidationReason,
@@ -13,6 +15,7 @@ export {
 } from "./authorization-decision.js";
 export {
   createFileAuthorizationDecisionStore,
+  type AuthorizationDecisionPage,
   type AuthorizationDecisionQuery,
   type FileAuthorizationDecisionStore,
   type FileAuthorizationDecisionStoreOptions

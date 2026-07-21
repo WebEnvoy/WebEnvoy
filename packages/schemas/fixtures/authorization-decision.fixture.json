@@ -23,7 +23,6 @@
   "effective_policy": {
     "mode": "auto",
     "source": "global_user_config",
-    "source_ref": "policy:global/1",
     "source_version": "1"
   },
   "applicability": {
@@ -40,5 +39,5 @@
   "state": "active",
   "invalidated_at": null,
   "invalidation_reason": null,
-  "consumer_boundary": "Business policy decision summary only; technical trace is excluded."
+  "consumer_boundary": "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded."
 }

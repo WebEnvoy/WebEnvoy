@@ -67,7 +67,6 @@ export type AuthorizationDecisionSummary = {
   effective_policy: {
     mode: ExecutionPolicyMode;
     source: AuthorizationDecisionSource;
-    source_ref: string;
     source_version: string;
   } | null;
   applicability: AuthorizationDecisionApplicability;
@@ -101,6 +100,9 @@ const categories = new Set<BusinessActionCategory>(["read", "prepare", "commit",
 const modes = new Set<ExecutionPolicyMode>(["auto", "confirm", "deny"]);
 const sources = new Set<AuthorizationDecisionSource>(["single_action", "thread_revision", "installed_skill_user_version", "global_user_config"]);
 const outcomes = new Set<AuthorizationDecisionBase["outcome"]>(["execute", "confirm", "stop"]);
+const lifecycleInvalidationReasons = new Set<AuthorizationDecisionInvalidationReason>([
+  "completed", "cancelled", "expired", "target_changed", "owner_changed", "action_reclassified", "effective_policy_changed"
+]);
 const consumerBoundary = "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded.";
 
 function exactObject(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
@@ -135,6 +137,12 @@ export function authorizationDecisionRef(decisionRef: string): AuthorizationDeci
   return { schema_version: authorizationDecisionRefSchemaVersion, decision_ref: parseAuthorizationDecisionRef(decisionRef) };
 }
 
+export function isAuthorizationDecisionInvalidationReason(
+  value: unknown
+): value is AuthorizationDecisionInvalidationReason {
+  return lifecycleInvalidationReasons.has(value as AuthorizationDecisionInvalidationReason);
+}
+
 export function authorizationTimestamp(value: unknown, label: string): string {
   if (typeof value !== "string") throw new Error(`${label}_invalid`);
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value);
@@ -151,6 +159,23 @@ export function authorizationTimestamp(value: unknown, label: string): string {
     throw new Error(`${label}_invalid`);
   }
   return value;
+}
+
+export function authorizationDecisionTimeOrderValid(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  try {
+    const temporal = value as Record<string, unknown>;
+    const decidedAt = Date.parse(authorizationTimestamp(temporal.decided_at, "decided_at"));
+    const expiresAt = temporal.expires_at === null ? null
+      : Date.parse(authorizationTimestamp(temporal.expires_at, "expires_at"));
+    const invalidatedAt = temporal.invalidated_at === null ? null
+      : Date.parse(authorizationTimestamp(temporal.invalidated_at, "invalidated_at"));
+    return (expiresAt === null || expiresAt > decidedAt) &&
+      (invalidatedAt === null || invalidatedAt >= decidedAt) &&
+      (invalidatedAt === null || expiresAt === null || invalidatedAt <= expiresAt);
+  } catch {
+    return false;
+  }
 }
 
 export function normalizeAuthorizationDecisionSubject(subject: AuthorizationDecisionSubject): AuthorizationDecisionSubject {
@@ -189,7 +214,7 @@ function normalizeTarget(value: unknown): BusinessActionTarget {
 
 function normalizeApplicability(value: unknown): AuthorizationDecisionApplicability {
   const object = exactObject(value, ["scope", "config_refs"], ["run_id", "thread_id", "turn_id", "operation_ref"]);
-  if (!Array.isArray(object.config_refs) || object.config_refs.length > 4 || new Set(object.config_refs).size !== object.config_refs.length) {
+  if (!Array.isArray(object.config_refs) || object.config_refs.length > 1 || new Set(object.config_refs).size !== object.config_refs.length) {
     throw new Error("authorization_config_refs_invalid");
   }
   const config_refs = object.config_refs.map((ref) => requiredRef(ref, "config_ref"));
@@ -235,19 +260,18 @@ export function normalizeAuthorizationDecisionBase(value: unknown): Authorizatio
     resource_match_ref: requiredRef(ownerObject.resource_match_ref, "resource_match_ref"),
     resource_match_version: requiredVersion(ownerObject.resource_match_version, "resource_match_version")
   } : null;
-  const policyObject = object.effective_policy === null ? undefined : exactObject(object.effective_policy, ["mode", "source", "source_ref", "source_version"]);
+  const policyObject = object.effective_policy === null ? undefined : exactObject(object.effective_policy, ["mode", "source", "source_version"]);
   if (policyObject && (!modes.has(policyObject.mode as ExecutionPolicyMode) || !sources.has(policyObject.source as AuthorizationDecisionSource))) throw new Error("authorization_policy_invalid");
   const effective_policy = policyObject ? {
     mode: policyObject.mode as ExecutionPolicyMode,
     source: policyObject.source as AuthorizationDecisionSource,
-    source_ref: requiredRef(policyObject.source_ref, "source_ref"),
     source_version: requiredVersion(policyObject.source_version, "source_version")
   } : null;
   const outcome = object.outcome as AuthorizationDecisionBase["outcome"];
   if (!outcomes.has(outcome)) throw new Error("authorization_outcome_invalid");
   const reasonObject = object.reason === undefined ? undefined : exactObject(object.reason, ["kind", "code"]);
   if (reasonObject && reasonObject.kind !== "system_stop" && reasonObject.kind !== "user_deny") throw new Error("authorization_reason_invalid");
-  const reason = reasonObject ? { kind: reasonObject.kind as "system_stop" | "user_deny", code: requiredRef(reasonObject.code, "reason_code") } : undefined;
+  const reason = reasonObject ? { kind: reasonObject.kind as "system_stop" | "user_deny", code: requiredVersion(reasonObject.code, "reason_code") } : undefined;
   if ((outcome === "stop") !== (reason !== undefined) || reason?.kind === "system_stop" && effective_policy !== null ||
     reason?.kind === "user_deny" && effective_policy?.mode !== "deny" || effective_policy?.mode === "auto" && outcome !== "execute" ||
     effective_policy?.mode === "confirm" && outcome !== "confirm" || effective_policy?.mode === "deny" && outcome !== "stop" ||
@@ -258,12 +282,14 @@ export function normalizeAuthorizationDecisionBase(value: unknown): Authorizatio
     throw new Error("authorization_owner_invalid");
   }
   const applicability = normalizeApplicability(object.applicability);
-  if (effective_policy === null ? applicability.config_refs.length !== 0 : !applicability.config_refs.includes(effective_policy.source_ref)) {
+  if (effective_policy === null ? applicability.config_refs.length !== 0 : applicability.config_refs.length !== 1) {
     throw new Error("authorization_config_refs_invalid");
   }
   const decidedAt = authorizationTimestamp(object.decided_at, "decided_at");
   const expiresAt = object.expires_at === null ? null : authorizationTimestamp(object.expires_at, "expires_at");
-  if (expiresAt !== null && Date.parse(expiresAt) <= Date.parse(decidedAt)) throw new Error("authorization_decision_expiry_invalid");
+  if (!authorizationDecisionTimeOrderValid({ decided_at: decidedAt, expires_at: expiresAt, invalidated_at: null })) {
+    throw new Error("authorization_decision_expiry_invalid");
+  }
   return {
     schema_version: authorizationDecisionSchemaVersion,
     decision_ref: parseAuthorizationDecisionRef(object.decision_ref),
@@ -278,6 +304,32 @@ export function normalizeAuthorizationDecisionBase(value: unknown): Authorizatio
     expires_at: expiresAt,
     consumer_boundary: consumerBoundary
   };
+}
+
+export function normalizeAuthorizationDecisionSummary(value: unknown): AuthorizationDecisionSummary {
+  const object = exactObject(value, [
+    "schema_version", "decision_ref", "business_action", "owner_declaration", "effective_policy", "applicability",
+    "outcome", "risk_marker", "decided_at", "expires_at", "state", "invalidated_at", "invalidation_reason", "consumer_boundary"
+  ], ["reason"]);
+  const { state, invalidated_at, invalidation_reason, ...baseFields } = object;
+  const base = normalizeAuthorizationDecisionBase(baseFields);
+  if (state !== "active" && state !== "consumed" && state !== "invalidated" && state !== "expired") {
+    throw new Error("authorization_decision_state_invalid");
+  }
+  const invalidatedAt = invalidated_at === null ? null : authorizationTimestamp(invalidated_at, "invalidated_at");
+  const reason = invalidation_reason as AuthorizationDecisionInvalidationReason | null;
+  if (reason !== null && !isAuthorizationDecisionInvalidationReason(reason)) throw new Error("authorization_decision_lifecycle_invalid");
+  const valid = state === "active"
+    ? invalidatedAt === null && reason === null
+    : invalidatedAt !== null && (
+      state === "consumed" && reason === "completed" ||
+      state === "expired" && reason === "expired" ||
+      state === "invalidated" && reason !== null && !["completed", "expired"].includes(reason)
+    );
+  if (!valid || !authorizationDecisionTimeOrderValid({ ...base, invalidated_at: invalidatedAt })) {
+    throw new Error("authorization_decision_lifecycle_invalid");
+  }
+  return { ...base, state, invalidated_at: invalidatedAt, invalidation_reason: reason };
 }
 
 function effectiveExpiry(facts: TrustedExecutionPolicyEvaluationFacts, requested: string | undefined): string | null {
@@ -311,10 +363,7 @@ export function buildAuthorizationDecisionBase(input: {
   } : null;
   const owner = ownerMatches ? input.facts.owner_proof! : undefined;
   const policy = evaluation.status === "evaluated" ? evaluation.effective_policy : undefined;
-  const configRefs = policy === undefined ? [] : [...new Set([
-    requiredRef(policy.source_ref, "effective_policy_source_ref"),
-    ...(input.facts.single_action_policy_ref ? [requiredRef(input.facts.single_action_policy_ref, "single_action_policy_ref")] : [])
-  ])];
+  const configRefs = policy === undefined ? [] : [requiredRef(policy.source_ref, "effective_policy_source_ref")];
   const subject = normalizeAuthorizationDecisionSubject(input.subject);
   const applicability = { ...subject, config_refs: configRefs } as AuthorizationDecisionApplicability;
   const outcome = evaluation.status === "evaluated"
@@ -341,7 +390,6 @@ export function buildAuthorizationDecisionBase(input: {
     effective_policy: policy ? {
       mode: policy.mode,
       source: source(policy.source),
-      source_ref: requiredRef(policy.source_ref, "effective_policy_source_ref"),
       source_version: requiredVersion(policy.source_version, "effective_policy_source_version")
     } : null,
     applicability,

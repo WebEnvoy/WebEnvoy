@@ -168,7 +168,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const authorizationResult = await handleAuthorizationDecisionApi({
     method: request.method,
     url: requestUrl,
-    ...(options.authorizationDecisionStore === undefined ? {} : { store: options.authorizationDecisionStore })
+    ...(options.authorizationDecisionStore === undefined ? {} : { store: options.authorizationDecisionStore }),
+    ...(options.runRecordStore === undefined ? {} : { runRecordStore: options.runRecordStore })
   });
   if (authorizationResult.handled) {
     sendJson(response, authorizationResult.status, authorizationResult.body);

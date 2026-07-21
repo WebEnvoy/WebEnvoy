@@ -6,7 +6,9 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import * as addFormatsModule from "ajv-formats";
 import {
+  authorizationDecisionTimeOrderValid,
   normalizeNonSensitiveText,
+  normalizeAuthorizationDecisionSummary,
   normalizePublicHttpTarget,
   normalizePublicOrigin,
   normalizeStoredTargetRef
@@ -73,6 +75,12 @@ const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, 
 const addFormats = addFormatsModule.default as unknown as (instance: Ajv2020) => Ajv2020;
 addFormats(ajv);
 ajv.addKeyword({ keyword: "x-webenvoy" });
+ajv.addKeyword({
+  keyword: "x-webenvoy-authorization-time-order",
+  type: "object",
+  schemaType: "boolean",
+  validate: (enabled: boolean, value: unknown) => !enabled || authorizationDecisionTimeOrderValid(value)
+});
 ajv.addFormat("webenvoy-public-http-target", { type: "string", validate: (value: string) => normalizePublicHttpTarget(value).ok });
 ajv.addFormat("webenvoy-public-origin", { type: "string", validate: (value: string) => normalizePublicOrigin(value) !== undefined });
 ajv.addFormat("webenvoy-stored-target-ref", { type: "string", validate: (value: string) => normalizeStoredTargetRef(value) === value });
@@ -159,18 +167,94 @@ const validateAuthorizationDecision = ajv.getSchema(asString(authorizationDecisi
 assert(validateAuthorizationDecision, "authorization decision validator must compile");
 const authorizationFixture = await readJson(join(fixtureDir, "authorization-decision.fixture.json"));
 delete authorizationFixture.$schema;
+assert.deepEqual(normalizeAuthorizationDecisionSummary(authorizationFixture), authorizationFixture);
+function runtimeAcceptsAuthorizationDecision(value: unknown): boolean {
+  try {
+    normalizeAuthorizationDecisionSummary(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 for (const mutate of [
   (value: JsonObject) => { value.raw_dom = "forbidden"; },
   (value: JsonObject) => { asObject(asObject(value.business_action, "action").target, "target").target_ref = "https://user:password@example.test/private"; },
-  (value: JsonObject) => { asObject(value.applicability, "applicability").config_refs = ["a", "b", "c", "d", "e"]; },
+  (value: JsonObject) => { asObject(value.applicability, "applicability").config_refs = ["a", "b"]; },
   (value: JsonObject) => {
     value.outcome = "stop";
     value.reason = { kind: "system_stop", code: "target_mismatch" };
-  }
+  },
+  (value: JsonObject) => { value.owner_declaration = null; },
+  (value: JsonObject) => { asObject(value.business_action, "action").category = null; },
+  (value: JsonObject) => { asObject(value.applicability, "applicability").config_refs = []; },
+  (value: JsonObject) => {
+    value.effective_policy = null;
+    value.outcome = "stop";
+    value.reason = { kind: "system_stop", code: "policy_unavailable" };
+  },
+  (value: JsonObject) => {
+    value.state = "consumed";
+    value.invalidation_reason = null;
+  },
+  (value: JsonObject) => { value.decided_at = "2026-07-21T00:00:00.0001Z"; },
+  (value: JsonObject) => { value.decided_at = "2026-12-31T23:59:60Z"; },
+  (value: JsonObject) => { value.decided_at = "0000-07-21T00:00:00Z"; },
+  (value: JsonObject) => { value.expires_at = value.decided_at; },
+  (value: JsonObject) => { value.expires_at = "2026-07-21T01:00:00.000+02:00"; },
+  (value: JsonObject) => { asObject(value.business_action, "action").action_id = "token"; },
+  (value: JsonObject) => {
+    value.state = "invalidated";
+    value.invalidated_at = "2026-07-20T23:59:59.999Z";
+    value.invalidation_reason = "cancelled";
+  },
+  (value: JsonObject) => {
+    value.expires_at = "2026-07-21T00:10:00.000Z";
+    value.state = "invalidated";
+    value.invalidated_at = "2026-07-21T00:11:00.000Z";
+    value.invalidation_reason = "cancelled";
+  },
+  (value: JsonObject) => { asObject(value.effective_policy, "effective policy").source_ref = "duplicate:policy/ref"; },
+  (value: JsonObject) => { value.consumer_boundary = "different boundary"; }
 ]) {
   const invalid = structuredClone(authorizationFixture);
   mutate(invalid);
-  assert.equal(validateAuthorizationDecision(invalid), false, "invalid authorization decision must be rejected");
+  const schemaAccepts: boolean = Boolean(validateAuthorizationDecision(invalid));
+  assert.equal(schemaAccepts, runtimeAcceptsAuthorizationDecision(invalid), "schema and runtime acceptance must match");
+  assert.equal(schemaAccepts, false, "invalid authorization decision must be rejected");
+}
+for (const mutate of [
+  (value: JsonObject) => { value.expires_at = "2026-07-21T02:00:00.000+01:00"; },
+  (value: JsonObject) => {
+    value.state = "consumed";
+    value.invalidated_at = value.decided_at;
+    value.invalidation_reason = "completed";
+  }
+]) {
+  const valid = structuredClone(authorizationFixture);
+  mutate(valid);
+  const schemaAccepts: boolean = Boolean(validateAuthorizationDecision(valid));
+  assert.equal(schemaAccepts, runtimeAcceptsAuthorizationDecision(valid), "schema and runtime acceptance must match");
+  assert.equal(schemaAccepts, true, "valid authorization decision must be accepted");
+}
+for (const [state, reason, expected] of [
+  ["active", null, true],
+  ["active", "cancelled", false],
+  ["consumed", "completed", true],
+  ["consumed", "expired", false],
+  ["expired", "expired", true],
+  ["expired", "completed", false],
+  ["invalidated", "cancelled", true],
+  ["invalidated", "effective_policy_changed", true],
+  ["invalidated", "completed", false],
+  ["invalidated", "expired", false]
+] as const) {
+  const lifecycle = structuredClone(authorizationFixture);
+  lifecycle.state = state;
+  lifecycle.invalidated_at = state === "active" ? null : lifecycle.decided_at;
+  lifecycle.invalidation_reason = reason;
+  const schemaAccepts: boolean = Boolean(validateAuthorizationDecision(lifecycle));
+  assert.equal(schemaAccepts, runtimeAcceptsAuthorizationDecision(lifecycle), "schema and runtime lifecycle acceptance must match");
+  assert.equal(schemaAccepts, expected, `${state}/${reason ?? "none"} lifecycle acceptance must match the contract`);
 }
 
 type CorePolicyModule = { evaluateExecutionPolicy(input: unknown): JsonObject };

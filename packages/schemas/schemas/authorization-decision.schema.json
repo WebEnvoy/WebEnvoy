@@ -4,6 +4,7 @@
   "title": "WebEnvoy Authorization Decision Summary v0",
   "type": "object",
   "additionalProperties": false,
+  "x-webenvoy-authorization-time-order": true,
   "x-webenvoy": {
     "owner": "Core",
     "status": "accepted-v0",
@@ -28,7 +29,7 @@
           "required": ["action_instance_ref", "action_id", "category", "target"],
           "properties": {
             "action_instance_ref": { "$ref": "#/$defs/ref" },
-            "action_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 128 },
+            "action_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "minLength": 1, "maxLength": 128, "format": "webenvoy-nonsensitive-text" },
             "category": { "type": ["string", "null"], "enum": ["read", "prepare", "commit", "destructive", null] },
             "target": { "$ref": "#/$defs/target" }
           }
@@ -58,11 +59,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "source", "source_ref", "source_version"],
+          "required": ["mode", "source", "source_version"],
           "properties": {
             "mode": { "enum": ["auto", "confirm", "deny"] },
             "source": { "enum": ["single_action", "thread_revision", "installed_skill_user_version", "global_user_config"] },
-            "source_ref": { "$ref": "#/$defs/ref" },
             "source_version": { "$ref": "#/$defs/version" }
           }
         }
@@ -105,15 +105,15 @@
       }
     },
     "risk_marker": { "type": ["string", "null"], "enum": ["destructive", null] },
-    "decided_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": ["string", "null"], "format": "date-time" },
+    "decided_at": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$" },
+    "expires_at": { "type": ["string", "null"], "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$" },
     "state": { "enum": ["active", "consumed", "invalidated", "expired"] },
-    "invalidated_at": { "type": ["string", "null"], "format": "date-time" },
+    "invalidated_at": { "type": ["string", "null"], "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$" },
     "invalidation_reason": {
       "type": ["string", "null"],
       "enum": ["completed", "cancelled", "expired", "target_changed", "owner_changed", "action_reclassified", "effective_policy_changed", null]
     },
-    "consumer_boundary": { "type": "string", "minLength": 1, "maxLength": 512, "format": "webenvoy-nonsensitive-text" }
+    "consumer_boundary": { "const": "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded." }
   },
   "allOf": [
     {
@@ -145,10 +145,31 @@
       "if": { "properties": { "effective_policy": { "type": "null" } }, "required": ["effective_policy"] },
       "then": {
         "properties": {
-          "reason": { "type": "object", "properties": { "kind": { "const": "system_stop" } }, "required": ["kind"] }
+          "reason": { "type": "object", "properties": { "kind": { "const": "system_stop" } }, "required": ["kind"] },
+          "applicability": { "properties": { "config_refs": { "maxItems": 0 } } }
         },
         "required": ["reason"]
       }
+    },
+    {
+      "if": { "properties": { "effective_policy": { "type": "object" } }, "required": ["effective_policy"] },
+      "then": { "properties": { "applicability": { "properties": { "config_refs": { "minItems": 1, "maxItems": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "business_action": { "type": "null" } }, "required": ["business_action"] },
+      "then": { "properties": { "owner_declaration": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "business_action": { "type": "object", "properties": { "category": { "type": "null" } }, "required": ["category"] } } },
+      "then": { "properties": { "owner_declaration": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "business_action": { "type": "object", "properties": { "category": { "type": "string" } }, "required": ["category"] } } },
+      "then": { "properties": { "owner_declaration": { "type": "object" } } }
+    },
+    {
+      "if": { "properties": { "owner_declaration": { "type": "object" } }, "required": ["owner_declaration"] },
+      "then": { "properties": { "business_action": { "type": "object", "properties": { "category": { "type": "string" } }, "required": ["category"] } } }
     },
     {
       "if": { "properties": { "business_action": { "type": "object", "properties": { "category": { "const": "destructive" } }, "required": ["category"] } } },
@@ -169,19 +190,46 @@
           "invalidated_at": { "type": "null" },
           "invalidation_reason": { "type": "null" }
         }
-      },
-      "else": {
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "consumed" } }, "required": ["state"] },
+      "then": {
         "properties": {
           "invalidated_at": { "type": "string", "format": "date-time" },
-          "invalidation_reason": { "type": "string" }
+          "invalidation_reason": { "const": "completed" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "expired" } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "invalidated_at": { "type": "string", "format": "date-time" },
+          "invalidation_reason": { "const": "expired" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "invalidated" } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "invalidated_at": { "type": "string", "format": "date-time" },
+          "invalidation_reason": { "enum": ["cancelled", "target_changed", "owner_changed", "action_reclassified", "effective_policy_changed"] }
         }
       }
     }
   ],
   "$defs": {
-    "ref": { "type": "string", "minLength": 1, "maxLength": 512, "format": "webenvoy-nonsensitive-text", "not": { "pattern": "^https?://" } },
+    "ref": { "type": "string", "minLength": 1, "maxLength": 512, "format": "webenvoy-nonsensitive-text", "not": { "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://" } },
     "version": { "type": "string", "minLength": 1, "maxLength": 128, "format": "webenvoy-nonsensitive-text" },
-    "refs": { "type": "array", "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/ref" } },
+    "refs": {
+      "type": "array",
+      "maxItems": 1,
+      "uniqueItems": true,
+      "description": "When effective_policy is present, the sole item is its effective source ref; system stops use an empty array.",
+      "items": { "$ref": "#/$defs/ref" }
+    },
     "target": {
       "type": "object",
       "additionalProperties": false,
