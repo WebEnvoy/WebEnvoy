@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,13 @@ import { fileURLToPath } from "node:url";
 import { createApiServer } from "@webenvoy/api-server";
 import {
   createFileRunRecordStore,
+  createFileAuthorizationDecisionStore,
+  evaluateExecutionPolicy,
   getRunEvidenceRefs,
   getRunResult,
   getRunSummary,
   runRecordSchemaVersion,
+  type AuthorizationDecisionSummary,
   type RunRecord
 } from "@webenvoy/core-runtime";
 
@@ -61,6 +64,7 @@ function queryFailureEnvelope(failure: unknown): JsonObject {
 
 async function queryStore(directory: string, runId: string): Promise<JsonObject> {
   const store = createFileRunRecordStore({ directory });
+  const decisionStore = createFileAuthorizationDecisionStore({ directory: `${directory}.authorization-decisions`, runRecordStore: store });
   const run = await getRunSummary(store, runId);
   if (!run.ok) return queryFailureEnvelope(run.failure);
 
@@ -69,12 +73,14 @@ async function queryStore(directory: string, runId: string): Promise<JsonObject>
 
   const evidence = await getRunEvidenceRefs(store, runId);
   if (!evidence.ok) return queryFailureEnvelope(evidence.failure);
+  const authorizationDecisions = await decisionStore.queryAuthorizationDecisions({ run_id: runId });
 
   return {
     ok: true,
     run: run.run,
     result: result.result,
-    evidence: evidence.evidence
+    evidence: evidence.evidence,
+    authorization_decisions: authorizationDecisions.authorization_decisions
   };
 }
 
@@ -139,6 +145,80 @@ function assertCliShape(cliOutput: JsonObject, golden: RunRecord): void {
   assert(Array.isArray(evidenceRefs), "CLI evidence.evidence_refs must be an array");
   assert.equal(evidenceRefs.length, 1);
   assert.equal(asObject(evidenceRefs[0], "CLI evidence.evidence_refs[0]").ref, golden.evidence_refs?.[0]);
+
+  const decisions = cliOutput.authorization_decisions;
+  assert(Array.isArray(decisions) && decisions.length === 1, "CLI authorization_decisions must contain the Core summary");
+  assert.equal(asObject(decisions[0], "CLI authorization decision").schema_version, "webenvoy.authorization-decision.v0");
+  assert.equal(asObject(asObject(decisions[0], "CLI authorization decision").reason, "CLI authorization reason").kind, "system_stop");
+}
+
+async function assertRunDecisionApis(
+  port: number,
+  golden: RunRecord,
+  cliOutput: JsonObject,
+  decision: AuthorizationDecisionSummary
+): Promise<void> {
+  assert.deepEqual(await getJson(port, `/runs/${golden.run_id}`), {
+    status: 200,
+    body: { ok: true, run: asObject(cliOutput.run, "CLI run") }
+  });
+  assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/result`), {
+    status: 200,
+    body: { ok: true, result: asObject(cliOutput.result, "CLI result") }
+  });
+  assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/evidence-refs`), {
+    status: 200,
+    body: { ok: true, evidence: asObject(cliOutput.evidence, "CLI evidence") }
+  });
+  assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/authorization-decisions`), {
+    status: 200,
+    body: { ok: true, authorization_decisions: cliOutput.authorization_decisions, next_cursor: null }
+  });
+  assert.deepEqual(await getJson(port, `/authorization-decisions/${encodeURIComponent(decision.decision_ref)}`), {
+    status: 200,
+    body: { ok: true, authorization_decision: decision }
+  });
+}
+
+async function assertDecisionPaginationApi(port: number, directory: string, golden: RunRecord): Promise<void> {
+  const oversized = await getJson(port, "/authorization-decisions?limit=101");
+  assert.equal(oversized.status, 400);
+  assert.equal(asObject(asObject(oversized.body, "decision query").error, "decision query error").code, "authorization_decision_query_limit_invalid");
+  const first = await getJson(port, "/authorization-decisions?limit=2");
+  assert.equal(first.status, 200);
+  const cursor = asString(first.body.next_cursor, "first decision page.next_cursor");
+  const firstDecisions = first.body.authorization_decisions;
+  assert(Array.isArray(firstDecisions) && firstDecisions.length === 2);
+  const second = await getJson(port, `/authorization-decisions?limit=2&cursor=${encodeURIComponent(cursor)}`);
+  assert.equal(second.status, 200);
+  const secondDecisions = second.body.authorization_decisions;
+  assert(Array.isArray(secondDecisions) && secondDecisions.length === 1);
+  assert.notEqual(asObject(firstDecisions[0], "first paged decision").decision_ref, asObject(secondDecisions[0], "second paged decision").decision_ref);
+  const missingRun = await getJson(port, "/runs/run_missing/authorization-decisions");
+  assert.equal(missingRun.status, 404);
+  assert.equal(asObject(asObject(missingRun.body, "missing run query").error, "missing run error").code, "run_not_found");
+  await writeFile(join(directory, "run_wrong_owner.json"), JSON.stringify(golden), "utf8");
+  const wrongOwner = await getJson(port, "/runs/run_wrong_owner/authorization-decisions");
+  assert.equal(wrongOwner.status, 503);
+  assert.equal(asObject(asObject(wrongOwner.body, "wrong run owner").error, "wrong run owner error").code, "authorization_run_record_invalid");
+}
+
+async function assertCorruptDecisionApi(port: number, directory: string): Promise<void> {
+  const decisionDirectory = `${directory}.authorization-decisions`;
+  const [journalFile] = await readdir(decisionDirectory);
+  assert(journalFile);
+  const journalPath = join(decisionDirectory, journalFile);
+  const journal = asObject(JSON.parse(await readFile(journalPath, "utf8")), "decision journal");
+  const entries = journal.decisions;
+  assert(Array.isArray(entries));
+  asObject(asObject(entries[0], "decision entry").decision, "stored decision").raw_dom = "forbidden";
+  await writeFile(journalPath, JSON.stringify(journal), "utf8");
+  const corrupt = await getJson(port, "/authorization-decisions");
+  assert.equal(corrupt.status, 503);
+  const failure = asObject(asObject(corrupt.body, "corrupt query").error, "corrupt query error");
+  assert.equal(failure.category, "persistence_observability");
+  assert.equal(failure.recovery_hint, "contact_operator");
+  assert.equal(failure.code, "authorization_decision_journal_invalid");
 }
 
 async function runSmokeMode(): Promise<void> {
@@ -147,7 +227,36 @@ async function runSmokeMode(): Promise<void> {
   await seedRunRecord(directory, golden);
 
   const store = createFileRunRecordStore({ directory });
-  const server = createApiServer({ runRecordStore: store });
+  const threadId = "thread_0123456789abcdef0123456789abcdef";
+  const turnId = "turn_0123456789abcdef0123456789abcdef";
+  const taskThreadStore = {
+    getTaskThread: async (candidate: string) => candidate === threadId
+      ? { thread_id: threadId, turns: [{ turn_id: turnId, run_id: golden.run_id }] }
+      : undefined
+  };
+  const decisionStore = createFileAuthorizationDecisionStore({
+    directory: `${directory}.authorization-decisions`,
+    runRecordStore: store,
+    taskThreadStore
+  });
+  const decision = await decisionStore.recordAuthorizationDecision({
+    idempotency_key: "cli-system-stop",
+    evaluation: evaluateExecutionPolicy({}),
+    subject: {
+      scope: "task",
+      run_id: golden.run_id,
+      thread_id: threadId,
+      turn_id: turnId
+    }
+  });
+  for (const index of [1, 2]) {
+    await decisionStore.recordAuthorizationDecision({
+      idempotency_key: `environment-system-stop-${index}`,
+      evaluation: evaluateExecutionPolicy({}),
+      subject: { scope: "environment", operation_ref: `harbor-operation:smoke/${index}` }
+    });
+  }
+  const server = createApiServer({ runRecordStore: store, authorizationDecisionStore: decisionStore });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -157,28 +266,9 @@ async function runSmokeMode(): Promise<void> {
   try {
     const cliOutput = await runCliQueryProcess(directory, golden.run_id);
     assertCliShape(cliOutput, golden);
-
-    assert.deepEqual(await getJson(port, `/runs/${golden.run_id}`), {
-      status: 200,
-      body: {
-        ok: true,
-        run: asObject(cliOutput.run, "CLI run")
-      }
-    });
-    assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/result`), {
-      status: 200,
-      body: {
-        ok: true,
-        result: asObject(cliOutput.result, "CLI result")
-      }
-    });
-    assert.deepEqual(await getJson(port, `/runs/${golden.run_id}/evidence-refs`), {
-      status: 200,
-      body: {
-        ok: true,
-        evidence: asObject(cliOutput.evidence, "CLI evidence")
-      }
-    });
+    await assertRunDecisionApis(port, golden, cliOutput, decision);
+    await assertDecisionPaginationApi(port, directory, golden);
+    await assertCorruptDecisionApi(port, directory);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error: Error | undefined) => (error ? reject(error) : resolve()));

@@ -62,6 +62,7 @@ export type TaskTurnView = Omit<TaskTurnRecord, "request_hash" | "run_claim_toke
   run_status?: RunRecordStatus;
   terminal_at?: string;
   input_gaps?: TaskTurnInputGap[];
+  authorization_decision_refs?: string[];
 };
 
 export type TaskThreadView = Omit<TaskThreadRecord, "schema_version" | "turns"> & {

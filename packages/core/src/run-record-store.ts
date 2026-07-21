@@ -1,9 +1,27 @@
 import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeFailureRecord, type FailureAttribution } from "./failure-attribution.js";
-import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import {
+  authorizationTimestamp,
+  buildAuthorizationDecisionBase,
+  parseAuthorizationDecisionRef,
+  type AuthorizationDecisionBase,
+  type AuthorizationDecisionSubject
+} from "./authorization-decision.js";
+import {
+  authorizationDecisionJournalLockPath,
+  commitTaskAuthorizationDecisionJournalEntry,
+  prepareAuthorizationDecisionJournalEntry,
+  readAuthorizationDecisionJournal,
+  visibleAuthorizationDecisionEntries,
+  writeAuthorizationDecisionJournal,
+  type PreparedAuthorizationDecision
+} from "./authorization-decision-journal.js";
+import { normalizeStoredTargetRef } from "./public-target-reference.js";
+import { normalizeNonSensitiveText } from "./sensitive-field-taxonomy.js";
+import {
+  FileOwnershipError,
   isFileOwnershipOwnerAlive,
   readFileOwnership,
   recoverDeadFileOwnership,
@@ -12,6 +30,7 @@ import {
   withFileOwnershipLock
 } from "./file-ownership.js";
 import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
+import { readTrustedExecutionPolicyEvaluation } from "./execution-policy.js";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
 
@@ -183,6 +202,7 @@ export type RunRecord = {
   source_refs?: string[];
   preview_result?: PreviewResult;
   evidence_refs?: string[];
+  authorization_decision_refs?: string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
@@ -249,6 +269,97 @@ export type FileRunRecordStore = {
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
   listRunRecords(): Promise<RunRecord[]>;
 };
+
+type AuthorizationDecisionRefTransaction = (
+  runId: string,
+  decisionDirectory: string,
+  stream: string,
+  prepared: PreparedAuthorizationDecision,
+  observedAt: string,
+  evaluation: unknown,
+  idempotencyKey: string,
+  expiresAt?: string
+) => Promise<AuthorizationDecisionBase>;
+
+const authorizationDecisionRefTransactions = new WeakMap<FileRunRecordStore, AuthorizationDecisionRefTransaction>();
+const authorizationDecisionRefFaultTransactions = new WeakMap<
+  FileRunRecordStore,
+  (phase: "prepare" | "commit", transaction: Parameters<AuthorizationDecisionRefTransaction>) => Promise<AuthorizationDecisionBase>
+>();
+
+function assertTrustedPreparedAuthorizationDecision(
+  prepared: PreparedAuthorizationDecision,
+  evaluation: unknown,
+  stream: string,
+  idempotencyKey: string,
+  expiresAt: string | undefined
+): boolean {
+  const facts = readTrustedExecutionPolicyEvaluation(evaluation);
+  if (!facts) throw new Error("authorization_evaluation_untrusted");
+  const { config_refs: _configRefs, ...subjectFields } = prepared.decision.applicability;
+  const subject = subjectFields as AuthorizationDecisionSubject;
+  const expected = buildAuthorizationDecisionBase({
+    decision_ref: prepared.decision.decision_ref,
+    facts,
+    subject,
+    fallback_decided_at: prepared.decision.decided_at,
+    ...(expiresAt === undefined ? {} : { expires_at: expiresAt })
+  });
+  const expectedHash = createHash("sha256").update(JSON.stringify({
+    subject,
+    evaluation: facts.evaluation,
+    requested_action: facts.requested_action ?? null,
+    owner_proof: facts.owner_proof ?? null,
+    expires_at: expiresAt ?? null
+  })).digest("hex");
+  const normalizedKey = normalizeNonSensitiveText(idempotencyKey, 128);
+  if (!normalizedKey) throw new Error("authorization_idempotency_key_invalid");
+  const expectedStream = createHash("sha256").update(JSON.stringify([
+    subject,
+    facts.requested_action?.action_instance_ref ?? "system_stop"
+  ])).digest("hex").slice(0, 32);
+  const expectedRef = `authorization-decision:${expectedStream}:${createHash("sha256").update(normalizedKey).digest("hex").slice(0, 32)}`;
+  if (stream !== expectedStream || prepared.decision.decision_ref !== expectedRef || prepared.request_hash !== expectedHash ||
+    JSON.stringify(prepared.decision) !== JSON.stringify(expected)) {
+    throw new Error("authorization_decision_journal_invalid");
+  }
+  return !("evaluated_at" in facts.evaluation);
+}
+
+// Internal Core coordination surface. It is absent from the public store contract and package exports.
+export function commitRunRecordAuthorizationDecisionRef(
+  store: FileRunRecordStore,
+  runId: string,
+  decisionDirectory: string,
+  stream: string,
+  prepared: PreparedAuthorizationDecision,
+  observedAt: string,
+  evaluation: unknown,
+  idempotencyKey: string,
+  expiresAt?: string
+): Promise<AuthorizationDecisionBase> {
+  const commit = authorizationDecisionRefTransactions.get(store);
+  if (!commit) throw new Error("authorization_run_store_unavailable");
+  return commit(runId, decisionDirectory, stream, prepared, observedAt, evaluation, idempotencyKey, expiresAt);
+}
+
+export function createAuthorizationDecisionRefFailureProbeStore(
+  store: FileRunRecordStore,
+  phase: "prepare" | "commit"
+): FileRunRecordStore {
+  const sourceCommit = authorizationDecisionRefTransactions.get(store);
+  const sourceFaultCommit = authorizationDecisionRefFaultTransactions.get(store);
+  if (!sourceCommit || !sourceFaultCommit) throw new Error("authorization_run_store_unavailable");
+  const probe = { ...store };
+  let fail = true;
+  authorizationDecisionRefTransactions.set(probe, (...transaction) => {
+    if (!fail) return sourceCommit(...transaction);
+    fail = false;
+    return sourceFaultCommit(phase, transaction);
+  });
+  authorizationDecisionRefFaultTransactions.set(probe, sourceFaultCommit);
+  return probe;
+}
 
 export const terminalRunRecordStatuses = new Set<RunRecordStatus>([
   "succeeded",
@@ -320,6 +431,11 @@ function copyRequiredRefs(values: readonly string[], label: string): string[] {
 
 function copyRefs(values: readonly string[] | undefined, label: string): string[] | undefined {
   return values ? copyRequiredRefs(values, label) : undefined;
+}
+
+function copyAuthorizationDecisionRefs(values: readonly string[]): string[] {
+  if (values.length > 64 || new Set(values).size !== values.length) throw new Error("authorization_decision_refs_invalid");
+  return values.map(parseAuthorizationDecisionRef);
 }
 
 function validatePreviewResult(preview: PreviewResult): void {
@@ -484,6 +600,7 @@ function assertRunRecord(record: RunRecord): void {
     requireRef(record.approval_request.consumer_boundary, "approval_request.consumer_boundary");
   }
   copyRefs(record.evidence_refs, "evidence_refs");
+  if (record.authorization_decision_refs !== undefined) copyAuthorizationDecisionRefs(record.authorization_decision_refs);
   if (record.post_check !== undefined) {
     requireRef(record.post_check.schema_version, "post_check.schema_version");
     if (record.post_check.schema_version !== "webenvoy.post-check-result.v0") {
@@ -729,7 +846,7 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
     await releaseFileOwnership(runClaimPath(directory, runId), claimToken).catch(() => false);
   }
 
-  return {
+  const store: FileRunRecordStore = {
     directory,
     claimRunId,
     getRunIdClaim,
@@ -794,4 +911,94 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
       return records;
     }
   };
+
+  let pendingFault: "prepare" | "commit" | undefined;
+  const commitAuthorizationDecision: AuthorizationDecisionRefTransaction = async (
+    runId,
+    decisionDirectory,
+    stream,
+    prepared,
+    observedAt,
+    evaluation,
+    idempotencyKey,
+    expiresAt
+  ) => withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+    const usesFallbackTimestamp = assertTrustedPreparedAuthorizationDecision(
+      prepared,
+      evaluation,
+      stream,
+      idempotencyKey,
+      expiresAt
+    );
+    const transactionObservedAt = authorizationTimestamp(observedAt, "observed_at");
+    if (Date.parse(prepared.decision.decided_at) > Date.parse(transactionObservedAt)) {
+      throw new Error("authorization_decision_time_invalid");
+    }
+    const record = await getRunRecord(runId);
+    if (!record) throw new Error(`run record not found: ${runId}`);
+    const ref = parseAuthorizationDecisionRef(prepared.decision.decision_ref);
+    if (ref.split(":")[1] !== stream || prepared.decision.applicability.scope !== "task" ||
+      prepared.decision.applicability.run_id !== runId) {
+      throw new Error("authorization_task_binding_mismatch");
+    }
+    const linked = record.authorization_decision_refs?.includes(ref) ?? false;
+    if (!linked && (record.authorization_decision_refs?.length ?? 0) >= 64) {
+      throw new Error("authorization_decision_refs_full");
+    }
+    try {
+      return await withFileOwnershipLock(
+        authorizationDecisionJournalLockPath(decisionDirectory, stream),
+        lockTimeoutMs,
+        async () => {
+          const journal = await readAuthorizationDecisionJournal(decisionDirectory, stream);
+          const existing = journal.decisions.find((entry) =>
+            entry.decision.decision_ref === prepared.decision.decision_ref && entry.request_hash === prepared.request_hash
+          );
+          const transactionPrepared = usesFallbackTimestamp && existing
+            ? { ...prepared, decision: { ...prepared.decision, decided_at: existing.decision.decided_at } }
+            : prepared;
+          if (Date.parse(transactionPrepared.decision.decided_at) > Date.parse(transactionObservedAt)) {
+            throw new Error("authorization_decision_time_invalid");
+          }
+          const staged = prepareAuthorizationDecisionJournalEntry(
+            journal,
+            transactionPrepared,
+            "prepared",
+            visibleAuthorizationDecisionEntries(journal, record.authorization_decision_refs),
+            transactionObservedAt
+          );
+          if (staged !== journal) await writeAuthorizationDecisionJournal(decisionDirectory, staged);
+          if (pendingFault === "prepare") {
+            pendingFault = undefined;
+            throw new Error("injected_prepare_failure");
+          }
+          if (!linked) {
+            await writeRecord(directory, {
+              ...record,
+              updated_at: clock().toISOString(),
+              authorization_decision_refs: copyAuthorizationDecisionRefs([...(record.authorization_decision_refs ?? []), ref])
+            });
+          }
+          if (pendingFault === "commit") {
+            pendingFault = undefined;
+            throw new Error("injected_commit_failure");
+          }
+          const committed = commitTaskAuthorizationDecisionJournalEntry(staged, ref, transactionObservedAt);
+          if (committed !== staged) await writeAuthorizationDecisionJournal(decisionDirectory, committed);
+          return transactionPrepared.decision;
+        }
+      );
+    } catch (error) {
+      if (error instanceof FileOwnershipError && error.message === "file_lock_timeout") {
+        throw new Error("authorization_decision_lock_timeout");
+      }
+      throw error;
+    }
+  });
+  authorizationDecisionRefTransactions.set(store, commitAuthorizationDecision);
+  authorizationDecisionRefFaultTransactions.set(store, async (phase, transaction) => {
+    pendingFault = phase;
+    return commitAuthorizationDecision(...transaction);
+  });
+  return store;
 }

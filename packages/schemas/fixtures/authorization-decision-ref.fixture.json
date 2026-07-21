@@ -1,0 +1,5 @@
+{
+  "$schema": "../schemas/authorization-decision-ref.schema.json",
+  "schema_version": "webenvoy.authorization-decision-ref.v0",
+  "decision_ref": "authorization-decision:0123456789abcdef0123456789abcdef:fedcba9876543210fedcba9876543210"
+}

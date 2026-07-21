@@ -154,6 +154,14 @@ export type ExecutionPolicyEvaluation =
 
 type JsonObject = Record<string, unknown>;
 type ParsedExecutionPolicyEvaluationInput = Omit<ExecutionPolicyEvaluationInput, "owner_proof"> & { owner_proof: BusinessActionOwnerProofFields };
+export type TrustedExecutionPolicyEvaluationFacts = {
+  evaluation: ExecutionPolicyEvaluation;
+  requested_action?: BusinessActionRequest;
+  owner_proof?: BusinessActionOwnerProofFields;
+  single_action_expires_at?: string;
+};
+
+const trustedEvaluationFacts = new WeakMap<object, TrustedExecutionPolicyEvaluationFacts>();
 const actionCategories = new Set<BusinessActionCategory>(["read", "prepare", "commit", "destructive"]);
 const policyModes = new Set<ExecutionPolicyMode>(["auto", "confirm", "deny"]);
 const callers = new Set<ExecutionPolicyCaller>(["api", "cli", "mcp", "sdk", "app", "agent", "environment"]);
@@ -295,6 +303,30 @@ function invalidInput(): ExecutionPolicyEvaluation {
   return { schema_version: executionPolicyEvaluationSchemaVersion, status: "stopped", next_step: "stop", stop_reason: "invalid_input" };
 }
 
+function rememberEvaluation(
+  evaluation: ExecutionPolicyEvaluation,
+  input?: ParsedExecutionPolicyEvaluationInput,
+  singleActionExpiresAt?: string
+): ExecutionPolicyEvaluation {
+  trustedEvaluationFacts.set(evaluation, {
+    evaluation: structuredClone(evaluation),
+    ...(input === undefined ? {} : {
+      requested_action: structuredClone(input.action),
+      owner_proof: structuredClone(input.owner_proof)
+    }),
+    ...(singleActionExpiresAt === undefined ? {} : {
+      single_action_expires_at: singleActionExpiresAt
+    })
+  });
+  return evaluation;
+}
+
+export function readTrustedExecutionPolicyEvaluation(
+  value: unknown
+): TrustedExecutionPolicyEvaluationFacts | undefined {
+  return value && typeof value === "object" ? trustedEvaluationFacts.get(value as object) : undefined;
+}
+
 function stopped(input: ParsedExecutionPolicyEvaluationInput, stopReason: Exclude<StopReason, "invalid_input">, action?: EvaluatedBusinessAction): ExecutionPolicyEvaluation {
   return { schema_version: executionPolicyEvaluationSchemaVersion, evaluated_at: input.evaluated_at, status: "stopped", next_step: "stop", stop_reason: stopReason,
     ...(action ? { action, risk_marker: action.category === "destructive" ? "destructive" as const : null } : {}) };
@@ -368,14 +400,18 @@ function evaluated(input: ParsedExecutionPolicyEvaluationInput, action: Evaluate
 export function evaluateExecutionPolicy(value: unknown): ExecutionPolicyEvaluation {
   try {
     const input = parseInput(value);
-    if (!input) return invalidInput();
+    if (!input) return rememberEvaluation(invalidInput());
     const action = matchedAction(input);
-    if ("status" in action) return action;
+    if ("status" in action) return rememberEvaluation(action, input);
     const current = currentPolicy(input, action.category);
-    if (!current) return stopped(input, "policy_unavailable", action);
+    if (!current) return rememberEvaluation(stopped(input, "policy_unavailable", action), input);
     const single = validSingleDecision(input, action, current);
-    return evaluated(input, action, single ? { mode: single.mode, source: "single_action_decision", source_ref: single.source_ref, source_version: single.source_version } : current);
+    return rememberEvaluation(
+      evaluated(input, action, single ? { mode: single.mode, source: "single_action_decision", source_ref: single.source_ref, source_version: single.source_version } : current),
+      input,
+      single?.expires_at
+    );
   } catch {
-    return invalidInput();
+    return rememberEvaluation(invalidInput());
   }
 }

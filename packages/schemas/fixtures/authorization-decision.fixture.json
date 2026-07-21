@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/authorization-decision.schema.json",
+  "schema_version": "webenvoy.authorization-decision.v0",
+  "decision_ref": "authorization-decision:0123456789abcdef0123456789abcdef:fedcba9876543210fedcba9876543210",
+  "business_action": {
+    "action_instance_ref": "action-instance:xhs-read/1",
+    "action_id": "xhs_read_note",
+    "category": "read",
+    "target": {
+      "target_ref": "target:xhs-note/1",
+      "target_type": "note_detail",
+      "site_slug": "xiaohongshu",
+      "origin": "https://www.xiaohongshu.com"
+    }
+  },
+  "owner_declaration": {
+    "matcher": "lode_action_declaration",
+    "declaration_ref": "lode:site-capability/xiaohongshu/read-note@1.0.0#xhs_read_note",
+    "declaration_version": "1.0.0",
+    "resource_match_ref": "resource-match:xhs/read/1",
+    "resource_match_version": "1"
+  },
+  "effective_policy": {
+    "mode": "auto",
+    "source": "global_user_config",
+    "source_version": "1"
+  },
+  "applicability": {
+    "scope": "task",
+    "run_id": "run_policy_fixture",
+    "thread_id": "thread_0123456789abcdef0123456789abcdef",
+    "turn_id": "turn_0123456789abcdef0123456789abcdef",
+    "config_refs": ["policy:global/1"]
+  },
+  "outcome": "execute",
+  "risk_marker": null,
+  "decided_at": "2026-07-21T00:00:00.000Z",
+  "expires_at": null,
+  "state": "active",
+  "invalidated_at": null,
+  "invalidation_reason": null,
+  "consumer_boundary": "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded."
+}

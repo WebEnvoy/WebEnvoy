@@ -130,7 +130,7 @@ pnpm --filter @webenvoy/api-server start
 
 当前任务入口包括 `POST /tasks`，以及任务线程的 `POST /threads`、`GET /threads`、`GET /threads/:thread_id`、`POST /threads/:thread_id/turns` 和显式终止入口。线程由 capability ref 与 Harbor identity environment ref 稳定绑定；提交回合必须携带 idempotency key、Run ID、结构化输入快照和相同绑定。活动或 `status_unknown` 回合存在时拒绝新回合，不建立隐式队列。长文本、文件和附件仅接受受限命名空间的 owner ref；宿主配置 availability checker 后，检查超时或失效会 fail closed，已保存回合返回精确输入缺口而不读取内容。未配置 checker 时 Core 只验证并保存不透明 ref，不声称已验证其可用性。
 
-查询入口还包括 `GET /health`、`GET /readiness`、`GET /runs/:run_id`、`GET /runs/:run_id/result` 和 `GET /runs/:run_id/evidence-refs`。这些接口只返回 Core Run Record、Task Thread、result envelope 和 evidence ref 的公共投影。设置 `WEBENVOY_RUN_RECORD_DIR` 后 API Server 同时启用默认的线程持久化目录；可用 `WEBENVOY_TASK_THREAD_DIR` 指定独立目录。写侧 guardrail 仍阻止真实外部写入。
+查询入口还包括 `GET /health`、`GET /readiness`、`GET /runs/:run_id`、`GET /runs/:run_id/result`、`GET /runs/:run_id/evidence-refs` 和 `GET /runs/:run_id/authorization-decisions`。这些接口只返回 Core Run Record、Task Thread、result envelope、evidence ref 和授权决定的公共投影。设置 `WEBENVOY_RUN_RECORD_DIR` 后 API Server 同时启用默认的线程与授权决定持久化目录；可用 `WEBENVOY_TASK_THREAD_DIR` 和 `WEBENVOY_AUTHORIZATION_DECISION_DIR` 指定独立目录。写侧 guardrail 仍阻止真实外部写入。
 
 ## 许可证
 

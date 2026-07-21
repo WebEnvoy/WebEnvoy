@@ -1,4 +1,26 @@
 export {
+  authorizationDecisionRef,
+  authorizationDecisionRefSchemaVersion,
+  authorizationDecisionSchemaVersion,
+  authorizationDecisionTimeOrderValid,
+  normalizeAuthorizationDecisionSummary,
+  parseAuthorizationDecisionRef,
+  type AuthorizationDecisionApplicability,
+  type AuthorizationDecisionInvalidationReason,
+  type AuthorizationDecisionRef,
+  type AuthorizationDecisionSource,
+  type AuthorizationDecisionState,
+  type AuthorizationDecisionSubject,
+  type AuthorizationDecisionSummary
+} from "./authorization-decision.js";
+export {
+  createFileAuthorizationDecisionStore,
+  type AuthorizationDecisionPage,
+  type AuthorizationDecisionQuery,
+  type FileAuthorizationDecisionStore,
+  type FileAuthorizationDecisionStoreOptions
+} from "./authorization-decision-store.js";
+export {
   claimDetailTarget,
   commitDetailTargetReservation,
   compensatePublishedSearchDetailTargets,

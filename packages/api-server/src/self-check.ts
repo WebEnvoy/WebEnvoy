@@ -244,6 +244,7 @@ async function main(): Promise<void> {
         status: "degraded",
         checks: {
           runRecordStore: "configured",
+          authorizationDecisionStore: "missing",
           taskThreadStore: "configured",
           lodePackageResolver: "configured",
           harborIdentityFactsReader: "configured",
@@ -349,6 +350,9 @@ async function main(): Promise<void> {
       });
       assert.equal(ownerUnavailable.status, 503);
       assert.equal(asRecord(asRecord(ownerUnavailable.body).error).code, "identity_compatibility_owner_unavailable");
+      const decisionStoreUnavailable = await getJson(unavailableAddress.port, "/authorization-decisions");
+      assert.equal(decisionStoreUnavailable.status, 503);
+      assert.equal(asRecord(asRecord(decisionStoreUnavailable.body).error).code, "authorization_decision_store_unavailable");
     } finally {
       await new Promise<void>((resolve, reject) => unavailableServer.close((error) => error ? reject(error) : resolve()));
     }
