@@ -36,7 +36,7 @@ async function createTaskFixture(directory: string) {
   });
   const { thread } = await threadStore.createOrGetTaskThread({
     capability_ref: "lode:capability/xiaohongshu/read-note",
-    identity_environment_ref: "identity-env:fixture"
+    identity_environment_ref: "identity-env_888888888888888888888888"
   });
   const reserved = await threadStore.reserveTaskTurn(thread.thread_id, {
     idempotency_key: "authorization-turn",

@@ -55,7 +55,7 @@ async function assertInFlightReplay(): Promise<void> {
   try {
     const created = await store.createOrGetTaskThread({
       capability_ref: "lode:capability/in-flight",
-      identity_environment_ref: "identity-env:in-flight"
+      identity_environment_ref: "identity-env_111111111111111111111111"
     });
     const body = {
       idempotency_key: "submit-in-flight",
@@ -66,7 +66,7 @@ async function assertInFlightReplay(): Promise<void> {
         fields: [{ field_id: "keyword", kind: "scalar", summary: "AI tools" }]
       },
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/in-flight", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env:in-flight" }
+      harbor: { identity_environment_ref: "identity-env_111111111111111111111111" }
     };
     const submit = handleTaskThreadApi({
       method: "POST",
@@ -123,14 +123,14 @@ async function assertInFlightReplay(): Promise<void> {
 
     const recoveredThread = await store.createOrGetTaskThread({
       capability_ref: "lode:capability/recovered",
-      identity_environment_ref: "identity-env:recovered"
+      identity_environment_ref: "identity-env_222222222222222222222222"
     });
     const recoveredBody = {
       ...body,
       idempotency_key: "submit-recovered",
       run_id: "run_api_recovered",
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/recovered", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env:recovered" }
+      harbor: { identity_environment_ref: "identity-env_222222222222222222222222" }
     };
     const recoveredTurn = await store.reserveTaskTurn(recoveredThread.thread.thread_id, {
       idempotency_key: recoveredBody.idempotency_key,
@@ -163,14 +163,14 @@ async function assertInFlightReplay(): Promise<void> {
 
     const waitingThread = await store.createOrGetTaskThread({
       capability_ref: "lode:capability/waiting-recovered",
-      identity_environment_ref: "identity-env:waiting-recovered"
+      identity_environment_ref: "identity-env_333333333333333333333333"
     });
     const waitingBody = {
       ...body,
       idempotency_key: "submit-waiting-recovered",
       run_id: "run_api_waiting_recovered",
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/waiting-recovered", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env:waiting-recovered" }
+      harbor: { identity_environment_ref: "identity-env_333333333333333333333333" }
     };
     const waitingTurn = await store.reserveTaskTurn(waitingThread.thread.thread_id, {
       idempotency_key: waitingBody.idempotency_key,
@@ -211,14 +211,14 @@ async function assertInFlightReplay(): Promise<void> {
 
     const interruptedThread = await store.createOrGetTaskThread({
       capability_ref: "lode:capability/interrupted",
-      identity_environment_ref: "identity-env:interrupted"
+      identity_environment_ref: "identity-env_444444444444444444444444"
     });
     const interruptedBody = {
       ...body,
       idempotency_key: "submit-interrupted",
       run_id: "run_api_interrupted",
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/interrupted", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env:interrupted" }
+      harbor: { identity_environment_ref: "identity-env_444444444444444444444444" }
     };
     const interrupted = await handleTaskThreadApi({
       method: "POST",
@@ -248,14 +248,14 @@ async function assertInFlightReplay(): Promise<void> {
 
     const unknownThread = await store.createOrGetTaskThread({
       capability_ref: "lode:capability/unknown-replay",
-      identity_environment_ref: "identity-env:unknown-replay"
+      identity_environment_ref: "identity-env_555555555555555555555555"
     });
     const unknownBody = {
       ...body,
       idempotency_key: "submit-unknown-replay",
       run_id: "run_api_unknown_replay",
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/unknown-replay", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env:unknown-replay" }
+      harbor: { identity_environment_ref: "identity-env_555555555555555555555555" }
     };
     const unknownTurn = await store.reserveTaskTurn(unknownThread.thread.thread_id, {
       idempotency_key: unknownBody.idempotency_key,

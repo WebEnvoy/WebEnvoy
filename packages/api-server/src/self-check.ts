@@ -580,6 +580,7 @@ async function main(): Promise<void> {
     })).status, 200);
     for (const identity_environment_ref of [
       "identity-env_deadbeef",
+      "identity-env:this-is-not-a-harbor-owner-ref",
       "identity-env:foo/https://example.test/private",
       "identity-env:foo/user:password",
       "identity-env:credential-reference",
@@ -688,7 +689,7 @@ async function main(): Promise<void> {
         ...taskTurnRequest.input_snapshot,
         fields: [{ field_id: "draft", kind: "long_text", owner_ref: "draft:fixture", content: "RAW-SECRET" }]
       },
-      harbor: { identity_environment_ref: "identity-env:other" }
+      harbor: { identity_environment_ref: "identity-env_89abcdef0123456701234567" }
     });
     assert.equal(invalidSnapshotBeforeBinding.status, 400);
     assert.equal(asRecord(asRecord(invalidSnapshotBeforeBinding.body).error).code, "field_property_unsupported:content");
@@ -697,7 +698,7 @@ async function main(): Promise<void> {
       ...taskTurnRequest,
       idempotency_key: "api-thread-submit-mismatch",
       run_id: "run_api_thread_mismatch",
-      harbor: { identity_environment_ref: "identity-env:other" }
+      harbor: { identity_environment_ref: "identity-env_89abcdef0123456701234567" }
     });
     assert.equal(bindingMismatch.status, 409);
     assert.equal(asRecord(asRecord(bindingMismatch.body).error).code, "thread_binding_mismatch");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,10 @@ import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-
 import { createFileTaskThreadStore } from "./task-thread-store.js";
 import { taskTurnInputSchemaVersion, TaskThreadStoreError } from "./task-turn-input.js";
 import { createLocalTaskTurnInputPolicyResolver } from "./task-turn-input-policy.js";
+
+function identityEnvironmentRef(seed: string): string {
+  return `identity-env_${createHash("sha256").update(seed).digest("hex").slice(0, 24)}`;
+}
 
 const packageRef = "lode://site-capability/test/search-notes@0.1.0";
 
@@ -77,7 +82,7 @@ async function assertProjectionPolicy(directory: string, runStore: FileRunRecord
   });
   const thread = await policyStore.createOrGetTaskThread({
     capability_ref: "lode:capability/search-notes",
-    identity_environment_ref: "identity-env:policy"
+    identity_environment_ref: identityEnvironmentRef("policy")
   });
   await assert.rejects(() => policyStore.reserveTaskTurn(thread.thread.thread_id, turnInput(
     "run_policy_raw_keyword",
@@ -118,7 +123,7 @@ async function assertUnavailablePolicy(directory: string, runStore: FileRunRecor
   const store = createFileTaskThreadStore({ directory: join(directory, "unavailable"), runRecordStore: runStore });
   const thread = await store.createOrGetTaskThread({
     capability_ref: "lode:capability/policy-unavailable",
-    identity_environment_ref: "identity-env:policy-unavailable"
+    identity_environment_ref: identityEnvironmentRef("policy-unavailable")
   });
   await assert.rejects(
     () => store.reserveTaskTurn(thread.thread.thread_id, turnInput(
@@ -157,7 +162,7 @@ async function assertOwnerCheckConcurrency(directory: string, runStore: FileRunR
   });
   const thread = await store.createOrGetTaskThread({
     capability_ref: "lode:capability/owner-check-concurrency",
-    identity_environment_ref: "identity-env:owner-check-concurrency"
+    identity_environment_ref: identityEnvironmentRef("owner-check-concurrency")
   });
   for (let index = 0; index < 12; index += 1) {
     const ownerRef = `attachment:fixture/${index}`;
@@ -195,7 +200,7 @@ async function assertResolverRaceReplay(
   });
   const thread = await successStore.createOrGetTaskThread({
     capability_ref: "lode:capability/search-notes",
-    identity_environment_ref: "identity-env:resolver-race"
+    identity_environment_ref: identityEnvironmentRef("resolver-race")
   });
   let signalStarted: () => void = () => {};
   const started = new Promise<void>((resolve) => { signalStarted = resolve; });
@@ -252,7 +257,7 @@ async function assertOwnerCheckTimeoutBound(directory: string, runStore: FileRun
     });
     const thread = await store.createOrGetTaskThread({
       capability_ref: `lode:capability/${name}`,
-      identity_environment_ref: `identity-env:${name}`
+      identity_environment_ref: identityEnvironmentRef(name)
     });
     const fields = Array.from({ length: 16 }, (_, index) => ({
       field_id: `file_${index}`,
@@ -297,7 +302,7 @@ async function assertExpiredOwnerChecksDoNotStart(directory: string, runStore: F
   });
   const thread = await store.createOrGetTaskThread({
     capability_ref: `lode:capability/${name}`,
-    identity_environment_ref: `identity-env:${name}`
+    identity_environment_ref: identityEnvironmentRef(name)
   });
   const fields = Array.from({ length: 16 }, (_, index) => ({
     field_id: `file_${index}`,

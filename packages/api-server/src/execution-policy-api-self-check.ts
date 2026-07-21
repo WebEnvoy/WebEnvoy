@@ -253,7 +253,7 @@ export async function assertExecutionPolicyApi(): Promise<void> {
 
     const { thread } = await taskThreadStore.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: "identity-env_666666666666666666666666"
     });
     const threadResponse = await request(port, `/threads/${thread.thread_id}/execution-policy?skill_ref=${encodeURIComponent(skillRef)}`, "PUT", mutation("thread-create", null, { read: "deny" }));
     assert.equal(threadResponse.status, 200);
@@ -265,7 +265,7 @@ export async function assertExecutionPolicyApi(): Promise<void> {
 
     const { thread: raceThread } = await taskThreadStore.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-race"
+      identity_environment_ref: "identity-env_777777777777777777777777"
     });
     const racePolicyRequest = request(
       port,
