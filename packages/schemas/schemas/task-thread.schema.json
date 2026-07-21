@@ -45,7 +45,10 @@
     },
     "identity_environment_ref": {
       "type": "string",
-      "pattern": "^identity-env:[A-Za-z0-9][A-Za-z0-9._~:/-]{0,2030}$"
+      "pattern": "^(?:identity-env_[a-f0-9]{24}|identity-env:(?=.{1,2031}$)[A-Za-z0-9][A-Za-z0-9._~-]{0,2030}(?:[/:][A-Za-z0-9][A-Za-z0-9._~-]{0,2030})*)$",
+      "not": {
+        "pattern": "(?:[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Oo][Oo][Kk][Ii][Ee])"
+      }
     },
     "created_at": {
       "type": "string",

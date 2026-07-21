@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import {
   validateTaskTurnInputSnapshot,
   type ReserveTaskTurnInput
 } from "./task-thread-store.js";
+import { taskThreadStoreSchemaVersion } from "./task-thread-types.js";
 
 let tick = 0;
 const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
@@ -122,6 +124,7 @@ export async function assertTaskThreadStore(): Promise<void> {
   const unavailableOwnerRefs = new Set<string>();
   const checkOwnerRef = async (ownerRef: string) => !unavailableOwnerRefs.has(ownerRef);
   const store = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef, resolveInputPolicy });
+  const harborIdentityRef = "identity-env_0123456789abcdef01234567";
 
   try {
     const publicUrl = validateTaskTurnInputSnapshot({
@@ -135,14 +138,66 @@ export async function assertTaskThreadStore(): Promise<void> {
     }), /field_owner_ref_invalid/);
     const creates = await Promise.all(Array.from({ length: 8 }, () => store.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     })));
     assert.equal(new Set(creates.map((result) => result.thread.thread_id)).size, 1);
     assert.equal(creates.filter((result) => result.created).length, 1);
+    assert.equal(creates[0]?.thread.identity_environment_ref, harborIdentityRef);
     const threadId = creates.at(0)!.thread.thread_id;
+    const otherIdentity = await store.createOrGetTaskThread({
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env_89abcdef0123456701234567"
+    });
+    assert.notEqual(otherIdentity.thread.thread_id, threadId);
+    for (const identity_environment_ref of [
+      "identity-env_deadbeef",
+      "identity-env_0123456789abcdef0123456g",
+      "harbor://identity-environment/xhs-brand",
+      "https://example.test/identity/xhs-brand",
+      "identity-env:https://example.test/identity/xhs-brand",
+      "identity-env:foo/https://example.test/private",
+      "identity-env:user:password",
+      "identity-env:foo/user:password",
+      "identity-env:credential-reference",
+      "identity-env:cookie-reference",
+      "identity-env:Mixed-SeCrEt-reference",
+      "identity-env:token-secret",
+      "identity-env_token-secret",
+      `identity-env:${"a".repeat(2032)}`
+    ]) {
+      await assert.rejects(() => store.createOrGetTaskThread({
+        capability_ref: "lode:capability/search-notes",
+        identity_environment_ref
+      }), /identity_environment_ref_invalid/);
+    }
+    const legacyCapabilityRef = "lode:capability/legacy-compatible";
+    const legacyIdentityRef = "identity-env:fixture/real-query:execution";
+    const legacyThreadId = `thread_${createHash("sha256")
+      .update(`${legacyCapabilityRef}\u0000${legacyIdentityRef}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    await writeFile(join(threadDirectory, `${legacyThreadId}.json`), `${JSON.stringify({
+      schema_version: taskThreadStoreSchemaVersion,
+      thread_id: legacyThreadId,
+      capability_ref: legacyCapabilityRef,
+      identity_environment_ref: legacyIdentityRef,
+      created_at: "2026-07-18T06:00:00.000Z",
+      updated_at: "2026-07-18T06:00:00.000Z",
+      turns: []
+    })}\n`);
+    const legacyExisting = await store.createOrGetTaskThread({
+      capability_ref: legacyCapabilityRef,
+      identity_environment_ref: legacyIdentityRef
+    });
+    assert.equal(legacyExisting.created, false);
+    assert.equal(legacyExisting.thread.identity_environment_ref, legacyIdentityRef);
+    await assert.rejects(() => store.createOrGetTaskThread({
+      capability_ref: legacyCapabilityRef,
+      identity_environment_ref: "identity-env:this-is-not-a-harbor-owner-ref"
+    }), /identity_environment_ref_invalid/);
     await assert.rejects(() => store.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes?token=private",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     }), /capability_ref_invalid/);
 
     const uncheckedStore = createFileTaskThreadStore({
@@ -152,7 +207,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     });
     const uncheckedThread = await uncheckedStore.createOrGetTaskThread({
       capability_ref: "lode:capability/unchecked-owner-refs",
-      identity_environment_ref: "identity-env:unchecked-owner-refs"
+      identity_environment_ref: "identity-env_111111111111111111111111"
     });
     assert.equal((await uncheckedStore.reserveTaskTurn(
       uncheckedThread.thread.thread_id,
@@ -168,7 +223,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     });
     const hangingThread = await hangingStore.createOrGetTaskThread({
       capability_ref: "lode:capability/hanging-owner-check",
-      identity_environment_ref: "identity-env:hanging-owner-check"
+      identity_environment_ref: "identity-env_222222222222222222222222"
     });
     await assert.rejects(
       () => hangingStore.reserveTaskTurn(hangingThread.thread.thread_id, turnInput("run_hanging_owner", "submit-hanging-owner", "hash-hanging-owner")),
@@ -176,7 +231,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     );
     assert.equal((await hangingStore.createOrGetTaskThread({
       capability_ref: "lode:capability/hanging-owner-check",
-      identity_environment_ref: "identity-env:hanging-owner-check"
+      identity_environment_ref: "identity-env_222222222222222222222222"
     })).created, false);
 
     const lockPath = join(threadDirectory, ".locks", `${threadId}.lock`);
@@ -192,7 +247,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     await assert.rejects(
       () => lockContender.createOrGetTaskThread({
         capability_ref: "lode:capability/search-notes",
-        identity_environment_ref: "identity-env:xhs-brand"
+        identity_environment_ref: harborIdentityRef
       }),
       /thread_lock_timeout/
     );
@@ -210,14 +265,14 @@ export async function assertTaskThreadStore(): Promise<void> {
     await assert.rejects(
       () => lockContender.createOrGetTaskThread({
         capability_ref: "lode:capability/search-notes",
-        identity_environment_ref: "identity-env:xhs-brand"
+        identity_environment_ref: harborIdentityRef
       }),
       /thread_lock_timeout/
     );
     await unlink(recoveryMarker);
     assert.equal((await lockContender.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     })).created, false);
 
     const first = await store.reserveTaskTurn(threadId, turnInput("run_thread_001", "submit-001", "hash-001"));
@@ -419,7 +474,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     await kill(orphanClaimOwner);
     const recoveredClaimThread = await recoveredStore.createOrGetTaskThread({
       capability_ref: "lode:capability/recovered-claim",
-      identity_environment_ref: "identity-env:recovered-claim"
+      identity_environment_ref: "identity-env_333333333333333333333333"
     });
     const recoveredClaim = await recoveredStore.reserveTaskTurn(
       recoveredClaimThread.thread.thread_id,
@@ -429,11 +484,11 @@ export async function assertTaskThreadStore(): Promise<void> {
 
     const globalA = await recoveredStore.createOrGetTaskThread({
       capability_ref: "lode:capability/global-a",
-      identity_environment_ref: "identity-env:global-a"
+      identity_environment_ref: "identity-env_444444444444444444444444"
     });
     const globalB = await recoveredStore.createOrGetTaskThread({
       capability_ref: "lode:capability/global-b",
-      identity_environment_ref: "identity-env:global-b"
+      identity_environment_ref: "identity-env_555555555555555555555555"
     });
     const globalReservation = await recoveredStore.reserveTaskTurn(globalA.thread.thread_id, turnInput("run_thread_global", "submit-global-a", "hash-global-a"));
     const globalClaimPath = join(`${runDirectory}.run-id-claims`, "run_thread_global.claim");
