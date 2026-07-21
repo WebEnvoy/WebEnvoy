@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   createFileRunRecordStore,
   createFileAuthorizationDecisionStore,
+  createFileExecutionPolicyConfigStore,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
@@ -50,6 +51,11 @@ if (import.meta.url === entrypoint) {
         ...(taskThreadStore === undefined ? {} : { taskThreadStore })
       })
     : undefined;
+  const executionPolicyConfigStore = runRecordStore
+    ? createFileExecutionPolicyConfigStore({
+        directory: process.env.WEBENVOY_EXECUTION_POLICY_DIR ?? `${runRecordStore.directory}.execution-policies`
+      })
+    : undefined;
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
@@ -62,6 +68,7 @@ if (import.meta.url === entrypoint) {
   const server = createApiServer({
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),
+    ...(executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore }),
     ...(taskThreadStore === undefined ? {} : { taskThreadStore }),
     ...(lodeRegistryPath === undefined
       ? {}

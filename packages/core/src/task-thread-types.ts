@@ -97,6 +97,10 @@ export type FileTaskThreadStore = {
   }): Promise<{ thread: TaskThreadView; created: boolean }>;
   getTaskThread(threadId: string): Promise<TaskThreadView | undefined>;
   listTaskThreads(): Promise<TaskThreadView[]>;
+  withNextTurnPolicyBoundary<T>(
+    threadId: string,
+    action: (context: { thread: TaskThreadView; next_turn_sequence: number }) => Promise<T>
+  ): Promise<T>;
   reserveTaskTurn(threadId: string, input: ReserveTaskTurnInput): Promise<{
     thread: TaskThreadView;
     turn: TaskTurnView;

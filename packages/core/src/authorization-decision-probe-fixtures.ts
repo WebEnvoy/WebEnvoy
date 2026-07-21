@@ -91,6 +91,8 @@ export function singleAuthorizationDecision(
   assert(confirmation.status === "evaluated" && confirmation.confirmation_request);
   const request = confirmation.confirmation_request;
   return {
+    schema_version: "webenvoy.single-action-decision.v0",
+    confirmation_decision_ref: "authorization-decision:33333333333333333333333333333333:44444444444444444444444444444444",
     source_ref: `decision:single/${mode}`,
     source_version: "1",
     action_instance_ref: request.action_instance_ref,

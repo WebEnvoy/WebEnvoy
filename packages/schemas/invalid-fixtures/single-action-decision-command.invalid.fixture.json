@@ -1,0 +1,22 @@
+{
+  "schema": "single-action-decision-command.schema.json",
+  "cases": [
+    {
+      "name": "persistent allow is not a choice",
+      "instance": {
+        "schema_version": "webenvoy.single-action-decision-command.v0",
+        "idempotency_key": "single-persistent",
+        "choice": "allow_always"
+      }
+    },
+    {
+      "name": "configuration mutation is forbidden",
+      "instance": {
+        "schema_version": "webenvoy.single-action-decision-command.v0",
+        "idempotency_key": "single-mutate",
+        "choice": "allow_once",
+        "modes": { "commit": "auto" }
+      }
+    }
+  ]
+}

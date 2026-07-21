@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/single-action-decision.v0.schema.json",
+  "title": "WebEnvoy Single Action Decision v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.single-action-decision.v0",
+    "compatibility_boundary": "One expiring allow-once or deny-once binding derived from an active Core confirmation. It cannot replace or mutate another policy source.",
+    "source_adrs": ["docs/adr/0008-core-technical-architecture-baseline.md", "docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": [
+    "schema_version", "confirmation_decision_ref", "source_ref", "source_version", "action_instance_ref", "action_id", "category", "target",
+    "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version",
+    "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "mode", "state", "issued_at", "expires_at"
+  ],
+  "properties": {
+    "$schema": { "const": "single-action-decision.schema.json" },
+    "schema_version": { "const": "webenvoy.single-action-decision.v0" },
+    "confirmation_decision_ref": { "type": "string", "pattern": "^authorization-decision:[a-f0-9]{32}:[a-f0-9]{32}$" },
+    "source_ref": { "type": "string", "pattern": "^execution-policy:single-action:[a-f0-9]{32}$" },
+    "source_version": { "const": "1" },
+    "action_instance_ref": { "$ref": "#/$defs/ref" },
+    "action_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 128 },
+    "category": { "enum": ["read", "prepare", "commit", "destructive"] },
+    "target": { "$ref": "#/$defs/target" },
+    "owner_matcher": { "enum": ["lode_action_declaration", "harbor_operation_catalog"] },
+    "owner_declaration_ref": { "$ref": "#/$defs/ref" },
+    "owner_declaration_version": { "$ref": "#/$defs/version" },
+    "resource_match_ref": { "$ref": "#/$defs/ref" },
+    "resource_match_version": { "$ref": "#/$defs/version" },
+    "effective_policy_source_ref": { "type": "string", "pattern": "^execution-policy:(?:global_user_config|installed_skill_user_version|thread_revision):[a-f0-9]{32}$", "maxLength": 512 },
+    "effective_policy_source_version": { "$ref": "#/$defs/version" },
+    "effective_policy_source": { "enum": ["thread_revision", "installed_skill_user_version", "global_user_config"] },
+    "mode": { "enum": ["auto", "deny"] },
+    "state": { "const": "active" },
+    "issued_at": { "$ref": "#/$defs/time" },
+    "expires_at": { "$ref": "#/$defs/time" }
+  },
+  "$defs": {
+    "ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 512, "pattern": "^(?!https?://)" },
+    "version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128 },
+    "time": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$" },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_ref", "target_type"],
+      "properties": {
+        "target_ref": { "$ref": "#/$defs/ref" },
+        "target_type": { "$ref": "#/$defs/version" },
+        "site_slug": { "$ref": "#/$defs/version" },
+        "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512 }
+      }
+    }
+  }
+}

@@ -1197,6 +1197,8 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
 
       const manifest = object(JSON.parse(await readFile(resolvedManifestPath, "utf8")));
       const capability = object(manifest?.capability);
+      const actionDeclaration = object(manifest?.action_declaration) as
+        Exclude<LodePackageAdmissionContract["action_declaration"], undefined> | undefined;
       const resourcePath = resourceRequirementsPath(entry, manifest, packagePath);
       if (!resourcePath) return failure("capability_contract", "resource_requirements_missing", "admission", "repair_package_contract");
       const resolvedResourcePath = await pathUnderRoot(resourcePath);
@@ -1224,6 +1226,9 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         operation_mode,
         version,
         ...(lifecycle === undefined ? {} : { lifecycle }),
+        ...(actionDeclaration === undefined ? {} : {
+          action_declaration: actionDeclaration
+        }),
         ...(runtimeAdmission === undefined ? {} : { runtime_admission: runtimeAdmission }),
         resource_requirements: resource_requirements as LodePackageAdmissionContract["resource_requirements"],
         ...(runtime_consumption === undefined ? {} : { runtime_consumption })

@@ -25,6 +25,11 @@ The files intentionally stay small:
 - `schemas/execution-policy-evaluation.schema.json`
 - `schemas/authorization-decision.schema.json`
 - `schemas/authorization-decision-ref.schema.json`
+- `schemas/execution-policy-configuration.schema.json`
+- `schemas/execution-policy-effective-view.schema.json`
+- `schemas/execution-policy-mutation.schema.json`
+- `schemas/single-action-decision-command.schema.json`
+- `schemas/single-action-decision.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -39,6 +44,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 `fixtures/execution-policy-destructive-auto.fixture.json` proves that Core preserves a user's explicit `auto` mode for a declared destructive action while retaining its risk marker and effective source.
 
 `fixtures/authorization-decision.fixture.json` and the ref fixture cover the business summary shared by API/CLI/MCP/SDK/Agent consumers and the opaque ref embedded by task and environment operation records.
+
+The execution-policy configuration/effective-view fixtures cover independent global, installed-skill-user, and next-turn thread versions. The single-action fixtures cover only an expiring `allow_once` or `deny_once` binding derived from a current Core confirmation.
 
 Run:
 

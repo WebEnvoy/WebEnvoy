@@ -1,0 +1,12 @@
+{
+  "$schema": "execution-policy-configuration.schema.json",
+  "schema_version": "webenvoy.execution-policy-configuration.v0",
+  "source": "thread_revision",
+  "source_ref": "execution-policy:thread_revision:265e3eaca43c5789c14decbba1649ad3",
+  "source_version": "1",
+  "thread_ref": "thread_11111111111111111111111111111111",
+  "effective_from_turn_sequence": 2,
+  "modes": { "read": "deny" },
+  "updated_at": "2026-07-21T01:02:00.000Z",
+  "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+}

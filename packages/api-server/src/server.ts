@@ -10,6 +10,7 @@ import {
   previewIdentityCompatibility,
   type FailureRecord,
   type FileAuthorizationDecisionStore,
+  type FileExecutionPolicyConfigStore,
   type FileRunRecordStore,
   type HarborIdentityFactsReader,
   type HarborRuntimeClient,
@@ -18,6 +19,7 @@ import {
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { submitTaskBody, validateThreadTaskBody } from "./task-api.js";
 import { handleAuthorizationDecisionApi } from "./authorization-decision-api.js";
+import { handleExecutionPolicyApi } from "./execution-policy-api.js";
 import { handleTaskThreadApi } from "./task-thread-api.js";
 
 type JsonBody = Record<string, unknown>;
@@ -26,6 +28,7 @@ type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
 export type ApiServerOptions = {
   runRecordStore?: FileRunRecordStore;
   authorizationDecisionStore?: FileAuthorizationDecisionStore;
+  executionPolicyConfigStore?: FileExecutionPolicyConfigStore;
   taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
   harborIdentityFactsReader?: HarborIdentityFactsReader;
@@ -143,6 +146,7 @@ function admissionHealth(options: ApiServerOptions): JsonBody {
   const checks = {
     runRecordStore: options.runRecordStore === undefined ? "missing" : "configured",
     authorizationDecisionStore: options.authorizationDecisionStore === undefined ? "missing" : "configured",
+    executionPolicyConfigStore: options.executionPolicyConfigStore === undefined ? "missing" : "configured",
     taskThreadStore: options.taskThreadStore === undefined ? "missing" : "configured",
     lodePackageResolver: options.lodePackageResolver === undefined ? "missing" : "configured",
     harborIdentityFactsReader: options.harborIdentityFactsReader === undefined ? "missing" : "configured",
@@ -164,6 +168,34 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);
   const runSessionRefsMatch = /^\/runs\/([^/]+)\/session-refs$/.exec(path);
   const runFailureMatch = /^\/runs\/([^/]+)\/failure$/.exec(path);
+
+  const executionPolicyInput = {
+    method: request.method,
+    url: requestUrl,
+    dependencies: {
+      ...(options.executionPolicyConfigStore === undefined ? {} : { configStore: options.executionPolicyConfigStore }),
+      ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore }),
+      ...(options.taskThreadStore === undefined ? {} : { taskThreadStore: options.taskThreadStore }),
+      ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver })
+    }
+  };
+  let executionPolicyResult = await handleExecutionPolicyApi(executionPolicyInput);
+  if (!executionPolicyResult.handled && "requires_body" in executionPolicyResult) {
+    if (!hasJsonMediaType(request)) {
+      sendJson(response, 415, { ok: false, error: previewRequestFailure("content_type_unsupported") });
+      return;
+    }
+    const parsed = await readJsonBody(request, 64 * 1024);
+    if (isFailureRecord(parsed)) {
+      sendJson(response, parsed.code === "request_body_too_large" ? 413 : 400, { ok: false, error: parsed });
+      return;
+    }
+    executionPolicyResult = await handleExecutionPolicyApi({ ...executionPolicyInput, body: parsed });
+  }
+  if (executionPolicyResult.handled) {
+    sendJson(response, executionPolicyResult.status, executionPolicyResult.body);
+    return;
+  }
 
   const authorizationResult = await handleAuthorizationDecisionApi({
     method: request.method,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -130,6 +131,14 @@ export async function probeAuthoritativeTaskBinding(directory: string): Promise<
   const stream = decision.decision_ref.split(":")[1]!;
   const journal = await readAuthorizationDecisionJournal(decisionDirectory, stream);
   const prepared = journal.decisions[0]!;
+  const legacyRequestHash = createHash("sha256").update(JSON.stringify({
+    subject: fixture.subject,
+    evaluation,
+    requested_action: null,
+    owner_proof: null,
+    expires_at: null
+  })).digest("hex");
+  assert.equal(prepared.request_hash, legacyRequestHash, "non-single decisions must retain the pre-#303 request hash");
   await assert.rejects(() => commitRunRecordAuthorizationDecisionRef(
     fixture.runStore,
     fixture.subject.run_id,

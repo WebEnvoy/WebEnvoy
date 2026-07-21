@@ -1,0 +1,11 @@
+{
+  "$schema": "execution-policy-configuration.schema.json",
+  "schema_version": "webenvoy.execution-policy-configuration.v0",
+  "source": "installed_skill_user_version",
+  "source_ref": "execution-policy:installed_skill_user_version:fe55b5ef6ce439b7c69917e0cde49601",
+  "source_version": "2",
+  "skill_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "modes": { "read": "auto" },
+  "updated_at": "2026-07-21T01:01:00.000Z",
+  "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+}

@@ -10,6 +10,8 @@ It verifies `packages/schemas/fixtures/write-action-guardrail-run-record.fixture
 
 It also verifies real-site Xiaohongshu and BOSS write-preview Run Record fixtures: action request, risk classification, approval request, preview result, no-submit state, page-changed, cancelled, and expired states.
 
+The App-facing execution-policy fixtures are consumed here as a separate conformance boundary. They fix the owner-resolved action category, effective mode and source, next-turn thread revision, independent skill/policy versions, single-action choices, and sensitive-field exclusions so downstream clients do not reproduce Core policy resolution.
+
 ```bash
 pnpm conformance
 ```

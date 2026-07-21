@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/execution-policy-configuration.v0.schema.json",
+  "title": "WebEnvoy Execution Policy Configuration v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.execution-policy-configuration.v0",
+    "compatibility_boundary": "Versioned global, installed-skill-user, or next-turn thread business-action modes only. Skill release versions remain independent, and private browser or user content fields are forbidden.",
+    "source_adrs": ["docs/adr/0008-core-technical-architecture-baseline.md", "docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": ["schema_version", "source", "source_ref", "source_version", "modes", "updated_at", "consumer_boundary"],
+  "properties": {
+    "$schema": { "const": "execution-policy-configuration.schema.json" },
+    "schema_version": { "const": "webenvoy.execution-policy-configuration.v0" },
+    "source": { "enum": ["global_user_config", "installed_skill_user_version", "thread_revision"] },
+    "source_ref": {
+      "type": "string",
+      "pattern": "^execution-policy:(?:global_user_config|installed_skill_user_version|thread_revision):[a-f0-9]{32}$",
+      "maxLength": 512
+    },
+    "source_version": { "type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 128 },
+    "skill_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "pattern": "^lode://site-capability/", "maxLength": 512 },
+    "thread_ref": { "type": "string", "pattern": "^thread_[a-f0-9]{32}$" },
+    "effective_from_turn_sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "modes": { "$ref": "#/$defs/modes" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "consumer_boundary": {
+      "const": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "source": { "const": "global_user_config" } }, "required": ["source"] },
+      "then": {
+        "properties": { "modes": { "minProperties": 4, "maxProperties": 4 } },
+        "not": { "anyOf": [{ "required": ["skill_ref"] }, { "required": ["thread_ref"] }, { "required": ["effective_from_turn_sequence"] }] }
+      }
+    },
+    {
+      "if": { "properties": { "source": { "const": "installed_skill_user_version" } }, "required": ["source"] },
+      "then": {
+        "required": ["skill_ref"],
+        "not": { "anyOf": [{ "required": ["thread_ref"] }, { "required": ["effective_from_turn_sequence"] }] }
+      }
+    },
+    {
+      "if": { "properties": { "source": { "const": "thread_revision" } }, "required": ["source"] },
+      "then": {
+        "required": ["thread_ref", "effective_from_turn_sequence"],
+        "not": { "required": ["skill_ref"] }
+      }
+    }
+  ],
+  "$defs": {
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "read": { "enum": ["auto", "confirm", "deny"] },
+        "prepare": { "enum": ["auto", "confirm", "deny"] },
+        "commit": { "enum": ["auto", "confirm", "deny"] },
+        "destructive": { "enum": ["auto", "confirm", "deny"] }
+      }
+    }
+  }
+}

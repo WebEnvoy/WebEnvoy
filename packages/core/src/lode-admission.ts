@@ -1,5 +1,6 @@
 import type { FailureRecord } from "./run-record-store.js";
 import { normalizeFailureRecord } from "./failure-attribution.js";
+import type { LodeBusinessActionOwnerContract } from "./execution-policy-owner-proof.js";
 
 export type LodePackageAdmissionContract = {
   package_ref: string;
@@ -10,6 +11,7 @@ export type LodePackageAdmissionContract = {
   operation_mode: string;
   version: string;
   lifecycle?: string;
+  action_declaration?: LodeBusinessActionOwnerContract["action_declaration"];
   runtime_admission?: LodeRuntimeAdmissionPolicy;
   resource_requirements: {
     schema_version?: string;

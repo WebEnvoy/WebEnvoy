@@ -18,6 +18,7 @@ import {
   type RetentionState,
   type RunRecord
 } from "@webenvoy/core-runtime";
+import { assertExecutionPolicyFixtureConformance } from "./execution-policy-fixtures.js";
 import { assertRealSiteReadOnlyFixtureQueries } from "./real-site-readonly-fixtures.js";
 import { assertRealSiteWritePreviewFixtureQueries } from "./real-site-write-preview-fixtures.js";
 
@@ -499,6 +500,10 @@ async function assertRunRecordStoreConformance(): Promise<number> {
 }
 
 const contracts = await assertLocalSchemaFixtures();
+const executionPolicyFixtureCount = await assertExecutionPolicyFixtureConformance();
 const runRecordCount = await assertRunRecordStoreConformance();
 
-console.log(`Validated conformance fixtures with ${contracts.schemaCount} schemas, ${contracts.fixtureCount} fixtures, and ${runRecordCount} Run Records.`);
+console.log(
+  `Validated conformance fixtures with ${contracts.schemaCount} schemas, ${contracts.fixtureCount} fixtures, ` +
+  `${executionPolicyFixtureCount} execution policy contracts, and ${runRecordCount} Run Records.`
+);

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/execution-policy-effective-view.v0.schema.json",
+  "title": "WebEnvoy Execution Policy Effective View v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.execution-policy-effective-view.v0",
+    "compatibility_boundary": "App-facing projection of every Lode-declared business action and its Core-resolved effective mode/source for a skill or next thread turn.",
+    "source_adrs": ["docs/adr/0008-core-technical-architecture-baseline.md", "docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": ["schema_version", "skill_ref", "owner_declaration_ref", "owner_declaration_version", "actions", "consumer_boundary"],
+  "properties": {
+    "$schema": { "const": "execution-policy-effective-view.schema.json" },
+    "schema_version": { "const": "webenvoy.execution-policy-effective-view.v0" },
+    "skill_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "pattern": "^lode://site-capability/", "maxLength": 512 },
+    "owner_declaration_ref": { "type": "string", "format": "webenvoy-nonsensitive-text", "pattern": "^lode://site-capability/.+#action_declaration$", "maxLength": 512 },
+    "owner_declaration_version": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128 },
+    "thread_ref": { "type": "string", "pattern": "^thread_[a-f0-9]{32}$" },
+    "turn_sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "actions": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/action" } },
+    "consumer_boundary": {
+      "const": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+    }
+  },
+  "dependentRequired": {
+    "thread_ref": ["turn_sequence"],
+    "turn_sequence": ["thread_ref"]
+  },
+  "$defs": {
+    "category": { "enum": ["read", "prepare", "commit", "destructive"] },
+    "target_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site_slug", "target_types", "supported_origins"],
+      "properties": {
+        "site_slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 128 },
+        "target_types": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$", "maxLength": 128 } },
+        "supported_origins": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512 } }
+      }
+    },
+    "effective_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "source", "source_ref", "source_version"],
+      "properties": {
+        "mode": { "enum": ["auto", "confirm", "deny"] },
+        "source": { "enum": ["thread_revision", "installed_skill_user_version", "global_user_config"] },
+        "source_ref": { "type": "string", "pattern": "^execution-policy:(?:global_user_config|installed_skill_user_version|thread_revision):[a-f0-9]{32}$", "maxLength": 512 },
+        "source_version": { "type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 128 }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "category", "target_scope", "risk_marker", "effective_policy"],
+      "properties": {
+        "action_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 128 },
+        "category": { "$ref": "#/$defs/category" },
+        "target_scope": { "$ref": "#/$defs/target_scope" },
+        "risk_marker": { "type": ["string", "null"], "enum": ["destructive", null] },
+        "effective_policy": { "oneOf": [{ "$ref": "#/$defs/effective_policy" }, { "type": "null" }] },
+        "stop_reason": { "const": "policy_unavailable" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "category": { "const": "destructive" } }, "required": ["category"] },
+          "then": { "properties": { "risk_marker": { "const": "destructive" } } },
+          "else": { "properties": { "risk_marker": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "effective_policy": { "type": "null" } }, "required": ["effective_policy"] },
+          "then": { "required": ["stop_reason"] },
+          "else": { "not": { "required": ["stop_reason"] } }
+        }
+      ]
+    }
+  }
+}

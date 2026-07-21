@@ -112,6 +112,8 @@ function single(value: ExecutionPolicyEvaluationInput, mode: "auto" | "deny" = "
   if (current.status !== "evaluated" || !current.confirmation_request) throw new Error("confirmation contract is required");
   const confirmation = current.confirmation_request;
   return {
+    schema_version: "webenvoy.single-action-decision.v0",
+    confirmation_decision_ref: "authorization-decision:11111111111111111111111111111111:22222222222222222222222222222222",
     source_ref: "decision:once/1",
     source_version: "1",
     action_instance_ref: confirmation.action_instance_ref,

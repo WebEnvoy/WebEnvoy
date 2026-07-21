@@ -457,6 +457,17 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       return threads.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
     },
 
+    async withNextTurnPolicyBoundary(threadId, action) {
+      return withFileLock(options.directory, threadId, lockTimeoutMs, async () => {
+        const thread = await getRecord(threadId);
+        if (!thread) throw new TaskThreadStoreError("thread_not_found");
+        return action({
+          thread: await project(thread),
+          next_turn_sequence: thread.turns.length + 1
+        });
+      });
+    },
+
     async reserveTaskTurn(threadId, input) {
       const idempotencyKey = requireIdentifier(input.idempotency_key, "idempotency_key");
       const requestHash = requireText(input.request_hash, "request_hash");

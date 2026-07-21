@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/single-action-decision-command.v0.schema.json",
+  "title": "WebEnvoy Single Action Decision Command v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core API Server",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.single-action-decision-command.v0",
+    "compatibility_boundary": "Allows or denies one already-persisted active confirmation only; it does not mutate global, skill, or thread policy sources.",
+    "source_adrs": ["docs/adr/0008-core-technical-architecture-baseline.md", "docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": ["schema_version", "idempotency_key", "choice"],
+  "properties": {
+    "$schema": { "const": "single-action-decision-command.schema.json" },
+    "schema_version": { "const": "webenvoy.single-action-decision-command.v0" },
+    "idempotency_key": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128 },
+    "choice": { "enum": ["allow_once", "deny_once"] }
+  }
+}
