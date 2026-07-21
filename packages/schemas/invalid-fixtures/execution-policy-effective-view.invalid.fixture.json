@@ -1,0 +1,47 @@
+{
+  "schema": "execution-policy-effective-view.schema.json",
+  "cases": [
+    {
+      "name": "thread view requires turn sequence",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-effective-view.v0",
+        "skill_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "owner_declaration_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0#action_declaration",
+        "owner_declaration_version": "0.1.0",
+        "thread_ref": "thread_11111111111111111111111111111111",
+        "actions": [],
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+      }
+    },
+    {
+      "name": "destructive action requires risk marker",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-effective-view.v0",
+        "skill_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "owner_declaration_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0#action_declaration",
+        "owner_declaration_version": "0.1.0",
+        "actions": [{
+          "action_id": "xhs_delete_saved_search",
+          "category": "destructive",
+          "target_scope": { "site_slug": "xiaohongshu", "target_types": ["saved_search"], "supported_origins": ["https://www.xiaohongshu.com"] },
+          "risk_marker": null,
+          "effective_policy": null,
+          "stop_reason": "policy_unavailable"
+        }],
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+      }
+    },
+    {
+      "name": "raw page material is rejected",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-effective-view.v0",
+        "skill_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "owner_declaration_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0#action_declaration",
+        "owner_declaration_version": "0.1.0",
+        "actions": [],
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded.",
+        "raw_dom": "forbidden"
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "execution-policy-configuration.schema.json",
+  "schema_version": "webenvoy.execution-policy-configuration.v0",
+  "source": "global_user_config",
+  "source_ref": "execution-policy:global_user_config:65bd1c9a4be573438c0082ea4d958532",
+  "source_version": "1",
+  "modes": { "read": "auto", "prepare": "auto", "commit": "confirm", "destructive": "auto" },
+  "updated_at": "2026-07-21T01:00:00.000Z",
+  "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+}

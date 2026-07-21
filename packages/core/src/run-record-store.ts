@@ -310,6 +310,9 @@ function assertTrustedPreparedAuthorizationDecision(
     evaluation: facts.evaluation,
     requested_action: facts.requested_action ?? null,
     owner_proof: facts.owner_proof ?? null,
+    ...(facts.single_action_decision === undefined ? {} : {
+      single_action_decision: facts.single_action_decision
+    }),
     expires_at: expiresAt ?? null
   })).digest("hex");
   const normalizedKey = normalizeNonSensitiveText(idempotencyKey, 128);

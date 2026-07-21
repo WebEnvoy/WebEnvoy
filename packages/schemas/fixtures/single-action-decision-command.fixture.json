@@ -1,0 +1,6 @@
+{
+  "$schema": "single-action-decision-command.schema.json",
+  "schema_version": "webenvoy.single-action-decision-command.v0",
+  "idempotency_key": "single-action-allow-001",
+  "choice": "allow_once"
+}

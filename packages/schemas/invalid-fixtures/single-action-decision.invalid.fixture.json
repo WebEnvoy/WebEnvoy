@@ -1,0 +1,55 @@
+{
+  "schema": "single-action-decision.schema.json",
+  "cases": [
+    {
+      "name": "consumed state is not reusable",
+      "instance": {
+        "schema_version": "webenvoy.single-action-decision.v0",
+        "confirmation_decision_ref": "authorization-decision:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccc",
+        "source_ref": "execution-policy:single-action:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_version": "1",
+        "action_instance_ref": "action-instance:xhs-search/1",
+        "action_id": "xhs_search_notes",
+        "category": "read",
+        "target": { "target_ref": "target:xhs-search/1", "target_type": "search_results_page" },
+        "owner_matcher": "lode_action_declaration",
+        "owner_declaration_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0#xhs_search_notes",
+        "owner_declaration_version": "0.1.0",
+        "resource_match_ref": "resource-match:xhs-search/1",
+        "resource_match_version": "1",
+        "effective_policy_source_ref": "execution-policy:global_user_config:65bd1c9a4be573438c0082ea4d958532",
+        "effective_policy_source_version": "1",
+        "effective_policy_source": "global_user_config",
+        "mode": "auto",
+        "state": "consumed",
+        "issued_at": "2026-07-21T01:00:00.000Z",
+        "expires_at": "2026-07-21T01:10:00.000Z"
+      }
+    },
+    {
+      "name": "raw target URL is forbidden",
+      "instance": {
+        "schema_version": "webenvoy.single-action-decision.v0",
+        "confirmation_decision_ref": "authorization-decision:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccc",
+        "source_ref": "execution-policy:single-action:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_version": "1",
+        "action_instance_ref": "action-instance:xhs-search/1",
+        "action_id": "xhs_search_notes",
+        "category": "read",
+        "target": { "target_ref": "https://example.test/private?token=value", "target_type": "search_results_page" },
+        "owner_matcher": "lode_action_declaration",
+        "owner_declaration_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0#xhs_search_notes",
+        "owner_declaration_version": "0.1.0",
+        "resource_match_ref": "resource-match:xhs-search/1",
+        "resource_match_version": "1",
+        "effective_policy_source_ref": "execution-policy:global_user_config:65bd1c9a4be573438c0082ea4d958532",
+        "effective_policy_source_version": "1",
+        "effective_policy_source": "global_user_config",
+        "mode": "auto",
+        "state": "active",
+        "issued_at": "2026-07-21T01:00:00.000Z",
+        "expires_at": "2026-07-21T01:10:00.000Z"
+      }
+    }
+  ]
+}

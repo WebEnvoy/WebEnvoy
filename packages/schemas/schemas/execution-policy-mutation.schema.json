@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/execution-policy-mutation.v0.schema.json",
+  "title": "WebEnvoy Execution Policy Mutation v0",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Core API Server",
+    "status": "accepted-v0",
+    "schema_version": "webenvoy.execution-policy-mutation.v0",
+    "compatibility_boundary": "Optimistic-concurrency command for one Core-owned policy source. Route binding and owner-declared categories are validated by Core.",
+    "source_adrs": ["docs/adr/0008-core-technical-architecture-baseline.md", "docs/adr/0009-unified-authorization-policy.md"]
+  },
+  "required": ["schema_version", "idempotency_key", "expected_source_version", "modes"],
+  "properties": {
+    "$schema": { "const": "execution-policy-mutation.schema.json" },
+    "schema_version": { "const": "webenvoy.execution-policy-mutation.v0" },
+    "idempotency_key": { "type": "string", "format": "webenvoy-nonsensitive-text", "minLength": 1, "maxLength": 128 },
+    "expected_source_version": { "type": ["string", "null"], "pattern": "^[1-9][0-9]*$", "maxLength": 128 },
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "read": { "enum": ["auto", "confirm", "deny"] },
+        "prepare": { "enum": ["auto", "confirm", "deny"] },
+        "commit": { "enum": ["auto", "confirm", "deny"] },
+        "destructive": { "enum": ["auto", "confirm", "deny"] }
+      }
+    }
+  }
+}

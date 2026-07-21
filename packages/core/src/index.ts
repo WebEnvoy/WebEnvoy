@@ -194,8 +194,46 @@ export {
   persistentVersionMaxLength
 } from "./sensitive-field-taxonomy.js";
 export {
+  createFileExecutionPolicyConfigStore,
+  ExecutionPolicyVersionConflictError,
+  type FileExecutionPolicyConfigStore,
+  type FileExecutionPolicyConfigStoreOptions
+} from "./execution-policy-config-store.js";
+export {
+  executionPolicyConfigConsumerBoundary,
+  executionPolicyConfigurationSchemaVersion,
+  executionPolicyEffectiveViewSchemaVersion,
+  executionPolicyMutationSchemaVersion,
+  executionPolicySourceRef,
+  normalizeExecutionPolicyModes,
+  normalizeExecutionPolicyMutation,
+  normalizeSingleActionDecisionCommand,
+  singleActionDecisionCommandSchemaVersion,
+  type ConfigurableExecutionPolicySource,
+  type ExecutionPolicyConfiguration,
+  type ExecutionPolicyMutation,
+  type SingleActionDecisionCommand
+} from "./execution-policy-config.js";
+export {
+  declaredActionCategories,
+  getExecutionPolicyEffectiveView,
+  resolveSkillActionCatalog,
+  resolveThreadPolicyContext,
+  validateThreadPolicyContext,
+  type EffectiveBusinessActionPolicy,
+  type ExecutionPolicyEffectiveView,
+  type ExecutionPolicyServiceDependencies
+} from "./execution-policy-service.js";
+export {
+  decideSingleAction,
+  type SingleActionDecisionDependencies
+} from "./single-action-decision.js";
+export {
   evaluateExecutionPolicy,
   executionPolicyEvaluationSchemaVersion,
+  normalizeSingleActionDecision,
+  resolveCurrentExecutionPolicy,
+  singleActionDecisionSchemaVersion,
   type BusinessActionCategory,
   type BusinessActionOwnerMatcher,
   type BusinessActionOwnerProof,
@@ -214,6 +252,14 @@ export {
   type SingleActionConfirmationRequest,
   type SingleActionDecision
 } from "./execution-policy.js";
+export {
+  matchHarborBusinessOperationOwner,
+  matchLodeBusinessActionOwner,
+  readLodeBusinessActionCatalog,
+  type BusinessActionTargetScope,
+  type LodeBusinessActionCatalog,
+  type LodeBusinessActionOwnerContract
+} from "./execution-policy-owner-proof.js";
 export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
@@ -245,6 +291,7 @@ export {
   TaskThreadStoreError,
   validateTaskTurnInputSnapshot,
   type TaskThreadView,
+  type FileTaskThreadStore,
   type TaskTurnFieldKind,
   type TaskTurnInputField,
   type TaskTurnInputGap,

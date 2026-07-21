@@ -9,6 +9,7 @@ import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
 import { assertRuntimeTaskSubmitApi } from "./runtime-task-submit-self-check.js";
 import { assertTaskThreadApiRaces } from "./task-thread-api-self-check.js";
+import { assertExecutionPolicyApi } from "./execution-policy-api-self-check.js";
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -245,6 +246,7 @@ async function main(): Promise<void> {
         checks: {
           runRecordStore: "configured",
           authorizationDecisionStore: "missing",
+          executionPolicyConfigStore: "missing",
           taskThreadStore: "configured",
           lodePackageResolver: "configured",
           harborIdentityFactsReader: "configured",
@@ -702,6 +704,7 @@ async function main(): Promise<void> {
 
     await assertRuntimeTaskSubmitApi();
     await assertTaskThreadApiRaces();
+    await assertExecutionPolicyApi();
   } finally {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => {

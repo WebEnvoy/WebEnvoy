@@ -333,7 +333,7 @@ export function normalizeAuthorizationDecisionSummary(value: unknown): Authoriza
 }
 
 function effectiveExpiry(facts: TrustedExecutionPolicyEvaluationFacts, requested: string | undefined): string | null {
-  const values = [facts.single_action_expires_at, requested]
+  const values = [facts.single_action_decision?.expires_at, requested]
     .filter((value): value is string => value !== undefined)
     .map((value) => authorizationTimestamp(value, "expires_at"));
   return values.length === 0 ? null : values.sort((left, right) => Date.parse(left) - Date.parse(right))[0]!;

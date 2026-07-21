@@ -20,6 +20,7 @@ import {
   prepareAuthorizationDecisionJournalEntry,
   projectAuthorizationDecision,
   readAuthorizationDecisionJournal,
+  sameConcreteAuthorizationBinding,
   visibleAuthorizationDecisionEntries,
   writeAuthorizationDecisionJournal,
   type AuthorizationDecisionJournal,
@@ -97,6 +98,9 @@ function requestHash(
     evaluation: facts.evaluation,
     requested_action: facts.requested_action ?? null,
     owner_proof: facts.owner_proof ?? null,
+    ...(facts.single_action_decision === undefined ? {} : {
+      single_action_decision: facts.single_action_decision
+    }),
     expires_at: expiresAt ?? null
   }));
 }
@@ -154,6 +158,27 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
     }
   }
 
+  private async assertSingleActionConfirmationActive(
+    prepared: PreparedAuthorizationDecision,
+    facts: TrustedExecutionPolicyEvaluationFacts
+  ): Promise<void> {
+    if (prepared.decision.effective_policy?.source !== "single_action") return;
+    const single = facts.single_action_decision;
+    if (!single) throw new Error("authorization_evaluation_untrusted");
+    const confirmation = await this.getAuthorizationDecision(single.confirmation_decision_ref);
+    if (!confirmation) throw new Error("authorization_single_action_confirmation_not_found");
+    if (confirmation.state !== "active") throw new Error("authorization_single_action_confirmation_inactive");
+    if (confirmation.outcome !== "confirm" || confirmation.effective_policy?.mode !== "confirm" ||
+      confirmation.effective_policy.source !== single.effective_policy_source ||
+      confirmation.effective_policy.source_version !== single.effective_policy_source_version ||
+      confirmation.applicability.config_refs.length !== 1 ||
+      confirmation.applicability.config_refs[0] !== single.effective_policy_source_ref ||
+      confirmation.expires_at !== single.expires_at ||
+      !sameConcreteAuthorizationBinding(confirmation, prepared.decision)) {
+      throw new Error("authorization_single_action_confirmation_binding_mismatch");
+    }
+  }
+
   private cursorSigningKey(): Promise<Uint8Array> {
     this.cursorSigningKeyPromise ??= loadAuthorizationDecisionCursorSigningKey(this.directory);
     return this.cursorSigningKeyPromise;
@@ -178,7 +203,7 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
     evaluation: unknown;
     subject: AuthorizationDecisionSubject;
     expires_at?: string;
-  }): { stream: string; prepared: PreparedAuthorizationDecision } {
+  }): { stream: string; prepared: PreparedAuthorizationDecision; facts: TrustedExecutionPolicyEvaluationFacts } {
     const facts = readTrustedExecutionPolicyEvaluation(input.evaluation);
     if (!facts) throw new Error("authorization_evaluation_untrusted");
     const key = idempotencyKey(input.idempotency_key);
@@ -193,7 +218,7 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
       ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at })
     });
     if (Date.parse(decision.decided_at) > this.clock().getTime()) throw new Error("authorization_decision_time_invalid");
-    return { stream, prepared: { request_hash: requestHash(input.subject, facts, input.expires_at), decision } };
+    return { stream, prepared: { request_hash: requestHash(input.subject, facts, input.expires_at), decision }, facts };
   }
 
   private async recordTaskDecision(
@@ -289,7 +314,7 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
     const observedAt = this.clock().toISOString();
     const at = authorizationTimestamp(invalidatedAt ?? observedAt, "invalidated_at");
     if (Date.parse(at) > Date.parse(observedAt)) throw new Error("authorization_decision_invalidation_time_invalid");
-    return this.withJournalLock(stream, async () => {
+    return this.withSingleActionLock(() => this.withJournalLock(stream, async () => {
       const journal = await readAuthorizationDecisionJournal(this.directory, stream);
       const stored = (await this.visibleJournalEntries(journal)).find((entry) => entry.decision.decision_ref === decisionRef);
       if (!stored) throw new Error("authorization_decision_not_found");
@@ -309,7 +334,7 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
       };
       await writeAuthorizationDecisionJournal(this.directory, next);
       return projectAuthorizationDecision(stored.decision, next.lifecycle_events, observedAt);
-    });
+    }));
   }
 
   async recordAuthorizationDecision(input: {
@@ -320,21 +345,21 @@ class FileAuthorizationDecisionStoreImpl implements FileAuthorizationDecisionSto
   }): Promise<AuthorizationDecisionSummary> {
     const subject = normalizeAuthorizationDecisionSubject(input.subject);
     await this.validateTaskBinding(subject);
-    const { stream, prepared } = this.buildPreparedDecision({ ...input, subject });
+    const { stream, prepared, facts } = this.buildPreparedDecision({ ...input, subject });
     const record = async () => {
       if (subject.scope === "task") {
         await this.recordTaskDecision(stream, prepared, input.evaluation, input.idempotency_key, input.expires_at);
       }
       else await this.recordEnvironmentDecision(stream, prepared);
     };
-    if (prepared.decision.effective_policy?.source === "single_action") {
-      await this.withSingleActionLock(async () => {
+    await this.withSingleActionLock(async () => {
+      if (prepared.decision.effective_policy?.source === "single_action") {
         await this.assertSingleActionGloballyAvailable(prepared);
-        await record();
-      });
-    } else {
+        const replay = await this.getAuthorizationDecision(prepared.decision.decision_ref);
+        if (!replay) await this.assertSingleActionConfirmationActive(prepared, facts);
+      }
       await record();
-    }
+    });
     const decision = await this.getAuthorizationDecision(prepared.decision.decision_ref);
     if (!decision) throw new Error("authorization_decision_persistence_failed");
     return decision;

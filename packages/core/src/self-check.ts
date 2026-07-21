@@ -24,6 +24,7 @@ import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
 import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
 import { assertAuthorizationDecisionStore } from "./authorization-decision-self-check.js";
+import { assertExecutionPolicyConfigStore } from "./execution-policy-config-self-check.js";
 
 let tick = 0;
 
@@ -1421,4 +1422,5 @@ await assertIdentityCompatibilityPreview();
 console.log("Validated read-only Lode and Harbor identity compatibility preview boundaries.");
 assertExecutionPolicyEvaluator();
 await assertAuthorizationDecisionStore();
+await assertExecutionPolicyConfigStore();
 console.log("Validated unified execution policy evaluation and fail-closed action matching.");

@@ -180,6 +180,18 @@ type ParsedLodeAction = {
   requirement_ref: string;
 };
 
+export type LodeBusinessActionCatalog = {
+  package_ref: string;
+  version: string;
+  schema_ref: string;
+  actions: readonly {
+    action_id: string;
+    category: BusinessActionCategory;
+    target_scope: BusinessActionTargetScope;
+    resource_requirement_refs: readonly string[];
+  }[];
+};
+
 function parseLodeAction(value: unknown): ParsedLodeAction | undefined {
   const action = exactObject(value, ["action_id", "category", "target_scope", "resource_requirements", "external_effects"]);
   const requirements = exactObject(action?.resource_requirements, ["path", "id", "profile_ids"]);
@@ -195,6 +207,38 @@ function parseLodeAction(value: unknown): ParsedLodeAction | undefined {
     profileIds.some((profileId) => !profileIdPattern.test(profileId)) || new Set(profileIds).size !== profileIds.length ||
     !effects || !validEffects(category, effects)) return undefined;
   return { action_id: actionId, category, target_scope: scope, requirement_ref: requirementId };
+}
+
+export function readLodeBusinessActionCatalog(ownerContract: unknown): LodeBusinessActionCatalog | undefined {
+  try {
+    const owner = exactObject(ownerContract, ["package_ref", "version", "action_declaration"]);
+    const declaration = exactObject(owner?.action_declaration, ["schema_version", "schema_ref", "actions"]);
+    const packageRef = ref(owner?.package_ref);
+    const version = text(owner?.version);
+    const schemaRef = ref(declaration?.schema_ref);
+    const packageVersion = packageRef === undefined ? undefined : lodePackageRefPattern.exec(packageRef)?.[1];
+    if (!owner || !declaration || !packageRef || !version || packageVersion !== version ||
+      declaration.schema_version !== "lode.capability-action-declaration.v0" ||
+      schemaRef !== "lode://schema/capability-action-declaration@0.1.0" ||
+      !Array.isArray(declaration.actions) || declaration.actions.length === 0 || declaration.actions.length > maxListItems) return undefined;
+    const parsedActions = declaration.actions.map(parseLodeAction);
+    if (parsedActions.some((action) => !action)) return undefined;
+    const actions = parsedActions as ParsedLodeAction[];
+    if (new Set(actions.map((action) => action.action_id)).size !== actions.length) return undefined;
+    return {
+      package_ref: packageRef,
+      version,
+      schema_ref: schemaRef,
+      actions: actions.map((action) => ({
+        action_id: action.action_id,
+        category: action.category,
+        target_scope: action.target_scope,
+        resource_requirement_refs: [action.requirement_ref]
+      }))
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 type ParsedHarborOperation = {
@@ -221,35 +265,23 @@ export function matchLodeBusinessActionOwner(
   resourceMatchContract: unknown
 ): BusinessActionOwnerProof | undefined {
   try {
-    const owner = exactObject(ownerContract, ["package_ref", "version", "action_declaration"]);
-    const declaration = exactObject(owner?.action_declaration, ["schema_version", "schema_ref", "actions"]);
-    const packageRef = ref(owner?.package_ref);
-    const version = text(owner?.version);
-    const schemaRef = ref(declaration?.schema_ref);
+    const catalog = readLodeBusinessActionCatalog(ownerContract);
     const resourceMatch = parseResourceMatch(resourceMatchContract);
-    const packageVersion = packageRef === undefined ? undefined : lodePackageRefPattern.exec(packageRef)?.[1];
-    if (!owner || !declaration || !packageRef || !version || packageVersion !== version ||
-      declaration.schema_version !== "lode.capability-action-declaration.v0" || schemaRef !== "lode://schema/capability-action-declaration@0.1.0" ||
-      !actionIdPattern.test(actionId) || isBrowserPrimitiveAction(actionId) || !Array.isArray(declaration.actions) || !resourceMatch) return undefined;
-
-    const parsedActions = declaration.actions.map(parseLodeAction);
-    if (parsedActions.some((action) => !action)) return undefined;
-    const actions = parsedActions as ParsedLodeAction[];
-    if (new Set(actions.map((action) => action.action_id)).size !== actions.length) return undefined;
-    const action = actions.find((candidate) => candidate.action_id === actionId);
-    if (!action || !sameRefs([action.requirement_ref], resourceMatch.matched_requirement_refs)) return undefined;
-    const ownerDeclarationRef = ref(`${packageRef}#${action.action_id}`);
+    if (!catalog || !actionIdPattern.test(actionId) || isBrowserPrimitiveAction(actionId) || !resourceMatch) return undefined;
+    const action = catalog.actions.find((candidate) => candidate.action_id === actionId);
+    if (!action || !sameRefs(action.resource_requirement_refs, resourceMatch.matched_requirement_refs)) return undefined;
+    const ownerDeclarationRef = ref(`${catalog.package_ref}#${action.action_id}`);
     if (!ownerDeclarationRef) return undefined;
     return brandedProof({
       matcher: "lode_action_declaration",
       owner_declaration_ref: ownerDeclarationRef,
-      owner_declaration_version: version,
+      owner_declaration_version: catalog.version,
       resource_match_ref: resourceMatch.match_ref,
       resource_match_version: resourceMatch.match_version,
       action_id: action.action_id,
       category: action.category,
       target_scope: action.target_scope,
-      resource_requirement_refs: [action.requirement_ref]
+      resource_requirement_refs: action.resource_requirement_refs
     });
   } catch {
     return undefined;

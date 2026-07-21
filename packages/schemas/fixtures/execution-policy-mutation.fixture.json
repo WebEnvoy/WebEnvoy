@@ -1,0 +1,7 @@
+{
+  "$schema": "execution-policy-mutation.schema.json",
+  "schema_version": "webenvoy.execution-policy-mutation.v0",
+  "idempotency_key": "policy-mutation-001",
+  "expected_source_version": "1",
+  "modes": { "read": "auto", "destructive": "confirm" }
+}

@@ -22,6 +22,7 @@ export type {
 } from "./execution-policy-owner-proof.js";
 
 export const executionPolicyEvaluationSchemaVersion = "webenvoy.execution-policy-evaluation.v0";
+export const singleActionDecisionSchemaVersion = "webenvoy.single-action-decision.v0";
 
 export type ExecutionPolicyMode = "auto" | "confirm" | "deny";
 export type ExecutionPolicySource =
@@ -45,9 +46,11 @@ export type BusinessActionRequest = {
 };
 
 export type ExecutionPolicyModes = Partial<Record<BusinessActionCategory, ExecutionPolicyMode>>;
-export type ExecutionPolicyContext = { thread_ref?: string; skill_ref?: string };
+export type ExecutionPolicyContext = { thread_ref?: string; skill_ref?: string; turn_sequence?: number };
 
 export type SingleActionDecision = {
+  schema_version: typeof singleActionDecisionSchemaVersion;
+  confirmation_decision_ref: string;
   source_ref: string;
   source_version: string;
   action_instance_ref: string;
@@ -70,7 +73,13 @@ export type SingleActionDecision = {
 
 export type ExecutionPolicySources = {
   single_action_decision?: SingleActionDecision;
-  thread_revision?: { source_ref: string; source_version: string; thread_ref: string; modes: ExecutionPolicyModes };
+  thread_revision?: {
+    source_ref: string;
+    source_version: string;
+    thread_ref: string;
+    effective_from_turn_sequence?: number;
+    modes: ExecutionPolicyModes;
+  };
   installed_skill_user_version?: { source_ref: string; source_version: string; skill_ref: string; modes: ExecutionPolicyModes };
   global_user_config?: { source_ref: string; source_version: string; modes: ExecutionPolicyModes };
 };
@@ -158,7 +167,7 @@ export type TrustedExecutionPolicyEvaluationFacts = {
   evaluation: ExecutionPolicyEvaluation;
   requested_action?: BusinessActionRequest;
   owner_proof?: BusinessActionOwnerProofFields;
-  single_action_expires_at?: string;
+  single_action_decision?: SingleActionDecision;
 };
 
 const trustedEvaluationFacts = new WeakMap<object, TrustedExecutionPolicyEvaluationFacts>();
@@ -168,6 +177,7 @@ const callers = new Set<ExecutionPolicyCaller>(["api", "cli", "mcp", "sdk", "app
 const singleStates = new Set<SingleActionDecision["state"]>(["active", "consumed", "cancelled", "expired", "target_changed"]);
 const currentPolicySources = new Set<Exclude<ExecutionPolicySource, "single_action_decision">>(["thread_revision", "installed_skill_user_version", "global_user_config"]);
 const businessActionIdPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+const authorizationDecisionRefPattern = /^authorization-decision:[a-f0-9]{32}:[a-f0-9]{32}$/;
 const privateRefPattern = /https?:\/\//i;
 
 function exactObject(value: unknown, required: readonly string[], optional: readonly string[] = []): JsonObject | undefined {
@@ -231,22 +241,40 @@ function parseModes(value: unknown): ExecutionPolicyModes | undefined {
   return object as ExecutionPolicyModes;
 }
 
-function parsePolicy(value: unknown, binding?: "thread_ref" | "skill_ref"): { source_ref: string; source_version: string; modes: ExecutionPolicyModes; thread_ref?: string; skill_ref?: string } | undefined {
+function parsePolicy(value: unknown, binding?: "thread_ref" | "skill_ref"): {
+  source_ref: string;
+  source_version: string;
+  modes: ExecutionPolicyModes;
+  thread_ref?: string;
+  skill_ref?: string;
+  effective_from_turn_sequence?: number;
+} | undefined {
   const required = ["source_ref", "source_version", "modes", ...(binding ? [binding] : [])];
-  const object = exactObject(value, required);
+  const object = exactObject(value, required, binding === "thread_ref" ? ["effective_from_turn_sequence"] : []);
   const sourceRef = persistentRef(object?.source_ref);
   const sourceVersion = string(object?.source_version);
   const modes = parseModes(object?.modes);
   const bindingRef = binding ? persistentRef(object?.[binding]) : undefined;
-  if (!object || !sourceRef || !sourceVersion || !modes || (binding && !bindingRef)) return undefined;
-  return { source_ref: sourceRef, source_version: sourceVersion, modes, ...(binding === "thread_ref" ? { thread_ref: bindingRef! } : {}), ...(binding === "skill_ref" ? { skill_ref: bindingRef! } : {}) };
+  const effectiveFrom = object?.effective_from_turn_sequence;
+  if (!object || !sourceRef || !sourceVersion || !modes || (binding && !bindingRef) ||
+    (effectiveFrom !== undefined && (!Number.isSafeInteger(effectiveFrom) || (effectiveFrom as number) < 1))) return undefined;
+  return {
+    source_ref: sourceRef,
+    source_version: sourceVersion,
+    modes,
+    ...(binding === "thread_ref" ? { thread_ref: bindingRef! } : {}),
+    ...(binding === "skill_ref" ? { skill_ref: bindingRef! } : {}),
+    ...(effectiveFrom === undefined ? {} : { effective_from_turn_sequence: effectiveFrom as number })
+  };
 }
 
 function parseSingleDecision(value: unknown): SingleActionDecision | undefined {
-  const fields = ["source_ref", "source_version", "action_instance_ref", "action_id", "category", "target", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "mode", "state", "issued_at", "expires_at"];
+  const fields = ["schema_version", "confirmation_decision_ref", "source_ref", "source_version", "action_instance_ref", "action_id", "category", "target", "owner_matcher", "owner_declaration_ref", "owner_declaration_version", "resource_match_ref", "resource_match_version", "effective_policy_source_ref", "effective_policy_source_version", "effective_policy_source", "mode", "state", "issued_at", "expires_at"];
   const object = exactObject(value, fields);
   const target = parseTarget(object?.target);
-  if (!object || !persistentRef(object.source_ref) || !string(object.source_version) || !persistentRef(object.action_instance_ref) ||
+  if (!object || object.schema_version !== singleActionDecisionSchemaVersion ||
+    typeof object.confirmation_decision_ref !== "string" || !authorizationDecisionRefPattern.test(object.confirmation_decision_ref) ||
+    !persistentRef(object.source_ref) || !string(object.source_version) || !persistentRef(object.action_instance_ref) ||
     !normalizeNonSensitiveText(object.action_id, persistentVersionMaxLength) || !businessActionIdPattern.test(object.action_id as string) || !actionCategories.has(object.category as BusinessActionCategory) || !target ||
     (object.owner_matcher !== "lode_action_declaration" && object.owner_matcher !== "harbor_operation_catalog") ||
     !persistentRef(object.owner_declaration_ref) || !string(object.owner_declaration_version) ||
@@ -258,16 +286,23 @@ function parseSingleDecision(value: unknown): SingleActionDecision | undefined {
   return object as SingleActionDecision;
 }
 
+export function normalizeSingleActionDecision(value: unknown): SingleActionDecision {
+  const decision = parseSingleDecision(value);
+  if (!decision) throw new Error("single_action_decision_invalid");
+  return structuredClone(decision);
+}
+
 function parseInput(value: unknown): ParsedExecutionPolicyEvaluationInput | undefined {
   const object = exactObject(value, ["caller", "evaluated_at", "action", "owner_proof", "context", "policies"]);
   const action = exactObject(object?.action, ["action_instance_ref", "action_id", "target"]);
-  const context = exactObject(object?.context, [], ["thread_ref", "skill_ref"]);
+  const context = exactObject(object?.context, [], ["thread_ref", "skill_ref", "turn_sequence"]);
   const policies = exactObject(object?.policies, [], ["single_action_decision", "thread_revision", "installed_skill_user_version", "global_user_config"]);
   const target = parseTarget(action?.target);
   const ownerProof = readBusinessActionOwnerProof(object?.owner_proof);
   const evaluatedAt = rfc3339(object?.evaluated_at);
   const threadRef = context?.thread_ref === undefined ? undefined : persistentRef(context.thread_ref);
   const skillRef = context?.skill_ref === undefined ? undefined : persistentRef(context.skill_ref);
+  const turnSequence = context?.turn_sequence;
   const single = policies?.single_action_decision === undefined ? undefined : parseSingleDecision(policies.single_action_decision);
   const thread = policies?.thread_revision === undefined ? undefined : parsePolicy(policies.thread_revision, "thread_ref");
   const skill = policies?.installed_skill_user_version === undefined ? undefined : parsePolicy(policies.installed_skill_user_version, "skill_ref");
@@ -275,11 +310,20 @@ function parseInput(value: unknown): ParsedExecutionPolicyEvaluationInput | unde
   if (!object || !callers.has(object.caller as ExecutionPolicyCaller) || !evaluatedAt || !action || !persistentRef(action.action_instance_ref) ||
     !normalizeNonSensitiveText(action.action_id, persistentVersionMaxLength) || !businessActionIdPattern.test(action.action_id as string) || !target || !ownerProof || !context || !policies ||
     (context.thread_ref !== undefined && !threadRef) || (context.skill_ref !== undefined && !skillRef) ||
+    (turnSequence !== undefined && (!Number.isSafeInteger(turnSequence) || (turnSequence as number) < 1)) ||
     (policies.single_action_decision !== undefined && !single) || (policies.thread_revision !== undefined && !thread) ||
     (policies.installed_skill_user_version !== undefined && !skill) || (policies.global_user_config !== undefined && !global)) return undefined;
   const parsedPolicies: ExecutionPolicySources = {};
   if (single) parsedPolicies.single_action_decision = single;
-  if (thread?.thread_ref) parsedPolicies.thread_revision = { source_ref: thread.source_ref, source_version: thread.source_version, thread_ref: thread.thread_ref, modes: thread.modes };
+  if (thread?.thread_ref) parsedPolicies.thread_revision = {
+    source_ref: thread.source_ref,
+    source_version: thread.source_version,
+    thread_ref: thread.thread_ref,
+    ...(thread.effective_from_turn_sequence === undefined ? {} : {
+      effective_from_turn_sequence: thread.effective_from_turn_sequence
+    }),
+    modes: thread.modes
+  };
   if (skill?.skill_ref) parsedPolicies.installed_skill_user_version = { source_ref: skill.source_ref, source_version: skill.source_version, skill_ref: skill.skill_ref, modes: skill.modes };
   if (global) parsedPolicies.global_user_config = { source_ref: global.source_ref, source_version: global.source_version, modes: global.modes };
   return {
@@ -287,7 +331,11 @@ function parseInput(value: unknown): ParsedExecutionPolicyEvaluationInput | unde
     evaluated_at: evaluatedAt,
     action: { action_instance_ref: action.action_instance_ref as string, action_id: action.action_id as string, target },
     owner_proof: ownerProof,
-    context: { ...(threadRef ? { thread_ref: threadRef } : {}), ...(skillRef ? { skill_ref: skillRef } : {}) },
+    context: {
+      ...(threadRef ? { thread_ref: threadRef } : {}),
+      ...(skillRef ? { skill_ref: skillRef } : {}),
+      ...(turnSequence === undefined ? {} : { turn_sequence: turnSequence as number })
+    },
     policies: parsedPolicies
   };
 }
@@ -306,7 +354,7 @@ function invalidInput(): ExecutionPolicyEvaluation {
 function rememberEvaluation(
   evaluation: ExecutionPolicyEvaluation,
   input?: ParsedExecutionPolicyEvaluationInput,
-  singleActionExpiresAt?: string
+  singleActionDecision?: SingleActionDecision
 ): ExecutionPolicyEvaluation {
   trustedEvaluationFacts.set(evaluation, {
     evaluation: structuredClone(evaluation),
@@ -314,8 +362,8 @@ function rememberEvaluation(
       requested_action: structuredClone(input.action),
       owner_proof: structuredClone(input.owner_proof)
     }),
-    ...(singleActionExpiresAt === undefined ? {} : {
-      single_action_expires_at: singleActionExpiresAt
+    ...(singleActionDecision === undefined ? {} : {
+      single_action_decision: structuredClone(singleActionDecision)
     })
   });
   return evaluation;
@@ -350,9 +398,16 @@ function matchedAction(input: ParsedExecutionPolicyEvaluationInput): EvaluatedBu
   };
 }
 
-function currentPolicy(input: ParsedExecutionPolicyEvaluationInput, category: BusinessActionCategory): EffectiveExecutionPolicy | undefined {
+export function resolveCurrentExecutionPolicy(
+  input: Pick<ExecutionPolicyEvaluationInput, "context" | "policies">,
+  category: BusinessActionCategory
+): EffectiveExecutionPolicy | undefined {
+  const thread = input.policies.thread_revision;
+  const threadApplies = thread?.thread_ref === input.context.thread_ref &&
+    (thread?.effective_from_turn_sequence === undefined ||
+      input.context.turn_sequence !== undefined && input.context.turn_sequence >= thread.effective_from_turn_sequence);
   const candidates: readonly [ExecutionPolicySource, { source_ref: string; source_version: string; modes: ExecutionPolicyModes } | undefined, boolean][] = [
-    ["thread_revision", input.policies.thread_revision, input.policies.thread_revision?.thread_ref === input.context.thread_ref],
+    ["thread_revision", thread, threadApplies],
     ["installed_skill_user_version", input.policies.installed_skill_user_version, input.policies.installed_skill_user_version?.skill_ref === input.context.skill_ref],
     ["global_user_config", input.policies.global_user_config, true]
   ];
@@ -403,13 +458,13 @@ export function evaluateExecutionPolicy(value: unknown): ExecutionPolicyEvaluati
     if (!input) return rememberEvaluation(invalidInput());
     const action = matchedAction(input);
     if ("status" in action) return rememberEvaluation(action, input);
-    const current = currentPolicy(input, action.category);
+    const current = resolveCurrentExecutionPolicy(input, action.category);
     if (!current) return rememberEvaluation(stopped(input, "policy_unavailable", action), input);
     const single = validSingleDecision(input, action, current);
     return rememberEvaluation(
       evaluated(input, action, single ? { mode: single.mode, source: "single_action_decision", source_ref: single.source_ref, source_version: single.source_version } : current),
       input,
-      single?.expires_at
+      single
     );
   } catch {
     return rememberEvaluation(invalidInput());

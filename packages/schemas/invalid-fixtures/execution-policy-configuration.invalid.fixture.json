@@ -1,0 +1,44 @@
+{
+  "schema": "execution-policy-configuration.schema.json",
+  "cases": [
+    {
+      "name": "global config requires all four categories",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-configuration.v0",
+        "source": "global_user_config",
+        "source_ref": "execution-policy:global_user_config:65bd1c9a4be573438c0082ea4d958532",
+        "source_version": "1",
+        "modes": { "read": "auto" },
+        "updated_at": "2026-07-21T01:00:00.000Z",
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+      }
+    },
+    {
+      "name": "thread config requires next turn boundary",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-configuration.v0",
+        "source": "thread_revision",
+        "source_ref": "execution-policy:thread_revision:265e3eaca43c5789c14decbba1649ad3",
+        "source_version": "1",
+        "thread_ref": "thread_11111111111111111111111111111111",
+        "modes": { "read": "deny" },
+        "updated_at": "2026-07-21T01:00:00.000Z",
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded."
+      }
+    },
+    {
+      "name": "private fields are rejected",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-configuration.v0",
+        "source": "installed_skill_user_version",
+        "source_ref": "execution-policy:installed_skill_user_version:fe55b5ef6ce439b7c69917e0cde49601",
+        "source_version": "1",
+        "skill_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+        "modes": { "read": "auto" },
+        "updated_at": "2026-07-21T01:00:00.000Z",
+        "consumer_boundary": "Business action modes and versioned owner refs only; credentials, browser storage, raw evidence, page content, and App drafts are excluded.",
+        "cookies": []
+      }
+    }
+  ]
+}

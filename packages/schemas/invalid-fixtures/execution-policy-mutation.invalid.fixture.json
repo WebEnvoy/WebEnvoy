@@ -1,0 +1,33 @@
+{
+  "schema": "execution-policy-mutation.schema.json",
+  "cases": [
+    {
+      "name": "empty modes rejected",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-mutation.v0",
+        "idempotency_key": "policy-empty",
+        "expected_source_version": null,
+        "modes": {}
+      }
+    },
+    {
+      "name": "zero version rejected",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-mutation.v0",
+        "idempotency_key": "policy-zero",
+        "expected_source_version": "0",
+        "modes": { "read": "auto" }
+      }
+    },
+    {
+      "name": "private field rejected",
+      "instance": {
+        "schema_version": "webenvoy.execution-policy-mutation.v0",
+        "idempotency_key": "policy-private",
+        "expected_source_version": null,
+        "modes": { "read": "auto" },
+        "profile_storage": "forbidden"
+      }
+    }
+  ]
+}

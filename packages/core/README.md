@@ -20,6 +20,8 @@ GH-295 adds durable task threads bound to one Lode capability and one Harbor ide
 
 GH-293 records trusted evaluator outputs as immutable business decision summaries with append-only lifecycle events. Task decisions are referenced by Run Record and projected on the matching turn; environment operations use the same opaque decision-ref contract without copying Harbor private state. A present effective policy uses the sole `applicability.config_refs[0]` as its source ref, while system stops use an empty list. Decision collections use bounded cursor pages with `next_cursor` so older summaries remain enumerable.
 
+GH-303 adds the Core-owned policy configuration and coordination surface. Global defaults, installed-skill user versions, and thread revisions use independent optimistic versions; thread changes carry an `effective_from_turn_sequence` boundary so they cannot alter the current turn. Effective views are derived from Lode action declarations and the same evaluator precedence used at execution time. `allow_once` and `deny_once` consume only a current, expiring confirmation record and never rewrite another policy source.
+
 It does not implement Harbor SDK/runtime calls, Lode registry/package body loading, result/evidence body retrieval, database migrations, multi-tenant storage, or true writes.
 
 ```bash
