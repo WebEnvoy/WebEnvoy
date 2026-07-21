@@ -129,6 +129,39 @@ for (const file of fixtureFiles) {
   assertValid(validate, instance, file);
 }
 
+const validateTaskThread = ajv.getSchema(taskThreadSchemaId);
+assert(validateTaskThread, `${taskThreadSchemaFile} must compile as Draft 2020-12 JSON Schema`);
+const taskThreadFixture = await readJson(join(fixtureDir, "task-thread.fixture.json"));
+delete taskThreadFixture.$schema;
+const legacyTaskThread = structuredClone(taskThreadFixture);
+legacyTaskThread.identity_environment_ref = "identity-env:xhs-brand";
+assertValid(validateTaskThread, legacyTaskThread, "legacy task thread identity ref");
+for (const identityEnvironmentRef of ["identity-env:xhs:brand", "identity-env:fixture/real-query:execution"]) {
+  const compatibleTaskThread = structuredClone(taskThreadFixture);
+  compatibleTaskThread.identity_environment_ref = identityEnvironmentRef;
+  assertValid(validateTaskThread, compatibleTaskThread, `legacy task thread identity ref ${identityEnvironmentRef}`);
+}
+for (const identityEnvironmentRef of [
+  "identity-env_deadbeef",
+  "identity-env_0123456789abcdef0123456g",
+  "harbor://identity-environment/xhs-brand",
+  "https://example.test/identity/xhs-brand",
+  "identity-env:https://example.test/identity/xhs-brand",
+  "identity-env:foo/https://example.test/private",
+  "identity-env:user:password",
+  "identity-env:foo/user:password",
+  "identity-env:credential-reference",
+  "identity-env:cookie-reference",
+  "identity-env:Mixed-SeCrEt-reference",
+  "identity-env:token-secret",
+  "identity-env_token-secret",
+  `identity-env:${"a".repeat(2032)}`
+]) {
+  const invalidTaskThread = structuredClone(taskThreadFixture);
+  invalidTaskThread.identity_environment_ref = identityEnvironmentRef;
+  assert.equal(validateTaskThread(invalidTaskThread), false, `task thread must reject identity ref ${identityEnvironmentRef.slice(0, 80)}`);
+}
+
 for (const file of invalidFixtureFiles) {
   const fixtureSet = await readJson(file);
   const schemaFile = asString(fixtureSet.schema, `${file}.schema`);

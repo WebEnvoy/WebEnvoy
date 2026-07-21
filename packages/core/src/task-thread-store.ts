@@ -55,11 +55,19 @@ export {
 const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const capabilityRefPattern = /^lode:capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,2030}$/;
 const packageRefPattern = /^lode:\/\/site-capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const identityEnvironmentRefPattern = /^identity-env:[A-Za-z0-9][A-Za-z0-9._~:/-]{0,2030}$/;
+// Harbor owns the underscore form; the colon form remains for safe historical thread bindings.
+const identityEnvironmentRefPattern = /^(?:identity-env_[a-f0-9]{24}|identity-env:(?=.{1,2031}$)[A-Za-z0-9][A-Za-z0-9._~-]{0,2030}(?:[/:][A-Za-z0-9][A-Za-z0-9._~-]{0,2030})*)$/;
+const sensitiveIdentityEnvironmentRefPattern = /(?:credential|password|secret|token|cookie)/i;
 const ownerRefCheckConcurrency = 8;
 function requireThreadBindingRef(value: unknown, label: string, pattern: RegExp): string {
   const ref = requireText(value, label, 2048);
   if (!pattern.test(ref)) throw new TaskThreadStoreError(`${label}_invalid`);
+  return ref;
+}
+
+function requireIdentityEnvironmentRef(value: unknown): string {
+  const ref = requireThreadBindingRef(value, "identity_environment_ref", identityEnvironmentRefPattern);
+  if (sensitiveIdentityEnvironmentRefPattern.test(ref)) throw new TaskThreadStoreError("identity_environment_ref_invalid");
   return ref;
 }
 
@@ -88,7 +96,7 @@ function assertThread(thread: TaskThreadRecord): void {
   if (thread.schema_version !== taskThreadStoreSchemaVersion) throw new TaskThreadStoreError("thread_schema_unsupported");
   requireIdentifier(thread.thread_id, "thread_id");
   requireThreadBindingRef(thread.capability_ref, "capability_ref", capabilityRefPattern);
-  requireThreadBindingRef(thread.identity_environment_ref, "identity_environment_ref", identityEnvironmentRefPattern);
+  requireIdentityEnvironmentRef(thread.identity_environment_ref);
   requireText(thread.created_at, "created_at");
   requireText(thread.updated_at, "updated_at");
   let expectedSequence = 1;
@@ -414,7 +422,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
 
     async createOrGetTaskThread(input) {
       const capabilityRef = requireThreadBindingRef(input.capability_ref, "capability_ref", capabilityRefPattern);
-      const identityRef = requireThreadBindingRef(input.identity_environment_ref, "identity_environment_ref", identityEnvironmentRefPattern);
+      const identityRef = requireIdentityEnvironmentRef(input.identity_environment_ref);
       const threadId = taskThreadId(capabilityRef, identityRef);
       const result = await withFileLock(options.directory, threadId, lockTimeoutMs, async () => {
         const existing = await getRecord(threadId);

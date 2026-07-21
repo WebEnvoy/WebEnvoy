@@ -3,7 +3,7 @@
   "schema_version": "webenvoy.task-thread.v0",
   "thread_id": "thread_0123456789abcdef0123456789abcdef",
   "capability_ref": "lode:capability/search-notes",
-  "identity_environment_ref": "identity-env:xhs-brand",
+  "identity_environment_ref": "identity-env_0123456789abcdef01234567",
   "created_at": "2026-07-19T06:00:00.000Z",
   "updated_at": "2026-07-19T06:00:01.000Z",
   "turns": [

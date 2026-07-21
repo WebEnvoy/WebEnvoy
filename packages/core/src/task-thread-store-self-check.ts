@@ -122,6 +122,7 @@ export async function assertTaskThreadStore(): Promise<void> {
   const unavailableOwnerRefs = new Set<string>();
   const checkOwnerRef = async (ownerRef: string) => !unavailableOwnerRefs.has(ownerRef);
   const store = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef, resolveInputPolicy });
+  const harborIdentityRef = "identity-env_0123456789abcdef01234567";
 
   try {
     const publicUrl = validateTaskTurnInputSnapshot({
@@ -135,14 +136,47 @@ export async function assertTaskThreadStore(): Promise<void> {
     }), /field_owner_ref_invalid/);
     const creates = await Promise.all(Array.from({ length: 8 }, () => store.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     })));
     assert.equal(new Set(creates.map((result) => result.thread.thread_id)).size, 1);
     assert.equal(creates.filter((result) => result.created).length, 1);
+    assert.equal(creates[0]?.thread.identity_environment_ref, harborIdentityRef);
     const threadId = creates.at(0)!.thread.thread_id;
+    const otherIdentity = await store.createOrGetTaskThread({
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env_89abcdef0123456701234567"
+    });
+    assert.notEqual(otherIdentity.thread.thread_id, threadId);
+    for (const identity_environment_ref of [
+      "identity-env_deadbeef",
+      "identity-env_0123456789abcdef0123456g",
+      "harbor://identity-environment/xhs-brand",
+      "https://example.test/identity/xhs-brand",
+      "identity-env:https://example.test/identity/xhs-brand",
+      "identity-env:foo/https://example.test/private",
+      "identity-env:user:password",
+      "identity-env:foo/user:password",
+      "identity-env:credential-reference",
+      "identity-env:cookie-reference",
+      "identity-env:Mixed-SeCrEt-reference",
+      "identity-env:token-secret",
+      "identity-env_token-secret",
+      `identity-env:${"a".repeat(2032)}`
+    ]) {
+      await assert.rejects(() => store.createOrGetTaskThread({
+        capability_ref: "lode:capability/search-notes",
+        identity_environment_ref
+      }), /identity_environment_ref_invalid/);
+    }
+    for (const identity_environment_ref of ["identity-env:xhs:brand", "identity-env:fixture/real-query:execution"]) {
+      assert.equal((await store.createOrGetTaskThread({
+        capability_ref: "lode:capability/legacy-compatible",
+        identity_environment_ref
+      })).thread.identity_environment_ref, identity_environment_ref);
+    }
     await assert.rejects(() => store.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes?token=private",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     }), /capability_ref_invalid/);
 
     const uncheckedStore = createFileTaskThreadStore({
@@ -192,7 +226,7 @@ export async function assertTaskThreadStore(): Promise<void> {
     await assert.rejects(
       () => lockContender.createOrGetTaskThread({
         capability_ref: "lode:capability/search-notes",
-        identity_environment_ref: "identity-env:xhs-brand"
+        identity_environment_ref: harborIdentityRef
       }),
       /thread_lock_timeout/
     );
@@ -210,14 +244,14 @@ export async function assertTaskThreadStore(): Promise<void> {
     await assert.rejects(
       () => lockContender.createOrGetTaskThread({
         capability_ref: "lode:capability/search-notes",
-        identity_environment_ref: "identity-env:xhs-brand"
+        identity_environment_ref: harborIdentityRef
       }),
       /thread_lock_timeout/
     );
     await unlink(recoveryMarker);
     assert.equal((await lockContender.createOrGetTaskThread({
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     })).created, false);
 
     const first = await store.reserveTaskTurn(threadId, turnInput("run_thread_001", "submit-001", "hash-001"));

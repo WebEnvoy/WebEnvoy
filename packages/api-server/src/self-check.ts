@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, identityCompatibilityPreviewRequestSchemaVersion, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type HarborIdentityFactsReader, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, identityCompatibilityPreviewRequestSchemaVersion, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type HarborIdentityFactsReader, type HarborRuntimeClient, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
@@ -119,6 +119,20 @@ async function main(): Promise<void> {
       }
     };
   };
+  const harborAdmissionIdentityRefs: Array<string | undefined> = [];
+  const harborRuntimeClient: HarborRuntimeClient = {
+    async collectAdmissionFacts(input) {
+      harborAdmissionIdentityRefs.push(input.harbor?.identity_environment_ref);
+      return {
+        category: "resource_admission",
+        code: "fixture_admission_stopped",
+        phase: "runtime_binding",
+        recovery_hint: "retry_task"
+      };
+    },
+    async executeReadOperation() { throw new Error("fixture admission must stop before execution"); },
+    async releaseCoreTaskSession() { throw new Error("fixture admission must not acquire a session"); }
+  };
   const runId = "run_api_query_001";
 
   await store.createRunRecord({
@@ -211,7 +225,7 @@ async function main(): Promise<void> {
     retention_state: "redacted"
   });
 
-  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver, harborIdentityFactsReader });
+  const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver, harborIdentityFactsReader, harborRuntimeClient });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   const address = server.address();
@@ -250,7 +264,7 @@ async function main(): Promise<void> {
           taskThreadStore: "configured",
           lodePackageResolver: "configured",
           harborIdentityFactsReader: "configured",
-          harborRuntimeClient: "missing"
+          harborRuntimeClient: "configured"
         },
         consumer_boundary: "Core admission health reports API wiring only; it does not launch Harbor, open a browser, or prove live site execution."
       }
@@ -548,20 +562,39 @@ async function main(): Promise<void> {
       }
     });
 
+    const harborIdentityRef = "identity-env_0123456789abcdef01234567";
     const createThreadResponse = await postJson(port, "/threads", {
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     });
     assert.equal(createThreadResponse.status, 201);
     const createThreadBody = asRecord(createThreadResponse.body);
     const createdThread = asRecord(createThreadBody.thread);
     const threadId = createdThread.thread_id as string;
+    assert.equal(createdThread.identity_environment_ref, harborIdentityRef);
     assert.equal((createdThread.turns as unknown[]).length, 0);
 
     assert.equal((await postJson(port, "/threads", {
       capability_ref: "lode:capability/search-notes",
-      identity_environment_ref: "identity-env:xhs-brand"
+      identity_environment_ref: harborIdentityRef
     })).status, 200);
+    for (const identity_environment_ref of [
+      "identity-env_deadbeef",
+      "identity-env:foo/https://example.test/private",
+      "identity-env:foo/user:password",
+      "identity-env:credential-reference",
+      "identity-env:cookie-reference",
+      "identity-env:Mixed-SeCrEt-reference",
+      "identity-env:token-secret",
+      `identity-env:${"a".repeat(2032)}`
+    ]) {
+      const rejectedThread = await postJson(port, "/threads", {
+        capability_ref: "lode:capability/search-notes",
+        identity_environment_ref
+      });
+      assert.equal(rejectedThread.status, 400);
+      assert.equal(asRecord(asRecord(rejectedThread.body).error).code, "identity_environment_ref_invalid");
+    }
 
     const taskTurnRequest = {
       idempotency_key: "api-thread-submit-001",
@@ -591,7 +624,7 @@ async function main(): Promise<void> {
         resource_requirement_refs: [],
         evidence_policy_ref: "policy:no-raw-evidence"
       },
-      harbor: { identity_environment_ref: "identity-env:xhs-brand" }
+      harbor: { identity_environment_ref: harborIdentityRef }
     };
     const turnResponse = await postJson(port, `/threads/${threadId}/turns`, taskTurnRequest);
     assert.equal(turnResponse.status, 409);
@@ -669,6 +702,44 @@ async function main(): Promise<void> {
     assert.equal(bindingMismatch.status, 409);
     assert.equal(asRecord(asRecord(bindingMismatch.body).error).code, "thread_binding_mismatch");
 
+    const readTurnResponse = await postJson(port, `/threads/${threadId}/turns`, {
+      ...taskTurnRequest,
+      idempotency_key: "api-thread-read-admission",
+      run_id: "run_api_thread_read_admission",
+      task_intent: {
+        schema_version: "webenvoy.task-intent.v0",
+        intent_id: "intent_api_thread_read_admission",
+        entrypoint: "app",
+        user_intent: { summary: "Verify the canonical Harbor identity binding." },
+        capability: {
+          ref: "lode:capability/search-notes",
+          version: "0.1.0",
+          source_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+          lock_ref: "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0"
+        },
+        input: {
+          summary: "Read Xiaohongshu notes for AI tools.",
+          refs: ["https://www.xiaohongshu.com/search_result/?keyword=AI%20tools"]
+        },
+        scope: {
+          target_type: "xiaohongshu_search",
+          target_ref: "https://www.xiaohongshu.com/search_result/?keyword=AI%20tools"
+        },
+        policy: { risk: "read", execution_intent: "read", timeout_ms: 5000 },
+        resource_requirement_refs: ["xiaohongshu.search-notes.resources"],
+        resource_requirement_profile_id: "fixture",
+        evidence_policy_ref: "evidence-policy:refs-only"
+      },
+      public_query: { query: "AI tools" },
+      harbor: {
+        identity_environment_ref: harborIdentityRef,
+        url: "https://www.xiaohongshu.com/search_result/?keyword=AI%20tools"
+      }
+    });
+    assert.equal(readTurnResponse.status, 503, JSON.stringify(readTurnResponse.body));
+    assert.equal(asRecord(asRecord(readTurnResponse.body).error).code, "fixture_admission_stopped");
+    assert.deepEqual(harborAdmissionIdentityRefs, [harborIdentityRef]);
+
     const reserved = await taskThreadStore.reserveTaskTurn(threadId, {
       idempotency_key: "api-thread-interrupted",
       request_hash: "interrupted-hash",
@@ -688,7 +759,7 @@ async function main(): Promise<void> {
     const threadResponse = await getJson(port, `/threads/${threadId}`);
     assert.equal(threadResponse.status, 200);
     const threadView = asRecord(asRecord(threadResponse.body).thread);
-    assert.deepEqual((threadView.turns as unknown[]).map((turn) => asRecord(turn).sequence), [1, 2]);
+    assert.deepEqual((threadView.turns as unknown[]).map((turn) => asRecord(turn).sequence), [1, 2, 3]);
     const threadList = asRecord(await getJson(port, "/threads").then((result) => result.body));
     assert.equal((threadList.threads as unknown[]).length, 1);
 
