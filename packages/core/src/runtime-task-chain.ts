@@ -809,7 +809,12 @@ function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEn
     post_check_missing: "field_missing"
   };
   const mapped = harborToLode[failureClass];
-  return mapped && entry.required_failure_classes.includes(mapped) ? mapped : undefined;
+  if (mapped && entry.required_failure_classes.includes(mapped)) return mapped;
+
+  // A newer Harbor runtime may add a bounded unavailable class before the
+  // pinned Lode taxonomy is updated. Keep the run in runtime failure space;
+  // never reinterpret an admitted browser/runtime failure as site drift.
+  return entry.required_failure_classes.includes("resource_unavailable") ? "resource_unavailable" : undefined;
 }
 
 export async function submitRuntimeTask(

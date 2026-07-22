@@ -2167,8 +2167,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100" }
       });
       const unknownFailureRun = asRecord(asRecord(unknownFailure.body).run);
-      assert.equal(asRecord(unknownFailureRun.failure).code, "site_changed");
-      assert.equal(asRecord(unknownFailureRun.post_check).summary, "Core rejected a Harbor unavailable response outside the pinned Lode failure taxonomy.");
+      assert.equal(asRecord(unknownFailureRun.failure).code, "resource_unavailable");
+      assert.equal(asRecord(unknownFailureRun.post_check).summary, "Harbor read operation ended with resource_unavailable.");
       for (const [targetPort, runId] of [[driftedSessionOperationPort, "run_api_submit_operation_session_drift"], [driftedBoundaryOperationPort, "run_api_submit_operation_boundary_drift"]] as const) {
         const drift = await postJson(targetPort, "/tasks", { run_id: runId, package_ref: xiaohongshuPackageRef, task_intent: xiaohongshuTaskIntent(`intent_${runId}`), public_query: { query: "city coffee" }, harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" } });
         assert.equal(asRecord(asRecord(drift.body).run).status, "failed");
