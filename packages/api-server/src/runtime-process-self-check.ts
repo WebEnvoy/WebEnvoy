@@ -284,7 +284,15 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
           schema_version: "harbor-local-identity-environment-store/v0",
           identity_environment_ref: "identity-env_process",
           site: { site_id: "example", origin: "https://example.org", display_name: "Example" },
-          status: { login_state: "logged_in", browser_storage_state: "present", recovery_required: false },
+          status: {
+            login_state: "logged_in",
+            authentication_provenance: "user_confirmed_managed_session",
+            manual_authentication_state: "completed",
+            browser_storage_state: "present",
+            recovery_required: false,
+            blocking_reasons: [],
+            repair_reasons: []
+          },
           refs: { execution_identity_ref: "identity-env_process:execution", profile_ref: "profile_process" },
           environment_summary: { provider_id: "cloakbrowser" }
         });
@@ -311,7 +319,12 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
             execution_identity_ref: "identity-env_process:execution",
             profile_ref: "profile_process",
             site_binding: { site_id: "example", origin: "https://example.org" },
-            login_state: { state: "logged_in", recovery_required: false },
+            login_state: {
+              state: "logged_in",
+              authentication_provenance: "user_confirmed_managed_session",
+              manual_authentication_state: "completed",
+              recovery_required: false
+            },
             browser_storage: { state: "present" },
             provider_binding: { selected_provider_id: "cloakbrowser", binding_status: "default_provider_available" },
             consumer_boundary: {

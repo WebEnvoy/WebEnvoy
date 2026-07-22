@@ -171,6 +171,8 @@ function identityFacts(value: SiteConfig): HarborIdentityEnvironmentFacts {
     },
     login_state: {
       state: "logged_in",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
       recovery_required: false
     },
     browser_storage: {

@@ -630,7 +630,8 @@ function createHarborMock(
   siteResourceBody: JsonObject | undefined = undefined,
   readOperationOverrides: JsonObject | ((body: JsonObject, holderRef: string) => JsonObject) = {},
   identityRecordOverrides: JsonObject = {},
-  cleanupBehavior: "success" | "unavailable" | "hang" | "inconsistent" | "owner_none_held" = "success"
+  cleanupBehavior: "success" | "unavailable" | "hang" | "inconsistent" | "owner_none_held" = "success",
+  providerCatalogOverrides: JsonObject = {}
 ): Server {
   const sessionRef = "session_runtime_api_ready";
   let currentHolderRef = "";
@@ -674,7 +675,8 @@ function createHarborMock(
       if (request.method === "GET" && request.url === "/runtime/browser-providers") {
         sendJson(response, 200, {
           schema_version: "harbor-browser-provider-status/v0",
-          providers: [{ provider_id: "cloakbrowser", install: { status: "installed", launchability: "launchable" } }]
+          providers: [{ provider_id: "cloakbrowser", install: { status: "installed", launchability: "launchable" } }],
+          ...providerCatalogOverrides
         });
         return;
       }
@@ -690,7 +692,8 @@ function createHarborMock(
             browser_storage_state: "present",
             manual_authentication_state: "completed",
             recovery_required: false,
-            blocking_reasons: []
+            blocking_reasons: [],
+            repair_reasons: []
           },
           refs: {
             execution_identity_ref: "identity-env_runtime_api:execution",
@@ -1399,11 +1402,54 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     ...readyXiaohongshuSiteFacts,
     resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) => fact.key === key ? { ...fact, state } : fact)
   });
-  const blockedIdentityCases: Array<{ name: string; session: JsonObject; siteFacts?: JsonObject; identityRef?: string; identityRecord?: JsonObject }> = [
+  const publicIdentityStatus = (overrides: JsonObject = {}): JsonObject => ({
+    readiness: "ready",
+    login_state: "logged_in",
+    authentication_provenance: "user_confirmed_managed_session",
+    browser_storage_state: "present",
+    manual_authentication_state: "completed",
+    recovery_required: false,
+    blocking_reasons: [],
+    repair_reasons: [],
+    ...overrides
+  });
+  const blockedIdentityCases: Array<{
+    name: string;
+    session: JsonObject;
+    siteFacts?: JsonObject;
+    identityRef?: string;
+    identityRecord?: JsonObject;
+    providerCatalog?: JsonObject;
+  }> = [
     { name: "missing_reason", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined } }) } },
-    { name: "unknown_provenance_manual_pending", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined, authentication_provenance: "unknown", manual_authentication_state: "pending" } }) } },
-    { name: "auth_incomplete", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { manual_authentication_state: "pending" } }) } },
-    { name: "recovery_required", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { recovery_required: true } }) } },
+    {
+      name: "unknown_provenance_manual_pending",
+      session: {},
+      identityRecord: { status: publicIdentityStatus({ authentication_provenance: "unknown", manual_authentication_state: "pending" }) }
+    },
+    {
+      name: "auth_incomplete",
+      session: {},
+      identityRecord: { status: publicIdentityStatus({ manual_authentication_state: "pending" }) }
+    },
+    {
+      name: "recovery_required",
+      session: {},
+      identityRecord: {
+        status: publicIdentityStatus({
+          readiness: "repair_required",
+          recovery_required: true,
+          blocking_reasons: ["provider_conflict", "fingerprint_conflict"]
+        })
+      }
+    },
+    {
+      name: "provider_unlaunchable",
+      session: {},
+      providerCatalog: {
+        providers: [{ provider_id: "cloakbrowser", install: { status: "installed", launchability: "unlaunchable" } }]
+      }
+    },
     { name: "wrong_origin", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://evil.example") } },
     {
       name: "unknown_schema",
@@ -1430,7 +1476,9 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     entry.session,
     entry.siteFacts ?? readyXiaohongshuSiteFacts,
     {},
-    entry.identityRecord
+    entry.identityRecord,
+    "success",
+    entry.providerCatalog
   ));
   const publicIdentityPaths: string[] = [];
   const publicIdentityHarbor = createHarborMock(
@@ -2182,6 +2230,18 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         });
         assert.equal(asRecord(blockedIdentity.body).ok, false, identityCase.name);
         assert.equal(blockedIdentityPaths[index]!.some((path) => path.endsWith("/read-operations")), false, identityCase.name);
+        if (["unknown_provenance_manual_pending", "auth_incomplete", "recovery_required", "provider_unlaunchable"].includes(identityCase.name)) {
+          assert.equal(blockedIdentityPaths[index]!.includes("POST /runtime/identity-environment-sessions"), false);
+        }
+        if (identityCase.name === "recovery_required") {
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).code, "browser_environment_repair_required");
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).recovery_hint, "repair_browser_environment");
+          assert.equal(asRecord(asRecord(blockedIdentity.body).run).status, "requires_user_action");
+        }
+        if (identityCase.name === "provider_unlaunchable") {
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).code, "browser_provider_unavailable");
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).recovery_hint, "install_or_select_provider");
+        }
       }
 
       const publicIdentitySubmit = await postJson(publicIdentityPort, "/tasks", {

@@ -109,7 +109,7 @@
             }
           },
           "recovery_action": {
-            "enum": ["none", "select_supported_package_version", "repair_package_contract", "refresh_owner_facts", "select_matching_identity", "open_manual_auth", "install_or_select_provider", "connect_identity_environment", "fix_target", "select_matching_resource_requirements", "retry_at_task_submission"]
+            "enum": ["none", "select_supported_package_version", "repair_package_contract", "refresh_owner_facts", "select_matching_identity", "open_manual_auth", "install_or_select_provider", "repair_browser_environment", "connect_identity_environment", "fix_target", "select_matching_resource_requirements", "retry_at_task_submission"]
           }
         }
       }

@@ -11,7 +11,11 @@ import type {
   HarborResourceFacts,
   HarborUnavailable
 } from "./harbor-admission.js";
-import { projectHarborPublicIdentityEnvironmentRecord } from "./harbor-admission.js";
+import {
+  projectHarborPublicIdentityEnvironmentRecord,
+  validateHarborIdentityEnvironmentFacts,
+  validateHarborIdentityProviderStatus
+} from "./harbor-admission.js";
 import {
   lodeRuntimeAdmissionFailure,
   parseLodeRuntimeAdmissionPolicy,
@@ -1451,11 +1455,26 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
       const provider = await requestJson("GET", "/runtime/browser-providers");
       if (isFailure(provider)) return provider;
+      const publicProviderStatus = providerStatus(provider);
 
       const identityRef = input.harbor?.identity_environment_ref;
       const identityRecord = identityRef === undefined
         ? undefined
         : await requestJson("GET", `/runtime/identity-environments/${encodeURIComponent(identityRef)}`);
+      if (isFailure(identityRecord)) return identityRecord;
+
+      let publicIdentity: HarborIdentityEnvironmentFacts | undefined;
+      if (identityRef !== undefined) {
+        const snapshot = projectHarborPublicIdentityEnvironmentRecord(identityRecord, { requireComplete: true });
+        if (!snapshot || snapshot.facts.identity_environment_ref !== identityRef) {
+          return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "repair_browser_environment");
+        }
+        const validatedIdentity = validateHarborIdentityEnvironmentFacts(snapshot.facts);
+        if (isFailure(validatedIdentity)) return validatedIdentity;
+        const providerFailure = validateHarborIdentityProviderStatus(validatedIdentity, publicProviderStatus);
+        if (providerFailure) return providerFailure;
+        publicIdentity = validatedIdentity;
+      }
 
       const session = await requestJson("POST", "/runtime/identity-environment-sessions", {
         identity_environment_ref: identityRef,
@@ -1469,7 +1488,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       });
       if (isFailure(session)) return session;
 
-      const identity = identityFactsFromSession(session) ?? (isFailure(identityRecord) ? undefined : projectHarborPublicIdentityEnvironmentRecord(identityRecord, { requireComplete: false })?.facts);
+      const identity = identityFactsFromSession(session) ?? publicIdentity;
       const runtime = coreRuntimeFactsFromSession(session, identity);
       const openedSessionRef = isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
@@ -1496,7 +1515,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (isFailure(siteResourceFacts)) {
         return {
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-          harbor_provider_status: providerStatus(provider),
+          harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
           harbor_scene_ref: unavailable(siteResourceFacts.code),
           harbor_resource_facts: unavailable(siteResourceFacts.code)
@@ -1511,7 +1530,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (isFailure(snapshot)) {
         return {
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-          harbor_provider_status: providerStatus(provider),
+          harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
           harbor_scene_ref: unavailable(snapshot.code),
           harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
@@ -1523,7 +1542,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const evidenceFailure = "status" in scene ? undefined : await verifyEvidenceRefs(scene.evidence_refs);
       const facts: HarborAdmissionInput = {
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-        harbor_provider_status: providerStatus(provider),
+        harbor_provider_status: publicProviderStatus,
         harbor_runtime_facts: runtimeAfterSnapshot,
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
@@ -1681,6 +1700,8 @@ function failureFromHarborPayload(value: unknown): FailureRecord | undefined {
 
 function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hint"] {
   if (code === "identity_auth_required" || code === "login_expired") return "open_manual_auth";
+  if (code === "browser_environment_repair_required" || code === "identity_storage_unavailable") return "repair_browser_environment";
+  if (code === "browser_provider_unavailable") return "install_or_select_provider";
   if (code.startsWith("identity_environment_")) return "connect_identity_environment";
   if (code === "session_locked") return "wait_or_request_handoff";
   if (code === "url_unreachable") return "fix_input";

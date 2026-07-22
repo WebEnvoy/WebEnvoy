@@ -70,11 +70,24 @@ export type HarborIdentityEnvironmentFacts = {
     selected_provider_id: string | null;
     binding_status: string;
   };
+  environment_recovery_reasons?: readonly HarborIdentityEnvironmentRecoveryReason[];
   consumer_boundary: {
     core: string;
     not_exposed: readonly string[];
   };
 };
+
+export type HarborIdentityEnvironmentRecoveryReason =
+  | "provider_conflict"
+  | "fingerprint_conflict"
+  | "proxy_conflict"
+  | "region_conflict"
+  | "language_conflict"
+  | "timezone_conflict"
+  | "browser_version_conflict"
+  | "storage_conflict"
+  | "profile_locked"
+  | "unknown_environment_recovery";
 
 export type HarborPublicIdentityEnvironmentSnapshot = {
   facts: HarborIdentityEnvironmentFacts;
@@ -245,6 +258,44 @@ const harborForbiddenFieldNames = new Set([
   "provider_private_object"
 ]);
 const identityRequiredPrivateBoundary = ["password", "verification_code", "cookie_value", "storage_value", "session_token"];
+const knownEnvironmentRecoveryReasons = new Set<HarborIdentityEnvironmentRecoveryReason>([
+  "provider_conflict",
+  "fingerprint_conflict",
+  "proxy_conflict",
+  "region_conflict",
+  "language_conflict",
+  "timezone_conflict",
+  "browser_version_conflict",
+  "storage_conflict",
+  "profile_locked",
+  "unknown_environment_recovery"
+]);
+
+function environmentRecoveryReasons(status: Record<string, unknown> | undefined): readonly HarborIdentityEnvironmentRecoveryReason[] {
+  const values = [
+    ...(Array.isArray(status?.blocking_reasons) ? status.blocking_reasons : []),
+    ...(Array.isArray(status?.repair_reasons) ? status.repair_reasons : [])
+  ];
+  const recognized = values
+    .filter((value): value is string => boundedEnvironmentRecoveryReason(value))
+    .map((value) => knownEnvironmentRecoveryReasons.has(value as HarborIdentityEnvironmentRecoveryReason) ? value as HarborIdentityEnvironmentRecoveryReason : "unknown_environment_recovery")
+    .filter((value, index, all) => all.indexOf(value) === index);
+  return recognized.slice(0, 8);
+}
+
+function boundedEnvironmentRecoveryReason(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function completeEnvironmentRecoveryReasons(status: Record<string, unknown> | undefined): boolean {
+  return [status?.blocking_reasons, status?.repair_reasons].every((value) =>
+    Array.isArray(value) && value.length <= 32 && value.every(boundedEnvironmentRecoveryReason)
+  );
+}
 
 function failure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recoveryHint: string): FailureRecord {
   return {
@@ -314,7 +365,7 @@ function providerIdFromRef(ref: string): string {
 function validateProviderStatus(input: HarborAdmissionInput, identity: HarborIdentityEnvironmentFacts): FailureRecord | undefined {
   if (!input.harbor_provider_status) return undefined;
   if (isUnavailable(input.harbor_provider_status)) {
-    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", input.harbor_provider_status.retryable ? "install_or_select_provider" : "open_manual_auth");
+    return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", input.harbor_provider_status.retryable ? "install_or_select_provider" : "repair_browser_environment");
   }
   const providerBinding = contractObject(identity.provider_binding);
   const selectedProviderId = contractString(providerBinding?.selected_provider_id);
@@ -343,7 +394,7 @@ export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmi
     return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
   }
   if (isUnavailable(identityFacts)) {
-    return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", identityFacts.retryable ? "connect_identity_environment" : "open_manual_auth");
+    return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", identityFacts.retryable ? "connect_identity_environment" : "repair_browser_environment");
   }
 
   const identity = contractObject(identityFacts);
@@ -356,18 +407,30 @@ export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmi
   const provider = contractObject(identity?.provider_binding);
   const boundary = contractObject(identity?.consumer_boundary);
   const notExposed = Array.isArray(boundary?.not_exposed) ? boundary.not_exposed : [];
+  const recoveryReasons = environmentRecoveryReasons({ blocking_reasons: identity?.environment_recovery_reasons });
 
   if (identity?.schema_version !== "harbor-local-identity-environment/v0" || !identityRef || !executionRef || !profileRef || !contractString(site?.origin)) {
     return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
   }
-  if (login?.recovery_required === true || login?.state === "logged_out" || login?.state === "expired" || login?.state === "manual_auth_required") {
+  if (login?.state === "logged_out" || login?.state === "expired" || login?.state === "manual_auth_required") {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
+  }
+  const authenticationProvenance = contractString(login?.reason) ?? contractString(login?.authentication_provenance);
+  if (
+    login?.state !== "logged_in" ||
+    authenticationProvenance !== "user_confirmed_managed_session" ||
+    login?.manual_authentication_state !== "completed"
+  ) {
     return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
   if (storage?.state !== "present") {
-    return failure("resource_admission", "identity_storage_unavailable", "runtime_binding", "open_manual_auth");
+    return failure("resource_admission", "identity_storage_unavailable", "runtime_binding", "repair_browser_environment");
   }
   if (!contractString(provider?.selected_provider_id) || provider?.binding_status === "no_launchable_provider") {
     return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", "install_or_select_provider");
+  }
+  if (recoveryReasons.length > 0 || login?.recovery_required === true) {
+    return failure("resource_admission", "browser_environment_repair_required", "runtime_binding", "repair_browser_environment");
   }
   if (boundary?.core !== "admission_facts_refs_and_blocking_reasons_only" || identityRequiredPrivateBoundary.some((entry) => !notExposed.includes(entry))) {
     return failure("resource_admission", "private_boundary_invalid", "runtime_binding", "remove_private_field");
@@ -398,7 +461,7 @@ export function projectHarborPublicIdentityEnvironmentRecord(
   if (!identityEnvironmentRef || !executionIdentityRef || !profileRef || !origin) return undefined;
   if (options.requireComplete && (
     !siteId || !loginState || !authenticationProvenance || !manualAuthenticationState || !browserStorageState ||
-    typeof status?.recovery_required !== "boolean"
+    typeof status?.recovery_required !== "boolean" || !completeEnvironmentRecoveryReasons(status)
   )) return undefined;
   const selectedProviderId = environment?.provider_id === null ? null : contractString(environment?.provider_id);
   if (options.requireComplete && environment?.provider_id !== null && selectedProviderId === undefined) return undefined;
@@ -421,6 +484,7 @@ export function projectHarborPublicIdentityEnvironmentRecord(
         selected_provider_id: selectedProviderId ?? null,
         binding_status: selectedProviderId ? "public_record_provider_available" : "no_launchable_provider"
       },
+      environment_recovery_reasons: environmentRecoveryReasons(status),
       consumer_boundary: {
         core: "admission_facts_refs_and_blocking_reasons_only",
         not_exposed: identityRequiredPrivateBoundary
@@ -645,7 +709,7 @@ export function inferHarborIdentityResourceFacts(identity: HarborIdentityEnviron
 
 function publicResourceFacts(input: HarborAdmissionInput): Set<string> | FailureRecord {
   if (isUnavailable(input.harbor_resource_facts)) {
-    return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", input.harbor_resource_facts.retryable ? "rerun_with_fresh_runtime" : "open_manual_auth");
+    return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", input.harbor_resource_facts.retryable ? "rerun_with_fresh_runtime" : "repair_browser_environment");
   }
   const facts = new Set<string>();
   addInferredResourceFacts(input, facts);
