@@ -301,6 +301,24 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(uncertainPreview.candidates[0]?.status, "requires_setup");
   assert.deepEqual(uncertainPreview.candidates[0]?.reason_codes, ["identity_auth_required"]);
 
+  const persistedReadAuthentication = identityFacts("identity-persisted-read", {
+    login_state: {
+      state: "logged_in",
+      authentication_provenance: "unknown",
+      manual_authentication_state: "not_required",
+      recovery_required: false
+    }
+  });
+  assert.equal(matchLockedOperationIdentity(operation, persistedReadAuthentication, "identity-persisted-read"), undefined);
+  const persistedReadPreview = await previewIdentityCompatibility(request(["identity-persisted-read"]), {
+    ...baseDependencies,
+    harborIdentityFactsReader: reader({
+      "identity-persisted-read": availableRead(persistedReadAuthentication, "2026-07-21T07:59:30.000Z")
+    })
+  });
+  assert(!("category" in persistedReadPreview));
+  assert.equal(persistedReadPreview.candidates[0]?.status, "compatible");
+
   const projectedBrowserRepair = projectHarborPublicIdentityEnvironmentRecord({
     schema_version: "harbor-local-identity-environment-store/v0",
     identity_environment_ref: "identity-browser-repair",
@@ -323,8 +341,8 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   const browserRepairFacts = identityFacts("identity-browser-repair", {
     login_state: {
       state: "logged_in",
-      authentication_provenance: "user_confirmed_managed_session",
-      manual_authentication_state: "completed",
+      authentication_provenance: "unknown",
+      manual_authentication_state: "not_required",
       recovery_required: true
     },
     environment_recovery_reasons: ["provider_conflict", "fingerprint_conflict"]

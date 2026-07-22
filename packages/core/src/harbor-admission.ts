@@ -201,6 +201,7 @@ export type HarborWritePrecheckFacts = {
 };
 
 export type HarborAdmissionMode = "read" | "write_precheck";
+export type HarborIdentityValidationMode = HarborAdmissionMode;
 
 export type HarborBrowserProviderCatalog = {
   schema_version: "harbor-browser-provider-status/v0";
@@ -389,7 +390,10 @@ export function validateHarborIdentityProviderStatus(
   return validateProviderStatus({ harbor_provider_status: providerStatus }, identity);
 }
 
-export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"]): HarborIdentityEnvironmentFacts | FailureRecord {
+export function validateHarborIdentityEnvironmentFacts(
+  identityFacts: HarborAdmissionInput["harbor_identity_environment_facts"],
+  mode: HarborIdentityValidationMode = "write_precheck"
+): HarborIdentityEnvironmentFacts | FailureRecord {
   if (!identityFacts) {
     return failure("resource_admission", "identity_environment_ref_missing", "runtime_binding", "connect_identity_environment");
   }
@@ -416,13 +420,6 @@ export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmi
     return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
   const authenticationProvenance = contractString(login?.reason) ?? contractString(login?.authentication_provenance);
-  if (
-    login?.state !== "logged_in" ||
-    authenticationProvenance !== "user_confirmed_managed_session" ||
-    login?.manual_authentication_state !== "completed"
-  ) {
-    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
-  }
   if (storage?.state !== "present") {
     return failure("resource_admission", "identity_storage_unavailable", "runtime_binding", "repair_browser_environment");
   }
@@ -431,6 +428,13 @@ export function validateHarborIdentityEnvironmentFacts(identityFacts: HarborAdmi
   }
   if (recoveryReasons.length > 0 || login?.recovery_required === true) {
     return failure("resource_admission", "browser_environment_repair_required", "runtime_binding", "repair_browser_environment");
+  }
+  const manuallyAuthenticated = login?.manual_authentication_state === "completed" || login?.manual_authentication_state === "not_required";
+  const authenticatedForMode = mode === "read"
+    ? manuallyAuthenticated
+    : authenticationProvenance === "user_confirmed_managed_session" && login?.manual_authentication_state === "completed";
+  if (login?.state !== "logged_in" || !authenticatedForMode) {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
   if (boundary?.core !== "admission_facts_refs_and_blocking_reasons_only" || identityRequiredPrivateBoundary.some((entry) => !notExposed.includes(entry))) {
     return failure("resource_admission", "private_boundary_invalid", "runtime_binding", "remove_private_field");
@@ -747,7 +751,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
   }
 
-  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts);
+  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts, mode);
   if ("category" in identity) {
     return { ok: false, failure: identity };
   }

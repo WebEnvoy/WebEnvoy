@@ -85,6 +85,7 @@ export type HarborRuntimeAdmissionRequest = {
   run_id: string;
   task_intent: unknown;
   package_ref: string;
+  admission_mode?: "read" | "write_precheck";
   harbor?: RuntimeTaskSubmissionRequest["harbor"];
 };
 
@@ -913,6 +914,7 @@ export async function submitRuntimeTask(
       run_id: request.run_id,
       task_intent: validatedTaskIntent,
       package_ref,
+      admission_mode: validatedTaskIntent.policy.risk === "write" ? "write_precheck" : "read",
       harbor: operationHarbor
     });
   } catch {
@@ -1469,7 +1471,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         if (!snapshot || snapshot.facts.identity_environment_ref !== identityRef) {
           return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "repair_browser_environment");
         }
-        const validatedIdentity = validateHarborIdentityEnvironmentFacts(snapshot.facts);
+        const validatedIdentity = validateHarborIdentityEnvironmentFacts(snapshot.facts, input.admission_mode ?? "read");
         if (isFailure(validatedIdentity)) return validatedIdentity;
         const providerFailure = validateHarborIdentityProviderStatus(validatedIdentity, publicProviderStatus);
         if (providerFailure) return providerFailure;

@@ -139,14 +139,14 @@ export function matchLockedOperationIdentity(
     identity.site_binding.site_id !== operation.runtime_consumption.site_slug
   ) return failure("identity_runtime_mismatch", "runtime_binding", "select_matching_runtime");
 
-  const admission = validateHarborIdentityEnvironmentFacts(identity);
+  const admission = validateHarborIdentityEnvironmentFacts(identity, operation.selection.operation_mode === "read" ? "read" : "write_precheck");
   if ("category" in admission) return admission;
 
   const login = identity.login_state;
   const provenance = login.reason ?? login.authentication_provenance;
   if (
-    login.state !== "logged_in" || provenance !== "user_confirmed_managed_session" ||
-    login.manual_authentication_state !== "completed"
+    operation.selection.operation_mode !== "read" &&
+    (login.state !== "logged_in" || provenance !== "user_confirmed_managed_session" || login.manual_authentication_state !== "completed")
   ) return failure("identity_auth_required", "runtime_binding", "open_manual_auth");
 
   const origin = identity.site_binding.origin;
