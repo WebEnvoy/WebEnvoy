@@ -1,4 +1,4 @@
-import type { HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
+import { validateHarborIdentityEnvironmentFacts, type HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
 import { isOpaqueDetailRef } from "./detail-target-store.js";
 import type {
   LodePackageAdmissionContract,
@@ -139,11 +139,14 @@ export function matchLockedOperationIdentity(
     identity.site_binding.site_id !== operation.runtime_consumption.site_slug
   ) return failure("identity_runtime_mismatch", "runtime_binding", "select_matching_runtime");
 
+  const admission = validateHarborIdentityEnvironmentFacts(identity);
+  if ("category" in admission) return admission;
+
   const login = identity.login_state;
   const provenance = login.reason ?? login.authentication_provenance;
   if (
     login.state !== "logged_in" || provenance !== "user_confirmed_managed_session" ||
-    login.manual_authentication_state !== "completed" || login.recovery_required !== false
+    login.manual_authentication_state !== "completed"
   ) return failure("identity_auth_required", "runtime_binding", "open_manual_auth");
 
   const origin = identity.site_binding.origin;

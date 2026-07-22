@@ -230,7 +230,7 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
 
 function failureReasonClass(failure: FailureRecord | undefined): FailureReasonClass {
   if (!failure) return "none";
-  if (["identity_auth_required", "identity_environment_unavailable", "not_logged_in", "login_expired", "identity_insufficient"].includes(failure.code)) return "login_required";
+  if (["identity_auth_required", "not_logged_in", "login_expired", "identity_insufficient"].includes(failure.code)) return "login_required";
   if (["page_changed", "page_not_ready", "site_changed", "source_shape_changed", "source_schema_changed"].includes(failure.code)) return "page_changed";
   if (["field_missing", "field_not_visible", "field_unavailable", "writable_target_missing", "selector_unstable", "mapping_incomplete"].includes(failure.code)) return "field_unavailable";
   if (["risk_prompt", "risk_challenge", "captcha_required", "safety_challenge", "anti_automation_challenge"].includes(failure.code)) return "risk_prompt";

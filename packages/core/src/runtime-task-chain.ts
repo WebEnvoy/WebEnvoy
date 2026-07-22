@@ -1681,6 +1681,8 @@ function failureFromHarborPayload(value: unknown): FailureRecord | undefined {
 
 function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hint"] {
   if (code === "identity_auth_required" || code === "login_expired") return "open_manual_auth";
+  if (code === "browser_environment_repair_required" || code === "identity_storage_unavailable") return "repair_browser_environment";
+  if (code === "browser_provider_unavailable") return "install_or_select_provider";
   if (code.startsWith("identity_environment_")) return "connect_identity_environment";
   if (code === "session_locked") return "wait_or_request_handoff";
   if (code === "url_unreachable") return "fix_input";

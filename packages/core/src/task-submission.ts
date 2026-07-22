@@ -423,6 +423,9 @@ function harborAdmissionStatus(failure: FailureRecord): Extract<RunRecord["statu
 function harborFailureRequiresUserAction(code: string): boolean {
   return (
     code === "identity_auth_required" ||
+    code === "browser_environment_repair_required" ||
+    code === "identity_storage_unavailable" ||
+    code === "browser_provider_unavailable" ||
     code === "identity_environment_required" ||
     code === "identity_environment_unavailable" ||
     code === "identity_environment_missing" ||

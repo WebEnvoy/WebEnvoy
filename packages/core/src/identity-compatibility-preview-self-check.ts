@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import type { HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
+import { projectHarborPublicIdentityEnvironmentRecord, type HarborIdentityEnvironmentFacts } from "./harbor-admission.js";
 import {
   createHttpHarborIdentityFactsReader,
   identityCompatibilityPreviewRequestSchemaVersion,
@@ -300,6 +300,46 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert(!("category" in uncertainPreview));
   assert.equal(uncertainPreview.candidates[0]?.status, "requires_setup");
   assert.deepEqual(uncertainPreview.candidates[0]?.reason_codes, ["identity_auth_required"]);
+
+  const projectedBrowserRepair = projectHarborPublicIdentityEnvironmentRecord({
+    schema_version: "harbor-local-identity-environment-store/v0",
+    identity_environment_ref: "identity-browser-repair",
+    updated_at: "2026-07-21T07:59:30.000Z",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" },
+    status: {
+      login_state: "logged_in",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
+      browser_storage_state: "present",
+      recovery_required: true,
+      blocking_reasons: ["provider_conflict", "fingerprint_conflict"],
+      repair_reasons: []
+    },
+    refs: { execution_identity_ref: "execution:identity-browser-repair", profile_ref: "profile:identity-browser-repair" },
+    environment_summary: { provider_id: "chrome_official" }
+  }, { requireComplete: true });
+  assert.deepEqual(projectedBrowserRepair?.facts.environment_recovery_reasons, ["provider_conflict", "fingerprint_conflict"]);
+
+  const browserRepairFacts = identityFacts("identity-browser-repair", {
+    login_state: {
+      state: "logged_in",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
+      recovery_required: true
+    },
+    environment_recovery_reasons: ["provider_conflict", "fingerprint_conflict"]
+  });
+  assert.equal(matchLockedOperationIdentity(operation, browserRepairFacts, "identity-browser-repair")?.code, "browser_environment_repair_required");
+  const browserRepairPreview = await previewIdentityCompatibility(request(["identity-browser-repair"]), {
+    ...baseDependencies,
+    harborIdentityFactsReader: reader({
+      "identity-browser-repair": availableRead(browserRepairFacts, "2026-07-21T07:59:30.000Z")
+    })
+  });
+  assert(!("category" in browserRepairPreview));
+  assert.equal(browserRepairPreview.candidates[0]?.status, "requires_setup");
+  assert.deepEqual(browserRepairPreview.candidates[0]?.reason_codes, ["browser_environment_repair_required"]);
+  assert.equal(browserRepairPreview.candidates[0]?.recovery_action, "repair_browser_environment");
 
   const runtimeUnknown = await previewIdentityCompatibility(request(["identity-runtime"]), {
     ...baseDependencies,

@@ -2182,6 +2182,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         });
         assert.equal(asRecord(blockedIdentity.body).ok, false, identityCase.name);
         assert.equal(blockedIdentityPaths[index]!.some((path) => path.endsWith("/read-operations")), false, identityCase.name);
+        if (identityCase.name === "recovery_required") {
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).code, "browser_environment_repair_required");
+          assert.equal(asRecord(asRecord(blockedIdentity.body).error).recovery_hint, "repair_browser_environment");
+          assert.equal(asRecord(asRecord(blockedIdentity.body).run).status, "requires_user_action");
+        }
       }
 
       const publicIdentitySubmit = await postJson(publicIdentityPort, "/tasks", {

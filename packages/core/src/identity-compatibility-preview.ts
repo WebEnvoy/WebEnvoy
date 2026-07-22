@@ -37,6 +37,7 @@ export type IdentityCompatibilityRecoveryAction =
   | "select_matching_identity"
   | "open_manual_auth"
   | "install_or_select_provider"
+  | "repair_browser_environment"
   | "connect_identity_environment"
   | "fix_target"
   | "select_matching_resource_requirements"
@@ -303,7 +304,8 @@ function strictIdentityFacts(facts: HarborIdentityEnvironmentFacts, expectedRef:
 
 function setupProjection(failureCode: string): { reason: string; category: string; recovery: IdentityCompatibilityRecoveryAction } | undefined {
   if (failureCode === "identity_auth_required") return { reason: "identity_auth_required", category: "authentication", recovery: "open_manual_auth" };
-  if (failureCode === "identity_storage_unavailable") return { reason: "identity_storage_unavailable", category: "browser_storage", recovery: "open_manual_auth" };
+  if (failureCode === "browser_environment_repair_required") return { reason: "browser_environment_repair_required", category: "browser_environment", recovery: "repair_browser_environment" };
+  if (failureCode === "identity_storage_unavailable") return { reason: "identity_storage_unavailable", category: "browser_environment", recovery: "repair_browser_environment" };
   if (failureCode === "browser_provider_unavailable") return { reason: "browser_provider_unavailable", category: "provider_binding", recovery: "install_or_select_provider" };
   return undefined;
 }
