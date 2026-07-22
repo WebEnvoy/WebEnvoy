@@ -127,9 +127,10 @@ const lodeRuntimeAdmissionAssetPaths = [
   "registry/detail-runtime-consumption.json",
   "registry/validate-only-runtime-consumption.json"
 ] as const;
+// WebEnvoy/Lode@1fbef74b4bf1b4f0a86aacd885386d7a62181207.
 const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
-  "registry/detail-runtime-consumption.json": "8d68ec1c56faf5b24d5194c283bd72c7698c9ba2f71e00fd860628a206e54cb5",
-  "registry/validate-only-runtime-consumption.json": "bac6450102af029a35b863d8f7154e5184806daeed30e8207bfe7439d556ad86"
+  "registry/detail-runtime-consumption.json": "ad17f4400ef745b1ebdb4cb46b2f4b50f274ee5ef3cfd5074e5980915a27a1a0",
+  "registry/validate-only-runtime-consumption.json": "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
 };
 const xhsDetailPackageRef = opaqueDetailOperationContract.package_ref;
 const xhsDetailLockRef = opaqueDetailOperationContract.lock_ref;
