@@ -65,7 +65,7 @@ async function assertDetailTargetStore(): Promise<void> {
     const input = {
       ...expected,
       detail_refs: Object.values(refs),
-      search_run_ref: "run-search-detail",
+      search_run_ref: "app-xiaohongshu-mriy6kkx",
       search_result_ref: "result-search-detail",
       observed_at: observedAt.toISOString()
     };
@@ -78,7 +78,7 @@ async function assertDetailTargetStore(): Promise<void> {
     const claimed = await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-detail" }, observedAt);
     assert.equal(claimed.ok, true);
     if (claimed.ok) {
-      assert.equal(claimed.binding.search_run_ref, "run-search-detail");
+      assert.equal(claimed.binding.search_run_ref, "app-xiaohongshu-mriy6kkx");
       assert.equal(claimed.binding.search_result_ref, "result-search-detail");
     }
     assert.deepEqual(await claimDetailTarget(directory, refs.positive, { ...expected, detail_run_ref: "run-replay" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
@@ -89,7 +89,7 @@ async function assertDetailTargetStore(): Promise<void> {
     await assert.rejects(() => persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-republish", detail_refs: [refs.positive] }, observedAt), /already exists/);
 
     const rollbackRef = "detail_ref_55555555-5555-4555-8555-555555555555";
-    const rollbackBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-rollback", detail_refs: [rollbackRef] }, observedAt);
+    const rollbackBatch = await stageSearchDetailTargets(directory, { ...input, search_run_ref: "core-316-live-read-20260722-05", detail_refs: [rollbackRef] }, observedAt);
     const [claimWhileStaged] = await Promise.all([
       claimDetailTarget(directory, rollbackRef, { ...expected, detail_run_ref: "run-concurrent-claim" }, observedAt),
       rollbackSearchDetailTargets(rollbackBatch)
@@ -140,6 +140,7 @@ async function assertDetailTargetStore(): Promise<void> {
     await compensatePublishedSearchDetailTargets(cleanupBatch);
 
     await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-sensitive", search_result_ref: "https://example.test/xsec_token", detail_refs: ["detail_ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] }, observedAt), /search result ref is invalid/);
+    await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "app-token-sensitive", detail_refs: ["detail_ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] }, observedAt), /search run ref is invalid/);
 
     const skewRef = "detail_ref_77777777-7777-4777-8777-777777777777";
     await assert.rejects(() => stageSearchDetailTargets(directory, { ...input, search_run_ref: "run-stale", detail_refs: [skewRef], observed_at: new Date(observedAt.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString() }, observedAt), /skew/);

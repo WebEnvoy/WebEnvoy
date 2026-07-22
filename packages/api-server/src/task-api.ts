@@ -1,4 +1,5 @@
 import {
+  isValidRunId,
   submitRuntimeTask,
   validateTaskIntent,
   type FailureRecord,
@@ -24,7 +25,6 @@ export type TaskSubmissionDependencies = {
   harborRuntimeClient?: HarborRuntimeClient;
 };
 
-const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
 const privateHarborInputFieldNames = new Set([
   "raw_payload", "dom", "har", "screenshot", "video", "cookie", "cookies", "token", "tokens",
@@ -120,7 +120,7 @@ async function validateRuntimeTaskSubmissionRequest(
   rejectExistingRun = true
 ): Promise<RuntimeTaskSubmissionRequest | FailureRecord> {
   const runId = optionalString(body.run_id, "run_id_invalid");
-  if (runId === undefined || isFailureRecord(runId) || !runIdPattern.test(runId)) return requestInvalid("run_id_invalid");
+  if (runId === undefined || isFailureRecord(runId) || !isValidRunId(runId)) return requestInvalid("run_id_invalid");
   if (rejectExistingRun && await store.getRunRecord(runId)) return requestInvalid("run_id_already_exists", "choose_new_run_id");
   const task_intent = jsonObject(body.task_intent);
   if (!task_intent) return requestInvalid("task_intent_required");

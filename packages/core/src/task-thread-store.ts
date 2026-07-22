@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { type RunRecordStatus } from "./run-record-store.js";
+import { isValidRunId } from "./run-id.js";
 import { FileOwnershipError, withFileOwnershipLock } from "./file-ownership.js";
 import {
   requireIdentifier,
@@ -52,7 +53,6 @@ export {
   type TaskTurnView
 } from "./task-thread-types.js";
 
-const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const capabilityRefPattern = /^lode:capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,2030}$/;
 const packageRefPattern = /^lode:\/\/site-capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const canonicalIdentityEnvironmentRefPattern = /^identity-env_[a-f0-9]{24}$/;
@@ -492,7 +492,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       const requestHash = requireText(input.request_hash, "request_hash");
       const runId = requireText(input.run_id, "run_id", 128);
       const packageRef = requireThreadBindingRef(input.package_ref, "package_ref", packageRefPattern);
-      if (!runIdPattern.test(runId)) throw new TaskThreadStoreError("run_id_invalid");
+      if (!isValidRunId(runId)) throw new TaskThreadStoreError("run_id_invalid");
       const initial = await getRecord(threadId);
       if (!initial) throw new TaskThreadStoreError("thread_not_found");
       const initialReplay = initial.turns.find((turn) => turn.idempotency_key === idempotencyKey);

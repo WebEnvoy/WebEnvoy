@@ -31,6 +31,7 @@ import {
 } from "./file-ownership.js";
 import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 import { readTrustedExecutionPolicyEvaluation } from "./execution-policy.js";
+import { requireRunId } from "./run-id.js";
 
 export const runRecordSchemaVersion = "webenvoy.run-record.v0";
 
@@ -389,7 +390,6 @@ export const runLifecycleTransitions: Readonly<Record<RunRecordStatus, readonly 
   expired: []
 };
 
-const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const forbiddenRunRecordFieldNames = new Set([
   "raw_payload",
   "dom",
@@ -466,10 +466,7 @@ function validatePreviewResult(preview: PreviewResult): void {
 }
 
 function validateRunId(runId: string): string {
-  if (!runIdPattern.test(runId)) {
-    throw new Error("run_id must use 1-128 characters from A-Z, a-z, 0-9, dot, underscore, or hyphen");
-  }
-  return runId;
+  return requireRunId(runId);
 }
 
 function runRecordPath(directory: string, runId: string): string {
