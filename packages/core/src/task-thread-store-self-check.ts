@@ -149,6 +149,12 @@ export async function assertTaskThreadStore(): Promise<void> {
       identity_environment_ref: "identity-env_89abcdef0123456701234567"
     });
     assert.notEqual(otherIdentity.thread.thread_id, threadId);
+    const persistedLegacy = await store.createOrGetTaskThread({
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env-live-xhs-chrome-20260710"
+    });
+    assert.equal(persistedLegacy.created, true);
+    assert.equal(persistedLegacy.thread.identity_environment_ref, "identity-env-live-xhs-chrome-20260710");
     for (const identity_environment_ref of [
       "identity-env_deadbeef",
       "identity-env_0123456789abcdef0123456g",

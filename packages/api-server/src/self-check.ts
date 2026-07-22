@@ -578,6 +578,11 @@ async function main(): Promise<void> {
       capability_ref: "lode:capability/search-notes",
       identity_environment_ref: harborIdentityRef
     })).status, 200);
+    const persistedLegacyThread = await postJson(port, "/threads", {
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env-live-xhs-chrome-20260710"
+    });
+    assert.equal(persistedLegacyThread.status, 201);
     for (const identity_environment_ref of [
       "identity-env_deadbeef",
       "identity-env:this-is-not-a-harbor-owner-ref",
@@ -762,7 +767,7 @@ async function main(): Promise<void> {
     const threadView = asRecord(asRecord(threadResponse.body).thread);
     assert.deepEqual((threadView.turns as unknown[]).map((turn) => asRecord(turn).sequence), [1, 2, 3]);
     const threadList = asRecord(await getJson(port, "/threads").then((result) => result.body));
-    assert.equal((threadList.threads as unknown[]).length, 1);
+    assert.equal((threadList.threads as unknown[]).length, 2);
 
     assert.deepEqual(await getJson(port, "/missing"), {
       status: 404,

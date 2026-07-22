@@ -56,7 +56,9 @@ const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const capabilityRefPattern = /^lode:capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,2030}$/;
 const packageRefPattern = /^lode:\/\/site-capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const canonicalIdentityEnvironmentRefPattern = /^identity-env_[a-f0-9]{24}$/;
-// The colon form is read-compatible only; new threads require Harbor's canonical owner ref.
+// These formats are accepted for existing Harbor-owned environments. Harbor emits the
+// canonical form for new environments, while older persisted records retain their ref.
+const persistedLegacyIdentityEnvironmentRefPattern = /^identity-env-[A-Za-z0-9][A-Za-z0-9._~-]{0,2030}$/;
 const legacyIdentityEnvironmentRefPattern = /^identity-env:(?=.{1,2031}$)[A-Za-z0-9][A-Za-z0-9._~-]{0,2030}(?:[/:][A-Za-z0-9][A-Za-z0-9._~-]{0,2030})*$/;
 const sensitiveIdentityEnvironmentRefPattern = /(?:credential|password|secret|token|cookie)/i;
 const ownerRefCheckConcurrency = 8;
@@ -68,7 +70,9 @@ function requireThreadBindingRef(value: unknown, label: string, pattern: RegExp)
 
 function requireIdentityEnvironmentRef(value: unknown): string {
   const ref = requireText(value, "identity_environment_ref", 2048);
-  if (!canonicalIdentityEnvironmentRefPattern.test(ref) && !legacyIdentityEnvironmentRefPattern.test(ref)) {
+  if (!canonicalIdentityEnvironmentRefPattern.test(ref) &&
+    !persistedLegacyIdentityEnvironmentRefPattern.test(ref) &&
+    !legacyIdentityEnvironmentRefPattern.test(ref)) {
     throw new TaskThreadStoreError("identity_environment_ref_invalid");
   }
   if (sensitiveIdentityEnvironmentRefPattern.test(ref)) throw new TaskThreadStoreError("identity_environment_ref_invalid");
@@ -427,7 +431,8 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
     async createOrGetTaskThread(input) {
       const capabilityRef = requireThreadBindingRef(input.capability_ref, "capability_ref", capabilityRefPattern);
       const identityRef = requireIdentityEnvironmentRef(input.identity_environment_ref);
-      const canCreate = canonicalIdentityEnvironmentRefPattern.test(identityRef);
+      const canCreate = canonicalIdentityEnvironmentRefPattern.test(identityRef) ||
+        persistedLegacyIdentityEnvironmentRefPattern.test(identityRef);
       const threadId = taskThreadId(capabilityRef, identityRef);
       const result = await withFileLock(options.directory, threadId, lockTimeoutMs, async () => {
         const existing = await getRecord(threadId);
