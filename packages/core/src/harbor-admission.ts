@@ -277,10 +277,24 @@ function environmentRecoveryReasons(status: Record<string, unknown> | undefined)
     ...(Array.isArray(status?.repair_reasons) ? status.repair_reasons : [])
   ];
   const recognized = values
-    .filter((value): value is string => typeof value === "string")
+    .filter((value): value is string => boundedEnvironmentRecoveryReason(value))
     .map((value) => knownEnvironmentRecoveryReasons.has(value as HarborIdentityEnvironmentRecoveryReason) ? value as HarborIdentityEnvironmentRecoveryReason : "unknown_environment_recovery")
     .filter((value, index, all) => all.indexOf(value) === index);
   return recognized.slice(0, 8);
+}
+
+function boundedEnvironmentRecoveryReason(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function completeEnvironmentRecoveryReasons(status: Record<string, unknown> | undefined): boolean {
+  return [status?.blocking_reasons, status?.repair_reasons].every((value) =>
+    Array.isArray(value) && value.length <= 32 && value.every(boundedEnvironmentRecoveryReason)
+  );
 }
 
 function failure(category: FailureRecord["category"], code: string, phase: FailureRecord["phase"], recoveryHint: string): FailureRecord {
@@ -439,7 +453,7 @@ export function projectHarborPublicIdentityEnvironmentRecord(
   if (!identityEnvironmentRef || !executionIdentityRef || !profileRef || !origin) return undefined;
   if (options.requireComplete && (
     !siteId || !loginState || !authenticationProvenance || !manualAuthenticationState || !browserStorageState ||
-    typeof status?.recovery_required !== "boolean"
+    typeof status?.recovery_required !== "boolean" || !completeEnvironmentRecoveryReasons(status)
   )) return undefined;
   const selectedProviderId = environment?.provider_id === null ? null : contractString(environment?.provider_id);
   if (options.requireComplete && environment?.provider_id !== null && selectedProviderId === undefined) return undefined;

@@ -11,7 +11,7 @@ import type {
   HarborResourceFacts,
   HarborUnavailable
 } from "./harbor-admission.js";
-import { projectHarborPublicIdentityEnvironmentRecord } from "./harbor-admission.js";
+import { projectHarborPublicIdentityEnvironmentRecord, validateHarborIdentityEnvironmentFacts } from "./harbor-admission.js";
 import {
   lodeRuntimeAdmissionFailure,
   parseLodeRuntimeAdmissionPolicy,
@@ -1456,6 +1456,18 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const identityRecord = identityRef === undefined
         ? undefined
         : await requestJson("GET", `/runtime/identity-environments/${encodeURIComponent(identityRef)}`);
+      if (isFailure(identityRecord)) return identityRecord;
+
+      let publicIdentity: HarborIdentityEnvironmentFacts | undefined;
+      if (identityRef !== undefined) {
+        const snapshot = projectHarborPublicIdentityEnvironmentRecord(identityRecord, { requireComplete: true });
+        if (!snapshot || snapshot.facts.identity_environment_ref !== identityRef) {
+          return failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "repair_browser_environment");
+        }
+        const validatedIdentity = validateHarborIdentityEnvironmentFacts(snapshot.facts);
+        if (isFailure(validatedIdentity)) return validatedIdentity;
+        publicIdentity = validatedIdentity;
+      }
 
       const session = await requestJson("POST", "/runtime/identity-environment-sessions", {
         identity_environment_ref: identityRef,
@@ -1469,7 +1481,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       });
       if (isFailure(session)) return session;
 
-      const identity = identityFactsFromSession(session) ?? (isFailure(identityRecord) ? undefined : projectHarborPublicIdentityEnvironmentRecord(identityRecord, { requireComplete: false })?.facts);
+      const identity = identityFactsFromSession(session) ?? publicIdentity;
       const runtime = coreRuntimeFactsFromSession(session, identity);
       const openedSessionRef = isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)

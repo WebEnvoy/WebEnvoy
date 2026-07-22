@@ -690,7 +690,8 @@ function createHarborMock(
             browser_storage_state: "present",
             manual_authentication_state: "completed",
             recovery_required: false,
-            blocking_reasons: []
+            blocking_reasons: [],
+            repair_reasons: []
           },
           refs: {
             execution_identity_ref: "identity-env_runtime_api:execution",
@@ -1403,7 +1404,22 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     { name: "missing_reason", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined } }) } },
     { name: "unknown_provenance_manual_pending", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { reason: undefined, authentication_provenance: "unknown", manual_authentication_state: "pending" } }) } },
     { name: "auth_incomplete", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { manual_authentication_state: "pending" } }) } },
-    { name: "recovery_required", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://www.xiaohongshu.com", { login_state: { recovery_required: true } }) } },
+    {
+      name: "recovery_required",
+      session: {},
+      identityRecord: {
+        status: {
+          readiness: "repair_required",
+          login_state: "logged_in",
+          authentication_provenance: "user_confirmed_managed_session",
+          browser_storage_state: "present",
+          manual_authentication_state: "completed",
+          recovery_required: true,
+          blocking_reasons: ["provider_conflict", "fingerprint_conflict"],
+          repair_reasons: []
+        }
+      }
+    },
     { name: "wrong_origin", session: { identity_environment_facts: liveSessionIdentity("xiaohongshu", "https://evil.example") } },
     {
       name: "unknown_schema",
@@ -2183,6 +2199,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         assert.equal(asRecord(blockedIdentity.body).ok, false, identityCase.name);
         assert.equal(blockedIdentityPaths[index]!.some((path) => path.endsWith("/read-operations")), false, identityCase.name);
         if (identityCase.name === "recovery_required") {
+          assert.equal(blockedIdentityPaths[index]!.includes("POST /runtime/identity-environment-sessions"), false);
           assert.equal(asRecord(asRecord(blockedIdentity.body).error).code, "browser_environment_repair_required");
           assert.equal(asRecord(asRecord(blockedIdentity.body).error).recovery_hint, "repair_browser_environment");
           assert.equal(asRecord(asRecord(blockedIdentity.body).run).status, "requires_user_action");

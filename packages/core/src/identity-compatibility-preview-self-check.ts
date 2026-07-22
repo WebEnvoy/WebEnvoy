@@ -433,7 +433,9 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
       recovery_required: false,
       authentication_provenance: "user_confirmed_managed_session",
       manual_authentication_state: "completed",
-      browser_storage_state: "present"
+      browser_storage_state: "present",
+      blocking_reasons: [],
+      repair_reasons: []
     },
     refs: { execution_identity_ref: "execution:identity-http", profile_ref: "profile:identity-http" },
     environment_summary: { provider_id: "cloakbrowser" }
@@ -453,6 +455,12 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   const httpResult = await httpReader("identity-http");
   assert.equal(httpResult.ok, true);
+
+  const malformedReasonList = projectHarborPublicIdentityEnvironmentRecord({
+    ...publicRecord,
+    status: { ...publicRecord.status, blocking_reasons: "provider_conflict" }
+  }, { requireComplete: true });
+  assert.equal(malformedReasonList, undefined);
   if (httpResult.ok) assert.equal(httpResult.observed_at, httpObservedAt.toISOString());
   assert.deepEqual(observedRequests.map((request) => request.input).sort(), [
     "http://127.0.0.1:18787/readiness",
