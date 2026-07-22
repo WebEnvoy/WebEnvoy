@@ -77,6 +77,7 @@ export {
   type RunRecordPatch,
   type RunRecordStatus
 } from "./run-record-store.js";
+export { isValidRunId } from "./run-id.js";
 export {
   completeRunWithReadOnlyFailure,
   completeRunWithReadOnlyProjection,
