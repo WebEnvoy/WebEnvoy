@@ -1,0 +1,38 @@
+name: Lode runtime pins
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/lode-runtime-pins.yml"
+      - "pnpm-lock.yaml"
+      - "tsconfig.base.json"
+      - "packages/api-server/package.json"
+      - "packages/api-server/src/**"
+      - "packages/core/package.json"
+      - "packages/core/src/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+          path: .runtime-sources/lode
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @webenvoy/api-server test:lode-runtime-pins
+        env:
+          WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode/registry/local-packages.json
