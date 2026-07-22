@@ -331,7 +331,7 @@ function evaluateFreshCandidate(
   requiredFacts: readonly LodeRequiredHarborFact[],
   freshness: IdentityCompatibilityCandidate["freshness"]
 ): IdentityCompatibilityCandidate {
-  const identityAdmission = validateHarborIdentityEnvironmentFacts(facts);
+  const identityAdmission = validateHarborIdentityEnvironmentFacts(facts, operation.selection.operation_mode === "read" ? "read" : "write_precheck");
   if ("category" in identityAdmission) {
     const setup = setupProjection(identityAdmission.code);
     if (!setup) return unavailableCandidate(identityRef, "malformed", "harbor_facts_malformed");
