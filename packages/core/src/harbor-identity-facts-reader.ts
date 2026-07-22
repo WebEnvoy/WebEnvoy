@@ -9,6 +9,7 @@ type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export type HttpHarborIdentityFactsReaderOptions = {
   baseUrl: string;
+  clock?: () => Date;
   fetch?: FetchLike;
   maxResponseBytes?: number;
   timeoutMs?: number;
@@ -42,6 +43,7 @@ function projectProviderCatalog(value: unknown): HarborBrowserProviderCatalog | 
 }
 
 export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityFactsReaderOptions): HarborIdentityFactsReader {
+  const clock = options.clock ?? (() => new Date());
   const fetchJson = options.fetch ?? fetch;
   const requestedMaxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
   const maxResponseBytes = Math.min(requestedMaxResponseBytes, 64 * 1024);
@@ -89,7 +91,9 @@ export function createHttpHarborIdentityFactsReader(options: HttpHarborIdentityF
       const providers = projectProviderCatalog(ownerFacts.providers);
       const snapshot = projectHarborPublicIdentityEnvironmentRecord(identityValue, { requireComplete: true });
       if (!providers || !snapshot) return { ok: false, owner_status: "malformed", reason_code: "harbor_identity_facts_malformed" };
-      return { ok: true, owner_readiness: "ready", provider_status: providers, ...snapshot };
+      const observedAt = clock();
+      if (!Number.isFinite(observedAt.getTime())) return { ok: false, owner_status: "malformed", reason_code: "harbor_identity_facts_malformed" };
+      return { ok: true, owner_readiness: "ready", provider_status: providers, ...snapshot, observed_at: observedAt.toISOString() };
     } catch (error) {
       if (error instanceof BoundedJsonResponseError) {
         return {

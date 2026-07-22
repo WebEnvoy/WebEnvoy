@@ -375,13 +375,13 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   const publicRecord = {
     schema_version: "harbor-local-identity-environment-store/v0",
     identity_environment_ref: "identity-http",
-    updated_at: "2026-07-21T07:59:30.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
     site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" },
     status: {
       login_state: "logged_in",
       recovery_required: false,
-      authentication_provenance: "manual",
-      manual_authentication_state: "confirmed",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
       browser_storage_state: "present"
     },
     refs: { execution_identity_ref: "execution:identity-http", profile_ref: "profile:identity-http" },
@@ -389,6 +389,7 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   };
   const httpReader = createHttpHarborIdentityFactsReader({
     baseUrl: "http://127.0.0.1:18787",
+    clock: () => now,
     fetch: async (input, init) => {
       const url = String(input);
       observedRequests.push({ input: url, ...(init === undefined ? {} : { init }) });
@@ -400,12 +401,21 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   const httpResult = await httpReader("identity-http");
   assert.equal(httpResult.ok, true);
+  if (httpResult.ok) assert.equal(httpResult.observed_at, now.toISOString());
   assert.deepEqual(observedRequests.map((request) => request.input).sort(), [
     "http://127.0.0.1:18787/readiness",
     "http://127.0.0.1:18787/runtime/browser-providers",
     "http://127.0.0.1:18787/runtime/identity-environments/identity-http"
   ]);
   assert(observedRequests.every((request) => request.init?.method === "GET" && request.init.body === undefined));
+
+  const oldRecordPreview = await previewIdentityCompatibility(request(["identity-http"]), {
+    ...baseDependencies,
+    harborIdentityFactsReader: httpReader
+  });
+  assert(!("category" in oldRecordPreview));
+  assert.equal(oldRecordPreview.candidates[0]?.status, "compatible");
+  assert.equal(oldRecordPreview.candidates[0]?.freshness.observed_at, now.toISOString());
 
   const privateReader = createHttpHarborIdentityFactsReader({
     baseUrl: "http://127.0.0.1:18787",
