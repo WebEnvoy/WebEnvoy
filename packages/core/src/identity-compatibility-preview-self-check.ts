@@ -330,6 +330,17 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(ownerFailures.candidates[2]?.owner_status.harbor, "unavailable");
   assert(ownerFailures.candidates.every((candidate) => candidate.status === "incompatible"));
 
+  const futureObservation = await previewIdentityCompatibility(request(["identity-future"]), {
+    ...baseDependencies,
+    harborIdentityFactsReader: reader({
+      "identity-future": availableRead(identityFacts("identity-future"), "2026-07-21T08:02:00.000Z")
+    })
+  });
+  assert(!("category" in futureObservation));
+  assert.equal(futureObservation.candidates[0]?.status, "incompatible");
+  assert.deepEqual(futureObservation.candidates[0]?.reason_codes, ["harbor_facts_malformed"]);
+  assert.equal(futureObservation.candidates[0]?.owner_status.harbor, "malformed");
+
   let reads = 0;
   const noRead: HarborIdentityFactsReader = async () => {
     reads += 1;
