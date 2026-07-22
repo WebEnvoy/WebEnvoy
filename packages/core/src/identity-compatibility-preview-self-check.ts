@@ -461,6 +461,14 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
     status: { ...publicRecord.status, blocking_reasons: "provider_conflict" }
   }, { requireComplete: true });
   assert.equal(malformedReasonList, undefined);
+  assert.equal(projectHarborPublicIdentityEnvironmentRecord({
+    ...publicRecord,
+    status: { ...publicRecord.status, repair_reasons: undefined }
+  }, { requireComplete: true }), undefined);
+  assert.equal(projectHarborPublicIdentityEnvironmentRecord({
+    ...publicRecord,
+    status: { ...publicRecord.status, repair_reasons: Array.from({ length: 33 }, () => "provider_conflict") }
+  }, { requireComplete: true }), undefined);
   if (httpResult.ok) assert.equal(httpResult.observed_at, httpObservedAt.toISOString());
   assert.deepEqual(observedRequests.map((request) => request.input).sort(), [
     "http://127.0.0.1:18787/readiness",

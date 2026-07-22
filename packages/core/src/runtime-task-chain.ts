@@ -11,7 +11,11 @@ import type {
   HarborResourceFacts,
   HarborUnavailable
 } from "./harbor-admission.js";
-import { projectHarborPublicIdentityEnvironmentRecord, validateHarborIdentityEnvironmentFacts } from "./harbor-admission.js";
+import {
+  projectHarborPublicIdentityEnvironmentRecord,
+  validateHarborIdentityEnvironmentFacts,
+  validateHarborIdentityProviderStatus
+} from "./harbor-admission.js";
 import {
   lodeRuntimeAdmissionFailure,
   parseLodeRuntimeAdmissionPolicy,
@@ -1451,6 +1455,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
 
       const provider = await requestJson("GET", "/runtime/browser-providers");
       if (isFailure(provider)) return provider;
+      const publicProviderStatus = providerStatus(provider);
 
       const identityRef = input.harbor?.identity_environment_ref;
       const identityRecord = identityRef === undefined
@@ -1466,6 +1471,8 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         }
         const validatedIdentity = validateHarborIdentityEnvironmentFacts(snapshot.facts);
         if (isFailure(validatedIdentity)) return validatedIdentity;
+        const providerFailure = validateHarborIdentityProviderStatus(validatedIdentity, publicProviderStatus);
+        if (providerFailure) return providerFailure;
         publicIdentity = validatedIdentity;
       }
 
@@ -1508,7 +1515,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (isFailure(siteResourceFacts)) {
         return {
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-          harbor_provider_status: providerStatus(provider),
+          harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
           harbor_scene_ref: unavailable(siteResourceFacts.code),
           harbor_resource_facts: unavailable(siteResourceFacts.code)
@@ -1523,7 +1530,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (isFailure(snapshot)) {
         return {
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-          harbor_provider_status: providerStatus(provider),
+          harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
           harbor_scene_ref: unavailable(snapshot.code),
           harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
@@ -1535,7 +1542,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const evidenceFailure = "status" in scene ? undefined : await verifyEvidenceRefs(scene.evidence_refs);
       const facts: HarborAdmissionInput = {
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
-        harbor_provider_status: providerStatus(provider),
+        harbor_provider_status: publicProviderStatus,
         harbor_runtime_facts: runtimeAfterSnapshot,
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
