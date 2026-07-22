@@ -26,6 +26,7 @@ export type LodeReadOnlyFailureClass =
   | "site_changed"
   | "field_missing"
   | "network_resource_unavailable"
+  | "resource_unavailable"
   | "signed_ref_missing"
   | "input_missing_security_id"
   | "query_missing"
@@ -75,6 +76,8 @@ function lodeFailure(failureClass: LodeReadOnlyFailureClass): { status: "failed"
       return { status: "blocked", failure: { category: "runtime_execution", code: failureClass, phase: "execution", recovery_hint: "retry_after_refresh" } };
     case "network_resource_unavailable":
       return { status: "blocked", failure: { category: "evidence_reference", code: failureClass, phase: "evidence", recovery_hint: "rerun_with_evidence" } };
+    case "resource_unavailable":
+      return { status: "blocked", failure: { category: "runtime_execution", code: failureClass, phase: "execution", recovery_hint: "retry_after_refresh" } };
     case "signed_ref_missing":
     case "input_missing_security_id":
     case "query_missing":

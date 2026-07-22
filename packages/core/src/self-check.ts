@@ -20,13 +20,32 @@ import { assertRealSiteWritePreviewResults } from "./real-site-write-preview-sel
 import { assertTaskThreadStore } from "./task-thread-store-self-check.js";
 import { assertTaskTurnInputPolicy } from "./task-turn-input-policy-self-check.js";
 import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
-import { createHttpHarborRuntimeClient } from "./runtime-task-chain.js";
+import { createHttpHarborRuntimeClient, isReleasedSessionProof, recoveryHintForHarborFailure } from "./runtime-task-chain.js";
 import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
 import { assertAuthorizationDecisionStore } from "./authorization-decision-self-check.js";
 import { assertExecutionPolicyConfigStore } from "./execution-policy-config-self-check.js";
 
 let tick = 0;
+
+function assertHarborFailureRecoveryClassification(): void {
+  for (const code of ["provider_conflict", "provider_binding_conflict", "fingerprint_conflict", "profile_locked", "launch_failed"]) {
+    assert.equal(recoveryHintForHarborFailure(code), "repair_browser_environment");
+  }
+  assert.equal(recoveryHintForHarborFailure("identity_auth_required"), "open_manual_auth");
+  assert.equal(isReleasedSessionProof({
+    runtime_session_ref: "session_failed_launch",
+    lifecycle_state: "failed",
+    control_owner: "none",
+    control_lock: { owner: "none", state: "released", holder_ref: null }
+  }, "session_failed_launch"), true);
+  assert.equal(isReleasedSessionProof({
+    runtime_session_ref: "session_failed_owned",
+    lifecycle_state: "failed",
+    control_owner: "core_task",
+    control_lock: { owner: "core_task", state: "held", holder_ref: "run_owned" }
+  }, "session_failed_owned"), false);
+}
 
 async function assertDetailTargetStore(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-detail-target-"));
@@ -1408,6 +1427,8 @@ await assertDetailTargetStore();
 console.log("Validated bound, expiring, single-use detail targets.");
 await assertDetailRequestOmitsRawUrl();
 console.log("Validated detail dispatch omits caller-provided Harbor URL.");
+assertHarborFailureRecoveryClassification();
+console.log("Validated Harbor browser-environment recovery classification and failed-session cleanup proof.");
 await assertRealSiteReadOnlyTaskExecution();
 console.log("Validated real-site read-only task execution.");
 await assertRealSiteReadOnlyResultProjection();
