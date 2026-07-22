@@ -399,7 +399,7 @@ async function evaluateCandidate(
   operation: LockedOperationMatch,
   requiredFacts: readonly LodeRequiredHarborFact[],
   readFacts: HarborIdentityFactsReader,
-  now: Date,
+  clock: () => Date,
   maxFactAgeMs: number
 ): Promise<IdentityCompatibilityCandidate> {
   let read: HarborIdentityFactsReadResult;
@@ -410,6 +410,8 @@ async function evaluateCandidate(
   }
   if (!read.ok) return unavailableCandidate(identityRef, read.owner_status, read.reason_code === "identity_environment_not_found" ? "identity_environment_not_found" : `harbor_owner_${read.owner_status}`);
   if (!strictIdentityFacts(read.facts, identityRef) || !read.observed_at) return unavailableCandidate(identityRef, "malformed", "harbor_facts_malformed");
+  const now = clock();
+  if (!Number.isFinite(now.getTime())) return unavailableCandidate(identityRef, "malformed", "harbor_facts_malformed");
   const observedAt = Date.parse(read.observed_at);
   const ageMs = now.getTime() - observedAt;
   if (!Number.isFinite(observedAt) || ageMs < -maxFutureSkewMs) return unavailableCandidate(identityRef, "malformed", "harbor_facts_malformed");
@@ -435,7 +437,8 @@ export async function previewIdentityCompatibility(
 ): Promise<IdentityCompatibilityPreviewResponse | FailureRecord> {
   const request = parseIdentityCompatibilityPreviewRequest(rawRequest);
   if ("category" in request) return request;
-  const now = dependencies.clock?.() ?? new Date();
+  const clock = dependencies.clock ?? (() => new Date());
+  const now = clock();
   const maxFactAgeMs = dependencies.maxFactAgeMs ?? defaultMaxFactAgeMs;
   if (!Number.isFinite(now.getTime()) || !Number.isInteger(maxFactAgeMs) || maxFactAgeMs <= 0) return failure("identity_compatibility_configuration_invalid", "contact_operator");
   const generatedAt = now.toISOString();
@@ -455,7 +458,7 @@ export async function previewIdentityCompatibility(
       const index = nextCandidate;
       nextCandidate += 1;
       const identityRef = request.identity_environment_refs[index];
-      if (identityRef) candidates[index] = await evaluateCandidate(identityRef, packageMatch.operation, packageMatch.requiredFacts, dependencies.harborIdentityFactsReader, now, maxFactAgeMs);
+      if (identityRef) candidates[index] = await evaluateCandidate(identityRef, packageMatch.operation, packageMatch.requiredFacts, dependencies.harborIdentityFactsReader, clock, maxFactAgeMs);
     }
   });
   await Promise.all(workers);
