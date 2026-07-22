@@ -1490,7 +1490,13 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       });
       if (isFailure(session)) return session;
 
-      const identity = identityFactsFromSession(session) ?? publicIdentity;
+      const sessionIdentity = identityFactsFromSession(session);
+      const validatedSessionIdentity = sessionIdentity === undefined
+        ? undefined
+        : validateHarborIdentityEnvironmentFacts(sessionIdentity, input.admission_mode ?? "read");
+      const identity = validatedSessionIdentity && !isFailure(validatedSessionIdentity)
+        ? validatedSessionIdentity
+        : publicIdentity;
       const runtime = coreRuntimeFactsFromSession(session, identity);
       const openedSessionRef = isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
@@ -1505,6 +1511,9 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
           runtime_session_ref: openedSessionRef
         } : primary;
       };
+      const sessionFailure = failureFromHarborPayload(session);
+      if (sessionFailure) return failAfterSession(sessionFailure);
+      if (isFailure(validatedSessionIdentity)) return failAfterSession(validatedSessionIdentity);
       if (isFailure(runtime)) return failAfterSession(runtime);
       const runtimeSessionRef = runtime.runtime_session_ref;
       const siteTask = siteTaskFromPackageRef(input.package_ref);
@@ -1649,11 +1658,11 @@ function isHeldCoreTaskSessionProof(value: unknown, input: { runtime_session_ref
     controlLock.holder_ref === input.run_id;
 }
 
-function isReleasedSessionProof(value: unknown, runtimeSessionRef: string): boolean {
+export function isReleasedSessionProof(value: unknown, runtimeSessionRef: string): boolean {
   const session = object(value);
   const controlLock = object(session?.control_lock);
   return session?.runtime_session_ref === runtimeSessionRef &&
-    (session.lifecycle_state === "idle" || session.lifecycle_state === "closed") &&
+    (session.lifecycle_state === "idle" || session.lifecycle_state === "closed" || session.lifecycle_state === "failed") &&
     session.control_owner === "none" &&
     controlLock?.owner === "none" &&
     controlLock.state === "released" &&
@@ -1700,9 +1709,17 @@ function failureFromHarborPayload(value: unknown): FailureRecord | undefined {
   return failure("resource_admission", failureClass, "runtime_binding", recoveryHintForHarborFailure(failureClass));
 }
 
-function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hint"] {
+export function recoveryHintForHarborFailure(code: string): FailureRecord["recovery_hint"] {
   if (code === "identity_auth_required" || code === "login_expired") return "open_manual_auth";
-  if (code === "browser_environment_repair_required" || code === "identity_storage_unavailable") return "repair_browser_environment";
+  if ([
+    "browser_environment_repair_required",
+    "identity_storage_unavailable",
+    "provider_conflict",
+    "provider_binding_conflict",
+    "fingerprint_conflict",
+    "profile_locked",
+    "launch_failed"
+  ].includes(code)) return "repair_browser_environment";
   if (code === "browser_provider_unavailable") return "install_or_select_provider";
   if (code.startsWith("identity_environment_")) return "connect_identity_environment";
   if (code === "session_locked") return "wait_or_request_handoff";

@@ -420,6 +420,9 @@ export function validateHarborIdentityEnvironmentFacts(
     return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
   const authenticationProvenance = contractString(login?.reason) ?? contractString(login?.authentication_provenance);
+  if (!authenticationProvenance) {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
+  }
   if (storage?.state !== "present") {
     return failure("resource_admission", "identity_storage_unavailable", "runtime_binding", "repair_browser_environment");
   }
