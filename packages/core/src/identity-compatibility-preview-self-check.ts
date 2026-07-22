@@ -387,9 +387,10 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
     refs: { execution_identity_ref: "execution:identity-http", profile_ref: "profile:identity-http" },
     environment_summary: { provider_id: "cloakbrowser" }
   };
+  const httpObservedAt = new Date(now.getTime() + 2 * 60 * 1000);
   const httpReader = createHttpHarborIdentityFactsReader({
     baseUrl: "http://127.0.0.1:18787",
-    clock: () => now,
+    clock: () => httpObservedAt,
     fetch: async (input, init) => {
       const url = String(input);
       observedRequests.push({ input: url, ...(init === undefined ? {} : { init }) });
@@ -401,7 +402,7 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   const httpResult = await httpReader("identity-http");
   assert.equal(httpResult.ok, true);
-  if (httpResult.ok) assert.equal(httpResult.observed_at, now.toISOString());
+  if (httpResult.ok) assert.equal(httpResult.observed_at, httpObservedAt.toISOString());
   assert.deepEqual(observedRequests.map((request) => request.input).sort(), [
     "http://127.0.0.1:18787/readiness",
     "http://127.0.0.1:18787/runtime/browser-providers",
@@ -409,13 +410,16 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   ]);
   assert(observedRequests.every((request) => request.init?.method === "GET" && request.init.body === undefined));
 
+  let previewClockCalls = 0;
   const oldRecordPreview = await previewIdentityCompatibility(request(["identity-http"]), {
     ...baseDependencies,
-    harborIdentityFactsReader: httpReader
+    harborIdentityFactsReader: httpReader,
+    clock: () => previewClockCalls++ === 0 ? now : httpObservedAt
   });
   assert(!("category" in oldRecordPreview));
   assert.equal(oldRecordPreview.candidates[0]?.status, "compatible");
-  assert.equal(oldRecordPreview.candidates[0]?.freshness.observed_at, now.toISOString());
+  assert.equal(oldRecordPreview.generated_at, now.toISOString());
+  assert.equal(oldRecordPreview.candidates[0]?.freshness.observed_at, httpObservedAt.toISOString());
 
   const privateReader = createHttpHarborIdentityFactsReader({
     baseUrl: "http://127.0.0.1:18787",
