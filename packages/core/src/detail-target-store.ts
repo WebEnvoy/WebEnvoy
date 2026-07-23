@@ -139,6 +139,24 @@ export async function inspectDetailTarget(
   expected: Omit<Parameters<typeof claimDetailTarget>[2], "detail_run_ref">,
   now = new Date()
 ): Promise<DetailTargetLookup> {
+  return inspectDetailTargetBinding(directory, detailRef, expected, now);
+}
+
+export async function inspectDetailTargetForIdentity(
+  directory: string,
+  detailRef: string,
+  expected: { site_slug: "xiaohongshu"; identity_environment_ref: string },
+  now = new Date()
+): Promise<DetailTargetLookup> {
+  return inspectDetailTargetBinding(directory, detailRef, expected, now);
+}
+
+async function inspectDetailTargetBinding(
+  directory: string,
+  detailRef: string,
+  expected: { site_slug: "xiaohongshu"; identity_environment_ref: string; runtime_session_ref?: string },
+  now: Date
+): Promise<DetailTargetLookup> {
   if (!isOpaqueDetailRef(detailRef)) return { ok: false, code: "detail_ref_unknown" };
   const root = await secureStoreRoot(directory);
   if (await secureExists(root, consumedPath(root, detailRef))) return { ok: false, code: "detail_ref_already_consumed" };
@@ -212,9 +230,10 @@ export async function releaseDetailTargetReservation(reservation: DetailTargetRe
   await unlink(claimPath(root, reservation.detail_ref));
 }
 
-function matchesBinding(binding: DetailTargetBinding, detailRef: string, expected: { site_slug: "xiaohongshu"; identity_environment_ref: string; runtime_session_ref: string }): boolean {
+function matchesBinding(binding: DetailTargetBinding, detailRef: string, expected: { site_slug: "xiaohongshu"; identity_environment_ref: string; runtime_session_ref?: string }): boolean {
   return binding.detail_ref === detailRef && binding.site_slug === expected.site_slug &&
-    binding.identity_environment_ref === expected.identity_environment_ref && binding.runtime_session_ref === expected.runtime_session_ref;
+    binding.identity_environment_ref === expected.identity_environment_ref &&
+    (expected.runtime_session_ref === undefined || binding.runtime_session_ref === expected.runtime_session_ref);
 }
 
 function validClock(value: Date, label: string): Date {

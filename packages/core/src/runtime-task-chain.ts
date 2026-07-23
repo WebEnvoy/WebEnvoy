@@ -41,6 +41,7 @@ import {
   commitDetailTargetReservation,
   compensatePublishedSearchDetailTargets,
   inspectDetailTarget,
+  inspectDetailTargetForIdentity,
   isOpaqueDetailRef,
   publishSearchDetailTargets,
   releaseDetailTargetReservation,
@@ -147,6 +148,20 @@ const canonicalDeferredProbeOperations = [
     site_slug: "xiaohongshu",
     operation_id: "xhs_search_notes",
     version: "0.1.0",
+    allowlist_id: "lode.xhs-boss.read.runtime-consumption",
+    consumer_issue: "#267",
+    consumer_purpose: "lock-bound read-only task admission and run recording",
+    deferred_facts: new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])
+  },
+  {
+    package_ref: opaqueDetailOperationContract.package_ref,
+    lock_ref: opaqueDetailOperationContract.lock_ref,
+    site_slug: opaqueDetailOperationContract.site_slug,
+    operation_id: opaqueDetailOperationContract.operation_id,
+    version: opaqueDetailOperationContract.version,
+    allowlist_id: "lode.xhs-boss.detail-read.runtime-consumption",
+    consumer_issue: "#270",
+    consumer_purpose: "persisted opaque detail ref consumption",
     deferred_facts: new Set(["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"])
   },
   {
@@ -155,6 +170,9 @@ const canonicalDeferredProbeOperations = [
     site_slug: "boss",
     operation_id: "boss_job_search",
     version: "0.1.0",
+    allowlist_id: "lode.xhs-boss.read.runtime-consumption",
+    consumer_issue: "#267",
+    consumer_purpose: "lock-bound read-only task admission and run recording",
     deferred_facts: new Set(["page.boss_spa.ready", "network.wapi_zpgeek.available", "source.refs.available"])
   }
 ] as const;
@@ -289,12 +307,12 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
     runtime.site_slug === operation.site_slug &&
     runtime.operation_id === operation.operation_id &&
     runtime.version === operation.version &&
-    runtime.allowlist_id === "lode.xhs-boss.read.runtime-consumption" &&
+    runtime.allowlist_id === operation.allowlist_id &&
     runtime.allowlist_version === "0.1.0" &&
     runtime.asset_owner === "Lode" &&
     runtime.consumer.repository === "WebEnvoy/WebEnvoy" &&
-    runtime.consumer.issue === "#267" &&
-    runtime.consumer.purpose === "lock-bound read-only task admission and run recording"
+    runtime.consumer.issue === operation.consumer_issue &&
+    runtime.consumer.purpose === operation.consumer_purpose
   )?.deferred_facts;
   if (!deferredFacts) return contract;
   return {
@@ -948,6 +966,35 @@ export async function submitRuntimeTask(
       return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, lode_resolution_failure: matched });
     }
     operationMatch = matched;
+  }
+
+  if (operationMatch && isXhsDetailOperation(operationMatch.runtime_consumption)) {
+    const identityRef = request.harbor?.identity_environment_ref;
+    if (identityRef && typeof detailRef === "string") {
+      let inspected;
+      try {
+        inspected = await inspectDetailTargetForIdentity(store.directory, detailRef, {
+          site_slug: "xiaohongshu",
+          identity_environment_ref: identityRef
+        });
+      } catch {
+        return acceptReadOnlyTaskSubmission(store, {
+          ...base,
+          lode_package_contract,
+          lode_resolution_failure: failure("persistence_observability", "detail_ref_lookup_failed", "persistence", "retry_task")
+        });
+      }
+      if (!inspected.ok) {
+        const detailFailure = inspected.code === "detail_ref_binding_mismatch"
+          ? failure("result_projection", "site_changed", "projection", "repair_package")
+          : failure("request_invalid", "signed_ref_missing", "projection", "fix_input");
+        return acceptReadOnlyTaskSubmission(store, {
+          ...base,
+          lode_package_contract,
+          lode_resolution_failure: detailFailure
+        });
+      }
+    }
   }
 
   if (!deps.harborRuntimeClient) {

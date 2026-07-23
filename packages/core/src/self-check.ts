@@ -19,7 +19,7 @@ import { assertRealRunQueryEvidence } from "./real-run-query-self-check.js";
 import { assertRealSiteWritePreviewResults } from "./real-site-write-preview-self-check.js";
 import { assertTaskThreadStore } from "./task-thread-store-self-check.js";
 import { assertTaskTurnInputPolicy } from "./task-turn-input-policy-self-check.js";
-import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
+import { claimDetailTarget, commitDetailTargetReservation, compensatePublishedSearchDetailTargets, detailTargetTtlMs, inspectDetailTarget, inspectDetailTargetForIdentity, persistSearchDetailTargets, publishSearchDetailTargets, recoverPublishedSearchDetailTargetReservations, releaseDetailTargetReservation, reserveDetailTarget, rollbackSearchDetailTargets, stageSearchDetailTargets } from "./detail-target-store.js";
 import { createHttpHarborRuntimeClient, isReleasedSessionProof, recoveryHintForHarborFailure } from "./runtime-task-chain.js";
 import { assertIdentityCompatibilityPreview } from "./identity-compatibility-preview-self-check.js";
 import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
@@ -72,6 +72,14 @@ async function assertDetailTargetStore(): Promise<void> {
     const batch = await stageSearchDetailTargets(directory, input, observedAt);
     assert.deepEqual(await inspectDetailTarget(directory, refs.positive, expected, observedAt), { ok: false, code: "detail_ref_unknown" });
     await publishSearchDetailTargets(batch);
+    assert.equal((await inspectDetailTargetForIdentity(directory, refs.crossSession, {
+      site_slug: "xiaohongshu",
+      identity_environment_ref: expected.identity_environment_ref
+    }, observedAt)).ok, true);
+    assert.deepEqual(await inspectDetailTargetForIdentity(directory, refs.crossIdentity, {
+      site_slug: "xiaohongshu",
+      identity_environment_ref: "identity-env-other"
+    }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
     assert.deepEqual(await claimDetailTarget(directory, "detail_ref_forged", { ...expected, detail_run_ref: "run-forged" }, observedAt), { ok: false, code: "detail_ref_unknown" });
     assert.deepEqual(await claimDetailTarget(directory, refs.crossIdentity, { ...expected, identity_environment_ref: "identity-env-other", detail_run_ref: "run-cross-identity" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });
     assert.deepEqual(await claimDetailTarget(directory, refs.crossSession, { ...expected, runtime_session_ref: "session-other", detail_run_ref: "run-cross-session" }, observedAt), { ok: false, code: "detail_ref_binding_mismatch" });

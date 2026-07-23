@@ -1242,6 +1242,20 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       }
     };
   };
+  const deferredXiaohongshuFactKeys = [
+    "identity.user_logged_in.confirmed",
+    "page.vue_app.ready",
+    "page.pinia_store.ready",
+    "source.refs.available"
+  ];
+  const deferredXiaohongshuSiteFacts = {
+    ...readyXiaohongshuSiteFacts,
+    resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) =>
+      deferredXiaohongshuFactKeys.includes(String(fact.key))
+        ? { ...fact, state: "unknown", severity: "warning", message: "Read-operation probe fact is not safely observable before dispatch." }
+        : fact
+    )
+  };
   const xiaohongshuHarbor = createHarborMock(
     true,
     xiaohongshuPaths,
@@ -1249,7 +1263,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     xiaohongshuScene,
     { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
     {},
-    readyXiaohongshuSiteFacts,
+    deferredXiaohongshuSiteFacts,
     xiaohongshuDetailOperation
   );
   const bossPaths: string[] = [];
@@ -1390,14 +1404,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     xiaohongshuScene,
     { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
     {},
-    {
-      ...readyXiaohongshuSiteFacts,
-      resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).map((fact) =>
-        ["identity.user_logged_in.confirmed", "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available"].includes(String(fact.key))
-          ? { ...fact, state: "unknown", severity: "warning", message: "Read-operation probe fact is not safely observable before dispatch." }
-          : fact
-      )
-    }
+    deferredXiaohongshuSiteFacts
   );
   const factState = (key: string, state: string): JsonObject => ({
     ...readyXiaohongshuSiteFacts,
@@ -2020,8 +2027,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         ["xsec", "xsec_token=forbidden"],
         ["unknown_ref", detailRefForRun("unknown-search-run")]
       ] as const) {
+        const harborPathsBeforeForgedRef = xiaohongshuPaths.length;
         const forged = await submitXiaohongshuDetail(name, forgedRef);
         assertRejectedBeforeReadOperation(forged.body, name);
+        assert.equal(xiaohongshuPaths.length, harborPathsBeforeForgedRef, `${name} must be rejected before Harbor admission`);
+        if (name === "unknown_ref") {
+          const failure = asRecord(asRecord(asRecord(forged.body).run).failure);
+          assert.equal(failure.code, "signed_ref_missing");
+          assert.notEqual(failure.code, "resource_fact_missing:page.vue_app.ready");
+        }
       }
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeForgedRefs);
 
@@ -2030,7 +2044,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const crossBindingRecord = asRecord(JSON.parse(await readFile(crossBindingPath, "utf8")));
       await writeFile(crossBindingPath, `${JSON.stringify({ ...crossBindingRecord, identity_environment_ref: "identity-env_other" })}\n`);
       const readOperationsBeforeCrossBinding = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
-      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("cross_binding", crossBinding.detailRef)).body, "cross_binding");
+      const harborPathsBeforeCrossBinding = xiaohongshuPaths.length;
+      const crossBindingDetail = await submitXiaohongshuDetail("cross_binding", crossBinding.detailRef);
+      assertRejectedBeforeReadOperation(crossBindingDetail.body, "cross_binding");
+      assert.equal(asRecord(asRecord(asRecord(crossBindingDetail.body).run).failure).code, "site_changed");
+      assert.equal(xiaohongshuPaths.length, harborPathsBeforeCrossBinding, "cross-bound detail ref must be rejected before Harbor admission");
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeCrossBinding);
 
       const expired = await submitXiaohongshuSearch("expired");
@@ -2038,11 +2056,21 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const expiredRecord = asRecord(JSON.parse(await readFile(expiredPath, "utf8")));
       await writeFile(expiredPath, `${JSON.stringify({ ...expiredRecord, expires_at: "2000-01-01T00:00:00.000Z" })}\n`);
       const readOperationsBeforeExpired = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
-      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("expired", expired.detailRef)).body, "expired");
+      const harborPathsBeforeExpired = xiaohongshuPaths.length;
+      const expiredDetail = await submitXiaohongshuDetail("expired", expired.detailRef);
+      assertRejectedBeforeReadOperation(expiredDetail.body, "expired");
+      const expiredFailure = asRecord(asRecord(asRecord(expiredDetail.body).run).failure);
+      assert.equal(expiredFailure.code, "signed_ref_missing");
+      assert.notEqual(expiredFailure.code, "resource_fact_missing:page.vue_app.ready");
+      assert.equal(xiaohongshuPaths.length, harborPathsBeforeExpired, "expired detail ref must be rejected before Harbor admission");
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeExpired);
 
       const readOperationsBeforeReplay = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
-      assertRejectedBeforeReadOperation((await submitXiaohongshuDetail("replay", successfulSearch.detailRef)).body, "replay");
+      const harborPathsBeforeReplay = xiaohongshuPaths.length;
+      const replayDetail = await submitXiaohongshuDetail("replay", successfulSearch.detailRef);
+      assertRejectedBeforeReadOperation(replayDetail.body, "replay");
+      assert.equal(asRecord(asRecord(asRecord(replayDetail.body).run).failure).code, "signed_ref_missing");
+      assert.equal(xiaohongshuPaths.length, harborPathsBeforeReplay, "replayed detail ref must be rejected before Harbor admission");
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readOperationsBeforeReplay);
 
       for (const name of ["challenge", "unavailable", "malformed", "missing_refs", "extra_refs", "post_check_failure"] as const) {
@@ -2083,11 +2111,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await symlink(runDir, claimsPath);
       const readsBeforeReserveFailure = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
       const releasesBeforeReserveFailure = xiaohongshuPaths.filter((path) => path.endsWith("/release")).length;
+      const harborPathsBeforeReserveFailure = xiaohongshuPaths.length;
       const reserveFailureRun = await submitXiaohongshuDetail("reserve_failure", reserveFailure.detailRef);
       assertNoSuccessRefs(reserveFailureRun.body, "reserve_failure");
-      assert.equal(asRecord(asRecord(reserveFailureRun.body).run).status, "unknown_outcome");
+      const reserveFailureRecord = asRecord(asRecord(reserveFailureRun.body).run);
+      assert.equal(reserveFailureRecord.status, "failed");
+      assert.equal(asRecord(reserveFailureRecord.failure).code, "detail_ref_lookup_failed");
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeReserveFailure);
-      assert.equal(xiaohongshuPaths.filter((path) => path.endsWith("/release")).length, releasesBeforeReserveFailure + 1);
+      assert.equal(xiaohongshuPaths.length, harborPathsBeforeReserveFailure);
+      assert.equal(xiaohongshuPaths.filter((path) => path.endsWith("/release")).length, releasesBeforeReserveFailure);
       await rm(claimsPath);
       await mkdir(claimsPath, { mode: 0o700 });
 
