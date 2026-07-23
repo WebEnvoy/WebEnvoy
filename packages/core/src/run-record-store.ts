@@ -48,6 +48,7 @@ export type RunRecordStatus =
   | "cancelled"
   | "expired";
 
+export type SuccessfulRunResultOutcome = "success" | "partial" | "empty";
 export type RetentionState = "active" | "summary_only" | "expired" | "redacted" | "access_denied" | "deleted_by_policy";
 export type PostCheckStatus = "passed" | "failed" | "blocked" | "not_run";
 
@@ -198,6 +199,7 @@ export type RunRecord = {
   approval_request?: ApprovalRequest;
   result_ref?: string;
   result_kind?: string;
+  result_outcome?: SuccessfulRunResultOutcome;
   output_schema_id?: string;
   projection_ref?: string;
   public_result_summary?: Record<string, unknown>;
@@ -227,6 +229,7 @@ export type CreateRunRecordInput = {
   approval_request?: ApprovalRequest;
   result_ref?: string;
   result_kind?: string;
+  result_outcome?: SuccessfulRunResultOutcome;
   output_schema_id?: string;
   projection_ref?: string;
   public_result_summary?: Record<string, unknown>;
@@ -245,6 +248,7 @@ export type RunRecordPatch = {
   approval_request?: ApprovalRequest;
   result_ref?: string;
   result_kind?: string;
+  result_outcome?: SuccessfulRunResultOutcome;
   output_schema_id?: string;
   projection_ref?: string;
   public_result_summary?: Record<string, unknown>;
@@ -538,6 +542,12 @@ function assertRunRecord(record: RunRecord): void {
   if (record.result_kind !== undefined) {
     requireRef(record.result_kind, "result_kind");
   }
+  if (record.result_outcome !== undefined && !["success", "partial", "empty"].includes(record.result_outcome)) {
+    throw new Error("result_outcome is unsupported");
+  }
+  if (record.result_outcome !== undefined && record.status !== "succeeded") {
+    throw new Error("result_outcome is only allowed on succeeded run records");
+  }
   if (record.output_schema_id !== undefined) {
     requireRef(record.output_schema_id, "output_schema_id");
   }
@@ -673,6 +683,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   if (patch.result_kind !== undefined) {
     next.result_kind = requireRef(patch.result_kind, "result_kind");
   }
+  if (patch.result_outcome !== undefined) {
+    next.result_outcome = patch.result_outcome;
+  }
   if (patch.output_schema_id !== undefined) {
     next.output_schema_id = requireRef(patch.output_schema_id, "output_schema_id");
   }
@@ -754,6 +767,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.result_kind !== undefined) {
     record.result_kind = requireRef(input.result_kind, "result_kind");
+  }
+  if (input.result_outcome !== undefined) {
+    record.result_outcome = input.result_outcome;
   }
   if (input.output_schema_id !== undefined) {
     record.output_schema_id = requireRef(input.output_schema_id, "output_schema_id");

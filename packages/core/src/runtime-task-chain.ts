@@ -33,7 +33,7 @@ import {
 } from "./operation-identity-matcher.js";
 import { readBoundedJsonResponse } from "./bounded-json-response.js";
 import { normalizePublicHttpTarget } from "./public-target-reference.js";
-import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
+import { completeRunWithReadOnlyEmptyResult, completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore } from "./run-record-store.js";
 import { acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
@@ -567,20 +567,35 @@ async function completeAcceptedReadTaskWithFailure(
     ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs })
   });
   const recoveryHint = readFailureRecoveryHint(failureClass);
+  const postCheck = {
+    schema_version: "webenvoy.post-check-result.v0" as const,
+    status: failureClass === "empty_result" ? "passed" as const : "blocked" as const,
+    summary: failureClass === "empty_result" ? "Harbor read operation completed with no matching results." : summary,
+    checked_at: new Date().toISOString(),
+    code: failureClass,
+    attribution: "runtime" as const,
+    recovery_hint: recoveryHint,
+    ...(evidenceRefs.length === 0 ? {} : { evidence_refs: [...evidenceRefs] }),
+    consumer_boundary: failureClass === "empty_result"
+      ? "Core records a successful bounded empty result for App display; it does not execute writes or inline raw browser/page material."
+      : "Core records terminal refs-only failure state for App recovery; it does not execute writes or inline raw browser/page material."
+  };
+  if (failureClass === "empty_result") {
+    const completed = await completeRunWithReadOnlyEmptyResult(store, result.run_record.run_id, {
+      ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs }),
+      post_check: postCheck,
+      retention_state: "active"
+    });
+    return {
+      ok: true,
+      task_intent: result.task_intent,
+      run_record: completed.run_record
+    };
+  }
   const completed = await completeRunWithReadOnlyFailure(store, result.run_record.run_id, {
     lode_failure_class: failureClass,
     ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs }),
-    post_check: {
-      schema_version: "webenvoy.post-check-result.v0",
-      status: "blocked",
-      summary,
-      checked_at: new Date().toISOString(),
-      code: failureClass,
-      attribution: "runtime",
-      recovery_hint: recoveryHint,
-      ...(evidenceRefs.length === 0 ? {} : { evidence_refs: [...evidenceRefs] }),
-      consumer_boundary: "Core records terminal refs-only failure state for App recovery; it does not execute writes or inline raw browser/page material."
-    },
+    post_check: postCheck,
     retention_state: "active"
   });
   return {

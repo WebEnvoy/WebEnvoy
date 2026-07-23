@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
+import { completeRunWithReadOnlyEmptyResult, completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { getRunFailureReason, getRunResult } from "./result-query.js";
 import { getRunSummary } from "./run-query.js";
 import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-store.js";
@@ -160,9 +160,8 @@ const specs: readonly ProjectionSpec[] = [
   }
 ];
 
-const failureCases: readonly [LodeReadOnlyFailureClass, string][] = [
+const failureCases: readonly [Exclude<LodeReadOnlyFailureClass, "empty_result">, string][] = [
   ["invalid_contract", "capability_failure"],
-  ["empty_result", "capability_failure"],
   ["not_logged_in", "login_required"],
   ["captcha_required", "risk_prompt"],
   ["page_not_ready", "page_changed"],
@@ -290,6 +289,36 @@ export async function assertRealSiteReadOnlyResultProjection(): Promise<void> {
       assert.equal(failure.failure_reason.failure?.code, failureClass);
       assert.equal(hasForbiddenKey(failure.failure_reason), false);
     }
+
+    await createRun(store, base, "empty_result");
+    const emptyRunId = `${base.runId}_empty_result`;
+    const empty = await completeRunWithReadOnlyEmptyResult(store, emptyRunId, {
+      evidence_refs: [...base.evidenceRefs],
+      retention_state: "active"
+    });
+    assert.equal(empty.run_record.status, "succeeded");
+    assert.equal(empty.result_envelope.ok, true);
+    assert.equal(empty.result_envelope.outcome, "empty");
+    assert.deepEqual(empty.result_envelope.data, { status: "empty" });
+
+    const emptyResult = await getRunResult(store, emptyRunId);
+    if (!emptyResult.ok) assert.fail(emptyResult.failure.code);
+    assert.equal(emptyResult.result.status, "succeeded");
+    assert.equal(emptyResult.result.result.payload_state, "available");
+    assert.equal(emptyResult.result.result.result_envelope?.outcome, "empty");
+    assert.deepEqual(emptyResult.result.result.result_envelope?.data, { status: "empty" });
+
+    const restartedEmptyResult = await getRunResult(createFileRunRecordStore({ directory, clock: nextInstant }), emptyRunId);
+    if (!restartedEmptyResult.ok) assert.fail(restartedEmptyResult.failure.code);
+    assert.equal(restartedEmptyResult.result.result.result_envelope?.outcome, "empty");
+    assert.deepEqual(restartedEmptyResult.result.result.result_envelope?.data, { status: "empty" });
+
+    const emptyFailure = await getRunFailureReason(store, emptyRunId);
+    if (!emptyFailure.ok) assert.fail(emptyFailure.failure.code);
+    assert.equal(emptyFailure.failure_reason.failure_present, false);
+    assert.equal(emptyFailure.failure_reason.reason_class, "none");
+    assert.equal(emptyFailure.failure_reason.app_action, "none");
+    assert.equal(emptyFailure.failure_reason.retryable, false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

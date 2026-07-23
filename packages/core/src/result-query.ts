@@ -125,8 +125,8 @@ function queryFailure(code: string, category: FailureRecord["category"], recover
   };
 }
 
-function resultOutcome(status: RunRecordStatus): ResultOutcome {
-  return status === "succeeded" ? "success" : (status as ResultOutcome);
+function resultOutcome(record: RunRecord): ResultOutcome {
+  return record.status === "succeeded" ? record.result_outcome ?? "success" : (record.status as ResultOutcome);
 }
 
 function evidenceState(retentionState: RetentionState | undefined): Pick<EvidenceRefSummary, "state" | "retention_state" | "redaction_state"> {
@@ -208,7 +208,7 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     schema_version: resultEnvelopeSchemaVersion,
     run_record_ref: record.run_id,
     ok,
-    outcome: resultOutcome(record.status),
+    outcome: resultOutcome(record),
     terminal: true,
     capability_ref: record.capability_ref,
     ...(record.capability_version === undefined ? {} : { capability_version: record.capability_version }),

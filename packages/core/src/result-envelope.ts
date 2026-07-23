@@ -1,9 +1,9 @@
 import { normalizeFailureRecord } from "./failure-attribution.js";
-import type { FailureRecord, FileRunRecordStore, PostCheckResult, PreviewFailureClass, PreviewResult, PreviewResultState, RetentionState, RunRecord, RunRecordStatus } from "./run-record-store.js";
+import type { FailureRecord, FileRunRecordStore, PostCheckResult, PreviewFailureClass, PreviewResult, PreviewResultState, RetentionState, RunRecord, RunRecordStatus, SuccessfulRunResultOutcome } from "./run-record-store.js";
 
 export const resultEnvelopeSchemaVersion = "webenvoy.result-envelope.v0";
 
-export type ResultOutcome = "success" | "failed" | "blocked" | "requires_user_action" | "manual_recovery_required" | "unknown_outcome" | "cancelled";
+export type ResultOutcome = SuccessfulRunResultOutcome | "failed" | "blocked" | "requires_user_action" | "manual_recovery_required" | "unknown_outcome" | "cancelled";
 export type FailureTerminalStatus = Extract<RunRecordStatus, "failed" | "blocked" | "requires_user_action" | "manual_recovery_required" | "unknown_outcome" | "cancelled">;
 
 export type ResultEnvelope = {
@@ -34,6 +34,7 @@ export type ResultEnvelope = {
 export type CompleteRunResultInput = {
   result_ref: string;
   result_kind: string;
+  outcome?: SuccessfulRunResultOutcome;
   output_schema_id?: string;
   data?: Record<string, unknown>;
   persisted_public_summary?: Record<string, unknown>;
@@ -153,10 +154,12 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
   const evidenceRefs = copyRefs(input.evidence_refs ?? current.evidence_refs, "evidence_refs");
   if (!evidenceRefs?.length) throw new Error("result envelope requires evidence_refs");
   const retentionState = input.retention_state ?? "active";
+  const outcome = input.outcome ?? "success";
   const updated = await store.updateRunRecord(runId, {
     status: "succeeded",
     result_ref: requireRef(input.result_ref, "result_ref"),
     result_kind: requireRef(input.result_kind, "result_kind"),
+    result_outcome: outcome,
     ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
     ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
     ...(input.persisted_public_summary === undefined ? {} : { public_result_summary: input.persisted_public_summary }),
@@ -171,7 +174,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
     result_envelope: {
       ...envelopeBase(updated),
       ok: true,
-      outcome: "success",
+      outcome,
       result_ref: input.result_ref,
       result_kind: requireRef(input.result_kind, "result_kind"),
       ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
