@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/run-record.schema.json",
+  "schema_version": "webenvoy.run-record.v0",
+  "run_id": "run_fixture_empty_001",
+  "status": "succeeded",
+  "created_at": "2026-07-23T14:41:44.864Z",
+  "updated_at": "2026-07-23T14:41:46.728Z",
+  "terminal_at": "2026-07-23T14:41:46.728Z",
+  "task_intent_ref": "intent_fixture_empty_001",
+  "entrypoint_ref": "entrypoint:app",
+  "capability_ref": "lode:capability/search-notes",
+  "capability_version": "0.1.0",
+  "capability_source_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "capability_lock_ref": "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0",
+  "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+  "admission": {
+    "decision": "accepted",
+    "action_risk": "read",
+    "runtime_binding_refs": ["session_fixture_empty"],
+    "evidence_refs": ["evidence_fixture_empty"]
+  },
+  "runtime_binding_refs": ["session_fixture_empty"],
+  "result_ref": "result:core/run_fixture_empty_001",
+  "result_kind": "empty",
+  "result_outcome": "empty",
+  "public_result_summary": {
+    "status": "empty"
+  },
+  "evidence_refs": ["evidence_fixture_empty"],
+  "post_check": {
+    "schema_version": "webenvoy.post-check-result.v0",
+    "status": "passed",
+    "summary": "Harbor read operation completed with no matching results.",
+    "checked_at": "2026-07-23T14:41:46.727Z",
+    "code": "empty_result",
+    "attribution": "runtime",
+    "recovery_hint": "fix_input",
+    "evidence_refs": ["evidence_fixture_empty"],
+    "consumer_boundary": "Core records a successful bounded empty result for App display; it does not execute writes or inline raw browser/page material."
+  },
+  "retention_state": "active"
+}

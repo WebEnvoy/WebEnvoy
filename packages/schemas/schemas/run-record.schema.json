@@ -26,6 +26,8 @@
       "scope_target_ref": "Caller declares; Core validates, normalizes, and records the exact target used for runtime admission",
       "runtime_binding_refs": "Harbor owns referenced runtime facts",
       "result_ref": "Core",
+      "result_outcome": "Core",
+      "public_result_summary": "Core persists a bounded public projection after runtime private-field rejection",
       "projection_ref": "Core",
       "source_refs": "Harbor or Lode owns referenced source body; Core records refs only",
       "preview_result": "Core projected validate-only preview result; submitted result truth is out of boundary",
@@ -242,6 +244,10 @@
       "type": "string",
       "minLength": 1
     },
+    "result_outcome": {
+      "type": "string",
+      "enum": ["success", "partial", "empty"]
+    },
     "output_schema_id": {
       "type": "string",
       "minLength": 1
@@ -249,6 +255,9 @@
     "projection_ref": {
       "type": "string",
       "minLength": 1
+    },
+    "public_result_summary": {
+      "type": "object"
     },
     "source_refs": {
       "type": "array",

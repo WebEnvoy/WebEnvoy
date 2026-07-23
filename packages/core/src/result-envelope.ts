@@ -159,7 +159,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
     status: "succeeded",
     result_ref: requireRef(input.result_ref, "result_ref"),
     result_kind: requireRef(input.result_kind, "result_kind"),
-    result_outcome: outcome,
+    ...(outcome === "success" ? {} : { result_outcome: outcome }),
     ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
     ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
     ...(input.persisted_public_summary === undefined ? {} : { public_result_summary: input.persisted_public_summary }),
