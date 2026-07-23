@@ -529,6 +529,11 @@ function sceneEvidenceRefs(value: unknown): string[] {
 }
 
 function readFailureRecoveryHint(failureClass: LodeReadOnlyFailureClass): string {
+  if (failureClass === "empty_result") return "fix_input";
+  if (failureClass === "invalid_contract") return "repair_package";
+  if (failureClass === "network_resource_unavailable") return "rerun_with_evidence";
+  if (failureClass === "not_logged_in" || failureClass === "login_expired") return "open_manual_auth";
+  if (failureClass === "identity_insufficient") return "switch_identity";
   return failureClass === "page_changed" || failureClass === "page_not_ready" ? "retry_after_refresh" : "manual_handoff";
 }
 
@@ -756,18 +761,18 @@ async function finalizeAcceptedTask(
 ): Promise<TaskSubmissionResult> {
   try {
     return await finalize();
-  } catch {
+  } catch (error) {
     const current = await store.getRunRecord(result.run_record.run_id);
     if (!current || terminalRunRecordStatuses.has(current.status)) throw new Error("run finalization failed after terminal persistence");
     if (current.status === "admitted") await store.updateRunRecord(current.run_id, { status: "running" });
-    const persistenceFailure = failure("persistence_observability", "run_finalization_persistence_failed", "persistence", "retry_run_finalization");
+    const persistenceFailure = classifyFinalizationFailure(error);
     const completed = await completeRunWithFailure(store, current.run_id, {
       failure: persistenceFailure,
       retention_state: "active",
       post_check: {
         schema_version: "webenvoy.post-check-result.v0",
         status: "failed",
-        summary: "Core released the task session but could not persist the intended terminal result; a refs-only persistence failure was recorded instead.",
+        summary: finalizationFailureSummary(persistenceFailure.code),
         checked_at: new Date().toISOString(),
         code: persistenceFailure.code,
         attribution: "unknown",
@@ -779,7 +784,58 @@ async function finalizeAcceptedTask(
   }
 }
 
-function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEntry, requested: { runtime_session_ref: string; site_id: string; operation_id: string }): string | undefined {
+function classifyFinalizationFailure(error: unknown): FailureRecord {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("detail target")) {
+    return failure("result_projection", "detail_target_binding_failed", "projection", "retry_task");
+  }
+  if (message === "public_result_summary exceeds 64 KiB") {
+    return failure("result_projection", "public_result_summary_too_large", "projection", "repair_package");
+  }
+  if (message.startsWith("result data contains forbidden field:") || message.startsWith("run record must not contain private browser material:")) {
+    return failure("result_projection", "public_result_private_field_rejected", "projection", "repair_package");
+  }
+  return failure("persistence_observability", "run_finalization_persistence_failed", "persistence", "retry_run_finalization");
+}
+
+function finalizationFailureSummary(code: string): string {
+  if (code === "detail_target_binding_failed") {
+    return "Core could not bind the fresh search result's opaque detail targets; retry the read task without changing identity authorization.";
+  }
+  if (code === "public_result_summary_too_large" || code === "public_result_private_field_rejected") {
+    return "Core rejected the public result projection because it did not satisfy the bounded refs-only result contract.";
+  }
+  return "Core released the task session but could not persist the intended terminal result; a refs-only persistence failure was recorded instead.";
+}
+
+const lodeReadOnlyFailureClasses = new Set<LodeReadOnlyFailureClass>([
+  "invalid_contract",
+  "empty_result",
+  "not_logged_in",
+  "login_expired",
+  "identity_insufficient",
+  "captcha_required",
+  "safety_challenge",
+  "page_changed",
+  "page_not_ready",
+  "site_changed",
+  "field_missing",
+  "network_resource_unavailable",
+  "resource_unavailable",
+  "signed_ref_missing",
+  "input_missing_security_id",
+  "query_missing",
+  "city_unresolved",
+  "pagination_limited",
+  "job_expired",
+  "permission_denied"
+]);
+
+function isLodeReadOnlyFailureClass(value: string): value is LodeReadOnlyFailureClass {
+  return lodeReadOnlyFailureClasses.has(value as LodeReadOnlyFailureClass);
+}
+
+function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEntry, requested: { runtime_session_ref: string; site_id: string; operation_id: string }): LodeReadOnlyFailureClass | undefined {
   const unavailable = object(value);
   const failureClass = string(unavailable?.failure_class);
   if (
@@ -787,7 +843,7 @@ function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEn
     unavailable.runtime_session_ref !== requested.runtime_session_ref || unavailable.site_id !== requested.site_id || unavailable.operation_id !== requested.operation_id ||
     typeof unavailable.retryable !== "boolean" || !failureClass
   ) return undefined;
-  if (entry.required_failure_classes.includes(failureClass)) return failureClass;
+  if (entry.required_failure_classes.includes(failureClass) && isLodeReadOnlyFailureClass(failureClass)) return failureClass;
   const harborToLode: Record<string, string> = {
     invalid_request: "site_changed",
     operation_not_allowlisted: "site_changed",
@@ -809,7 +865,7 @@ function unavailableFailureClass(value: unknown, entry: LodeRuntimeConsumptionEn
     post_check_missing: "field_missing"
   };
   const mapped = harborToLode[failureClass];
-  if (mapped && entry.required_failure_classes.includes(mapped)) return mapped;
+  if (mapped && isLodeReadOnlyFailureClass(mapped) && entry.required_failure_classes.includes(mapped)) return mapped;
 
   // A newer Harbor runtime may add a bounded unavailable class before the
   // pinned Lode taxonomy is updated. Keep the run in runtime failure space;
@@ -1093,7 +1149,7 @@ export async function submitRuntimeTask(
       const cleanup = await releaseAcceptedCoreTaskSession(store, submitted, deps.harborRuntimeClient, runtimeSessionRef, operationFailure);
       if (cleanup) return cleanup;
       if (!failureClass) return finalizeAcceptedTask(store, submitted, () => completeAcceptedReadTaskWithFailure(store, submitted, "site_changed", "Core rejected a Harbor unavailable response outside the pinned Lode failure taxonomy."));
-      return finalizeAcceptedTask(store, submitted, () => completeAcceptedReadTaskWithFailure(store, submitted, failureClass as LodeReadOnlyFailureClass, `Harbor read operation ended with ${failureClass}.`));
+      return finalizeAcceptedTask(store, submitted, () => completeAcceptedReadTaskWithFailure(store, submitted, failureClass, `Harbor read operation ended with ${failureClass}.`));
     }
     const requested = {
       runtime_session_ref: runtimeSessionRef,
