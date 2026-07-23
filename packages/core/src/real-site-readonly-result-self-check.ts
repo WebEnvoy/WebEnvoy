@@ -161,6 +161,8 @@ const specs: readonly ProjectionSpec[] = [
 ];
 
 const failureCases: readonly [LodeReadOnlyFailureClass, string][] = [
+  ["invalid_contract", "capability_failure"],
+  ["empty_result", "capability_failure"],
   ["not_logged_in", "login_required"],
   ["captcha_required", "risk_prompt"],
   ["page_not_ready", "page_changed"],

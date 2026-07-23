@@ -427,7 +427,7 @@ async function writeLodeRegistry(
         runtime_admission: currentRuntimeAdmission,
         allowed_origins: ["https://www.xiaohongshu.com"],
         resource_requirements: { resource_requirements_id: xiaohongshuResourceRef },
-        failure_taxonomy: { failure_mapping_id: "xiaohongshu.search-notes.failure-mapping", required_classes: ["invalid_contract", "resource_unavailable", "site_changed", "not_logged_in", "login_expired", "page_not_ready", "safety_challenge", "field_missing", "network_resource_unavailable"] },
+        failure_taxonomy: { failure_mapping_id: "xiaohongshu.search-notes.failure-mapping", required_classes: ["invalid_contract", "resource_unavailable", "site_changed", "empty_result", "not_logged_in", "login_expired", "page_not_ready", "safety_challenge", "field_missing", "network_resource_unavailable"] },
         evidence_and_post_check: {
           required_ref_kinds: ["pinia_store_summary", "network_summary", "dom_snapshot_summary", "snapshot_ref", "post_check_ref"],
           post_check_id: "xiaohongshu.search-notes.post-check",
@@ -1266,6 +1266,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     post_check: { post_check_ref: "post_check_77777777-7777-4777-8777-777777777777", status: "passed", reason: "managed_provider_read_probe_completed" }
   });
   const unavailableOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { status: "unavailable", failure_class: "provider_probe_unavailable", retryable: true });
+  const emptyResultHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { status: "unavailable", failure_class: "empty_result", retryable: false });
   const safetyChallengeHarbor = createHarborMock(true, [], [], {
     page_summary: { title: "BOSS verification", url: "https://www.zhipin.com/web/geek/job?query=AI&city=101010100", summary: "BOSS verification challenge." }
   }, undefined, {}, readyBossSiteFacts, { site_id: "boss", operation_id: "boss_job_search", status: "unavailable", failure_class: "safety_challenge", retryable: false });
@@ -1533,6 +1534,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
     const bossHarborPort = await listen(bossHarbor);
     const unavailableOperationHarborPort = await listen(unavailableOperationHarbor);
+    const emptyResultHarborPort = await listen(emptyResultHarbor);
     const safetyChallengeHarborPort = await listen(safetyChallengeHarbor);
     const unknownFailureHarborPort = await listen(unknownFailureHarbor);
     const missingRefsOperationHarborPort = await listen(missingRefsOperationHarbor);
@@ -1686,6 +1688,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     });
     const bossServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${bossHarborPort}` }) });
     const unavailableOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${unavailableOperationHarborPort}` }) });
+    const emptyResultServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${emptyResultHarborPort}` }) });
     const safetyChallengeServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${safetyChallengeHarborPort}` }) });
     const unknownFailureServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${unknownFailureHarborPort}` }) });
     const missingRefsOperationServer = createApiServer({ runRecordStore: store, lodePackageResolver: resolver, harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${missingRefsOperationHarborPort}` }) });
@@ -1757,6 +1760,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const xiaohongshuPort = await listen(xiaohongshuServer);
     const bossPort = await listen(bossServer);
     const unavailableOperationPort = await listen(unavailableOperationServer);
+    const emptyResultPort = await listen(emptyResultServer);
     const safetyChallengePort = await listen(safetyChallengeServer);
     const unknownFailurePort = await listen(unknownFailureServer);
     const missingRefsOperationPort = await listen(missingRefsOperationServer);
@@ -2144,9 +2148,27 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
         });
         assert.equal(failedOperation.status, httpStatus);
-        assert.equal(asRecord(asRecord(failedOperation.body).run).status, status);
+        const failedRun = asRecord(asRecord(failedOperation.body).run);
+        assert.equal(failedRun.status, status);
         assert.equal(asRecord(failedOperation.body).ok, false);
+        if (runId === "run_api_submit_operation_unavailable") {
+          assert.equal(asRecord(failedRun.failure).code, "network_resource_unavailable");
+          assert.equal(asRecord(failedRun.failure).category, "evidence_reference");
+        }
       }
+      const emptyResult = await postJson(emptyResultPort, "/tasks", {
+        run_id: "run_api_submit_operation_empty_result",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_run_api_submit_operation_empty_result"),
+        public_query: { query: "city coffee" },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+      });
+      const emptyResultRun = asRecord(asRecord(emptyResult.body).run);
+      assert.equal(emptyResult.status, 400, JSON.stringify(emptyResult.body));
+      assert.equal(emptyResultRun.status, "failed");
+      assert.equal(asRecord(emptyResultRun.failure).code, "empty_result");
+      assert.equal(asRecord(emptyResultRun.failure).category, "result_projection");
+      assert.notEqual(asRecord(emptyResultRun.failure).code, "run_finalization_persistence_failed");
       const challenge = await postJson(safetyChallengePort, "/tasks", {
         run_id: "run_api_submit_boss_safety_challenge",
         package_ref: bossPackageRef,
@@ -2623,6 +2645,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(xiaohongshuServer);
       await close(bossServer);
       await close(unavailableOperationServer);
+      await close(emptyResultServer);
       await close(safetyChallengeServer);
       await close(unknownFailureServer);
       await close(missingRefsOperationServer);
@@ -2658,6 +2681,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(xiaohongshuHarbor);
     await close(bossHarbor);
     await close(unavailableOperationHarbor);
+    await close(emptyResultHarbor);
     await close(safetyChallengeHarbor);
     await close(unknownFailureHarbor);
     await close(missingRefsOperationHarbor);
