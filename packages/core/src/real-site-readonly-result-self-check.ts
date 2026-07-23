@@ -245,14 +245,31 @@ export async function assertRealSiteReadOnlyResultProjection(): Promise<void> {
 
       const result = await getRunResult(store, spec.runId);
       if (!result.ok) assert.fail(result.failure.code);
+      assert.equal(result.result.result.payload_state, "available");
       assert.equal(result.result.result.result_envelope?.result_kind, spec.projection.result_kind);
       assert.equal(result.result.result.result_envelope?.projection_ref, spec.projectionRef);
+      assert.deepEqual(result.result.result.result_envelope?.data, { projection: spec.projection });
       assert.deepEqual(result.result.result.result_envelope?.source_refs, [spec.sourceRef]);
       assert.equal(hasForbiddenKey(result.result), false);
+
+      const restartedStore = createFileRunRecordStore({ directory, clock: nextInstant });
+      const restartedResult = await getRunResult(restartedStore, spec.runId);
+      if (!restartedResult.ok) assert.fail(restartedResult.failure.code);
+      assert.equal(restartedResult.result.result.payload_state, "available");
+      assert.deepEqual(restartedResult.result.result.result_envelope?.data, { projection: spec.projection });
 
       const summary = await getRunSummary(store, spec.runId);
       if (!summary.ok) assert.fail(summary.failure.code);
       assert.equal(summary.run.task.capability_source_ref, spec.packageRef);
+      if (spec === specs[0]) {
+        for (const retentionState of ["access_denied", "deleted_by_policy", "expired"] as const) {
+          await store.updateRunRecord(spec.runId, { retention_state: retentionState });
+          const retained = await getRunResult(store, spec.runId);
+          if (!retained.ok) assert.fail(retained.failure.code);
+          assert.equal(retained.result.result.payload_state, retentionState);
+          assert.equal(retained.result.result.result_envelope?.data, undefined);
+        }
+      }
     }
 
     const base = specs[0];

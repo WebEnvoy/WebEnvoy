@@ -1391,6 +1391,10 @@ try {
   const invalidRefId = "run_self_check_invalid_ref_patch";
   await store.createRunRecord(baseInput(invalidRefId));
   await assert.rejects(() => store.updateRunRecord(invalidRefId, { result_ref: "" }), /result_ref/);
+  await assert.rejects(
+    () => store.updateRunRecord(invalidRefId, { public_result_summary: { summary: "界".repeat(30_000) } }),
+    /public_result_summary exceeds 64 KiB/
+  );
   const pendingResultQuery = await getRunResult(store, invalidRefId);
   assert.equal(pendingResultQuery.ok, true);
   if (!pendingResultQuery.ok) {
@@ -1409,6 +1413,17 @@ try {
         evidence_refs: ["evidence:fixture/unsafe"]
       }),
     /forbidden field: token/
+  );
+  await assert.rejects(
+    () =>
+      completeRunWithResult(store, invalidRefId, {
+        result_ref: "result:fixture/unsafe-persisted",
+        result_kind: "content_detail",
+        data: { summary: "safe" },
+        persisted_public_summary: { cookie: "must-not-enter-core" },
+        evidence_refs: ["evidence:fixture/unsafe-persisted"]
+      }),
+    /forbidden field: cookie/
   );
 
   const detachedListRunRecords = store.listRunRecords;

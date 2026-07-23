@@ -16,7 +16,7 @@ export const failureReasonQuerySchemaVersion = "webenvoy.failure-reason-query.v0
 export type EvidenceRefSource = "admission" | "terminal" | "admission_and_terminal";
 export type EvidenceRefState = "available" | "missing" | "expired" | "redacted" | "access_denied" | "deleted_by_policy";
 export type ResultEnvelopeState = "available" | "unavailable" | "redacted";
-export type ResultPayloadState = "not_persisted_in_core" | "unavailable" | "redacted" | "expired" | "access_denied" | "deleted_by_policy";
+export type ResultPayloadState = "available" | "not_persisted_in_core" | "unavailable" | "redacted" | "expired" | "access_denied" | "deleted_by_policy";
 export type ResultUnavailableReason = "run_not_terminal" | "result_ref_missing";
 export type FailureReasonClass =
   | "none"
@@ -195,7 +195,7 @@ function resultStates(record: RunRecord): Pick<ResultQueryEnvelope["result"], "e
   }
   return {
     envelope_state: "available",
-    payload_state: "not_persisted_in_core"
+    payload_state: record.public_result_summary === undefined ? "not_persisted_in_core" : "available"
   };
 }
 
@@ -218,6 +218,9 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.result_kind === undefined ? {} : { result_kind: record.result_kind }),
     ...(record.output_schema_id === undefined ? {} : { output_schema_id: record.output_schema_id }),
     ...(record.projection_ref === undefined ? {} : { projection_ref: record.projection_ref }),
+    ...(record.public_result_summary === undefined || (record.retention_state !== undefined && record.retention_state !== "active")
+      ? {}
+      : { data: record.public_result_summary }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
     ...(record.source_refs === undefined ? {} : { source_refs: [...record.source_refs] }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),

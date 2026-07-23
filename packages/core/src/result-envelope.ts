@@ -36,6 +36,7 @@ export type CompleteRunResultInput = {
   result_kind: string;
   output_schema_id?: string;
   data?: Record<string, unknown>;
+  persisted_public_summary?: Record<string, unknown>;
   projection_ref?: string;
   raw_payload_refs?: readonly string[];
   source_refs?: readonly string[];
@@ -147,6 +148,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
   if (!current) throw new Error(`run record not found: ${runId}`);
   if (input.data === undefined && input.projection_ref === undefined) throw new Error("result envelope requires data or projection_ref");
   assertPublicData(input.data);
+  assertPublicData(input.persisted_public_summary);
 
   const evidenceRefs = copyRefs(input.evidence_refs ?? current.evidence_refs, "evidence_refs");
   if (!evidenceRefs?.length) throw new Error("result envelope requires evidence_refs");
@@ -157,6 +159,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
     result_kind: requireRef(input.result_kind, "result_kind"),
     ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
     ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
+    ...(input.persisted_public_summary === undefined ? {} : { public_result_summary: input.persisted_public_summary }),
     ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
     evidence_refs: evidenceRefs,
     retention_state: retentionState,
