@@ -2188,6 +2188,16 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           assert.equal(asRecord(failedRun.failure).category, "evidence_reference");
         }
       }
+      const unavailableFailureQuery = await getJson(unavailableOperationPort, "/runs/run_api_submit_operation_unavailable/failure");
+      assert.equal(unavailableFailureQuery.status, 200);
+      const unavailableFailureReason = asRecord(asRecord(unavailableFailureQuery.body).failure_reason);
+      assert.equal(unavailableFailureReason.status, "blocked");
+      assert.equal(unavailableFailureReason.failure_present, true);
+      assert.equal(unavailableFailureReason.reason_class, "evidence_unavailable");
+      assert.equal(asRecord(unavailableFailureReason.failure).code, "network_resource_unavailable");
+      assert.equal(unavailableFailureReason.app_action, "rerun_with_evidence");
+      assert.equal(unavailableFailureReason.retryable, true);
+
       const emptyResult = await postJson(emptyResultPort, "/tasks", {
         run_id: "run_api_submit_operation_empty_result",
         package_ref: xiaohongshuPackageRef,
@@ -2196,11 +2206,28 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
       });
       const emptyResultRun = asRecord(asRecord(emptyResult.body).run);
-      assert.equal(emptyResult.status, 400, JSON.stringify(emptyResult.body));
-      assert.equal(emptyResultRun.status, "failed");
-      assert.equal(asRecord(emptyResultRun.failure).code, "empty_result");
-      assert.equal(asRecord(emptyResultRun.failure).category, "result_projection");
-      assert.notEqual(asRecord(emptyResultRun.failure).code, "run_finalization_persistence_failed");
+      assert.equal(emptyResult.status, 202, JSON.stringify(emptyResult.body));
+      assert.equal(asRecord(emptyResult.body).ok, true);
+      assert.equal(emptyResultRun.status, "succeeded");
+      assert.equal(emptyResultRun.result_kind, "empty");
+      assert.equal(emptyResultRun.failure, undefined);
+
+      const emptyResultQuery = await getJson(emptyResultPort, "/runs/run_api_submit_operation_empty_result/result");
+      assert.equal(emptyResultQuery.status, 200);
+      const emptyResultEnvelope = asRecord(asRecord(asRecord(emptyResultQuery.body).result).result).result_envelope;
+      assert.equal(asRecord(emptyResultEnvelope).ok, true);
+      assert.equal(asRecord(emptyResultEnvelope).outcome, "empty");
+      assert.deepEqual(asRecord(emptyResultEnvelope).data, { status: "empty" });
+      assert.equal(asRecord(asRecord(emptyResultQuery.body).result).failure, undefined);
+
+      const emptyFailureQuery = await getJson(emptyResultPort, "/runs/run_api_submit_operation_empty_result/failure");
+      assert.equal(emptyFailureQuery.status, 200);
+      const emptyFailureReason = asRecord(asRecord(emptyFailureQuery.body).failure_reason);
+      assert.equal(emptyFailureReason.status, "succeeded");
+      assert.equal(emptyFailureReason.failure_present, false);
+      assert.equal(emptyFailureReason.reason_class, "none");
+      assert.equal(emptyFailureReason.app_action, "none");
+      assert.equal(emptyFailureReason.retryable, false);
       const challenge = await postJson(safetyChallengePort, "/tasks", {
         run_id: "run_api_submit_boss_safety_challenge",
         package_ref: bossPackageRef,

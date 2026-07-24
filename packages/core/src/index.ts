@@ -79,8 +79,10 @@ export {
 } from "./run-record-store.js";
 export { isValidRunId } from "./run-id.js";
 export {
+  completeRunWithReadOnlyEmptyResult,
   completeRunWithReadOnlyFailure,
   completeRunWithReadOnlyProjection,
+  type CompleteReadOnlyEmptyResultInput,
   type CompleteReadOnlyFailureInput,
   type CompleteReadOnlyProjectionInput,
   type LodeProjectionRef,

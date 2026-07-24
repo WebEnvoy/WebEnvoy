@@ -46,12 +46,17 @@ export type CompleteReadOnlyProjectionInput = {
   retention_state?: RetentionState;
 };
 
-export type CompleteReadOnlyFailureInput = {
-  lode_failure_class: LodeReadOnlyFailureClass;
+type CompleteReadOnlyTerminalInput = {
   evidence_refs?: readonly string[];
   post_check?: PostCheckResult;
   retention_state?: RetentionState;
 };
+
+export type CompleteReadOnlyFailureInput = CompleteReadOnlyTerminalInput & {
+  lode_failure_class: Exclude<LodeReadOnlyFailureClass, "empty_result">;
+};
+
+export type CompleteReadOnlyEmptyResultInput = CompleteReadOnlyTerminalInput;
 
 function refId(value: LodeProjectionRef, label: string): string {
   const ref = typeof value === "string" ? value : value.ref_id;
@@ -63,12 +68,10 @@ function projectionRefs(values: readonly LodeProjectionRef[], label: string): st
   return values.map((value, index) => refId(value, `${label}[${index}]`));
 }
 
-function lodeFailure(failureClass: LodeReadOnlyFailureClass): { status: "failed" | "blocked" | "requires_user_action"; failure: FailureRecord } {
+function lodeFailure(failureClass: Exclude<LodeReadOnlyFailureClass, "empty_result">): { status: "failed" | "blocked" | "requires_user_action"; failure: FailureRecord } {
   switch (failureClass) {
     case "invalid_contract":
       return { status: "failed", failure: { category: "capability_contract", code: failureClass, phase: "projection", recovery_hint: "repair_package" } };
-    case "empty_result":
-      return { status: "failed", failure: { category: "result_projection", code: failureClass, phase: "projection", recovery_hint: "fix_input" } };
     case "not_logged_in":
     case "login_expired":
       return { status: "requires_user_action", failure: { category: "resource_admission", code: failureClass, phase: "runtime_binding", recovery_hint: "open_manual_auth" } };
@@ -126,6 +129,19 @@ export async function completeRunWithReadOnlyProjection(store: FileRunRecordStor
     source_refs: projectionRefs(projection.source_refs, "projection.source_refs"),
     evidence_refs: evidenceRefs,
     ...(input.projection_ref === undefined ? {} : { projection_ref: input.projection_ref }),
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
+    ...(input.retention_state === undefined ? {} : { retention_state: input.retention_state })
+  });
+}
+
+export async function completeRunWithReadOnlyEmptyResult(store: FileRunRecordStore, runId: string, input: CompleteReadOnlyEmptyResultInput): Promise<CompletedRunOutput> {
+  return completeRunWithResult(store, runId, {
+    result_ref: `result:core/${runId}`,
+    result_kind: "empty",
+    outcome: "empty",
+    data: { status: "empty" },
+    persisted_public_summary: { status: "empty" },
+    ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
     ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
     ...(input.retention_state === undefined ? {} : { retention_state: input.retention_state })
   });
