@@ -116,14 +116,14 @@ async function assertDetailTargetStore(): Promise<void> {
 
     const reservableRef = "detail_ref_99999999-9999-4999-8999-999999999999";
     await persistSearchDetailTargets(directory, { ...input, search_run_ref: "run-reservable", detail_refs: [reservableRef] }, observedAt);
-    const reservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-a" }, observedAt);
+    const reservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "app-xiaohongshu-detail-reserve-a" }, observedAt);
     assert.equal(reservation.ok, true);
     assert.deepEqual(await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-b" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });
     if (!reservation.ok) throw new Error("detail target reservation failed");
     // Unknown outcomes intentionally retain this reservation until reconciliation.
     assert.equal((await inspectDetailTarget(directory, reservableRef, expected, observedAt)).ok, true);
     await releaseDetailTargetReservation(reservation.reservation);
-    const retryReservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-retry" }, observedAt);
+    const retryReservation = await reserveDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "app-xiaohongshu-detail-reserve-retry" }, observedAt);
     if (!retryReservation.ok) throw new Error("released detail target could not be reserved again");
     assert.equal((await commitDetailTargetReservation(retryReservation.reservation, observedAt)).ok, true);
     assert.deepEqual(await claimDetailTarget(directory, reservableRef, { ...expected, detail_run_ref: "run-reserve-replay" }, observedAt), { ok: false, code: "detail_ref_already_consumed" });

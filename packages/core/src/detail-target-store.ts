@@ -291,7 +291,7 @@ async function releaseBatchReservations(root: string, batchPath: string): Promis
 
 async function validateClaimReservation(reservation: DetailTargetReservation): Promise<{ root: string; binding: DetailTargetBinding }> {
   if (!isOpaqueDetailRef(reservation.detail_ref)) throw new Error("detail target reservation is invalid");
-  assertSafeRef(reservation.detail_run_ref, "run", /^(?:run[_-])[A-Za-z0-9._:-]{1,200}$/);
+  assertRunRef(reservation.detail_run_ref, "detail run");
   const root = await secureStoreRoot(reservation.directory);
   const path = claimPath(root, reservation.detail_ref);
   const claim = JSON.parse(await readNoFollow(root, path)) as { detail_ref?: unknown; detail_run_ref?: unknown };
