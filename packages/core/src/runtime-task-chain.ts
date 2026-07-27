@@ -295,7 +295,10 @@ function readOnlyResultKind(taskIntent: TaskIntentEnvelope): string {
   return `${taskIntent.capability.ref.replace(/^lode:capability\//, "")}.read_result`;
 }
 
-function operationAdmissionContract(contract: LodePackageAdmissionContract): LodePackageAdmissionContract {
+function operationAdmissionContract(
+  contract: LodePackageAdmissionContract,
+  verifiedXhsDetailInput: boolean
+): LodePackageAdmissionContract {
   const runtime = contract.runtime_consumption;
   const deferredFacts = runtime && canonicalDeferredProbeOperations.find((operation) =>
     contract.package_ref === operation.package_ref &&
@@ -314,7 +317,11 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
     runtime.consumer.issue === operation.consumer_issue &&
     runtime.consumer.purpose === operation.consumer_purpose
   )?.deferred_facts;
-  if (!deferredFacts) return contract;
+  const verifiedInputFacts = verifiedXhsDetailInput
+    ? new Set(["input.signed_note_ref.available"])
+    : undefined;
+  if (!deferredFacts && !verifiedInputFacts) return contract;
+  const excludedFacts = new Set([...(deferredFacts ?? []), ...(verifiedInputFacts ?? [])]);
   return {
     ...contract,
     resource_requirements: {
@@ -323,7 +330,7 @@ function operationAdmissionContract(contract: LodePackageAdmissionContract): Lod
         ...profile,
         ...(profile.required_harbor_facts === undefined
           ? {}
-          : { required_harbor_facts: profile.required_harbor_facts.filter((fact) => !deferredFacts.has(fact.fact_key)) })
+          : { required_harbor_facts: profile.required_harbor_facts.filter((fact) => !excludedFacts.has(fact.fact_key)) })
       }))
     }
   };
@@ -983,33 +990,47 @@ export async function submitRuntimeTask(
     operationMatch = matched;
   }
 
+  let verifiedXhsDetailInput = false;
   if (operationMatch && isXhsDetailOperation(operationMatch.runtime_consumption)) {
     const identityRef = request.harbor?.identity_environment_ref;
-    if (identityRef && typeof detailRef === "string") {
-      let inspected;
-      try {
-        inspected = await inspectDetailTargetForIdentity(store.directory, detailRef, {
-          site_slug: "xiaohongshu",
-          identity_environment_ref: identityRef
-        });
-      } catch {
-        return acceptReadOnlyTaskSubmission(store, {
-          ...base,
-          lode_package_contract,
-          lode_resolution_failure: failure("persistence_observability", "detail_ref_lookup_failed", "persistence", "retry_task")
-        });
-      }
-      if (!inspected.ok) {
-        const detailFailure = inspected.code === "detail_ref_binding_mismatch"
-          ? failure("result_projection", "site_changed", "projection", "repair_package")
-          : failure("request_invalid", "signed_ref_missing", "projection", "fix_input");
-        return acceptReadOnlyTaskSubmission(store, {
-          ...base,
-          lode_package_contract,
-          lode_resolution_failure: detailFailure
-        });
-      }
+    if (!identityRef) {
+      return acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        harbor_admission_failure: failure("resource_admission", "identity_environment_unavailable", "runtime_binding", "connect_identity_environment")
+      });
     }
+    if (typeof detailRef !== "string") {
+      return acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        lode_resolution_failure: failure("capability_contract", "detail_ref_invalid", "admission", "use_persisted_search_detail_ref")
+      });
+    }
+    let inspected;
+    try {
+      inspected = await inspectDetailTargetForIdentity(store.directory, detailRef, {
+        site_slug: "xiaohongshu",
+        identity_environment_ref: identityRef
+      });
+    } catch {
+      return acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        lode_resolution_failure: failure("persistence_observability", "detail_ref_lookup_failed", "persistence", "retry_task")
+      });
+    }
+    if (!inspected.ok) {
+      const detailFailure = inspected.code === "detail_ref_binding_mismatch"
+        ? failure("result_projection", "site_changed", "projection", "repair_package")
+        : failure("request_invalid", "signed_ref_missing", "projection", "fix_input");
+      return acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        lode_resolution_failure: detailFailure
+      });
+    }
+    verifiedXhsDetailInput = true;
   }
 
   if (!deps.harborRuntimeClient) {
@@ -1060,7 +1081,7 @@ export async function submitRuntimeTask(
       ? { ...base, lode_package_contract, harbor_admission_failure: harbor }
       : {
           ...base,
-          lode_package_contract: operationAdmissionContract(lode_package_contract),
+          lode_package_contract: operationAdmissionContract(lode_package_contract, verifiedXhsDetailInput),
           ...harbor,
           ...(preflightFailure === undefined ? {} : { harbor_admission_failure: preflightFailure })
         }
