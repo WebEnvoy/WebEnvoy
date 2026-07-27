@@ -597,7 +597,8 @@ async function writeLodeRegistry(
         operation_boundary: "read",
         required_harbor_facts: [
           "runtime.execution_surface.available", "runtime.origin.www_xiaohongshu_com.available", "identity.user_logged_in.confirmed",
-          "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "evidence.snapshot_ref.available", "safety.challenge.absent"
+          "page.vue_app.ready", "page.pinia_store.ready", "source.refs.available", "evidence.snapshot_ref.available",
+          "safety.challenge.absent", "input.signed_note_ref.available"
         ].map((fact_key) => ({ fact_key, owner: "Harbor", required: true }))
       }]
     })
@@ -1976,6 +1977,29 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       };
 
       const successfulSearch = await submitXiaohongshuSearch("success");
+      for (const [name, mutateIntent, harbor] of [
+        ["missing_identity", (intent: Record<string, unknown>) => intent, undefined],
+        ["missing_source", (intent: Record<string, unknown>) => ({
+          ...intent,
+          capability: { ...asRecord(intent.capability), source_ref: undefined }
+        }), { identity_environment_ref: "identity-env_runtime_api" }]
+      ] as const) {
+        const harborPathsBeforeMissingInput = xiaohongshuPaths.length;
+        const rejected = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_xhs_detail_${name}`,
+          package_ref: xiaohongshuDetailPackageRef,
+          task_intent: mutateIntent(xiaohongshuDetailTaskIntent(`intent_api_xhs_detail_${name}`, successfulSearch.detailRef)),
+          harbor
+        });
+        if (name === "missing_identity") {
+          const run = asRecord(asRecord(rejected.body).run);
+          assert.equal(run.status, "requires_user_action", JSON.stringify(rejected.body));
+          assert.equal(run.result_ref, undefined);
+        } else {
+          assertRejectedBeforeReadOperation(rejected.body, name);
+        }
+        assert.equal(xiaohongshuPaths.length, harborPathsBeforeMissingInput, `${name} must be rejected before Harbor admission`);
+      }
       const readsBeforeUnsafeTargets = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
       for (const [name, unsafeTarget] of [
         ["credential_url", "https://preview-user:preview-password@www.xiaohongshu.com/search_result/"],
