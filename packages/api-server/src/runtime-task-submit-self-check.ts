@@ -780,7 +780,23 @@ function createHarborMock(
           operation_mode: "read",
           observed_at: new Date().toISOString(),
           public_summary_ref: "read_result_22222222-2222-4222-8222-222222222222",
-          public_summary: { schema_version: "harbor-read-operation-public-summary/v0", operation_id: "xhs_search_notes", result_kind: "xiaohongshu_search_notes_surface", surface: "search_result", result_state: "operation_read_response_observed", response_status: 200, result_count: 1, detail_refs: [detailRefForRun(currentHolderRef)], source_signals: ["pinia_store", "xhs_search_read_network"] },
+          public_summary: {
+            schema_version: "harbor-read-operation-public-summary/v1",
+            operation_id: "xhs_search_notes",
+            result_kind: "xiaohongshu_search_notes_surface",
+            surface: "search_result",
+            result_state: "operation_read_response_observed",
+            response_status: 200,
+            result_count: 1,
+            detail_refs: [detailRefForRun(currentHolderRef)],
+            items: [{
+              detail_ref: detailRefForRun(currentHolderRef),
+              title: "城市咖啡公开笔记",
+              author_display_name: "公开作者",
+              interaction_metrics: { likes: "128", comments: "12", collects: "34" }
+            }],
+            source_signals: ["pinia_store", "xhs_search_read_network"]
+          },
           source_refs: [{ kind: "pinia_store_summary", ref: "source_11111111-1111-4111-8111-111111111111" }, { kind: "network_summary", ref: "source_22222222-2222-4222-8222-222222222222" }, { kind: "dom_snapshot_summary", ref: "source_33333333-3333-4333-8333-333333333333" }],
           evidence_refs: ["evidence_11111111-1111-4111-8111-111111111111"],
           evidence_ref_kinds: [{ kind: "snapshot_ref", ref: "evidence_11111111-1111-4111-8111-111111111111" }, { kind: "post_check_ref", ref: "post_check_11111111-1111-4111-8111-111111111111" }],
@@ -1292,7 +1308,59 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   const driftedSessionOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { runtime_session_ref: "session_other" });
   const driftedBoundaryOperationHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { public_boundary: { output: "public_summary_and_refs_only", raw_credentials: "not_exposed" } });
   const unknownOutcomeHarbor = createHarborMock(true, [], [], xiaohongshuScene, undefined, {}, readyXiaohongshuSiteFacts, { schema_version: "malformed-after-dispatch" });
-  const operationRefDriftCases: Array<{ name: string; override: JsonObject }> = [
+  const driftDetailRef = "detail_ref_99999999-9999-4999-8999-999999999999";
+  const driftSearchSummary = {
+    schema_version: "harbor-read-operation-public-summary/v1",
+    operation_id: "xhs_search_notes",
+    result_kind: "xiaohongshu_search_notes_surface",
+    surface: "search_result",
+    result_state: "operation_read_response_observed",
+    response_status: 200,
+    result_count: 1,
+    detail_refs: [driftDetailRef],
+    items: [{ detail_ref: driftDetailRef, title: "公开笔记", author_display_name: "公开作者", interaction_metrics: { likes: "10" } }],
+    source_signals: ["pinia_store", "xhs_search_read_network"]
+  };
+  const operationRefDriftCases: Array<{ name: string; override: JsonObject; expectSuccess?: boolean }> = [
+    {
+      name: "legacy_v0",
+      expectSuccess: true,
+      override: {
+        public_summary: {
+          ...driftSearchSummary,
+          schema_version: "harbor-read-operation-public-summary/v0",
+          items: undefined
+        }
+      }
+    },
+    {
+      name: "v0_with_items",
+      override: { public_summary: { ...driftSearchSummary, schema_version: "harbor-read-operation-public-summary/v0" } }
+    },
+    { name: "extra_item_field", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], raw_url: "https://example.test/xsec_token=forbidden" }] } } },
+    { name: "metrics_wrong_type", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], interaction_metrics: "xsec_token=secret" }] } } },
+    { name: "sensitive_title", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], title: "https://example.test/?xsec_token=secret" }] } } },
+    { name: "sensitive_author", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], author_display_name: "cookie=secret" }] } } },
+    { name: "sensitive_refresh_token", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], title: "refresh_token=secret" }] } } },
+    { name: "sensitive_bearer", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], author_display_name: "Bearer eyJhbGciOiJIUzI1NiJ9" }] } } },
+    { name: "sensitive_fragment_token", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], title: "https://example.test/#access_token=secret" }] } } },
+    { name: "sensitive_json_password", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], author_display_name: "\"password\":\"secret\"" }] } } },
+    { name: "overlong_title", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], title: "x".repeat(201) }] } } },
+    { name: "mismatched_item_ref", override: { public_summary: { ...driftSearchSummary, items: [{ ...driftSearchSummary.items[0], detail_ref: "detail_ref_88888888-8888-4888-8888-888888888888" }] } } },
+    {
+      name: "limit_exceeded",
+      override: {
+        public_summary: {
+          ...driftSearchSummary,
+          result_count: 2,
+          detail_refs: [driftDetailRef, "detail_ref_77777777-7777-4777-8777-777777777777"],
+          items: [
+            driftSearchSummary.items[0],
+            { detail_ref: "detail_ref_77777777-7777-4777-8777-777777777777", title: "第二条公开笔记" }
+          ]
+        }
+      }
+    },
     {
       name: "extra_source_kind",
       override: {
@@ -1889,7 +1957,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         run_id: "run_api_submit_xiaohongshu_site_facts",
         package_ref: xiaohongshuPackageRef,
         task_intent: xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_site_facts"),
-        public_query: { query: "city coffee" },
+        public_query: { query: "city coffee", limit: 1 },
         harbor: {
           identity_environment_ref: "identity-env_runtime_api",
           url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
@@ -1908,8 +1976,48 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert(xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/read-operations"));
       const readOperationBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/read-operations")?.body);
       assert.equal(readOperationBody.query, "city coffee");
+      assert.equal(readOperationBody.limit, 1);
       assert.equal(readOperationBody.url, xiaohongshuRun.scope_target_ref);
       assert.equal(JSON.stringify(readOperationBody).includes(harborSupervisorToken), false);
+      const xiaohongshuResult = asRecord((await getJson(
+        xiaohongshuPort,
+        "/runs/run_api_submit_xiaohongshu_site_facts/result"
+      )).body);
+      const xiaohongshuEnvelope = asRecord(asRecord(asRecord(xiaohongshuResult.result).result).result_envelope);
+      const xiaohongshuProjection = asRecord(asRecord(xiaohongshuEnvelope.data).projection);
+      const xiaohongshuSummary = asRecord(asRecord(xiaohongshuProjection.normalized).public_summary);
+      const xiaohongshuItems = xiaohongshuSummary.items as JsonObject[];
+      assert.equal(xiaohongshuSummary.schema_version, "harbor-read-operation-public-summary/v1");
+      assert.equal(xiaohongshuItems[0]?.title, "城市咖啡公开笔记");
+      assert.equal(xiaohongshuItems[0]?.detail_ref, (xiaohongshuSummary.detail_refs as string[])[0]);
+      const reopenedStore = createFileRunRecordStore({ directory: runDir });
+      const reopenedRun = await reopenedStore.getRunRecord("run_api_submit_xiaohongshu_site_facts");
+      const reopenedSummary = asRecord(asRecord(asRecord(reopenedRun?.public_result_summary).projection).normalized).public_summary;
+      assert.deepEqual(reopenedSummary, xiaohongshuSummary);
+      const readsBeforeInvalidLimits = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+      for (const invalidLimit of [0, 1.5, 16]) {
+        const rejectedLimit = await postJson(xiaohongshuPort, "/tasks", {
+          run_id: `run_api_submit_xiaohongshu_invalid_limit_${String(invalidLimit).replace(".", "_")}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_api_submit_xiaohongshu_invalid_limit_${invalidLimit}`),
+          public_query: { query: "city coffee", limit: invalidLimit },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: xiaohongshuRun.scope_target_ref }
+        });
+        assert.equal(rejectedLimit.status, 400, String(invalidLimit));
+        assert.equal(asRecord(asRecord(rejectedLimit.body).error).code, "public_query_invalid", String(invalidLimit));
+      }
+      const nearMatchIntent = xiaohongshuTaskIntent("intent_api_submit_xiaohongshu_near_match");
+      asRecord(nearMatchIntent.capability).ref = "lode:capability/search-note";
+      const rejectedNearMatch = await postJson(xiaohongshuPort, "/tasks", {
+        run_id: "run_api_submit_xiaohongshu_near_match",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: nearMatchIntent,
+        public_query: { query: "city coffee", limit: 1 },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: xiaohongshuRun.scope_target_ref }
+      });
+      assert.equal(rejectedNearMatch.status, 400);
+      assert.equal(asRecord(asRecord(rejectedNearMatch.body).error).code, "public_query_invalid");
+      assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeInvalidLimits);
       const xiaohongshuSessionBody = asRecord(xiaohongshuBodies.find((entry) => entry.path === "POST /runtime/identity-environment-sessions")?.body);
       assert.equal(xiaohongshuSessionBody.package_ref, xiaohongshuPackageRef);
       assert.equal(xiaohongshuSessionBody.url, xiaohongshuRun.scope_target_ref);
@@ -1938,7 +2046,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           run_id: `run_api_submit_xiaohongshu_target_${name}_drift`,
           package_ref: xiaohongshuPackageRef,
           task_intent: xiaohongshuTaskIntent(`intent_api_submit_xiaohongshu_target_${name}_drift`),
-          public_query: { query: "city coffee" },
+          public_query: { query: "city coffee", limit: 1 },
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: harborUrl }
         });
         const driftRun = asRecord(asRecord(drift.body).run);
@@ -2334,12 +2442,17 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           run_id: `run_api_submit_operation_refs_${driftCase.name}`,
           package_ref: xiaohongshuPackageRef,
           task_intent: xiaohongshuTaskIntent(`intent_api_submit_operation_refs_${driftCase.name}`),
-          public_query: { query: "city coffee" },
+          public_query: { query: "city coffee", limit: 1 },
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
         });
-        assert.equal(asRecord(drift.body).ok, false, driftCase.name);
-        assert.equal(asRecord(asRecord(drift.body).run).status, "failed", driftCase.name);
-        assert.equal(asRecord(asRecord(drift.body).run).result_ref, undefined, driftCase.name);
+        if (driftCase.expectSuccess) {
+          assert.equal(asRecord(drift.body).ok, true, driftCase.name);
+          assert.equal(asRecord(asRecord(drift.body).run).status, "succeeded", driftCase.name);
+        } else {
+          assert.equal(asRecord(drift.body).ok, false, driftCase.name);
+          assert.equal(asRecord(asRecord(drift.body).run).status, "failed", driftCase.name);
+          assert.equal(asRecord(asRecord(drift.body).run).result_ref, undefined, driftCase.name);
+        }
       }
 
       for (const [index, identityCase] of blockedIdentityCases.entries()) {
