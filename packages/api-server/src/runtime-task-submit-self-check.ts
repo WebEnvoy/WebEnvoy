@@ -280,7 +280,7 @@ function xiaohongshuTaskIntent(intentId: string): JsonObject {
       refs: ["https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"]
     },
     scope: {
-      target_type: "xiaohongshu_search",
+      target_type: "search_results_page",
       target_ref: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
     },
     policy: {
