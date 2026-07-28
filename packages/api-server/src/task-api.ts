@@ -134,7 +134,12 @@ async function validateRuntimeTaskSubmissionRequest(
   const scope = jsonObject(task_intent.scope);
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
-  const allowedPublicQueryFields = bossJobSearch ? new Set(["query", "city_code", "page", "limit"]) : new Set(["query"]);
+  const xhsSearch = package_ref === "lode://site-capability/xiaohongshu/search-notes@0.1.0" &&
+    (capability?.ref === "lode:capability/search-notes" || capability?.ref === "lode:capability/xiaohongshu-search-notes") &&
+    capability.source_ref === package_ref && scope?.target_type === "xiaohongshu_search";
+  const allowedPublicQueryFields = bossJobSearch
+    ? new Set(["query", "city_code", "page", "limit"])
+    : xhsSearch ? new Set(["query", "limit"]) : new Set(["query"]);
   const cityCode = publicQueryInput === undefined ? undefined : optionalString(publicQueryInput.city_code, "public_query_invalid");
   const page = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.page, "public_query_invalid");
   const limit = publicQueryInput === undefined ? undefined : optionalPositiveInteger(publicQueryInput.limit, "public_query_invalid");
@@ -142,7 +147,8 @@ async function validateRuntimeTaskSubmissionRequest(
     (bossJobSearch && publicQueryInput === undefined) || (publicQueryInput && (
       publicQuery === undefined || publicQuery.trim() !== publicQuery || publicQuery.length > (bossJobSearch ? 80 : 256) ||
       Object.keys(publicQueryInput).some((field) => !allowedPublicQueryFields.has(field)) ||
-      (bossJobSearch && (cityCode === undefined || !/^\d{6,32}$/.test(cityCode) || page !== 1 || limit === undefined || limit > 15))
+      (bossJobSearch && (cityCode === undefined || !/^\d{6,32}$/.test(cityCode) || page !== 1 || limit === undefined || limit > 15)) ||
+      (xhsSearch && limit !== undefined && limit > 15)
     ))) return requestInvalid("public_query_invalid");
 
   const harborInput = body.harbor === undefined ? undefined : jsonObject(body.harbor);

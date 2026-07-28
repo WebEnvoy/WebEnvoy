@@ -101,7 +101,7 @@ type HarborRuntimeAdmissionResult = HarborAdmissionInput | FailureRecord | Harbo
 
 export type HarborRuntimeClient = {
   collectAdmissionFacts(input: HarborRuntimeAdmissionRequest): Promise<HarborRuntimeAdmissionResult>;
-  executeReadOperation(input: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
+  executeReadOperation(input: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
   releaseCoreTaskSession(input: { runtime_session_ref: string; run_id: string }): Promise<FailureRecord | undefined>;
 };
 
@@ -446,10 +446,63 @@ function projectionFromReadOperation(taskIntent: TaskIntentEnvelope, packageRef:
   };
 }
 
+function validXhsSearchSummary(
+  summary: JsonObject | undefined,
+  detailRefs: unknown[],
+  requestedLimit: number | undefined
+): boolean {
+  if (
+    summary == null ||
+    !Number.isInteger(summary.result_count) ||
+    summary.result_count !== detailRefs.length ||
+    detailRefs.length === 0 ||
+    detailRefs.length > Math.min(requestedLimit ?? 15, 15) ||
+    new Set(detailRefs).size !== detailRefs.length ||
+    !detailRefs.every(isOpaqueDetailRef)
+  ) return false;
+
+  if (summary.schema_version === "harbor-read-operation-public-summary/v0") {
+    return summary.items === undefined;
+  }
+  if (summary.schema_version !== "harbor-read-operation-public-summary/v1") return false;
+
+  const items = Array.isArray(summary.items) ? summary.items.map(object) : [];
+  const itemKeys = new Set(["detail_ref", "title", "author_display_name", "interaction_metrics"]);
+  const metricKeys = new Set(["likes", "comments", "collects"]);
+  const bounded = (value: unknown, max: number) =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= max &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+  const safePublicText = (value: unknown, max: number) =>
+    bounded(value, max) &&
+    !/(?:^|[^a-z0-9_-])(?:[a-z0-9_-]*token|cookie|authorization|password|passwd|secret|credential|profile[_-]?storage|raw[_-]?(?:dom|har)|network[_-]?response[_-]?body)\s*[=:]\s*\S+/i.test(value as string) &&
+    !/\bbearer\s+\S+/i.test(value as string);
+  const optionalPublicText = (value: unknown, max: number) => value === undefined || safePublicText(value, max);
+
+  return items.length === detailRefs.length && items.every((item, index) => {
+    if (!item || Object.keys(item).some((key) => !itemKeys.has(key)) || item.detail_ref !== detailRefs[index] || !safePublicText(item.title, 200)) {
+      return false;
+    }
+    if (!optionalPublicText(item.author_display_name, 100)) return false;
+    const metrics = object(item.interaction_metrics);
+    if (item.interaction_metrics !== undefined && metrics === undefined) return false;
+    return metrics === undefined || (
+      Object.keys(metrics).length > 0 &&
+      Object.keys(metrics).every((key) => metricKeys.has(key)) &&
+      [...metricKeys].every((key) =>
+        metrics[key] === undefined ||
+        (bounded(metrics[key], 40) && /^[0-9０-９.,+\-\s万千百wWkKmM]+$/u.test(metrics[key] as string))
+      )
+    );
+  });
+}
+
 function validateCompletedReadOperation(
   value: unknown,
   entry: LodeRuntimeConsumptionEntry,
-  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; detail_ref?: string }
+  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string }
 ): JsonObject | undefined {
   const operation = object(value);
   const pin = object(operation?.lode_pin);
@@ -477,7 +530,7 @@ function validateCompletedReadOperation(
         sourceSignals: ["pinia_note_store_ready", "xhs_note_detail_document", "xhs_note_detail_rendered"]
       }
       : {
-        keys: ["schema_version", "operation_id", "result_kind", "surface", "result_state", "response_status", "result_count", "detail_refs", "source_signals"],
+        keys: ["schema_version", "operation_id", "result_kind", "surface", "result_state", "response_status", "result_count", "detail_refs", "items", "source_signals"],
         resultKind: "xiaohongshu_search_notes_surface",
         surface: "search_result",
         sourceSignals: ["pinia_store", "xhs_search_read_network"]
@@ -514,15 +567,18 @@ function validateCompletedReadOperation(
     (normalized.source_status === "located" || normalized.source_status === "partially_located") &&
     !/(xsec|cookie|token|profile_storage|raw_dom|raw_har|network_response_body|screenshot_body)/i.test(JSON.stringify(normalized))
   );
+  const validSearchSummary = entry.operation_id !== "xhs_search_notes" ||
+    validXhsSearchSummary(publicSummary, detailRefs, requested.limit);
   if (
     operation?.schema_version !== "harbor-allowlisted-read-operation/v0" || operation.status !== "completed" ||
     !opaqueRef(operation.operation_ref) || !opaqueRef(operation.public_summary_ref) || !publicSummary || Object.keys(publicSummary).some((key) => !summaryKeys.has(key)) ||
-    publicSummary.schema_version !== "harbor-read-operation-public-summary/v0" || publicSummary.operation_id !== entry.operation_id ||
+    (entry.operation_id !== "xhs_search_notes" && publicSummary.schema_version !== "harbor-read-operation-public-summary/v0") ||
+    publicSummary.operation_id !== entry.operation_id ||
     publicSummary.result_kind !== expectedSummary.resultKind || publicSummary.surface !== expectedSummary.surface ||
     publicSummary.result_state !== "operation_read_response_observed" || typeof publicSummary.response_status !== "number" || publicSummary.response_status < 200 || publicSummary.response_status >= 300 ||
     sourceSignals.length !== expectedSummary.sourceSignals.length || !expectedSummary.sourceSignals.every((signal, index) => sourceSignals[index] === signal) ||
     (entry.operation_id === "boss_job_search" && (publicSummary.query !== requested.query || publicSummary.city_code !== requested.city_code || publicSummary.business_code !== 0 || !Number.isInteger(publicSummary.job_count) || (publicSummary.job_count as number) <= 0)) ||
-    (!detailOperation && entry.operation_id === "xhs_search_notes" && (!Number.isInteger(publicSummary.result_count) || publicSummary.result_count !== detailRefs.length || detailRefs.length === 0 || detailRefs.length > 15 || new Set(detailRefs).size !== detailRefs.length || !detailRefs.every(isOpaqueDetailRef))) ||
+    !validSearchSummary ||
     !validDetailSummary ||
     operation.runtime_session_ref !== requested.runtime_session_ref || operation.site_id !== requested.site_id || operation.operation_id !== requested.operation_id ||
     operation.site_id !== entry.site_slug || operation.operation_id !== entry.operation_id || operation.operation_mode !== "read" ||
@@ -678,7 +734,7 @@ async function completeAcceptedReadOperation(
   packageRef: string,
   entry: LodeRuntimeConsumptionEntry,
   operation: unknown,
-  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; detail_ref?: string; identity_environment_ref?: string }
+  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; identity_environment_ref?: string }
 ): Promise<TaskSubmissionResult> {
   const completedOperation = validateCompletedReadOperation(operation, entry, requested);
   if (!completedOperation) {
@@ -1190,6 +1246,7 @@ export async function submitRuntimeTask(
       detailReservation = reserved.reservation;
     }
     const cityCode = runtimeConsumption.operation_id === "boss_job_search" ? request.public_query?.city_code : undefined;
+    const limit = request.public_query?.limit;
     let operation: unknown;
     const operationController = new AbortController();
     const operationTimeout = request.harbor?.timeout_ms;
@@ -1203,6 +1260,7 @@ export async function submitRuntimeTask(
         operation_id: runtimeConsumption.operation_id,
         ...(detailOperation ? { detail_ref: detailRef as string } : { query: query as string }),
         ...(cityCode === undefined ? {} : { city_code: cityCode }),
+        ...(limit === undefined ? {} : { limit }),
         ...(!detailOperation && operationMatch ? { url: operationMatch.selection.target_ref } : {}),
         signal: operationController.signal
       });
@@ -1240,6 +1298,7 @@ export async function submitRuntimeTask(
       operation_id: runtimeConsumption.operation_id,
       ...(detailOperation ? { detail_ref: detailRef as string } : { query: query as string }),
       ...(cityCode === undefined ? {} : { city_code: cityCode }),
+      ...(limit === undefined ? {} : { limit }),
       ...(request.harbor?.identity_environment_ref === undefined ? {} : { identity_environment_ref: request.harbor.identity_environment_ref })
     };
     if (detailReservation) {
@@ -1719,6 +1778,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
             operation_id: input.operation_id,
             ...(input.query === undefined ? {} : { query: input.query }),
             ...(input.city_code === undefined ? {} : { city_code: input.city_code }),
+            ...(input.limit === undefined ? {} : { limit: input.limit }),
             ...(input.detail_ref === undefined ? {} : { detail_ref: input.detail_ref }),
             ...(input.detail_ref !== undefined || input.url === undefined ? {} : { url: input.url })
           })
