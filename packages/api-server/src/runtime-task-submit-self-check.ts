@@ -232,11 +232,11 @@ async function readRequestJson(request: IncomingMessage): Promise<JsonObject> {
   return asRecord(JSON.parse(Buffer.concat(chunks).toString("utf8")));
 }
 
-function taskIntent(intentId: string): JsonObject {
+function taskIntent(intentId: string, entrypoint = "app"): JsonObject {
   return {
     schema_version: "webenvoy.task-intent.v0",
     intent_id: intentId,
-    entrypoint: "app",
+    entrypoint,
     user_intent: { summary: "Read Example Domain through a real Harbor runtime session." },
     capability: {
       ref: "lode:capability/read-public-page",
@@ -1840,6 +1840,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(sessionBody.package_ref, packageRef);
       assert.equal(sessionBody.holder_ref, "run_api_submit_runtime_chain");
       assert.equal(sessionBody.url, "https://example.org/");
+      assert.equal(sessionBody.headless, false);
       const snapshotBody = asRecord(bodies.find((entry) => entry.path === "POST /runtime/sessions/session_runtime_api_ready/snapshot")?.body);
       assert.equal(snapshotBody.run_id, "run_api_submit_runtime_chain");
       assert.equal(snapshotBody.package_ref, packageRef);
@@ -1867,6 +1868,22 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(capabilityRuns.status, 200);
       const statusCounts = asRecord(asRecord(asRecord(capabilityRuns.body).capability_runs).status_counts);
       assert.equal(statusCounts.succeeded, 1);
+
+      const apiSubmit = await postJson(port, "/tasks", {
+        run_id: "run_api_submit_headless_runtime_chain",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_headless_runtime_chain", "api"),
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://example.org/"
+        }
+      });
+      assert.equal(apiSubmit.status, 202);
+      const apiSessionBody = asRecord(bodies.find((entry) =>
+        entry.path === "POST /runtime/identity-environment-sessions" &&
+        asRecord(entry.body).run_id === "run_api_submit_headless_runtime_chain"
+      )?.body);
+      assert.equal(apiSessionBody.headless, true);
 
       const xiaohongshuSubmit = await postJson(xiaohongshuPort, "/tasks", {
         run_id: "run_api_submit_xiaohongshu_site_facts",
