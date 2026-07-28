@@ -136,7 +136,7 @@ async function validateRuntimeTaskSubmissionRequest(
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
   const xhsSearch = package_ref === "lode://site-capability/xiaohongshu/search-notes@0.1.0" &&
     (capability?.ref === "lode:capability/search-notes" || capability?.ref === "lode:capability/xiaohongshu-search-notes") &&
-    capability.source_ref === package_ref && scope?.target_type === "xiaohongshu_search";
+    capability.source_ref === package_ref && scope?.target_type === "search_results_page";
   const allowedPublicQueryFields = bossJobSearch
     ? new Set(["query", "city_code", "page", "limit"])
     : xhsSearch ? new Set(["query", "limit"]) : new Set(["query"]);

@@ -516,6 +516,24 @@ async function assertDegradedProcessSmoke(): Promise<void> {
       assert.equal(response.status, 400, name);
       assert.equal(asRecord(asRecord(response.body).error).code, "public_query_invalid", name);
     }
+    const declaredXhsIntent = taskIntent("intent_process_xhs_declared_target");
+    declaredXhsIntent.capability = {
+      ref: "lode:capability/search-notes",
+      version: "0.1.0",
+      source_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0"
+    };
+    declaredXhsIntent.scope = {
+      target_type: "search_results_page",
+      target_ref: "https://www.xiaohongshu.com/search_result?keyword=coffee"
+    };
+    const declaredXhsQuery = await postJson(port, "/tasks", {
+      run_id: "run_process_xhs_declared_target",
+      package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      task_intent: declaredXhsIntent,
+      public_query: { query: "coffee", limit: 15 }
+    });
+    assert.equal(declaredXhsQuery.status, 422, JSON.stringify(declaredXhsQuery.body));
+    assert.equal(asRecord(asRecord(declaredXhsQuery.body).error).code, "lode_resolver_unconfigured");
   } catch (error) {
     console.error(output());
     throw error;
