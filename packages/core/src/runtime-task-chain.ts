@@ -88,6 +88,7 @@ export type HarborRuntimeAdmissionRequest = {
   package_ref: string;
   admission_mode?: "read" | "write_precheck";
   harbor?: RuntimeTaskSubmissionRequest["harbor"];
+  runtime_session_ref?: string;
 };
 
 type HarborAdmissionCollectionFailure = {
@@ -1047,6 +1048,7 @@ export async function submitRuntimeTask(
   }
 
   let verifiedXhsDetailInput = false;
+  let xhsDetailRuntimeSessionRef: string | undefined;
   if (operationMatch && isXhsDetailOperation(operationMatch.runtime_consumption)) {
     const identityRef = request.harbor?.identity_environment_ref;
     if (!identityRef) {
@@ -1087,6 +1089,7 @@ export async function submitRuntimeTask(
       });
     }
     verifiedXhsDetailInput = true;
+    xhsDetailRuntimeSessionRef = inspected.binding.runtime_session_ref;
   }
 
   if (!deps.harborRuntimeClient) {
@@ -1115,7 +1118,8 @@ export async function submitRuntimeTask(
       task_intent: validatedTaskIntent,
       package_ref,
       admission_mode: validatedTaskIntent.policy.risk === "write" ? "write_precheck" : "read",
-      harbor: operationHarbor
+      harbor: operationHarbor,
+      ...(xhsDetailRuntimeSessionRef === undefined ? {} : { runtime_session_ref: xhsDetailRuntimeSessionRef })
     });
   } catch {
     harborResult = failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime");
@@ -1681,17 +1685,23 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         publicIdentity = validatedIdentity;
       }
 
-      const session = await requestJson("POST", "/runtime/identity-environment-sessions", {
-        identity_environment_ref: identityRef,
-        url: taskTargetUrl,
-        run_id: input.run_id,
-        package_ref: input.package_ref,
-        control_owner: "core_task",
-        headless: object(input.task_intent)?.entrypoint !== "app",
-        holder_ref: input.run_id,
-        reuse_existing: input.harbor?.reuse_existing ?? true,
-        timeout_ms: input.harbor?.timeout_ms
-      });
+      const session = input.runtime_session_ref === undefined
+        ? await requestJson("POST", "/runtime/identity-environment-sessions", {
+            identity_environment_ref: identityRef,
+            url: taskTargetUrl,
+            run_id: input.run_id,
+            package_ref: input.package_ref,
+            control_owner: "core_task",
+            headless: object(input.task_intent)?.entrypoint !== "app",
+            holder_ref: input.run_id,
+            reuse_existing: input.harbor?.reuse_existing ?? true,
+            timeout_ms: input.harbor?.timeout_ms
+          })
+        : await requestJson(
+            "POST",
+            `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/lock`,
+            { control_owner: "core_task", holder_ref: input.run_id }
+          );
       if (isFailure(session)) return session;
 
       const sessionIdentity = identityFactsFromSession(session);
@@ -1702,9 +1712,9 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         ? validatedSessionIdentity
         : publicIdentity;
       const runtime = coreRuntimeFactsFromSession(session, identity);
-      const openedSessionRef = isFailure(runtime)
+      const openedSessionRef = input.runtime_session_ref ?? (isFailure(runtime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
-        : runtime.runtime_session_ref;
+        : runtime.runtime_session_ref);
       const failAfterSession = async (primary: FailureRecord): Promise<FailureRecord | HarborAdmissionCollectionFailure> => {
         if (!openedSessionRef) return primary;
         const cleanup = await releaseCoreTaskSession({ runtime_session_ref: openedSessionRef, run_id: input.run_id });
@@ -1719,6 +1729,9 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       if (sessionFailure) return failAfterSession(sessionFailure);
       if (isFailure(validatedSessionIdentity)) return failAfterSession(validatedSessionIdentity);
       if (isFailure(runtime)) return failAfterSession(runtime);
+      if (input.runtime_session_ref !== undefined && runtime.runtime_session_ref !== input.runtime_session_ref) {
+        return failAfterSession(failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime"));
+      }
       const runtimeSessionRef = runtime.runtime_session_ref;
       const siteTask = siteTaskFromPackageRef(input.package_ref);
       const siteResourceFacts = siteTask === undefined
