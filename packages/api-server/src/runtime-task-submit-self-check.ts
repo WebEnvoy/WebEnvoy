@@ -725,6 +725,25 @@ function createHarborMock(
         });
         return;
       }
+      if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/lock`) {
+        currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
+        if (currentHolderRef.includes("session_missing")) {
+          sendJson(response, 404, { status: "unavailable", failure_class: "session_missing", retryable: false });
+          return;
+        }
+        if (currentHolderRef.includes("lock_conflict")) {
+          sendJson(response, 409, { status: "unavailable", failure_class: "session_locked", retryable: true });
+          return;
+        }
+        cleanupState = "held";
+        sendJson(response, 200, {
+          identity_environment_facts: liveSessionIdentity(sessionSiteId, sessionOrigin),
+          runtime_facts: liveRuntimeFacts(currentHolderRef.includes("session_ref_mismatch")
+            ? { runtime_session_ref: "session_unbound" }
+            : {})
+        });
+        return;
+      }
       if (request.method === "GET" && request.url === `/runtime/sessions/${sessionRef}`) {
         if (cleanupBehavior === "hang") return;
         if (cleanupBehavior === "owner_none_held") {
@@ -2146,6 +2165,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         assert.equal(JSON.stringify(rejectedTarget.body).includes("preview-password"), false, name);
       }
       assert.equal(xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length, readsBeforeUnsafeTargets);
+      const sessionsBeforeSuccessfulDetail = xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length;
       const successfulDetail = await submitXiaohongshuDetail("success", successfulSearch.detailRef);
       assert.equal(successfulDetail.status, 202, JSON.stringify(successfulDetail.body));
       const successfulDetailRun = asRecord(asRecord(successfulDetail.body).run);
@@ -2168,6 +2188,39 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.equal(successfulDetailRead.detail_ref, successfulSearch.detailRef);
       assert.equal(successfulDetailRead.query, undefined);
       assert.equal(successfulDetailRead.url, undefined);
+      assert.equal(
+        xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length,
+        sessionsBeforeSuccessfulDetail,
+        "detail read must not create a second identity session"
+      );
+      assert(
+        xiaohongshuPaths.includes("POST /runtime/sessions/session_runtime_api_ready/lock"),
+        "detail read must reacquire the search result's exact runtime session"
+      );
+      for (const name of ["session_missing", "lock_conflict", "session_ref_mismatch"] as const) {
+        const search = await submitXiaohongshuSearch(`reacquire_${name}`);
+        const sessionsBeforeFailure = xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length;
+        const readsBeforeFailure = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
+        const pathsBeforeFailure = xiaohongshuPaths.length;
+        const rejected = await submitXiaohongshuDetail(name, search.detailRef);
+        assertNoSuccessRefs(rejected.body, name);
+        assert.equal(
+          xiaohongshuBodies.filter((entry) => entry.path === "POST /runtime/identity-environment-sessions").length,
+          sessionsBeforeFailure,
+          `${name} must not fall back to a new identity session`
+        );
+        assert.equal(
+          xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length,
+          readsBeforeFailure,
+          `${name} must fail before the detail operation`
+        );
+        if (name === "session_ref_mismatch") {
+          assert(
+            xiaohongshuPaths.slice(pathsBeforeFailure).includes("POST /runtime/sessions/session_runtime_api_ready/release"),
+            "a mismatched lock response must release the originally bound session"
+          );
+        }
+      }
 
       const readOperationsBeforeForgedRefs = xiaohongshuBodies.filter((entry) => entry.path.endsWith("/read-operations")).length;
       for (const [name, forgedRef] of [
