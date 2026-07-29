@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
-import { type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
+import { validateHarborAdmission, type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithPreviewResult, completeRunWithResult } from "./result-envelope.js";
 import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
@@ -584,6 +584,51 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
     assert.equal(busySession.ok, false);
     assert.equal(busySession.failure.code, "runtime_session_busy");
     assert.equal(busySession.run_record?.admission.runtime_session_binding?.session_use, "agent_direct_browsing");
+
+    const lockedByAgent = await acceptReadOnlyTaskSubmission(store, {
+      run_id: "run_self_check_runtime_locked_by_agent",
+      task_intent: taskIntent,
+      package_ref: lodeReadPublicPageContract.package_ref,
+      lode_package_contract: lodeReadPublicPageContract,
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
+      harbor_runtime_facts: {
+        ...harborRuntimeFacts,
+        lifecycle_state: "locked",
+        control: { ...harborRuntimeFacts.control, owner: "agent" }
+      },
+      harbor_scene_ref: harborSceneRef,
+      harbor_resource_facts: harborResourceFacts
+    });
+    assert.equal(lockedByAgent.ok, false);
+    assert.equal(lockedByAgent.failure.code, "runtime_session_busy");
+
+    const lockedCoreRuntimeFacts = {
+      ...harborRuntimeFacts,
+      lifecycle_state: "locked",
+      control: { ...harborRuntimeFacts.control, owner: "core_task", lock_owner: "core_task" }
+    };
+    const lockedCoreInput = {
+      harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+      harbor_provider_status: harborProviderStatus,
+      harbor_runtime_facts: lockedCoreRuntimeFacts,
+      harbor_scene_ref: harborSceneRef,
+      harbor_write_precheck_facts: harborWritePrecheckFacts,
+      harbor_resource_facts: harborResourceFacts
+    };
+    assert.equal(validateHarborAdmission(lockedCoreInput, "read").ok, true);
+    const lockedWritePrecheck = validateHarborAdmission(lockedCoreInput, "write_precheck");
+    assert.equal(lockedWritePrecheck.ok, false);
+    assert.equal(lockedWritePrecheck.failure.code, "runtime_session_busy");
+    const mismatchedLockOwner = validateHarborAdmission({
+      ...lockedCoreInput,
+      harbor_runtime_facts: {
+        ...lockedCoreRuntimeFacts,
+        control: { ...lockedCoreRuntimeFacts.control, lock_owner: "agent" }
+      }
+    }, "read");
+    assert.equal(mismatchedLockOwner.ok, false);
+    assert.equal(mismatchedLockOwner.failure.code, "runtime_session_busy");
 
     const rawEndpointRejected = await acceptReadOnlyTaskSubmission(store, {
       run_id: "run_self_check_raw_endpoint_rejected",

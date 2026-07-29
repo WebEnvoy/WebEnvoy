@@ -740,7 +740,7 @@ function createHarborMock(
           identity_environment_facts: liveSessionIdentity(sessionSiteId, sessionOrigin),
           runtime_facts: liveRuntimeFacts(currentHolderRef.includes("session_ref_mismatch")
             ? { runtime_session_ref: "session_unbound" }
-            : {})
+            : { lifecycle_state: "locked" })
         });
         return;
       }

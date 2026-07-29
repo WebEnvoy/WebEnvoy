@@ -501,7 +501,11 @@ export function projectHarborPublicIdentityEnvironmentRecord(
   };
 }
 
-function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime_facts"], identity: HarborIdentityEnvironmentFacts): RuntimeAdmission {
+function validateRuntimeFacts(
+  runtimeFacts: HarborAdmissionInput["harbor_runtime_facts"],
+  identity: HarborIdentityEnvironmentFacts,
+  mode: HarborAdmissionMode
+): RuntimeAdmission {
   if (!runtimeFacts) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
   }
@@ -523,6 +527,7 @@ function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime
   const availability = contractObject(runtime?.availability) ?? {};
   const viewerRef = contractString(viewer?.viewer_ref);
   const controlOwner = contractString(control?.owner) ?? "unknown";
+  const lockOwner = contractString(control?.lock_owner);
   const takeover = contractObject(control?.takeover);
 
   if (runtime?.schema_version !== "harbor-core-runtime-facts/v0" || !runtimeSessionRef || !profileRef || !providerRef || !providerMode || !lifecycleState || !viewerRef) {
@@ -538,7 +543,11 @@ function validateRuntimeFacts(runtimeFacts: HarborAdmissionInput["harbor_runtime
   if (factRefs?.session !== runtimeSessionRef || factRefs.viewer !== viewerRef) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
   }
-  if (!activeRuntimeStates.has(lifecycleState)) {
+  const coreOwnedReadLock = mode === "read" &&
+    lifecycleState === "locked" &&
+    controlOwner === "core_task" &&
+    (lockOwner === undefined || lockOwner === "core_task");
+  if (!activeRuntimeStates.has(lifecycleState) && !coreOwnedReadLock) {
     return { ok: false, failure: failure("resource_admission", runtimeExpiredCode(lifecycleState), "runtime_binding", lifecycleState === "locked" ? "wait_or_request_handoff" : "connect_runtime") };
   }
   const binding: RuntimeSessionBindingFacts = {
@@ -763,7 +772,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: providerStatusFailure };
   }
 
-  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity);
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode);
   if (!runtime.ok) {
     return {
       ok: false,
