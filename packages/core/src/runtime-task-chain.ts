@@ -102,7 +102,7 @@ type HarborRuntimeAdmissionResult = HarborAdmissionInput | FailureRecord | Harbo
 
 export type HarborRuntimeClient = {
   collectAdmissionFacts(input: HarborRuntimeAdmissionRequest): Promise<HarborRuntimeAdmissionResult>;
-  executeReadOperation(input: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
+  executeReadOperation(input: { runtime_session_ref: string; holder_ref?: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
   releaseCoreTaskSession(input: { runtime_session_ref: string; run_id: string }): Promise<FailureRecord | undefined>;
 };
 
@@ -1260,6 +1260,7 @@ export async function submitRuntimeTask(
     try {
       operation = await deps.harborRuntimeClient.executeReadOperation({
         runtime_session_ref: runtimeSessionRef,
+        holder_ref: request.run_id,
         site_id: runtimeConsumption.site_slug,
         operation_id: runtimeConsumption.operation_id,
         ...(detailOperation ? { detail_ref: detailRef as string } : { query: query as string }),
@@ -1787,6 +1788,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
           headers: { ...authorization, "content-type": "application/json" },
           ...(input.signal === undefined ? {} : { signal: input.signal }),
           body: JSON.stringify({
+            ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
             site_id: input.site_id,
             operation_id: input.operation_id,
             ...(input.query === undefined ? {} : { query: input.query }),

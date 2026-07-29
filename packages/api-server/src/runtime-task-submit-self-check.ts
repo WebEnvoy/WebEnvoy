@@ -2185,6 +2185,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       const successfulDetailRead = asRecord(xiaohongshuBodies.find((entry) =>
         entry.path.endsWith("/read-operations") && entry.body.operation_id === "xhs_read_note_detail" && entry.body.detail_ref === successfulSearch.detailRef
       )?.body);
+      assert.equal(successfulDetailRead.holder_ref, "run_api_xhs_detail_success");
       assert.equal(successfulDetailRead.detail_ref, successfulSearch.detailRef);
       assert.equal(successfulDetailRead.query, undefined);
       assert.equal(successfulDetailRead.url, undefined);
