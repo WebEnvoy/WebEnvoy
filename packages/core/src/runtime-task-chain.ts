@@ -2077,13 +2077,16 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         );
         if (canonicalRuntimeResponse.kind === "failure") return failAfterSession(canonicalRuntimeResponse.failure);
         if (canonicalRuntimeResponse.kind === "payload") {
-          const canonicalRuntime = coreRuntimeFactsFromSession(canonicalRuntimeResponse.value, identity);
+          const canonicalRuntime = coreRuntimeFactsFromSession(canonicalRuntimeResponse.value, identity, "canonical");
           if (isFailure(canonicalRuntime)) return failAfterSession(canonicalRuntime);
           runtime = canonicalRuntime;
           runtimeFactsSource = "canonical";
         }
       }
-      if (input.runtime_session_ref !== undefined && runtime.runtime_session_ref !== input.runtime_session_ref) {
+      if (
+        (openedSessionRef !== undefined && runtime.runtime_session_ref !== openedSessionRef) ||
+        (input.runtime_session_ref !== undefined && runtime.runtime_session_ref !== input.runtime_session_ref)
+      ) {
         return failAfterSession(failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime"));
       }
       const runtimeSessionRef = runtime.runtime_session_ref;
@@ -2308,7 +2311,14 @@ function identityFactsFromSession(value: unknown): HarborIdentityEnvironmentFact
   return direct?.schema_version === "harbor-local-identity-environment/v0" ? (direct as HarborIdentityEnvironmentFacts) : undefined;
 }
 
-function coreRuntimeFactsFromSession(value: unknown, identity: HarborIdentityEnvironmentFacts | undefined): HarborCoreRuntimeFacts | FailureRecord {
+function coreRuntimeFactsFromSession(
+  value: unknown,
+  identity: HarborIdentityEnvironmentFacts | undefined,
+  source: "session" | "canonical" = "session"
+): HarborCoreRuntimeFacts | FailureRecord {
+  if (source === "canonical" && object(value)?.schema_version !== "harbor-core-runtime-facts/v0") {
+    return failure("resource_admission", "runtime_contract_invalid", "runtime_binding", "connect_runtime");
+  }
   const direct = pickObject(value, "harbor_runtime_facts", "core_runtime_facts", "runtime_facts", "session");
   if (!direct) return failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime");
   if (direct.status === "unavailable") return failure("resource_admission", string(direct.failure_class) ?? "runtime_session_unavailable", "runtime_binding", "connect_runtime");

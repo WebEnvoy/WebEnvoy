@@ -1407,6 +1407,55 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     {},
     liveRuntimeFacts()
   );
+  const canonicalRuntimeSessionMismatchPaths: string[] = [];
+  const canonicalRuntimeSessionMismatchHarbor = createHarborMock(
+    true,
+    canonicalRuntimeSessionMismatchPaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts,
+    {},
+    {},
+    "success",
+    {},
+    liveRuntimeFacts({
+      runtime_session_ref: "session_runtime_api_other",
+      fact_refs: { session: "session_runtime_api_other", viewer: "viewer_runtime_api" }
+    })
+  );
+  const legacyCanonicalRuntimeFacts: JsonObject = {
+    schema_version: "harbor-runtime-facts/v0",
+    runtime_session_ref: "session_runtime_api_ready",
+    identity_environment_ref: "identity-env_runtime_api",
+    execution_identity_ref: "identity-env_runtime_api:execution",
+    profile_ref: "profile_runtime_api",
+    provider_ref: "harbor:provider/cloakbrowser",
+    provider_mode: "local_dedicated_profile",
+    lifecycle_state: "active",
+    availability: { cdp: "available", viewer: "unsupported", snapshot: "available", evidence: "available" },
+    viewer_ref: "viewer_runtime_api",
+    viewer_entry: { availability: "unsupported", access_mode: "none" },
+    control_owner: "core_task",
+    control_lock: { owner: "core_task", updated_at: "2026-07-08T00:00:00.000Z" },
+    current_error: null
+  };
+  const legacyCanonicalRuntimePaths: string[] = [];
+  const legacyCanonicalRuntimeHarbor = createHarborMock(
+    true,
+    legacyCanonicalRuntimePaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts,
+    {},
+    {},
+    "success",
+    {},
+    legacyCanonicalRuntimeFacts
+  );
   const unsupportedRuntimePaths: string[] = [];
   const unsupportedRuntimeHarbor = createHarborMock(
     true,
@@ -1746,6 +1795,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
     const strictSearchHarborPort = await listen(strictSearchHarbor);
     const canonicalRuntimeHarborPort = await listen(canonicalRuntimeHarbor);
+    const canonicalRuntimeSessionMismatchHarborPort = await listen(canonicalRuntimeSessionMismatchHarbor);
+    const legacyCanonicalRuntimeHarborPort = await listen(legacyCanonicalRuntimeHarbor);
     const unsupportedRuntimeHarborPort = await listen(unsupportedRuntimeHarbor);
     const legacyRuntimeHarborPort = await listen(legacyRuntimeHarbor);
     const bossHarborPort = await listen(bossHarbor);
@@ -2035,6 +2086,17 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       if ("category" in unsupportedAdmission || "kind" in unsupportedAdmission) throw new Error("unsupported runtime facts fallback failed");
       const unsupportedFacts = unsupportedAdmission as { runtime_facts_source?: string };
       assert.equal(unsupportedFacts.runtime_facts_source, "legacy");
+      const canonicalSessionMismatch = await collectAdmission(`http://127.0.0.1:${canonicalRuntimeSessionMismatchHarborPort}`, "run_canonical_runtime_session_mismatch");
+      assert.equal("category" in canonicalSessionMismatch, true);
+      if (!("category" in canonicalSessionMismatch)) throw new Error("canonical runtime session mismatch unexpectedly admitted");
+      assert.equal(canonicalSessionMismatch.code, "runtime_ref_mismatch");
+      assert(canonicalRuntimeSessionMismatchPaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
+      assert.equal(canonicalRuntimeSessionMismatchPaths.includes("POST /runtime/sessions/session_runtime_api_other/release"), false);
+      const legacyCanonical = await collectAdmission(`http://127.0.0.1:${legacyCanonicalRuntimeHarborPort}`, "run_legacy_shaped_canonical_runtime_facts");
+      assert.equal("category" in legacyCanonical, true);
+      if (!("category" in legacyCanonical)) throw new Error("legacy-shaped canonical runtime facts unexpectedly admitted");
+      assert.equal(legacyCanonical.code, "runtime_contract_invalid");
+      assert(legacyCanonicalRuntimePaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
       assert(canonicalRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
       assert(unsupportedRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
       assert(legacyRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
@@ -3146,6 +3208,8 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(xiaohongshuHarbor);
     await close(strictSearchHarbor);
     await close(canonicalRuntimeHarbor);
+    await close(canonicalRuntimeSessionMismatchHarbor);
+    await close(legacyCanonicalRuntimeHarbor);
     await close(unsupportedRuntimeHarbor);
     await close(legacyRuntimeHarbor);
     await close(bossHarbor);
