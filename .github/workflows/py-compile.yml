@@ -2,10 +2,6 @@ name: Python compile
 
 on:
   pull_request:
-    paths:
-      - "Makefile"
-      - "**/*.py"
-      - ".github/workflows/py-compile.yml"
     types: [opened, synchronize, reopened]
   merge_group:
 
