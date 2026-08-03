@@ -35,7 +35,8 @@ navigation-ack hang, was interrupted, and left no residual process.
 No real account, browser profile, production page, credential/cookie/token/raw
 DOM/HAR, submit/publish/send action, signing, notarization, publication, deploy,
 source archive, or source deletion was used. This is a local `no_release` record;
-the generated UI screenshots are smoke outputs, not release artifacts.
+the smoke screenshots were generated as local fixtures, then restored to the
+committed fixture state; they are not retained or hashed as release artifacts.
 
 ## Rollback rehearsal
 

@@ -53,28 +53,12 @@
         "sha256": "da7aa536363aa1feba56173b5b740aa4c11e7a1a58cfc248d6391f90e6378e52"
       }
     ],
-    "smoke_outputs": [
-      {
-        "variant": "packaged",
-        "path": "apps/desktop/artifacts/gh-168-packaged-preview.png",
-        "sha256": "ad00a08e9dd95ad3a35e09788ec2b67eabb1a15ad5d3e22c969809bb7d58c240"
-      },
-      {
-        "variant": "packaged_vertical",
-        "path": "apps/desktop/artifacts/app-261-packaged-vertical-smoke.png",
-        "sha256": "64c5b8e7989da4dff070d4709bd3ff5689bbe48846efbfade75815a878d5da6e"
-      },
-      {
-        "variant": "packaged_runtime",
-        "path": "apps/desktop/artifacts/app-265-packaged-runtime-smoke.png",
-        "sha256": "1df1213eeec44926f8691bd999a34e8671f7302c252571b6f44b0f04523a7775"
-      },
-      {
-        "variant": "packaged_readonly",
-        "path": "apps/desktop/artifacts/app-265-packaged-readonly-smoke.png",
-        "sha256": "b32d1d1906e24ac76ee13a7eea8d08a785a4ef42ce3153c39e6f6dffa61d10ac"
-      }
-    ]
+    "smoke_outputs": {
+      "retained": false,
+      "classification": "local_fixture_only",
+      "variants": ["packaged", "packaged_vertical", "packaged_runtime", "packaged_readonly"],
+      "note": "Screenshots were generated during smoke runs and restored to the committed fixture state; they are not retained release artifacts."
+    }
   },
   "commands": [
     {"command": "node --version && pnpm --version", "result": "pass"},
