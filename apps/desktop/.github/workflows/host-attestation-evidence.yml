@@ -1,0 +1,61 @@
+name: loom-host-attestation-evidence
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Existing PR to re-attest at its exact current head after artifact expiry
+        required: true
+        type: number
+
+jobs:
+  host-attestation-evidence:
+    name: host-attestation-evidence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Resolve exact target PR from GitHub
+        id: target
+        uses: actions/github-script@v7
+        env:
+          TARGET_PR: ${{ github.event.pull_request.number || inputs.pr_number }}
+        with:
+          script: |
+            const prNumber = Number(process.env.TARGET_PR);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed("a positive target PR number is required");
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: prNumber });
+            if (pr.base.ref !== context.payload.repository.default_branch) {
+              core.setFailed("host attestation only supports PRs targeting the default branch");
+              return;
+            }
+            core.setOutput("pr_number", String(pr.number));
+            core.setOutput("head_sha", pr.head.sha);
+            core.setOutput("base_ref", pr.base.ref);
+      - name: Write host-generated evidence locator
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.target.outputs.head_sha }}
+          BASE_REF: ${{ steps.target.outputs.base_ref }}
+        run: |
+          printf '{"schema_version":"loom-host-attestation-evidence/v1","pr_number":%s,"head_sha":"%s","base_ref":"%s"}\n' "$PR_NUMBER" "$HEAD_SHA" "$BASE_REF" > "$RUNNER_TEMP/host-attestation.json"
+      - name: Upload host attestation evidence
+        id: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-host-attestation-${{ steps.target.outputs.pr_number }}
+          path: ${{ runner.temp }}/host-attestation.json
+          if-no-files-found: error
+          retention-days: 14

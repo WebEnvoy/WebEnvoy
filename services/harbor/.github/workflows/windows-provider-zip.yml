@@ -1,0 +1,38 @@
+name: Windows provider ZIP security
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/windows-provider-zip.yml
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
+      - packages/runtime-api/src/cloakbrowser-archive.ts
+      - packages/runtime-api/src/cloakbrowser-windows-zip.test.ts
+
+permissions:
+  contents: read
+
+jobs:
+  windows-provider-zip:
+    name: windows-provider-zip
+    runs-on: windows-latest
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build targeted test
+        run: pnpm build
+      - name: Run Windows ZIP security fixtures
+        run: node --test dist/packages/runtime-api/src/cloakbrowser-windows-zip.test.js

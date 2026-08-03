@@ -1,0 +1,21 @@
+name: Python compile
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  py-compile:
+    name: py-compile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile tracked Python files
+        run: make py-compile

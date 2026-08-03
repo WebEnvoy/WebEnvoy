@@ -1,0 +1,23 @@
+{
+  "name": "@webenvoy/harbor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start:runtime": "pnpm build && node dist/packages/runtime-api/src/runtime-server.js",
+    "test": "pnpm build && node --test 'dist/packages/runtime-api/src/*.test.js'",
+    "smoke:runtime": "pnpm build && node dist/packages/runtime-api/src/smoke.js",
+    "smoke:runtime:api": "pnpm build && node dist/packages/runtime-api/src/server-smoke.js",
+    "smoke:runtime:local": "pnpm build && node dist/packages/runtime-api/src/smoke.js --local"
+  },
+  "dependencies": {
+    "tar": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@10.30.3"
+}

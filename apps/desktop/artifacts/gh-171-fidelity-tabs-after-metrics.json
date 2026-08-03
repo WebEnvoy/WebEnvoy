@@ -1,0 +1,74 @@
+{
+  "composer": {
+    "background": "rgba(255, 255, 255, 0.96)",
+    "color": "rgb(21, 27, 36)",
+    "gap": "8px",
+    "height": 104,
+    "overflow": "visible",
+    "padding": "12px 14px 10px",
+    "width": 278,
+    "x": 314,
+    "y": 664
+  },
+  "contextCopy": {
+    "background": "rgba(0, 0, 0, 0)",
+    "color": "rgb(21, 27, 36)",
+    "gap": "12px",
+    "height": 243,
+    "overflow": "visible",
+    "padding": "16px 18px 18px",
+    "width": 319,
+    "x": 667,
+    "y": 92
+  },
+  "panelTabActive": {
+    "background": "rgba(0, 0, 0, 0)",
+    "color": "rgb(9, 105, 255)",
+    "gap": "normal",
+    "height": 28,
+    "overflow": "visible",
+    "padding": "0px 2px",
+    "width": 56,
+    "x": 675,
+    "y": 55
+  },
+  "panelTabAfter": {
+    "background": "rgb(9, 105, 255)",
+    "bottom": "-9px",
+    "height": "2px"
+  },
+  "panelTabList": {
+    "background": "rgba(0, 0, 0, 0)",
+    "color": "rgb(21, 27, 36)",
+    "gap": "10px",
+    "height": 28,
+    "overflow": "visible",
+    "padding": "0px",
+    "width": 294,
+    "x": 675,
+    "y": 55
+  },
+  "send": {
+    "background": "rgb(21, 27, 36)",
+    "color": "rgb(255, 255, 255)",
+    "gap": "6px",
+    "height": 28,
+    "overflow": "hidden",
+    "padding": "0px",
+    "width": 30,
+    "x": 547,
+    "y": 728
+  },
+  "sourceHealth": {
+    "background": "rgba(0, 0, 0, 0)",
+    "color": "rgb(21, 27, 36)",
+    "gap": "0px",
+    "height": 283,
+    "overflow": "visible",
+    "padding": "12px 18px 16px",
+    "width": 319,
+    "x": 667,
+    "y": 336
+  },
+  "theme": "light"
+}

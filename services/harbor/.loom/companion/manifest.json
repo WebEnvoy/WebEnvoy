@@ -1,0 +1,5 @@
+{
+  "schema_version": "loom-repo-companion-manifest/v1",
+  "companion_entry": ".loom/companion/README.md",
+  "repo_interface": ".loom/companion/repo-interface.json"
+}
