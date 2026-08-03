@@ -31,9 +31,11 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 
 WebEnvoy/WebEnvoy#341 冻结 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 的责任边界：Core 解析并锁定 Lode version/hash pin，执行 capability/resource admission，校验 Lode output 并生成 normalized Result Envelope、failure attribution 和 Run Record；Harbor 只提供可追溯的站点无关 runtime facts/refs。`site_id`、`task_kind` 和 fact key 只用于选择/匹配 Harbor 的公共运行事实，不构成站点业务结果 schema。
 
-Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。当前 page-scene 消费面只绑定 refs 与 runtime availability；redaction/access/retention 仍由 PD-0019 规格化，不能表述为已支持。credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
+Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。当前 page-scene runtime 链还要求 `page_summary.url/title/summary`，校验 URL 并把三项投影进 normalized result；这只是 compatibility-only legacy payload，不是获准的 Harbor business truth，目标面仍是 refs/facts 加 Lode 声明、Core-owned normalization。Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除或替代这项依赖。Redaction/access/retention 仍由 PD-0019 规格化，当前消费面没有这些字段，不能表述为已支持。credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
 
 Core `addInferredResourceFacts` 当前的 site-login 推导也只属于兼容期 legacy adapter，不是 Harbor owner-published fact 或新路径 evidence；Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除该推导或用 Harbor 发布的可版本化 fact/ref 替代。
+
+Failure attribution 也保留一个明确的 compatibility drift：Core request/private-field rejection 属于 input boundary；但 Harbor admission payload 出现 `forbidden_field:*` 时，当前 `validateHarborAdmission` 生成 `resource_admission` / `runtime_binding`，`inferFailureAttribution` 因 category 归为 `runtime`。#341 不宣称已经修复；Core #342 必须收敛最终类别/归因，且不得把这项 receipt-side 检查混同为 Core request rejection。
 
 | 迁移阶段 | 新路径 | 旧路径 | 停止条件 |
 | --- | --- | --- | --- |

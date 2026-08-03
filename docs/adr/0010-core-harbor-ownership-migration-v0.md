@@ -21,7 +21,7 @@ Core、Harbor、Lode 和 App 继续独立进程、独立 owner API。Core 是任
 | `harbor-local-identity-environment/v0` 与 `harbor-core-runtime-facts/v0`：`runtime_session_ref`、`identity_environment_ref`、`execution_identity_ref`、`profile_ref`、`provider_ref`、`provider_mode`、`lifecycle_state` | Harbor | Core 只消费公共 ref/status，绑定 accepted run 并保留历史引用；不保存 session/profile 内部状态 | Harbor 不拥有 run、task outcome 或 Lode package | v0 frozen |
 | runtime availability、viewer/control/handoff facts、`fact_refs`（属于 `harbor-core-runtime-facts/v0`） | Harbor | Core 只消费 `availability`、`viewer_ref`、control owner/lock/handoff/takeover 状态和 session/viewer refs，用于 admission、pause、handoff 或 recovery decision | Harbor 不把 viewer/control 状态解释为业务成功 | v0 frozen |
 | site/runtime resource facts (`harbor-site-resource-facts/v0`；Core resource projection 为 `harbor-core-resource-facts/v0`) | Harbor | Core 只按 Lode 声明的 fact key 做 resource matching；`site_id`/`task_kind` 仅是上下文选择器，不是业务 schema | Harbor 不声明 capability、归一化业务字段或成功条件 | v0 frozen |
-| page scene refs (`harbor-page-scene-refs/v0`)：`snapshot_ref`、`refmap_ref`、`evidence_refs`、`source_trace_ref` 与 runtime availability | Harbor | Core 当前只校验并绑定 refs 和 runtime availability；结果只通过 refs 追溯现场 | Harbor 不输出 normalized result；Core 不内联 DOM/HAR/screenshot/video/network body | current v0 surface |
+| page scene refs (`harbor-page-scene-refs/v0`)：`snapshot_ref`、`refmap_ref`、`evidence_refs`、`source_trace_ref`、runtime availability，以及当前必需的 `page_summary.url/title/summary` | Harbor | Core 当前校验 refs 与 `page_summary.url`，并把 `page_summary` 投影进 normalized result；该 summary 只是有界 compatibility payload，不是获准的 Harbor business truth | Harbor 不拥有 normalized result；目标面只保留 refs/facts，Core 不内联 DOM/HAR/screenshot/video/network body | compatibility surface |
 | normalized business output、public Result Envelope、Run Record、terminal outcome、`unknown_outcome` 和 reconciliation | Core；output schema/normalizer 由 Lode 声明 | Core 校验 Lode output，生成/持久化结果 envelope、failure、post-check 与 refs；Harbor 只提供 source/evidence/runtime refs | Harbor 不拥有业务结果；Lode 不拥有 run outcome | v0 frozen |
 | Lode license/version identity | Lode（MIT assets）；Core 记录本次消费的 version/hash pin | Core 只保留可审计 ref、版本和 hash 摘要 | Harbor 不承载 Lode pin 或 package license truth | v0 frozen |
 
@@ -32,14 +32,14 @@ Core、Harbor、Lode 和 App 继续独立进程、独立 owner API。Core 是任
 - Harbor identity facts（`harbor-local-identity-environment/v0`）：身份环境、登录/恢复状态、provider/profile refs 和 `consumer_boundary`；
 - Harbor runtime facts：session、provider/profile refs、lifecycle、availability、viewer/control 和 `fact_refs`；
 - Harbor resource facts（`harbor-site-resource-facts/v0` 或 `harbor-core-resource-facts/v0`）：`resource_facts[]` 中已发布 fact key/state，以及 refs-only public boundary；
-- Harbor scene/write-precheck refs（`harbor-page-scene-refs/v0`、`harbor-write-precheck-facts/v0`）：snapshot/refmap/source/evidence refs；write-precheck 只表示 validate-only/no-submit guard；
+- Harbor scene/write-precheck refs（`harbor-page-scene-refs/v0`、`harbor-write-precheck-facts/v0`）：snapshot/refmap/source/evidence refs，以及当前 Core runtime 链强制消费的 `page_summary.url/title/summary` compatibility payload；write-precheck 只表示 validate-only/no-submit guard；
 - Lode package contract：package/capability/version/lock/source refs、resource requirements、operation mode、output/post-check/failure declarations。
 
 当前 Core `addInferredResourceFacts` 会从 identity login/origin 输入推导 `identity.user_logged_in.confirmed` 和 `identity.boss_geek_logged_in.confirmed`。这只是 `compatibility` 期间的有界 legacy adapter 行为，不是 Harbor owner-published fact，也不能作为新路径 evidence。Core #342 与 Harbor #352 必须在进入 `cutover-ready` 前删除这项 Core-side site-login 推导，或以 Harbor 发布、可版本化且可追溯的 fact/ref 替代。
 
 上述输入必须可追溯到对应 owner，且每次 accepted run 固定当时的 ref/version 快照。未知、过期、不匹配或违反 boundary 的输入 fail closed；不得用站点推测、provider claim 或旧结果补全。
 
-Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 metadata，仍由 [PD-0019](pending-decisions.md#pd-0019) 规格化；当前 Core page-scene 消费面没有这些字段，不得表述为已支持。
+Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 metadata，仍由 [PD-0019](pending-decisions.md#pd-0019) 规格化；当前 Core page-scene 消费面没有这些字段，不得表述为已支持。相反，当前 `runtime-task-chain.ts` 的 `isHarborSceneReference`、`projectionFromScene` 和 `completeAcceptedReadTask` 仍要求或消费 `page_summary.url/title/summary`；它只能作为兼容期 legacy payload，不得作为 Harbor 拥有业务语义的先例或新路径 evidence。Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除这一依赖，或以 Lode 声明、Core-owned normalization 消费 refs/facts 的合同替代。
 
 ### 双重 truth 禁线
 
@@ -54,7 +54,8 @@ Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 me
 
 | 触发条件（现有词汇） | 来源 owner | Core 归因/阶段 | 状态与停止条件 |
 | --- | --- | --- | --- |
-| 请求或私有字段非法：`input_invalid`、`private_field_rejected:*`、`forbidden_field:*` | Core 输入边界 | `request_invalid` / `pre_admission` 或 `capability_contract` / `admission`；attribution=`input` | blocked；不创建 Run Record；修复输入后重试 |
+| Core 请求或 Core-owned 结果中的私有字段非法：`input_invalid`、`private_field_rejected:*` | Core 输入/结果边界 | `request_invalid` / `pre_admission` 或对应 Core validation phase；attribution=`input` | blocked；不发布结果；修复输入/输出后重试 |
+| Harbor admission payload 收到禁止字段：`forbidden_field:*` | Harbor facts 接收边界；Core admission 检查 | 当前 `resource_admission` / `runtime_binding`，`inferFailureAttribution` 因 category 归为 `runtime`；这是 compatibility attribution | blocked；移除禁止字段。Core #342 必须收敛最终类别/归因，在完成前不得宣称已与 Core request rejection 对齐 |
 | Lode ref/lock/package/lifecycle 不可用：`package_ref_required`、`package_contract_required`、`package_lock_mismatch`、`capability_version_incompatible`、`invalid_contract`、`capability_invalidated` | Lode 声明，Core admission | `capability_contract` / `admission` 或 `resource_matching`；attribution=`capability` | blocked/failed；Core 不猜测替代 package；修复或重新 pin 后重试 |
 | Harbor identity/provider/runtime 不可用或不匹配：`identity_environment_*`、`browser_provider_unavailable`、`runtime_ref_missing`、`runtime_session_unavailable`、`runtime_ref_expired`、`runtime_session_unreachable`、`runtime_session_busy`、`identity_runtime_mismatch` | Harbor facts | `resource_admission` / `runtime_binding`；attribution=`runtime` | blocked；暂停新执行，连接/修复/交接 runtime；accepted run 不伪装成功 |
 | Harbor resource fact 不满足：`resource_requirement_unmatched`、`resource_fact_missing:<fact_key>` | Harbor facts + Lode requirements；Core matching | `resource_admission` / `resource_matching`；attribution=`runtime` | blocked；停止 admission，刷新 facts 或修复 runtime/package |
@@ -64,6 +65,8 @@ Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 me
 | owner、字段、敏感边界或兼容性冲突 | Core/Harbor/Lode 联合决策，不由单仓猜测 | `invalid_contract`（迁移控制面，不新增公共 code） | migration blocked；冻结新合同，保留旧/新适配，直到 owner 明确修复 |
 
 `ReadOperationFailureClass` 中的 `operation_not_allowlisted`、`allowlist_pin_invalid`、`public_summary_missing` 等只在 legacy Harbor operation adapter 内归因；新 Core path 将其映射为对应的 capability/resource/result/evidence 类别，不把 Harbor adapter 的业务结果升级为 Harbor truth。
+
+当前 `forbidden_field:*` 的 `resource_admission` / `runtime_binding` / attribution=`runtime` 是代码事实，不是本 ADR 已解决的目标归因。#341 只记录漂移和 cutover stop 条件；Core #342 必须在不混同 Core request/private-field rejection 的前提下确定并实现最终 attribution。
 
 ## Compatibility window、cutover 与 rollback
 
