@@ -144,7 +144,7 @@ jobs:
       - name: Resolve Desktop Lode pin
         id: lode-pin
         shell: bash
-        run: echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode)')" >> "$GITHUB_OUTPUT"
+        run: echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode.commit)')" >> "$GITHUB_OUTPUT"
       - name: Check out pinned Lode assets
         uses: actions/checkout@v4
         with:

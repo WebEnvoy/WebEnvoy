@@ -39,6 +39,10 @@ let runtimeSupervisor = createRuntimeSupervisor();
 const mainWindows = new Set<BrowserWindow>();
 app.setName("WebEnvoy App");
 
+if (packagedSmoke && process.platform === "darwin") {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
+
 if (packagedSmoke && packagedSmokeUserDataDir) {
   app.setPath("userData", packagedSmokeUserDataDir);
 }

@@ -29,6 +29,7 @@ const child = spawn(electron, ["dist-electron/main.js"], {
 
 let stdout = "";
 let stderr = "";
+let timedOut = false;
 
 child.stdout.on("data", (chunk) => {
   stdout += chunk;
@@ -38,13 +39,37 @@ child.stderr.on("data", (chunk) => {
   stderr += chunk;
 });
 
-const exitCode = await new Promise((resolve) => {
-  child.on("exit", resolve);
-});
+let exitCode;
+try {
+  exitCode = await new Promise((resolve, reject) => {
+    let forceKill;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      forceKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    }, 60_000);
+    const clearTimers = () => {
+      clearTimeout(timeout);
+      clearTimeout(forceKill);
+    };
+    child.once("error", (error) => {
+      clearTimers();
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimers();
+      resolve(code);
+    });
+  });
+} finally {
+  await rm(userDataDir, { recursive: true, force: true });
+  await core.close();
+  await harbor.close();
+}
 
-await rm(userDataDir, { recursive: true, force: true });
-await core.close();
-await harbor.close();
+if (timedOut) {
+  throw new Error(`Packaged Electron smoke timed out after 60 seconds.\n${stderr || stdout}`);
+}
 
 if (exitCode !== 0) {
   throw new Error(`Packaged Electron smoke failed.\n${stderr || stdout}`);
