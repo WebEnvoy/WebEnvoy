@@ -35,7 +35,7 @@ Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control fac
 
 Core `addInferredResourceFacts` 当前的 site-login 推导也只属于兼容期 legacy adapter，不是 Harbor owner-published fact 或新路径 evidence；Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除该推导或用 Harbor 发布的可版本化 fact/ref 替代。
 
-Failure attribution 也保留一个明确的 compatibility drift：Core request/private-field rejection 属于 input boundary；但 Harbor admission payload 出现 `forbidden_field:*` 时，当前 `validateHarborAdmission` 生成 `resource_admission` / `runtime_binding`，`inferFailureAttribution` 因 category 归为 `runtime`。#341 不宣称已经修复；Core #342 必须收敛最终类别/归因，且不得把这项 receipt-side 检查混同为 Core request rejection。
+Failure attribution 也保留一个明确的 compatibility drift：Core 请求输入的 `input_invalid` / `private_field_rejected:*` 归为 `input`；Core result projection 的 `public_result_private_field_rejected` 当前是 `result_projection` / `projection` 并归为 `capability`；Harbor admission payload 出现 `forbidden_field:*` 时，当前 `validateHarborAdmission` 则生成 `resource_admission` / `runtime_binding` 并归为 `runtime`。#341 不宣称已经修复；Core #342 必须收敛最终类别/归因，且不得混同这三类边界。
 
 | 迁移阶段 | 新路径 | 旧路径 | 停止条件 |
 | --- | --- | --- | --- |

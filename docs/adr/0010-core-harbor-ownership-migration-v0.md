@@ -54,7 +54,8 @@ Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 me
 
 | 触发条件（现有词汇） | 来源 owner | Core 归因/阶段 | 状态与停止条件 |
 | --- | --- | --- | --- |
-| Core 请求或 Core-owned 结果中的私有字段非法：`input_invalid`、`private_field_rejected:*` | Core 输入/结果边界 | `request_invalid` / `pre_admission` 或对应 Core validation phase；attribution=`input` | blocked；不发布结果；修复输入/输出后重试 |
+| Core 请求输入非法：`input_invalid`、`private_field_rejected:*` | Core 输入边界 | `request_invalid` / `pre_admission`；attribution=`input` | blocked；修复输入后重试 |
+| Core result projection 拒绝私有字段：`public_result_private_field_rejected` | Core result projection 边界 | 当前 `result_projection` / `projection`；`inferFailureAttribution` 因 category 归为 `capability` | failed；不发布结果；修复 package/output 后重试 |
 | Harbor admission payload 收到禁止字段：`forbidden_field:*` | Harbor facts 接收边界；Core admission 检查 | 当前 `resource_admission` / `runtime_binding`，`inferFailureAttribution` 因 category 归为 `runtime`；这是 compatibility attribution | blocked；移除禁止字段。Core #342 必须收敛最终类别/归因，在完成前不得宣称已与 Core request rejection 对齐 |
 | Lode ref/lock/package/lifecycle 不可用：`package_ref_required`、`package_contract_required`、`package_lock_mismatch`、`capability_version_incompatible`、`invalid_contract`、`capability_invalidated` | Lode 声明，Core admission | `capability_contract` / `admission` 或 `resource_matching`；attribution=`capability` | blocked/failed；Core 不猜测替代 package；修复或重新 pin 后重试 |
 | Harbor identity/provider/runtime 不可用或不匹配：`identity_environment_*`、`browser_provider_unavailable`、`runtime_ref_missing`、`runtime_session_unavailable`、`runtime_ref_expired`、`runtime_session_unreachable`、`runtime_session_busy`、`identity_runtime_mismatch` | Harbor facts | `resource_admission` / `runtime_binding`；attribution=`runtime` | blocked；暂停新执行，连接/修复/交接 runtime；accepted run 不伪装成功 |
