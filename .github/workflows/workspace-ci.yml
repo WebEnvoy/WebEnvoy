@@ -2,15 +2,6 @@ name: Workspace CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/workspace-ci.yml"
-      - "package.json"
-      - "pnpm-workspace.yaml"
-      - "pnpm-lock.yaml"
-      - "tsconfig.base.json"
-      - "packages/**"
-      - "apps/desktop/**"
-      - "services/harbor/**"
   merge_group:
   workflow_dispatch:
 
@@ -58,17 +49,19 @@ jobs:
           while IFS= read -r path; do
             [[ -z "$path" ]] && continue
             case "$path" in
-              package.json|pnpm-workspace.yaml|pnpm-lock.yaml|tsconfig.base.json|.github/workflows/workspace-ci.yml)
+              package.json|pnpm-workspace.yaml|pnpm-lock.yaml|tsconfig.base.json|.github/workflows/*)
                 all=1
                 ;;
               packages/*)
                 core=1
+                desktop=1
                 ;;
               apps/desktop/*)
                 desktop=1
                 ;;
               services/harbor/*)
                 harbor=1
+                desktop=1
                 ;;
             esac
           done <<< "$changed"
@@ -199,3 +192,43 @@ jobs:
         run: pnpm --filter @webenvoy/harbor typecheck
       - name: Test Harbor
         run: pnpm --filter @webenvoy/harbor test
+
+  summary:
+    name: workspace-ci
+    if: always()
+    needs: [change-scope, core, desktop, harbor]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize selected and skipped lanes
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          CORE_SELECTED: ${{ needs.change-scope.outputs.core }}
+          CORE_RESULT: ${{ needs.core.result }}
+          DESKTOP_SELECTED: ${{ needs.change-scope.outputs.desktop }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+          HARBOR_SELECTED: ${{ needs.change-scope.outputs.harbor }}
+          HARBOR_RESULT: ${{ needs.harbor.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "workspace path matrix result: $SCOPE_RESULT"
+            exit 1
+          fi
+
+          failed=0
+          for lane in core desktop harbor; do
+            selected_var="${lane^^}_SELECTED"
+            result_var="${lane^^}_RESULT"
+            selected="${!selected_var}"
+            result="${!result_var}"
+            echo "$lane: selected=$selected result=$result"
+            if [[ "$selected" == "1" && "$result" != "success" ]]; then
+              failed=1
+            elif [[ "$selected" != "1" && "$result" != "skipped" ]]; then
+              failed=1
+            fi
+          done
+
+          exit "$failed"
