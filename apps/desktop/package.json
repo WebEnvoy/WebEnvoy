@@ -3,19 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.30.3",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node scripts/dev-electron.mjs",
-    "build": "npm run typecheck && npm run build:main && vite build",
+    "build": "pnpm run typecheck && pnpm run build:main && vite build",
     "build:main": "node -e \"require('fs').rmSync('dist-electron', { recursive: true, force: true })\" && tsc -p tsconfig.electron.json && node scripts/package-lode-assets.mjs && node scripts/package-runtime-assets.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
-    "test:workbench-dom": "npm run build:main && node scripts/workbench-protected-store-smoke.mjs && electron scripts/workbench-dom-smoke.mjs && node scripts/workbench-dom-smoke-exit-test.mjs",
-    "smoke": "npm run build && node scripts/smoke.mjs && node scripts/smoke-skill-workbench.mjs",
-    "smoke:skill-workbench": "npm run build:main && node scripts/smoke-skill-workbench.mjs",
-    "smoke:packaged": "npm run build && node scripts/smoke-packaged.mjs",
-    "smoke:packaged:vertical": "npm run build && node scripts/smoke-packaged-vertical.mjs",
-    "smoke:packaged:runtime": "WEBENVOY_REQUIRE_PACKAGED_RUNTIME=1 npm run build && node scripts/smoke-packaged-runtime.mjs",
-    "smoke:packaged:readonly": "npm run build && node scripts/smoke-packaged-readonly.mjs",
+    "test:workbench-dom": "pnpm run build:main && node scripts/workbench-protected-store-smoke.mjs && electron scripts/workbench-dom-smoke.mjs && node scripts/workbench-dom-smoke-exit-test.mjs",
+    "smoke": "pnpm run build && node scripts/smoke.mjs && node scripts/smoke-skill-workbench.mjs",
+    "smoke:skill-workbench": "pnpm run build:main && node scripts/smoke-skill-workbench.mjs",
+    "smoke:packaged": "pnpm run build && node scripts/smoke-packaged.mjs",
+    "smoke:packaged:vertical": "pnpm run build && node scripts/smoke-packaged-vertical.mjs",
+    "smoke:packaged:runtime": "WEBENVOY_REQUIRE_PACKAGED_RUNTIME=1 pnpm run build && node scripts/smoke-packaged-runtime.mjs",
+    "smoke:packaged:readonly": "pnpm run build && node scripts/smoke-packaged-readonly.mjs",
     "start": "electron dist-electron/main.js"
   },
   "dependencies": {
@@ -34,6 +35,7 @@
     "vite": "^7.0.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
   }
 }

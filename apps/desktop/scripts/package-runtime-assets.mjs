@@ -1,12 +1,25 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const outRoot = path.resolve("dist-electron/runtime");
+const appRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const workspaceRoot = path.resolve(appRoot, "../..");
 const sourceLock = JSON.parse(await readFile(new URL("./runtime-source-lock.json", import.meta.url), "utf8"));
-const coreRoot = findRoot("WEBENVOY_CORE_RUNTIME_SOURCE_DIR", ["../WebEnvoy", "../../WebEnvoy"], "packages/api-server/package.json", sourceLock.core);
-const harborRoot = findRoot("WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR", ["../Harbor", "../../Harbor"], "packages/runtime-api/src/runtime-server.ts", sourceLock.harbor);
+const coreRoot = findRoot(
+  "WEBENVOY_CORE_RUNTIME_SOURCE_DIR",
+  workspaceRoot,
+  "packages/api-server/package.json",
+  sourceLock.core,
+);
+const harborRoot = findRoot(
+  "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR",
+  path.join(workspaceRoot, "services", "harbor"),
+  "packages/runtime-api/src/runtime-server.ts",
+  sourceLock.harbor,
+);
 const requirePackagedRuntime = process.env.WEBENVOY_REQUIRE_PACKAGED_RUNTIME === "1";
 const packaged = [];
 const missing = [];
@@ -15,19 +28,19 @@ await rm(outRoot, { recursive: true, force: true });
 await mkdir(outRoot, { recursive: true });
 
 if (coreRoot) {
-  buildRuntime(coreRoot, "Core");
+  buildRuntime(coreRoot, "Core", "@webenvoy/api-server");
   await packageCoreRuntime(coreRoot, path.join(outRoot, "core"));
-  packaged.push({ service: "core", sourceRoot: coreRoot });
+  packaged.push({ service: "core", sourcePath: relativeSourcePath(coreRoot, "packages/api-server") });
 } else {
-  missing.push("Core runtime source missing; set WEBENVOY_CORE_RUNTIME_SOURCE_DIR or check out sibling WebEnvoy.");
+  missing.push("Core runtime source missing; set WEBENVOY_CORE_RUNTIME_SOURCE_DIR or use the workspace packages/api-server.");
 }
 
 if (harborRoot) {
-  buildRuntime(harborRoot, "Harbor");
+  buildRuntime(harborRoot, "Harbor", "@webenvoy/harbor");
   await packageHarborRuntime(harborRoot, path.join(outRoot, "harbor"));
-  packaged.push({ service: "harbor", sourceRoot: harborRoot });
+  packaged.push({ service: "harbor", sourcePath: relativeSourcePath(harborRoot, "services/harbor") });
 } else {
-  missing.push("Harbor runtime source missing; set WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR or check out sibling Harbor.");
+  missing.push("Harbor runtime source missing; set WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR or use the workspace services/harbor.");
 }
 
 await writeFile(
@@ -83,23 +96,35 @@ async function copyPackage(from, to) {
   await cp(path.join(from, "package.json"), path.join(to, "package.json"));
 }
 
-function buildRuntime(cwd, name) {
-  const result = spawnSync("pnpm", ["build"], { cwd, stdio: "inherit" });
+function buildRuntime(cwd, name, packageName) {
+  const workspaceComponent = cwd === workspaceRoot || cwd === path.join(workspaceRoot, "services", "harbor");
+  const result = spawnSync("pnpm", ["--filter", packageName, "build"], {
+    cwd: workspaceComponent ? workspaceRoot : cwd,
+    stdio: "inherit",
+  });
   if (result.status !== 0) {
     throw new Error(`${name} runtime build failed with status ${result.status ?? "unknown"}.`);
   }
 }
 
-function findRoot(envName, candidates, requiredPath, expectedHead) {
-  const roots = [process.env[envName], ...candidates.map((candidate) => path.resolve(candidate))].filter(Boolean);
-  for (const candidate of roots) {
-    if (!existsSync(path.join(candidate, requiredPath))) continue;
-    if (isLockedCleanSource(candidate, expectedHead)) return candidate;
-    if (candidate === process.env[envName]) {
-      throw new Error(`${envName} must reference a clean source pinned to ${expectedHead}: ${candidate}`);
+function findRoot(envName, workspaceCandidate, requiredPath, expectedHead) {
+  const configuredRoot = process.env[envName];
+  if (configuredRoot) {
+    if (!existsSync(path.join(configuredRoot, requiredPath))) return null;
+    if (!isLockedCleanSource(configuredRoot, expectedHead)) {
+      throw new Error(`${envName} must reference a clean source pinned to ${expectedHead}: ${configuredRoot}`);
     }
+    return configuredRoot;
   }
-  return null;
+  return existsSync(path.join(workspaceCandidate, requiredPath)) ? workspaceCandidate : null;
+}
+
+function relativeSourcePath(root, componentPath) {
+  if (root === workspaceRoot || root.startsWith(`${workspaceRoot}${path.sep}`)) {
+    const sourcePath = root === workspaceRoot ? path.join(root, componentPath) : root;
+    return path.relative(workspaceRoot, sourcePath) || ".";
+  }
+  return root;
 }
 
 function isLockedCleanSource(candidate, expectedHead) {

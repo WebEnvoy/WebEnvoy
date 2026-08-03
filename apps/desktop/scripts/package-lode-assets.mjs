@@ -3,8 +3,11 @@ import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const outDir = path.resolve("dist-electron/lode");
+const appRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const workspaceRoot = path.resolve(appRoot, "../..");
 const sourceLock = JSON.parse(await readFile(new URL("./runtime-source-lock.json", import.meta.url), "utf8"));
 const sourceRepository = findLodeRepository(sourceLock.lode);
 
@@ -30,8 +33,10 @@ console.log(`Packaged Lode capability assets from ${sourceLock.lode} in ${source
 function findLodeRepository(expectedHead) {
   const candidates = [
     process.env.WEBENVOY_LODE_ASSETS_SOURCE_DIR,
-    path.resolve("../Lode"),
-    path.resolve("../../Lode"),
+    path.resolve(workspaceRoot, "../Lode"),
+    path.resolve(workspaceRoot, "../../Lode"),
+    path.resolve(workspaceRoot, "../Lode.worktrees/lode-290-search-pin"),
+    path.resolve(workspaceRoot, "../../Lode.worktrees/lode-290-search-pin"),
   ].filter(Boolean);
 
   for (const candidate of candidates) {

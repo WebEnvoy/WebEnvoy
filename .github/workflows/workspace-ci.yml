@@ -1,0 +1,201 @@
+name: Workspace CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/workspace-ci.yml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
+      - "tsconfig.base.json"
+      - "packages/**"
+      - "apps/desktop/**"
+      - "services/harbor/**"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10.30.3"
+
+jobs:
+  change-scope:
+    name: workspace path matrix
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.scope.outputs.core }}
+      desktop: ${{ steps.scope.outputs.desktop }}
+      harbor: ${{ steps.scope.outputs.harbor }}
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve changed workspace paths
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || -z "$BASE_SHA" ]]; then
+            changed=$(git ls-files)
+          else
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          fi
+
+          core=0
+          desktop=0
+          harbor=0
+          all=0
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            case "$path" in
+              package.json|pnpm-workspace.yaml|pnpm-lock.yaml|tsconfig.base.json|.github/workflows/workspace-ci.yml)
+                all=1
+                ;;
+              packages/*)
+                core=1
+                ;;
+              apps/desktop/*)
+                desktop=1
+                ;;
+              services/harbor/*)
+                harbor=1
+                ;;
+            esac
+          done <<< "$changed"
+
+          if [[ "$all" == "1" ]]; then
+            core=1
+            desktop=1
+            harbor=1
+          fi
+
+          {
+            echo "core=$core"
+            echo "desktop=$desktop"
+            echo "harbor=$harbor"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Changed workspace paths:"
+          printf '%s\n' "$changed"
+          echo "Selected checks: core=$core desktop=$desktop harbor=$harbor"
+
+  core:
+    name: Core build, test, typecheck and lint
+    needs: change-scope
+    if: needs.change-scope.outputs.core == '1'
+    runs-on: ubuntu-latest
+    env:
+      WEBENVOY_HARBOR_ROOT: ${{ github.workspace }}/services/harbor
+      WEBENVOY_LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode-core
+      WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode-core/registry/local-packages.json
+    steps:
+      - name: Check out workspace
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out pinned Lode assets
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: 6238d3f9de0cd09157c9769e27d90174c299406a
+          path: .runtime-sources/lode-core
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+      - name: Frozen workspace install
+        run: pnpm install --frozen-lockfile
+      - name: Build all Core packages
+        run: pnpm --filter @webenvoy/core-runtime build && pnpm --filter @webenvoy/api-server build && pnpm --filter @webenvoy/schemas build && pnpm --filter @webenvoy/conformance build
+      - name: Typecheck all Core packages
+        run: pnpm --filter @webenvoy/core-runtime typecheck && pnpm --filter @webenvoy/api-server typecheck && pnpm --filter @webenvoy/schemas typecheck && pnpm --filter @webenvoy/conformance typecheck
+      - name: Test all Core packages
+        run: pnpm --filter @webenvoy/core-runtime test && pnpm --filter @webenvoy/api-server test:lode-runtime-pins && pnpm --filter @webenvoy/api-server test && pnpm --filter @webenvoy/schemas test && pnpm --filter @webenvoy/conformance test && pnpm --filter @webenvoy/conformance smoke
+      - name: Lint all Core packages
+        run: pnpm --filter @webenvoy/core-runtime lint && pnpm --filter @webenvoy/api-server lint && pnpm --filter @webenvoy/schemas lint && pnpm --filter @webenvoy/conformance lint
+
+  desktop:
+    name: Desktop build and typecheck
+    needs: change-scope
+    if: needs.change-scope.outputs.desktop == '1'
+    runs-on: ubuntu-latest
+    env:
+      WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ github.workspace }}/.runtime-sources/lode-app
+    steps:
+      - name: Check out workspace
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Resolve Desktop Lode pin
+        id: lode-pin
+        shell: bash
+        run: echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode)')" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned Lode assets
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: ${{ steps.lode-pin.outputs.ref }}
+          path: .runtime-sources/lode-app
+          persist-credentials: false
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+      - name: Frozen workspace install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck Desktop
+        run: pnpm --filter @webenvoy/app typecheck
+      - name: Build Desktop
+        run: pnpm --filter @webenvoy/app build
+
+  harbor:
+    name: Harbor build, test and typecheck
+    needs: change-scope
+    if: needs.change-scope.outputs.harbor == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workspace
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+      - name: Frozen workspace install
+        run: pnpm install --frozen-lockfile
+      - name: Build Harbor
+        run: pnpm --filter @webenvoy/harbor build
+      - name: Typecheck Harbor
+        run: pnpm --filter @webenvoy/harbor typecheck
+      - name: Test Harbor
+        run: pnpm --filter @webenvoy/harbor test
