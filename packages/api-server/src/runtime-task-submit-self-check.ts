@@ -638,6 +638,7 @@ function createHarborMock(
   const sessionRef = "session_runtime_api_ready";
   let currentHolderRef = "";
   let cleanupState: "held" | "released" | "closed" | "inconsistent" = "held";
+  let legacyRuntimeReadbackServed = false;
   const sitePage = siteResourceBody?.page as JsonObject | undefined;
   const sessionOrigin = typeof sitePage?.origin === "string" ? sitePage.origin : "https://example.org";
   const sessionSiteId = typeof siteResourceBody?.site_id === "string" ? siteResourceBody.site_id : "example";
@@ -719,6 +720,7 @@ function createHarborMock(
       if (request.method === "POST" && request.url === "/runtime/identity-environment-sessions") {
         currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
         cleanupState = "held";
+        legacyRuntimeReadbackServed = false;
         sendJson(response, 200, {
           identity_environment_facts: liveSessionIdentity(sessionSiteId, sessionOrigin),
           runtime_facts: liveRuntimeFacts(),
@@ -728,6 +730,7 @@ function createHarborMock(
       }
       if (request.method === "POST" && request.url === `/runtime/sessions/${sessionRef}/lock`) {
         currentHolderRef = typeof body.holder_ref === "string" ? body.holder_ref : "";
+        legacyRuntimeReadbackServed = false;
         if (currentHolderRef.includes("session_missing")) {
           sendJson(response, 404, { status: "unavailable", failure_class: "session_missing", retryable: false });
           return;
@@ -754,7 +757,8 @@ function createHarborMock(
         return;
       }
       if (request.method === "GET" && request.url === `/runtime/sessions/${sessionRef}`) {
-        if (cleanupBehavior === "hang") return;
+        if (cleanupBehavior === "hang" && legacyRuntimeReadbackServed) return;
+        legacyRuntimeReadbackServed = true;
         if (cleanupBehavior === "owner_none_held") {
           sendJson(response, 200, {
             runtime_session_ref: sessionRef,

@@ -21,12 +21,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: WebEnvoy/Lode
           ref: 6238d3f9de0cd09157c9769e27d90174c299406a
           path: .runtime-sources/lode
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Harbor
+          ref: bcfc1b902c3fb8c2fd691c805a2ada1ddae51181
+          path: .runtime-sources/harbor
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -35,4 +42,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @webenvoy/api-server test:lode-runtime-pins
         env:
+          WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode/registry/local-packages.json
+      - run: pnpm --filter @webenvoy/api-server test
+        env:
+          WEBENVOY_HARBOR_ROOT: ${{ github.workspace }}/.runtime-sources/harbor
+          WEBENVOY_LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
           WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode/registry/local-packages.json
