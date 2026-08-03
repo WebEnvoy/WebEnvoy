@@ -1,0 +1,42 @@
+{
+  "schema_version": "loom-repo-interop/v1",
+  "host_adapters": [],
+  "repo_native_carriers": [
+    {
+      "id": "generated-companion-residue",
+      "summary": "Repo-owned adoption residue generated as explicit write targets; Loom reads it without promoting the repo-specific rules into core.",
+      "surfaces": [
+        "admission",
+        "review",
+        "merge_ready",
+        "closeout"
+      ],
+      "locator": ".loom/companion",
+      "owner": "repo-companion",
+      "requirement": "required",
+      "fallback_to": "adoption"
+    }
+  ],
+  "shadow_surfaces": {
+    "admission": {
+      "summary": "Compare admission parity between Loom and the repo-native result.",
+      "loom_locator": ".loom/shadow/admission-loom.json",
+      "repo_locator": ".loom/shadow/admission-repo.json"
+    },
+    "review": {
+      "summary": "Compare review parity between Loom and the repo-native result.",
+      "loom_locator": ".loom/shadow/review-loom.json",
+      "repo_locator": ".loom/shadow/review-repo.json"
+    },
+    "merge_ready": {
+      "summary": "Compare merge_ready parity between Loom and the repo-native result.",
+      "loom_locator": ".loom/shadow/merge-ready-loom.json",
+      "repo_locator": ".loom/shadow/merge-ready-repo.json"
+    },
+    "closeout": {
+      "summary": "Compare closeout parity between Loom and the repo-native result.",
+      "loom_locator": ".loom/shadow/closeout-loom.json",
+      "repo_locator": ".loom/shadow/closeout-repo.json"
+    }
+  }
+}

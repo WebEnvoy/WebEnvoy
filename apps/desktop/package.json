@@ -1,0 +1,39 @@
+{
+  "name": "@webenvoy/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev-electron.mjs",
+    "build": "npm run typecheck && npm run build:main && vite build",
+    "build:main": "node -e \"require('fs').rmSync('dist-electron', { recursive: true, force: true })\" && tsc -p tsconfig.electron.json && node scripts/package-lode-assets.mjs && node scripts/package-runtime-assets.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "test:workbench-dom": "npm run build:main && node scripts/workbench-protected-store-smoke.mjs && electron scripts/workbench-dom-smoke.mjs && node scripts/workbench-dom-smoke-exit-test.mjs",
+    "smoke": "npm run build && node scripts/smoke.mjs && node scripts/smoke-skill-workbench.mjs",
+    "smoke:skill-workbench": "npm run build:main && node scripts/smoke-skill-workbench.mjs",
+    "smoke:packaged": "npm run build && node scripts/smoke-packaged.mjs",
+    "smoke:packaged:vertical": "npm run build && node scripts/smoke-packaged-vertical.mjs",
+    "smoke:packaged:runtime": "WEBENVOY_REQUIRE_PACKAGED_RUNTIME=1 npm run build && node scripts/smoke-packaged-runtime.mjs",
+    "smoke:packaged:readonly": "npm run build && node scripts/smoke-packaged-readonly.mjs",
+    "start": "electron dist-electron/main.js"
+  },
+  "dependencies": {
+    "@radix-ui/react-tabs": "^1.1.16",
+    "lucide-react": "^1.23.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^43.0.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

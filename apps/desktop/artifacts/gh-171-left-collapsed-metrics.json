@@ -1,0 +1,32 @@
+{
+  "centerTopbar": {
+    "height": 46,
+    "visible": true,
+    "width": 478,
+    "x": 188,
+    "y": 0
+  },
+  "composer": {
+    "height": 104,
+    "visible": true,
+    "width": 518,
+    "x": 74,
+    "y": 664
+  },
+  "dataLeftOpen": "false",
+  "floatingRendered": false,
+  "leftResizer": {
+    "height": 784,
+    "visible": false,
+    "width": 0,
+    "x": 0,
+    "y": 0
+  },
+  "revealZone": {
+    "height": 784,
+    "visible": true,
+    "width": 12,
+    "x": 0,
+    "y": 0
+  }
+}
