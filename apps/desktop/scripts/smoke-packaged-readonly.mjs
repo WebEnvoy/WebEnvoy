@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import electron from "electron";
+
+import { runBoundedElectronSmoke } from "./run-bounded-electron-smoke.mjs";
 
 const screenshotPath = path.resolve(
   process.env.WEBENVOY_PACKAGED_READONLY_SMOKE_SCREENSHOT ?? "artifacts/app-265-packaged-readonly-smoke.png",
@@ -57,7 +58,8 @@ try {
 }
 
 async function runElectronSmoke({ coreEndpoint, harborEndpoint, screenshotPath, userDataDir }) {
-  const child = spawn(electron, ["dist-electron/main.js"], {
+  const { exitCode, stdout, stderr } = await runBoundedElectronSmoke({
+    electronPath: electron,
     env: {
       ...process.env,
       WEBENVOY_PACKAGED_SMOKE: "1",
@@ -69,20 +71,6 @@ async function runElectronSmoke({ coreEndpoint, harborEndpoint, screenshotPath, 
       HARBOR_RUNTIME_PROVIDER: "fixture",
       HARBOR_CLOAKBROWSER_PATH: process.execPath,
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-
-  const exitCode = await new Promise((resolve) => {
-    child.on("exit", resolve);
   });
 
   if (exitCode !== 0) {

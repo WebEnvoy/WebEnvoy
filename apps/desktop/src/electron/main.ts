@@ -39,6 +39,10 @@ let runtimeSupervisor = createRuntimeSupervisor();
 const mainWindows = new Set<BrowserWindow>();
 app.setName("WebEnvoy App");
 
+if (packagedSmoke && process.platform === "darwin") {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
+
 if (packagedSmoke && packagedSmokeUserDataDir) {
   app.setPath("userData", packagedSmokeUserDataDir);
 }
@@ -473,9 +477,11 @@ async function runPackagedSmoke(window: BrowserWindow, loadRenderer: Promise<voi
       packagedViewport: { windowWidth: packagedWindowWidth, ...packagedViewport, horizontalOverflow: false },
       packagedTaskBoundary,
     })}`);
+    runtimeSupervisor.stop();
     app.exit(0);
   } catch (error) {
     console.error(error);
+    runtimeSupervisor.stop();
     app.exit(1);
   }
 }

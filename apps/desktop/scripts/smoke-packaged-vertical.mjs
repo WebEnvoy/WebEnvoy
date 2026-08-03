@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import electron from "electron";
+
+import { runBoundedElectronSmoke } from "./run-bounded-electron-smoke.mjs";
 
 const screenshotPath = path.resolve(
   process.env.WEBENVOY_PACKAGED_VERTICAL_SMOKE_SCREENSHOT ?? "artifacts/app-261-packaged-vertical-smoke.png",
@@ -103,35 +104,26 @@ try {
 
 async function runElectronSmoke({ coreEndpoint, harborEndpoint, screenshotPath, expectation }) {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "webenvoy-app-packaged-smoke-"));
-  const child = spawn(electron, ["dist-electron/main.js"], {
-    env: {
-      ...process.env,
-      WEBENVOY_PACKAGED_SMOKE: "1",
-      WEBENVOY_PACKAGED_SMOKE_RUNTIME_EXPECTATION: expectation,
-      WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: coreEndpoint,
-      WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harborEndpoint,
-      WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
-      WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
-      ...(screenshotPath ? { WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath } : {}),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  let electronRun;
+  try {
+    electronRun = await runBoundedElectronSmoke({
+      electronPath: electron,
+      env: {
+        ...process.env,
+        WEBENVOY_PACKAGED_SMOKE: "1",
+        WEBENVOY_PACKAGED_SMOKE_RUNTIME_EXPECTATION: expectation,
+        WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: coreEndpoint,
+        WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harborEndpoint,
+        WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
+        WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
+        ...(screenshotPath ? { WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath } : {}),
+      },
+    });
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true });
+  }
 
-  let stdout = "";
-  let stderr = "";
-
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-
-  const exitCode = await new Promise((resolve) => {
-    child.on("exit", resolve);
-  });
-
-  await rm(userDataDir, { recursive: true, force: true });
+  const { exitCode, stdout, stderr } = electronRun;
 
   if (exitCode !== 0) {
     throw new Error(`Packaged vertical Electron smoke failed.\n${stderr || stdout}`);

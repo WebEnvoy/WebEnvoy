@@ -7,19 +7,9 @@ import path from "node:path";
 const outRoot = path.resolve("dist-electron/runtime");
 const appRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const workspaceRoot = path.resolve(appRoot, "../..");
-const sourceLock = JSON.parse(await readFile(new URL("./runtime-source-lock.json", import.meta.url), "utf8"));
-const coreRoot = findRoot(
-  "WEBENVOY_CORE_RUNTIME_SOURCE_DIR",
-  workspaceRoot,
-  "packages/api-server/package.json",
-  sourceLock.core,
-);
-const harborRoot = findRoot(
-  "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR",
-  path.join(workspaceRoot, "services", "harbor"),
-  "packages/runtime-api/src/runtime-server.ts",
-  sourceLock.harbor,
-);
+const coreRoot = workspaceRoot;
+const harborRoot = path.join(workspaceRoot, "services", "harbor");
+const workspaceSource = readWorkspaceSource();
 const requirePackagedRuntime = process.env.WEBENVOY_REQUIRE_PACKAGED_RUNTIME === "1";
 const packaged = [];
 const missing = [];
@@ -27,28 +17,47 @@ const missing = [];
 await rm(outRoot, { recursive: true, force: true });
 await mkdir(outRoot, { recursive: true });
 
-if (coreRoot) {
-  buildRuntime(coreRoot, "Core", "@webenvoy/api-server");
+if (
+  workspaceSource.commit &&
+  workspaceSource.component_trees.core &&
+  existsSync(path.join(coreRoot, "packages/api-server/package.json"))
+) {
+  buildRuntime("Core", "@webenvoy/api-server");
   await packageCoreRuntime(coreRoot, path.join(outRoot, "core"));
-  packaged.push({ service: "core", sourcePath: relativeSourcePath(coreRoot, "packages/api-server") });
+  packaged.push({ service: "core", component_path: "packages/api-server" });
 } else {
-  missing.push("Core runtime source missing; set WEBENVOY_CORE_RUNTIME_SOURCE_DIR or use the workspace packages/api-server.");
+  missing.push("Core runtime source missing from workspace packages/api-server.");
 }
 
-if (harborRoot) {
-  buildRuntime(harborRoot, "Harbor", "@webenvoy/harbor");
+if (
+  workspaceSource.commit &&
+  workspaceSource.component_trees.harbor &&
+  existsSync(path.join(harborRoot, "packages/runtime-api/src/runtime-server.ts"))
+) {
+  buildRuntime("Harbor", "@webenvoy/harbor");
   await packageHarborRuntime(harborRoot, path.join(outRoot, "harbor"));
-  packaged.push({ service: "harbor", sourcePath: relativeSourcePath(harborRoot, "services/harbor") });
+  packaged.push({ service: "harbor", component_path: "services/harbor" });
 } else {
-  missing.push("Harbor runtime source missing; set WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR or use the workspace services/harbor.");
+  missing.push("Harbor runtime source missing from workspace services/harbor.");
 }
+
+if (!workspaceSource.commit || !workspaceSource.tree) missing.push("Workspace Git commit or tree is unavailable.");
 
 await writeFile(
   path.join(outRoot, "packaging-state.json"),
   `${JSON.stringify(
     {
-      schema_version: "webenvoy-app-packaged-runtime-assets/v0",
+      schema_version: "webenvoy-app-packaged-runtime-assets/v1",
       status: missing.length === 0 ? "ready" : "blocked",
+      workspace: {
+        commit: workspaceSource.commit,
+        tree: workspaceSource.tree,
+        component_paths: {
+          core: "packages/api-server",
+          harbor: "services/harbor",
+        },
+        component_trees: workspaceSource.component_trees,
+      },
       packaged,
       missing,
       consumer_boundary:
@@ -96,10 +105,9 @@ async function copyPackage(from, to) {
   await cp(path.join(from, "package.json"), path.join(to, "package.json"));
 }
 
-function buildRuntime(cwd, name, packageName) {
-  const workspaceComponent = cwd === workspaceRoot || cwd === path.join(workspaceRoot, "services", "harbor");
+function buildRuntime(name, packageName) {
   const result = spawnSync("pnpm", ["--filter", packageName, "build"], {
-    cwd: workspaceComponent ? workspaceRoot : cwd,
+    cwd: workspaceRoot,
     stdio: "inherit",
   });
   if (result.status !== 0) {
@@ -107,30 +115,22 @@ function buildRuntime(cwd, name, packageName) {
   }
 }
 
-function findRoot(envName, workspaceCandidate, requiredPath, expectedHead) {
-  const configuredRoot = process.env[envName];
-  if (configuredRoot) {
-    if (!existsSync(path.join(configuredRoot, requiredPath))) return null;
-    if (!isLockedCleanSource(configuredRoot, expectedHead)) {
-      throw new Error(`${envName} must reference a clean source pinned to ${expectedHead}: ${configuredRoot}`);
-    }
-    return configuredRoot;
-  }
-  return existsSync(path.join(workspaceCandidate, requiredPath)) ? workspaceCandidate : null;
+function readWorkspaceSource() {
+  const commit = readGitObject("HEAD");
+  return {
+    commit,
+    tree: commit ? readGitObject(`${commit}^{tree}`) : null,
+    component_trees: {
+      core: commit ? readGitObject(`${commit}:packages/api-server`) : null,
+      harbor: commit ? readGitObject(`${commit}:services/harbor`) : null,
+    },
+  };
 }
 
-function relativeSourcePath(root, componentPath) {
-  if (root === workspaceRoot || root.startsWith(`${workspaceRoot}${path.sep}`)) {
-    const sourcePath = root === workspaceRoot ? path.join(root, componentPath) : root;
-    return path.relative(workspaceRoot, sourcePath) || ".";
-  }
-  return root;
-}
-
-function isLockedCleanSource(candidate, expectedHead) {
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: candidate, encoding: "utf8" });
-  const status = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: candidate, encoding: "utf8" });
-  return head.status === 0 && head.stdout.trim() === expectedHead && status.status === 0 && status.stdout.trim() === "";
+function readGitObject(revision) {
+  const result = spawnSync("git", ["rev-parse", revision], { cwd: workspaceRoot, encoding: "utf8" });
+  const object = result.status === 0 ? result.stdout.trim() : "";
+  return /^[0-9a-f]{40}$/.test(object) ? object : null;
 }
 
 function coreStartScript() {

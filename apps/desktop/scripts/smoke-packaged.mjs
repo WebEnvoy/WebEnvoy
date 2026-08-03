@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import electron from "electron";
+
+import { runBoundedElectronSmoke } from "./run-bounded-electron-smoke.mjs";
 
 const screenshotPath = path.resolve(
   process.env.WEBENVOY_PACKAGED_SMOKE_SCREENSHOT ?? "artifacts/gh-168-packaged-preview.png",
@@ -14,37 +15,27 @@ const core = await startUnavailableJsonServer();
 const harbor = await startUnavailableJsonServer();
 const userDataDir = await mkdtemp(path.join(tmpdir(), "webenvoy-app-packaged-smoke-"));
 
-const child = spawn(electron, ["dist-electron/main.js"], {
-  env: {
-    ...process.env,
-    WEBENVOY_PACKAGED_SMOKE: "1",
-    WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath,
-    WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: core.endpoint,
-    WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harbor.endpoint,
-    WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
-    WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
+let electronRun;
+try {
+  electronRun = await runBoundedElectronSmoke({
+    electronPath: electron,
+    env: {
+      ...process.env,
+      WEBENVOY_PACKAGED_SMOKE: "1",
+      WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath,
+      WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: core.endpoint,
+      WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harbor.endpoint,
+      WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
+      WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
+    },
+  });
+} finally {
+  await rm(userDataDir, { recursive: true, force: true });
+  await core.close();
+  await harbor.close();
+}
 
-let stdout = "";
-let stderr = "";
-
-child.stdout.on("data", (chunk) => {
-  stdout += chunk;
-});
-
-child.stderr.on("data", (chunk) => {
-  stderr += chunk;
-});
-
-const exitCode = await new Promise((resolve) => {
-  child.on("exit", resolve);
-});
-
-await rm(userDataDir, { recursive: true, force: true });
-await core.close();
-await harbor.close();
+const { exitCode, stdout, stderr } = electronRun;
 
 if (exitCode !== 0) {
   throw new Error(`Packaged Electron smoke failed.\n${stderr || stdout}`);

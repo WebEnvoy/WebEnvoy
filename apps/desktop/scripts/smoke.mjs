@@ -10,7 +10,10 @@ import ts from "typescript";
 const requiredFiles = [
   "dist-electron/main.js",
   "dist-electron/preload.cjs",
+  "dist-electron/runtime/core/start-runtime.mjs",
+  "dist-electron/runtime/harbor/start-runtime.mjs",
   "dist-electron/runtime/harbor/node_modules/tar/package.json",
+  "dist-electron/lode/provenance.json",
   "dist/renderer/index.html",
   "dist/renderer/assets",
 ];
@@ -26,6 +29,7 @@ const packagedCoreRuntimeSource = await readFile("dist-electron/runtime/core/sta
 const packagedHarborRuntimeSource = await readFile("dist-electron/runtime/harbor/start-runtime.mjs", "utf8");
 const packagedRuntimeState = JSON.parse(await readFile("dist-electron/runtime/packaging-state.json", "utf8"));
 const runtimeSourceLock = JSON.parse(await readFile("scripts/runtime-source-lock.json", "utf8"));
+const packagedLodeProvenance = JSON.parse(await readFile("dist-electron/lode/provenance.json", "utf8"));
 const rendererHtml = await readFile("dist/renderer/index.html", "utf8");
 const connectionConfigSource = await readFile("src/renderer/localConnectionConfig.ts", "utf8");
 const coreReadTaskClientSource = await readFile("src/renderer/coreReadTaskClient.ts", "utf8");
@@ -121,14 +125,42 @@ if (
   throw new Error("Packaged Core runtime smoke failed: thread, policy, authorization, identity-facts, or default-policy wiring is missing.");
 }
 
-const expectedRuntimeHeads = {
-  core: "2c401cf90c0cf7150e8156b904975cefaf435fa8",
-  harbor: "f9e13311ccd3f80cf8ef54cb97245a42da49882b",
-  lode: "1fbef74b4bf1b4f0a86aacd885386d7a62181207",
-};
-if (JSON.stringify(runtimeSourceLock) !== JSON.stringify(expectedRuntimeHeads) ||
-  packagedRuntimeState.status !== "ready" || packagedRuntimeState.packaged?.length !== 2) {
-  throw new Error("Packaged source-lock smoke failed: runtime or Lode assets were not produced from the pinned clean sources.");
+const lodeLock = runtimeSourceLock.lode;
+const workspaceRoot = path.resolve("../..");
+const workspaceCommit = readGitObject("HEAD", workspaceRoot);
+const workspaceTree = readGitObject(`${workspaceCommit}^{tree}`, workspaceRoot);
+const coreTree = readGitObject(`${workspaceCommit}:packages/api-server`, workspaceRoot);
+const harborTree = readGitObject(`${workspaceCommit}:services/harbor`, workspaceRoot);
+if (
+  runtimeSourceLock.schema_version !== "webenvoy-desktop-source-lock/v1" ||
+  lodeLock?.repository !== "WebEnvoy/Lode" ||
+  !/^[0-9a-f]{40}$/.test(lodeLock?.commit ?? "") ||
+  !/^[0-9a-f]{40}$/.test(lodeLock?.tree ?? "") ||
+  !/^[0-9a-f]{64}$/.test(lodeLock?.raw_assets_sha256 ?? "") ||
+  JSON.stringify(packagedLodeProvenance) !== JSON.stringify({
+    schema_version: "webenvoy-lode-asset-provenance/v1",
+    ...lodeLock,
+  }) ||
+  packagedRuntimeState.schema_version !== "webenvoy-app-packaged-runtime-assets/v1" ||
+  packagedRuntimeState.status !== "ready" ||
+  packagedRuntimeState.workspace?.commit !== workspaceCommit ||
+  packagedRuntimeState.workspace?.tree !== workspaceTree ||
+  packagedRuntimeState.workspace?.component_paths?.core !== "packages/api-server" ||
+  packagedRuntimeState.workspace?.component_paths?.harbor !== "services/harbor" ||
+  packagedRuntimeState.workspace?.component_trees?.core !== coreTree ||
+  packagedRuntimeState.workspace?.component_trees?.harbor !== harborTree ||
+  JSON.stringify(packagedRuntimeState.packaged) !== JSON.stringify([
+    { service: "core", component_path: "packages/api-server" },
+    { service: "harbor", component_path: "services/harbor" },
+  ])
+) {
+  throw new Error("Packaged provenance smoke failed: workspace components or Lode assets were not produced from the locked sources.");
+}
+
+function readGitObject(revision, cwd) {
+  const result = spawnSync("git", ["rev-parse", revision], { cwd, encoding: "utf8" });
+  const object = result.status === 0 ? result.stdout.trim() : "";
+  return /^[0-9a-f]{40}$/.test(object) ? object : null;
 }
 
 const sharedSupervisorToken = "smoke-shared-runtime-supervisor-token";
@@ -3487,14 +3519,16 @@ if (!bossWritePreviewTask.runs.some((run) => run.fieldSources?.some((field) => f
 async function assertPackagedRuntimeRequiredFailsClosed() {
   const tempDir = await mkdtemp(path.join(tmpdir(), "webenvoy-runtime-assets-smoke-"));
   try {
-    const result = spawnSync(process.execPath, [path.resolve("scripts/package-runtime-assets.mjs")], {
-      cwd: tempDir,
+    const tempAppRoot = path.join(tempDir, "apps", "desktop");
+    const tempScript = path.join(tempAppRoot, "scripts", "package-runtime-assets.mjs");
+    await mkdir(path.dirname(tempScript), { recursive: true });
+    await cp(path.resolve("scripts/package-runtime-assets.mjs"), tempScript);
+    const result = spawnSync(process.execPath, [tempScript], {
+      cwd: tempAppRoot,
       encoding: "utf8",
       env: {
         ...process.env,
         WEBENVOY_REQUIRE_PACKAGED_RUNTIME: "1",
-        WEBENVOY_CORE_RUNTIME_SOURCE_DIR: path.join(tempDir, "missing-core"),
-        WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR: path.join(tempDir, "missing-harbor"),
       },
     });
     const output = `${result.stdout}\n${result.stderr}`;
