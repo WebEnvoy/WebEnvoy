@@ -1,0 +1,95 @@
+{
+  "schema_version": "webenvoy.history-import-provenance/v1",
+  "work_item": 344,
+  "recorded_at": "2026-08-03T17:02:19Z",
+  "target": {
+    "repository": "WebEnvoy/WebEnvoy",
+    "base_commit": "408853bfe53da14326c0dc334646f76397e6ad7b",
+    "base_tree": "2bd6a60796b5a61c55c80c0792fa0e889d38fded",
+    "import_head_commit": "b47ea4ef3ff17f72a4eef11906e0165c30de4a91",
+    "import_head_tree": "5f6f8f1ad7aca6c47c78f4b23505e123ea00c95c",
+    "record_scope": "topology import before this provenance-only commit"
+  },
+  "imports": [
+    {
+      "source_repository": "WebEnvoy/App",
+      "source_ref": "origin/main",
+      "source_commit": "d417eb39b91217adc801d149e2333fe6304d9ff0",
+      "source_tree": "7405c3db75db54c1000948d95a16619e73c62eb3",
+      "reachable_commit_count": 137,
+      "file_count": 204,
+      "tracked_bytes": 7721922,
+      "license": "AGPL-3.0-only",
+      "target_prefix": "apps/desktop",
+      "target_tree": "7405c3db75db54c1000948d95a16619e73c62eb3",
+      "import_merge_commit": "078f8834f3d38456c7b601b6fa201f5ca01a503e",
+      "import_message": "feat(monorepo): 导入 App 历史 (#344)",
+      "import_merge_parents": [
+        "408853bfe53da14326c0dc334646f76397e6ad7b",
+        "d417eb39b91217adc801d149e2333fe6304d9ff0"
+      ],
+      "second_parent": "d417eb39b91217adc801d149e2333fe6304d9ff0",
+      "branch_only_refs": {
+        "local_non_default": 69,
+        "remote_non_default": 19,
+        "tags": 0,
+        "mapping_owner": "GitHub mapping follow-up; not product tree"
+      },
+      "fixture_classification": {
+        "artifact_class": "design_or_local_fixture",
+        "not_harbor_runtime_evidence": true,
+        "scope": "tracked App images, prototype samples and packaged-smoke previews",
+        "path_patterns": [
+          "artifacts/**/*.png",
+          "docs/design/desktop-task-thread-direction.png",
+          "design-qa.md",
+          "DESIGN.md",
+          "docs/design/**"
+        ]
+      }
+    },
+    {
+      "source_repository": "WebEnvoy/Harbor",
+      "source_ref": "origin/main",
+      "source_commit": "bcfc1b902c3fb8c2fd691c805a2ada1ddae51181",
+      "source_tree": "95a4a09f0b0f909c58849999db3bab0618551229",
+      "reachable_commit_count": 160,
+      "file_count": 104,
+      "tracked_bytes": 1331065,
+      "license": "AGPL-3.0-only",
+      "target_prefix": "services/harbor",
+      "target_tree": "95a4a09f0b0f909c58849999db3bab0618551229",
+      "import_merge_commit": "b47ea4ef3ff17f72a4eef11906e0165c30de4a91",
+      "import_message": "feat(monorepo): 导入 Harbor 历史 (#344)",
+      "import_merge_parents": [
+        "078f8834f3d38456c7b601b6fa201f5ca01a503e",
+        "bcfc1b902c3fb8c2fd691c805a2ada1ddae51181"
+      ],
+      "second_parent": "bcfc1b902c3fb8c2fd691c805a2ada1ddae51181",
+      "branch_only_refs": {
+        "local_non_default": 113,
+        "remote_non_default": 47,
+        "tags": 0,
+        "mapping_owner": "GitHub mapping follow-up; not product tree"
+      },
+      "fixture_classification": {
+        "artifact_class": "runtime_source_only",
+        "not_harbor_runtime_evidence": true,
+        "scope": "source code and documented runtime boundaries; no live account or production payload"
+      }
+    }
+  ],
+  "mapping_rule": {
+    "default_branch_dag": "git rev-list <source_ref>",
+    "object_identity": "Every source commit in the default-branch reachable DAG keeps its original SHA and is reachable from the corresponding import merge second parent.",
+    "tree_identity": "The tree at each target prefix equals the source tip tree byte-for-byte.",
+    "branch_only_refs": "Counts are recorded for later GitHub mapping and are not imported into product history.",
+    "lode": "No Lode history, package body, site strategy or submodule is imported."
+  },
+  "rollback": {
+    "target_only": true,
+    "action": "Before merge, prefer recoverable git revert -m 1 of the two import merges; resetting this dedicated unmerged migration branch to base_commit is also bounded to the two import commits/prefixes.",
+    "source": "Never rewrite, delete, archive or otherwise mutate source repositories; target-side reads do not alter them.",
+    "provenance": "Keep this record as evidence even when the target import is rolled back."
+  }
+}
