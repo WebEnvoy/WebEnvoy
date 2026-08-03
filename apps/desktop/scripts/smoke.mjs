@@ -126,10 +126,11 @@ if (
 }
 
 const lodeLock = runtimeSourceLock.lode;
-const workspaceCommit = spawnSync("git", ["rev-parse", "HEAD"], {
-  cwd: path.resolve("../.."),
-  encoding: "utf8",
-}).stdout.trim();
+const workspaceRoot = path.resolve("../..");
+const workspaceCommit = readGitObject("HEAD", workspaceRoot);
+const workspaceTree = readGitObject(`${workspaceCommit}^{tree}`, workspaceRoot);
+const coreTree = readGitObject(`${workspaceCommit}:packages/api-server`, workspaceRoot);
+const harborTree = readGitObject(`${workspaceCommit}:services/harbor`, workspaceRoot);
 if (
   runtimeSourceLock.schema_version !== "webenvoy-desktop-source-lock/v1" ||
   lodeLock?.repository !== "WebEnvoy/Lode" ||
@@ -143,14 +144,23 @@ if (
   packagedRuntimeState.schema_version !== "webenvoy-app-packaged-runtime-assets/v1" ||
   packagedRuntimeState.status !== "ready" ||
   packagedRuntimeState.workspace?.commit !== workspaceCommit ||
+  packagedRuntimeState.workspace?.tree !== workspaceTree ||
   packagedRuntimeState.workspace?.component_paths?.core !== "packages/api-server" ||
   packagedRuntimeState.workspace?.component_paths?.harbor !== "services/harbor" ||
+  packagedRuntimeState.workspace?.component_trees?.core !== coreTree ||
+  packagedRuntimeState.workspace?.component_trees?.harbor !== harborTree ||
   JSON.stringify(packagedRuntimeState.packaged) !== JSON.stringify([
     { service: "core", component_path: "packages/api-server" },
     { service: "harbor", component_path: "services/harbor" },
   ])
 ) {
   throw new Error("Packaged provenance smoke failed: workspace components or Lode assets were not produced from the locked sources.");
+}
+
+function readGitObject(revision, cwd) {
+  const result = spawnSync("git", ["rev-parse", revision], { cwd, encoding: "utf8" });
+  const object = result.status === 0 ? result.stdout.trim() : "";
+  return /^[0-9a-f]{40}$/.test(object) ? object : null;
 }
 
 const sharedSupervisorToken = "smoke-shared-runtime-supervisor-token";

@@ -477,9 +477,11 @@ async function runPackagedSmoke(window: BrowserWindow, loadRenderer: Promise<voi
       packagedViewport: { windowWidth: packagedWindowWidth, ...packagedViewport, horizontalOverflow: false },
       packagedTaskBoundary,
     })}`);
+    runtimeSupervisor.stop();
     app.exit(0);
   } catch (error) {
     console.error(error);
+    runtimeSupervisor.stop();
     app.exit(1);
   }
 }

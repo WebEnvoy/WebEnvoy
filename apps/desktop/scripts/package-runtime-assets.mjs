@@ -9,7 +9,7 @@ const appRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const workspaceRoot = path.resolve(appRoot, "../..");
 const coreRoot = workspaceRoot;
 const harborRoot = path.join(workspaceRoot, "services", "harbor");
-const workspaceCommit = readWorkspaceCommit();
+const workspaceSource = readWorkspaceSource();
 const requirePackagedRuntime = process.env.WEBENVOY_REQUIRE_PACKAGED_RUNTIME === "1";
 const packaged = [];
 const missing = [];
@@ -17,7 +17,11 @@ const missing = [];
 await rm(outRoot, { recursive: true, force: true });
 await mkdir(outRoot, { recursive: true });
 
-if (workspaceCommit && existsSync(path.join(coreRoot, "packages/api-server/package.json"))) {
+if (
+  workspaceSource.commit &&
+  workspaceSource.component_trees.core &&
+  existsSync(path.join(coreRoot, "packages/api-server/package.json"))
+) {
   buildRuntime("Core", "@webenvoy/api-server");
   await packageCoreRuntime(coreRoot, path.join(outRoot, "core"));
   packaged.push({ service: "core", component_path: "packages/api-server" });
@@ -25,7 +29,11 @@ if (workspaceCommit && existsSync(path.join(coreRoot, "packages/api-server/packa
   missing.push("Core runtime source missing from workspace packages/api-server.");
 }
 
-if (workspaceCommit && existsSync(path.join(harborRoot, "packages/runtime-api/src/runtime-server.ts"))) {
+if (
+  workspaceSource.commit &&
+  workspaceSource.component_trees.harbor &&
+  existsSync(path.join(harborRoot, "packages/runtime-api/src/runtime-server.ts"))
+) {
   buildRuntime("Harbor", "@webenvoy/harbor");
   await packageHarborRuntime(harborRoot, path.join(outRoot, "harbor"));
   packaged.push({ service: "harbor", component_path: "services/harbor" });
@@ -33,7 +41,7 @@ if (workspaceCommit && existsSync(path.join(harborRoot, "packages/runtime-api/sr
   missing.push("Harbor runtime source missing from workspace services/harbor.");
 }
 
-if (!workspaceCommit) missing.push("Workspace Git commit is unavailable.");
+if (!workspaceSource.commit || !workspaceSource.tree) missing.push("Workspace Git commit or tree is unavailable.");
 
 await writeFile(
   path.join(outRoot, "packaging-state.json"),
@@ -42,11 +50,13 @@ await writeFile(
       schema_version: "webenvoy-app-packaged-runtime-assets/v1",
       status: missing.length === 0 ? "ready" : "blocked",
       workspace: {
-        commit: workspaceCommit,
+        commit: workspaceSource.commit,
+        tree: workspaceSource.tree,
         component_paths: {
           core: "packages/api-server",
           harbor: "services/harbor",
         },
+        component_trees: workspaceSource.component_trees,
       },
       packaged,
       missing,
@@ -105,10 +115,22 @@ function buildRuntime(name, packageName) {
   }
 }
 
-function readWorkspaceCommit() {
-  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspaceRoot, encoding: "utf8" });
-  const commit = result.status === 0 ? result.stdout.trim() : "";
-  return /^[0-9a-f]{40}$/.test(commit) ? commit : null;
+function readWorkspaceSource() {
+  const commit = readGitObject("HEAD");
+  return {
+    commit,
+    tree: commit ? readGitObject(`${commit}^{tree}`) : null,
+    component_trees: {
+      core: commit ? readGitObject(`${commit}:packages/api-server`) : null,
+      harbor: commit ? readGitObject(`${commit}:services/harbor`) : null,
+    },
+  };
+}
+
+function readGitObject(revision) {
+  const result = spawnSync("git", ["rev-parse", revision], { cwd: workspaceRoot, encoding: "utf8" });
+  const object = result.status === 0 ? result.stdout.trim() : "";
+  return /^[0-9a-f]{40}$/.test(object) ? object : null;
 }
 
 function coreStartScript() {

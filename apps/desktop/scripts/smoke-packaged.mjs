@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import electron from "electron";
+
+import { runBoundedElectronSmoke } from "./run-bounded-electron-smoke.mjs";
 
 const screenshotPath = path.resolve(
   process.env.WEBENVOY_PACKAGED_SMOKE_SCREENSHOT ?? "artifacts/gh-168-packaged-preview.png",
@@ -14,52 +15,19 @@ const core = await startUnavailableJsonServer();
 const harbor = await startUnavailableJsonServer();
 const userDataDir = await mkdtemp(path.join(tmpdir(), "webenvoy-app-packaged-smoke-"));
 
-const child = spawn(electron, ["dist-electron/main.js"], {
-  env: {
-    ...process.env,
-    WEBENVOY_PACKAGED_SMOKE: "1",
-    WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath,
-    WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: core.endpoint,
-    WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harbor.endpoint,
-    WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
-    WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-
-let stdout = "";
-let stderr = "";
-let timedOut = false;
-
-child.stdout.on("data", (chunk) => {
-  stdout += chunk;
-});
-
-child.stderr.on("data", (chunk) => {
-  stderr += chunk;
-});
-
-let exitCode;
+let electronRun;
 try {
-  exitCode = await new Promise((resolve, reject) => {
-    let forceKill;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      forceKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
-    }, 60_000);
-    const clearTimers = () => {
-      clearTimeout(timeout);
-      clearTimeout(forceKill);
-    };
-    child.once("error", (error) => {
-      clearTimers();
-      reject(error);
-    });
-    child.once("exit", (code) => {
-      clearTimers();
-      resolve(code);
-    });
+  electronRun = await runBoundedElectronSmoke({
+    electronPath: electron,
+    env: {
+      ...process.env,
+      WEBENVOY_PACKAGED_SMOKE: "1",
+      WEBENVOY_PACKAGED_SMOKE_SCREENSHOT: screenshotPath,
+      WEBENVOY_PACKAGED_SMOKE_CORE_ENDPOINT: core.endpoint,
+      WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT: harbor.endpoint,
+      WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR: userDataDir,
+      WEBENVOY_DISABLE_PACKAGED_RUNTIME: "1",
+    },
   });
 } finally {
   await rm(userDataDir, { recursive: true, force: true });
@@ -67,9 +35,7 @@ try {
   await harbor.close();
 }
 
-if (timedOut) {
-  throw new Error(`Packaged Electron smoke timed out after 60 seconds.\n${stderr || stdout}`);
-}
+const { exitCode, stdout, stderr } = electronRun;
 
 if (exitCode !== 0) {
   throw new Error(`Packaged Electron smoke failed.\n${stderr || stdout}`);
