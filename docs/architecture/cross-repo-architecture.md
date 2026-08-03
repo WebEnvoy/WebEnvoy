@@ -13,8 +13,8 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 
 | 仓库 | 架构角色 | 真相源 | 不拥有 |
 |---|---|---|---|
-| `WebEnvoy/WebEnvoy` | Core 与公共任务路径 | Task、Run、Result Envelope、Run Record、Admission、Action Risk、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、App UI 状态 |
-| `WebEnvoy/Harbor` | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | 任务成功判断、站点业务 schema、Lode package、Core Run Record |
+| `WebEnvoy/WebEnvoy` | Core 与公共任务路径 | Task、Run、Result Envelope、Run Record、Lode pin、capability admission、结果归一化、failure attribution、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、Lode package body、App UI 状态 |
+| `WebEnvoy/Harbor` | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | Lode pin、capability admission、normalized business output、task outcome、Core Run Record |
 | `WebEnvoy/Lode` | 能力资产和站点知识 | Capability package、Workflow package、input/output schema、source schema、fixtures、post-check、asset registry | 浏览器会话、真实账号状态、Core admission、Run Record、App UI 状态 |
 | `WebEnvoy/App` | 人类用户入口 | Work / Library / Browser surfaces、用户意图、审批入口、handoff UI、run/evidence/catalog 展示状态 | Core run 状态机、Harbor runtime 状态机、Lode 资产真相、证据原始存储 |
 
@@ -26,6 +26,25 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 4. Lode 是 capability source。站点能力、任务包、schema、fixtures、post-check 和失效标记来自 Lode。
 5. App 是用户入口。App 展示事实并发送用户意图，不复制上游 truth。
 6. 跨仓共享字段以规格文档为准。ADR 和本架构文档中的字段名只作为方向性引用。
+
+## Core–Harbor 所有权迁移 v0
+
+WebEnvoy/WebEnvoy#341 冻结 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 的责任边界：Core 解析并锁定 Lode version/hash pin，执行 capability/resource admission，校验 Lode output 并生成 normalized Result Envelope、failure attribution 和 Run Record；Harbor 只提供可追溯的站点无关 runtime facts/refs。`site_id`、`task_kind` 和 fact key 只用于选择/匹配 Harbor 的公共运行事实，不构成站点业务结果 schema。
+
+Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。当前 page-scene runtime 链还要求 `page_summary.url/title/summary`，校验 URL 并把三项投影进 normalized result；这只是 compatibility-only legacy payload，不是获准的 Harbor business truth，目标面仍是 refs/facts 加 Lode 声明、Core-owned normalization。Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除或替代这项依赖。Redaction/access/retention 仍由 PD-0019 规格化，当前消费面没有这些字段，不能表述为已支持。credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
+
+Core `addInferredResourceFacts` 当前的 site-login 推导也只属于兼容期 legacy adapter，不是 Harbor owner-published fact 或新路径 evidence；Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除该推导或用 Harbor 发布的可版本化 fact/ref 替代。
+
+Failure attribution 也保留一个明确的 compatibility drift：Core 请求输入的 `input_invalid` / `private_field_rejected:*` 归为 `input`；Core result projection 的 `public_result_private_field_rejected` 当前是 `result_projection` / `projection` 并归为 `capability`；Harbor admission payload 出现 `forbidden_field:*` 时，当前 `validateHarborAdmission` 则生成 `resource_admission` / `runtime_binding` 并归为 `runtime`。#341 不宣称已经修复；Core #342 必须收敛最终类别/归因，且不得混同这三类边界。
+
+| 迁移阶段 | 新路径 | 旧路径 | 停止条件 |
+| --- | --- | --- | --- |
+| `compatibility`（当前） | 文档冻结 Core owner；不改变 runtime、字段或 API | 继续服务既有 caller，保留旧 pin/summary adapter | 发现 owner、字段、failure 或 sensitive boundary 冲突即冻结 cutover |
+| `cutover-ready` | 所有 consumer 通过 Core-owned pin/admission/projection 的 current-head read-only contract check | 保留回退映射和历史 run 语义；窗口继续有效 | 缺任一 owner/readback、refs-only 或 rollback 证据则不得切换 |
+| `cutover-stabilizing` | 新 run 默认走 Core-owned path；Core 写唯一结果/失败 truth | in-flight/history 按原绑定；窗口保持有效并保留 bounded rollback target | 新路径出现任意 mismatch 立即 rollback |
+| `retired`（后续 Work Item） | 以显式 post-cutover exit/retirement evidence 定义旧 API/字段退役 | 仅所有 caller 迁移、稳定/rollback 验证完成且无历史/fallback 依赖后删除 | evidence 结束窗口；#341 不授权删除旧路径 |
+
+兼容窗口贯穿 cutover stabilization/rollback，只在显式 post-cutover exit/retirement evidence、下一版不兼容合同或 conflict stop 三者中先发生者结束；冲突时先 rollback，再结束本轮窗口并保留 legacy path。Rollback 只切换后续 admission 路由，不删除旧路径或改写已 accepted/terminal Run Record。字段/API 迁移、Harbor/Lode/App 的最终 wire schema 仍由 [PD-0019](../adr/pending-decisions.md#pd-0019) 和后续跨仓规格处理。
 
 ## 依赖方向
 
