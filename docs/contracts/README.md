@@ -16,6 +16,7 @@
 | 持久任务线程与有序回合 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) | 一个 Lode capability 与一个 Harbor identity environment 形成稳定线程；回合按序、幂等、单活动并可恢复，敏感正文与文件只保存 owner refs。 |
 | 身份兼容性只读预检查 | [`identity-compatibility-preview-request.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview-request.schema.json), [`identity-compatibility-preview.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview.schema.json) | Core 对版本锁定的 Lode operation 与 Harbor 公共身份事实做有界投影；`current_execution_window` 只返回运行时未知，不创建 task、run、session 或浏览器动作。 |
 | 引用和版本归属合同 v0 | [ADR 0007](../adr/0007-reference-version-ownership-v0.md) | Lode/Harbor/App/Core 引用、版本、失效和 failure mapping。 |
+| Core–Harbor 运行事实与 capability 所有权迁移 v0 | [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) | Core 拥有 Lode pin、capability admission、normalized result 和 failure attribution；Harbor 只提供站点无关 runtime facts/refs；兼容窗口、cutover 和 rollback；不改变 runtime、字段或 API。 |
 | Core 技术架构基线 | [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | TypeScript / Node.js / pnpm 默认、JSON Schema / Zod / Ajv 边界、API Server / Core Runtime / Run Record 代码边界、跨入口 fixture 规划和跨仓 no-copy 约束。 |
 
 ## 使用规则
@@ -23,6 +24,7 @@
 - 实现、测试和跨仓消费优先引用本索引中的权威 ADR。
 - 若合同需要最终 JSON Schema、OpenAPI、fixture 或生成类型，新建专门规格文件，并从本索引链接。
 - ADR 0002-0004 仍是拟议 ADR；只有其中已经标注 `accepted` 的 Stage 1/Stage 2 facts 进入本索引。
+- Core–Harbor owner、failure、sensitive boundary、compatibility/cutover/rollback 以 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 为准；它冻结责任，不冻结最终 wire field/API。
 - 后续 API Server、Core Runtime、Run Record、Schema、CLI、MCP、SDK 和 App-facing API 骨架必须先读 [ADR 0008](../adr/0008-core-technical-architecture-baseline.md)，再创建代码、schema、fixture、依赖或生成类型。
 - 不把 `docs/draft/` 当作实现依据。
 
@@ -45,10 +47,10 @@
 | --- | --- | --- |
 | 单一任务入口 | API、CLI、MCP、SDK 和 App 都应经 API Server/Core Runtime 进入同一任务路径，不各自直接调用 Harbor 或 Lode。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0006](../adr/0006-common-task-entry-v0.md) |
 | 能力准入 | stable execution 只接受 Lode 声明了 lifecycle、input/output contract、resource requirements、fixtures/post-check、version/invalidation 和 evidence expectation 的能力；缺失时 fail closed。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
-| 资源匹配 | Lode 声明资源需求，Harbor 提供 runtime/profile/session facts，Core 做匹配和拒绝原因；Harbor 不输出业务适配结论。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
-| Result Envelope | Core 校验 Lode output 并生成 public envelope；raw payload、DOM、HAR、screenshot、network/runtime material 只能以 refs 进入公共结果。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md) |
+| 资源匹配 | Lode 声明资源需求，Harbor 提供 runtime/profile/session facts，Core 做匹配和拒绝原因；Harbor 不输出业务适配结论。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
+| Result Envelope | Core 校验 Lode output 并生成 public envelope；raw payload、DOM、HAR、screenshot、network/runtime material 只能以 refs 进入公共结果；旧 Harbor `public_summary` 仅在兼容窗口作为 legacy adapter。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) |
 | Run Record | `accepted` 后的 run 是 durable truth；状态单调；记录 request/capability/resource/runtime/result/failure/evidence/raw/source/resource/write/reconciliation refs。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md) |
 | Task Thread | 稳定 `thread_id` 绑定 capability 与 identity environment；每个结构化输入形成唯一有序回合，活动或未知回合阻止隐式排队，重复 idempotency key 不重复执行。 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) |
 | 写侧安全 | 真实写入必须区分 action declaration、effective authorization、idempotency、write operation ref、post-check、unknown outcome、manual recovery 和 reconciliation；unknown outcome 不能转成 success。 | [ADR 0009](../adr/0009-unified-authorization-policy.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md) |
-| no-leakage | Core 不保存 Cookie、Token、完整 DOM、完整请求/响应、未脱敏页面现场、本地路径、provider private object 或业务私有 payload。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
+| no-leakage | Core 不保存 Cookie、Token、完整 DOM、完整请求/响应、未脱敏页面现场、本地路径、provider private object 或业务私有 payload；也不复制 Lode package body/normalizer code。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
 | 非目标 | Core 不成为通用 browser agent loop、Harbor process manager、Lode asset store、provider router/marketplace、account risk scoring system、business strategy engine、ETL/data warehouse。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |

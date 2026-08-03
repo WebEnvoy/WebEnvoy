@@ -13,8 +13,8 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 
 | 仓库 | 架构角色 | 真相源 | 不拥有 |
 |---|---|---|---|
-| `WebEnvoy/WebEnvoy` | Core 与公共任务路径 | Task、Run、Result Envelope、Run Record、Admission、Action Risk、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、App UI 状态 |
-| `WebEnvoy/Harbor` | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | 任务成功判断、站点业务 schema、Lode package、Core Run Record |
+| `WebEnvoy/WebEnvoy` | Core 与公共任务路径 | Task、Run、Result Envelope、Run Record、Lode pin、capability admission、结果归一化、failure attribution、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、Lode package body、App UI 状态 |
+| `WebEnvoy/Harbor` | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | Lode pin、capability admission、normalized business output、task outcome、Core Run Record |
 | `WebEnvoy/Lode` | 能力资产和站点知识 | Capability package、Workflow package、input/output schema、source schema、fixtures、post-check、asset registry | 浏览器会话、真实账号状态、Core admission、Run Record、App UI 状态 |
 | `WebEnvoy/App` | 人类用户入口 | Work / Library / Browser surfaces、用户意图、审批入口、handoff UI、run/evidence/catalog 展示状态 | Core run 状态机、Harbor runtime 状态机、Lode 资产真相、证据原始存储 |
 
@@ -26,6 +26,21 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 4. Lode 是 capability source。站点能力、任务包、schema、fixtures、post-check 和失效标记来自 Lode。
 5. App 是用户入口。App 展示事实并发送用户意图，不复制上游 truth。
 6. 跨仓共享字段以规格文档为准。ADR 和本架构文档中的字段名只作为方向性引用。
+
+## Core–Harbor 所有权迁移 v0
+
+WebEnvoy/WebEnvoy#341 冻结 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 的责任边界：Core 解析并锁定 Lode version/hash pin，执行 capability/resource admission，校验 Lode output 并生成 normalized Result Envelope、failure attribution 和 Run Record；Harbor 只提供可追溯的站点无关 runtime facts/refs。`site_id`、`task_kind` 和 fact key 只用于选择/匹配 Harbor 的公共运行事实，不构成站点业务结果 schema。
+
+Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。Core 只保留公共 refs、状态和脱敏摘要；credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
+
+| 迁移阶段 | 新路径 | 旧路径 | 停止条件 |
+| --- | --- | --- | --- |
+| `compatibility`（当前） | 文档冻结 Core owner；不改变 runtime、字段或 API | 继续服务既有 caller，保留旧 pin/summary adapter | 发现 owner、字段、failure 或 sensitive boundary 冲突即冻结 cutover |
+| `cutover-ready` | 所有 consumer 通过 Core-owned pin/admission/projection 的 current-head read-only contract check | 保留回退映射和历史 run 语义 | 缺任一 owner/readback、refs-only 或 rollback 证据则不得切换 |
+| `cutover` | 新 run 默认走 Core-owned path；Core 写唯一结果/失败 truth | in-flight/history 按原绑定；窗口内 bounded fallback | 新路径出现任意 mismatch 立即 rollback |
+| `retired`（后续 Work Item） | 另行定义旧 API/字段退役 | 仅所有 caller 完成迁移后删除 | #341 不授权删除旧路径 |
+
+兼容窗口在 `cutover-ready` 通过、下一版不兼容合同发布或发现冲突三者中先发生者结束；rollback 只切换后续 admission 路由，不删除旧路径或改写已 accepted/terminal Run Record。字段/API 迁移、Harbor/Lode/App 的最终 wire schema 仍由 [PD-0019](../adr/pending-decisions.md#pd-0019) 和后续跨仓规格处理。
 
 ## 依赖方向
 
