@@ -346,6 +346,10 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
         });
         return;
       }
+      if (request.method === "GET" && request.url === "/runtime/sessions/session_process_ready/runtime-facts") {
+        sendJson(response, 404, { status: "unavailable", failure_class: "runtime_facts_unsupported", retryable: false });
+        return;
+      }
       if (request.method === "POST" && request.url === "/runtime/sessions/session_process_ready/snapshot") {
         const runId = typeof body.run_id === "string" ? body.run_id : "";
         sendJson(response, 200, {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, cp, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -78,6 +78,48 @@ async function main(): Promise<void> {
       assert.equal(drift.code, "runtime_consumption_asset_pin_mismatch:runtime_consumption_allowlist");
     } finally {
       await rm(driftRoot, { recursive: true, force: true });
+    }
+
+    const pathMismatchRoot = await mkdtemp(join(tmpdir(), "webenvoy-lode-runtime-pins-path-mismatch-"));
+    try {
+      await cp(dirname(dirname(registryPath)), pathMismatchRoot, { recursive: true });
+      const pathMismatchRegistryPath = join(pathMismatchRoot, "registry/local-packages.json");
+      const pathMismatchRegistry = JSON.parse(await readFile(pathMismatchRegistryPath, "utf8")) as { entries: Record<string, unknown>[] };
+      const pathMismatchEntry = pathMismatchRegistry.entries.find((entry) => entry.package_ref === pinnedSkills[0].skill_ref);
+      assert(pathMismatchEntry);
+      await writeFile(
+        join(pathMismatchRoot, "sites/xiaohongshu/search-notes/swapped-manifest.json"),
+        await readFile(join(pathMismatchRoot, "sites/xiaohongshu/search-notes/manifest.json"))
+      );
+      pathMismatchEntry.manifest_path = "sites/xiaohongshu/search-notes/swapped-manifest.json";
+      await writeFile(pathMismatchRegistryPath, JSON.stringify(pathMismatchRegistry));
+      const pathMismatch = await createLocalLodePackageResolver({ registryPath: pathMismatchRegistryPath, rootDir: pathMismatchRoot })({
+        package_ref: pinnedSkills[0].skill_ref,
+        task_intent: {}
+      });
+      assert.equal("category" in pathMismatch, true);
+      if (!("category" in pathMismatch)) throw new Error("registry path mismatch unexpectedly admitted");
+      assert.equal(pathMismatch.code, "runtime_consumption_asset_path_mismatch:manifest");
+    } finally {
+      await rm(pathMismatchRoot, { recursive: true, force: true });
+    }
+
+    const swappedAssetRoot = await mkdtemp(join(tmpdir(), "webenvoy-lode-runtime-pins-swapped-asset-"));
+    try {
+      await cp(dirname(dirname(registryPath)), swappedAssetRoot, { recursive: true });
+      await writeFile(
+        join(swappedAssetRoot, "sites/xiaohongshu/search-notes/resource-requirements.json"),
+        await readFile(join(swappedAssetRoot, "sites/xiaohongshu/read-note-detail/resource-requirements.json"))
+      );
+      const swappedAsset = await createLocalLodePackageResolver({
+        registryPath: join(swappedAssetRoot, "registry/local-packages.json"),
+        rootDir: swappedAssetRoot
+      })({ package_ref: pinnedSkills[0].skill_ref, task_intent: {} });
+      assert.equal("category" in swappedAsset, true);
+      if (!("category" in swappedAsset)) throw new Error("swapped pinned asset unexpectedly admitted");
+      assert.equal(swappedAsset.code, "runtime_consumption_asset_pin_mismatch:resource_requirements");
+    } finally {
+      await rm(swappedAssetRoot, { recursive: true, force: true });
     }
 
     for (const expected of pinnedSkills) {

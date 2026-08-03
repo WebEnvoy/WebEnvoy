@@ -1382,7 +1382,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       ? { public_summary: strictSearchSummary(holderRef, { raw_url: "https://example.test/private" }) }
       : holderRef.includes("missing")
         ? { public_summary: strictSearchSummary(holderRef, {}, { result_count: undefined }) }
-        : { public_summary: strictSearchSummary(holderRef) }
+        : holderRef.includes("runtime")
+          ? { runtime_session_ref: "session_other" }
+          : holderRef.includes("boundary")
+            ? { public_boundary: { output: "private_summary" } }
+            : holderRef.includes("source")
+              ? { source_refs: [{ kind: "raw_dom_ref", ref: "source_44444444-4444-4444-8444-444444444444" }] }
+              : holderRef.includes("evidence")
+                ? { evidence_ref_kinds: [{ kind: "raw_har_ref", ref: "evidence_44444444-4444-4444-8444-444444444444" }] }
+                : { public_summary: strictSearchSummary(holderRef) }
   );
   const canonicalRuntimePaths: string[] = [];
   const canonicalRuntimeHarbor = createHarborMock(
@@ -2046,7 +2054,15 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       assert.deepEqual(Object.keys(asRecord(strictProjection.normalized)).sort(), ["canonical_url", "has_more", "keyword", "notes", "result_count", "source_status", "summary", "title"]);
       assert.deepEqual(Object.keys(asRecord((asRecord(strictProjection.normalized).notes as JsonObject[])[0])).sort(), ["author_display_name", "detail_ref", "interaction_metrics", "title"]);
       assert.deepEqual((strictProjection.source_refs as JsonObject[]).map((ref) => Object.keys(ref).sort()), [["producer", "redaction", "ref_id", "schema_hint", "source_kind"], ["producer", "redaction", "ref_id", "schema_hint", "source_kind"], ["producer", "redaction", "ref_id", "schema_hint", "source_kind"]]);
-      for (const suffix of ["private", "missing"] as const) {
+      const strictFailureAttributionCases = {
+        private: { category: "result_projection", attribution: "capability", status: "failed" },
+        missing: { category: "result_projection", attribution: "capability", status: "failed" },
+        runtime: { category: "runtime_execution", attribution: "runtime", status: "failed" },
+        boundary: { category: "runtime_execution", attribution: "runtime", status: "failed" },
+        source: { category: "evidence_reference", attribution: "evidence", status: "blocked" },
+        evidence: { category: "evidence_reference", attribution: "evidence", status: "blocked" }
+      } as const;
+      for (const suffix of Object.keys(strictFailureAttributionCases) as (keyof typeof strictFailureAttributionCases)[]) {
         const invalid = await postJson(strictSearchPort, "/tasks", {
           run_id: `run_strict_search_projection_${suffix}`,
           package_ref: xiaohongshuPackageRef,
@@ -2055,10 +2071,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
           harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
         });
         const invalidRun = asRecord(asRecord(invalid.body).run);
-        assert.equal(invalidRun.status, "failed", suffix);
-        assert.equal(asRecord(invalidRun.failure).category, "result_projection", suffix);
-        assert.equal(asRecord(invalidRun.failure).code, "output_invalid", suffix);
-        assert.equal(asRecord(invalidRun.post_check).attribution, "capability", suffix);
+        const expectedFailure = strictFailureAttributionCases[suffix];
+        assert.equal(invalidRun.status, expectedFailure.status, suffix);
+        assert.equal(asRecord(invalidRun.failure).category, expectedFailure.category, suffix);
+        assert.equal(asRecord(invalidRun.failure).attribution, expectedFailure.attribution, suffix);
+        assert.equal(asRecord(invalidRun.post_check).attribution, expectedFailure.attribution, suffix);
       }
       const submit = await postJson(port, "/tasks", {
         run_id: "run_api_submit_runtime_chain",
