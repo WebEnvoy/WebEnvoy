@@ -31,6 +31,14 @@ export type LodePackageAdmissionContract = {
     }[];
   };
   runtime_consumption?: LodeRuntimeConsumptionEntry;
+  /** Lode-owned search declaration metadata; never persisted as package body. */
+  runtime_consumption_declaration?: {
+    declaration_path: string;
+    asset_hashes: Readonly<Record<string, string>>;
+    output_required_public_fields: readonly string[];
+    input_required_fields: readonly string[];
+    required_ref_kinds: readonly string[];
+  };
 };
 
 export type LodeRuntimeAdmissionPolicy = {

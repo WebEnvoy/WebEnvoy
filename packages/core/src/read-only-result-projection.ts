@@ -17,6 +17,7 @@ export type LodeReadOnlyProjection = {
 
 export type LodeReadOnlyFailureClass =
   | "invalid_contract"
+  | "output_invalid"
   | "empty_result"
   | "not_logged_in"
   | "login_expired"
@@ -72,6 +73,8 @@ function lodeFailure(failureClass: Exclude<LodeReadOnlyFailureClass, "empty_resu
   switch (failureClass) {
     case "invalid_contract":
       return { status: "failed", failure: { category: "capability_contract", code: failureClass, phase: "projection", recovery_hint: "repair_package" } };
+    case "output_invalid":
+      return { status: "failed", failure: { category: "result_projection", code: failureClass, phase: "projection", recovery_hint: "repair_package" } };
     case "not_logged_in":
     case "login_expired":
       return { status: "requires_user_action", failure: { category: "resource_admission", code: failureClass, phase: "runtime_binding", recovery_hint: "open_manual_auth" } };

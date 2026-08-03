@@ -632,7 +632,8 @@ function createHarborMock(
   readOperationOverrides: JsonObject | ((body: JsonObject, holderRef: string) => JsonObject) = {},
   identityRecordOverrides: JsonObject = {},
   cleanupBehavior: "success" | "unavailable" | "hang" | "inconsistent" | "owner_none_held" = "success",
-  providerCatalogOverrides: JsonObject = {}
+  providerCatalogOverrides: JsonObject = {},
+  canonicalRuntimeFacts: JsonObject | undefined = undefined
 ): Server {
   const sessionRef = "session_runtime_api_ready";
   let currentHolderRef = "";
@@ -742,6 +743,14 @@ function createHarborMock(
             ? { runtime_session_ref: "session_unbound" }
             : { lifecycle_state: "locked" })
         });
+        return;
+      }
+      if (request.method === "GET" && request.url === `/runtime/sessions/${sessionRef}/runtime-facts`) {
+        if (canonicalRuntimeFacts === undefined) {
+          sendJson(response, 404, { status: "unavailable", failure_class: "runtime_facts_unsupported", retryable: false });
+          return;
+        }
+        sendJson(response, 200, canonicalRuntimeFacts);
         return;
       }
       if (request.method === "GET" && request.url === `/runtime/sessions/${sessionRef}`) {
@@ -1292,6 +1301,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         : fact
     )
   };
+  const canonicalXiaohongshuSiteFacts = {
+    ...readyXiaohongshuSiteFacts,
+    resource_facts: (readyXiaohongshuSiteFacts.resource_facts as JsonObject[]).filter((fact) => fact.key !== "identity.user_logged_in.confirmed")
+  };
   const xiaohongshuHarbor = createHarborMock(
     true,
     xiaohongshuPaths,
@@ -1340,6 +1353,77 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     items: [{ detail_ref: driftDetailRef, title: "公开笔记", author_display_name: "公开作者", interaction_metrics: { likes: "10" } }],
     source_signals: ["pinia_store", "xhs_search_read_network"]
   };
+  const strictSearchSummary = (holderRef: string, itemOverrides: JsonObject = {}, summaryOverrides: JsonObject = {}): JsonObject => {
+    const detailRef = detailRefForRun(holderRef);
+    return {
+      schema_version: "harbor-read-operation-public-summary/v1",
+      operation_id: "xhs_search_notes",
+      result_kind: "xiaohongshu_search_notes_surface",
+      surface: "search_result",
+      result_state: "operation_read_response_observed",
+      response_status: 200,
+      result_count: 1,
+      detail_refs: [detailRef],
+      items: [{ detail_ref: detailRef, title: "公开笔记", author_display_name: "公开作者", interaction_metrics: { likes: "10" }, ...itemOverrides }],
+      source_signals: ["pinia_store", "xhs_search_read_network"],
+      ...summaryOverrides
+    };
+  };
+  const strictSearchPaths: string[] = [];
+  const strictSearchHarbor = createHarborMock(
+    true,
+    strictSearchPaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    readyXiaohongshuSiteFacts,
+    (_body, holderRef) => holderRef.includes("private")
+      ? { public_summary: strictSearchSummary(holderRef, { raw_url: "https://example.test/private" }) }
+      : holderRef.includes("missing")
+        ? { public_summary: strictSearchSummary(holderRef, {}, { result_count: undefined }) }
+        : { public_summary: strictSearchSummary(holderRef) }
+  );
+  const canonicalRuntimePaths: string[] = [];
+  const canonicalRuntimeHarbor = createHarborMock(
+    true,
+    canonicalRuntimePaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts,
+    {},
+    {},
+    "success",
+    {},
+    liveRuntimeFacts()
+  );
+  const unsupportedRuntimePaths: string[] = [];
+  const unsupportedRuntimeHarbor = createHarborMock(
+    true,
+    unsupportedRuntimePaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts,
+    {},
+    {},
+    "success",
+    {},
+    { status: "unsupported" }
+  );
+  const legacyRuntimePaths: string[] = [];
+  const legacyRuntimeHarbor = createHarborMock(
+    true,
+    legacyRuntimePaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts
+  );
   const operationRefDriftCases: Array<{ name: string; override: JsonObject; expectSuccess?: boolean }> = [
     {
       name: "legacy_v0",
@@ -1609,6 +1693,31 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
   try {
     const { registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 } = await writeLodeRegistry(root, { bossFixtureEnabled: true });
     const resolver = createLocalLodePackageResolver({ registryPath, allowlistAssetSha256, runtimeAdmissionAssetSha256 });
+    // Fixture-only declaration metadata exercises Core's strict projection path;
+    // file pin verification is covered by the Lode resolver self-check.
+    const strictSearchResolver = async (input: Parameters<typeof resolver>[0]) => {
+      const resolved = await resolver(input);
+      if ("category" in resolved || resolved.package_ref !== xiaohongshuPackageRef) return resolved;
+      return {
+        ...resolved,
+        runtime_consumption_declaration: {
+          declaration_path: "registry/search-runtime-consumption.json",
+          asset_hashes: Object.fromEntries([
+            "manifest",
+            "package_lock",
+            "input_schema",
+            "output_schema",
+            "resource_requirements",
+            "failure_mapping",
+            "post_check",
+            "runtime_consumption_allowlist"
+          ].map((role) => [role, "0".repeat(64)])),
+          output_required_public_fields: ["canonical_url", "title", "summary", "source_status", "keyword", "result_count", "notes"],
+          input_required_fields: ["url", "keyword"],
+          required_ref_kinds: ["pinia_store_summary", "network_summary", "dom_snapshot_summary", "snapshot_ref", "post_check_ref"]
+        }
+      };
+    };
     const nonPinnedResolver = async (input: Parameters<typeof resolver>[0]) => {
       const resolved = await resolver(input);
       if ("category" in resolved || !resolved.runtime_consumption) return resolved;
@@ -1627,6 +1736,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const malformedEvidenceHarborPort = await listen(malformedEvidenceHarbor);
     const mismatchedEvidenceHarborPort = await listen(mismatchedEvidenceHarbor);
     const xiaohongshuHarborPort = await listen(xiaohongshuHarbor);
+    const strictSearchHarborPort = await listen(strictSearchHarbor);
+    const canonicalRuntimeHarborPort = await listen(canonicalRuntimeHarbor);
+    const unsupportedRuntimeHarborPort = await listen(unsupportedRuntimeHarbor);
+    const legacyRuntimeHarborPort = await listen(legacyRuntimeHarbor);
     const bossHarborPort = await listen(bossHarbor);
     const unavailableOperationHarborPort = await listen(unavailableOperationHarbor);
     const emptyResultHarborPort = await listen(emptyResultHarbor);
@@ -1714,6 +1827,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const timedFailure = await timedOperation;
     assert.equal(asRecord(timedFailure).code, "timeout");
     const store = createFileRunRecordStore({ directory: runDir });
+    const strictSearchServer = createApiServer({
+      runRecordStore: store,
+      lodePackageResolver: strictSearchResolver,
+      harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${strictSearchHarborPort}` })
+    });
     const server = createApiServer({
       runRecordStore: store,
       lodePackageResolver: resolver,
@@ -1879,7 +1997,69 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const identityRequiredPort = await listen(identityRequiredServer);
     const raceDuplicatePort = await listen(raceDuplicateServer);
     const persistenceFailurePort = await listen(persistenceFailureServer);
+    const strictSearchPort = await listen(strictSearchServer);
     try {
+      const collectAdmission = (baseUrl: string, runId: string) => createHttpHarborRuntimeClient({ baseUrl }).collectAdmissionFacts({
+        run_id: runId,
+        task_intent: xiaohongshuTaskIntent(`intent_${runId}`),
+        package_ref: xiaohongshuPackageRef,
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee"
+        }
+      });
+      const canonicalAdmission = await collectAdmission(`http://127.0.0.1:${canonicalRuntimeHarborPort}`, "run_canonical_runtime_facts");
+      assert.equal("category" in canonicalAdmission, false);
+      assert.equal("kind" in canonicalAdmission, false);
+      if ("category" in canonicalAdmission || "kind" in canonicalAdmission) throw new Error("canonical runtime facts admission failed");
+      const canonicalFacts = canonicalAdmission as { runtime_facts_source?: string; harbor_resource_facts?: JsonObject };
+      assert.equal(canonicalFacts.runtime_facts_source, "canonical");
+      assert.equal((canonicalFacts.harbor_resource_facts?.resource_facts as JsonObject[] | undefined)?.some((fact) => fact.fact_key === "identity.user_logged_in.confirmed"), false);
+      const legacyAdmission = await collectAdmission(`http://127.0.0.1:${legacyRuntimeHarborPort}`, "run_legacy_runtime_facts");
+      assert.equal("category" in legacyAdmission, false);
+      assert.equal("kind" in legacyAdmission, false);
+      if ("category" in legacyAdmission || "kind" in legacyAdmission) throw new Error("legacy runtime facts admission failed");
+      const legacyFacts = legacyAdmission as { runtime_facts_source?: string };
+      assert.equal(legacyFacts.runtime_facts_source, "legacy");
+      const unsupportedAdmission = await collectAdmission(`http://127.0.0.1:${unsupportedRuntimeHarborPort}`, "run_unsupported_runtime_facts");
+      assert.equal("category" in unsupportedAdmission, false);
+      assert.equal("kind" in unsupportedAdmission, false);
+      if ("category" in unsupportedAdmission || "kind" in unsupportedAdmission) throw new Error("unsupported runtime facts fallback failed");
+      const unsupportedFacts = unsupportedAdmission as { runtime_facts_source?: string };
+      assert.equal(unsupportedFacts.runtime_facts_source, "legacy");
+      assert(canonicalRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
+      assert(unsupportedRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
+      assert(legacyRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
+      const strictSuccess = await postJson(strictSearchPort, "/tasks", {
+        run_id: "run_strict_search_projection_success",
+        package_ref: xiaohongshuPackageRef,
+        task_intent: xiaohongshuTaskIntent("intent_strict_search_projection_success"),
+        public_query: { query: "city coffee", limit: 1 },
+        harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+      });
+      const strictSuccessRun = asRecord(asRecord(strictSuccess.body).run);
+      assert.equal(strictSuccessRun.status, "succeeded");
+      const strictSuccessResult = asRecord((await getJson(strictSearchPort, "/runs/run_strict_search_projection_success/result")).body);
+      const strictSuccessEnvelope = asRecord(asRecord(asRecord(strictSuccessResult.result).result).result_envelope);
+      const strictProjection = asRecord(asRecord(strictSuccessEnvelope.data).projection);
+      assert.equal(strictProjection.result_kind, "xhs_note_search");
+      assert.deepEqual(Object.keys(asRecord(strictProjection.normalized)).sort(), ["canonical_url", "has_more", "keyword", "notes", "result_count", "source_status", "summary", "title"]);
+      assert.deepEqual(Object.keys(asRecord((asRecord(strictProjection.normalized).notes as JsonObject[])[0])).sort(), ["author_display_name", "detail_ref", "interaction_metrics", "title"]);
+      assert.deepEqual((strictProjection.source_refs as JsonObject[]).map((ref) => Object.keys(ref).sort()), [["producer", "redaction", "ref_id", "schema_hint", "source_kind"], ["producer", "redaction", "ref_id", "schema_hint", "source_kind"], ["producer", "redaction", "ref_id", "schema_hint", "source_kind"]]);
+      for (const suffix of ["private", "missing"] as const) {
+        const invalid = await postJson(strictSearchPort, "/tasks", {
+          run_id: `run_strict_search_projection_${suffix}`,
+          package_ref: xiaohongshuPackageRef,
+          task_intent: xiaohongshuTaskIntent(`intent_strict_search_projection_${suffix}`),
+          public_query: { query: "city coffee", limit: 1 },
+          harbor: { identity_environment_ref: "identity-env_runtime_api", url: "https://www.xiaohongshu.com/search_result/?keyword=city%20coffee" }
+        });
+        const invalidRun = asRecord(asRecord(invalid.body).run);
+        assert.equal(invalidRun.status, "failed", suffix);
+        assert.equal(asRecord(invalidRun.failure).category, "result_projection", suffix);
+        assert.equal(asRecord(invalidRun.failure).code, "output_invalid", suffix);
+        assert.equal(asRecord(invalidRun.post_check).attribution, "capability", suffix);
+      }
       const submit = await postJson(port, "/tasks", {
         run_id: "run_api_submit_runtime_chain",
         package_ref: packageRef,
@@ -2936,6 +3116,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       await close(identityRequiredServer);
       await close(raceDuplicateServer);
       await close(persistenceFailureServer);
+      await close(strictSearchServer);
     }
   } finally {
     await close(harbor);
@@ -2946,6 +3127,10 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(malformedEvidenceHarbor);
     await close(mismatchedEvidenceHarbor);
     await close(xiaohongshuHarbor);
+    await close(strictSearchHarbor);
+    await close(canonicalRuntimeHarbor);
+    await close(unsupportedRuntimeHarbor);
+    await close(legacyRuntimeHarbor);
     await close(bossHarbor);
     await close(unavailableOperationHarbor);
     await close(emptyResultHarbor);

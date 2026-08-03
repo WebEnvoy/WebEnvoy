@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -47,6 +47,38 @@ async function main(): Promise<void> {
       registryPath,
       rootDir: dirname(dirname(registryPath))
     });
+
+    const search = await lodePackageResolver({
+      package_ref: pinnedSkills[0].skill_ref,
+      task_intent: {}
+    });
+    assert.equal("category" in search, false);
+    if ("category" in search) throw new Error("search declaration did not resolve");
+    assert.deepEqual(Object.keys(search.runtime_consumption_declaration?.asset_hashes ?? {}).sort(), [
+      "failure_mapping",
+      "input_schema",
+      "manifest",
+      "output_schema",
+      "package_lock",
+      "post_check",
+      "resource_requirements",
+      "runtime_consumption_allowlist"
+    ]);
+
+    const driftRoot = await mkdtemp(join(tmpdir(), "webenvoy-lode-runtime-pins-drift-"));
+    try {
+      await cp(dirname(dirname(registryPath)), driftRoot, { recursive: true });
+      await appendFile(join(driftRoot, "registry/runtime-consumption-allowlist.json"), "\n");
+      const drift = await createLocalLodePackageResolver({
+        registryPath: join(driftRoot, "registry/local-packages.json"),
+        rootDir: driftRoot
+      })({ package_ref: pinnedSkills[0].skill_ref, task_intent: {} });
+      assert.equal("category" in drift, true);
+      if (!("category" in drift)) throw new Error("asset drift unexpectedly admitted");
+      assert.equal(drift.code, "runtime_consumption_asset_pin_mismatch:runtime_consumption_allowlist");
+    } finally {
+      await rm(driftRoot, { recursive: true, force: true });
+    }
 
     for (const expected of pinnedSkills) {
       const view = await getExecutionPolicyEffectiveView(

@@ -116,6 +116,8 @@ export type LocalLodePackageResolverOptions = {
   rootDir?: string;
   allowlistAssetSha256?: string;
   runtimeAdmissionAssetSha256?: Readonly<Record<string, string>>;
+  /** Test-only override for the Lode-owned declaration content pin. */
+  searchRuntimeConsumptionDeclarationSha256?: string;
 };
 
 export type HttpHarborRuntimeClientOptions = {
@@ -139,6 +141,18 @@ const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> 
   "registry/detail-runtime-consumption.json": "ad17f4400ef745b1ebdb4cb46b2f4b50f274ee5ef3cfd5074e5980915a27a1a0",
   "registry/validate-only-runtime-consumption.json": "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
 };
+const lodeSearchRuntimeConsumptionDeclarationPath = "registry/search-runtime-consumption.json";
+const lodeSearchRuntimeConsumptionDeclarationSha256 = "76d017a5e5dc79e774d586c10fb2494d6704013118ab14b739ceb5547ce3f0b0";
+const lodeSearchRuntimeConsumptionAssetRoles = [
+  "manifest",
+  "package_lock",
+  "input_schema",
+  "output_schema",
+  "resource_requirements",
+  "failure_mapping",
+  "post_check",
+  "runtime_consumption_allowlist"
+] as const;
 const xhsDetailPackageRef = opaqueDetailOperationContract.package_ref;
 const xhsDetailLockRef = opaqueDetailOperationContract.lock_ref;
 const lodeDetailTruthAssetSha256 = "dca2761b7feb09a0ab86f7202e153da3c97b21a75299af6adaf64eade319deef";
@@ -426,9 +440,62 @@ function projectionFromScene(taskIntent: TaskIntentEnvelope, packageRef: string,
   };
 }
 
-function projectionFromReadOperation(taskIntent: TaskIntentEnvelope, packageRef: string, operation: JsonObject): LodeReadOnlyProjection {
+function projectionFromReadOperation(
+  taskIntent: TaskIntentEnvelope,
+  packageRef: string,
+  operation: JsonObject,
+  searchDeclaration?: LodePackageAdmissionContract["runtime_consumption_declaration"],
+  requestedQuery?: string
+): LodeReadOnlyProjection {
   const sourceRefs = (operation.source_refs as JsonObject[]).map((entry) => string(object(entry)?.ref) as string);
   const evidenceRefs = (operation.evidence_ref_kinds as JsonObject[]).map((entry) => string(object(entry)?.ref) as string);
+  const publicSummary = object(operation.public_summary);
+  if (searchDeclaration !== undefined) {
+    const items = (Array.isArray(publicSummary?.items) ? publicSummary.items : []).map((value) => {
+      const item = object(value) ?? {};
+      return {
+        detail_ref: item.detail_ref,
+        title: item.title,
+        ...(item.author_display_name === undefined ? {} : { author_display_name: item.author_display_name }),
+        ...(item.interaction_metrics === undefined ? {} : { interaction_metrics: item.interaction_metrics })
+      };
+    });
+    const keyword = requestedQuery ?? "";
+    const resultCount = publicSummary?.result_count as number;
+    const boundedKeyword = keyword.length > 80 ? keyword.slice(0, 80) : keyword;
+    const normalized = {
+      canonical_url: taskIntent.scope.target_ref,
+      title: `Xiaohongshu search results (${resultCount})`,
+      summary: boundedKeyword.length === 0 ? "Public Xiaohongshu search results." : `Public search results for ${boundedKeyword}.`,
+      source_status: "located",
+      keyword,
+      result_count: resultCount,
+      has_more: "unknown",
+      notes: items
+    };
+    const pinnedSourceRefs = sourceRefs.map((ref, index) => ({
+      ref_id: ref,
+      source_kind: string(object((operation.source_refs as JsonObject[])[index])?.kind) ?? "summary_ref",
+      producer: "Harbor",
+      redaction: "summary_only",
+      schema_hint: "harbor.runtime-summary-ref.v0"
+    }));
+    const pinnedEvidenceRefs = evidenceRefs.map((ref, index) => ({
+      ref_id: ref,
+      evidence_kind: string(object((operation.evidence_ref_kinds as JsonObject[])[index])?.kind) ?? "evidence_ref",
+      producer: "Harbor",
+      redaction: "refs_only"
+    }));
+    return {
+      result_kind: "xhs_note_search",
+      status: "available",
+      classification: "success_result",
+      normalized,
+      source_refs: pinnedSourceRefs,
+      evidence_refs: pinnedEvidenceRefs,
+      warnings: ["Core normalized the Harbor public summary against the pinned Lode output contract."]
+    };
+  }
   return {
     result_kind: readOnlyResultKind(taskIntent),
     status: "available",
@@ -503,7 +570,8 @@ function validXhsSearchSummary(
 function validateCompletedReadOperation(
   value: unknown,
   entry: LodeRuntimeConsumptionEntry,
-  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string }
+  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string },
+  searchDeclaration?: LodePackageAdmissionContract["runtime_consumption_declaration"]
 ): JsonObject | undefined {
   const operation = object(value);
   const pin = object(operation?.lode_pin);
@@ -569,7 +637,11 @@ function validateCompletedReadOperation(
     !/(xsec|cookie|token|profile_storage|raw_dom|raw_har|network_response_body|screenshot_body)/i.test(JSON.stringify(normalized))
   );
   const validSearchSummary = entry.operation_id !== "xhs_search_notes" ||
-    validXhsSearchSummary(publicSummary, detailRefs, requested.limit);
+    (validXhsSearchSummary(publicSummary, detailRefs, requested.limit) &&
+      (searchDeclaration === undefined || publicSummary?.schema_version === "harbor-read-operation-public-summary/v1"));
+  const validSearchPin = entry.operation_id === "xhs_search_notes" && searchDeclaration !== undefined
+    ? searchDeclaration.output_required_public_fields.join(",") === "canonical_url,title,summary,source_status,keyword,result_count,notes"
+    : true;
   if (
     operation?.schema_version !== "harbor-allowlisted-read-operation/v0" || operation.status !== "completed" ||
     !opaqueRef(operation.operation_ref) || !opaqueRef(operation.public_summary_ref) || !publicSummary || Object.keys(publicSummary).some((key) => !summaryKeys.has(key)) ||
@@ -590,14 +662,16 @@ function validateCompletedReadOperation(
     flatEvidenceRefs.length !== bodyEvidenceRefs.length || !flatEvidenceRefs.every((ref, index) => ref === bodyEvidenceRefs[index]?.ref) ||
     postCheck?.status !== "passed" || postCheck.reason !== "managed_provider_read_probe_completed" || !opaqueRef(postCheck.post_check_ref) ||
     postCheck.post_check_ref !== evidenceRefs.find((ref) => ref?.kind === "post_check_ref")?.ref ||
-    pin?.repository !== "WebEnvoy/Lode" ||
+    (entry.operation_id === "xhs_search_notes" && searchDeclaration !== undefined
+      ? !validSearchPin
+      : pin?.repository !== "WebEnvoy/Lode" ||
     (detailOperation
       ? pin.issue !== "#268" || pin.merge_commit !== "66d79b4e600565a00515b1c801e84291edc7b0c1" || pin.asset_path !== "registry/detail-runtime-consumption.json" || pin.asset_sha256 !== lodeDetailTruthAssetSha256 || pin.truth_id !== entry.allowlist_id || pin.asset_owner !== "Lode"
       : pin.commit !== lodeAllowlistCommit || pin.asset_path !== lodeAllowlistAssetPath ||
         pin.asset_sha256 !== "5aa6be8bd416bbd19f73dcfab995f62f769849923f2aa2e995da974b0f329184" ||
         pin.mirror_payload_sha256 !== "3b32e37e04cb008c7e1c072ead35919cde6e498ebfcea34a57de889559a0f141" ||
         pin.allowlist_id !== entry.allowlist_id || pin.allowlist_version !== entry.allowlist_version || pin.asset_owner !== entry.asset_owner ||
-        consumer?.repository !== "WebEnvoy/Harbor" || consumer.issue !== "#245" || consumer.purpose !== "allowlisted one-shot read-only operation admission") ||
+        consumer?.repository !== "WebEnvoy/Harbor" || consumer.issue !== "#245" || consumer.purpose !== "allowlisted one-shot read-only operation admission")) ||
     boundary?.output !== "public_summary_and_refs_only" || boundary.raw_credentials !== "not_exposed" || boundary.raw_profile_storage !== "not_exposed" ||
     boundary.raw_cdp_endpoint !== "not_exposed" || boundary.raw_dom !== "not_exposed" || boundary.raw_har !== "not_exposed" ||
     boundary.raw_network_bodies !== "not_exposed" || boundary.screenshot_body !== "not_exposed" || boundary.external_write_actions !== "not_performed"
@@ -612,6 +686,7 @@ function sceneEvidenceRefs(value: unknown): string[] {
 
 function readFailureRecoveryHint(failureClass: LodeReadOnlyFailureClass): string {
   if (failureClass === "empty_result") return "fix_input";
+  if (failureClass === "output_invalid") return "repair_package";
   if (failureClass === "invalid_contract") return "repair_package";
   if (failureClass === "network_resource_unavailable") return "rerun_with_evidence";
   if (failureClass === "not_logged_in" || failureClass === "login_expired") return "open_manual_auth";
@@ -631,13 +706,14 @@ async function completeAcceptedReadTaskWithFailure(
     ...(evidenceRefs.length === 0 ? {} : { evidence_refs: evidenceRefs })
   });
   const recoveryHint = readFailureRecoveryHint(failureClass);
+  const attribution = failureClass === "output_invalid" || failureClass === "invalid_contract" ? "capability" as const : "runtime" as const;
   const postCheck = {
     schema_version: "webenvoy.post-check-result.v0" as const,
     status: failureClass === "empty_result" ? "passed" as const : "blocked" as const,
     summary: failureClass === "empty_result" ? "Harbor read operation completed with no matching results." : summary,
     checked_at: new Date().toISOString(),
     code: failureClass,
-    attribution: "runtime" as const,
+    attribution,
     recovery_hint: recoveryHint,
     ...(evidenceRefs.length === 0 ? {} : { evidence_refs: [...evidenceRefs] }),
     consumer_boundary: failureClass === "empty_result"
@@ -735,14 +811,18 @@ async function completeAcceptedReadOperation(
   packageRef: string,
   entry: LodeRuntimeConsumptionEntry,
   operation: unknown,
-  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; identity_environment_ref?: string }
+  requested: { runtime_session_ref: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; identity_environment_ref?: string },
+  searchDeclaration?: LodePackageAdmissionContract["runtime_consumption_declaration"]
 ): Promise<TaskSubmissionResult> {
-  const completedOperation = validateCompletedReadOperation(operation, entry, requested);
+  const completedOperation = validateCompletedReadOperation(operation, entry, requested, searchDeclaration);
   if (!completedOperation) {
+    if (searchDeclaration !== undefined) {
+      return completeAcceptedReadTaskWithFailure(store, result, "output_invalid", "Core rejected Harbor output against the pinned Lode search schema.");
+    }
     return completeAcceptedReadTaskWithFailure(store, result, "site_changed", "Core rejected an unavailable or contract-drifted Harbor read operation.");
   }
-  const projection = projectionFromReadOperation(result.task_intent, packageRef, completedOperation);
-  const evidenceRefs = projection.evidence_refs as string[];
+  const projection = projectionFromReadOperation(result.task_intent, packageRef, completedOperation, searchDeclaration, requested.query);
+  const evidenceRefs = projection.evidence_refs.map((ref) => typeof ref === "string" ? ref : ref.ref_id);
   await store.updateRunRecord(result.run_record.run_id, { status: "running", evidence_refs: evidenceRefs });
   const publicSummary = object(completedOperation.public_summary);
   let detailTargetBatch: DetailTargetBatch | undefined;
@@ -778,7 +858,7 @@ async function completeAcceptedReadOperation(
         summary: "Harbor completed the allowlisted read operation and its Lode-bound post-check passed.",
         checked_at: new Date().toISOString(),
         evidence_refs: evidenceRefs,
-        source_refs: projection.source_refs as string[],
+        source_refs: projection.source_refs.map((ref) => typeof ref === "string" ? ref : ref.ref_id),
         consumer_boundary: "Core records only the validated public summary and opaque operation/source/evidence/post-check refs."
       },
       retention_state: "active"
@@ -1334,7 +1414,15 @@ export async function submitRuntimeTask(
     }
     const cleanup = await releaseAcceptedCoreTaskSession(store, submitted, deps.harborRuntimeClient, runtimeSessionRef);
     if (cleanup) return cleanup;
-    return finalizeAcceptedTask(store, submitted, () => completeAcceptedReadOperation(store, submitted, package_ref, runtimeConsumption, operation, requested));
+    return finalizeAcceptedTask(store, submitted, () => completeAcceptedReadOperation(
+      store,
+      submitted,
+      package_ref,
+      runtimeConsumption,
+      operation,
+      requested,
+      lode_package_contract.runtime_consumption_declaration
+    ));
   }
   if (runtimeSessionRef) {
     const cleanup = await releaseAcceptedCoreTaskSession(store, submitted, deps.harborRuntimeClient, runtimeSessionRef);
@@ -1399,8 +1487,13 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
     try {
       const registry = object(JSON.parse(await readFile(options.registryPath, "utf8")));
       const entries = Array.isArray(registry?.entries) ? registry.entries.map(object) : [];
-      const entry = entries.find((candidate) => candidate?.package_ref === package_ref);
+      const matchingEntries = entries.filter((candidate) => candidate?.package_ref === package_ref);
+      if (matchingEntries.length === 0) return failure("capability_contract", "package_not_found", "admission", "select_capability_version");
+      if (matchingEntries.length !== 1) return failure("capability_contract", "package_duplicate", "admission", "repair_package_contract");
+      const entry = matchingEntries[0];
       if (!entry) return failure("capability_contract", "package_not_found", "admission", "select_capability_version");
+      const searchDeclaration = await resolveSearchRuntimeConsumptionDeclaration(entries, entry, package_ref);
+      if (isFailure(searchDeclaration)) return searchDeclaration;
       const runtimeAdmission = await resolveRuntimeAdmissionPolicy(entry, package_ref);
       if (runtimeAdmission && isFailure(runtimeAdmission)) return runtimeAdmission;
 
@@ -1446,12 +1539,103 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         }),
         ...(runtimeAdmission === undefined ? {} : { runtime_admission: runtimeAdmission }),
         resource_requirements: resource_requirements as LodePackageAdmissionContract["resource_requirements"],
-        ...(runtime_consumption === undefined ? {} : { runtime_consumption })
+        ...(runtime_consumption === undefined ? {} : { runtime_consumption }),
+        ...(searchDeclaration === undefined ? {} : { runtime_consumption_declaration: searchDeclaration })
       };
     } catch {
       return failure("capability_contract", "lode_registry_unavailable", "admission", "connect_lode_registry");
     }
   };
+
+  async function resolveSearchRuntimeConsumptionDeclaration(
+    registryEntries: readonly (JsonObject | undefined)[],
+    registryEntry: JsonObject,
+    packageRef: string
+  ): Promise<LodePackageAdmissionContract["runtime_consumption_declaration"] | FailureRecord | undefined> {
+    const declarationRef = string(registryEntry.runtime_consumption_ref);
+    if (declarationRef === undefined) return undefined;
+    if (packageRef !== "lode://site-capability/xiaohongshu/search-notes@0.1.0" || declarationRef !== lodeSearchRuntimeConsumptionDeclarationPath) {
+      return failure("capability_contract", "runtime_consumption_declaration_drift", "admission", "repair_package_contract");
+    }
+    if (registryEntries.filter((candidate) => candidate?.runtime_consumption_ref === declarationRef).length !== 1) {
+      return failure("capability_contract", "runtime_consumption_declaration_duplicate", "admission", "repair_package_contract");
+    }
+    const path = await pathUnderRoot(declarationRef).catch(() => undefined);
+    if (!path) return failure("capability_contract", "runtime_consumption_declaration_missing", "admission", "connect_lode_registry");
+    let declaration: JsonObject | undefined;
+    try {
+      const declarationBytes = await readFile(path);
+      const expectedDeclarationSha = options.searchRuntimeConsumptionDeclarationSha256 ?? lodeSearchRuntimeConsumptionDeclarationSha256;
+      if (createHash("sha256").update(declarationBytes).digest("hex") !== expectedDeclarationSha) {
+        return failure("capability_contract", "runtime_consumption_declaration_pin_mismatch", "admission", "repair_package_contract");
+      }
+      declaration = object(JSON.parse(declarationBytes.toString("utf8")));
+    } catch {
+      return failure("capability_contract", "runtime_consumption_declaration_unavailable", "admission", "connect_lode_registry");
+    }
+    const declaredEntries = Array.isArray(declaration?.entries) ? declaration.entries.map(object).filter((candidate): candidate is JsonObject => candidate !== undefined) : [];
+    if (
+      declaration?.schema_version !== "lode.search-runtime-consumption.v0" ||
+      declaration.truth_id !== "lode.xiaohongshu.search.runtime-consumption" ||
+      declaration.asset_owner !== "Lode" ||
+      declaration.runtime_execution !== "out_of_scope" ||
+      declaredEntries.length !== 1
+    ) return failure("capability_contract", "runtime_consumption_declaration_invalid", "admission", "repair_package_contract");
+    const declared = declaredEntries[0];
+    if (!declared) return failure("capability_contract", "runtime_consumption_declaration_invalid", "admission", "repair_package_contract");
+    const identityKeys = ["package_ref", "lock_ref", "version", "site_slug", "capability_id", "operation_id", "operation_mode", "lifecycle"] as const;
+    if (
+      declared.package_ref !== packageRef ||
+      identityKeys.some((key) => declared[key] !== registryEntry[key]) ||
+      declared.runtime_admission === undefined ||
+      !object(declared.input_contract) ||
+      !object(declared.output_contract) ||
+      !Array.isArray(declared.required_ref_kinds)
+    ) return failure("capability_contract", "runtime_consumption_declaration_drift", "admission", "repair_package_contract");
+    const registryAdmission = parseLodeRuntimeAdmissionPolicy(packageRef, registryEntry.runtime_admission);
+    const declaredAdmission = parseLodeRuntimeAdmissionPolicy(packageRef, declared.runtime_admission);
+    if (
+      registryAdmission === undefined || declaredAdmission === undefined ||
+      isFailure(registryAdmission) || isFailure(declaredAdmission) ||
+      canonicalJson(registryAdmission) !== canonicalJson(declaredAdmission)
+    ) return failure("capability_contract", "runtime_consumption_declaration_drift", "admission", "repair_package_contract");
+    const assets = object(declared.assets);
+    if (!assets || Object.keys(assets).sort().join(",") !== [...lodeSearchRuntimeConsumptionAssetRoles].sort().join(",")) {
+      return failure("capability_contract", "runtime_consumption_assets_invalid", "admission", "repair_package_contract");
+    }
+    const assetHashes: Record<string, string> = {};
+    for (const role of lodeSearchRuntimeConsumptionAssetRoles) {
+      const tuple = assets[role];
+      if (!Array.isArray(tuple) || tuple.length !== 2 || typeof tuple[0] !== "string" || typeof tuple[1] !== "string" || !/^[a-f0-9]{64}$/.test(tuple[1])) {
+        return failure("capability_contract", `runtime_consumption_asset_invalid:${role}`, "admission", "repair_package_contract");
+      }
+      const assetPath = await pathUnderRoot(tuple[0]).catch(() => undefined);
+      if (!assetPath) return failure("capability_contract", `runtime_consumption_asset_missing:${role}`, "admission", "connect_lode_registry");
+      let digest: string;
+      try {
+        digest = createHash("sha256").update(await readFile(assetPath)).digest("hex");
+      } catch {
+        return failure("capability_contract", `runtime_consumption_asset_unavailable:${role}`, "admission", "connect_lode_registry");
+      }
+      if (digest !== tuple[1]) return failure("capability_contract", `runtime_consumption_asset_pin_mismatch:${role}`, "admission", "repair_package_contract");
+      assetHashes[role] = tuple[1];
+    }
+    const inputRequiredFields = (object(declared.input_contract)?.required as unknown);
+    const outputRequiredFields = (object(declared.output_contract)?.required_public_fields as unknown);
+    const requiredRefs = declared.required_ref_kinds;
+    if (
+      !Array.isArray(inputRequiredFields) || !inputRequiredFields.every((value) => typeof value === "string") ||
+      !Array.isArray(outputRequiredFields) || !outputRequiredFields.every((value) => typeof value === "string") ||
+      !requiredRefs.every((value) => typeof value === "string")
+    ) return failure("capability_contract", "runtime_consumption_declaration_invalid", "admission", "repair_package_contract");
+    return {
+      declaration_path: declarationRef,
+      asset_hashes: assetHashes,
+      input_required_fields: inputRequiredFields,
+      output_required_public_fields: outputRequiredFields,
+      required_ref_kinds: requiredRefs as string[]
+    };
+  }
 
   async function resolveRuntimeAdmissionPolicy(
     registryEntry: JsonObject,
@@ -1712,10 +1896,10 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const identity = validatedSessionIdentity && !isFailure(validatedSessionIdentity)
         ? validatedSessionIdentity
         : publicIdentity;
-      const runtime = coreRuntimeFactsFromSession(session, identity);
-      const openedSessionRef = input.runtime_session_ref ?? (isFailure(runtime)
+      const sessionRuntime = coreRuntimeFactsFromSession(session, identity);
+      const openedSessionRef = input.runtime_session_ref ?? (isFailure(sessionRuntime)
         ? string(pickObject(session, "runtime_facts", "runtime_session")?.runtime_session_ref)
-        : runtime.runtime_session_ref);
+        : sessionRuntime.runtime_session_ref);
       const failAfterSession = async (primary: FailureRecord): Promise<FailureRecord | HarborAdmissionCollectionFailure> => {
         if (!openedSessionRef) return primary;
         const cleanup = await releaseCoreTaskSession({ runtime_session_ref: openedSessionRef, run_id: input.run_id });
@@ -1729,7 +1913,33 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
       const sessionFailure = failureFromHarborPayload(session);
       if (sessionFailure) return failAfterSession(sessionFailure);
       if (isFailure(validatedSessionIdentity)) return failAfterSession(validatedSessionIdentity);
-      if (isFailure(runtime)) return failAfterSession(runtime);
+      if (isFailure(sessionRuntime)) return failAfterSession(sessionRuntime);
+      let runtime = sessionRuntime;
+      let runtimeFactsSource: "canonical" | "legacy" = "legacy";
+      if (openedSessionRef) {
+        const canonicalRuntimePayload = await requestJson(
+          "GET",
+          `/runtime/sessions/${encodeURIComponent(openedSessionRef)}/runtime-facts`
+        );
+        if (!isFailure(canonicalRuntimePayload)) {
+          const canonicalRuntime = coreRuntimeFactsFromSession(canonicalRuntimePayload, identity);
+          const canonicalRuntimeRecord = object(canonicalRuntimePayload);
+          const canonicalRuntimeSources = [
+            canonicalRuntimeRecord,
+            object(canonicalRuntimeRecord?.harbor_runtime_facts),
+            object(canonicalRuntimeRecord?.core_runtime_facts),
+            object(canonicalRuntimeRecord?.runtime_facts),
+            object(canonicalRuntimeRecord?.session)
+          ];
+          const canonicalRuntimeUnsupported = canonicalRuntimeSources.some((source) => source?.status === "unavailable" || source?.status === "unsupported");
+          if (isFailure(canonicalRuntime)) {
+            if (!canonicalRuntimeUnsupported) return failAfterSession(canonicalRuntime);
+          } else {
+            runtime = canonicalRuntime;
+            runtimeFactsSource = "canonical";
+          }
+        }
+      }
       if (input.runtime_session_ref !== undefined && runtime.runtime_session_ref !== input.runtime_session_ref) {
         return failAfterSession(failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime"));
       }
@@ -1746,6 +1956,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
           harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
+          runtime_facts_source: runtimeFactsSource,
           harbor_scene_ref: unavailable(siteResourceFacts.code),
           harbor_resource_facts: unavailable(siteResourceFacts.code)
         };
@@ -1761,6 +1972,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
           harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
           harbor_provider_status: publicProviderStatus,
           harbor_runtime_facts: runtime,
+          runtime_facts_source: runtimeFactsSource,
           harbor_scene_ref: unavailable(snapshot.code),
           harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
         };
@@ -1773,6 +1985,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         harbor_identity_environment_facts: identity ?? unavailable("identity_environment_unavailable"),
         harbor_provider_status: publicProviderStatus,
         harbor_runtime_facts: runtimeAfterSnapshot,
+        runtime_facts_source: runtimeFactsSource,
         harbor_scene_ref: evidenceFailure ? unavailable(evidenceFailure.code) : scene,
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
       };

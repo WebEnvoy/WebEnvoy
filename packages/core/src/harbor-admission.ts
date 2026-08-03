@@ -134,6 +134,8 @@ export type HarborAdmissionInput = {
   harbor_scene_ref?: HarborCoreSceneReference | HarborUnavailable;
   harbor_write_precheck_facts?: HarborWritePrecheckFacts | HarborUnavailable;
   harbor_resource_facts?: HarborResourceFacts | HarborUnavailable;
+  /** Internal adapter marker; never comes from Harbor or becomes run truth. */
+  runtime_facts_source?: "canonical" | "legacy";
 };
 
 export type HarborAdmission =
@@ -681,7 +683,7 @@ function validateWritePrecheckFacts(
   };
 }
 
-function addInferredResourceFacts(input: HarborAdmissionInput, facts: Set<string>): void {
+function addInferredResourceFacts(input: HarborAdmissionInput, facts: Set<string>, includeLegacyIdentityFacts = true): void {
   const identity = contractObject(input.harbor_identity_environment_facts);
   const runtime = contractObject(input.harbor_runtime_facts);
   const scene = contractObject(input.harbor_scene_ref);
@@ -703,7 +705,7 @@ function addInferredResourceFacts(input: HarborAdmissionInput, facts: Set<string
   if (origin === "https://www.zhipin.com") {
     facts.add("runtime.origin.www_zhipin_com.available");
   }
-  if (identityLogin?.state === "logged_in" && identityLogin.recovery_required !== true) {
+  if (includeLegacyIdentityFacts && identityLogin?.state === "logged_in" && identityLogin.recovery_required !== true) {
     facts.add("identity.user_logged_in.confirmed");
     if (origin === "https://www.zhipin.com") facts.add("identity.boss_geek_logged_in.confirmed");
   }
@@ -728,7 +730,7 @@ function publicResourceFacts(input: HarborAdmissionInput): Set<string> | Failure
     return failure("resource_admission", "resource_requirement_unmatched", "resource_matching", input.harbor_resource_facts.retryable ? "rerun_with_fresh_runtime" : "repair_browser_environment");
   }
   const facts = new Set<string>();
-  addInferredResourceFacts(input, facts);
+  addInferredResourceFacts(input, facts, input.runtime_facts_source !== "canonical");
   if (input.harbor_resource_facts !== undefined) {
     const resource = contractObject(input.harbor_resource_facts);
     const entries = Array.isArray(resource?.resource_facts) ? resource.resource_facts : undefined;
