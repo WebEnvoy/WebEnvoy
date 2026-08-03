@@ -1596,7 +1596,14 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
       if (!capability_id || !operation_mode || !version || !lock_ref || !resource_requirements) {
         return failure("capability_contract", "invalid_contract", "admission", "repair_package_contract");
       }
-      const runtime_consumption = await resolveRuntimeConsumption(package_ref, lock_ref, version, operation_id, entry.task_kind === "real_site_read");
+      const runtime_consumption = await resolveRuntimeConsumption(
+        package_ref,
+        lock_ref,
+        version,
+        operation_id,
+        entry.task_kind === "real_site_read",
+        searchResolution?.assetBytes.runtime_consumption_allowlist
+      );
       if (runtime_consumption instanceof Error) return failure("capability_contract", runtime_consumption.message, "admission", "repair_package_contract");
 
       return {
@@ -1785,7 +1792,14 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
       : failure("capability_contract", "runtime_admission_disabled", "admission", "wait_for_scope_activation");
   }
 
-  async function resolveRuntimeConsumption(packageRef: string, lockRef: string, version: string, operationId: string | undefined, required: boolean): Promise<LodeRuntimeConsumptionEntry | undefined | Error> {
+  async function resolveRuntimeConsumption(
+    packageRef: string,
+    lockRef: string,
+    version: string,
+    operationId: string | undefined,
+    required: boolean,
+    pinnedAllowlistBytes?: Buffer
+  ): Promise<LodeRuntimeConsumptionEntry | undefined | Error> {
     if (packageRef === xhsDetailPackageRef) {
       const path = await pathUnderRoot("registry/detail-runtime-consumption.json").catch(() => undefined);
       if (!path) return new Error("runtime_consumption_detail_truth_missing");
@@ -1835,7 +1849,8 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
     }
     const path = await pathUnderRoot(lodeAllowlistAssetPath).catch(() => undefined);
     if (!path) return required ? new Error("runtime_consumption_allowlist_missing") : undefined;
-    const allowlist = object(JSON.parse(await readFile(path, "utf8")));
+    const allowlistBytes = pinnedAllowlistBytes ?? await readFile(path);
+    const allowlist = object(JSON.parse(allowlistBytes.toString("utf8")));
     if (!allowlist || allowlistSemanticSha256(allowlist) !== (options.allowlistAssetSha256 ?? lodeAllowlistSemanticSha256)) {
       return new Error("runtime_consumption_allowlist_pin_mismatch");
     }
