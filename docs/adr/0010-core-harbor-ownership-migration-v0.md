@@ -21,7 +21,7 @@ Core、Harbor、Lode 和 App 继续独立进程、独立 owner API。Core 是任
 | `harbor-local-identity-environment/v0` 与 `harbor-core-runtime-facts/v0`：`runtime_session_ref`、`identity_environment_ref`、`execution_identity_ref`、`profile_ref`、`provider_ref`、`provider_mode`、`lifecycle_state` | Harbor | Core 只消费公共 ref/status，绑定 accepted run 并保留历史引用；不保存 session/profile 内部状态 | Harbor 不拥有 run、task outcome 或 Lode package | v0 frozen |
 | runtime availability、viewer/control/handoff facts、`fact_refs`（属于 `harbor-core-runtime-facts/v0`） | Harbor | Core 只消费 `availability`、`viewer_ref`、control owner/lock/handoff/takeover 状态和 session/viewer refs，用于 admission、pause、handoff 或 recovery decision | Harbor 不把 viewer/control 状态解释为业务成功 | v0 frozen |
 | site/runtime resource facts (`harbor-site-resource-facts/v0`；Core resource projection 为 `harbor-core-resource-facts/v0`) | Harbor | Core 只按 Lode 声明的 fact key 做 resource matching；`site_id`/`task_kind` 仅是上下文选择器，不是业务 schema | Harbor 不声明 capability、归一化业务字段或成功条件 | v0 frozen |
-| page scene refs (`harbor-page-scene-refs/v0`)：`snapshot_ref`、`refmap_ref`、`evidence_refs`、`source_trace_ref`、`captured_at` 与有界 page summary | Harbor | Core 记录 refs、redaction/availability 状态和安全摘要；结果只通过 refs 追溯现场 | Harbor 不输出 normalized result；Core 不内联 DOM/HAR/screenshot/video/network body | v0 frozen |
+| page scene refs (`harbor-page-scene-refs/v0`)：`snapshot_ref`、`refmap_ref`、`evidence_refs`、`source_trace_ref` 与 runtime availability | Harbor | Core 当前只校验并绑定 refs 和 runtime availability；结果只通过 refs 追溯现场 | Harbor 不输出 normalized result；Core 不内联 DOM/HAR/screenshot/video/network body | current v0 surface |
 | normalized business output、public Result Envelope、Run Record、terminal outcome、`unknown_outcome` 和 reconciliation | Core；output schema/normalizer 由 Lode 声明 | Core 校验 Lode output，生成/持久化结果 envelope、failure、post-check 与 refs；Harbor 只提供 source/evidence/runtime refs | Harbor 不拥有业务结果；Lode 不拥有 run outcome | v0 frozen |
 | Lode license/version identity | Lode（MIT assets）；Core 记录本次消费的 version/hash pin | Core 只保留可审计 ref、版本和 hash 摘要 | Harbor 不承载 Lode pin 或 package license truth | v0 frozen |
 
@@ -35,7 +35,11 @@ Core、Harbor、Lode 和 App 继续独立进程、独立 owner API。Core 是任
 - Harbor scene/write-precheck refs（`harbor-page-scene-refs/v0`、`harbor-write-precheck-facts/v0`）：snapshot/refmap/source/evidence refs；write-precheck 只表示 validate-only/no-submit guard；
 - Lode package contract：package/capability/version/lock/source refs、resource requirements、operation mode、output/post-check/failure declarations。
 
+当前 Core `addInferredResourceFacts` 会从 identity login/origin 输入推导 `identity.user_logged_in.confirmed` 和 `identity.boss_geek_logged_in.confirmed`。这只是 `compatibility` 期间的有界 legacy adapter 行为，不是 Harbor owner-published fact，也不能作为新路径 evidence。Core #342 与 Harbor #352 必须在进入 `cutover-ready` 前删除这项 Core-side site-login 推导，或以 Harbor 发布、可版本化且可追溯的 fact/ref 替代。
+
 上述输入必须可追溯到对应 owner，且每次 accepted run 固定当时的 ref/version 快照。未知、过期、不匹配或违反 boundary 的输入 fail closed；不得用站点推测、provider claim 或旧结果补全。
+
+Page-scene 的 redaction、access 和 retention 是期望由 Harbor 拥有的 metadata，仍由 [PD-0019](pending-decisions.md#pd-0019) 规格化；当前 Core page-scene 消费面没有这些字段，不得表述为已支持。
 
 ### 双重 truth 禁线
 
@@ -63,18 +67,18 @@ Core、Harbor、Lode 和 App 继续独立进程、独立 owner API。Core 是任
 
 ## Compatibility window、cutover 与 rollback
 
-本窗口是有界迁移控制面，不是永久双写。窗口从本 ADR 接受起开始，至下列任一条件先发生时结束：
+本窗口是有界迁移控制面，不是永久双写。窗口从本 ADR 接受起开始，贯穿 `compatibility`、`cutover-ready` 和 post-cutover stabilization/rollback，至下列任一条件先发生时结束：
 
-1. 所有 in-scope consumer 已声明并通过 `Core-owned Lode pin/admission/projection` 的 current-head read-only contract check，且旧路径仍可回退；
+1. 产生显式 post-cutover exit/retirement evidence：所有 in-scope consumer 已通过 Core-owned path 的 current-head read-only contract check，稳定期与 rollback 验证完成，且不存在旧 caller、in-flight/history 或 bounded fallback 依赖；
 2. 发布下一版不兼容 contract/version；
-3. 发现 owner、字段、failure attribution 或 sensitive boundary 冲突。此时停止 cutover，不延长窗口。
+3. 发现 owner、字段、failure attribution 或 sensitive boundary 冲突。此时先执行 rollback，再以 conflict-stopped 状态结束本轮窗口；legacy path 保留，不得删除。
 
 | 阶段 | 新路径 owner/行为 | 旧路径处理 | 进入/停止条件 |
 | --- | --- | --- | --- |
 | `compatibility`（当前） | Core 文档冻结 owner；实现继续按现有 API/字段运行 | Harbor 的 `LODE_*_PIN`、allowlisted read operation 和 `public_summary` 可继续服务既有 caller，仅作为 legacy adapter | 进入：本 ADR accepted。任何字段/API/sensitive conflict 立即 stop |
-| `cutover-ready` | Core 已能独立消费 Lode pin + Harbor facts/refs，并拥有 admission、normalization、failure attribution | 保留旧路径和回退映射；不删除、不改写历史 Run Record | 需要所有 caller 的 owner/readback 证据、refs-only boundary 和 rollback target；任一缺口停止 |
-| `cutover` | 新建 run 默认走 Core-owned path；Core 写 Result/Run truth | in-flight/history 继续按原绑定；compatibility window 内仅作为 bounded fallback | 仅在 `cutover-ready` 全部通过后进入；新 path 发现 mismatch 立即 rollback |
-| `retired`（不在 #341） | 由后续 Work Item 明确旧路径移除及版本策略 | 只有所有 caller 完成迁移且无历史依赖后才可退役 | 需要独立 issue/spec/review；本 ADR 不授权删除旧字段/API |
+| `cutover-ready` | Core 已能独立消费 Lode pin + Harbor facts/refs，并拥有 admission、normalization、failure attribution | 保留旧路径和回退映射；窗口继续有效；不删除、不改写历史 Run Record | 需要所有 caller 的 owner/readback 证据、refs-only boundary 和 rollback target；任一缺口停止 |
+| `cutover-stabilizing` | 新建 run 默认走 Core-owned path；Core 写 Result/Run truth | in-flight/history 继续按原绑定；窗口保持有效，旧路径作为 bounded rollback target | 仅在 `cutover-ready` 全部通过后进入；新 path 发现 mismatch 立即 rollback |
+| `retired`（不在 #341） | 由后续 Work Item 以 post-cutover exit/retirement evidence 明确旧路径移除及版本策略 | 只有所有 caller 完成迁移、稳定/rollback 验证完成且无历史/fallback 依赖后才可退役 | 显式 evidence 结束窗口；需要独立 issue/spec/review；本 ADR 不授权删除旧字段/API |
 
 ### Cutover stop conditions
 

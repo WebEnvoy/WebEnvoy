@@ -31,16 +31,18 @@ ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、�
 
 WebEnvoy/WebEnvoy#341 冻结 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 的责任边界：Core 解析并锁定 Lode version/hash pin，执行 capability/resource admission，校验 Lode output 并生成 normalized Result Envelope、failure attribution 和 Run Record；Harbor 只提供可追溯的站点无关 runtime facts/refs。`site_id`、`task_kind` 和 fact key 只用于选择/匹配 Harbor 的公共运行事实，不构成站点业务结果 schema。
 
-Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。Core 只保留公共 refs、状态和脱敏摘要；credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
+Core 可消费现有 Harbor identity/runtime/resource facts、viewer/control facts、snapshot/refmap/source/evidence refs，以及 Lode package contract 的 refs、版本、lock、resource、output/post-check/failure 声明。当前 page-scene 消费面只绑定 refs 与 runtime availability；redaction/access/retention 仍由 PD-0019 规格化，不能表述为已支持。credential、cookie、token、profile storage、raw DOM/HAR/screenshot/video/network body、provider private endpoint、Lode package body 和 normalizer code 仍留在各自 owner 边界。Harbor 现有 allowlisted read operation 的 `LODE_*_PIN`、`public_summary` 等输出在兼容窗口内仅作为 legacy adapter，不能成为新路径的业务结果真相。
+
+Core `addInferredResourceFacts` 当前的 site-login 推导也只属于兼容期 legacy adapter，不是 Harbor owner-published fact 或新路径 evidence；Core #342 与 Harbor #352 必须在 `cutover-ready` 前删除该推导或用 Harbor 发布的可版本化 fact/ref 替代。
 
 | 迁移阶段 | 新路径 | 旧路径 | 停止条件 |
 | --- | --- | --- | --- |
 | `compatibility`（当前） | 文档冻结 Core owner；不改变 runtime、字段或 API | 继续服务既有 caller，保留旧 pin/summary adapter | 发现 owner、字段、failure 或 sensitive boundary 冲突即冻结 cutover |
-| `cutover-ready` | 所有 consumer 通过 Core-owned pin/admission/projection 的 current-head read-only contract check | 保留回退映射和历史 run 语义 | 缺任一 owner/readback、refs-only 或 rollback 证据则不得切换 |
-| `cutover` | 新 run 默认走 Core-owned path；Core 写唯一结果/失败 truth | in-flight/history 按原绑定；窗口内 bounded fallback | 新路径出现任意 mismatch 立即 rollback |
-| `retired`（后续 Work Item） | 另行定义旧 API/字段退役 | 仅所有 caller 完成迁移后删除 | #341 不授权删除旧路径 |
+| `cutover-ready` | 所有 consumer 通过 Core-owned pin/admission/projection 的 current-head read-only contract check | 保留回退映射和历史 run 语义；窗口继续有效 | 缺任一 owner/readback、refs-only 或 rollback 证据则不得切换 |
+| `cutover-stabilizing` | 新 run 默认走 Core-owned path；Core 写唯一结果/失败 truth | in-flight/history 按原绑定；窗口保持有效并保留 bounded rollback target | 新路径出现任意 mismatch 立即 rollback |
+| `retired`（后续 Work Item） | 以显式 post-cutover exit/retirement evidence 定义旧 API/字段退役 | 仅所有 caller 迁移、稳定/rollback 验证完成且无历史/fallback 依赖后删除 | evidence 结束窗口；#341 不授权删除旧路径 |
 
-兼容窗口在 `cutover-ready` 通过、下一版不兼容合同发布或发现冲突三者中先发生者结束；rollback 只切换后续 admission 路由，不删除旧路径或改写已 accepted/terminal Run Record。字段/API 迁移、Harbor/Lode/App 的最终 wire schema 仍由 [PD-0019](../adr/pending-decisions.md#pd-0019) 和后续跨仓规格处理。
+兼容窗口贯穿 cutover stabilization/rollback，只在显式 post-cutover exit/retirement evidence、下一版不兼容合同或 conflict stop 三者中先发生者结束；冲突时先 rollback，再结束本轮窗口并保留 legacy path。Rollback 只切换后续 admission 路由，不删除旧路径或改写已 accepted/terminal Run Record。字段/API 迁移、Harbor/Lode/App 的最终 wire schema 仍由 [PD-0019](../adr/pending-decisions.md#pd-0019) 和后续跨仓规格处理。
 
 ## 依赖方向
 
