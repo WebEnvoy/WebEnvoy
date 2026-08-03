@@ -7,12 +7,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createFileRunRecordStore } from "@webenvoy/core-runtime";
+import { runReadonlyVerticalSlice } from "./readonly-vertical-slice-self-check.js";
 
 type JsonResponse = {
   status: number;
   body: unknown;
 };
 type JsonObject = Record<string, unknown>;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  assert(value && typeof value === "object" && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
 
 const packageRef = "lode://site-capability/example/read-public-page@0.1.0";
 const bossPackageRef = "lode://site-capability/boss/job-search@0.1.0";
@@ -29,12 +35,6 @@ const identityPrivateBoundary = ["password", "verification_code", "cookie_value"
 const expectedRuntimeBindingRefs = ["session_process_ready", "profile_process", "harbor:provider/cloakbrowser", "viewer_process", "identity-env_process", "identity-env_process:execution", "snapshot_process_ready", "refmap_process_ready", "source_trace_process_ready"];
 const harborSupervisorToken = "runtime-process-supervisor-token";
 const apiServerEntry = join(dirname(fileURLToPath(import.meta.url)), "index.js");
-
-function asRecord(value: unknown): Record<string, unknown> {
-  assert(value && typeof value === "object" && !Array.isArray(value));
-  return value as Record<string, unknown>;
-}
-
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   response.end(`${JSON.stringify(body)}\n`);
@@ -124,14 +124,14 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   });
 }
 
-function spawnApiServer(port: number, runRecordDir: string, env: Record<string, string> = {}): { child: ChildProcess; output: () => string } {
+function spawnApiServer(port: number, runRecordDir: string, env: Record<string, string | undefined> = {}): { child: ChildProcess; output: () => string } {
+  const childEnv = { ...process.env };
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete childEnv[key];
+    else childEnv[key] = value;
+  }
   const child = spawn(process.execPath, [apiServerEntry], {
-    env: {
-      ...process.env,
-      PORT: String(port),
-      WEBENVOY_RUN_RECORD_DIR: runRecordDir,
-      ...env
-    },
+    env: { ...childEnv, PORT: String(port), WEBENVOY_RUN_RECORD_DIR: runRecordDir },
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -409,7 +409,11 @@ function createHarborMock(paths: string[], protectedAuthorization: string[], ini
 async function assertDegradedProcessSmoke(): Promise<void> {
   const port = await reservePort();
   const runRecordDir = await mkdtemp(join(tmpdir(), "webenvoy-api-runtime-runs-"));
-  const { child, output } = spawnApiServer(port, runRecordDir);
+  const { child, output } = spawnApiServer(port, runRecordDir, {
+    WEBENVOY_LODE_REGISTRY_PATH: undefined,
+    WEBENVOY_HARBOR_RUNTIME_URL: undefined,
+    HARBOR_RUNTIME_SUPERVISOR_TOKEN: undefined
+  });
 
   try {
     assert.deepEqual(await waitForJson(port, "/health", child), {
@@ -692,6 +696,7 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
 async function main(): Promise<void> {
   await assertDegradedProcessSmoke();
   await assertConfiguredTaskProcessSmoke();
+  await runReadonlyVerticalSlice();
 }
 
 await main();

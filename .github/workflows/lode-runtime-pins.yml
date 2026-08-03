@@ -36,3 +36,7 @@ jobs:
       - run: pnpm --filter @webenvoy/api-server test:lode-runtime-pins
         env:
           WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode/registry/local-packages.json
+      - run: pnpm --filter @webenvoy/api-server test
+        env:
+          WEBENVOY_LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
+          WEBENVOY_LODE_REGISTRY_PATH: ${{ github.workspace }}/.runtime-sources/lode/registry/local-packages.json
