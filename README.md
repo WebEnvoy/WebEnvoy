@@ -1,8 +1,10 @@
-# WebEnvoy Core
+# WebEnvoy
 
-`WebEnvoy/WebEnvoy` 是 WebEnvoy Core 仓库。
+`WebEnvoy/WebEnvoy` 是 WebEnvoy 模块化产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的唯一新产品开发入口。
 
-WebEnvoy 是完整产品体系；WebEnvoy Core 负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因。统一人类用户入口由 `WebEnvoy/App` 承载，浏览器身份和运行现场由 Harbor 提供，站点知识、能力包和任务模板由 Lode 维护。
+Core 模块负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因；Desktop App 提供人类用户入口；Harbor 提供浏览器身份和运行现场；Lode 继续作为独立 MIT 能力资产仓维护站点知识、能力包和任务模板。
+
+旧的 `WebEnvoy/App` 与 `WebEnvoy/Harbor` 源仓仅保留历史、backlog 和 rollback 参考，不承载新的产品实现；是否 transfer、关闭或 archive 仍需单独的 owner 确认。
 
 WebEnvoy Core 让 Agent 的网页操作任务进入统一、可准入、可执行、可记录、可验证、可归因、可对账的核心任务路径。
 
@@ -47,13 +49,13 @@ WebEnvoy Core 适合那些“不能只靠一次性脚本稳定完成”的网页
 
 ## WebEnvoy Core 不是什么
 
-WebEnvoy Core 不是完整 WebEnvoy 产品入口，也不是 App Shell。
+Core 模块不是 App Shell、通用 Browser Agent、普通爬虫框架、账号矩阵工具、内容排期系统或简单的 Playwright / Puppeteer 脚本集合。
 
-它不是通用 Browser Agent、普通爬虫框架、账号矩阵工具、内容排期系统或简单的 Playwright / Puppeteer 脚本集合。WebEnvoy Core 不替用户决定业务策略，也不负责运营账号。它关注的是：当用户或上游系统已经知道要完成什么网页操作任务时，如何让 Agent 更稳定、更可复用、更可验证、更可归因地完成它。
+它不替用户决定业务策略，也不负责运营账号。它关注的是：当用户或上游系统已经知道要完成什么网页操作任务时，如何让 Agent 更稳定、更可复用、更可验证、更可归因地完成它。
 
 ## 本仓库包含什么
 
-本仓库承载 WebEnvoy Core 的主要任务运行能力。这里的模块说明是实现视角，用来帮助开发者理解代码边界：
+本仓库承载 Core、Desktop App 与 Harbor Runtime 的模块化产品实现。这里的模块说明是实现视角，用来帮助开发者理解代码边界：
 
 - API Server：Agent、程序、上游系统、WebEnvoy App、CLI、MCP 和 SDK 的统一入口；
 - Core Runtime：统一任务路径、能力准入、资源匹配、执行控制、Run Record、结果归一和失败归因；
