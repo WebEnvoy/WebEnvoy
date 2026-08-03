@@ -1456,6 +1456,24 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     {},
     legacyCanonicalRuntimeFacts
   );
+  const wrappedLegacyCanonicalRuntimePaths: string[] = [];
+  const wrappedLegacyCanonicalRuntimeHarbor = createHarborMock(
+    true,
+    wrappedLegacyCanonicalRuntimePaths,
+    [],
+    xiaohongshuScene,
+    { evidence_ref: "evidence_runtime_api_snapshot", access_state: "available" },
+    {},
+    canonicalXiaohongshuSiteFacts,
+    {},
+    {},
+    "success",
+    {},
+    {
+      schema_version: "harbor-core-runtime-facts/v0",
+      runtime_facts: legacyCanonicalRuntimeFacts
+    }
+  );
   const unsupportedRuntimePaths: string[] = [];
   const unsupportedRuntimeHarbor = createHarborMock(
     true,
@@ -1797,6 +1815,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     const canonicalRuntimeHarborPort = await listen(canonicalRuntimeHarbor);
     const canonicalRuntimeSessionMismatchHarborPort = await listen(canonicalRuntimeSessionMismatchHarbor);
     const legacyCanonicalRuntimeHarborPort = await listen(legacyCanonicalRuntimeHarbor);
+    const wrappedLegacyCanonicalRuntimeHarborPort = await listen(wrappedLegacyCanonicalRuntimeHarbor);
     const unsupportedRuntimeHarborPort = await listen(unsupportedRuntimeHarbor);
     const legacyRuntimeHarborPort = await listen(legacyRuntimeHarbor);
     const bossHarborPort = await listen(bossHarbor);
@@ -2097,6 +2116,11 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       if (!("category" in legacyCanonical)) throw new Error("legacy-shaped canonical runtime facts unexpectedly admitted");
       assert.equal(legacyCanonical.code, "runtime_contract_invalid");
       assert(legacyCanonicalRuntimePaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
+      const wrappedLegacyCanonical = await collectAdmission(`http://127.0.0.1:${wrappedLegacyCanonicalRuntimeHarborPort}`, "run_wrapped_legacy_shaped_canonical_runtime_facts");
+      assert.equal("category" in wrappedLegacyCanonical, true);
+      if (!("category" in wrappedLegacyCanonical)) throw new Error("wrapped legacy-shaped canonical runtime facts unexpectedly admitted");
+      assert.equal(wrappedLegacyCanonical.code, "runtime_contract_invalid");
+      assert(wrappedLegacyCanonicalRuntimePaths.includes("POST /runtime/sessions/session_runtime_api_ready/release"));
       assert(canonicalRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
       assert(unsupportedRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
       assert(legacyRuntimePaths.includes("GET /runtime/sessions/session_runtime_api_ready/runtime-facts"));
@@ -3210,6 +3234,7 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
     await close(canonicalRuntimeHarbor);
     await close(canonicalRuntimeSessionMismatchHarbor);
     await close(legacyCanonicalRuntimeHarbor);
+    await close(wrappedLegacyCanonicalRuntimeHarbor);
     await close(unsupportedRuntimeHarbor);
     await close(legacyRuntimeHarbor);
     await close(bossHarbor);

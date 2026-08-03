@@ -2319,9 +2319,13 @@ function coreRuntimeFactsFromSession(
   if (source === "canonical" && object(value)?.schema_version !== "harbor-core-runtime-facts/v0") {
     return failure("resource_admission", "runtime_contract_invalid", "runtime_binding", "connect_runtime");
   }
-  const direct = pickObject(value, "harbor_runtime_facts", "core_runtime_facts", "runtime_facts", "session");
+  const direct = source === "canonical"
+    ? object(value)
+    : pickObject(value, "harbor_runtime_facts", "core_runtime_facts", "runtime_facts", "session");
   if (!direct) return failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime");
-  if (direct.status === "unavailable") return failure("resource_admission", string(direct.failure_class) ?? "runtime_session_unavailable", "runtime_binding", "connect_runtime");
+  if (source === "session" && direct.status === "unavailable") {
+    return failure("resource_admission", string(direct.failure_class) ?? "runtime_session_unavailable", "runtime_binding", "connect_runtime");
+  }
 
   const runtime_session_ref = string(direct.runtime_session_ref);
   const profile_ref = string(direct.profile_ref);
@@ -2330,7 +2334,7 @@ function coreRuntimeFactsFromSession(
   const lifecycle_state = string(direct.lifecycle_state);
   const viewer_ref = string(direct.viewer_ref) ?? string(object(direct.viewer)?.viewer_ref);
   if (!runtime_session_ref || !profile_ref || !provider_ref || !provider_mode || !lifecycle_state || !viewer_ref) {
-    return failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime");
+    return failure("resource_admission", source === "canonical" ? "runtime_contract_invalid" : "runtime_ref_missing", "runtime_binding", "connect_runtime");
   }
   if (direct.schema_version === "harbor-core-runtime-facts/v0") {
     const availability = object(direct.availability);
