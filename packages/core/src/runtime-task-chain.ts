@@ -1989,6 +1989,16 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
     }
   }
 
+  async function requestLegacyRuntimeFacts(path: string): Promise<unknown | FailureRecord> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("legacy_runtime_facts_timeout")), cleanupTimeoutMs);
+    try {
+      return await requestJson("GET", path, undefined, controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   return {
     async collectAdmissionFacts(input) {
       const taskTargetUrl = taskUrl(input.task_intent);
@@ -2081,6 +2091,14 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
           if (isFailure(canonicalRuntime)) return failAfterSession(canonicalRuntime);
           runtime = canonicalRuntime;
           runtimeFactsSource = "canonical";
+        } else {
+          const legacyRuntimeResponse = await requestLegacyRuntimeFacts(
+            `/runtime/sessions/${encodeURIComponent(openedSessionRef)}`
+          );
+          if (isFailure(legacyRuntimeResponse)) return failAfterSession(legacyRuntimeResponse);
+          const legacyRuntime = legacyRuntimeFactsFromReadback(legacyRuntimeResponse, sessionRuntime);
+          if (isFailure(legacyRuntime)) return failAfterSession(legacyRuntime);
+          runtime = legacyRuntime;
         }
       }
       if (
@@ -2389,6 +2407,18 @@ function coreRuntimeFactsFromSession(
     },
     unavailable: null
   };
+}
+
+function legacyRuntimeFactsFromReadback(
+  value: unknown,
+  openedRuntime: HarborCoreRuntimeFacts
+): HarborCoreRuntimeFacts | FailureRecord {
+  const readback = pickObject(value, "harbor_runtime_facts", "core_runtime_facts", "runtime_facts", "session");
+  const readbackSessionRef = string(readback?.runtime_session_ref);
+  if (!readbackSessionRef || readbackSessionRef !== openedRuntime.runtime_session_ref) {
+    return failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime");
+  }
+  return openedRuntime;
 }
 
 function sceneFromSnapshot(value: unknown): HarborCoreSceneReference | HarborUnavailable {
