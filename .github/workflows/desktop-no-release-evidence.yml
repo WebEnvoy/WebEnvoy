@@ -1,0 +1,168 @@
+name: Desktop no-release evidence
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-no-release-evidence.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "apps/desktop/**"
+      - "packages/**"
+      - "services/harbor/**"
+      - "docs/verification/core-347-*"
+
+permissions:
+  contents: read
+
+jobs:
+  packaged-no-release:
+    name: Packaged no-release evidence
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      LODE_PIN: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+      WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ github.workspace }}/.runtime-sources/lode
+    steps:
+      - name: Checkout WebEnvoy
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Preserve carrier and checkout exact provenance input
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .loom/tmp/core-347-host-artifact
+          cp docs/verification/core-347-release-artifact-provenance-v1.json .loom/tmp/core-347-host-artifact/carrier.json
+
+      - name: Checkout exact WebEnvoy provenance input
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/WebEnvoy
+          ref: 39a6454ed55fe04873153c2fb3466d47784b3200
+          path: .runtime-sources/webenvoy-input
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Enable pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate
+          test "$(node --version)" = "v24.16.0"
+          test "$(pnpm --version)" = "10.30.3"
+
+      - name: Checkout exact Lode input
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+          path: .runtime-sources/lode
+          persist-credentials: false
+
+      - name: Verify pinned Lode checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C .runtime-sources/webenvoy-input status --porcelain)"
+          test "$(git -C .runtime-sources/lode rev-parse HEAD)" = "$LODE_PIN"
+          test -z "$(git -C .runtime-sources/lode status --porcelain)"
+
+      - name: Install frozen dependencies
+        working-directory: .runtime-sources/webenvoy-input
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Desktop fixture smoke matrix
+        shell: bash
+        working-directory: .runtime-sources/webenvoy-input
+        run: |
+          set -euo pipefail
+          pnpm --filter @webenvoy/app smoke
+          pnpm --filter @webenvoy/app smoke:packaged
+          pnpm --filter @webenvoy/app smoke:packaged:vertical
+          WEBENVOY_REQUIRE_PACKAGED_RUNTIME=1 pnpm --filter @webenvoy/app smoke:packaged:runtime
+          pnpm --filter @webenvoy/app smoke:packaged:readonly
+
+      - name: Verify no-release artifact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root=".runtime-sources/webenvoy-input/apps/desktop/dist-electron"
+          evidence_dir=".loom/tmp/core-347-host-artifact"
+          find "$artifact_root" -type f -print \
+            | sed "s#^${artifact_root}/##" \
+            | LC_ALL=C sort > "$evidence_dir/relative-file-list.txt"
+          : > "$evidence_dir/relative-file-content-manifest.txt"
+          while IFS= read -r relative_path; do
+            digest="$(shasum -a 256 "$artifact_root/$relative_path" | awk '{print $1}')"
+            printf '%s %s\n' "$relative_path" "$digest" >> "$evidence_dir/relative-file-content-manifest.txt"
+          done < "$evidence_dir/relative-file-list.txt"
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { execFileSync } from "node:child_process";
+          import { readFileSync, statSync } from "node:fs";
+          import { join } from "node:path";
+
+          const carrierPath = ".loom/tmp/core-347-host-artifact/carrier.json";
+          const carrier = JSON.parse(readFileSync(carrierPath, "utf8"));
+          const artifactRoot = ".runtime-sources/webenvoy-input/apps/desktop/dist-electron";
+          const listPath = ".loom/tmp/core-347-host-artifact/relative-file-list.txt";
+          const contentPath = ".loom/tmp/core-347-host-artifact/relative-file-content-manifest.txt";
+          const listBytes = readFileSync(listPath);
+          const contentBytes = readFileSync(contentPath);
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+          };
+
+          assert(carrier.judgment === "no_release", "carrier judgment must remain no_release");
+          assert(carrier.artifact.package_kind === "unsigned_local_packaged_runtime", "unexpected package kind");
+          const relativeFiles = listBytes.toString("utf8").trimEnd().split("\n").filter(Boolean);
+          const contentLines = contentBytes.toString("utf8").trimEnd().split("\n").filter(Boolean);
+          assert(relativeFiles.length === carrier.artifact.file_count, `file count mismatch: ${relativeFiles.length}`);
+          assert(sha256(listBytes) === carrier.artifact.relative_file_list_sha256, "relative file-list digest mismatch");
+          assert(sha256(contentBytes) === carrier.artifact.relative_file_content_manifest_sha256, "content manifest digest mismatch");
+          assert(contentLines.length === relativeFiles.length, "content manifest line count mismatch");
+          const expectedFiles = new Set(relativeFiles);
+          for (const line of contentLines) {
+            const separator = line.indexOf(" ");
+            assert(separator > 0, `invalid content manifest line: ${line}`);
+            const relativePath = line.slice(0, separator);
+            assert(expectedFiles.has(relativePath), `content path is not in file list: ${relativePath}`);
+            assert(!relativePath.startsWith("/") && !relativePath.includes(".."), `unsafe relative path: ${relativePath}`);
+          }
+          for (const keyFile of carrier.artifact.key_files) {
+            const filePath = join(artifactRoot, keyFile.path);
+            assert(statSync(filePath).isFile(), `missing key file: ${keyFile.path}`);
+            assert(sha256(readFileSync(filePath)) === keyFile.sha256, `key-file digest mismatch: ${keyFile.path}`);
+          }
+          const head = execFileSync("git", ["-C", ".runtime-sources/webenvoy-input", "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+          assert(carrier.verification_input.monorepo.commit === head, `carrier commit ${carrier.verification_input.monorepo.commit} != ${head}`);
+          const lodeHead = execFileSync("git", ["-C", ".runtime-sources/lode", "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+          assert(lodeHead === process.env.LODE_PIN, `Lode checkout ${lodeHead} != ${process.env.LODE_PIN}`);
+          console.log(JSON.stringify({ judgment: carrier.judgment, file_count: relativeFiles.length, head, lode: lodeHead }));
+          NODE
+
+      - name: Assert no-release boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "no_release: unsigned local fixture evidence only; no signing, notarization, publication, deploy, or external write"
+
+      - name: Upload no-release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-347-no-release-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            .runtime-sources/webenvoy-input/apps/desktop/dist-electron
+            .loom/tmp/core-347-host-artifact/relative-file-list.txt
+            .loom/tmp/core-347-host-artifact/relative-file-content-manifest.txt
+            docs/verification/core-347-release-artifact-provenance-v1.json

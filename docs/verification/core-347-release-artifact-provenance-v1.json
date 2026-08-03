@@ -125,8 +125,104 @@
       "clean_checkouts": true,
       "frozen_inputs": true,
       "offline_fixture_smoke": true,
-      "result": "passed"
+      "result": "passed",
+      "working_directories": {
+        "monorepo": "<work-root>/rollback-monorepo",
+        "app": "<work-root>/rollback-monorepo/apps/desktop",
+        "core": "<work-root>/rollback-core",
+        "harbor": "<work-root>/rollback-harbor",
+        "lode": "<work-root>/rollback-lode"
+      },
+      "checkout_commands": [
+        "git clone https://github.com/WebEnvoy/WebEnvoy.git <work-root>/rollback-monorepo",
+        "git -C <work-root>/rollback-monorepo checkout --detach 26704259b5acb428a29e954eebad144b14bc640e",
+        "git clone https://github.com/WebEnvoy/WebEnvoy.git <work-root>/rollback-core",
+        "git -C <work-root>/rollback-core checkout --detach 2c401cf90c0cf7150e8156b904975cefaf435fa8",
+        "git clone https://github.com/WebEnvoy/Harbor.git <work-root>/rollback-harbor",
+        "git -C <work-root>/rollback-harbor checkout --detach f9e13311ccd3f80cf8ef54cb97245a42da49882b",
+        "git clone https://github.com/WebEnvoy/Lode.git <work-root>/rollback-lode",
+        "git -C <work-root>/rollback-lode checkout --detach 1fbef74b4bf1b4f0a86aacd885386d7a62181207",
+        "test -z \"$(git -C <work-root>/rollback-monorepo status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-core status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-harbor status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-lode status --porcelain)\""
+      ],
+      "install_commands": [
+        {
+          "cwd": "<work-root>/rollback-core",
+          "command": "pnpm install --frozen-lockfile"
+        },
+        {
+          "cwd": "<work-root>/rollback-harbor",
+          "command": "pnpm install --frozen-lockfile"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "command": "npm ci --ignore-scripts"
+        }
+      ],
+      "verification_commands": [
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run build",
+          "result": "pass"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run smoke:packaged:readonly",
+          "result": "pass"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run smoke:packaged:runtime",
+          "result": "pass"
+        }
+      ],
+      "environment_bindings": {
+        "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+        "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+        "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+      }
     }
+  },
+  "state_matrix": {
+    "contract_locator": "docs/verification/readonly-vertical-slice.md#四态及保护路径",
+    "self_check_locator": "packages/api-server/src/readonly-vertical-slice-self-check.ts",
+    "states": [
+      {
+        "state": "offline_read_success",
+        "entrypoint": "assertSuccess",
+        "expected": "read operation succeeds against the offline fixture with no failure attribution"
+      },
+      {
+        "state": "structured_unavailable",
+        "entrypoint": "assertUnavailable",
+        "expected": "structured_unavailable with failure attribution runtime"
+      },
+      {
+        "state": "failure_attribution",
+        "entrypoint": "assertFailure",
+        "expected": "failed run with failure attribution capability"
+      },
+      {
+        "state": "bounded_rollback",
+        "entrypoint": "assertRollback",
+        "expected": "rollback trace completes and fixture cleanup returns to idle"
+      }
+    ],
+    "canonical_fail_closed_locator": "packages/api-server/src/readonly-vertical-slice-self-check.ts#assertCanonicalGuards"
   },
   "safety_boundary": {
     "real_account": "not_used",

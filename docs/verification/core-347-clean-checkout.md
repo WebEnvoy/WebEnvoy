@@ -24,7 +24,7 @@ created.
 ## Checks and boundaries
 
 The frozen install, root build/typecheck/test/lint/conformance/smoke, Harbor
-typecheck and fixture runtime-API smoke, and all five Desktop packaged variants
+typecheck and fixture runtime-API smoke, Desktop smoke plus four packaged variants
 passed. Packaged runtime and readonly smokes started independent Core and Harbor
 child processes, verified Core `/threads`, Lode action/policy admission and
 fixture fail-closed behavior, then left no runtime process or user-data residue.
@@ -37,6 +37,22 @@ DOM/HAR, submit/publish/send action, signing, notarization, publication, deploy,
 source archive, or source deletion was used. This is a local `no_release` record;
 the smoke screenshots were generated as local fixtures, then restored to the
 committed fixture state; they are not retained or hashed as release artifacts.
+
+## Four-state offline fixture matrix
+
+The machine-readable carrier lists the same four states. The executable
+assertions are in [`readonly-vertical-slice-self-check.ts`](../../packages/api-server/src/readonly-vertical-slice-self-check.ts)
+and the contract is [`readonly-vertical-slice.md#四态及保护路径`](readonly-vertical-slice.md#四态及保护路径).
+
+| State | Assertion | Expected result |
+| --- | --- | --- |
+| `offline_read_success` | `assertSuccess` | Read succeeds against the offline fixture with no failure attribution. |
+| `structured_unavailable` | `assertUnavailable` | Structured unavailable state; attribution is `runtime`. |
+| `failure_attribution` | `assertFailure` | Failed run; attribution is `capability`. |
+| `bounded_rollback` | `assertRollback` | Rollback trace completes and fixture cleanup returns to idle. |
+
+Canonical network/5xx/session-missing/malformed guards are separately asserted
+fail-closed by `assertCanonicalGuards`; they are not a fifth success state.
 
 ## Rollback rehearsal
 
