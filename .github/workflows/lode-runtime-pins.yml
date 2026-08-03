@@ -10,6 +10,10 @@ on:
       - "packages/api-server/src/**"
       - "packages/core/package.json"
       - "packages/core/src/**"
+      - "apps/desktop/package.json"
+      - "apps/desktop/scripts/package-lode-assets.mjs"
+      - "apps/desktop/scripts/runtime-source-lock.json"
+      - "services/harbor/package.json"
   workflow_dispatch:
 
 permissions:

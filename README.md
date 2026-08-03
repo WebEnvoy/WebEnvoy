@@ -61,6 +61,18 @@ WebEnvoy Core 不是完整 WebEnvoy 产品入口，也不是 App Shell。
 - CLI / MCP / SDK：不同使用方式下的调用入口；
 - Schema / Contract：WebEnvoy Core、Harbor、Lode 和 App 之间共享的基础契约。
 
+## Monorepo workspace
+
+Core、Desktop App 和 Harbor Runtime 在同一个 pnpm workspace 中维护，但仍保持独立的进程、owner API 和事实边界：
+
+- `packages/*`：Core Runtime、API Server、Schema 与 conformance；
+- `apps/desktop`：Electron Desktop App，只通过 Core/Harbor owner API 消费运行事实；
+- `services/harbor`：Harbor Runtime API，继续独占 Profile、Cookie、Token、raw DOM/HAR 和 screenshot 等敏感运行事实。
+
+仓库只保留根目录 `pnpm-lock.yaml`。Node.js 基线为 `>=24 <25`，pnpm 使用 `10.30.3`；可用 `pnpm --filter <package> <script>` 运行单个模块的已有脚本。Lode 仍是独立 MIT 仓库，Desktop 打包和 Core 兼容检查通过显式的 commit/hash pin 消费它，不把 Lode 资产复制为 workspace package。
+
+按路径 CI 由根目录 `.github/workflows/workspace-ci.yml` 统一承载：Core、Desktop 或 Harbor 路径只触发对应检查，根 manifest、workspace 或 lockfile 变化触发全量 workspace 检查。导入模块前缀下保留的 `.github/workflows/` 仅是历史来源，不是 GitHub active workflow。
+
 API Server 是本仓库的一等入口。SDK、CLI、MCP 和 WebEnvoy App 都应尽量复用同一套 API，避免形成多套执行路径。
 
 ## 与 App / Harbor / Lode 的关系

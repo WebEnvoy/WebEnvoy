@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { createFixtureLauncher, HarborRuntime } from "./index.js";
@@ -285,8 +285,10 @@ test("checks create/import ownership and recovers cross-process locks without AB
 
     const first = acquireProfileStorageOwnership([lockRef]);
     const firstOwner = readFileSync(ownershipPath, "utf8");
+    const replacementPath = `${ownershipPath}.replacement`;
+    writeFileSync(replacementPath, firstOwner);
     rmSync(ownershipPath);
-    writeFileSync(ownershipPath, firstOwner);
+    renameSync(replacementPath, ownershipPath);
     first.release();
     assert.equal(existsSync(ownershipPath), true);
     rmSync(ownershipPath);
