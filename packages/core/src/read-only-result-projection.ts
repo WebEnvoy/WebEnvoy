@@ -17,6 +17,7 @@ export type LodeReadOnlyProjection = {
 
 export type LodeReadOnlyFailureClass =
   | "invalid_contract"
+  | "output_invalid"
   | "empty_result"
   | "not_logged_in"
   | "login_expired"
@@ -54,6 +55,8 @@ type CompleteReadOnlyTerminalInput = {
 
 export type CompleteReadOnlyFailureInput = CompleteReadOnlyTerminalInput & {
   lode_failure_class: Exclude<LodeReadOnlyFailureClass, "empty_result">;
+  failure_category?: FailureRecord["category"];
+  failure_attribution?: NonNullable<FailureRecord["attribution"]>;
 };
 
 export type CompleteReadOnlyEmptyResultInput = CompleteReadOnlyTerminalInput;
@@ -72,6 +75,8 @@ function lodeFailure(failureClass: Exclude<LodeReadOnlyFailureClass, "empty_resu
   switch (failureClass) {
     case "invalid_contract":
       return { status: "failed", failure: { category: "capability_contract", code: failureClass, phase: "projection", recovery_hint: "repair_package" } };
+    case "output_invalid":
+      return { status: "failed", failure: { category: "result_projection", code: failureClass, phase: "projection", recovery_hint: "repair_package" } };
     case "not_logged_in":
     case "login_expired":
       return { status: "requires_user_action", failure: { category: "resource_admission", code: failureClass, phase: "runtime_binding", recovery_hint: "open_manual_auth" } };
@@ -151,7 +156,11 @@ export async function completeRunWithReadOnlyFailure(store: FileRunRecordStore, 
   const mapped = lodeFailure(input.lode_failure_class);
   return completeRunWithFailure(store, runId, {
     status: mapped.status,
-    failure: mapped.failure,
+    failure: {
+      ...mapped.failure,
+      ...(input.failure_category === undefined ? {} : { category: input.failure_category }),
+      ...(input.failure_attribution === undefined ? {} : { attribution: input.failure_attribution })
+    },
     ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
     ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
     ...(input.retention_state === undefined ? {} : { retention_state: input.retention_state })

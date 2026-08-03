@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: WebEnvoy/Lode
-          ref: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+          ref: 6238d3f9de0cd09157c9769e27d90174c299406a
           path: .runtime-sources/lode
           persist-credentials: false
       - uses: actions/setup-node@v4

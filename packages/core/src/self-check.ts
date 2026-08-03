@@ -346,6 +346,18 @@ const harborResourceFacts = {
   consumer_boundary: "Core consumes Harbor public resource readiness keys only; no raw page, storage, credential, network, screenshot, or browser endpoint material."
 } satisfies HarborResourceFacts;
 
+const loginResourceRequirement = [{ fact_key: "identity.user_logged_in.confirmed", owner: "Harbor", required: true }] as const;
+const canonicalRuntimeAdmission = validateHarborAdmission({
+  harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+  harbor_provider_status: harborProviderStatus,
+  harbor_runtime_facts: harborRuntimeFacts,
+  harbor_resource_facts: harborResourceFacts,
+  runtime_facts_source: "canonical"
+}, "read", loginResourceRequirement);
+assert.equal(canonicalRuntimeAdmission.ok, false);
+if (canonicalRuntimeAdmission.ok) throw new Error("canonical runtime facts must not infer identity login readiness");
+assert.equal(canonicalRuntimeAdmission.failure.code, "resource_fact_missing:identity.user_logged_in.confirmed");
+
 const harborSceneRef = {
   schema_version: "harbor-page-scene-refs/v0",
   runtime_session_ref: "session_fixture_ready",
@@ -361,6 +373,15 @@ const harborSceneRef = {
   },
   unavailable: null
 } satisfies HarborCoreSceneReference;
+
+assert.equal(validateHarborAdmission({
+  harbor_identity_environment_facts: harborIdentityEnvironmentFacts,
+  harbor_provider_status: harborProviderStatus,
+  harbor_runtime_facts: harborRuntimeFacts,
+  harbor_scene_ref: harborSceneRef,
+  harbor_resource_facts: harborResourceFacts,
+  runtime_facts_source: "legacy"
+}, "read", loginResourceRequirement).ok, true);
 
 const lodePreviewContactFormContract = {
   package_ref: "lode://site-capability/example/preview-contact-form@0.1.0",
