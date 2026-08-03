@@ -13,7 +13,7 @@ record is [`core-347-release-artifact-provenance-v1.json`](core-347-release-arti
 - Toolchain: Node `v24.16.0`, pnpm `10.30.3`, Corepack `0.34.6`; `pnpm-lock.yaml` SHA-256 `71a2dc3525d29cd04cb721c9cefb04fc29432be2586a959519109010e6a2d456`.
 
 The artifact content manifest covers 703 files under `apps/desktop/dist-electron/`:
-file-list SHA-256 `a6349315d3cf38fe2a9c725b1f93367461ea1984982c8e372881c5443d730e1d`,
+relative-file-list SHA-256 `0f0d334389a11b03709ea0b7bf452c403c7be5805932c6a24fcea405614f2874`,
 content-manifest SHA-256 `e5273bd7326211b9637dc17fdae9235fa4e179ab3dc96d44ef5bc52f66833a65`,
 `runtime/packaging-state.json` SHA-256 `cfeae0de03a33c5fc3f098894367f7416b062a80d91999d331c429f27124074b`,
 and `lode/provenance.json` SHA-256
@@ -51,7 +51,9 @@ checkouts. The exact inputs were monorepo `26704259b5acb428a29e954eebad144b14bc6
 
 After frozen installs, the old Desktop build and both
 `smoke:packaged:readonly` and `smoke:packaged:runtime` fixture replays passed.
-The baseline output was 684 files with content-manifest SHA-256
+The baseline output was 684 files with relative-file-list SHA-256
+`8f6e2c07f6040856136d2beb073e0c67663fa4b89f52d4046bc1d877598ac653`,
+content-manifest SHA-256
 `42b8ceb9bda3ce3ec1e401cfa6797b84a97de261db9ede9f35f2d76e5f531564` and
 packaging-state SHA-256 `76197a6addceba03485a16e8911fd1128120ffdd00ed8af586a1926e75cfe2e8`.
 The old script had no Lode `provenance.json`; that missing fact is preserved as

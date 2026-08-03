@@ -39,9 +39,9 @@
     "scope": "apps/desktop/dist-electron/**",
     "package_kind": "unsigned_local_packaged_runtime",
     "installer_or_release_bundle": null,
-    "manifest_method": "LC_ALL=C sorted relative paths; each path paired with SHA-256; hash the resulting lines",
+    "manifest_method": "File list: find scope -type f, strip scope prefix, LC_ALL=C sort, SHA-256 the newline-delimited relative paths. Content manifest: for each sorted relative path, emit `<relative_path> <sha256>\\n`, then SHA-256 the resulting lines.",
     "file_count": 703,
-    "relative_file_list_sha256": "a6349315d3cf38fe2a9c725b1f93367461ea1984982c8e372881c5443d730e1d",
+    "relative_file_list_sha256": "0f0d334389a11b03709ea0b7bf452c403c7be5805932c6a24fcea405614f2874",
     "relative_file_content_manifest_sha256": "e5273bd7326211b9637dc17fdae9235fa4e179ab3dc96d44ef5bc52f66833a65",
     "key_files": [
       {
@@ -114,7 +114,7 @@
       "artifact": {
         "scope": "apps/desktop/dist-electron/**",
         "file_count": 684,
-        "relative_file_list_sha256": "a95932eaa648007c7c61f2e8d403c9966ce6e14999f03c8b4566c0f9164157f5",
+        "relative_file_list_sha256": "8f6e2c07f6040856136d2beb073e0c67663fa4b89f52d4046bc1d877598ac653",
         "relative_file_content_manifest_sha256": "42b8ceb9bda3ce3ec1e401cfa6797b84a97de261db9ede9f35f2d76e5f531564",
         "packaging_state_sha256": "76197a6addceba03485a16e8911fd1128120ffdd00ed8af586a1926e75cfe2e8",
         "lode_provenance_sha256": null,
