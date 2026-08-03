@@ -1,0 +1,238 @@
+{
+  "schema_version": "webenvoy.release-artifact-provenance/v1",
+  "work_item": 347,
+  "recorded_at": "2026-08-03T19:56:20Z",
+  "judgment": "no_release",
+  "verification_input": {
+    "monorepo": {
+      "repository": "WebEnvoy/WebEnvoy",
+      "commit": "39a6454ed55fe04873153c2fb3466d47784b3200",
+      "tree": "4e06acaaad7792ecf9dcc6a59f68c14c71c11af1",
+      "clean_checkout": true,
+      "component_paths": {
+        "core": "packages/api-server",
+        "app": "apps/desktop",
+        "harbor": "services/harbor"
+      },
+      "component_trees": {
+        "core": "f6760ff173d54ffebfe51599db58839b0dec69ae",
+        "app": "8e0a9302d526419c01437fc1453205af18fa8c62",
+        "harbor": "4ea37e3123c63c98289e32467e35368d48ae0609"
+      }
+    },
+    "lode": {
+      "repository": "WebEnvoy/Lode",
+      "commit": "1fbef74b4bf1b4f0a86aacd885386d7a62181207",
+      "tree": "cda20d44a8a8b48f6ba13c598325a95d50eff962",
+      "raw_assets_sha256": "419eaa0fd7792edc9090e47fe45a342c9b459bdb8bf9ca02a90e8bbd019a9a4a",
+      "asset_paths": ["registry", "sites"],
+      "clean_checkout": true
+    },
+    "toolchain": {
+      "node": "v24.16.0",
+      "pnpm": "10.30.3",
+      "corepack": "0.34.6",
+      "pnpm_lock_sha256": "71a2dc3525d29cd04cb721c9cefb04fc29432be2586a959519109010e6a2d456"
+    }
+  },
+  "artifact": {
+    "scope": "apps/desktop/dist-electron/**",
+    "package_kind": "unsigned_local_packaged_runtime",
+    "installer_or_release_bundle": null,
+    "manifest_method": "File list: find scope -type f, strip scope prefix, LC_ALL=C sort, SHA-256 the newline-delimited relative paths. Content manifest: for each sorted relative path, emit `<relative_path> <sha256>\\n`, then SHA-256 the resulting lines.",
+    "file_count": 703,
+    "relative_file_list_sha256": "0f0d334389a11b03709ea0b7bf452c403c7be5805932c6a24fcea405614f2874",
+    "relative_file_content_manifest_sha256": "e5273bd7326211b9637dc17fdae9235fa4e179ab3dc96d44ef5bc52f66833a65",
+    "key_files": [
+      {
+        "path": "runtime/packaging-state.json",
+        "sha256": "cfeae0de03a33c5fc3f098894367f7416b062a80d91999d331c429f27124074b"
+      },
+      {
+        "path": "lode/provenance.json",
+        "sha256": "da7aa536363aa1feba56173b5b740aa4c11e7a1a58cfc248d6391f90e6378e52"
+      }
+    ],
+    "smoke_outputs": {
+      "retained": false,
+      "classification": "local_fixture_only",
+      "variants": ["packaged", "packaged_vertical", "packaged_runtime", "packaged_readonly"],
+      "note": "Screenshots were generated during smoke runs and restored to the committed fixture state; they are not retained release artifacts."
+    }
+  },
+  "commands": [
+    {"command": "node --version && pnpm --version", "result": "pass"},
+    {"command": "pnpm install --frozen-lockfile", "result": "pass"},
+    {"command": "pnpm build", "result": "pass"},
+    {"command": "pnpm typecheck", "result": "pass"},
+    {"command": "pnpm lint", "result": "pass"},
+    {"command": "pnpm conformance", "result": "pass"},
+    {"command": "pnpm smoke", "result": "pass"},
+    {"command": "pnpm test", "result": "pass", "notes": "Harbor 186 passed and 1 skipped; Core, API, schemas and conformance passed."},
+    {"command": "pnpm --filter @webenvoy/harbor typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/harbor smoke:runtime:api", "result": "pass", "notes": "Fixture provider and redacted owner-shaped endpoints."},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app build", "result": "pass"},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app smoke", "result": "pass"},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app smoke:packaged", "result": "pass"},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app smoke:packaged:vertical", "result": "pass"},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app smoke:packaged:runtime", "result": "pass"},
+    {"command": "WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> pnpm --filter @webenvoy/app smoke:packaged:readonly", "result": "pass"},
+    {"command": "WEBENVOY_CORE_RUNTIME_SOURCE_DIR=<rollback-core> WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR=<rollback-harbor> WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> npm run build", "result": "pass", "scope": "disposable rollback baseline"},
+    {"command": "WEBENVOY_CORE_RUNTIME_SOURCE_DIR=<rollback-core> WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR=<rollback-harbor> WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> npm run smoke:packaged:readonly", "result": "pass", "scope": "disposable rollback baseline"},
+    {"command": "WEBENVOY_CORE_RUNTIME_SOURCE_DIR=<rollback-core> WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR=<rollback-harbor> WEBENVOY_LODE_ASSETS_SOURCE_DIR=<clean-lode-checkout> npm run smoke:packaged:runtime", "result": "pass", "scope": "disposable rollback baseline"}
+  ],
+  "rollback": {
+    "strategy": "restore exact pre-switch commits in separate clean checkouts; do not reset, rewrite, archive, delete, or mutate source repositories",
+    "baseline": {
+      "monorepo": {
+        "commit": "26704259b5acb428a29e954eebad144b14bc640e",
+        "tree": "16cd70d190750e35bea3c2807bc41891b73ee5ff",
+        "app_path": "apps/desktop",
+        "app_tree": "7405c3db75db54c1000948d95a16619e73c62eb3"
+      },
+      "core": {
+        "commit": "2c401cf90c0cf7150e8156b904975cefaf435fa8",
+        "tree": "b34b94ea980d01e9326c5606e58af5d705e72941",
+        "path": "packages/api-server"
+      },
+      "harbor": {
+        "commit": "f9e13311ccd3f80cf8ef54cb97245a42da49882b",
+        "tree": "fa756ee3b37bfc85daab1f4bcde1c8080e1df046",
+        "path": "services/harbor"
+      },
+      "lode": {
+        "repository": "WebEnvoy/Lode",
+        "commit": "1fbef74b4bf1b4f0a86aacd885386d7a62181207",
+        "tree": "cda20d44a8a8b48f6ba13c598325a95d50eff962",
+        "raw_assets_sha256": "419eaa0fd7792edc9090e47fe45a342c9b459bdb8bf9ca02a90e8bbd019a9a4a"
+      },
+      "locks": {
+        "monorepo_pnpm_lock_sha256": "e44a57d144090a0db56ba6d24f0d7482cec45f63c4f6caf5da36d659db28d628",
+        "app_package_lock_sha256": "0f8441129bb2d125e9ae6ff0d62a0dd05164c2d14934f24afbcb6659567bf0bd",
+        "harbor_pnpm_lock_sha256": "56f1ccee07189cbf79ffb25bba52350db94bb3e06cc6c28969841eda5218ff46"
+      },
+      "artifact": {
+        "scope": "apps/desktop/dist-electron/**",
+        "file_count": 684,
+        "relative_file_list_sha256": "8f6e2c07f6040856136d2beb073e0c67663fa4b89f52d4046bc1d877598ac653",
+        "relative_file_content_manifest_sha256": "42b8ceb9bda3ce3ec1e401cfa6797b84a97de261db9ede9f35f2d76e5f531564",
+        "packaging_state_sha256": "76197a6addceba03485a16e8911fd1128120ffdd00ed8af586a1926e75cfe2e8",
+        "lode_provenance_sha256": null,
+        "lode_provenance_note": "The pre-switch script emitted no provenance.json; this absence is part of the baseline gap."
+      }
+    },
+    "replay": {
+      "clean_checkouts": true,
+      "frozen_inputs": true,
+      "offline_fixture_smoke": true,
+      "result": "passed",
+      "working_directories": {
+        "monorepo": "<work-root>/rollback-monorepo",
+        "app": "<work-root>/rollback-monorepo/apps/desktop",
+        "core": "<work-root>/rollback-core",
+        "harbor": "<work-root>/rollback-harbor",
+        "lode": "<work-root>/rollback-lode"
+      },
+      "checkout_commands": [
+        "git clone https://github.com/WebEnvoy/WebEnvoy.git <work-root>/rollback-monorepo",
+        "git -C <work-root>/rollback-monorepo checkout --detach 26704259b5acb428a29e954eebad144b14bc640e",
+        "git clone https://github.com/WebEnvoy/WebEnvoy.git <work-root>/rollback-core",
+        "git -C <work-root>/rollback-core checkout --detach 2c401cf90c0cf7150e8156b904975cefaf435fa8",
+        "git clone https://github.com/WebEnvoy/Harbor.git <work-root>/rollback-harbor",
+        "git -C <work-root>/rollback-harbor checkout --detach f9e13311ccd3f80cf8ef54cb97245a42da49882b",
+        "git clone https://github.com/WebEnvoy/Lode.git <work-root>/rollback-lode",
+        "git -C <work-root>/rollback-lode checkout --detach 1fbef74b4bf1b4f0a86aacd885386d7a62181207",
+        "test -z \"$(git -C <work-root>/rollback-monorepo status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-core status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-harbor status --porcelain)\" && test -z \"$(git -C <work-root>/rollback-lode status --porcelain)\""
+      ],
+      "install_commands": [
+        {
+          "cwd": "<work-root>/rollback-core",
+          "command": "pnpm install --frozen-lockfile"
+        },
+        {
+          "cwd": "<work-root>/rollback-harbor",
+          "command": "pnpm install --frozen-lockfile"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "command": "npm ci --ignore-scripts"
+        }
+      ],
+      "verification_commands": [
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run build",
+          "result": "pass"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run smoke:packaged:readonly",
+          "result": "pass"
+        },
+        {
+          "cwd": "<work-root>/rollback-monorepo/apps/desktop",
+          "environment": {
+            "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+            "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+            "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+          },
+          "command": "npm run smoke:packaged:runtime",
+          "result": "pass"
+        }
+      ],
+      "environment_bindings": {
+        "WEBENVOY_CORE_RUNTIME_SOURCE_DIR": "<work-root>/rollback-core",
+        "WEBENVOY_HARBOR_RUNTIME_SOURCE_DIR": "<work-root>/rollback-harbor",
+        "WEBENVOY_LODE_ASSETS_SOURCE_DIR": "<work-root>/rollback-lode"
+      }
+    }
+  },
+  "state_matrix": {
+    "contract_locator": "docs/verification/readonly-vertical-slice.md#四态及保护路径",
+    "self_check_locator": "packages/api-server/src/readonly-vertical-slice-self-check.ts",
+    "states": [
+      {
+        "state": "offline_read_success",
+        "entrypoint": "assertSuccess",
+        "expected": "read operation succeeds against the offline fixture with no failure attribution"
+      },
+      {
+        "state": "structured_unavailable",
+        "entrypoint": "assertUnavailable",
+        "expected": "structured_unavailable with failure attribution runtime"
+      },
+      {
+        "state": "failure_attribution",
+        "entrypoint": "assertFailure",
+        "expected": "failed run with failure attribution capability"
+      },
+      {
+        "state": "bounded_rollback",
+        "entrypoint": "assertRollback",
+        "expected": "rollback trace completes and fixture cleanup returns to idle"
+      }
+    ],
+    "canonical_fail_closed_locator": "packages/api-server/src/readonly-vertical-slice-self-check.ts#assertCanonicalGuards"
+  },
+  "safety_boundary": {
+    "real_account": "not_used",
+    "real_browser_profile": "not_used",
+    "production_page": "not_opened",
+    "external_write_actions": "not_performed",
+    "credentials_cookies_tokens_raw_dom_har": "not_collected",
+    "local_fixture_screenshots": "generated_only_and_not_release_artifacts",
+    "signing_notarization_publication_deploy": "not_run",
+    "source_archive_or_delete": "not_run"
+  },
+  "known_validation_note": "A standalone Harbor test invocation hung in a local fake-browser navigation-ack case and was interrupted after verifying no residual process; the completed root pnpm test suite passed Harbor 186/1 skip."
+}
