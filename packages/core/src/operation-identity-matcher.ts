@@ -26,6 +26,16 @@ export type LockedOperationMatch = {
   required_harbor_facts: readonly LodeRequiredHarborFact[];
 };
 
+export type LockedOperationIdentityBinding = {
+  package_ref: string;
+  lock_ref: string;
+  operation_id: string;
+  operation_mode: string;
+  target_origin: string;
+  site_slug: string;
+  allowed_origins: readonly string[];
+};
+
 export const opaqueDetailOperationContract = {
   package_ref: "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
   lock_ref: "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0",
@@ -35,13 +45,10 @@ export const opaqueDetailOperationContract = {
   operation_mode: "read"
 } as const;
 
-const xhsCreatorPrecheckOriginPair = {
-  package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
-  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
-  operation_id: "xhs_publish_note_precheck",
-  identity_origin: "https://www.xiaohongshu.com",
-  target_origin: "https://creator.xiaohongshu.com"
-} as const;
+const xhsCreatorOperationPins = new Set([
+  "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1|xhs_publish_note_precheck",
+  "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|xhs_publish_note_path_prepare"
+]);
 
 function failure(code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
   return { category: code.startsWith("identity_") || code.startsWith("runtime_") ? "resource_admission" : "capability_contract", code, phase, recovery_hint };
@@ -141,35 +148,50 @@ export function matchLockedOperationIdentity(
   identity: HarborIdentityEnvironmentFacts,
   requestedIdentityRef: string
 ): FailureRecord | undefined {
+  return matchLockedOperationIdentityBinding({
+    package_ref: operation.runtime_consumption.package_ref,
+    lock_ref: operation.runtime_consumption.lock_ref,
+    operation_id: operation.runtime_consumption.operation_id,
+    operation_mode: operation.runtime_consumption.operation_mode,
+    target_origin: operation.selection.target_origin,
+    site_slug: operation.runtime_consumption.site_slug,
+    allowed_origins: operation.runtime_consumption.allowed_origins
+  }, identity, requestedIdentityRef);
+}
+
+export function matchLockedOperationIdentityBinding(
+  binding: LockedOperationIdentityBinding,
+  identity: HarborIdentityEnvironmentFacts,
+  requestedIdentityRef: string
+): FailureRecord | undefined {
   if (
     identity.schema_version !== "harbor-local-identity-environment/v0" ||
     identity.identity_environment_ref !== requestedIdentityRef ||
-    identity.site_binding.site_id !== operation.runtime_consumption.site_slug
+    identity.site_binding.site_id !== binding.site_slug
   ) return failure("identity_runtime_mismatch", "runtime_binding", "select_matching_runtime");
 
-  const admission = validateHarborIdentityEnvironmentFacts(identity, operation.selection.operation_mode === "read" ? "read" : "write_precheck");
+  const admission = validateHarborIdentityEnvironmentFacts(identity, binding.operation_mode === "read" ? "read" : "write_precheck");
   if ("category" in admission) return admission;
 
   const login = identity.login_state;
   const provenance = login.reason ?? login.authentication_provenance;
   if (
-    operation.selection.operation_mode !== "read" &&
+    binding.operation_mode !== "read" &&
     (login.state !== "logged_in" || provenance !== "user_confirmed_managed_session" || login.manual_authentication_state !== "completed")
   ) return failure("identity_auth_required", "runtime_binding", "open_manual_auth");
 
   const origin = identity.site_binding.origin;
-  const exactCreatorPrecheckPair = operation.runtime_consumption.package_ref === xhsCreatorPrecheckOriginPair.package_ref &&
-    operation.runtime_consumption.lock_ref === xhsCreatorPrecheckOriginPair.lock_ref &&
-    operation.runtime_consumption.operation_id === xhsCreatorPrecheckOriginPair.operation_id &&
-    sameOrigin(origin, xhsCreatorPrecheckOriginPair.identity_origin) &&
-    sameOrigin(operation.selection.target_origin, xhsCreatorPrecheckOriginPair.target_origin) &&
-    [xhsCreatorPrecheckOriginPair.identity_origin, xhsCreatorPrecheckOriginPair.target_origin].every((requiredOrigin) =>
-      operation.runtime_consumption.allowed_origins.some((allowed) => sameOrigin(allowed, requiredOrigin))
+  const exactCreatorOperationPair = xhsCreatorOperationPins.has(`${binding.package_ref}|${binding.lock_ref}|${binding.operation_id}`) &&
+    binding.operation_mode === "validate_only" && binding.site_slug === "xiaohongshu" &&
+    sameOrigin(origin, "https://www.xiaohongshu.com") &&
+    sameOrigin(binding.target_origin, "https://creator.xiaohongshu.com") &&
+    ["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"].every((requiredOrigin) =>
+      binding.allowed_origins.some((allowed) => sameOrigin(allowed, requiredOrigin))
     );
   if (
     !origin.startsWith("https://") || !normalizePublicOrigin(origin) ||
-    (!sameOrigin(origin, operation.selection.target_origin) && !exactCreatorPrecheckPair) ||
-    !operation.runtime_consumption.allowed_origins.some((allowed) => sameOrigin(origin, allowed))
+    (!sameOrigin(origin, binding.target_origin) && !exactCreatorOperationPair) ||
+    !binding.allowed_origins.some((allowed) => sameOrigin(origin, allowed))
   ) return failure("runtime_origin_not_allowed", "resource_matching", "fix_input");
   return undefined;
 }

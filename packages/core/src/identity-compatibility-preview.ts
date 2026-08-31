@@ -16,7 +16,9 @@ import {
 import {
   matchLockedLodeOperation,
   matchLockedOperationIdentity,
+  matchLockedOperationIdentityBinding,
   opaqueDetailOperationContract,
+  type LockedOperationIdentityBinding,
   type LockedOperationMatch
 } from "./operation-identity-matcher.js";
 import type { LodePackageResolver } from "./runtime-task-chain.js";
@@ -112,6 +114,17 @@ const maxCandidates = 32;
 const maxRequiredFacts = 32;
 const defaultMaxFactAgeMs = 5 * 60 * 1000;
 const maxFutureSkewMs = 60 * 1000;
+const xhsPathPrepareContract = {
+  package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+  capability_id: "publish-note-path-prepare",
+  operation_id: "xhs_publish_note_path_prepare",
+  operation_mode: "validate_only",
+  version: "0.1.0",
+  resource_requirement_ref: "xiaohongshu.publish-note-path-prepare.resources",
+  resource_requirement_profile_id: "xhs-creator-publish-page-path-prepare",
+  target_origin: "https://creator.xiaohongshu.com"
+} as const;
 
 function failure(code: string, recovery_hint = "fix_input"): FailureRecord {
   return { category: "request_invalid", code, phase: "pre_admission", recovery_hint };
@@ -262,9 +275,50 @@ function response(
 function validateResolvedPackage(
   contract: LodePackageAdmissionContract,
   request: IdentityCompatibilityPreviewRequest
-): FailureRecord | { operation: LockedOperationMatch; requiredFacts: readonly LodeRequiredHarborFact[] } {
+): FailureRecord | {
+  operation: LockedOperationMatch | LockedOperationIdentityBinding;
+  requiredFacts: readonly LodeRequiredHarborFact[];
+  normalizedTargetRef: string;
+} {
+  const pathPrepare =
+    contract.package_ref === xhsPathPrepareContract.package_ref && contract.lock_ref === xhsPathPrepareContract.lock_ref &&
+    contract.capability_id === xhsPathPrepareContract.capability_id && contract.operation_id === xhsPathPrepareContract.operation_id &&
+    contract.operation_mode === xhsPathPrepareContract.operation_mode && contract.version === xhsPathPrepareContract.version &&
+    request.package_ref === xhsPathPrepareContract.package_ref && request.lock_ref === xhsPathPrepareContract.lock_ref &&
+    request.operation_id === xhsPathPrepareContract.operation_id && request.operation_mode === xhsPathPrepareContract.operation_mode &&
+    request.version === xhsPathPrepareContract.version && request.resource_requirement_ref === xhsPathPrepareContract.resource_requirement_ref &&
+    request.resource_requirement_profile_id === xhsPathPrepareContract.resource_requirement_profile_id &&
+    request.target_origin === xhsPathPrepareContract.target_origin;
+  if (pathPrepare) {
+    const target = normalizePublicHttpTarget(request.target_ref);
+    if (!target.ok || target.target_origin !== xhsPathPrepareContract.target_origin) {
+      return { category: "capability_contract", code: "target_origin_not_allowed", phase: "resource_matching", recovery_hint: "fix_target" };
+    }
+    return validateResolvedIdentityBinding(contract, request, {
+      package_ref: request.package_ref,
+      lock_ref: request.lock_ref,
+      operation_id: request.operation_id,
+      operation_mode: request.operation_mode,
+      target_origin: request.target_origin,
+      site_slug: "xiaohongshu",
+      allowed_origins: ["https://www.xiaohongshu.com", xhsPathPrepareContract.target_origin]
+    }, target.target_ref);
+  }
   const operation = matchLockedLodeOperation(contract, request);
   if ("category" in operation) return operation;
+  return validateResolvedIdentityBinding(contract, request, operation, operation.selection.target_ref);
+}
+
+function validateResolvedIdentityBinding(
+  contract: LodePackageAdmissionContract,
+  request: IdentityCompatibilityPreviewRequest,
+  operation: LockedOperationMatch | LockedOperationIdentityBinding,
+  normalizedTargetRef: string
+): FailureRecord | {
+  operation: LockedOperationMatch | LockedOperationIdentityBinding;
+  requiredFacts: readonly LodeRequiredHarborFact[];
+  normalizedTargetRef: string;
+} {
   const admission = validateLodePackageAdmission({
     capability: {
       ref: `lode:capability/${contract.capability_id}`,
@@ -284,7 +338,7 @@ function validateResolvedPackage(
     admission.required_harbor_facts.length > maxRequiredFacts ||
     admission.required_harbor_facts.some((fact) => !boundedString(fact.fact_key, 128) || (fact.freshness !== undefined && !boundedString(fact.freshness, 64)))
   ) return { category: "capability_contract", code: "resource_requirements_unbounded", phase: "resource_matching", recovery_hint: "repair_package_contract" };
-  return { operation, requiredFacts: admission.required_harbor_facts };
+  return { operation, requiredFacts: admission.required_harbor_facts, normalizedTargetRef };
 }
 
 function strictIdentityFacts(facts: HarborIdentityEnvironmentFacts, expectedRef: string): boolean {
@@ -327,11 +381,12 @@ function evaluateFreshCandidate(
   identityRef: string,
   facts: HarborIdentityEnvironmentFacts,
   providerStatus: HarborBrowserProviderCatalog,
-  operation: LockedOperationMatch,
+  operation: LockedOperationMatch | LockedOperationIdentityBinding,
   requiredFacts: readonly LodeRequiredHarborFact[],
   freshness: IdentityCompatibilityCandidate["freshness"]
 ): IdentityCompatibilityCandidate {
-  const identityAdmission = validateHarborIdentityEnvironmentFacts(facts, operation.selection.operation_mode === "read" ? "read" : "write_precheck");
+  const operationMode = "runtime_consumption" in operation ? operation.selection.operation_mode : operation.operation_mode;
+  const identityAdmission = validateHarborIdentityEnvironmentFacts(facts, operationMode === "read" ? "read" : "write_precheck");
   if ("category" in identityAdmission) {
     const setup = setupProjection(identityAdmission.code);
     if (!setup) return unavailableCandidate(identityRef, "malformed", "harbor_facts_malformed");
@@ -346,7 +401,9 @@ function evaluateFreshCandidate(
       recovery_action: setup.recovery
     };
   }
-  const operationIdentityFailure = matchLockedOperationIdentity(operation, facts, identityRef);
+  const operationIdentityFailure = "runtime_consumption" in operation
+    ? matchLockedOperationIdentity(operation, facts, identityRef)
+    : matchLockedOperationIdentityBinding(operation, facts, identityRef);
   if (operationIdentityFailure) {
     const setup = setupProjection(operationIdentityFailure.code);
     return {
@@ -398,7 +455,7 @@ function evaluateFreshCandidate(
 
 async function evaluateCandidate(
   identityRef: string,
-  operation: LockedOperationMatch,
+  operation: LockedOperationMatch | LockedOperationIdentityBinding,
   requiredFacts: readonly LodeRequiredHarborFact[],
   readFacts: HarborIdentityFactsReader,
   clock: () => Date,
@@ -464,5 +521,5 @@ export async function previewIdentityCompatibility(
     }
   });
   await Promise.all(workers);
-  return response(request, generatedAt, candidates, packageMatch.operation.selection.target_ref);
+  return response(request, generatedAt, candidates, packageMatch.normalizedTargetRef);
 }
