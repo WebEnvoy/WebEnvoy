@@ -55,7 +55,7 @@ function SkillFieldControl({ draft, error, field, onBlur, onFiles, onRemoveFile,
   if (field.kind === "boolean") {
     control = <input {...common} type="checkbox" checked={value === true} onChange={(event) => onValue(event.currentTarget.checked)} />;
   } else if (field.kind === "select") {
-    control = <select {...common} value={typeof value === "string" ? value : ""} onChange={(event) => onValue(event.currentTarget.value)}><option value="">请选择</option>{field.options?.map((option) => <option value={option} key={option}>{option}</option>)}</select>;
+    control = <select {...common} value={typeof value === "string" ? value : ""} onChange={(event) => onValue(event.currentTarget.value)}><option value="">请选择</option>{field.options?.map((option) => <option value={option} key={option}>{field.id === "requested_path" ? option === "image_text_upload" ? "上传图片" : option === "image_text_generate" ? "文字配图" : option : option}</option>)}</select>;
   } else if (field.kind === "multi-select") {
     const selected = Array.isArray(value) ? value : [];
     control = <div className="create-task-multi-select" role="group" tabIndex={-1} aria-labelledby={labelId} aria-describedby={descriptionId} aria-invalid={error != null} aria-errormessage={error == null ? undefined : errorId}>{field.options?.map((option) => <label key={option}><input type="checkbox" checked={selected.includes(option)} onBlur={onBlur} onChange={(event) => onValue(event.currentTarget.checked ? [...selected, option] : selected.filter((item) => item !== option))} />{option}</label>)}</div>;

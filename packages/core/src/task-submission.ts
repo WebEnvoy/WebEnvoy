@@ -27,6 +27,7 @@ export type TaskIntentEnvelope = {
   input: {
     summary: string;
     refs?: string[];
+    requested_path?: string;
   };
   scope: {
     target_type: string;
@@ -260,6 +261,9 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   const capabilitySourceRef = fields.capability.source_ref === undefined ? undefined : asNonEmptyString(fields.capability.source_ref, "capability_source_ref_invalid");
   const capabilityLockRef = fields.capability.lock_ref === undefined ? undefined : asNonEmptyString(fields.capability.lock_ref, "capability_lock_ref_invalid");
   const inputSummary = asNonEmptyString(fields.input.summary, "input_summary_required");
+  const requestedPath = fields.input.requested_path === undefined
+    ? undefined
+    : asNonEmptyString(fields.input.requested_path, "input_requested_path_invalid");
   const scopeTargetType = asNonEmptyString(fields.scope.target_type, "scope_target_type_required");
   const rawScopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
   if (isFailure(userIntentSummary)) return userIntentSummary;
@@ -268,6 +272,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   if (isFailure(capabilitySourceRef)) return capabilitySourceRef;
   if (isFailure(capabilityLockRef)) return capabilityLockRef;
   if (isFailure(inputSummary)) return inputSummary;
+  if (isFailure(requestedPath)) return requestedPath;
   if (isFailure(scopeTargetType)) return scopeTargetType;
   if (isFailure(rawScopeTargetRef)) return rawScopeTargetRef;
   const scopeTargetRef = normalizeStoredTargetRef(rawScopeTargetRef);
@@ -291,7 +296,8 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
     },
     input: {
       summary: inputSummary,
-      ...(normalizedInputRefs === undefined ? {} : { refs: normalizedInputRefs as string[] })
+      ...(normalizedInputRefs === undefined ? {} : { refs: normalizedInputRefs as string[] }),
+      ...(requestedPath === undefined ? {} : { requested_path: requestedPath })
     },
     scope: {
       target_type: scopeTargetType,

@@ -8,7 +8,10 @@ import {
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
 import {
+  XHS_PUBLISH_PATH_PREPARE_PIN,
   admitXhsPublishPrecheck,
+  admitXhsPublishPathPrepare,
+  completeXhsPathPrepare,
   completeWritePrecheck,
   validCompletedWritePrecheckProbe,
   WritePrecheckObservationStore
@@ -168,6 +171,55 @@ test("pins and admits only the public Lode validate-only contract", () => {
     target_ref: "ref",
     no_submit_guard: "active"
   }), null);
+});
+
+test("#405 admits both explicit paths and returns refs-only no-submit state", () => {
+  for (const requested_path of ["image_text_upload", "image_text_generate"] as const) {
+    const admitted = admitXhsPublishPathPrepare({
+      url: `${input.target_url}?from=menu_left&target=image`,
+      target_ref: "target-ref:xiaohongshu/creator-publish-page",
+      no_submit_guard: "active",
+      requested_path
+    });
+    assert.equal(admitted?.requested_path, requested_path);
+    assert.equal(admitted?.url, `${input.target_url}?from=menu_left&target=image`);
+  }
+  for (const rejected of [
+    { requested_path: "video" },
+    { requested_path: "image_text_upload", no_submit_guard: "inactive" },
+    { requested_path: "image_text_upload", selector: "button" }
+  ]) {
+    assert.equal(admitXhsPublishPathPrepare({
+      url: input.target_url,
+      target_ref: input.target_ref,
+      no_submit_guard: "active",
+      ...rejected
+    }), null);
+  }
+  const probe = completedProbe();
+  const pathProbe = {
+    ...probe,
+    path_prepare: {
+      requested_path: "image_text_generate" as const,
+      observed_path: "observed" as const,
+      composition_state: "initialized" as const,
+      business_state_before: { route_state: "observed" as const, control_owner_state: "observed" as const, observed_path: "unknown" as const, composition_state: "unknown" as const, submitted: false as const },
+      business_state_after: { route_state: "observed" as const, control_owner_state: "observed" as const, observed_path: "observed" as const, composition_state: "initialized" as const, submitted: false as const },
+      interaction: { allowed_action: "exact_visible_path_control_selection" as const, requested_control: "generate_image" as const, selection_status: "selected" as const, readback_status: "read" as const },
+      composition_state_proof: { basis: "business_state_readback" as const, path_entry_alone_proves_initialized: false as const },
+      submitted: false as const,
+      prohibited_actions_observed: { file_chooser: false as const, file_select: false as const, upload: false as const, generate: false as const, field_fill: false as const, save_draft: false as const, publish: false as const, submit: false as const, retry: false as const, bypass: false as const },
+      no_submit_guard_status: "active" as const
+    }
+  };
+  const completed = completeXhsPathPrepare("session_path_prepare", "identity_path_prepare", pathProbe);
+  assert.equal(completed?.schema_version, "harbor-xhs-publish-note-path-prepare/v0");
+  assert.equal(completed?.normalized.requested_path, "image_text_generate");
+  assert.equal(completed?.normalized.composition_state, "initialized");
+  assert.equal(completed?.normalized.composition_state_proof.path_entry_alone_proves_initialized, false);
+  assert.equal(completed?.submitted, false);
+  assert.equal(completed?.lode_pin.package_ref, XHS_PUBLISH_PATH_PREPARE_PIN.package_ref);
+  assert.equal(completed?.public_boundary.external_write_actions, "not_performed");
 });
 
 test("keeps the browser probe read-only and freshness-bound", () => {

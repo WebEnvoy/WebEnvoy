@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readTargetPageFacts, selectPage } from "./local-provider-launcher.js";
+import { readTargetPageFacts, selectPage, validateXhsWritePrecheckObservation, writePrecheckProbeExpression } from "./local-provider-launcher.js";
 
 test("selectPage matches equivalent page URLs by structured URL semantics", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?keyword=AI%20%E5%B7%A5%E5%85%B7&source=web#notes";
@@ -116,4 +116,44 @@ test("reads binary CDP messages without waiting for the command timeout", async 
   } finally {
     globalThis.WebSocket = originalWebSocket;
   }
+});
+
+test("#405 path probe maps only the requested exact visible label and keeps file selection out", () => {
+  const upload = writePrecheckProbeExpression("image_text_upload", true);
+  const generate = writePrecheckProbeExpression("image_text_generate", true);
+  assert.match(upload, /上传图片/);
+  assert.match(generate, /文字配图/);
+  assert.match(upload, /selectPath = true/);
+  assert.match(upload, /pathLabels = \["上传图片"\]/);
+  assert.match(upload, /input\[type=["']file["']\]/);
+  assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
+});
+
+test("#405 observation preserves path state for the bounded path branch", () => {
+  const input = {
+    target_url: "https://creator.xiaohongshu.com/publish/publish",
+    expected_origin: "https://creator.xiaohongshu.com" as const,
+    target_ref: "target-ref:xiaohongshu/creator-publish-page",
+    requested_path: "image_text_upload" as const,
+    select_path: true
+  };
+  const base = {
+    url: input.target_url,
+    origin: input.expected_origin,
+    pathname: "/publish/publish",
+    challenge_like: false,
+    login_like: false,
+    creator_app_owned: true,
+    creator_surface_state: "observed" as const,
+    creator_root_count: 1,
+    upload_image_tab_active: true,
+    upload_image_entry_visible: true,
+    text_image_entry_visible: true,
+    composition_path: "image_text_upload" as const,
+    path_observed: "observed" as const,
+    path_entry_visible: "observed" as const,
+    composition_state: "composition_not_initialized" as const
+  };
+  assert.equal(validateXhsWritePrecheckObservation(input, { ...base, path_observed: "unobserved" }).status, "completed");
+  assert.equal(validateXhsWritePrecheckObservation(input, base).status, "completed");
 });

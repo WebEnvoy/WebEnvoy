@@ -199,6 +199,10 @@ export interface LocalProviderWritePrecheckProbeInput {
   target_ref: string;
   /** Controlled path hint; no selector/script is accepted at this boundary. */
   composition_path?: XhsWritePrecheckCompositionPath;
+  /** #405 user-selected path; Harbor may select only this exact visible control. */
+  requested_path?: XhsPathPrepareRequestedPath;
+  /** Internal bounded operation mode; only #405 enables one exact control click. */
+  select_path?: boolean;
 }
 
 /** Public, bounded path ids owned by the Lode composition catalog. */
@@ -208,6 +212,50 @@ export type XhsWritePrecheckCompositionPath =
   | "video"
   | "long_article"
   | "podcast";
+
+export type XhsPathPrepareRequestedPath = "image_text_upload" | "image_text_generate";
+export type XhsPathPrepareObservedPath = "observed" | "unknown" | "mismatch";
+export type XhsPathPrepareCompositionState = "initialized" | "not_initialized" | "unknown";
+
+export interface XhsPathPrepareBusinessState {
+  route_state: XhsPathPrepareObservedPath;
+  control_owner_state: XhsPathPrepareObservedPath;
+  observed_path: XhsPathPrepareObservedPath;
+  composition_state: XhsPathPrepareCompositionState;
+  submitted: false;
+}
+
+export interface XhsPathPrepareNormalizedState {
+  requested_path: XhsPathPrepareRequestedPath;
+  observed_path: XhsPathPrepareObservedPath;
+  composition_state: XhsPathPrepareCompositionState;
+  business_state_before: XhsPathPrepareBusinessState;
+  business_state_after: XhsPathPrepareBusinessState;
+  interaction: {
+    allowed_action: "exact_visible_path_control_selection";
+    requested_control: "upload_image" | "generate_image";
+    selection_status: "selected" | "not_performed" | "blocked" | "unknown";
+    readback_status: "read" | "not_read" | "unknown";
+  };
+  composition_state_proof: {
+    basis: "business_state_readback" | "unknown";
+    path_entry_alone_proves_initialized: false;
+  };
+  submitted: false;
+  prohibited_actions_observed: {
+    file_chooser: false;
+    file_select: false;
+    upload: false;
+    generate: false;
+    field_fill: false;
+    save_draft: false;
+    publish: false;
+    submit: false;
+    retry: false;
+    bypass: false;
+  };
+  no_submit_guard_status: "active";
+}
 
 export type XhsWritePrecheckCompositionState =
   | "composition_initialized"
@@ -259,6 +307,7 @@ export type LocalProviderWritePrecheckProbeResult =
       publish_control: XhsWritePrecheckFieldState;
       prohibited_actions_observed: { upload: false; generate: false; save: false; publish: false };
       target_ref: string;
+      path_prepare?: XhsPathPrepareNormalizedState;
     }
   | {
       status: "unavailable";

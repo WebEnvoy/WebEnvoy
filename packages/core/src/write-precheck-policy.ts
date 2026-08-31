@@ -31,7 +31,38 @@ export type EvaluatedWritePrecheckPolicy = {
 const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
 const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
 const writePrecheckActionId = "xhs_publish_note_precheck";
+const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const pathPrepareActionId = "xhs_publish_note_path_prepare";
 const confirmationTtlMs = 10 * 60 * 1_000;
+
+type WritePrecheckVariant = {
+  package_ref: string;
+  lock_ref: string;
+  capability_id: string;
+  action_id: string;
+};
+
+function writePrecheckVariant(taskIntent: TaskIntentEnvelope, contract: LodePackageAdmissionContract): WritePrecheckVariant | undefined {
+  const candidate = contract.package_ref === pathPreparePackageRef
+    ? { package_ref: pathPreparePackageRef, lock_ref: pathPrepareLockRef, capability_id: "publish-note-path-prepare", action_id: pathPrepareActionId }
+    : { package_ref: writePrecheckPackageRef, lock_ref: writePrecheckLockRef, capability_id: "publish-note-precheck", action_id: writePrecheckActionId };
+  return contract.package_ref === candidate.package_ref &&
+    contract.source_ref === candidate.package_ref &&
+    contract.lock_ref === candidate.lock_ref &&
+    contract.capability_id === candidate.capability_id &&
+    contract.version === "0.1.0" &&
+    taskIntent.capability.ref === `lode:capability/${candidate.capability_id}` &&
+    taskIntent.capability.version === "0.1.0" &&
+    taskIntent.capability.source_ref === candidate.package_ref &&
+    taskIntent.capability.lock_ref === candidate.lock_ref &&
+    contract.operation_id === candidate.action_id &&
+    taskIntent.policy.risk === "write" &&
+    taskIntent.policy.execution_intent === "validate_only" &&
+    contract.operation_mode === "validate_only"
+    ? candidate
+    : undefined;
+}
 
 function failure(code: string, recovery_hint: string): FailureRecord {
   return { category: "action_risk", code, phase: "admission", recovery_hint };
@@ -89,18 +120,31 @@ export function isUnifiedWritePrecheckTask(
     contract.operation_mode === "validate_only";
 }
 
+/** Exact #405 path-prepare package/action binding. */
+export function isXhsPathPrepareTask(
+  taskIntent: TaskIntentEnvelope,
+  contract: LodePackageAdmissionContract
+): boolean {
+  return writePrecheckVariant(taskIntent, contract)?.action_id === pathPrepareActionId &&
+    (taskIntent.input.requested_path === "image_text_upload" || taskIntent.input.requested_path === "image_text_generate");
+}
+
 /** Accept continuation only for the exact persisted validate-only precheck. */
 export function isExactWritePrecheckRun(run: RunRecord | undefined, confirmationDecisionRef?: string): boolean {
   const action = run?.action_request;
   const risk = action?.risk_classification;
   const guard = action?.no_submit_guard;
   const snapshot = run?.policy_binding_snapshot;
+  const pathPrepare = run?.package_ref === pathPreparePackageRef;
+  const expectedPackageRef = pathPrepare ? pathPreparePackageRef : writePrecheckPackageRef;
+  const expectedLockRef = pathPrepare ? pathPrepareLockRef : writePrecheckLockRef;
+  const expectedCapabilityRef = pathPrepare ? "lode:capability/publish-note-path-prepare" : "lode:capability/publish-note-precheck";
   return run?.status === "requires_user_action" &&
-    run.package_ref === writePrecheckPackageRef &&
-    run.capability_ref === "lode:capability/publish-note-precheck" &&
+    run.package_ref === expectedPackageRef &&
+    run.capability_ref === expectedCapabilityRef &&
     run.capability_version === "0.1.0" &&
-    run.capability_source_ref === writePrecheckPackageRef &&
-    run.capability_lock_ref === writePrecheckLockRef &&
+    run.capability_source_ref === expectedPackageRef &&
+    run.capability_lock_ref === expectedLockRef &&
     run.admission.action_risk === "write" &&
     action?.task_intent_ref === run.task_intent_ref &&
     action.capability_ref === run.capability_ref &&
@@ -118,8 +162,8 @@ export function isExactWritePrecheckRun(run: RunRecord | undefined, confirmation
     ["execute_after_approval", "reconcile_status", "request_cancel"].every((intent) =>
       guard.blocked_execution_intents.includes(intent)
     ) &&
-    guard.source_refs.includes(writePrecheckPackageRef) &&
-    guard.source_refs.includes(writePrecheckLockRef) &&
+    guard.source_refs.includes(expectedPackageRef) &&
+    guard.source_refs.includes(expectedLockRef) &&
     snapshot?.schema_version === "webenvoy.policy-binding-snapshot.v0" &&
     (confirmationDecisionRef === undefined || snapshot.decision_ref === confirmationDecisionRef) &&
     run.authorization_decision_refs?.includes(snapshot.decision_ref) === true;
@@ -139,14 +183,15 @@ export async function evaluateWritePrecheckTaskPolicy(input: {
   if (!context || !input.config_store) {
     return failure("execution_policy_owner_unavailable", "retry_when_policy_owner_ready");
   }
-  if (input.lode_contract.operation_mode !== input.task_intent.policy.execution_intent ||
+  const variant = writePrecheckVariant(input.task_intent, input.lode_contract);
+  if (!variant || input.lode_contract.operation_mode !== input.task_intent.policy.execution_intent ||
     input.lode_contract.operation_mode !== "validate_only" ||
     input.task_intent.policy.risk !== "write") {
     return failure("execution_policy_owner_declaration_invalid", "repair_package_contract");
   }
   const target = normalizePublicHttpTarget(input.task_intent.scope.target_ref);
   if (!target.ok) return failure("execution_policy_target_invalid", "fix_input");
-  const action = input.lode_contract.action_declaration?.actions.find((candidate) => candidate.action_id === writePrecheckActionId);
+  const action = input.lode_contract.action_declaration?.actions.find((candidate) => candidate.action_id === variant.action_id);
   const resourceProfile = input.lode_contract.resource_requirements.resource_requirement_profiles.find((candidate) =>
     candidate.requirement_profile_id === input.task_intent.resource_requirement_profile_id
   );
@@ -164,7 +209,7 @@ export async function evaluateWritePrecheckTaskPolicy(input: {
   const matchVersion = hash({
     package_ref: input.lode_contract.package_ref,
     package_version: input.lode_contract.version,
-    action_id: writePrecheckActionId,
+    action_id: variant.action_id,
     action_category: action.category,
     resource_requirements_id: input.lode_contract.resource_requirements.resource_requirements_id,
     resource_requirements_version: input.lode_contract.resource_requirements.resource_requirements_version ?? null,
@@ -176,7 +221,7 @@ export async function evaluateWritePrecheckTaskPolicy(input: {
     package_ref: input.lode_contract.package_ref,
     version: input.lode_contract.version,
     action_declaration: input.lode_contract.action_declaration
-  }, writePrecheckActionId, {
+  }, variant.action_id, {
     schema_version: "webenvoy.harbor-resource-match.v0",
     match_ref: `resource-match:${matchVersion.slice(0, 32)}`,
     match_version: `sha256:${matchVersion}`,
@@ -205,8 +250,8 @@ export async function evaluateWritePrecheckTaskPolicy(input: {
     caller: input.task_intent.entrypoint,
     evaluated_at: input.evaluated_at,
     action: {
-      action_instance_ref: `task-action:${input.run_id}:${writePrecheckActionId}`,
-      action_id: writePrecheckActionId,
+      action_instance_ref: `task-action:${input.run_id}:${variant.action_id}`,
+      action_id: variant.action_id,
       target: {
         target_ref: `target:sha256:${targetFingerprint}`,
         target_type: input.task_intent.scope.target_type,

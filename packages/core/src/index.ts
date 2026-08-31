@@ -278,10 +278,14 @@ export {
   type LodePackageResolverInput,
   type RuntimeTaskSubmissionDependencies,
   type XhsWritePrecheckCompositionPath,
+  type XhsPathPrepareRequestedPath,
+  type XhsPathPrepareObservedPath,
+  type XhsPathPrepareCompositionState,
   type RuntimeTaskSubmissionRequest
 } from "./runtime-task-chain.js";
 export {
   isExactWritePrecheckRun,
+  isXhsPathPrepareTask,
   type WritePrecheckAuthorizationContext
 } from "./write-precheck-policy.js";
 export {

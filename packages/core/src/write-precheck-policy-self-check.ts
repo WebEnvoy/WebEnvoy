@@ -14,6 +14,7 @@ import type { TaskIntentEnvelope } from "./task-submission.js";
 import {
   evaluateWritePrecheckTaskPolicy,
   isUnifiedWritePrecheckTask,
+  isXhsPathPrepareTask,
   writePrecheckPolicyFailure,
   type WritePrecheckAuthorizationContext
 } from "./write-precheck-policy.js";
@@ -85,6 +86,47 @@ function taskIntent(): TaskIntentEnvelope {
     resource_requirement_refs: ["xiaohongshu.publish-note-precheck.resources"],
     resource_requirement_profile_id: "xhs-creator-publish-page-precheck",
     evidence_policy_ref: "policy:no-raw-evidence"
+  };
+}
+
+function pathPrepareContract(): LodePackageAdmissionContract {
+  return {
+    package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    source_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    capability_id: "publish-note-path-prepare",
+    operation_id: "xhs_publish_note_path_prepare",
+    operation_mode: "validate_only",
+    version: "0.1.0",
+    lifecycle: "proposed",
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [{
+        action_id: "xhs_publish_note_path_prepare",
+        category: "prepare",
+        target_scope: { site_slug: "xiaohongshu", target_types: ["creator_publish_page"], supported_origins: ["https://creator.xiaohongshu.com"] },
+        resource_requirements: { path: "resource-requirements.json", id: "xiaohongshu.publish-note-path-prepare.resources", profile_ids: ["xhs-creator-publish-page-path-prepare"] },
+        external_effects: []
+      }]
+    },
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.publish-note-path-prepare.resources",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+      operation_mode: "validate_only",
+      resource_requirement_profiles: [{ requirement_profile_id: "xhs-creator-publish-page-path-prepare" }]
+    }
+  };
+}
+
+function pathPrepareTaskIntent(contractValue = pathPrepareContract()): TaskIntentEnvelope {
+  return {
+    ...taskIntent(),
+    intent_id: "intent_path_prepare_policy",
+    capability: { ref: "lode:capability/publish-note-path-prepare", version: "0.1.0", source_ref: contractValue.package_ref, lock_ref: contractValue.lock_ref! },
+    input: { summary: "选择图文路径", requested_path: "image_text_upload" },
+    resource_requirement_refs: ["xiaohongshu.publish-note-path-prepare.resources"],
+    resource_requirement_profile_id: "xhs-creator-publish-page-path-prepare"
   };
 }
 
@@ -231,6 +273,13 @@ async function evaluate(
 }
 
 export async function assertWritePrecheckPolicyWiring(): Promise<void> {
+  const pathContract = pathPrepareContract();
+  const pathTask = pathPrepareTaskIntent(pathContract);
+  assert.equal(isXhsPathPrepareTask(pathTask, pathContract), true);
+  assert.equal(isXhsPathPrepareTask({ ...pathTask, input: { ...pathTask.input, requested_path: "video" } }, pathContract), false);
+  const pathPolicy = await evaluateWritePrecheckTaskPolicy({ run_id: "app-xhs-path-prepare", task_intent: pathTask, lode_contract: pathContract, authorization_context: context, config_store: configStore("auto"), evaluated_at: evaluatedAt });
+  assert.ok(!("category" in pathPolicy));
+  assert.equal(pathPolicy.evaluation.status === "evaluated" && pathPolicy.evaluation.next_step, "execute");
   assert.equal(isUnifiedWritePrecheckTask(taskIntent(), contract()), true);
   const spoofedTask = structuredClone(taskIntent());
   spoofedTask.capability.ref = "lode:capability/evil-cap";

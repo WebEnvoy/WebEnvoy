@@ -42,6 +42,7 @@ import type {
   XhsWritePrecheckFieldState,
   XhsWritePrecheckMediaState,
   XhsWritePrecheckObservationStatus,
+  XhsPathPrepareNormalizedState,
   RuntimeErrorCode,
   RuntimeErrorFact,
   RuntimeFact,
@@ -155,6 +156,7 @@ type WritePrecheckObservation = {
   validation_state?: XhsWritePrecheckFieldState;
   save_draft_control?: XhsWritePrecheckFieldState;
   publish_control?: XhsWritePrecheckFieldState;
+  selection_status?: "selected" | "not_performed" | "blocked" | "unknown";
 };
 
 const writePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
@@ -321,9 +323,38 @@ async function probeProviderWritePrecheck(
     return withCdp(page.webSocketDebuggerUrl, async (client) => {
       const observedAt = Date.now();
       await sendWritePrecheckCdp(client, "Runtime.enable");
-      const observation = await evaluateWritePrecheck(client, input.composition_path);
+      const path = input.requested_path ?? input.composition_path;
+      const observation = await evaluateWritePrecheck(client, path);
       const validation = validateXhsWritePrecheckObservation(input, observation);
       if (validation.status === "unavailable") return validation;
+      if (input.requested_path !== undefined) {
+        const selected = await evaluateWritePrecheck(client, input.requested_path, true);
+        if (!selected || selected.selection_status !== "selected") {
+          return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
+        }
+        const selectedValidation = validateXhsWritePrecheckObservation(input, selected);
+        if (selectedValidation.status === "unavailable") return selectedValidation;
+        if (selected.path_observed !== "observed") {
+          return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false);
+        }
+        const screenshot = await captureWritePrecheckScreenshot(client);
+        if (!screenshot) {
+          return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
+        }
+        const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
+        if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
+          return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.");
+        }
+        if (!after || after.path_observed !== "observed") {
+          return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false);
+        }
+        return {
+          ...selectedValidation,
+          observed_at: new Date(observedAt).toISOString(),
+          evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
+          path_prepare: pathPrepareState(input.requested_path, observation, selected, after)
+        };
+      }
       const screenshot = await captureWritePrecheckScreenshot(client);
       if (!screenshot) {
         return writePrecheckUnavailable("evidence_unavailable", "The refs-only precheck snapshot evidence could not be captured.");
@@ -343,13 +374,67 @@ async function probeProviderWritePrecheck(
   }
 }
 
-async function evaluateWritePrecheck(client: CdpClient, compositionPath?: XhsWritePrecheckCompositionPath): Promise<WritePrecheckObservation | undefined> {
+async function evaluateWritePrecheck(
+  client: CdpClient,
+  compositionPath?: XhsWritePrecheckCompositionPath,
+  selectPath = false,
+  exactPath = false
+): Promise<WritePrecheckObservation | undefined> {
   const evaluated = await sendWritePrecheckCdp(client, "Runtime.evaluate", {
-    expression: writePrecheckProbeExpression(compositionPath),
+    expression: writePrecheckProbeExpression(compositionPath, selectPath, exactPath),
     returnByValue: true,
     awaitPromise: true
   });
   return (evaluated.result as { value?: WritePrecheckObservation } | undefined)?.value;
+}
+
+function pathPrepareState(
+  requestedPath: "image_text_upload" | "image_text_generate",
+  before: WritePrecheckObservation | undefined,
+  selected: WritePrecheckObservation | undefined,
+  after: WritePrecheckObservation | undefined
+): XhsPathPrepareNormalizedState {
+  const requestedControl = requestedPath === "image_text_upload" ? "upload_image" : "generate_image";
+  const businessState = (observation: WritePrecheckObservation | undefined): XhsPathPrepareNormalizedState["business_state_before"] => ({
+    route_state: observation?.pathname === "/publish/publish" ? "observed" : "mismatch",
+    control_owner_state: observation?.creator_app_owned === true ? "observed" : "unknown",
+    observed_path: observation?.path_observed === "observed" ? "observed" : observation?.path_observed === "unobserved" ? "mismatch" : "unknown",
+    composition_state: observation?.composition_state === "composition_initialized" ? "initialized" : observation?.composition_state === "composition_not_initialized" ? "not_initialized" : "unknown",
+    submitted: false as const
+  });
+  const afterState = businessState(after);
+  const compositionState = afterState.composition_state;
+  return {
+    requested_path: requestedPath,
+    observed_path: afterState.observed_path,
+    composition_state: compositionState,
+    business_state_before: businessState(before),
+    business_state_after: afterState,
+    interaction: {
+      allowed_action: "exact_visible_path_control_selection" as const,
+      requested_control: requestedControl as "upload_image" | "generate_image",
+      selection_status: selected?.selection_status === "selected" ? "selected" as const : "unknown" as const,
+      readback_status: afterState.observed_path === "observed" ? "read" as const : "unknown" as const
+    },
+    composition_state_proof: {
+      basis: compositionState === "initialized" ? "business_state_readback" as const : "unknown" as const,
+      path_entry_alone_proves_initialized: false as const
+    },
+    submitted: false as const,
+    prohibited_actions_observed: {
+      file_chooser: false as const,
+      file_select: false as const,
+      upload: false as const,
+      generate: false as const,
+      field_fill: false as const,
+      save_draft: false as const,
+      publish: false as const,
+      submit: false as const,
+      retry: false as const,
+      bypass: false as const
+    },
+    no_submit_guard_status: "active" as const
+  };
 }
 
 async function captureWritePrecheckScreenshot(client: CdpClient): Promise<LocalProviderScreenshotFacts | null> {
@@ -379,12 +464,43 @@ function writePrecheckUnavailable(
   return { status: "unavailable", failure_class, message, retryable };
 }
 
-export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath): string {
+function pathSelectionProbeExpression(): string {
+  return String.raw`    if (selectPath) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const ready = observe();
+        if (ready.creator_app_owned) {
+          const normalizeControlLabel = (el) => (el?.getAttribute('aria-label') || el?.getAttribute('name') || el?.textContent || '').replace(/\s+/g, ' ').trim();
+          const controlVisible = (el) => {
+            const style = el ? getComputedStyle(el) : null;
+            const rect = el?.getBoundingClientRect();
+            return Boolean(el && style && style.visibility !== 'hidden' && style.display !== 'none' &&
+              style.pointerEvents !== 'none' && rect && rect.width > 0 && rect.height > 0 &&
+              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]'));
+          };
+          const controls = [...document.querySelectorAll('button, [role="button"], [role="tab"]')]
+            .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected || normalizeControlLabel(el).includes(expected)) &&
+              !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
+          const control = controls[0];
+          if (!control) return { ...ready, selection_status: 'blocked' };
+          control.click();
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+`;
+}
+
+export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath, selectPath = false, exactPath = false): string {
   const requestedPath = normalizedCompositionPath(compositionPath);
-  const labels = compositionPathLabels[requestedPath];
+  const labels = (selectPath || exactPath) && (requestedPath === "image_text_upload" || requestedPath === "image_text_generate")
+    ? [requestedPath === "image_text_upload" ? "上传图片" : "文字配图"]
+    : compositionPathLabels[requestedPath];
   return `(async () => {
     const requestedPath = ${JSON.stringify(requestedPath)};
     const pathLabels = ${JSON.stringify(labels)};
+    const selectPath = ${JSON.stringify(selectPath)};
     const observe = () => {
       const bodyText = (document.body?.innerText || '').slice(0, 20000);
       const visible = (el, allowDisabled = true) => {
@@ -487,12 +603,13 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         publish_control: publish
       };
     };
+    ${selectPath ? pathSelectionProbeExpression() : ""}
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const observation = observe();
-      if (observation.challenge_like || observation.login_like || observation.creator_app_owned) return observation;
+      if (observation.challenge_like || observation.login_like || observation.creator_app_owned) return { ...observation, selection_status: selectPath ? 'selected' : 'not_performed' };
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    return observe();
+    return { ...observe(), selection_status: selectPath ? 'unknown' : 'not_performed' };
   })()`;
 }
 
@@ -501,9 +618,16 @@ export function validWritePrecheckFreshness(
   before: WritePrecheckObservation | undefined,
   after: WritePrecheckObservation | undefined,
   startedAt: number,
-  completedAt: number
+  completedAt: number,
+  allowPathTransition = false
 ): boolean {
   if (completedAt < startedAt || completedAt - startedAt > 2000) return false;
+  if (allowPathTransition) {
+    return validateXhsWritePrecheckObservation(input, before).status === "completed" &&
+      validateXhsWritePrecheckObservation(input, after).status === "completed" &&
+      before?.url === after?.url && before?.origin === after?.origin &&
+      before?.pathname === after?.pathname && before?.creator_app_owned === after?.creator_app_owned;
+  }
   if (
     validateXhsWritePrecheckObservation(input, before).status !== "completed" ||
     validateXhsWritePrecheckObservation(input, after).status !== "completed"
