@@ -183,6 +183,8 @@ test("keeps the browser probe read-only and freshness-bound", () => {
   assert.equal(expression.includes("querySelectorAll('main"), false);
   assert.equal(expression.includes("semanticText"), false);
   assert.equal(expression.includes("bodyText.includes('创作者')"), false);
+  assert.equal(expression.includes("creatorControls.length >= 2"), false);
+  assert.match(expression, /selectedRequestedPath/);
   assert.match(expression, /findControl = \(patterns, includeDisabled = false/);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 2_999), true);
   assert.equal(validWritePrecheckFreshness(input, observation, { ...observation, login_like: true }, 1_000, 2_000), false);
@@ -249,6 +251,9 @@ test("accepts dynamic composition observations without mistaking selector drift 
     assert.equal(unknown.field_states.title_input?.observation, "unknown");
   }
 
+  // Two unselected path-looking buttons without a semantic root are exposed
+  // as unknown by the probe; the validator must not promote that fallback to
+  // an owned creator surface.
   const selectorDrift = validateXhsWritePrecheckObservation(input, {
     ...observation,
     creator_app_owned: false,

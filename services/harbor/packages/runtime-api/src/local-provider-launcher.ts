@@ -411,19 +411,18 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         .find((el) => patterns.some((pattern) => pattern.test(label(el))));
       const creatorLabel = /上传图文|上传图片|文字配图|上传视频|长文|播客|标题|正文|内容|简介|描述|发布|保存草稿|保存/;
       const creatorControls = controls.filter((el) => creatorLabel.test(label(el)));
+      const isSelected = (el) => el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
+        /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
+      const isRequestedPath = (el) => pathLabels.some((expected) => label(el) === expected || label(el).includes(expected));
+      const selectedRequestedPath = controls.find((el) => isSelected(el) && isRequestedPath(el));
       const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
         .filter((el) => visible(el)) : [];
       const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
-      const requestedPathEntryInApp = creatorControls.some((control) => pathLabels.some((expected) => label(control) === expected || label(control).includes(expected)));
-      const creatorSurface = semanticRootSurface || (appVisible && creatorControls.length >= 2 && requestedPathEntryInApp ? app : undefined);
+      const creatorSurface = semanticRootSurface || (appVisible && selectedRequestedPath ? app : undefined);
       const roots = creatorSurface ? [creatorSurface] : [];
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
       const pathEntryVisible = pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
-      const activePath = surfaceControls.some((el) => {
-        const selected = el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
-          /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
-        return selected && pathLabels.some((expected) => label(el) === expected || label(el).includes(expected));
-      });
+      const activePath = Boolean(selectedRequestedPath && surfaceControls.includes(selectedRequestedPath));
       const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
       const titleControl = findControl([/标题|title/i], false, surfaceControls);
