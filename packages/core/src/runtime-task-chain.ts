@@ -984,7 +984,7 @@ const xhsPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-not
 const xhsPathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const xhsPathPrepareInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/input@0.1.0";
 const xhsPathPrepareOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0";
-const xhsPathPrepareLodeCommit = "317f4d66d680d66b3ac3ab7f73bd7a6bbf1d9a01";
+const xhsPathPrepareLodeCommit = "d09a2d683007c9f396838bdab92ecf7c0e6b339c";
 const xhsPathPrepareAssetPath = "sites/xiaohongshu/publish-note-path-prepare/manifest.json";
 const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
