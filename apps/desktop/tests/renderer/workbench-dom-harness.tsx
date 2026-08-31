@@ -635,6 +635,7 @@ async function runDesktopChecks() {
         schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
         classification: "partial_result",
         precheck_scope: "entrypoint_only",
+        composition_path: "image_text_upload",
         composition_state: "composition_not_initialized",
         no_submit_guard: "active",
         submitted: false,
@@ -653,6 +654,10 @@ async function runDesktopChecks() {
           content_editor: { availability: "unavailable", observation: "not_observed" },
           publish_control: { availability: "unavailable", observation: "not_observed" },
         },
+        media_state: { availability: "unknown", observation: "unknown", controls: {} },
+        validation_state: { availability: "unknown", observation: "unknown" },
+        save_draft_control: { availability: "unknown", observation: "unknown" },
+        publish_control: { availability: "unavailable", observation: "not_observed" },
         prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false },
         post_check_ref: "post_check_00000000-0000-0000-0000-000000000361",
         lode_pin: {
@@ -675,6 +680,7 @@ async function runDesktopChecks() {
   assert(
     xhsPrecheckModel.kind === "object" &&
       xhsPrecheckModel.fields.some((field) => field.value === "未提交（submitted=false）") &&
+      xhsPrecheckModel.fields.some((field) => field.label === "创作形态" && field.value.includes("image_text_upload")) &&
       xhsPrecheckModel.fields.some((field) => field.value === "No-submit guard 已启用") &&
       !xhsPrecheckModel.fields.some((field) => field.label === "target_ref"),
     "The canonical XHS write-precheck did not render its submitted=false business boundary.",
@@ -697,6 +703,20 @@ async function runDesktopChecks() {
   assert(
     incompleteXhsPrecheck.kind === "object" && incompleteXhsPrecheck.fields[0]?.label === "结果不可用",
     "An incomplete XHS write-precheck was rendered as verified.",
+  );
+  const extraFieldXhsPrecheck = projectStandardBusinessResult(resultRun, {
+    ...xhsPrecheckResult,
+    result: {
+      ...xhsPrecheckResult.result,
+      data: {
+        ...xhsPrecheckResult.result.data,
+        field_states: { ...xhsPrecheckResult.result.data.field_states, unexpected: { availability: "unknown", observation: "unknown" } },
+      },
+    },
+  });
+  assert(
+    extraFieldXhsPrecheck.kind === "object" && extraFieldXhsPrecheck.fields[0]?.label === "结果不可用",
+    "An XHS write-precheck with an extra field key was rendered as verified.",
   );
   const stateTitles = [
     projectBusinessResultMessage({ ...resultRun, turnStatus: "cancelled" }, { status: "fixture" })?.title,

@@ -277,6 +277,7 @@ export {
   type LodePackageResolver,
   type LodePackageResolverInput,
   type RuntimeTaskSubmissionDependencies,
+  type XhsWritePrecheckCompositionPath,
   type RuntimeTaskSubmissionRequest
 } from "./runtime-task-chain.js";
 export {

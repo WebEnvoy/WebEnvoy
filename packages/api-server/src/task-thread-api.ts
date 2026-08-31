@@ -134,6 +134,10 @@ function publicContinuationHarbor(value: unknown): JsonBody | undefined {
   const harbor: JsonBody = {};
   if (typeof input.identity_environment_ref === "string") harbor.identity_environment_ref = input.identity_environment_ref;
   if (typeof input.url === "string") harbor.url = input.url;
+  // The task body has already crossed task-api's bounded path validator; keep
+  // the selected catalog path on a confirmation continuation without copying
+  // any private Harbor material.
+  if (typeof input.composition_path === "string") harbor.composition_path = input.composition_path;
   if (typeof input.reuse_existing === "boolean") harbor.reuse_existing = input.reuse_existing;
   if (typeof input.timeout_ms === "number") harbor.timeout_ms = input.timeout_ms;
   const evidencePolicy = asObject(input.evidence_policy);

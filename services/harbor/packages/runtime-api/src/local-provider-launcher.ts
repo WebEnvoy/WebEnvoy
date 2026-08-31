@@ -37,6 +37,11 @@ import type {
   LocalProviderScreenshotFacts,
   LocalProviderWritePrecheckProbeInput,
   LocalProviderWritePrecheckProbeResult,
+  XhsWritePrecheckCompositionPath,
+  XhsWritePrecheckCompositionState,
+  XhsWritePrecheckFieldState,
+  XhsWritePrecheckMediaState,
+  XhsWritePrecheckObservationStatus,
   RuntimeErrorCode,
   RuntimeErrorFact,
   RuntimeFact,
@@ -135,11 +140,95 @@ type WritePrecheckObservation = {
   challenge_like?: boolean;
   login_like?: boolean;
   creator_app_owned?: boolean;
+  creator_surface_state?: "observed" | "unknown" | "absent";
   creator_root_count?: number;
   upload_image_tab_active?: boolean;
   upload_image_entry_visible?: boolean;
   text_image_entry_visible?: boolean;
+  composition_path?: XhsWritePrecheckCompositionPath;
+  path_observed?: XhsWritePrecheckObservationStatus;
+  path_entry_visible?: XhsWritePrecheckObservationStatus;
+  composition_state?: XhsWritePrecheckCompositionState;
+  composition_initialized?: boolean;
+  field_states?: Record<string, XhsWritePrecheckFieldState>;
+  media_state?: XhsWritePrecheckMediaState;
+  validation_state?: XhsWritePrecheckFieldState;
+  save_draft_control?: XhsWritePrecheckFieldState;
+  publish_control?: XhsWritePrecheckFieldState;
 };
+
+const writePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
+  "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
+]);
+
+const compositionPathLabels: Record<XhsWritePrecheckCompositionPath, readonly string[]> = {
+  image_text_upload: ["上传图片", "上传图文"],
+  image_text_generate: ["文字配图"],
+  video: ["上传视频", "视频"],
+  long_article: ["长文", "写长文"],
+  podcast: ["播客"]
+};
+const mediaControlIds: Record<XhsWritePrecheckCompositionPath, readonly string[]> = {
+  image_text_upload: ["upload_image"],
+  image_text_generate: ["generate_image"],
+  video: ["upload_video"],
+  long_article: ["add_media"],
+  podcast: ["upload_audio", "add_rss_subscription"]
+};
+
+function normalizedCompositionPath(value: XhsWritePrecheckCompositionPath | undefined): XhsWritePrecheckCompositionPath {
+  return value && writePrecheckCompositionPaths.has(value) ? value : "image_text_upload";
+}
+
+function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
+  if (!observed) return false;
+  try {
+    const actual = new URL(observed);
+    const target = new URL(expected);
+    if (actual.origin !== target.origin || actual.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "") || actual.hash || target.hash) return false;
+    const actualParams = [...actual.searchParams].sort(([a], [b]) => a.localeCompare(b));
+    const targetParams = [...target.searchParams].sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify(actualParams) === JSON.stringify(targetParams);
+  } catch {
+    return false;
+  }
+}
+
+function unknownFieldState(): XhsWritePrecheckFieldState {
+  return { availability: "unknown", observation: "unknown" };
+}
+
+function safeFieldState(value: XhsWritePrecheckFieldState | undefined): XhsWritePrecheckFieldState {
+  if (!value) return unknownFieldState();
+  return {
+    availability: value.availability,
+    observation: value.observation,
+    ...(value.required === undefined ? {} : { required: value.required }),
+    ...(value.editable === undefined ? {} : { editable: value.editable }),
+    ...(value.value_state === undefined ? {} : { value_state: value.value_state })
+  };
+}
+
+function safeFieldStates(observation: WritePrecheckObservation): Record<string, XhsWritePrecheckFieldState> {
+  return {
+    title_input: safeFieldState(observation.field_states?.title_input),
+    content_editor: safeFieldState(observation.field_states?.content_editor),
+    publish_control: safeFieldState(observation.field_states?.publish_control ?? observation.publish_control)
+  };
+}
+
+function safeMediaState(observation: WritePrecheckObservation, compositionPath: XhsWritePrecheckCompositionPath): XhsWritePrecheckMediaState {
+  const media = observation.media_state;
+  if (!media) return { availability: "unknown", observation: "unknown", controls: {} };
+  const controls = media.controls ?? {};
+  return {
+    availability: media.availability,
+    observation: media.observation,
+    controls: Object.fromEntries(mediaControlIds[compositionPath]
+      .filter((id) => controls[id] !== undefined)
+      .map((id) => [id, safeFieldState(controls[id])]))
+  };
+}
 
 export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
   "Runtime.enable",
@@ -159,19 +248,30 @@ export function validateXhsWritePrecheckObservation(
   if (
     observation.origin !== input.expected_origin ||
     observation.pathname !== "/publish/publish" ||
-    observation.url !== input.target_url
+    !sameWritePrecheckUrl(observation.url, input.target_url)
   ) return writePrecheckUnavailable("page_changed", "The current page is not the exact requested creator publish page.");
-  if (
-    !observation.creator_app_owned ||
-    observation.creator_root_count !== 1 ||
-    !observation.upload_image_tab_active ||
-    !observation.upload_image_entry_visible ||
-    !observation.text_image_entry_visible
-  ) return writePrecheckUnavailable(
-    "target_not_writable",
-    "The creator publish entrypoint or its visible image/text entry controls are unavailable.",
-    false
+  // A missing semantic root can be selector drift just as easily as a page
+  // without the creator surface. Keep the distinction unknown; only an
+  // explicit absent classification may become target_not_writable.
+  if (observation.creator_surface_state === "absent") {
+    return writePrecheckUnavailable("target_not_writable", "The creator publish surface is explicitly absent.", false);
+  }
+  if (observation.creator_app_owned !== true) {
+    return writePrecheckUnavailable("evidence_unavailable", "The creator publish surface could not be classified.");
+  }
+  const composition_path = normalizedCompositionPath(input.composition_path ?? observation.composition_path);
+  const composition_state = observation.composition_state ?? (
+    observation.composition_initialized === true
+      ? "composition_initialized"
+      : observation.composition_initialized === false
+        ? "composition_not_initialized"
+        : "composition_unknown"
   );
+  const field_states = safeFieldStates(observation);
+  const media_state = safeMediaState(observation, composition_path);
+  const validation_state = safeFieldState(observation.validation_state);
+  const save_draft_control = safeFieldState(observation.save_draft_control);
+  const publish_control = safeFieldState(observation.publish_control ?? field_states.publish_control);
   return {
     status: "completed",
     observed_at: new Date().toISOString(),
@@ -183,20 +283,23 @@ export function validateXhsWritePrecheckObservation(
     ],
     evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
     classification: "partial_result",
-    precheck_scope: "entrypoint_only",
-    composition_state: "composition_not_initialized",
+    precheck_scope: observation.path_observed === "observed" && observation.path_entry_visible === "observed" ? "composition_observation" : "entrypoint_only",
+    composition_path,
+    composition_state,
     entrypoint_observations: {
-      route_loaded: true,
-      publish_vue_container_visible: true,
-      upload_image_tab_active: true,
-      upload_image_entry_visible: true,
-      text_image_entry_visible: true
+      route_loaded: observation.pathname === "/publish/publish",
+      publish_vue_container_visible: observation.creator_root_count === undefined || observation.creator_root_count > 0,
+      upload_image_tab_active: observation.upload_image_tab_active === true,
+      upload_image_entry_visible: observation.upload_image_entry_visible === true,
+      text_image_entry_visible: observation.text_image_entry_visible === true,
+      path_observed: observation.path_observed ?? "unknown",
+      path_entry_visible: observation.path_entry_visible ?? "unknown"
     },
-    field_states: {
-      title_input: { availability: "unavailable", observation: "not_observed" },
-      content_editor: { availability: "unavailable", observation: "not_observed" },
-      publish_control: { availability: "unavailable", observation: "not_observed" }
-    },
+    field_states,
+    media_state,
+    validation_state,
+    save_draft_control,
+    publish_control,
     prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false },
     target_ref: input.target_ref
   };
@@ -208,7 +311,7 @@ async function probeProviderWritePrecheck(
   input: LocalProviderWritePrecheckProbeInput
 ): Promise<LocalProviderWritePrecheckProbeResult> {
   try {
-    if (currentUrl !== input.target_url) {
+    if (!sameWritePrecheckUrl(currentUrl, input.target_url)) {
       return writePrecheckUnavailable("page_changed", "The managed session is not on the requested creator publish page.");
     }
     const page = await activePage(port, currentUrl, AbortSignal.timeout(3000));
@@ -218,14 +321,14 @@ async function probeProviderWritePrecheck(
     return withCdp(page.webSocketDebuggerUrl, async (client) => {
       const observedAt = Date.now();
       await sendWritePrecheckCdp(client, "Runtime.enable");
-      const observation = await evaluateWritePrecheck(client);
+      const observation = await evaluateWritePrecheck(client, input.composition_path);
       const validation = validateXhsWritePrecheckObservation(input, observation);
       if (validation.status === "unavailable") return validation;
       const screenshot = await captureWritePrecheckScreenshot(client);
       if (!screenshot) {
         return writePrecheckUnavailable("evidence_unavailable", "The refs-only precheck snapshot evidence could not be captured.");
       }
-      const after = await evaluateWritePrecheck(client);
+      const after = await evaluateWritePrecheck(client, input.composition_path);
       if (!validWritePrecheckFreshness(input, observation, after, observedAt, Date.now())) {
         return writePrecheckUnavailable("page_changed", "The creator page changed while snapshot evidence was captured.");
       }
@@ -240,9 +343,9 @@ async function probeProviderWritePrecheck(
   }
 }
 
-async function evaluateWritePrecheck(client: CdpClient): Promise<WritePrecheckObservation | undefined> {
+async function evaluateWritePrecheck(client: CdpClient, compositionPath?: XhsWritePrecheckCompositionPath): Promise<WritePrecheckObservation | undefined> {
   const evaluated = await sendWritePrecheckCdp(client, "Runtime.evaluate", {
-    expression: writePrecheckProbeExpression(),
+    expression: writePrecheckProbeExpression(compositionPath),
     returnByValue: true,
     awaitPromise: true
   });
@@ -276,19 +379,113 @@ function writePrecheckUnavailable(
   return { status: "unavailable", failure_class, message, retryable };
 }
 
-export function writePrecheckProbeExpression(): string {
+export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath): string {
+  const requestedPath = normalizedCompositionPath(compositionPath);
+  const labels = compositionPathLabels[requestedPath];
   return `(async () => {
+    const requestedPath = ${JSON.stringify(requestedPath)};
+    const pathLabels = ${JSON.stringify(labels)};
     const observe = () => {
-      const text = (document.body?.innerText || '').slice(0, 20000).toLowerCase();
-      const visible = (el) => { const s = el ? getComputedStyle(el) : null; const r = el?.getBoundingClientRect(); return Boolean(el && !el.hidden && !el.disabled && !el.closest('[aria-hidden="true"], [aria-disabled="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') && s && s.visibility !== 'hidden' && s.display !== 'none' && s.pointerEvents !== 'none' && s.zIndex !== '-1' && Number(s.opacity) >= 0.01 && r && r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))); };
-      const app = document.querySelector('#app');
-      const frameworkOwned = Boolean(app?.__vue_app__);
-      const roots = [...document.querySelectorAll('#web.publish-vue-container')].filter((root) => visible(root) && app?.contains(root));
-      const exactText = (el, expected) => (el.textContent || '').trim() === expected;
-      const rootFacts = roots.map((root) => { const activeTab = [...root.querySelectorAll('.creator-tab.active, .creator-tab[aria-selected="true"]')].some((el) => visible(el) && exactText(el, '上传图文')); const buttons = [...root.querySelectorAll('button, [role="button"]')].filter(visible); return { activeTab, uploadImage: buttons.some((el) => exactText(el, '上传图片')), textImage: buttons.some((el) => exactText(el, '文字配图')) }; });
-      const entrypoint = rootFacts.find((fact) => fact.activeTab && fact.uploadImage && fact.textImage);
-      const loginSurface = location.pathname.startsWith('/login') || [...document.querySelectorAll('[class*="login"], [class*="qrcode"], [class*="qr-code"]')].some((el) => visible(el) && /扫码登录|手机号登录|登录二维码/.test(el.textContent || ''));
-      return { url: location.href, origin: location.origin, pathname: location.pathname, challenge_like: /验证码|安全验证|访问受限|captcha/.test(text), login_like: loginSurface, creator_app_owned: frameworkOwned && Boolean(entrypoint), creator_root_count: roots.length, upload_image_tab_active: Boolean(entrypoint?.activeTab), upload_image_entry_visible: Boolean(entrypoint?.uploadImage), text_image_entry_visible: Boolean(entrypoint?.textImage) };
+      const bodyText = (document.body?.innerText || '').slice(0, 20000);
+      const visible = (el, allowDisabled = true) => {
+        const s = el ? getComputedStyle(el) : null;
+        const r = el?.getBoundingClientRect();
+        return Boolean(el && !el.hidden && (allowDisabled || !el.disabled) &&
+          !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+          s && s.visibility !== 'hidden' && s.display !== 'none' && s.pointerEvents !== 'none' &&
+          s.zIndex !== '-1' && Number(s.opacity) >= 0.01 && r && r.width > 0 && r.height > 0 &&
+          r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight &&
+          (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
+      };
+      const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+      const label = (el) => normalize(el?.getAttribute('aria-label') || el?.getAttribute('name') ||
+        el?.getAttribute('placeholder') || el?.textContent || '');
+      const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], input, textarea, [contenteditable="true"], [role="textbox"]')];
+      const app = document.querySelector('#app, [data-v-app]');
+      const appVisible = visible(app);
+      const controls = interactive.filter((el) => appVisible && app.contains(el) && visible(el));
+      const allControls = interactive.filter((el) => appVisible && app.contains(el) && visible(el, true));
+      const hasLabel = (patterns, includeDisabled = false, scopedControls = includeDisabled ? allControls : controls) => scopedControls
+        .some((el) => patterns.some((pattern) => pattern.test(label(el))));
+      const findControl = (patterns, includeDisabled = false, scopedControls = includeDisabled ? allControls : controls) => scopedControls
+        .find((el) => patterns.some((pattern) => pattern.test(label(el))));
+      const creatorLabel = /上传图文|上传图片|文字配图|上传视频|长文|播客|标题|正文|内容|简介|描述|发布|保存草稿|保存/;
+      const creatorControls = controls.filter((el) => creatorLabel.test(label(el)));
+      const isSelected = (el) => el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
+        /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
+      const isRequestedPath = (el) => pathLabels.some((expected) => label(el) === expected || label(el).includes(expected));
+      const selectedRequestedPath = controls.find((el) => isSelected(el) && isRequestedPath(el));
+      const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
+        .filter((el) => visible(el)) : [];
+      const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
+      const creatorSurface = semanticRootSurface || (appVisible && selectedRequestedPath ? app : undefined);
+      const roots = creatorSurface ? [creatorSurface] : [];
+      const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
+      const pathEntryVisible = pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
+      const activePath = Boolean(selectedRequestedPath && surfaceControls.includes(selectedRequestedPath));
+      const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
+      const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
+      const titleControl = findControl([/标题|title/i], false, surfaceControls);
+      const contentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls);
+      const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i], false, surfaceControls);
+      const saveControl = findControl([/保存草稿|保存|save draft/i], false, surfaceControls);
+      const validationControl = [...(creatorSurface?.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error"], [class*="valid"]') || [])]
+        .find((el) => visible(el, true));
+      const fieldState = (el) => {
+        // A selector miss is not proof that the control is unavailable; keep
+        // both dimensions unknown until a semantic control is observed.
+        if (!el) return { availability: 'unknown', observation: 'unknown' };
+        const editable = !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true';
+        return { availability: editable ? 'available' : 'unavailable', observation: 'observed', editable: editable ? 'observed' : 'unobserved', value_state: 'unknown' };
+      };
+      const title = fieldState(titleControl);
+      const content = fieldState(contentControl);
+      const publish = fieldState(publishControl);
+      const save = fieldState(saveControl);
+      const validation = fieldState(validationControl);
+      const mediaDefinitions = {
+        image_text_upload: [['upload_image', [/上传图片/]]],
+        image_text_generate: [['generate_image', [/文字配图/]]],
+        video: [['upload_video', [/上传视频|视频/]]],
+        long_article: [['add_media', [/添加媒体|上传图片|上传视频/]]],
+        podcast: [['upload_audio', [/上传音频/]], ['add_rss_subscription', [/添加 RSS 订阅|RSS/]]]
+      };
+      const mediaControls = {};
+      for (const [id, patterns] of mediaDefinitions[requestedPath] || []) {
+        const control = findControl(patterns, false, surfaceControls);
+        mediaControls[id] = fieldState(control);
+      }
+      const mediaControl = (mediaDefinitions[requestedPath] || []).map(([, patterns]) => findControl(patterns, false, surfaceControls)).find(Boolean);
+      // Merely seeing an upload control is the entrypoint, not an initialized
+      // composition. Initialization is observable only once an editing or
+      // publication control is present; file selection is intentionally not
+      // performed by this read-only probe.
+      const editableControl = (el) => Boolean(el && !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true');
+      const composition_initialized = Boolean(activePath && [titleControl, contentControl, publishControl, saveControl].some(editableControl));
+      const loginSurface = location.pathname.startsWith('/login') || [...document.querySelectorAll('[class*="login"], [class*="qrcode"], [class*="qr-code"]')]
+        .some((el) => visible(el, true) && /扫码登录|手机号登录|登录二维码/.test(el.textContent || ''));
+      return {
+        url: location.href,
+        origin: location.origin,
+        pathname: location.pathname,
+        challenge_like: /验证码|安全验证|访问受限|captcha/i.test(bodyText),
+        login_like: loginSurface,
+        creator_app_owned: Boolean(creatorSurface),
+        creator_surface_state: creatorSurface ? 'observed' : 'unknown',
+        creator_root_count: roots.length,
+        upload_image_tab_active: Boolean(activePath && requestedPath === 'image_text_upload'),
+        upload_image_entry_visible: hasLabel([/上传图片/], false, surfaceControls),
+        text_image_entry_visible: hasLabel([/文字配图/], false, surfaceControls),
+        composition_path: requestedPath,
+        path_observed,
+        path_entry_visible,
+        composition_state: activePath ? (composition_initialized ? 'composition_initialized' : 'composition_not_initialized') : 'composition_unknown',
+        field_states: { title_input: title, content_editor: content, publish_control: publish },
+        media_state: { availability: mediaControl ? 'available' : 'unknown', observation: mediaControl ? 'observed' : 'unknown', controls: mediaControls },
+        validation_state: validation,
+        save_draft_control: save,
+        publish_control: publish
+      };
     };
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const observation = observe();

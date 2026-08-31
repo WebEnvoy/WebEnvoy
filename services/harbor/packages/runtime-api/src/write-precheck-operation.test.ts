@@ -179,9 +179,162 @@ test("keeps the browser probe read-only and freshness-bound", () => {
   assert.match(expression, /上传图文/);
   assert.match(expression, /上传图片/);
   assert.match(expression, /文字配图/);
+  assert.equal(expression.includes("hasLabel([/^上传图文$/]"), false);
+  assert.equal(expression.includes("querySelectorAll('main"), false);
+  assert.equal(expression.includes("semanticText"), false);
+  assert.equal(expression.includes("bodyText.includes('创作者')"), false);
+  assert.equal(expression.includes("creatorControls.length >= 2"), false);
+  assert.match(expression, /selectedRequestedPath/);
+  assert.match(expression, /findControl = \(patterns, includeDisabled = false/);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 2_999), true);
   assert.equal(validWritePrecheckFreshness(input, observation, { ...observation, login_like: true }, 1_000, 2_000), false);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 3_001), false);
+});
+
+test("accepts dynamic composition observations without mistaking selector drift for a non-writable target", () => {
+  const initialized = validateXhsWritePrecheckObservation(
+    { ...input, composition_path: "image_text_upload" },
+    {
+      ...observation,
+      upload_image_tab_active: false,
+      upload_image_entry_visible: false,
+      text_image_entry_visible: false,
+      composition_path: "image_text_upload",
+      path_observed: "observed",
+      path_entry_visible: "observed",
+      composition_state: "composition_initialized",
+      field_states: {
+        title_input: { availability: "available", observation: "observed", editable: "observed", value_state: "empty" },
+        content_editor: { availability: "available", observation: "observed", editable: "observed", value_state: "empty" },
+        publish_control: { availability: "available", observation: "observed", editable: "observed" }
+      },
+      media_state: {
+        availability: "available",
+        observation: "observed",
+        controls: { upload_image: { availability: "available", observation: "observed", editable: "observed" } }
+      },
+      validation_state: { availability: "unknown", observation: "unknown" },
+      save_draft_control: { availability: "available", observation: "observed", editable: "observed" },
+      publish_control: { availability: "available", observation: "observed", editable: "observed" }
+    }
+  );
+  assert.equal(initialized.status, "completed");
+  if (initialized.status === "completed") {
+    assert.equal(initialized.composition_path, "image_text_upload");
+    assert.equal(initialized.precheck_scope, "composition_observation");
+    assert.equal(initialized.composition_state, "composition_initialized");
+    assert.equal(initialized.field_states.title_input?.availability, "available");
+    assert.equal(initialized.media_state.observation, "observed");
+    assert.equal(initialized.prohibited_actions_observed.upload, false);
+  }
+
+  const unknown = validateXhsWritePrecheckObservation(
+    { ...input, composition_path: "video" },
+    {
+      ...observation,
+      creator_app_owned: true,
+      creator_root_count: 2,
+      upload_image_tab_active: false,
+      upload_image_entry_visible: false,
+      text_image_entry_visible: false,
+      composition_path: "video",
+      path_observed: "unknown",
+      path_entry_visible: "unknown",
+      composition_state: "composition_unknown"
+    }
+  );
+  assert.equal(unknown.status, "completed");
+  if (unknown.status === "completed") {
+    assert.equal(unknown.composition_path, "video");
+    assert.equal(unknown.composition_state, "composition_unknown");
+    assert.equal(unknown.entrypoint_observations.path_observed, "unknown");
+    assert.equal(unknown.field_states.title_input?.observation, "unknown");
+  }
+
+  // Two unselected path-looking buttons without a semantic root are exposed
+  // as unknown by the probe; the validator must not promote that fallback to
+  // an owned creator surface.
+  const selectorDrift = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    creator_app_owned: false,
+    creator_root_count: 0,
+    creator_surface_state: "unknown",
+    upload_image_tab_active: false,
+    upload_image_entry_visible: false,
+    text_image_entry_visible: false
+  });
+  assert.deepEqual(
+    selectorDrift.status === "unavailable" ? selectorDrift.failure_class : undefined,
+    "evidence_unavailable"
+  );
+
+  const explicitAbsent = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    creator_app_owned: false,
+    creator_root_count: 0,
+    creator_surface_state: "absent",
+    upload_image_tab_active: false,
+    upload_image_entry_visible: false,
+    text_image_entry_visible: false
+  });
+  assert.equal(explicitAbsent.status === "unavailable" ? explicitAbsent.failure_class : undefined, "target_not_writable");
+});
+
+test("keeps all catalog composition paths bounded and read-only", () => {
+  for (const path of ["image_text_upload", "image_text_generate", "video", "long_article", "podcast"] as const) {
+    const expression = writePrecheckProbeExpression(path);
+    assert.match(expression, new RegExp(path));
+    for (const mutation of [".click(", ".value=", "dispatchEvent", "execCommand", "location.assign", ".submit("]) {
+      assert.equal(expression.includes(mutation), false, `${path}:${mutation}`);
+    }
+    assert.equal(admitXhsPublishPrecheck({ ...lodeAdmissionFixture, composition_path: path })?.composition_path, path);
+  }
+  assert.equal(admitXhsPublishPrecheck({ ...lodeAdmissionFixture, composition_path: "arbitrary-selector" }), null);
+});
+
+test("drops and rejects field or media keys outside the bounded observation shape", () => {
+  const result = completedProbe();
+  const withExtraField = {
+    ...result,
+    field_states: { ...result.field_states, unexpected: { availability: "unknown", observation: "unknown" } }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withExtraField), false);
+  const withInnerExtraField = {
+    ...result,
+    field_states: {
+      ...result.field_states,
+      title_input: { ...result.field_states.title_input, detail: "unexpected" }
+    }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withInnerExtraField), false);
+  const withExtraMediaControl = {
+    ...result,
+    media_state: {
+      ...result.media_state,
+      controls: { ...result.media_state.controls, unexpected: { availability: "unknown", observation: "unknown" } }
+    }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withExtraMediaControl), false);
+  const sanitized = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    composition_path: "image_text_upload",
+    field_states: {
+      title_input: { availability: "unknown", observation: "unknown" },
+      content_editor: { availability: "unknown", observation: "unknown" },
+      publish_control: { availability: "unknown", observation: "unknown" },
+      unexpected: { availability: "available", observation: "observed" }
+    },
+    media_state: {
+      availability: "unknown",
+      observation: "unknown",
+      controls: { upload_image: { availability: "unknown", observation: "unknown" }, unexpected: { availability: "available", observation: "observed" } }
+    }
+  });
+  assert.equal(sanitized.status, "completed");
+  if (sanitized.status === "completed") {
+    assert.equal("unexpected" in sanitized.field_states, false);
+    assert.equal("unexpected" in (sanitized.media_state.controls ?? {}), false);
+  }
 });
 
 test("returns refs-only submitted=false evidence and fails fixtures closed", async () => {

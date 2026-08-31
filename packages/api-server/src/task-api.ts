@@ -9,6 +9,7 @@ import {
   type HarborRuntimeClient,
   type LodePackageResolver,
   type RuntimeTaskSubmissionRequest,
+  type XhsWritePrecheckCompositionPath,
   type WritePrecheckAuthorizationContext,
   type TaskSubmissionResult
 } from "@webenvoy/core-runtime";
@@ -30,7 +31,10 @@ export type TaskSubmissionDependencies = {
   authorizationDecisionStore?: FileAuthorizationDecisionStore;
 };
 
-const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
+const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "composition_path", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
+const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
+  "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
+]);
 const privateHarborInputFieldNames = new Set([
   "raw_payload", "dom", "har", "screenshot", "video", "cookie", "cookies", "token", "tokens",
   "password", "verification_code", "local_path", "profile_path", "storage_value", "session_token",
@@ -164,6 +168,11 @@ async function validateRuntimeTaskSubmissionRequest(
     if (unsupportedField) return requestInvalid(`unsupported_harbor_field:${unsupportedField}`, "remove_private_field");
     const identity_environment_ref = optionalString(harborInput.identity_environment_ref, "identity_environment_ref_invalid");
     const url = optionalHttpUrl(harborInput.url);
+    const composition_path = harborInput.composition_path === undefined
+      ? undefined
+      : typeof harborInput.composition_path === "string" && xhsWritePrecheckCompositionPaths.has(harborInput.composition_path as XhsWritePrecheckCompositionPath)
+        ? harborInput.composition_path as XhsWritePrecheckCompositionPath
+        : requestInvalid("composition_path_invalid");
     const reuse_existing = optionalBoolean(harborInput.reuse_existing, "reuse_existing_invalid");
     const timeout_ms = optionalPositiveInteger(harborInput.timeout_ms, "timeout_ms_invalid");
     const evidence_policy = harborInput.evidence_policy === undefined ? undefined : jsonObject(harborInput.evidence_policy);
@@ -171,6 +180,7 @@ async function validateRuntimeTaskSubmissionRequest(
     const snapshot = harborInput.snapshot === undefined ? undefined : jsonObject(harborInput.snapshot);
     if (isFailureRecord(identity_environment_ref)) return identity_environment_ref;
     if (isFailureRecord(url)) return url;
+    if (isFailureRecord(composition_path)) return composition_path;
     if (isFailureRecord(reuse_existing)) return reuse_existing;
     if (isFailureRecord(timeout_ms)) return timeout_ms;
     if (harborInput.evidence_policy !== undefined && !evidence_policy) return requestInvalid("evidence_policy_invalid");
@@ -181,6 +191,7 @@ async function validateRuntimeTaskSubmissionRequest(
     harbor = {
       ...(identity_environment_ref === undefined ? {} : { identity_environment_ref }),
       ...(url === undefined ? {} : { url }),
+      ...(composition_path === undefined ? {} : { composition_path }),
       ...(reuse_existing === undefined ? {} : { reuse_existing }),
       ...(timeout_ms === undefined ? {} : { timeout_ms }),
       ...(evidence_policy === undefined ? {} : { evidence_policy })
