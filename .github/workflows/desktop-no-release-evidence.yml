@@ -21,7 +21,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     env:
-      LODE_PIN: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+      LODE_PIN: 6bff1afd059a30571f8ed219d1dcd25e6fb20c6b
       WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ github.workspace }}/.runtime-sources/lode
     steps:
       - name: Checkout WebEnvoy
@@ -62,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: WebEnvoy/Lode
-          ref: 1fbef74b4bf1b4f0a86aacd885386d7a62181207
+          ref: 6bff1afd059a30571f8ed219d1dcd25e6fb20c6b
           path: .runtime-sources/lode
           persist-credentials: false
 

@@ -35,6 +35,14 @@ export const opaqueDetailOperationContract = {
   operation_mode: "read"
 } as const;
 
+const xhsCreatorPrecheckOriginPair = {
+  package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+  operation_id: "xhs_publish_note_precheck",
+  identity_origin: "https://www.xiaohongshu.com",
+  target_origin: "https://creator.xiaohongshu.com"
+} as const;
+
 function failure(code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
   return { category: code.startsWith("identity_") || code.startsWith("runtime_") ? "resource_admission" : "capability_contract", code, phase, recovery_hint };
 }
@@ -150,8 +158,17 @@ export function matchLockedOperationIdentity(
   ) return failure("identity_auth_required", "runtime_binding", "open_manual_auth");
 
   const origin = identity.site_binding.origin;
+  const exactCreatorPrecheckPair = operation.runtime_consumption.package_ref === xhsCreatorPrecheckOriginPair.package_ref &&
+    operation.runtime_consumption.lock_ref === xhsCreatorPrecheckOriginPair.lock_ref &&
+    operation.runtime_consumption.operation_id === xhsCreatorPrecheckOriginPair.operation_id &&
+    sameOrigin(origin, xhsCreatorPrecheckOriginPair.identity_origin) &&
+    sameOrigin(operation.selection.target_origin, xhsCreatorPrecheckOriginPair.target_origin) &&
+    [xhsCreatorPrecheckOriginPair.identity_origin, xhsCreatorPrecheckOriginPair.target_origin].every((requiredOrigin) =>
+      operation.runtime_consumption.allowed_origins.some((allowed) => sameOrigin(allowed, requiredOrigin))
+    );
   if (
-    !origin.startsWith("https://") || !normalizePublicOrigin(origin) || !sameOrigin(origin, operation.selection.target_origin) ||
+    !origin.startsWith("https://") || !normalizePublicOrigin(origin) ||
+    (!sameOrigin(origin, operation.selection.target_origin) && !exactCreatorPrecheckPair) ||
     !operation.runtime_consumption.allowed_origins.some((allowed) => sameOrigin(origin, allowed))
   ) return failure("runtime_origin_not_allowed", "resource_matching", "fix_input");
   return undefined;

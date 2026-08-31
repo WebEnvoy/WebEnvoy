@@ -20,6 +20,11 @@ import { bossProductionDeferredReason, isBossProductionSkill } from "./productio
 type Identity = HarborIdentityLoadState["identities"][number];
 type JsonRecord = Record<string, unknown>;
 const xiaohongshuSearchPackageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
+const xiaohongshuPublishPrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+const xiaohongshuPublishPrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const xiaohongshuPublishPrecheckActionId = "xhs_publish_note_precheck";
+const xiaohongshuPublishPrecheckResourceRequirementRef = "xiaohongshu.publish-note-precheck.resources";
+const xiaohongshuPublishPrecheckProfileId = "xhs-creator-publish-page-precheck";
 
 export type TaskThreadSubmitState =
   | { status: "idle"; summary: string }
@@ -227,11 +232,9 @@ function submissionReadiness(options: SubmitOptions, requestedModes?: ExecutionP
     return "需要登录或完成人工认证后再提交。";
   }
   if (options.identity.readiness.state === "unknown") return "账号身份状态尚未确认；提交保持停止。";
-  if (
-    options.skill.actions.length !== 1 ||
-    options.skill.actions[0]?.operationMode !== "read" ||
-    options.skill.actions[0].resourceRequirementProfileIds.length !== 1
-  ) {
+  const singleAction = options.skill.actions.length === 1 ? options.skill.actions[0] : undefined;
+  const readAction = singleAction?.operationMode === "read" && singleAction.resourceRequirementProfileIds.length === 1;
+  if (!readAction && !isXiaohongshuPublishPrecheckSkill(options.skill)) {
     return "当前 Core 仅接入已声明的单一只读动作；准备、发布与危险行为保持停止。";
   }
   if (requestedModes != null) {
@@ -268,7 +271,12 @@ function taskTarget(skill: LodeCatalogSkill, identity: Identity, draft: SkillInp
     : stringValue(draft.values.url) || identity.origin;
   let url: URL;
   try { url = new URL(rawUrl); } catch { return { ok: false as const, reason: "目标网址无效。" }; }
-  if (url.username || url.password || !action.supportedOrigins.includes(url.origin) || url.origin !== new URL(identity.origin).origin) {
+  const identityOrigin = new URL(identity.origin).origin;
+  const exactCreatorPrecheck = isXiaohongshuPublishPrecheckSkill(skill) &&
+    identity.siteId === "xiaohongshu" && identityOrigin === "https://www.xiaohongshu.com" &&
+    url.origin === "https://creator.xiaohongshu.com";
+  if (url.username || url.password || !action.supportedOrigins.includes(url.origin) ||
+    (url.origin !== identityOrigin && !exactCreatorPrecheck)) {
     return { ok: false as const, reason: "目标网址与技能或账号身份声明的站点不匹配。" };
   }
   if (skill.packageRef.includes("/search-notes@")) {
@@ -314,13 +322,17 @@ function publicQueryForSkill(skill: LodeCatalogSkill, draft: SkillInputDraft) {
 }
 
 export function projectTaskSubmissionSkill(skill: LodeCatalogSkill): LodeCatalogSkill {
-  if (skill.packageRef !== xiaohongshuSearchPackageRef) return skill;
-  return {
-    ...skill,
-    inputFields: skill.inputFields
-      .filter((field) => field.id !== "url")
-      .map((field) => field.id === "limit" ? { ...field, maximum: Math.min(field.maximum ?? 15, 15) } : field),
-  };
+  if (skill.packageRef === xiaohongshuSearchPackageRef) {
+    return {
+      ...skill,
+      inputFields: skill.inputFields
+        .filter((field) => field.id !== "url")
+        .map((field) => field.id === "limit" ? { ...field, maximum: Math.min(field.maximum ?? 15, 15) } : field),
+    };
+  }
+  return isXiaohongshuPublishPrecheckSkill(skill)
+    ? { ...skill, inputFields: skill.inputFields.filter((field) => field.id !== "target_ref") }
+    : skill;
 }
 
 export function buildCoreThreadInputSnapshot(
@@ -334,6 +346,12 @@ export function buildCoreThreadInputSnapshot(
     const value = draft.values[field.id];
     const files = draft.files[field.id] ?? [];
     if (!hasValue(value) && files.length === 0) continue;
+    if (field.kind === "constant") {
+      const summary = boundedScalarSummary(value);
+      if (summary == null) return { ok: false, reason: `字段“${field.label}”无法生成安全的固定值摘要。` };
+      fields.push({ field_id: field.id, kind: "scalar", summary });
+      continue;
+    }
     if (field.inputProjection === "safe_summary") {
       const summary = boundedScalarSummary(value);
       if (summary == null) return { ok: false, reason: `字段“${field.label}”无法生成安全的简短摘要。` };
@@ -381,6 +399,25 @@ export function buildCoreThreadInputSnapshot(
 function capabilityRefForSkill(skill: LodeCatalogSkill) {
   const match = /^lode:\/\/site-capability\/[^/]+\/([^@]+)@/.exec(skill.packageRef);
   return `lode:capability/${match?.[1] ?? "invalid"}`;
+}
+
+function isXiaohongshuPublishPrecheckSkill(skill: LodeCatalogSkill) {
+  const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
+  return skill.packageRef === xiaohongshuPublishPrecheckPackageRef &&
+    skill.lockRef === xiaohongshuPublishPrecheckLockRef &&
+    skill.version === "0.1.0" &&
+    skill.siteSlug === "xiaohongshu" &&
+    action?.id === xiaohongshuPublishPrecheckActionId &&
+    action.category === "prepare" &&
+    action.operationMode === "validate_only" &&
+    action.targetTypes.length === 1 &&
+    action.targetTypes[0] === "creator_publish_page" &&
+    action.supportedOrigins.length === 1 &&
+    action.supportedOrigins[0] === "https://creator.xiaohongshu.com" &&
+    action.externalEffects.length === 0 &&
+    action.resourceRequirementRef === xiaohongshuPublishPrecheckResourceRequirementRef &&
+    action.resourceRequirementProfileIds.length === 1 &&
+    action.resourceRequirementProfileIds[0] === xiaohongshuPublishPrecheckProfileId;
 }
 
 function boundedScalarSummary(value: SkillInputValue | undefined) {

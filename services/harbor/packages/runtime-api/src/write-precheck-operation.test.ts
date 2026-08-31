@@ -55,7 +55,7 @@ function completedProbe(): Extract<LocalProviderWritePrecheckProbeResult, { stat
 
 test("pins and admits only the public Lode validate-only contract", () => {
   assert.equal(XHS_PUBLISH_PRECHECK_PIN.repository, "WebEnvoy/Lode");
-  assert.equal(XHS_PUBLISH_PRECHECK_PIN.commit, "1fbef74b4bf1b4f0a86aacd885386d7a62181207");
+  assert.equal(XHS_PUBLISH_PRECHECK_PIN.commit, "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b");
   assert.equal(XHS_PUBLISH_PRECHECK_PIN.operation_mode, "validate_only");
   assert.deepEqual(admitXhsPublishPrecheck(lodeAdmissionFixture), {
     url: lodeAdmissionFixture.url,
@@ -67,6 +67,7 @@ test("pins and admits only the public Lode validate-only contract", () => {
   assert.deepEqual(admitXhsPublishPrecheck({
     url: input.target_url,
     target_ref: input.target_ref,
+    holder_ref: "run_write_precheck",
     no_submit_guard: "active",
     requested_fields: ["title", "summary"],
     include_source_refs: true,
@@ -74,6 +75,7 @@ test("pins and admits only the public Lode validate-only contract", () => {
   }), {
     url: input.target_url,
     target_ref: input.target_ref,
+    holder_ref: "run_write_precheck",
     requested_fields: ["title", "summary"],
     include_source_refs: true,
     proposed_input_summary: "公开草稿摘要"
@@ -274,8 +276,20 @@ test("fails closed when session control changes during the trusted probe", async
   if (authenticated.status === "unavailable") throw new Error(`managed write-precheck session should authenticate: ${JSON.stringify(authenticated)}`);
   assert.equal(authenticated.status.authentication_provenance, "user_confirmed_managed_session");
   runtime.recordHandoff(sessionRef, { control_owner: "core_task", handoff_reason: "user_requested" });
+  const mismatchedHolder = await runtime.executeXhsPublishPrecheck(sessionRef, {
+    url: input.target_url,
+    target_ref: input.target_ref,
+    holder_ref: "wrong_run",
+    no_submit_guard: "active"
+  });
+  assert.deepEqual(
+    { status: mismatchedHolder.status, failure_class: "failure_class" in mismatchedHolder ? mismatchedHolder.failure_class : null },
+    { status: "unavailable", failure_class: "session_user_controlled" }
+  );
+  runtime.releaseSession(sessionRef, { control_owner: "core_task" });
+  runtime.lockSession(sessionRef, { control_owner: "core_task", holder_ref: "write_run" });
 
-  const request = { url: input.target_url, target_ref: input.target_ref, no_submit_guard: "active" };
+  const request = { url: input.target_url, target_ref: input.target_ref, holder_ref: "write_run", no_submit_guard: "active" };
   assert.equal((await runtime.executeXhsPublishPrecheck(sessionRef, request)).status, "completed");
   changeControl = true;
   const drifted = await runtime.executeXhsPublishPrecheck(sessionRef, request);

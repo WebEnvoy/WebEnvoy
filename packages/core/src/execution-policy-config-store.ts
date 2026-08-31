@@ -368,9 +368,24 @@ class FileExecutionPolicyConfigStoreImpl implements FileExecutionPolicyConfigSto
       input.thread_ref === undefined ? undefined : this.getThreadRevision(input.thread_ref, input.turn_sequence)
     ]);
     return {
-      ...(global?.source === "global_user_config" ? { global_user_config: global } : {}),
-      ...(skill?.source === "installed_skill_user_version" ? { installed_skill_user_version: skill } : {}),
-      ...(thread?.source === "thread_revision" ? { thread_revision: thread } : {})
+      ...(global?.source === "global_user_config" ? { global_user_config: {
+        source_ref: global.source_ref,
+        source_version: global.source_version,
+        modes: global.modes
+      } } : {}),
+      ...(skill?.source === "installed_skill_user_version" ? { installed_skill_user_version: {
+        source_ref: skill.source_ref,
+        source_version: skill.source_version,
+        skill_ref: skill.skill_ref,
+        modes: skill.modes
+      } } : {}),
+      ...(thread?.source === "thread_revision" ? { thread_revision: {
+        source_ref: thread.source_ref,
+        source_version: thread.source_version,
+        thread_ref: thread.thread_ref,
+        effective_from_turn_sequence: thread.effective_from_turn_sequence,
+        modes: thread.modes
+      } } : {})
     };
   }
 

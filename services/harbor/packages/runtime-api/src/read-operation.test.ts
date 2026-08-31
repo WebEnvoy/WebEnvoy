@@ -235,7 +235,7 @@ test("waits within the bounded probe for a canonical XHS page to finish initiali
     observations += 1;
     return {
       origin: "https://www.xiaohongshu.com",
-      ready: true,
+      ready: observations > 1,
       login_like: false,
       challenge_like: false,
       vue_ready: observations > 1,
@@ -252,7 +252,6 @@ test("does not retry XHS readiness when the observation is not a safe initializa
   for (const observation of [
     undefined,
     { origin: "https://attacker.example", ready: true, login_like: false, challenge_like: false, vue_ready: false, pinia_ready: false },
-    { origin: "https://www.xiaohongshu.com", ready: false, login_like: false, challenge_like: false, vue_ready: false, pinia_ready: false },
     { origin: "https://www.xiaohongshu.com", ready: true, login_like: true, challenge_like: false, vue_ready: false, pinia_ready: false },
     { origin: "https://www.xiaohongshu.com", ready: true, login_like: false, challenge_like: true, vue_ready: false, pinia_ready: false }
   ] as const) {

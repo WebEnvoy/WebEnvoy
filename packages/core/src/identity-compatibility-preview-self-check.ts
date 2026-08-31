@@ -280,6 +280,49 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert(!("category" in formalMultiProfileMatch));
   assert.equal(matchLockedOperationIdentity(formalMultiProfileMatch, identityFacts("identity-compatible"), "identity-compatible"), undefined);
 
+  const creatorPrecheckRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+  const creatorPrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+  const creatorPrecheckContract: LodePackageAdmissionContract = {
+    ...packageContract(),
+    package_ref: creatorPrecheckRef,
+    source_ref: creatorPrecheckRef,
+    lock_ref: creatorPrecheckLockRef,
+    capability_id: "publish-note-precheck",
+    operation_id: "xhs_publish_note_precheck",
+    operation_mode: "validate_only",
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.publish-note-precheck.resources",
+      package_ref: creatorPrecheckRef,
+      operation_mode: "validate_only",
+      resource_requirement_profiles: [{ requirement_profile_id: "xhs-creator-publish-page-precheck" }]
+    },
+    runtime_consumption: {
+      ...packageContract().runtime_consumption!,
+      package_ref: creatorPrecheckRef,
+      lock_ref: creatorPrecheckLockRef,
+      operation_id: "xhs_publish_note_precheck",
+      operation_mode: "validate_only",
+      allowed_origins: ["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"],
+      resource_requirements_id: "xiaohongshu.publish-note-precheck.resources"
+    }
+  };
+  const creatorPrecheckMatch = matchLockedLodeOperation(creatorPrecheckContract, {
+    package_ref: creatorPrecheckRef,
+    lock_ref: creatorPrecheckLockRef,
+    version: "0.1.0",
+    operation_id: "xhs_publish_note_precheck",
+    operation_mode: "validate_only",
+    target_ref: "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image",
+    target_origin: "https://creator.xiaohongshu.com",
+    resource_requirement_ref: "xiaohongshu.publish-note-precheck.resources",
+    resource_requirement_profile_id: "xhs-creator-publish-page-precheck"
+  });
+  assert(!("category" in creatorPrecheckMatch));
+  assert.equal(matchLockedOperationIdentity(creatorPrecheckMatch, identityFacts("identity-xhs-www"), "identity-xhs-www"), undefined);
+  assert.equal(matchLockedOperationIdentity(creatorPrecheckMatch, identityFacts("identity-other-origin", {
+    site_binding: { site_id: "xiaohongshu", origin: "https://example.com" }
+  }), "identity-other-origin")?.code, "runtime_origin_not_allowed");
+
   const uncertainAuthentication = identityFacts("identity-auth-uncertain", {
     login_state: {
       state: "logged_in",

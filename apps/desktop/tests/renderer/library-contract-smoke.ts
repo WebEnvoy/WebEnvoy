@@ -42,6 +42,7 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkResponseProjection(request);
   checkTurnInputProjection(input.xhsSkill);
   checkXhsSearchTarget(input.xhsSkill);
+  checkXhsPublishPrecheck(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
   await checkBossDeferredHelpers(bossSkill);
@@ -302,12 +303,111 @@ function automaticExecutionPolicy(skill: LodeCatalogSkill) {
     skillRef: skill.packageRef,
     actions: [{
       actionId: skill.actions[0]!.id,
-      category: "read" as const,
+      category: skill.actions[0]!.category,
       riskMarker: null,
       targetScope: { siteSlug: skill.siteSlug, targetTypes: skill.actions[0]!.targetTypes, supportedOrigins: skill.actions[0]!.supportedOrigins },
       policy: { mode: "auto" as const, source: "installed_skill_user_version" as const, sourceRef: `execution-policy:skill/${skill.id}`, sourceVersion: "1" },
     }],
   };
+}
+
+function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
+  const skill: LodeCatalogSkill = {
+    ...baseSkill,
+    id: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+    packageRef: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+    lockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+    name: "小红书发布草稿写前验证",
+    summary: "只读确认创作入口；不提交。",
+    category: "write-precheck",
+    inputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0",
+    outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
+    outputKind: "xhs_publish_note_precheck",
+    inputFields: [
+      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri" },
+      { id: "target_ref", label: "目标引用", kind: "text", required: true, description: "Harbor 写前目标引用", inputProjection: "owner_ref" },
+      { id: "no_submit_guard", label: "不提交保护", kind: "constant", required: true, description: "固定为 active", defaultValue: "active", inputProjection: "safe_summary" },
+    ],
+    actions: [{
+      id: "xhs_publish_note_precheck",
+      category: "prepare",
+      operationMode: "validate_only",
+      targetTypes: ["creator_publish_page"],
+      supportedOrigins: ["https://creator.xiaohongshu.com"],
+      externalEffects: [],
+      resourceRequirementRef: "xiaohongshu.publish-note-precheck.resources",
+      resourceRequirementProfileIds: ["xhs-creator-publish-page-precheck"],
+    }],
+  };
+  const submissionSkill = projectTaskSubmissionSkill(skill);
+  if (submissionSkill.inputFields.some((field) => field.id === "target_ref")) {
+    throw new Error("Xiaohongshu publish precheck exposed the owner-only target_ref field.");
+  }
+  const draft = createSkillInputDraft(submissionSkill);
+  draft.values.url = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+  const ownerRef = "draft:app-protected/00000000-0000-4000-8000-000000000030";
+  const prepared = prepareTaskTurnRequest({
+    endpoint: "http://core.owner",
+    skill: submissionSkill,
+    identity,
+    draft,
+    ownerRefs: {
+      ownerRef,
+      fieldOwnerRefs: { url: `${ownerRef}/url` },
+      attachmentRefs: {},
+    },
+    executionPolicy: automaticExecutionPolicy(skill),
+    runtime,
+  });
+  if (!prepared.ok) throw new Error(`Xiaohongshu publish precheck was rejected: ${prepared.reason}`);
+  const intent = prepared.request.task_intent as {
+    capability?: { ref?: string; source_ref?: string; lock_ref?: string };
+    policy?: { risk?: string; execution_intent?: string };
+    scope?: { target_type?: string; target_ref?: string };
+    resource_requirement_profile_id?: string;
+  };
+  const input = prepared.request.input_snapshot as { fields?: Array<{ field_id?: string; kind?: string; summary?: string; owner_ref?: string }> };
+  const harbor = prepared.request.harbor as { url?: string };
+  const fields = Object.fromEntries((input.fields ?? []).map((field) => [field.field_id, field]));
+  const targetUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+  if (
+    prepared.capabilityRef !== "lode:capability/publish-note-precheck" ||
+    prepared.request.package_ref !== skill.packageRef ||
+    intent.capability?.ref !== "lode:capability/publish-note-precheck" ||
+    intent.capability.source_ref !== skill.packageRef ||
+    intent.capability.lock_ref !== skill.lockRef ||
+    intent.policy?.risk !== "write" || intent.policy.execution_intent !== "validate_only" ||
+    intent.scope?.target_type !== "creator_publish_page" || intent.scope.target_ref !== targetUrl ||
+    harbor.url !== targetUrl ||
+    intent.resource_requirement_profile_id !== "xhs-creator-publish-page-precheck" ||
+    fields.url?.kind !== "url" || fields.url.summary !== "https://creator.xiaohongshu.com/publish/publish" ||
+    fields.target_ref !== undefined ||
+    fields.no_submit_guard?.kind !== "scalar" || fields.no_submit_guard.summary !== "active" ||
+    new URL(identity.origin).origin === "https://creator.xiaohongshu.com"
+  ) throw new Error("Xiaohongshu publish precheck request lost canonical policy or input ownership boundaries.");
+  if (prepareTaskTurnRequest({
+    endpoint: "http://core.owner", skill: submissionSkill, identity: { ...identity, origin: "https://attacker.example" }, draft,
+    ownerRefs: { ownerRef, fieldOwnerRefs: { url: `${ownerRef}/url` }, attachmentRefs: {} },
+    executionPolicy: automaticExecutionPolicy(skill), runtime,
+  }).ok) throw new Error("Xiaohongshu publish precheck accepted a non-canonical identity origin.");
+
+  const blockedModes = ["draft", "preview"] as const;
+  for (const operationMode of blockedModes) {
+    const blockedSkill = { ...skill, actions: [{ ...skill.actions[0]!, operationMode }] };
+    if (prepareTaskTurnRequest({
+      endpoint: "http://core.owner", skill: blockedSkill, identity, draft,
+      ownerRefs: { ownerRef, fieldOwnerRefs: { url: `${ownerRef}/url` }, attachmentRefs: {} },
+      executionPolicy: automaticExecutionPolicy(blockedSkill), runtime,
+    }).ok) throw new Error(`Xiaohongshu ${operationMode} precheck was not blocked.`);
+  }
+  for (const category of ["commit", "destructive"] as const) {
+    const blockedSkill = { ...skill, actions: [{ ...skill.actions[0]!, category }] };
+    if (prepareTaskTurnRequest({
+      endpoint: "http://core.owner", skill: blockedSkill, identity, draft,
+      ownerRefs: { ownerRef, fieldOwnerRefs: { url: `${ownerRef}/url` }, attachmentRefs: {} },
+      executionPolicy: automaticExecutionPolicy(blockedSkill), runtime,
+    }).ok) throw new Error(`Xiaohongshu ${category} action was not blocked.`);
+  }
 }
 
 function checkExecutionPolicyMutation() {
