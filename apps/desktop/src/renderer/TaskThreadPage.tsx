@@ -11,6 +11,7 @@ import { RunStatusGlyph } from "./RunStatusGlyph";
 import type { RunProjection, TaskProjection } from "./taskThreadFixtures";
 import { TaskTurnBusinessInput } from "./TaskTurnBusinessInput";
 import type { TaskPreviewSelection } from "./useAppTasks";
+import { bossProductionDeferredReason, isBossProductionTask } from "./productionTaskPolicy";
 
 export function TaskThreadPage({
   coreEndpoint,
@@ -31,6 +32,7 @@ export function TaskThreadPage({
   onActiveRunChange: (runId: string) => void;
   onOpenPreview: (selection: TaskPreviewSelection) => void;
 }) {
+  const bossDeferred = isBossProductionTask(selectedTask);
   return (
     <div className="thread-body">
       <ThreadNavigationRail
@@ -65,6 +67,7 @@ export function TaskThreadPage({
               isSelected={run.id === selectedRun.id}
               key={run.id}
               run={run}
+              bossDeferred={bossDeferred}
               skill={skill}
               skills={skills}
               onOpenPreview={onOpenPreview}
@@ -81,6 +84,7 @@ function RunTurn({
   identityLabel,
   threadRef,
   run,
+  bossDeferred,
   isSelected,
   skill,
   skills,
@@ -90,6 +94,7 @@ function RunTurn({
   identityLabel: string;
   threadRef: string;
   run: RunProjection;
+  bossDeferred: boolean;
   isSelected: boolean;
   skill?: LodeCatalogSkill;
   skills?: LodeCatalogSkill[];
@@ -118,6 +123,14 @@ function RunTurn({
         candidate?.inputSchemaId === inputDefinition.inputSchemaRef,
       );
 
+  if (bossDeferred && run.source !== "Core live") {
+    return (
+      <article className={isSelected ? "run-turn selected" : "run-turn"} data-content-search-unit-key={run.id} data-turn-key={run.id}>
+        <div className="library-source-notice warning" role="status"><AlertTriangle size={15} /><span>{bossProductionDeferredReason}</span></div>
+      </article>
+    );
+  }
+
   return (
     <article
       className={isSelected ? "run-turn selected" : "run-turn"}
@@ -125,23 +138,49 @@ function RunTurn({
       data-turn-key={run.id}
     >
       {run.businessInput == null ? null : <TaskTurnBusinessInput input={run.businessInput} skill={inputSkill} />}
-      <SingleActionConfirmation endpoint={coreEndpoint} identityLabel={identityLabel} run={run} threadRef={threadRef} />
-      <TurnExecutionStatus isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: "evidence" })} run={run} />
-      <TaskBusinessResult
-        onOpenPreview={(request) => onOpenPreview({ runId: run.id, tab: "result", ...request })}
-        resultState={resultState}
-        run={run}
-        skills={skills}
-      />
+      {bossDeferred ? <BossHistoricalFailure run={run} /> : null}
+      {bossDeferred ? null : <SingleActionConfirmation endpoint={coreEndpoint} identityLabel={identityLabel} run={run} threadRef={threadRef} />}
+      <TurnExecutionStatus bossDeferred={bossDeferred} isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: "evidence" })} run={run} />
+      {bossDeferred ? null : (
+        <TaskBusinessResult
+          onOpenPreview={(request) => onOpenPreview({ runId: run.id, tab: "result", ...request })}
+          resultState={resultState}
+          run={run}
+          skills={skills}
+        />
+      )}
       <TurnFooter run={run} />
     </article>
   );
 }
 
-function TurnExecutionStatus({ isSelected, onOpenPreview, run }: { isSelected: boolean; onOpenPreview: () => void; run: RunProjection }) {
-  const running = run.lifecycle === "running" || run.lifecycle === "queued";
-  const failed = run.outcome === "failure" || run.lifecycle === "blocked";
-  const label = running ? "正在执行" : run.turnStatus === "cancelled" ? "已取消" : failed ? "未完成" : run.outcome === "partial" ? "部分完成" : "已处理";
+function BossHistoricalFailure({ run }: { run: RunProjection }) {
+  if (
+    run.source !== "Core live" ||
+    !(
+      run.failureRecovery != null ||
+      run.outcome === "failure" ||
+      run.outcome === "failure-safe" ||
+      run.outcome === "unavailable" ||
+      run.lifecycle === "blocked"
+    )
+  ) return null;
+  const attributed = run.capabilityAttribution?.failureClass;
+  const category = attributed != null && attributed !== "none"
+    ? attributed
+    : run.resultRows.find((row) => row.label === "失败代码")?.value ?? "unknown";
+  return (
+    <div className="library-source-notice warning" role="status">
+      <AlertTriangle size={15} />
+      <span>历史失败 · 来源 Core live · 失败类别 {category} · 时间 {formatTurnTime(run.terminalAt ?? run.updatedAt)}</span>
+    </div>
+  );
+}
+
+function TurnExecutionStatus({ bossDeferred, isSelected, onOpenPreview, run }: { bossDeferred: boolean; isSelected: boolean; onOpenPreview: () => void; run: RunProjection }) {
+  const running = !bossDeferred && (run.lifecycle === "running" || run.lifecycle === "queued");
+  const failed = bossDeferred || run.outcome === "failure" || run.lifecycle === "blocked";
+  const label = bossDeferred ? "功能延期" : running ? "正在执行" : run.turnStatus === "cancelled" ? "已取消" : failed ? "未完成" : run.outcome === "partial" ? "部分完成" : "已处理";
   const duration = running ? "" : formatDuration(run.createdAt, run.terminalAt ?? run.updatedAt);
   return (
     <div className={`turn-execution-status${running ? " running" : ""}${failed ? " failed" : ""}`} aria-current={isSelected ? "step" : undefined}>
@@ -149,7 +188,7 @@ function TurnExecutionStatus({ isSelected, onOpenPreview, run }: { isSelected: b
       <strong>{label}</strong>
       {duration ? <span>{duration}</span> : null}
       {running ? <span className="turn-execution-shimmer" aria-hidden="true" /> : null}
-      {run.evidenceCards.length > 0 || run.fieldSources?.length ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label="在右栏打开结果依据" title="在右栏打开结果依据" data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
+      {!bossDeferred && (run.evidenceCards.length > 0 || run.fieldSources?.length) ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label="在右栏打开结果依据" title="在右栏打开结果依据" data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
     </div>
   );
 }

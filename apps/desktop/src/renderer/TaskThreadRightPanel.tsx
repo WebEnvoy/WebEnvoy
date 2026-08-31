@@ -20,6 +20,7 @@ import { type RuntimeSupervisorState } from "./runtimeSupervisorState";
 import type { RunProjection, TaskProjection } from "./taskThreadFixtures";
 import type { TaskPreviewSelection } from "./useAppTasks";
 import { isOpaqueDetailRef } from "./resultDetailHandoff";
+import { bossProductionDeferredReason, isBossProductionTask } from "./productionTaskPolicy";
 
 type SourceHealth = {
   id: "core" | "harbor" | "lode";
@@ -73,6 +74,9 @@ export function TaskThreadRightPanel({
 }) {
   const [activeTab, setActiveTab] = useState<string>(previewSelection.tab);
   useEffect(() => setActiveTab(previewSelection.tab), [previewSelection.runId, previewSelection.tab]);
+  if (isBossProductionTask(selectedTask) && selectedRun.source !== "Core live") {
+    return <aside className="context-panel codex-scrollbar" aria-label="Task context"><div className="context-copy" role="status">{bossProductionDeferredReason}</div></aside>;
+  }
   return (
     <aside className="context-panel codex-scrollbar" aria-label="Task context">
       <PanelTabs

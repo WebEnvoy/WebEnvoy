@@ -3,6 +3,7 @@ import type { IdentityEnvironmentProjection } from "./identityEnvironmentFixture
 import { requestOwnerJson } from "./ownerApiClient";
 import { runtimeService, type RuntimeSupervisorState } from "./runtimeSupervisorState";
 import type { RunProjection, TaskProjection } from "./taskThreadFixtures";
+import { bossProductionDeferredReason, isBossProductionTask } from "./productionTaskPolicy";
 
 export type CoreTaskSubmitState =
   | { status: "idle"; summary: string }
@@ -77,6 +78,7 @@ export function coreTaskSubmitReadiness(
   runtime: RuntimeSupervisorState,
   identities: IdentityEnvironmentProjection[],
 ): SubmitReadiness {
+  if (isBossProductionTask(task)) return { ok: false, reason: bossProductionDeferredReason };
   const core = runtimeService(runtime, "core");
   const harbor = runtimeService(runtime, "harbor");
   const spec = coreReadTaskSpecs.find((item) => item.taskId === task.id && item.mode === "read");
@@ -250,6 +252,7 @@ export function readOnlyIdentityAdmissionBlockReason(
   identity: IdentityEnvironmentProjection,
   taskId: string,
 ) {
+  if (taskId.startsWith("task-boss-")) return bossProductionDeferredReason;
   if (identity.source !== "Harbor live") {
     return "缺少 Harbor live identity；fixture/local identity 只能管理或认证，不能启动真实 Core task。";
   }

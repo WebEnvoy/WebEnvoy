@@ -16,6 +16,7 @@ import {
   skillLaunchState,
 } from "./skillCompatibilityPresentation";
 import { actionLabel, categoryLabel, displaySummary, skillStatusLabel } from "./siteSkillPresentation";
+import { bossProductionDeferredReason, isBossProductionSkill } from "./productionTaskPolicy";
 
 export type SiteSkillDirectoryProps = {
   catalog: LodeCatalogLoadState;
@@ -187,20 +188,21 @@ function SiteSkillRow({
   const defaultIdentity = candidates.find((identity) => isCandidateUsable(compatibilityCandidate(identity, compatibility))) ?? candidates[0];
   const candidate = compatibilityCandidate(defaultIdentity, compatibility);
   const launch = skillLaunchState(skill, defaultIdentity, candidate, compatibility, runtimeSupervisorState, catalog.status);
+  const bossDeferred = isBossProductionSkill(skill);
   return (
     <div className="production-skill-row">
       <button ref={mainButtonRef} className="production-skill-row-main" type="button" onClick={onOpen}>
         <span className="production-skill-icon"><Globe2 size={17} /></span>
         <span>
-          <strong>{catalogSkillName(skill)}</strong><small>{displaySummary(skill)}</small>
+          <strong>{catalogSkillName(skill)}</strong><small>{bossDeferred ? bossProductionDeferredReason : displaySummary(skill)}</small>
           <span className="production-skill-tags">
             <em>{categoryLabel(skill.category)}</em>{skill.actions.map((action) => <em key={action.id}>{actionLabel(action.category)}</em>)}
           </span>
         </span>
       </button>
       <div className="production-skill-row-actions">
-        <span className={skill.availability === "available" ? "skill-status available" : "skill-status warning"}>
-          {skill.availability === "available" ? <CircleCheck size={13} /> : <CircleAlert size={13} />}{skillStatusLabel(skill)}
+        <span className={!bossDeferred && skill.availability === "available" ? "skill-status available" : "skill-status warning"}>
+          {!bossDeferred && skill.availability === "available" ? <CircleCheck size={13} /> : <CircleAlert size={13} />}{bossDeferred ? "功能延期" : skillStatusLabel(skill)}
         </span>
         <button className="production-primary-button compact" type="button" disabled={!launch.ok} title={launch.reason} onClick={() => onUse(skill, defaultIdentity?.id)}>
           去使用

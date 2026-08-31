@@ -13,6 +13,7 @@ import type { LodeCatalogSkill } from "./lodeCatalogClient";
 import type { RuntimeSupervisorState } from "./runtimeSupervisorState";
 import { StructuredTaskComposer } from "./StructuredTaskComposer";
 import type { TaskProjection } from "./taskThreadFixtures";
+import { bossProductionDeferredReason, isBossProductionSkill, isBossProductionTask } from "./productionTaskPolicy";
 
 export function TaskThreadComposer({
   coreEndpoint,
@@ -50,6 +51,9 @@ export function TaskThreadComposer({
       current.status === "ready" && unknownAttempt == null && ownerUnavailable ? current : initialTaskThreadSubmitState,
     );
   }, [selectedTask.id, unknownAttempt?.idempotencyKey, ownerUnavailable]);
+  if (isBossProductionTask(selectedTask) || skill != null && isBossProductionSkill(skill)) {
+    return <div className="thread-composer composer-owner-state" role="status"><CircleAlert size={15} /><span>{bossProductionDeferredReason}</span></div>;
+  }
   if (ownerUnavailable) {
     async function recover(action: "reconcile" | "terminate") {
       const request = ++recoveryRequest.current;

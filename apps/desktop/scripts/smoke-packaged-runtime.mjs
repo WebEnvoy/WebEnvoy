@@ -40,6 +40,9 @@ try {
     throw new Error("Packaged runtime smoke failed: renderer did not consume Core /threads.");
   }
   if (
+    !result.packagedBossDeferred?.uiDisabled ||
+    !result.packagedBossDeferred?.deferredCopyVisible ||
+    result.packagedBossDeferred.bossSkillCount < 1 ||
     !result.packagedTaskBoundary?.lodeActionDeclared ||
     result.packagedTaskBoundary.effectivePolicyStatus !== 200 ||
     !result.packagedTaskBoundary.effectivePolicyReady ||
@@ -68,6 +71,7 @@ try {
       `Harbor pid: ${harbor.pid}`,
       "Core /threads: ready",
       "Packaged Lode action + Core policy + first-turn boundary: verified fail-closed before Harbor session creation",
+      "BOSS production skill entries: visibly deferred and disabled",
       "Production viewport: 720px without horizontal overflow",
       `Lode asset source: ${result.runtimeSupervisorState.lodeAssets.source}`,
       `Screenshot: ${screenshotPath}`,

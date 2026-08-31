@@ -14,6 +14,7 @@ import {
 } from "./skillCompatibilityPresentation";
 import { actionLabel, categoryLabel, displaySummary, outputLabel, resultViewLabel, skillStatusLabel } from "./siteSkillPresentation";
 import type { SiteSkillRecoveryRequest } from "./siteSkillRecovery";
+import { bossProductionDeferredReason, isBossProductionSkill } from "./productionTaskPolicy";
 
 export type SiteSkillDetailProps = {
   catalogStatus: LodeCatalogLoadState["status"];
@@ -40,6 +41,7 @@ export function SiteSkillDetail(props: SiteSkillDetailProps) {
   const candidate = compatibilityCandidate(selectedIdentity, compatibility);
   const recovery = compatibilityRecoveryCopy(candidate);
   const launch = skillLaunchState(skill, selectedIdentity, candidate, compatibility, props.runtimeSupervisorState, props.catalogStatus);
+  const bossDeferred = isBossProductionSkill(skill);
 
   useEffect(() => backRef.current?.focus(), []);
   useEffect(() => {
@@ -76,8 +78,8 @@ export function SiteSkillDetail(props: SiteSkillDetailProps) {
     <div className="production-library-page production-skill-detail">
       <button ref={backRef} className="production-back-link" type="button" onClick={props.onBack}><ArrowLeft size={14} />返回站点技能</button>
       <SkillDetailHeader skill={skill} selectedIdentityId={selectedIdentityId} launch={launch} onUse={props.onUse} />
-      {skill.availability !== "available" ? (
-        <div className="library-source-notice warning" role="status"><CircleAlert size={15} /><span>{skill.availabilityReason}</span></div>
+      {bossDeferred || skill.availability !== "available" ? (
+        <div className="library-source-notice warning" role="status"><CircleAlert size={15} /><span>{bossDeferred ? bossProductionDeferredReason : skill.availabilityReason}</span></div>
       ) : null}
       <SkillContractOverview skill={skill} />
       <CompatibleIdentities

@@ -28,6 +28,8 @@ import { TaskThreadRightPanel } from "../../src/renderer/TaskThreadRightPanel";
 import type { ThreadNavigationItem } from "../../src/renderer/ThreadNavigationRail";
 import type { TaskPreviewSelection } from "../../src/renderer/useAppTasks";
 import { WorkbenchSidebar } from "../../src/renderer/WorkbenchSidebar";
+import { taskThreadFixtures } from "../../src/renderer/taskThreadFixtures";
+import { bossProductionDeferredReason } from "../../src/renderer/productionTaskPolicy";
 import "../../src/renderer/uiFoundation.css";
 import "../../src/renderer/styles.css";
 import "../../src/renderer/workbench.css";
@@ -181,7 +183,9 @@ const ownerPayload = {
           updated_at: `2026-07-20T${hour}:01:00Z`,
           terminal_at: `2026-07-20T${hour}:01:00Z`,
           submission_state: "accepted",
-          status: "completed",
+          failure_code: "site_access_restricted",
+          status: "failed",
+          run_status: "failed",
         };
       }),
     },
@@ -801,6 +805,9 @@ async function runDesktopChecks() {
       && appShell.dataset.rightPanelOpen === "false",
     "Task B did not restore its closed right-panel state.",
   );
+  assert(document.body.textContent?.includes("历史失败 · 来源 Core live · 失败类别 site_access_restricted · 时间"),
+    "BOSS Core live historical failure lost provenance, time, or failure category.");
+  await checkBossLiveConfirmationDeferred();
   assertThreadContentGeometry(true);
   taskButton(taskAId)?.click();
   await waitFor(
@@ -816,6 +823,7 @@ async function runDesktopChecks() {
   );
   taskButton(taskAId)?.click();
   await waitFor(() => Boolean(previewButton()), "Task A did not restore after the empty thread check.");
+  await checkBossFixtureResultDeferred();
 
   return {
     emptyThreadOpenState: true,
@@ -827,6 +835,81 @@ async function runDesktopChecks() {
     reducedMotion: true,
     singleActionDecision: true,
   };
+}
+
+async function checkBossFixtureResultDeferred() {
+  const task = taskThreadFixtures.find((candidate) => candidate.id === "task-boss-real-read");
+  const run = task?.runs[0];
+  assert(task && run, "BOSS fixture task is missing.");
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  root.render(
+    <>
+      <TaskThreadPage
+        coreEndpoint={coreEndpoint}
+        navigationItems={task.runs.map((candidate) => ({ id: candidate.id, hasOutput: false, getLabel: () => "功能延期", getPreview: () => ({ response: bossProductionDeferredReason, outputs: [] }) }))}
+        selectedRun={run}
+        selectedTask={task}
+        skills={resultSkills}
+        onActiveRunChange={() => {}}
+        onOpenPreview={() => { throw new Error("BOSS fixture result exposed preview"); }}
+      />
+      <TaskThreadRightPanel
+        coreEndpoint={coreEndpoint}
+        coreReadState={retainedState}
+        coreSubmitState={initialCoreTaskSubmitState}
+        runtimeSupervisorState={runtimeState}
+        previewSelection={{ runId: run.id, tab: "result" }}
+        selectedRun={run}
+        selectedTask={task}
+        skills={resultSkills}
+        shellDiagnostics={{ colorScheme: "light", configScope: "local-ui-only", platform: "darwin" }}
+      />
+    </>,
+  );
+  await nextFrame();
+  assert(container.textContent?.includes(bossProductionDeferredReason), "BOSS fixture result did not render the deferred state.");
+  assert(container.querySelector("[data-workbench-open-right]") == null && !container.textContent?.includes("正在执行") && !container.textContent?.includes("已处理"),
+    "BOSS fixture/fallback result was presented as live or previewable.");
+  root.unmount();
+  container.remove();
+}
+
+async function checkBossLiveConfirmationDeferred() {
+  const task = tasks.find((candidate) => candidate.id === taskBId);
+  const sourceRun = task?.runs[0];
+  assert(task && sourceRun, "BOSS Core live task is missing.");
+  const run = {
+    ...sourceRun,
+    turnStatus: "waiting_for_user" as const,
+    authorizationDecisionRefs: [authorizationDecisionRef],
+  };
+  const deferredTask = { ...task, runs: [run] };
+  const authorizationRequestsBeforeRender = authorizationRequests.filter((request) => request.path.includes("/authorization-decisions/")).length;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  root.render(
+    <TaskThreadPage
+      coreEndpoint={coreEndpoint}
+      navigationItems={[{ id: run.id, hasOutput: false, getLabel: () => "功能延期", getPreview: () => ({ response: bossProductionDeferredReason, outputs: [] }) }]}
+      selectedRun={run}
+      selectedTask={deferredTask}
+      skills={resultSkills}
+      onActiveRunChange={() => {}}
+      onOpenPreview={() => { throw new Error("BOSS deferred confirmation exposed preview"); }}
+    />,
+  );
+  await nextFrame();
+  assert(container.querySelector(".single-action-confirmation") == null && !container.textContent?.includes("允许这一次"),
+    "BOSS Core live waiting-for-user run exposed a single-action decision.");
+  assert(container.textContent?.includes("功能延期") && !container.textContent?.includes("等待本次决定") && !container.textContent?.includes("已处理"),
+    "BOSS Core live waiting-for-user run exposed actionable or completed copy.");
+  assert(authorizationRequests.filter((request) => request.path.includes("/authorization-decisions/")).length === authorizationRequestsBeforeRender,
+    "BOSS Core live waiting-for-user run fetched or submitted an authorization decision.");
+  root.unmount();
+  container.remove();
 }
 
 function resultModel(run: (typeof tasks)[number]["runs"][number], expected: string, data: Record<string, unknown>, resultKind: string) {

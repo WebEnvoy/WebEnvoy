@@ -18,6 +18,7 @@ import {
   bossSkill, catalog, detailSkill, identity, identityB, installLibraryShellMock, libraryOwnerRequests,
   protectedDrafts, runtime, setProtectedDraftDeleteStatus, setProtectedDraftSaveDelay, xhsSkill,
 } from "./library-harness-fixtures";
+import { bossProductionDeferredReason } from "../../src/renderer/productionTaskPolicy";
 import "../../src/renderer/uiFoundation.css";
 import "../../src/renderer/styles.css";
 import "../../src/renderer/workbench.css";
@@ -103,6 +104,7 @@ function Harness() {
       {submittedTask == null ? null : <button hidden data-hide-thread-identity type="button" onClick={() => setThreadIdentityAvailable(false)}>隐藏账号身份</button>}
       {submittedTask == null ? null : <button hidden data-show-thread-identity type="button" onClick={() => setThreadIdentityAvailable(true)}>恢复账号身份</button>}
       {createSelection != null ? <button type="button" data-library-switch onClick={() => setCreateSelection(null)}>切换技能</button> : null}
+      <button hidden type="button" data-force-boss-selection onClick={() => setCreateSelection({ skill: bossSkill, identityId: identity.id })}>强制 BOSS 选择</button>
       {createSelection != null ? <button type="button" data-catalog-refresh onClick={() => setCreateSelection((current) => current == null ? null : ({ ...current, skill: { ...current.skill, summary: `${current.skill.summary} refreshed` } }))}>刷新目录</button> : null}
       <output data-library-selection="">{selection}</output>
     </main>
@@ -460,16 +462,34 @@ function assertNoHorizontalOverflow(label: string) {
 async function checkDirectory(mode: "desktop" | "narrow" | "stale") {
   const bodyText = document.body.textContent ?? "";
   const xhsRow = Array.from(document.querySelectorAll<HTMLButtonElement>(".production-skill-row-main")).find((button) => button.textContent?.includes(xhsSkill.name));
+  const bossRow = Array.from(document.querySelectorAll<HTMLButtonElement>(".production-skill-row-main")).find((button) => button.textContent?.includes(bossSkill.name));
   const bossUse = skillUseButton(bossSkill.name);
   const xhsUse = skillUseButton(xhsSkill.name);
   const categoryCount = Array.from(document.querySelectorAll(".production-library-filters button")).filter((button) => button.textContent === xhsSkill.category).length;
   const searchHeight = document.querySelector(".production-library-search")?.getBoundingClientRect().height ?? 0;
   await runLibraryContractSmoke({ catalog, detailSkill, identityEnvironmentRef: identity.identityEnvironmentRef, protectedDrafts, xhsSkill });
-  if (!bodyText.includes("发现站点技能") || bodyText.includes("示例技能") || xhsRow == null || bossUse?.disabled !== true ||
+  bossRow?.click();
+  await twoFrames();
+  const bossDetailUse = document.querySelector<HTMLButtonElement>(".skill-detail-heading .production-primary-button");
+  const bossDetailBlocked = document.body.textContent?.includes(bossProductionDeferredReason) === true &&
+    bossDetailUse?.disabled === true && bossDetailUse.title === bossProductionDeferredReason;
+  document.querySelector<HTMLButtonElement>(".production-back-link")?.click();
+  await twoFrames();
+  const ownerRequestsBeforeBypass = libraryOwnerRequests.length;
+  document.querySelector<HTMLButtonElement>("[data-force-boss-selection]")?.click();
+  await twoFrames();
+  const bypassBlocked = document.querySelector(".owner-state")?.textContent?.includes(bossProductionDeferredReason) === true &&
+    document.querySelector(".create-task-submit") == null && libraryOwnerRequests.length === ownerRequestsBeforeBypass;
+  document.querySelector<HTMLButtonElement>("[data-library-switch]")?.click();
+  await twoFrames();
+  if (!bodyText.includes("发现站点技能") || bodyText.includes("示例技能") || !bodyText.includes(bossProductionDeferredReason) ||
+    xhsRow == null || bossRow == null || bossUse?.disabled !== true || bossUse.title !== bossProductionDeferredReason || !bossDetailBlocked || !bypassBlocked ||
     mode === "stale" && xhsUse?.disabled !== true || categoryCount !== 1 || mode === "narrow" && searchHeight > 50) {
     throw new Error("Library directory did not render owner skills or fail closed.");
   }
-  return { searchHeight, xhsRow };
+  const currentXhsRow = Array.from(document.querySelectorAll<HTMLButtonElement>(".production-skill-row-main")).find((button) => button.textContent?.includes(xhsSkill.name));
+  if (currentXhsRow == null) throw new Error("Library directory did not recover after the BOSS bypass check.");
+  return { searchHeight, xhsRow: currentXhsRow };
 }
 
 function checkSkillDetail() {
