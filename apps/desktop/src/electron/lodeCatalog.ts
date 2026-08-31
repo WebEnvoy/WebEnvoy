@@ -299,6 +299,7 @@ function projectCatalogSkillMetadata(entry: Record<string, unknown>, assets: Cat
   const latestVersion = optionalString(version.latest) ?? currentVersion;
   const lifecycle = requiredString(version.lifecycle, `${packageRef} catalog lifecycle`);
   const lockRef = requiredString(catalog.lock_ref, `${packageRef} catalog lock_ref`);
+  const lockVersion = lockRef.slice(lockRef.lastIndexOf("@") + 1);
   const inputSchemaId = optionalString(inputSchema.$id) ?? "";
   const outputSchemaId = optionalString(outputSchema.$id) ?? "";
   const capabilityId = requiredString(manifestCapability.capability_id, `${packageRef} manifest capability id`);
@@ -321,7 +322,7 @@ function projectCatalogSkillMetadata(entry: Record<string, unknown>, assets: Cat
     requiredString(catalog.package_ref, `${packageRef} catalog package_ref`) !== packageRef ||
     requiredString(packageLock.package_ref, `${packageRef} package lock package_ref`) !== packageRef ||
     requiredString(packageLock.lock_ref, `${packageRef} package lock lock_ref`) !== lockRef ||
-    requiredString(packageLock.lock_version, `${packageRef} package lock lock_version`) !== currentVersion ||
+    requiredString(packageLock.lock_version, `${packageRef} package lock lock_version`) !== lockVersion ||
     requiredString(packageLock.package_version, `${packageRef} package lock version`) !== currentVersion ||
     requiredString(packageLock.capability_id, `${packageRef} package lock capability id`) !== capabilityId ||
     requiredString(packageLock.operation_id, `${packageRef} package lock operation id`) !== operationId ||

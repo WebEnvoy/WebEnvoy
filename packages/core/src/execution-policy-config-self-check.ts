@@ -89,6 +89,10 @@ export async function assertExecutionPolicyConfigStore(): Promise<void> {
     assert.equal((await store.getThreadRevision(threadRef, 2))?.source_version, "1");
     const beforeThread = await store.resolveSources({ skill_ref: skillRef, thread_ref: threadRef, turn_sequence: 1 });
     assert.equal(resolveCurrentExecutionPolicy({ context: { skill_ref: skillRef, thread_ref: threadRef, turn_sequence: 1 }, policies: beforeThread }, "read")?.source, "installed_skill_user_version");
+    const liveEvaluationInput = authorizationEvaluationInput();
+    liveEvaluationInput.context = { skill_ref: skillRef, thread_ref: threadRef, turn_sequence: 1 };
+    liveEvaluationInput.policies = beforeThread;
+    assert.equal(evaluateExecutionPolicy(liveEvaluationInput).status, "evaluated");
     const afterThread = await store.resolveSources({ skill_ref: skillRef, thread_ref: threadRef, turn_sequence: 2 });
     assert.equal(resolveCurrentExecutionPolicy({ context: { skill_ref: skillRef, thread_ref: threadRef, turn_sequence: 2 }, policies: afterThread }, "read")?.mode, "deny");
 

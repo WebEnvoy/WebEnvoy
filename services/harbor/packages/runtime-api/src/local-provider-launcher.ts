@@ -232,7 +232,7 @@ async function probeProviderWritePrecheck(
       return {
         ...validation,
         observed_at: new Date(observedAt).toISOString(),
-        evidence_ref_kinds: [{ kind: "snapshot_ref", ref: screenshot.screenshot_ref }]
+        evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }]
       };
     }, AbortSignal.timeout(3000));
   } catch {
@@ -494,12 +494,12 @@ export async function waitForXiaohongshuSiteResourceReadiness(
 
 function isPendingXiaohongshuInitialization(observation: ReadProbeObservation | undefined): boolean {
   return observation?.origin === "https://www.xiaohongshu.com" &&
-    observation.ready === true &&
     observation.login_like === false &&
     observation.challenge_like === false &&
+    typeof observation.ready === "boolean" &&
     typeof observation.vue_ready === "boolean" &&
     typeof observation.pinia_ready === "boolean" &&
-    (!observation.vue_ready || !observation.pinia_ready);
+    (!observation.ready || !observation.vue_ready || !observation.pinia_ready);
 }
 
 export function xiaohongshuSiteResourceProbeExpression(): string {

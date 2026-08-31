@@ -59,7 +59,7 @@ function validateSchemaNode(
     !validOptionalInteger(node.minLength) || !validOptionalInteger(node.maxLength) || !validOptionalInteger(node.minItems) ||
     typeof node.pattern === "string" && !isSafeCatalogPattern(node.pattern)) return false;
   if (!validLiteral(node.const) || !validLiteral(node.default) || !validEnum(node.enum) || !validExamples(node.examples)) return false;
-  if (!validReference(node.$ref, definitions) || !validRequired(node.required, node.properties)) return false;
+  if (!validReference(node.$ref, definitions) || !validRequired(node.required)) return false;
   if (!validateSchemaMap(node.properties, definitions, budget, depth) ||
     !validateSchemaMap(node.$defs, definitions, budget, depth) ||
     !validateSchemaChild(node.items, definitions, budget, depth) ||
@@ -108,11 +108,11 @@ function validReference(value: unknown, definitions: Record<string, unknown>) {
   return match != null && Object.hasOwn(definitions, match[1]!);
 }
 
-function validRequired(value: unknown, properties: unknown) {
+function validRequired(value: unknown) {
   if (value === undefined) return true;
   const required = strictStringArray(value);
   if (required == null || required.length === 0 || required.length > maxSchemaMapEntries || new Set(required).size !== required.length) return false;
-  return !isRecord(properties) || required.every((key) => Object.hasOwn(properties, key));
+  return true;
 }
 
 function validType(value: unknown) {

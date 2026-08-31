@@ -704,6 +704,7 @@ if (!coreLodeEnv.WEBENVOY_LODE_ASSETS_PATH || !coreLodeEnv.WEBENVOY_LODE_REGISTR
 
 const lodeCatalog = lodeCatalogModule.readLodeCatalog(lodeBundle);
 const xhsSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/search-notes@"));
+const xhsPublishPrecheckSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-precheck@"));
 const bossSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/boss/job-search@"));
 if (
   lodeCatalog.status !== "ready" ||
@@ -719,6 +720,10 @@ if (
   !xhsSearchSkill.inputFields.some((field) =>
     field.id === "keyword" && field.label === "keyword" && field.required && field.minLength === 1 && field.maxLength === 80
   ) ||
+  xhsPublishPrecheckSkill?.availability !== "available" ||
+  xhsPublishPrecheckSkill.lockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
+  xhsPublishPrecheckSkill.actions[0]?.category !== "prepare" ||
+  xhsPublishPrecheckSkill.actions[0]?.operationMode !== "validate_only" ||
   bossSearchSkill?.availability !== "incompatible" ||
   !bossSearchSkill.availabilityReason.includes("动作声明")
 ) {

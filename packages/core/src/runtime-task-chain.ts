@@ -163,7 +163,7 @@ const lodeRuntimeAdmissionAssetPaths = [
   "registry/detail-runtime-consumption.json",
   "registry/validate-only-runtime-consumption.json"
 ] as const;
-// WebEnvoy/Lode@1fbef74b4bf1b4f0a86aacd885386d7a62181207.
+// WebEnvoy/Lode@6bff1afd059a30571f8ed219d1dcd25e6fb20c6b.
 const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
   "registry/detail-runtime-consumption.json": "ad17f4400ef745b1ebdb4cb46b2f4b50f274ee5ef3cfd5074e5980915a27a1a0",
   "registry/validate-only-runtime-consumption.json": "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
@@ -962,7 +962,7 @@ const xhsWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-n
 const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
 const xhsWritePrecheckInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0";
 const xhsWritePrecheckOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0";
-const xhsWritePrecheckLodeCommit = "1fbef74b4bf1b4f0a86aacd885386d7a62181207";
+const xhsWritePrecheckLodeCommit = "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b";
 const xhsWritePrecheckLodeAssetSha256 = "c62ba191357e0056b03523a46c0bb26424c916333f388898a4cc457f9c1cc6fc";
 const xhsWritePrecheckLodeSemanticSha256 = "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0";
 

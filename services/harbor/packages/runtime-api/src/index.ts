@@ -1177,7 +1177,7 @@ export class HarborRuntime {
   ): Promise<ValidateOnlyWritePrecheckResult> {
     const admitted = admitXhsPublishPrecheck(input);
     if (!admitted) return unavailableWritePrecheck(runtime_session_ref, "invalid_contract", false);
-    const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url);
+    const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
     if (before) return unavailableWritePrecheck(runtime_session_ref, before, before !== "safety_challenge");
     const session = this.runtimeSessions.getRecord(runtime_session_ref)!;
     const controlGeneration = session.control_generation;
@@ -1198,7 +1198,7 @@ export class HarborRuntime {
       current.facts.control_lock.holder_ref !== holderRef ||
       current.facts.identity_environment_ref !== identityRef
     ) return unavailableWritePrecheck(runtime_session_ref, "session_user_controlled", false);
-    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url);
+    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
     if (after) return unavailableWritePrecheck(runtime_session_ref, after, after !== "safety_challenge");
     if (!validCompletedWritePrecheckProbe(probe)) {
       return unavailableWritePrecheck(runtime_session_ref, "evidence_unavailable");
@@ -1210,7 +1210,8 @@ export class HarborRuntime {
 
   private writePrecheckSessionFailure(
     runtime_session_ref: string,
-    url: string
+    url: string,
+    holderRef?: string
   ): WritePrecheckFailureClass | null {
     const session = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!session) return "session_missing";
@@ -1229,7 +1230,7 @@ export class HarborRuntime {
       identity.login_state.recovery_required ||
       identity.browser_storage.state !== "present"
     ) return "login_required";
-    if (!hasStableReadOperationController(session)) return "session_user_controlled";
+    if (!hasStableReadOperationController(session, holderRef)) return "session_user_controlled";
     return isChallengeLike(session.facts.current_page.current_url, session.facts.current_page.title)
       ? "safety_challenge"
       : null;
@@ -1406,7 +1407,8 @@ function hasStableReadOperationController(session: RuntimeSessionRecord, holderR
     session.facts.control_lock.state === "held" &&
     session.facts.control_lock.owner === session.facts.control_owner &&
     Boolean(session.facts.control_lock.holder_ref) &&
-    (session.facts.lifecycle_state !== "locked" || holderRef === session.facts.control_lock.holder_ref) &&
+    (holderRef === undefined || holderRef === session.facts.control_lock.holder_ref) &&
+    (session.facts.lifecycle_state !== "locked" || holderRef !== undefined) &&
     isRuntimeSessionReadable(session.facts);
 }
 

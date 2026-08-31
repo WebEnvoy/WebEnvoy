@@ -163,7 +163,7 @@ function completedWritePrecheckOperation(input: {
       operation_mode: "validate_only",
       origin: "https://creator.xiaohongshu.com",
       repository: "WebEnvoy/Lode",
-      commit: "1fbef74b4bf1b4f0a86aacd885386d7a62181207",
+      commit: "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b",
       asset_path: "registry/validate-only-runtime-consumption.json",
       asset_sha256: "c62ba191357e0056b03523a46c0bb26424c916333f388898a4cc457f9c1cc6fc",
       asset_semantic_sha256: "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
