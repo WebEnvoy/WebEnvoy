@@ -13,6 +13,8 @@
       "idempotency_key": "app-submit-001",
       "run_id": "run_thread_fixture_001",
       "creation_channel": "app",
+      "package_ref": "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+      "input_schema_ref": "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
       "input": {
         "schema_version": "webenvoy.task-turn-input.v0",
         "fields": [

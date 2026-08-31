@@ -12,6 +12,8 @@ type CoreThreadTurn = {
   idempotency_key: string;
   run_id: string;
   creation_channel: "api" | "cli" | "mcp" | "sdk" | "app";
+  package_ref?: string;
+  input_schema_ref?: string;
   input: CoreThreadInputSnapshot;
   created_at: string;
   updated_at: string;
@@ -255,6 +257,9 @@ function projectCoreTurn(turn: CoreThreadTurn): RunProjection {
     updatedAt: turn.updated_at,
     terminalAt: turn.terminal_at ?? turn.terminated_at,
     businessInput: cloneInputSnapshot(turn.input),
+    ...(turn.package_ref === undefined || turn.input_schema_ref === undefined
+      ? {}
+      : { inputDefinition: { packageRef: turn.package_ref, inputSchemaRef: turn.input_schema_ref } }),
     ...(turn.authorization_decision_refs == null ? {} : { authorizationDecisionRefs: [...turn.authorization_decision_refs] }),
   };
 }
@@ -383,7 +388,10 @@ function parseCoreTurn(value: unknown): CoreThreadTurn | null {
   if (turn.submission_error !== undefined && submissionError == null) return null;
   if (turn.input_gaps !== undefined && inputGaps == null) return null;
   if (turn.authorization_decision_refs !== undefined && authorizationDecisionRefs == null) return null;
+  if ((turn.package_ref === undefined) !== (turn.input_schema_ref === undefined)) return null;
   if (
+    !isOptionalPackageRef(turn.package_ref) ||
+    !isOptionalBoundedText(turn.input_schema_ref, 2048) ||
     !isOptionalString(turn.failure_code) ||
     !isOptionalDateTime(turn.terminal_at) ||
     !isOptionalDateTime(turn.terminated_at)
@@ -433,7 +441,7 @@ const threadKeys = new Set([
 ]);
 const turnKeys = new Set([
   "turn_id", "sequence", "idempotency_key", "run_id", "creation_channel", "input", "created_at", "updated_at",
-  "submission_state", "failure_code", "submission_error", "terminated_at", "terminal_at", "status", "run_status", "input_gaps", "authorization_decision_refs",
+  "package_ref", "input_schema_ref", "submission_state", "failure_code", "submission_error", "terminated_at", "terminal_at", "status", "run_status", "input_gaps", "authorization_decision_refs",
 ]);
 const submissionErrorKeys = new Set(["category", "code", "phase", "recovery_hint"]);
 const inputGapKeys = new Set(["location", "code", "recovery_action"]);
@@ -447,6 +455,15 @@ function isBoundedText(value: unknown, maximum: number): value is string {
 
 function isOptionalString(value: unknown): value is string | undefined {
   return value === undefined || isString(value);
+}
+
+function isOptionalBoundedText(value: unknown, maximum: number): value is string | undefined {
+  return value === undefined || isBoundedText(value, maximum);
+}
+
+function isOptionalPackageRef(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string" &&
+    /^lode:\/\/site-capability\/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
 }
 
 function isThreadId(value: unknown): value is string {

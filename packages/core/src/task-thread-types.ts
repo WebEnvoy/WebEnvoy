@@ -29,6 +29,8 @@ export type TaskTurnRecord = {
   request_hash: string;
   run_id: string;
   creation_channel: "api" | "cli" | "mcp" | "sdk" | "app";
+  package_ref?: string;
+  input_schema_ref?: string;
   input: TaskTurnInputSnapshot;
   created_at: string;
   updated_at: string;

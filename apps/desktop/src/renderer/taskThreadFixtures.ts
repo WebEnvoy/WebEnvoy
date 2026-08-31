@@ -111,6 +111,10 @@ export type RunProjection = {
   updatedAt?: string;
   terminalAt?: string;
   businessInput?: CoreThreadInputSnapshot;
+  inputDefinition?: {
+    packageRef: string;
+    inputSchemaRef: string;
+  };
   authorizationDecisionRefs?: string[];
 };
 

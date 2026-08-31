@@ -222,9 +222,8 @@ async function assertResolverRaceReplay(
   await started;
   const reserved = await successStore.reserveTaskTurn(thread.thread.thread_id, input);
   releaseFailure();
-  const replayed = await racingReplay;
-  assert.equal(replayed.replayed, true);
-  assert.equal(replayed.turn.turn_id, reserved.turn.turn_id);
+  await assert.rejects(racingReplay, /lode_input_policy_unavailable/);
+  assert.equal((await successStore.getTaskThread(thread.thread.thread_id))?.turns[0]?.turn_id, reserved.turn.turn_id);
 }
 
 async function assertOwnerCheckTimeoutBound(directory: string, runStore: FileRunRecordStore): Promise<void> {

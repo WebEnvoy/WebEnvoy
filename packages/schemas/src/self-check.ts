@@ -133,6 +133,16 @@ const validateTaskThread = ajv.getSchema(taskThreadSchemaId);
 assert(validateTaskThread, `${taskThreadSchemaFile} must compile as Draft 2020-12 JSON Schema`);
 const taskThreadFixture = await readJson(join(fixtureDir, "task-thread.fixture.json"));
 delete taskThreadFixture.$schema;
+const legacyDefinitionTaskThread = structuredClone(taskThreadFixture);
+const legacyDefinitionTurn = asObject((legacyDefinitionTaskThread.turns as unknown[])[0], "legacy task thread turn");
+delete legacyDefinitionTurn.package_ref;
+delete legacyDefinitionTurn.input_schema_ref;
+assertValid(validateTaskThread, legacyDefinitionTaskThread, "legacy task thread without definition refs");
+for (const missingRef of ["package_ref", "input_schema_ref"] as const) {
+  const partialDefinitionTaskThread = structuredClone(taskThreadFixture);
+  delete asObject((partialDefinitionTaskThread.turns as unknown[])[0], "partial task thread turn")[missingRef];
+  assert.equal(validateTaskThread(partialDefinitionTaskThread), false, `task thread must reject a lone ${missingRef}`);
+}
 const legacyTaskThread = structuredClone(taskThreadFixture);
 legacyTaskThread.identity_environment_ref = "identity-env:xhs-brand";
 assertValid(validateTaskThread, legacyTaskThread, "legacy task thread identity ref");

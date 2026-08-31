@@ -15,7 +15,10 @@ import {
   type TaskTurnInputField,
   type TaskTurnInputSnapshot
 } from "./task-turn-input.js";
-import { validateTaskTurnInputAgainstPolicy } from "./task-turn-input-policy.js";
+import {
+  validateTaskTurnInputAgainstPolicy,
+  type TaskTurnInputPolicy
+} from "./task-turn-input-policy.js";
 import {
   taskThreadSchemaVersion,
   taskThreadStoreSchemaVersion,
@@ -137,6 +140,13 @@ function assertThread(thread: TaskThreadRecord): void {
     }
     if (turn.submission_ok !== undefined && typeof turn.submission_ok !== "boolean") {
       throw new TaskThreadStoreError("submission_ok_invalid");
+    }
+    if ((turn.package_ref === undefined) !== (turn.input_schema_ref === undefined)) {
+      throw new TaskThreadStoreError("turn_definition_refs_invalid");
+    }
+    if (turn.package_ref !== undefined) {
+      requireThreadBindingRef(turn.package_ref, "package_ref", packageRefPattern);
+      requireText(turn.input_schema_ref, "input_schema_ref", 2048);
     }
     validatePersistedTaskTurnInputSnapshot(turn.input);
     if (turnIds.has(turn.turn_id)) throw new TaskThreadStoreError("turn_id_duplicate");
@@ -297,6 +307,32 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
   ): Promise<void> {
     const [gap] = await inputGaps(input, availability);
     if (gap) throw new TaskThreadStoreError(`${gap.code}:${gap.location}`);
+  }
+
+  async function resolveTurnInputPolicy(thread: TaskThreadRecord, packageRef: string): Promise<TaskTurnInputPolicy> {
+    if (!options.resolveInputPolicy) throw new TaskThreadStoreError("lode_input_policy_unavailable");
+    const policy = await options.resolveInputPolicy({
+      package_ref: packageRef,
+      capability_ref: thread.capability_ref
+    });
+    if (policy.package_ref !== packageRef || policy.capability_ref !== thread.capability_ref) {
+      throw new TaskThreadStoreError("input_capability_mismatch");
+    }
+    requireText(policy.input_schema_ref, "input_schema_ref", 2048);
+    return policy;
+  }
+
+  function assertReplayDefinition(
+    turn: TaskTurnRecord,
+    packageRef: string,
+    policy: TaskTurnInputPolicy
+  ): void {
+    if (turn.package_ref === undefined || turn.input_schema_ref === undefined) {
+      throw new TaskThreadStoreError("turn_definition_refs_unavailable");
+    }
+    if (turn.package_ref !== packageRef || turn.input_schema_ref !== policy.input_schema_ref) {
+      throw new TaskThreadStoreError("turn_definition_refs_mismatch");
+    }
   }
 
   async function turnState(turn: TaskTurnRecord): Promise<{
@@ -495,23 +531,17 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       if (!isValidRunId(runId)) throw new TaskThreadStoreError("run_id_invalid");
       const initial = await getRecord(threadId);
       if (!initial) throw new TaskThreadStoreError("thread_not_found");
+      const inputPolicy = await resolveTurnInputPolicy(initial, packageRef);
       const initialReplay = initial.turns.find((turn) => turn.idempotency_key === idempotencyKey);
       if (initialReplay) {
         if (initialReplay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
+        assertReplayDefinition(initialReplay, packageRef, inputPolicy);
         return reservationView(initial, initialReplay, true);
       }
       const shapeInput = validateTaskTurnInputSnapshot(input.input);
       const availability = new Map<string, Promise<boolean | undefined>>();
       let validatedInput: TaskTurnInputSnapshot;
       try {
-        if (!options.resolveInputPolicy) throw new TaskThreadStoreError("lode_input_policy_unavailable");
-        const inputPolicy = await options.resolveInputPolicy({
-          package_ref: packageRef,
-          capability_ref: initial.capability_ref
-        });
-        if (inputPolicy.package_ref !== packageRef || inputPolicy.capability_ref !== initial.capability_ref) {
-          throw new TaskThreadStoreError("input_capability_mismatch");
-        }
         validatedInput = validateTaskTurnInputAgainstPolicy(shapeInput, inputPolicy);
         await assertInputRefsAvailable(validatedInput, availability);
       } catch (error) {
@@ -519,6 +549,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         const replay = latest?.turns.find((turn) => turn.idempotency_key === idempotencyKey);
         if (latest && replay) {
           if (replay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
+          assertReplayDefinition(replay, packageRef, inputPolicy);
           return reservationView(latest, replay, true, undefined, availability);
         }
         throw error;
@@ -529,6 +560,7 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         const replay = thread.turns.find((turn) => turn.idempotency_key === idempotencyKey);
         if (replay) {
           if (replay.request_hash !== requestHash) throw new TaskThreadStoreError("idempotency_payload_mismatch");
+          assertReplayDefinition(replay, packageRef, inputPolicy);
           return { record: thread, turn: replay, replayed: true };
         }
         if (thread.turns.some((turn) => turn.run_id === runId)) {
@@ -548,6 +580,8 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
           request_hash: requestHash,
           run_id: runId,
           creation_channel: input.creation_channel,
+          package_ref: packageRef,
+          input_schema_ref: inputPolicy.input_schema_ref,
           input: validatedInput,
           created_at: now,
           updated_at: now,

@@ -13,7 +13,7 @@ export function TaskTurnBusinessInput({ input, skill }: {
       <div className="task-turn-business-input-heading">
         <FileText size={15} />
         <strong>{skill?.name ?? "业务输入"}</strong>
-        {skill == null ? <small title="历史回合未绑定精确字段定义版本">历史字段</small> : null}
+        {skill == null ? <small title="提交时的技能包或输入 Schema 当前不可精确解析">历史字段定义不可用</small> : null}
       </div>
       <dl>
         {input.fields.map((field) => {

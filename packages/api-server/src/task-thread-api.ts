@@ -109,7 +109,7 @@ function errorStatus(error: TaskThreadStoreError): number {
   if (error.code === "thread_lock_timeout" || error.code === "lode_input_policy_unavailable" || error.code.startsWith("owner_ref_check_unavailable:")) return 503;
   if (error.code === "input_schema_invalid" || error.code === "input_schema_ref_mismatch" || error.code === "input_package_not_found") return 422;
   if (error.code.startsWith("owner_ref_unavailable:")) return 409;
-  if (error.code === "thread_has_active_turn" || error.code === "idempotency_payload_mismatch" || error.code === "run_id_already_linked" || error.code === "turn_not_active" || error.code === "turn_run_still_active" || error.code === "input_capability_mismatch") return 409;
+  if (error.code === "thread_has_active_turn" || error.code === "idempotency_payload_mismatch" || error.code === "run_id_already_linked" || error.code === "turn_not_active" || error.code === "turn_run_still_active" || error.code === "input_capability_mismatch" || error.code === "turn_definition_refs_unavailable" || error.code === "turn_definition_refs_mismatch") return 409;
   return 400;
 }
 

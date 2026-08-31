@@ -54,6 +54,9 @@ const nestedSearchItems = nestedDetailRefs.map((detailRef, index) => ({
   interaction_metrics: { likes: String(2481 - index), comments: String(80 - index), collects: String(320 - index) },
 }));
 const resultSkills = [{
+  name: "搜索并读取笔记",
+  inputSchemaId: "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
+  inputFields: [{ id: "keyword", label: "关键词" }],
   outputKind: "collection",
   outputSchemaId: "lode://schema/site-capability/xiaohongshu/search-notes/output@0.1.0",
   packageRef: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
@@ -89,6 +92,8 @@ const ownerPayload = {
           idempotency_key: "owner-a-turn-1",
           run_id: "run-owner-a-completed",
           creation_channel: "api",
+          package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+          input_schema_ref: "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
           input: {
             schema_version: "webenvoy.task-turn-input.v0",
             fields: [{ field_id: "keyword", kind: "scalar", summary: "AI 工具" }],
@@ -711,11 +716,15 @@ async function runDesktopChecks() {
   assert(bossModel.kind === "collection" && bossModel.rows[0]?.cells.title === "AI 工程师",
     "A BOSS result was incorrectly routed through the Xiaohongshu search-card renderer.");
   assert(taskA.runs.some((run) => run.id === "run-owner-a-completed"), "Completed owner turn was not retained.");
+  assert(taskA.runs.find((run) => run.id === "run-owner-a-completed")?.inputDefinition?.inputSchemaRef ===
+    "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0", "Submit-time input definition refs were not retained.");
   assert(taskA.runs.some((run) => run.id === `runtime-blocked-${taskAId}`), "Active owner turn did not fail closed.");
   assert(!taskA.runs.some((run) => run.id === "run-owner-a-running"), "Active owner turn remained usable after runtime loss.");
   await waitFor(() => Boolean(document.querySelector(".thread-content .business-result-table")), "Collection business result did not render.");
   assert(document.body.textContent?.includes("让 AI 自动整理资料的 5 个方法") && document.body.textContent?.includes("一只产品汪"),
     "The task turn did not show actual Xiaohongshu search content.");
+  assert(document.body.textContent?.includes("关键词") && document.body.textContent?.includes("历史字段定义不可用"),
+    "Historical input cards did not distinguish exact and unavailable submit-time definitions.");
   await waitFor(
     () => Boolean(document.querySelector(".thread-content .business-result-message[aria-label='没有匹配数据']")),
     "Core empty_result did not render the business empty state.",
