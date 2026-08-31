@@ -108,7 +108,7 @@ Docs-only N/A 必须升级为真实 suite 的条件：新增 `package.json`、sc
 | --- | --- | --- |
 | `/Volumes/2T/dev/WebEnvoy/.github/ROADMAP.md` | 吸收 | 阶段二目标是最小统一协议；入口矩阵、真实写入、marketplace、hosted runtime 不进入本批实现。 |
 | `ROADMAP.md` | 吸收 | Core 服务组织级阶段二，先冻结 task/run/result/evidence/action request 基线。 |
-| `AGENTS.md` | 吸收 | API Server 一等入口、TypeScript/Node、JSON Schema、Loom 和许可证边界进入本 ADR/AGENTS 更新。 |
+| `AGENTS.md` | 吸收 | API Server 一等入口、TypeScript/Node、JSON Schema、GitHub-native 交付规则和许可证边界进入本 ADR/AGENTS 更新。 |
 | `docs/adr/0002-run-task-capability-model.md` | 吸收 | 复用 Core 任务路径、capability admission、resource matching 和 no-copy 边界。 |
 | `docs/adr/0003-result-envelope-and-run-record.md` | 吸收 | 复用 Result Envelope、Run Record、refs-only、failure taxonomy 和 raw evidence 禁线。 |
 | `docs/adr/0004-admission-and-action-risk.md` | 吸收 | 复用三道 admission gate、risk class、validate/draft/preview/true-write deferred 边界。 |

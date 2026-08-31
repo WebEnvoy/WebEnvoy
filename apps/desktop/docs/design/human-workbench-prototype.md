@@ -7,7 +7,7 @@ data and does not connect to Core, Harbor or Lode runtime services. It is an
 isolated Vite entry and does not change the production renderer entry.
 
 User approval is the product Gate. Build success, automated checks, a PR or a
-Loom review cannot replace that approval.
+GitHub review cannot replace that approval.
 
 ## Approved Baseline
 

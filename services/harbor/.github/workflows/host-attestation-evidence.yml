@@ -1,4 +1,4 @@
-name: loom-host-attestation-evidence
+name: WebEnvoy host attestation evidence
 
 on:
   pull_request_target:
@@ -50,12 +50,12 @@ jobs:
           HEAD_SHA: ${{ steps.target.outputs.head_sha }}
           BASE_REF: ${{ steps.target.outputs.base_ref }}
         run: |
-          printf '{"schema_version":"loom-host-attestation-evidence/v1","pr_number":%s,"head_sha":"%s","base_ref":"%s"}\n' "$PR_NUMBER" "$HEAD_SHA" "$BASE_REF" > "$RUNNER_TEMP/host-attestation.json"
+          printf '{"schema_version":"webenvoy-host-attestation-evidence/v1","pr_number":%s,"head_sha":"%s","base_ref":"%s"}\n' "$PR_NUMBER" "$HEAD_SHA" "$BASE_REF" > "$RUNNER_TEMP/host-attestation.json"
       - name: Upload host attestation evidence
         id: artifact
         uses: actions/upload-artifact@v4
         with:
-          name: loom-host-attestation-${{ steps.target.outputs.pr_number }}
+          name: webenvoy-host-attestation-${{ steps.target.outputs.pr_number }}
           path: ${{ runner.temp }}/host-attestation.json
           if-no-files-found: error
           retention-days: 14
