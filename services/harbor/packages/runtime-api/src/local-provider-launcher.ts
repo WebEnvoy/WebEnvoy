@@ -279,7 +279,7 @@ export function validateXhsWritePrecheckObservation(
   return {
     status: "completed",
     observed_at: new Date().toISOString(),
-    observed_url: input.target_url,
+    observed_url: observation.url!,
     page: readyPage(input.target_url, "Xiaohongshu creator publish precheck"),
     source_refs: [
       { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
@@ -322,7 +322,8 @@ async function probeProviderWritePrecheck(
     if (!page.webSocketDebuggerUrl) {
       return writePrecheckUnavailable("provider_probe_unavailable", "The creator page has no controlled CDP target.");
     }
-    return withCdp(page.webSocketDebuggerUrl, async (client) => {
+    const webSocketUrl = page.webSocketDebuggerUrl;
+    return withCdp(webSocketUrl, async (client) => {
       const observedAt = Date.now();
       await sendWritePrecheckCdp(client, "Runtime.enable");
       const path = input.requested_path ?? input.composition_path;
@@ -333,13 +334,18 @@ async function probeProviderWritePrecheck(
         await sendWritePrecheckCdp(client, "Page.enable");
         let fileChooserOpened = false;
         const stopObservingFileChooser = client.on("Page.fileChooserOpened", () => { fileChooserOpened = true; });
-        await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
         let selected: WritePrecheckObservation | undefined;
         try {
+          await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
           selected = await evaluateWritePrecheck(client, input.requested_path, true);
         } finally {
-          await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: false });
-          stopObservingFileChooser();
+          try {
+            await withCdp(webSocketUrl, (cleanupClient) =>
+              sendWritePrecheckCdp(cleanupClient, "Page.setInterceptFileChooserDialog", { enabled: false }),
+            AbortSignal.timeout(1500));
+          } finally {
+            stopObservingFileChooser();
+          }
         }
         if (fileChooserOpened) {
           return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
@@ -490,13 +496,14 @@ function pathSelectionProbeExpression(): string {
             const rect = el?.getBoundingClientRect();
             return Boolean(el && style && style.visibility !== 'hidden' && style.display !== 'none' &&
               style.pointerEvents !== 'none' && rect && rect.width > 0 && rect.height > 0 &&
+              !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
               !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]'));
           };
-          const controls = [...document.querySelectorAll('button, [role="button"], [role="tab"]')]
+          const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
+          if (controls.length !== 1) return { ...ready, selection_status: 'blocked' };
           const control = controls[0];
-          if (!control) return { ...ready, selection_status: 'blocked' };
           control.click();
           await new Promise((resolve) => setTimeout(resolve, 120));
           break;
@@ -519,10 +526,10 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
     const strictPath = ${JSON.stringify(selectPath || exactPath)};
     const observe = () => {
       const bodyText = (document.body?.innerText || '').slice(0, 20000);
-      const visible = (el, allowDisabled = true) => {
+      const visible = (el, allowDisabled = false) => {
         const s = el ? getComputedStyle(el) : null;
         const r = el?.getBoundingClientRect();
-        return Boolean(el && !el.hidden && (allowDisabled || !el.disabled) &&
+        return Boolean(el && !el.hidden && (allowDisabled || (!el.disabled && el.getAttribute('aria-disabled') !== 'true')) &&
           !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
           s && s.visibility !== 'hidden' && s.display !== 'none' && s.pointerEvents !== 'none' &&
           s.zIndex !== '-1' && Number(s.opacity) >= 0.01 && r && r.width > 0 && r.height > 0 &&

@@ -187,6 +187,8 @@ test("#405 admits both explicit paths and returns refs-only no-submit state", ()
   for (const rejected of [
     { requested_path: "video" },
     { requested_path: "image_text_upload", no_submit_guard: "inactive" },
+    { requested_path: "image_text_upload", include_source_refs: true },
+    { requested_path: "image_text_upload", proposed_input_summary: "unused" },
     { requested_path: "image_text_upload", selector: "button" }
   ]) {
     assert.equal(admitXhsPublishPathPrepare({
@@ -219,6 +221,13 @@ test("#405 admits both explicit paths and returns refs-only no-submit state", ()
   assert.equal(completed?.normalized.composition_state_proof.path_entry_alone_proves_initialized, false);
   assert.equal(completed?.submitted, false);
   assert.equal(completed?.evidence_refs[0]?.ref, pathProbe.evidence_ref_kinds[0]?.ref);
+  assert.deepEqual(completed?.post_check.source_refs, completed?.source_refs);
+  assert.deepEqual(completed?.post_check.evidence_refs, completed?.evidence_refs);
+  assert.equal(completed?.post_check.requested_path, completed?.normalized.requested_path);
+  assert.equal(completed?.post_check.observed_path, completed?.normalized.observed_path);
+  assert.equal(completed?.post_check.composition_state, completed?.normalized.composition_state);
+  assert.deepEqual(completed?.post_check.business_state_after, completed?.normalized.business_state_after);
+  assert.equal(completed?.post_check.no_submit_guard_status, "active");
   assert.equal(completed?.lode_pin.package_ref, XHS_PUBLISH_PATH_PREPARE_PIN.package_ref);
   assert.equal(completed?.public_boundary.external_write_actions, "not_performed");
 });

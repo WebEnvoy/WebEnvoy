@@ -129,6 +129,11 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /input\[type=["']file["']\]/);
   assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
+  assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
+  assert.match(upload, /controls\.length !== 1/);
+  assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
+  assert.match(upload, /const visible = \(el, allowDisabled = false\)/);
+  assert.doesNotMatch(upload, /querySelectorAll\('button, \[role="button"\], \[role="tab"\]'\)/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });
 

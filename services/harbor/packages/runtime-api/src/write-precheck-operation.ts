@@ -74,8 +74,6 @@ export interface AdmittedXhsPathPrepare {
   target_ref: string;
   holder_ref?: string;
   requested_path: XhsPathPrepareRequestedPath;
-  include_source_refs?: boolean;
-  proposed_input_summary?: string;
 }
 
 export type ValidateOnlyXhsPathPrepareResult =
@@ -101,8 +99,15 @@ export type ValidateOnlyXhsPathPrepareResult =
         status: "passed";
         reason: "validated_creator_path_without_submission";
         post_check_ref: string;
+        source_refs: readonly { kind: string; ref: string }[];
+        evidence_refs: readonly { kind: string; ref: string }[];
         submitted: false;
-        no_submit_guard: "active";
+        requested_path: XhsPathPrepareRequestedPath;
+        observed_path: XhsPathPrepareNormalizedState["observed_path"];
+        composition_state: XhsPathPrepareNormalizedState["composition_state"];
+        business_state_before: XhsPathPrepareNormalizedState["business_state_before"];
+        business_state_after: XhsPathPrepareNormalizedState["business_state_after"];
+        no_submit_guard_status: "active";
       };
       lode_pin: typeof XHS_PUBLISH_PATH_PREPARE_PIN;
       public_boundary: {
@@ -394,13 +399,11 @@ export function admitXhsPublishPrecheck(value: unknown): AdmittedWritePrecheck |
 export function admitXhsPublishPathPrepare(value: unknown): AdmittedXhsPathPrepare | null {
   const input = object(value);
   if (!input || Object.keys(input).some((key) =>
-    !["url", "target_ref", "holder_ref", "no_submit_guard", "requested_path", "include_source_refs", "proposed_input_summary"].includes(key)
+    !["url", "target_ref", "holder_ref", "no_submit_guard", "requested_path"].includes(key)
   )) return null;
   if (!opaquePublicRef(input.target_ref) || input.no_submit_guard !== "active" ||
     (input.requested_path !== "image_text_upload" && input.requested_path !== "image_text_generate")) return null;
   if (input.holder_ref !== undefined && !safePublic(input.holder_ref, 200)) return null;
-  if (input.include_source_refs !== undefined && typeof input.include_source_refs !== "boolean") return null;
-  if (input.proposed_input_summary !== undefined && !safePublic(input.proposed_input_summary, 500)) return null;
   if (typeof input.url !== "string" || !safePublic(input.url, 2_048)) return null;
   try {
     const url = new URL(input.url);
@@ -412,9 +415,7 @@ export function admitXhsPublishPathPrepare(value: unknown): AdmittedXhsPathPrepa
       url: url.href,
       target_ref: input.target_ref,
       requested_path: input.requested_path,
-      ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
-      ...(input.include_source_refs === undefined ? {} : { include_source_refs: input.include_source_refs }),
-      ...(input.proposed_input_summary === undefined ? {} : { proposed_input_summary: input.proposed_input_summary })
+      ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref })
     } as AdmittedXhsPathPrepare;
   } catch {
     return null;
@@ -549,6 +550,14 @@ export function completeXhsPathPrepare(
   const postCheckRef = opaqueRef("post_check");
   const snapshotRefs = probe.evidence_ref_kinds.filter(({ kind }) => kind === "snapshot_ref");
   if (snapshotRefs.length !== 1) return null;
+  const sourceRefs = [
+    ...probe.source_refs,
+    { kind: "business_state_summary", ref: opaqueRef("source") }
+  ];
+  const evidenceRefs = [
+    snapshotRefs[0]!,
+    { kind: "post_check_ref", ref: postCheckRef }
+  ];
   return {
     schema_version: HARBOR_XHS_PATH_PREPARE_SCHEMA,
     status: "completed",
@@ -566,20 +575,21 @@ export function completeXhsPathPrepare(
       source_status: "located",
       ...pathPrepare
     },
-    source_refs: [
-      ...probe.source_refs,
-      { kind: "business_state_summary", ref: opaqueRef("source") }
-    ],
-    evidence_refs: [
-      snapshotRefs[0]!,
-      { kind: "post_check_ref", ref: postCheckRef }
-    ],
+    source_refs: sourceRefs,
+    evidence_refs: evidenceRefs,
     post_check: {
       status: "passed",
       reason: "validated_creator_path_without_submission",
       post_check_ref: postCheckRef,
+      source_refs: sourceRefs,
+      evidence_refs: evidenceRefs,
       submitted: false,
-      no_submit_guard: "active"
+      requested_path: pathPrepare.requested_path,
+      observed_path: pathPrepare.observed_path,
+      composition_state: pathPrepare.composition_state,
+      business_state_before: pathPrepare.business_state_before,
+      business_state_after: pathPrepare.business_state_after,
+      no_submit_guard_status: "active"
     },
     lode_pin: XHS_PUBLISH_PATH_PREPARE_PIN,
     public_boundary: {
