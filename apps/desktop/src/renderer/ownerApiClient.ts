@@ -85,6 +85,11 @@ export function projectOwnerHttpStatusError(path: string, status: number, payloa
   return [`${path} returned ${status}`, error?.category, error?.code].filter(Boolean).join(": ");
 }
 
+export function isProjectedAuthorizationConfirmationRequired(value: unknown) {
+  const error = projectOwnerApiError(value);
+  return error?.category === "action_risk" && error.code === "authorization_confirmation_required";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

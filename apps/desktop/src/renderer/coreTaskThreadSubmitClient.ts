@@ -3,7 +3,7 @@ import { coreTaskSubmitFailureSummary } from "./coreTaskSubmitClient";
 import { fetchEffectiveExecutionPolicy, putThreadExecutionPolicy, sourceVersionForPolicy } from "./executionPolicyClient";
 import type { HarborIdentityLoadState } from "./harborIdentityTypes";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
-import { requestOwnerJson } from "./ownerApiClient";
+import { isProjectedAuthorizationConfirmationRequired, requestOwnerJson } from "./ownerApiClient";
 import { runtimeService, type RuntimeSupervisorState } from "./runtimeSupervisorState";
 import {
   isOpaqueDetailRef,
@@ -140,6 +140,9 @@ async function appendPreparedTurn(endpoint: string, threadRef: string, request: 
   const task = projectCoreThreadResponse(taskPayload);
   const status = typeof record?.status === "number" ? record.status : null;
   if (task == null) {
+    if (status === 409 && isProjectedAuthorizationConfirmationRequired(responseBody)) {
+      return reconcileTaskThreadTurn(endpoint, attempt);
+    }
     return status != null && status >= 400 && status < 500 && !isTerminalRuntimeFailure(response)
       ? failed(response, "Core 未接受当前任务回合。")
       : reconcileTaskThreadTurn(endpoint, attempt);
