@@ -350,6 +350,40 @@ async function probeProviderWritePrecheck(
           await sendWritePrecheckCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
           selected = await evaluateWritePrecheck(client, input.requested_path, true);
+          if (fileChooserOpened) {
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
+          }
+          if (networkRequestAttempted) {
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a network request and was blocked.", false);
+          }
+          if (!selected || selected.selection_status !== "selected") {
+            return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
+          }
+          const selectedValidation = validateXhsWritePrecheckObservation(input, selected);
+          if (selectedValidation.status === "unavailable") return selectedValidation;
+          if (selected.path_observed !== "observed") {
+            return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false);
+          }
+          const screenshot = await captureWritePrecheckScreenshot(client);
+          if (!screenshot) {
+            return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
+          }
+          const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
+          if (fileChooserOpened || networkRequestAttempted) {
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false);
+          }
+          if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
+            return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.");
+          }
+          if (!after || after.path_observed !== "observed") {
+            return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false);
+          }
+          return {
+            ...selectedValidation,
+            observed_at: new Date(observedAt).toISOString(),
+            evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
+            path_prepare: pathPrepareState(input.requested_path, observation, selected, after)
+          };
         } finally {
           try {
             await Promise.allSettled(blockedRequests);
@@ -363,37 +397,6 @@ async function probeProviderWritePrecheck(
             stopInterceptingRequests();
           }
         }
-        if (fileChooserOpened) {
-          return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
-        }
-        if (networkRequestAttempted) {
-          return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a network request and was blocked.", false);
-        }
-        if (!selected || selected.selection_status !== "selected") {
-          return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
-        }
-        const selectedValidation = validateXhsWritePrecheckObservation(input, selected);
-        if (selectedValidation.status === "unavailable") return selectedValidation;
-        if (selected.path_observed !== "observed") {
-          return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false);
-        }
-        const screenshot = await captureWritePrecheckScreenshot(client);
-        if (!screenshot) {
-          return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
-        }
-        const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
-        if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
-          return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.");
-        }
-        if (!after || after.path_observed !== "observed") {
-          return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false);
-        }
-        return {
-          ...selectedValidation,
-          observed_at: new Date(observedAt).toISOString(),
-          evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
-          path_prepare: pathPrepareState(input.requested_path, observation, selected, after)
-        };
       }
       const screenshot = await captureWritePrecheckScreenshot(client);
       if (!screenshot) {
