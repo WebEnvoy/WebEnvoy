@@ -25,6 +25,11 @@ const xiaohongshuPublishPrecheckLockRef = "lode://lock/site-capability/xiaohongs
 const xiaohongshuPublishPrecheckActionId = "xhs_publish_note_precheck";
 const xiaohongshuPublishPrecheckResourceRequirementRef = "xiaohongshu.publish-note-precheck.resources";
 const xiaohongshuPublishPrecheckProfileId = "xhs-creator-publish-page-precheck";
+const xiaohongshuPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const xiaohongshuPathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const xiaohongshuPathPrepareActionId = "xhs_publish_note_path_prepare";
+const xiaohongshuPathPrepareResourceRequirementRef = "xiaohongshu.publish-note-path-prepare.resources";
+const xiaohongshuPathPrepareProfileId = "xhs-creator-publish-page-path-prepare";
 
 export type TaskThreadSubmitState =
   | { status: "idle"; summary: string }
@@ -173,6 +178,12 @@ export function prepareTaskTurnRequest(options: SubmitOptions, requestedModes?: 
   if (!target.ok) return target;
   const publicQuery = publicQueryForSkill(options.skill, options.draft);
   if (!publicQuery.ok) return publicQuery;
+  const requestedPath = isXiaohongshuPathPrepareSkill(options.skill)
+    ? stringValue(options.draft.values.requested_path)
+    : undefined;
+  if (isXiaohongshuPathPrepareSkill(options.skill) && requestedPath !== "image_text_upload" && requestedPath !== "image_text_generate") {
+    return { ok: false, reason: "请选择明确的图文子路径：上传图片或文字配图。" };
+  }
   const snapshot = buildCoreThreadInputSnapshot(options.skill, options.draft, options.ownerRefs);
   if (!snapshot.ok) return snapshot;
   const capabilityRef = capabilityRefForSkill(options.skill);
@@ -198,7 +209,7 @@ export function prepareTaskTurnRequest(options: SubmitOptions, requestedModes?: 
           source_ref: options.skill.packageRef,
           ...(options.skill.lockRef ? { lock_ref: options.skill.lockRef } : {}),
         },
-        input: { summary: options.skill.name, refs: [target.ref] },
+        input: { summary: options.skill.name, refs: [target.ref], ...(requestedPath === undefined ? {} : { requested_path: requestedPath }) },
         scope: { target_type: target.targetType, target_ref: target.ref },
         policy: {
           risk: action.category === "read" ? "read" : "write",
@@ -214,6 +225,7 @@ export function prepareTaskTurnRequest(options: SubmitOptions, requestedModes?: 
         ...(target.url == null ? {} : { url: target.url }),
         reuse_existing: true,
         timeout_ms: 60_000,
+        ...(requestedPath === undefined ? {} : { requested_path: requestedPath }),
       },
     },
   };
@@ -234,7 +246,7 @@ function submissionReadiness(options: SubmitOptions, requestedModes?: ExecutionP
   if (options.identity.readiness.state === "unknown") return "账号身份状态尚未确认；提交保持停止。";
   const singleAction = options.skill.actions.length === 1 ? options.skill.actions[0] : undefined;
   const readAction = singleAction?.operationMode === "read" && singleAction.resourceRequirementProfileIds.length === 1;
-  if (!readAction && !isXiaohongshuPublishPrecheckSkill(options.skill)) {
+  if (!readAction && !isXiaohongshuPublishPrecheckSkill(options.skill) && !isXiaohongshuPathPrepareSkill(options.skill)) {
     return "当前 Core 仅接入已声明的单一只读动作；准备、发布与危险行为保持停止。";
   }
   if (requestedModes != null) {
@@ -272,7 +284,7 @@ function taskTarget(skill: LodeCatalogSkill, identity: Identity, draft: SkillInp
   let url: URL;
   try { url = new URL(rawUrl); } catch { return { ok: false as const, reason: "目标网址无效。" }; }
   const identityOrigin = new URL(identity.origin).origin;
-  const exactCreatorPrecheck = isXiaohongshuPublishPrecheckSkill(skill) &&
+  const exactCreatorPrecheck = (isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill)) &&
     identity.siteId === "xiaohongshu" && identityOrigin === "https://www.xiaohongshu.com" &&
     url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish";
   if (url.username || url.password || !action.supportedOrigins.includes(url.origin) ||
@@ -330,7 +342,7 @@ export function projectTaskSubmissionSkill(skill: LodeCatalogSkill): LodeCatalog
         .map((field) => field.id === "limit" ? { ...field, maximum: Math.min(field.maximum ?? 15, 15) } : field),
     };
   }
-  return isXiaohongshuPublishPrecheckSkill(skill)
+  return isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill)
     ? { ...skill, inputFields: skill.inputFields.filter((field) => field.id !== "target_ref") }
     : skill;
 }
@@ -418,6 +430,19 @@ function isXiaohongshuPublishPrecheckSkill(skill: LodeCatalogSkill) {
     action.resourceRequirementRef === xiaohongshuPublishPrecheckResourceRequirementRef &&
     action.resourceRequirementProfileIds.length === 1 &&
     action.resourceRequirementProfileIds[0] === xiaohongshuPublishPrecheckProfileId;
+}
+
+function isXiaohongshuPathPrepareSkill(skill: LodeCatalogSkill) {
+  const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
+  return skill.packageRef === xiaohongshuPathPreparePackageRef &&
+    skill.lockRef === xiaohongshuPathPrepareLockRef &&
+    skill.version === "0.1.0" && skill.siteSlug === "xiaohongshu" &&
+    action?.id === xiaohongshuPathPrepareActionId && action.category === "prepare" &&
+    action.operationMode === "validate_only" && action.targetTypes.length === 1 &&
+    action.targetTypes[0] === "creator_publish_page" && action.supportedOrigins.length === 1 &&
+    action.supportedOrigins[0] === "https://creator.xiaohongshu.com" && action.externalEffects.length === 0 &&
+    action.resourceRequirementRef === xiaohongshuPathPrepareResourceRequirementRef &&
+    action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === xiaohongshuPathPrepareProfileId;
 }
 
 function boundedScalarSummary(value: SkillInputValue | undefined) {

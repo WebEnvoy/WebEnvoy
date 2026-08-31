@@ -80,6 +80,8 @@ const pendingWritePrecheckContinuations = new Map<string, PendingWritePrecheckCo
 const pendingWritePrecheckMaxEntries = 256;
 const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
 const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 
 function prunePendingWritePrecheckContinuations(now = Date.now()): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {
@@ -118,13 +120,20 @@ function exactWritePrecheckTaskBody(body: JsonBody, packageRef: string, run: Run
   const taskIntent = asObject(body.task_intent);
   const capability = asObject(taskIntent?.capability);
   const policy = asObject(taskIntent?.policy);
-  return packageRef === writePrecheckPackageRef &&
-    capability?.ref === "lode:capability/publish-note-precheck" &&
+  const taskInput = asObject(taskIntent?.input);
+  const harbor = asObject(body.harbor);
+  const pathPrepare = packageRef === pathPreparePackageRef;
+  const expectedPackage = pathPrepare ? pathPreparePackageRef : writePrecheckPackageRef;
+  const expectedLock = pathPrepare ? pathPrepareLockRef : writePrecheckLockRef;
+  const expectedCapability = pathPrepare ? "lode:capability/publish-note-path-prepare" : "lode:capability/publish-note-precheck";
+  return packageRef === expectedPackage &&
+    capability?.ref === expectedCapability &&
     capability.version === "0.1.0" &&
-    capability.source_ref === writePrecheckPackageRef &&
-    capability.lock_ref === writePrecheckLockRef &&
+    capability.source_ref === expectedPackage &&
+    capability.lock_ref === expectedLock &&
     policy?.risk === "write" &&
     policy.execution_intent === "validate_only" &&
+    (!pathPrepare || (taskInput?.requested_path === "image_text_upload" || taskInput?.requested_path === "image_text_generate") && harbor?.requested_path === taskInput.requested_path && harbor.composition_path === undefined) &&
     isExactWritePrecheckRun(run, confirmationDecisionRef);
 }
 
@@ -138,6 +147,7 @@ function publicContinuationHarbor(value: unknown): JsonBody | undefined {
   // the selected catalog path on a confirmation continuation without copying
   // any private Harbor material.
   if (typeof input.composition_path === "string") harbor.composition_path = input.composition_path;
+  if (typeof input.requested_path === "string") harbor.requested_path = input.requested_path;
   if (typeof input.reuse_existing === "boolean") harbor.reuse_existing = input.reuse_existing;
   if (typeof input.timeout_ms === "number") harbor.timeout_ms = input.timeout_ms;
   const evidencePolicy = asObject(input.evidence_policy);

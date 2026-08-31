@@ -14,6 +14,7 @@ import type { TaskIntentEnvelope } from "./task-submission.js";
 import {
   evaluateWritePrecheckTaskPolicy,
   isUnifiedWritePrecheckTask,
+  isXhsPathPrepareTask,
   writePrecheckPolicyFailure,
   type WritePrecheckAuthorizationContext
 } from "./write-precheck-policy.js";
@@ -85,6 +86,47 @@ function taskIntent(): TaskIntentEnvelope {
     resource_requirement_refs: ["xiaohongshu.publish-note-precheck.resources"],
     resource_requirement_profile_id: "xhs-creator-publish-page-precheck",
     evidence_policy_ref: "policy:no-raw-evidence"
+  };
+}
+
+function pathPrepareContract(): LodePackageAdmissionContract {
+  return {
+    package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    source_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+    capability_id: "publish-note-path-prepare",
+    operation_id: "xhs_publish_note_path_prepare",
+    operation_mode: "validate_only",
+    version: "0.1.0",
+    lifecycle: "proposed",
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [{
+        action_id: "xhs_publish_note_path_prepare",
+        category: "prepare",
+        target_scope: { site_slug: "xiaohongshu", target_types: ["creator_publish_page"], supported_origins: ["https://creator.xiaohongshu.com"] },
+        resource_requirements: { path: "resource-requirements.json", id: "xiaohongshu.publish-note-path-prepare.resources", profile_ids: ["xhs-creator-publish-page-path-prepare"] },
+        external_effects: []
+      }]
+    },
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.publish-note-path-prepare.resources",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+      operation_mode: "validate_only",
+      resource_requirement_profiles: [{ requirement_profile_id: "xhs-creator-publish-page-path-prepare" }]
+    }
+  };
+}
+
+function pathPrepareTaskIntent(contractValue = pathPrepareContract()): TaskIntentEnvelope {
+  return {
+    ...taskIntent(),
+    intent_id: "intent_path_prepare_policy",
+    capability: { ref: "lode:capability/publish-note-path-prepare", version: "0.1.0", source_ref: contractValue.package_ref, lock_ref: contractValue.lock_ref! },
+    input: { summary: "选择图文路径", requested_path: "image_text_upload" },
+    resource_requirement_refs: ["xiaohongshu.publish-note-path-prepare.resources"],
+    resource_requirement_profile_id: "xhs-creator-publish-page-path-prepare"
   };
 }
 
@@ -214,6 +256,84 @@ function completedWritePrecheckOperation(input: {
   };
 }
 
+function completedPathPrepareOperation(input: {
+  runtime_session_ref: string;
+  identity_ref: string;
+  canonical_url: string;
+  target_ref: string;
+  suffix: string;
+}): Record<string, unknown> {
+  const sourceRefs = ["page", "dom", "business"].map((name) => `source_${name}_${input.suffix}`);
+  const snapshotRef = `evidence_snapshot_${input.suffix}`;
+  const postCheckRef = `postcheck_${input.suffix}`;
+  const businessState = { route_state: "observed", control_owner_state: "observed", observed_path: "observed", composition_state: "not_initialized", submitted: false };
+  return {
+    schema_version: "harbor-xhs-publish-note-path-prepare/v0",
+    status: "completed",
+    runtime_session_ref: input.runtime_session_ref,
+    identity_ref: input.identity_ref,
+    observed_at: evaluatedAt,
+    submitted: false,
+    target_ref: input.target_ref,
+    result_kind: "xhs_publish_note_path_prepare",
+    normalized: {
+      canonical_url: input.canonical_url,
+      target_ref: input.target_ref,
+      title: "小红书图文创作页",
+      summary: "已回读图文子路径与 composition 业务状态。",
+      source_status: "located",
+      requested_path: "image_text_upload",
+      observed_path: "observed",
+      composition_state: "not_initialized",
+      business_state_before: { ...businessState, observed_path: "unknown", composition_state: "unknown" },
+      business_state_after: businessState,
+      interaction: { allowed_action: "exact_visible_path_control_selection", requested_control: "upload_image", selection_status: "selected", readback_status: "read" },
+      composition_state_proof: { basis: "unknown", path_entry_alone_proves_initialized: false },
+      submitted: false,
+      prohibited_actions_observed: { file_chooser: false, file_select: false, upload: false, generate: false, field_fill: false, save_draft: false, publish: false, submit: false, retry: false, bypass: false },
+      no_submit_guard_status: "active"
+    },
+    source_refs: [
+      { kind: "creator_publish_page_summary", ref: sourceRefs[0] },
+      { kind: "dom_snapshot_summary", ref: sourceRefs[1] },
+      { kind: "business_state_summary", ref: sourceRefs[2] }
+    ],
+    evidence_refs: [{ kind: "snapshot_ref", ref: snapshotRef }, { kind: "post_check_ref", ref: postCheckRef }],
+    post_check: {
+      status: "passed",
+      reason: "validated_creator_path_without_submission",
+      post_check_ref: postCheckRef,
+      source_refs: [
+        { kind: "creator_publish_page_summary", ref: sourceRefs[0] },
+        { kind: "dom_snapshot_summary", ref: sourceRefs[1] },
+        { kind: "business_state_summary", ref: sourceRefs[2] }
+      ],
+      evidence_refs: [{ kind: "snapshot_ref", ref: snapshotRef }, { kind: "post_check_ref", ref: postCheckRef }],
+      submitted: false,
+      requested_path: "image_text_upload",
+      observed_path: "observed",
+      composition_state: "not_initialized",
+      business_state_before: { ...businessState, observed_path: "unknown", composition_state: "unknown" },
+      business_state_after: businessState,
+      no_submit_guard_status: "active"
+    },
+    lode_pin: {
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+      lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+      input_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/input@0.1.0",
+      output_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0",
+      version: "0.1.0",
+      operation_id: "xhs_publish_note_path_prepare",
+      operation_mode: "validate_only",
+      origin: "https://creator.xiaohongshu.com",
+      repository: "WebEnvoy/Lode",
+      commit: "317f4d66d680d66b3ac3ab7f73bd7a6bbf1d9a01",
+      asset_path: "sites/xiaohongshu/publish-note-path-prepare/manifest.json"
+    },
+    public_boundary: { raw_dom: "not_exposed", raw_har: "not_exposed", screenshot_body: "not_exposed", credentials: "not_exposed", external_write_actions: "not_performed" }
+  };
+}
+
 async function evaluate(
   mode: ExecutionPolicyMode,
   authorizationContext = context,
@@ -231,6 +351,71 @@ async function evaluate(
 }
 
 export async function assertWritePrecheckPolicyWiring(): Promise<void> {
+  const pathContract = pathPrepareContract();
+  const pathTask = pathPrepareTaskIntent(pathContract);
+  assert.equal(isXhsPathPrepareTask(pathTask, pathContract), true);
+  assert.equal(isXhsPathPrepareTask({ ...pathTask, input: { ...pathTask.input, requested_path: "video" } }, pathContract), false);
+  const pathPolicy = await evaluateWritePrecheckTaskPolicy({ run_id: "app-xhs-path-prepare", task_intent: pathTask, lode_contract: pathContract, authorization_context: context, config_store: configStore("auto"), evaluated_at: evaluatedAt });
+  assert.ok(!("category" in pathPolicy));
+  assert.equal(pathPolicy.evaluation.status === "evaluated" && pathPolicy.evaluation.next_step, "execute");
+
+  const pathDirectory = await mkdtemp(join(tmpdir(), "webenvoy-path-prepare-output-"));
+  try {
+    let currentRunId = "";
+    let mutatePathOperation: ((operation: Record<string, unknown>) => void) | undefined;
+    const identityRef = "identity-env_xhs-path-prepare";
+    const runStore = createFileRunRecordStore({ directory: join(pathDirectory, "runs"), clock: () => new Date(evaluatedAt) });
+    const authorizationStore = createFileAuthorizationDecisionStore({
+      directory: join(pathDirectory, "decisions"),
+      runRecordStore: runStore,
+      taskThreadStore: { getTaskThread: async () => ({ thread_id: context.thread_id, turns: [{ turn_id: context.turn_id, run_id: currentRunId }] }) },
+      clock: () => new Date(evaluatedAt)
+    });
+    const harbor = {
+      collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: `session_${currentRunId}` } } as unknown as HarborAdmissionInput),
+      validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string; url: string }) => {
+        const operation = completedPathPrepareOperation({
+          runtime_session_ref: input.runtime_session_ref,
+          identity_ref: identityRef,
+          canonical_url: input.url,
+          target_ref: input.target_ref,
+          suffix: currentRunId
+        });
+        mutatePathOperation?.(operation);
+        return operation;
+      },
+      executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+      releaseCoreTaskSession: async () => undefined
+    } as HarborRuntimeClient;
+    for (const [name, mutation, succeeds] of [
+      ["valid", () => undefined, true],
+      ["pin-drift", (operation: Record<string, unknown>) => { (operation.lode_pin as Record<string, unknown>).commit = "attacker"; }, false],
+      ["missing-source-ref", (operation: Record<string, unknown>) => { delete ((operation.source_refs as Record<string, unknown>[])[2]!).ref; }, false],
+      ["normalized-extra", (operation: Record<string, unknown>) => { (operation.normalized as Record<string, unknown>).raw_dom = "private"; }, false],
+      ["composition-unknown", (operation: Record<string, unknown>) => { (operation.normalized as Record<string, unknown>).composition_state = "unknown"; }, false]
+    ] as const) {
+      currentRunId = `app-xhs-path-prepare-${name}`;
+      mutatePathOperation = mutation;
+      const intent = { ...pathTask, intent_id: `intent_path_prepare_${name}` };
+      const result = await submitRuntimeTask(runStore, {
+        run_id: currentRunId,
+        task_intent: intent,
+        package_ref: pathContract.package_ref,
+        authorization_context: { ...context, idempotency_key: `path-prepare-${name}` },
+        harbor: { identity_environment_ref: identityRef, url: intent.scope.target_ref, requested_path: "image_text_upload" }
+      }, {
+        lodePackageResolver: async () => pathContract,
+        harborRuntimeClient: harbor,
+        executionPolicyConfigStore: configStore("auto"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(result.ok, succeeds, `${name}:${JSON.stringify(result)}`);
+      assert.equal(result.run_record?.status, succeeds ? "succeeded" : "failed", name);
+    }
+  } finally {
+    await rm(pathDirectory, { recursive: true, force: true });
+  }
   assert.equal(isUnifiedWritePrecheckTask(taskIntent(), contract()), true);
   const spoofedTask = structuredClone(taskIntent());
   spoofedTask.capability.ref = "lode:capability/evil-cap";

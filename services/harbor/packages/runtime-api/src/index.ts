@@ -108,14 +108,20 @@ import {
 } from "./managed-provider-lifecycle.js";
 import {
   admitXhsPublishPrecheck,
+  admitXhsPublishPathPrepare,
   completeWritePrecheck,
+  completeXhsPathPrepare,
   HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA,
+  HARBOR_XHS_PATH_PREPARE_SCHEMA,
   unavailableWritePrecheck,
+  unavailableXhsPathPrepare,
   validCompletedWritePrecheckProbe,
   WritePrecheckObservationStore,
   XHS_PUBLISH_PRECHECK_ALLOWED_ORIGINS,
   XHS_PUBLISH_PRECHECK_PIN,
+  XHS_PUBLISH_PATH_PREPARE_PIN,
   type ValidateOnlyWritePrecheckResult,
+  type ValidateOnlyXhsPathPrepareResult,
   type WritePrecheckFailureClass,
   type WritePrecheckObservationRecord
 } from "./write-precheck-operation.js";
@@ -131,7 +137,7 @@ export { createLocalIdentityEnvironmentFacts, HARBOR_LOCAL_IDENTITY_ENVIRONMENT_
 export { HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 export { HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA } from "./identity-environment-mutation-types.js";
 export { HARBOR_MANAGED_PROVIDER_LIFECYCLE_SCHEMA, ManagedProviderLifecycle } from "./managed-provider-lifecycle.js";
-export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, XHS_PUBLISH_PRECHECK_PIN } from "./write-precheck-operation.js";
+export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, HARBOR_XHS_PATH_PREPARE_SCHEMA, XHS_PUBLISH_PRECHECK_PIN, XHS_PUBLISH_PATH_PREPARE_PIN } from "./write-precheck-operation.js";
 export {
   bindIdentityEnvironmentDefaultProvider,
   detectBrowserProviders,
@@ -310,6 +316,11 @@ export type {
   LocalProviderSiteResourceProbeResult,
   LocalProviderWritePrecheckProbeInput,
   LocalProviderWritePrecheckProbeResult,
+  XhsPathPrepareBusinessState,
+  XhsPathPrepareCompositionState,
+  XhsPathPrepareNormalizedState,
+  XhsPathPrepareObservedPath,
+  XhsPathPrepareRequestedPath,
   XhsWritePrecheckCompositionPath,
   XhsWritePrecheckCompositionState,
   XhsWritePrecheckFieldState,
@@ -349,6 +360,8 @@ export type {
   ViewerTransport
 } from "./viewer-control.js";
 export type {
+  AdmittedXhsPathPrepare,
+  ValidateOnlyXhsPathPrepareResult,
   ValidateOnlyWritePrecheckResult,
   WritePrecheckFailureClass,
   WritePrecheckObservationRecord
@@ -1184,7 +1197,11 @@ export class HarborRuntime {
   async executeXhsPublishPrecheck(
     runtime_session_ref: string,
     input: unknown
-  ): Promise<ValidateOnlyWritePrecheckResult> {
+  ): Promise<ValidateOnlyWritePrecheckResult | ValidateOnlyXhsPathPrepareResult> {
+    const requestedPath = input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>).requested_path
+      : undefined;
+    if (requestedPath !== undefined) return this.executeXhsPublishPathPrepare(runtime_session_ref, input);
     const admitted = admitXhsPublishPrecheck(input);
     if (!admitted) return unavailableWritePrecheck(runtime_session_ref, "invalid_contract", false);
     const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
@@ -1215,6 +1232,46 @@ export class HarborRuntime {
       return unavailableWritePrecheck(runtime_session_ref, "evidence_unavailable");
     }
     const completed = completeWritePrecheck(runtime_session_ref, identityRef, probe);
+    this.writePrecheckObservations.record(completed);
+    return completed;
+  }
+
+  private async executeXhsPublishPathPrepare(
+    runtime_session_ref: string,
+    input: unknown
+  ): Promise<ValidateOnlyXhsPathPrepareResult> {
+    const admitted = admitXhsPublishPathPrepare(input);
+    if (!admitted) return unavailableXhsPathPrepare(runtime_session_ref, "invalid_contract", false);
+    const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
+    if (before) return unavailableXhsPathPrepare(runtime_session_ref, before, before !== "safety_challenge");
+    const session = this.runtimeSessions.getRecord(runtime_session_ref)!;
+    const controlGeneration = session.control_generation;
+    const holderRef = session.facts.control_lock.holder_ref;
+    const identityRef = session.facts.identity_environment_ref!;
+    const probe = await this.runtimeSessions.probeWritePrecheck(runtime_session_ref, {
+      target_url: admitted.url,
+      expected_origin: XHS_PUBLISH_PRECHECK_PIN.origin,
+      target_ref: admitted.target_ref,
+      requested_path: admitted.requested_path
+    });
+    if (probe.status === "unavailable") return unavailableXhsPathPrepare(runtime_session_ref, probe.failure_class, probe.retryable);
+    const current = this.runtimeSessions.getRecord(runtime_session_ref);
+    if (!current || current.control_generation !== controlGeneration ||
+      current.facts.control_lock.holder_ref !== holderRef || current.facts.identity_environment_ref !== identityRef) {
+      return unavailableXhsPathPrepare(runtime_session_ref, "session_user_controlled", false);
+    }
+    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
+    if (after) return unavailableXhsPathPrepare(runtime_session_ref, after, after !== "safety_challenge");
+    const completed = completeXhsPathPrepare(runtime_session_ref, identityRef, probe);
+    if (!completed) return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable");
+    const prohibited = Object.values(completed.normalized.prohibited_actions_observed).some((observed) => observed);
+    if (completed.normalized.requested_path !== admitted.requested_path || completed.normalized.observed_path !== "observed") {
+      return unavailableXhsPathPrepare(runtime_session_ref, "path_mismatch", false);
+    }
+    if (completed.normalized.interaction.selection_status !== "selected" || completed.normalized.interaction.readback_status !== "read" ||
+      completed.normalized.submitted !== false || completed.normalized.no_submit_guard_status !== "active" || prohibited) {
+      return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable", false);
+    }
     this.writePrecheckObservations.record(completed);
     return completed;
   }

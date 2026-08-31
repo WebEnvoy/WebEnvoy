@@ -4,7 +4,9 @@ import type {
   XhsWritePrecheckCompositionPath,
   XhsWritePrecheckCompositionState,
   XhsWritePrecheckFieldState,
-  XhsWritePrecheckMediaState
+  XhsWritePrecheckMediaState,
+  XhsPathPrepareNormalizedState,
+  XhsPathPrepareRequestedPath
 } from "./runtime-session-types.js";
 
 export const HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA = "harbor-validate-only-write-precheck/v0";
@@ -22,6 +24,21 @@ export const XHS_PUBLISH_PRECHECK_PIN = {
   asset_path: "registry/validate-only-runtime-consumption.json",
   asset_sha256: "c62ba191357e0056b03523a46c0bb26424c916333f388898a4cc457f9c1cc6fc",
   asset_semantic_sha256: "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
+} as const;
+
+export const HARBOR_XHS_PATH_PREPARE_SCHEMA = "harbor-xhs-publish-note-path-prepare/v0";
+export const XHS_PUBLISH_PATH_PREPARE_PIN = {
+  package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+  input_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/input@0.1.0",
+  output_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0",
+  version: "0.1.0",
+  operation_id: "xhs_publish_note_path_prepare",
+  operation_mode: "validate_only",
+  origin: "https://creator.xiaohongshu.com",
+  repository: "WebEnvoy/Lode",
+  commit: "317f4d66d680d66b3ac3ab7f73bd7a6bbf1d9a01",
+  asset_path: "sites/xiaohongshu/publish-note-path-prepare/manifest.json"
 } as const;
 
 export const XHS_PUBLISH_PRECHECK_ALLOWED_ORIGINS = [
@@ -51,6 +68,64 @@ export interface AdmittedWritePrecheck {
   include_source_refs?: boolean;
   proposed_input_summary?: string;
 }
+
+export interface AdmittedXhsPathPrepare {
+  url: string;
+  target_ref: string;
+  holder_ref?: string;
+  requested_path: XhsPathPrepareRequestedPath;
+}
+
+export type ValidateOnlyXhsPathPrepareResult =
+  | {
+      schema_version: typeof HARBOR_XHS_PATH_PREPARE_SCHEMA;
+      status: "completed";
+      runtime_session_ref: string;
+      identity_ref: string;
+      observed_at: string;
+      submitted: false;
+      target_ref: string;
+      result_kind: "xhs_publish_note_path_prepare";
+      normalized: XhsPathPrepareNormalizedState & {
+        canonical_url: string;
+        target_ref: string;
+        title: string;
+        summary: string;
+        source_status: "located" | "partially_located" | "unknown";
+      };
+      source_refs: readonly { kind: string; ref: string }[];
+      evidence_refs: readonly { kind: string; ref: string }[];
+      post_check: {
+        status: "passed";
+        reason: "validated_creator_path_without_submission";
+        post_check_ref: string;
+        source_refs: readonly { kind: string; ref: string }[];
+        evidence_refs: readonly { kind: string; ref: string }[];
+        submitted: false;
+        requested_path: XhsPathPrepareRequestedPath;
+        observed_path: XhsPathPrepareNormalizedState["observed_path"];
+        composition_state: XhsPathPrepareNormalizedState["composition_state"];
+        business_state_before: XhsPathPrepareNormalizedState["business_state_before"];
+        business_state_after: XhsPathPrepareNormalizedState["business_state_after"];
+        no_submit_guard_status: "active";
+      };
+      lode_pin: typeof XHS_PUBLISH_PATH_PREPARE_PIN;
+      public_boundary: {
+        raw_dom: "not_exposed";
+        raw_har: "not_exposed";
+        screenshot_body: "not_exposed";
+        credentials: "not_exposed";
+        external_write_actions: "not_performed";
+      };
+    }
+  | {
+      schema_version: typeof HARBOR_XHS_PATH_PREPARE_SCHEMA;
+      status: "unavailable";
+      runtime_session_ref: string;
+      failure_class: WritePrecheckFailureClass | "path_mismatch" | "composition_unknown" | "composition_not_initialized";
+      retryable: boolean;
+      submitted: false;
+    };
 
 export type ValidateOnlyWritePrecheckResult =
   | {
@@ -130,7 +205,29 @@ export interface WritePrecheckObservationRecord {
 export class WritePrecheckObservationStore {
   private readonly records = new Map<string, WritePrecheckObservationRecord>();
 
-  record(result: Extract<ValidateOnlyWritePrecheckResult, { status: "completed" }>): void {
+  record(result: Extract<ValidateOnlyWritePrecheckResult, { status: "completed" }> | Extract<ValidateOnlyXhsPathPrepareResult, { status: "completed" }>): void {
+    if (result.schema_version === HARBOR_XHS_PATH_PREPARE_SCHEMA) {
+      const refs: (readonly [string, WritePrecheckObservationRecord["kind"]])[] = [
+        ...result.source_refs.map(({ ref }) => [ref, "source_observation"] as const),
+        ...result.evidence_refs.map(({ ref, kind }) => [ref, kind === "post_check_ref" ? "post_check" : "evidence"] as const)
+      ];
+      for (const [ref, kind] of refs) {
+        this.records.set(ref, {
+          schema_version: "harbor-write-precheck-observation/v0",
+          ref,
+          evidence_ref: ref,
+          access_state: "available",
+          kind,
+          runtime_session_ref: result.runtime_session_ref,
+          identity_ref: result.identity_ref,
+          observed_at: result.observed_at,
+          submitted: false,
+          public_boundary: { raw_dom: "not_exposed", screenshot_body: "not_exposed", credentials: "not_exposed" }
+        });
+      }
+      while (this.records.size > 256) this.records.delete(this.records.keys().next().value!);
+      return;
+    }
     const refs: (readonly [string, WritePrecheckObservationRecord["kind"]])[] = [
       [result.operation_ref, "operation"],
       [result.page_ref, "page"],
@@ -299,6 +396,32 @@ export function admitXhsPublishPrecheck(value: unknown): AdmittedWritePrecheck |
   }
 }
 
+export function admitXhsPublishPathPrepare(value: unknown): AdmittedXhsPathPrepare | null {
+  const input = object(value);
+  if (!input || Object.keys(input).some((key) =>
+    !["url", "target_ref", "holder_ref", "no_submit_guard", "requested_path"].includes(key)
+  )) return null;
+  if (!opaquePublicRef(input.target_ref) || input.no_submit_guard !== "active" ||
+    (input.requested_path !== "image_text_upload" && input.requested_path !== "image_text_generate")) return null;
+  if (input.holder_ref !== undefined && !safePublic(input.holder_ref, 200)) return null;
+  if (typeof input.url !== "string" || !safePublic(input.url, 2_048)) return null;
+  try {
+    const url = new URL(input.url);
+    if (url.origin !== XHS_PUBLISH_PATH_PREPARE_PIN.origin || url.pathname !== "/publish/publish" ||
+      url.username || url.password || url.hash || [...url.searchParams].some(([key, entry]) =>
+        !bounded(key, 200) || (entry !== "" && !bounded(entry, 500)) || containsSensitivePublicMaterial(key) || containsSensitivePublicMaterial(entry)
+      )) return null;
+    return {
+      url: url.href,
+      target_ref: input.target_ref,
+      requested_path: input.requested_path,
+      ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref })
+    } as AdmittedXhsPathPrepare;
+  } catch {
+    return null;
+  }
+}
+
 export function unavailableWritePrecheck(
   runtime_session_ref: string,
   failure_class: WritePrecheckFailureClass,
@@ -400,4 +523,81 @@ export function validCompletedWritePrecheckProbe(
     Object.keys(probe.prohibited_actions_observed).sort().join(",") === "generate,publish,save,upload" &&
     Object.values(probe.prohibited_actions_observed).every((observed) => observed === false) &&
     bounded(probe.target_ref, 200);
+}
+
+export function unavailableXhsPathPrepare(
+  runtime_session_ref: string,
+  failure_class: WritePrecheckFailureClass | "path_mismatch" | "composition_unknown" | "composition_not_initialized",
+  retryable = true
+): Extract<ValidateOnlyXhsPathPrepareResult, { status: "unavailable" }> {
+  return {
+    schema_version: HARBOR_XHS_PATH_PREPARE_SCHEMA,
+    status: "unavailable",
+    runtime_session_ref,
+    failure_class,
+    retryable,
+    submitted: false
+  };
+}
+
+export function completeXhsPathPrepare(
+  runtime_session_ref: string,
+  identity_ref: string,
+  probe: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }>
+): Extract<ValidateOnlyXhsPathPrepareResult, { status: "completed" }> | null {
+  const pathPrepare = probe.path_prepare;
+  if (!pathPrepare) return null;
+  const postCheckRef = opaqueRef("post_check");
+  const snapshotRefs = probe.evidence_ref_kinds.filter(({ kind }) => kind === "snapshot_ref");
+  if (snapshotRefs.length !== 1) return null;
+  const sourceRefs = [
+    ...probe.source_refs,
+    { kind: "business_state_summary", ref: opaqueRef("source") }
+  ];
+  const evidenceRefs = [
+    snapshotRefs[0]!,
+    { kind: "post_check_ref", ref: postCheckRef }
+  ];
+  return {
+    schema_version: HARBOR_XHS_PATH_PREPARE_SCHEMA,
+    status: "completed",
+    runtime_session_ref,
+    identity_ref,
+    observed_at: probe.observed_at,
+    submitted: false,
+    target_ref: probe.target_ref,
+    result_kind: "xhs_publish_note_path_prepare",
+    normalized: {
+      canonical_url: probe.observed_url,
+      target_ref: probe.target_ref,
+      title: "小红书图文创作页",
+      summary: "已按用户选择回读图文子路径与 composition 业务状态。",
+      source_status: "located",
+      ...pathPrepare
+    },
+    source_refs: sourceRefs,
+    evidence_refs: evidenceRefs,
+    post_check: {
+      status: "passed",
+      reason: "validated_creator_path_without_submission",
+      post_check_ref: postCheckRef,
+      source_refs: sourceRefs,
+      evidence_refs: evidenceRefs,
+      submitted: false,
+      requested_path: pathPrepare.requested_path,
+      observed_path: pathPrepare.observed_path,
+      composition_state: pathPrepare.composition_state,
+      business_state_before: pathPrepare.business_state_before,
+      business_state_after: pathPrepare.business_state_after,
+      no_submit_guard_status: "active"
+    },
+    lode_pin: XHS_PUBLISH_PATH_PREPARE_PIN,
+    public_boundary: {
+      raw_dom: "not_exposed",
+      raw_har: "not_exposed",
+      screenshot_body: "not_exposed",
+      credentials: "not_exposed",
+      external_write_actions: "not_performed"
+    }
+  };
 }

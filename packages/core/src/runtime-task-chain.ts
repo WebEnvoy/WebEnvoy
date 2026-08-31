@@ -57,6 +57,7 @@ import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-s
 import {
   evaluateWritePrecheckTaskPolicy,
   isExactWritePrecheckRun,
+  isXhsPathPrepareTask,
   isUnifiedWritePrecheckTask,
   persistWritePrecheckPolicyDecision,
   writePrecheckPolicyFailure,
@@ -75,6 +76,9 @@ export type XhsWritePrecheckCompositionPath =
   | "video"
   | "long_article"
   | "podcast";
+export type XhsPathPrepareRequestedPath = "image_text_upload" | "image_text_generate";
+export type XhsPathPrepareObservedPath = "observed" | "unknown" | "mismatch";
+export type XhsPathPrepareCompositionState = "initialized" | "not_initialized" | "unknown";
 
 export type RuntimeTaskSubmissionRequest = {
   run_id: string;
@@ -86,6 +90,7 @@ export type RuntimeTaskSubmissionRequest = {
     identity_environment_ref?: string;
     url?: string;
     composition_path?: XhsWritePrecheckCompositionPath;
+    requested_path?: XhsPathPrepareRequestedPath;
     reuse_existing?: boolean;
     timeout_ms?: number;
     evidence_policy?: JsonObject;
@@ -130,6 +135,7 @@ export type HarborRuntimeClient = {
     url: string;
     target_ref: string;
     composition_path?: XhsWritePrecheckCompositionPath;
+    requested_path?: XhsPathPrepareRequestedPath;
     requested_fields?: readonly ("title" | "summary" | "canonical_url" | "source_status")[];
     include_source_refs?: boolean;
     proposed_input_summary?: string;
@@ -974,6 +980,12 @@ const xhsWritePrecheckOutputSchemaRef = "lode://schema/site-capability/xiaohongs
 const xhsWritePrecheckLodeCommit = "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b";
 const xhsWritePrecheckLodeAssetSha256 = "c62ba191357e0056b03523a46c0bb26424c916333f388898a4cc457f9c1cc6fc";
 const xhsWritePrecheckLodeSemanticSha256 = "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0";
+const xhsPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const xhsPathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const xhsPathPrepareInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/input@0.1.0";
+const xhsPathPrepareOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0";
+const xhsPathPrepareLodeCommit = "317f4d66d680d66b3ac3ab7f73bd7a6bbf1d9a01";
+const xhsPathPrepareAssetPath = "sites/xiaohongshu/publish-note-path-prepare/manifest.json";
 const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
 ]);
@@ -1104,6 +1116,187 @@ function validateCompletedWritePrecheck(
     source_refs: sourceValues as string[],
     evidence_refs: evidenceValues as string[]
   };
+}
+
+type PathPrepareValidation =
+  | { ok: true; operation: JsonObject; source_refs: string[]; evidence_refs: string[] }
+  | { ok: false; failure: FailureRecord };
+
+function validateCompletedXhsPathPrepare(
+  value: unknown,
+  expected: { runtime_session_ref: string; identity_ref: string | undefined; canonical_url: string; target_ref: string; requested_path: XhsPathPrepareRequestedPath }
+): PathPrepareValidation {
+  const operation = object(value);
+  const normalized = object(operation?.normalized);
+  const pin = object(operation?.lode_pin);
+  const sourceRefs = Array.isArray(operation?.source_refs) ? operation.source_refs.map(object) : [];
+  const evidenceRefs = Array.isArray(operation?.evidence_refs) ? operation.evidence_refs.map(object) : [];
+  const prohibited = object(normalized?.prohibited_actions_observed);
+  const before = object(normalized?.business_state_before);
+  const after = object(normalized?.business_state_after);
+  const interaction = object(normalized?.interaction);
+  const proof = object(normalized?.composition_state_proof);
+  const exactKeys = (entry: JsonObject | undefined, keys: readonly string[]): entry is JsonObject => Boolean(entry &&
+    Object.keys(entry).length === keys.length && keys.every((key) => Object.hasOwn(entry, key)));
+  if (!operation || operation.schema_version !== "harbor-xhs-publish-note-path-prepare/v0" || operation.status !== "completed" ||
+    !exactKeys(operation, ["schema_version", "status", "runtime_session_ref", "identity_ref", "observed_at", "submitted", "target_ref", "result_kind", "normalized", "source_refs", "evidence_refs", "post_check", "lode_pin", "public_boundary"]) ||
+    operation.runtime_session_ref !== expected.runtime_session_ref || operation.identity_ref !== expected.identity_ref || operation.target_ref !== expected.target_ref || operation.submitted !== false ||
+    operation.result_kind !== "xhs_publish_note_path_prepare" || !normalized || !pin) {
+    return { ok: false, failure: writePrecheckFailure("harbor_path_prepare_output_invalid", "result_projection") };
+  }
+  if (!exactKeys(pin, ["package_ref", "lock_ref", "input_schema_ref", "output_schema_ref", "version", "operation_id", "operation_mode", "origin", "repository", "commit", "asset_path"]) ||
+    pin.package_ref !== xhsPathPreparePackageRef || pin.lock_ref !== xhsPathPrepareLockRef ||
+    pin.input_schema_ref !== xhsPathPrepareInputSchemaRef || pin.output_schema_ref !== xhsPathPrepareOutputSchemaRef ||
+    pin.version !== "0.1.0" || pin.operation_id !== "xhs_publish_note_path_prepare" || pin.operation_mode !== "validate_only" ||
+    pin.origin !== "https://creator.xiaohongshu.com" || pin.repository !== "WebEnvoy/Lode" ||
+    pin.commit !== xhsPathPrepareLodeCommit || pin.asset_path !== xhsPathPrepareAssetPath) {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_contract_drift", "capability_contract") };
+  }
+  const boundary = object(operation.public_boundary);
+  if (!exactKeys(boundary, ["raw_dom", "raw_har", "screenshot_body", "credentials", "external_write_actions"]) ||
+    boundary!.raw_dom !== "not_exposed" || boundary!.raw_har !== "not_exposed" ||
+    boundary!.screenshot_body !== "not_exposed" || boundary!.credentials !== "not_exposed" || boundary!.external_write_actions !== "not_performed") {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_privacy_boundary_invalid", "result_projection") };
+  }
+  const observedPath = string(normalized.observed_path);
+  const composition = string(normalized.composition_state);
+  const stateValid = (state: JsonObject | undefined) => exactKeys(state, ["route_state", "control_owner_state", "observed_path", "composition_state", "submitted"]) &&
+    ["observed", "unknown", "mismatch"].includes(string(state.route_state) ?? "") &&
+    ["observed", "unknown", "mismatch"].includes(string(state.control_owner_state) ?? "") &&
+    ["observed", "unknown", "mismatch"].includes(string(state.observed_path) ?? "") &&
+    ["initialized", "not_initialized", "unknown"].includes(string(state.composition_state) ?? "") && state.submitted === false;
+  const allProhibitedFalse = prohibited && Object.keys(prohibited).sort().join(",") === "bypass,field_fill,file_chooser,file_select,generate,publish,retry,save_draft,submit,upload" &&
+    Object.values(prohibited).every((entry) => entry === false);
+  const sourceKinds = sourceRefs.map((entry) => string(entry?.kind));
+  const evidenceKinds = evidenceRefs.map((entry) => string(entry?.kind));
+  const sourceValues = sourceRefs.map((entry) => string(entry?.ref));
+  const evidenceValues = evidenceRefs.map((entry) => string(entry?.ref));
+  const postCheck = object(operation.post_check);
+  const postCheckRef = evidenceRefs.find((entry) => entry?.kind === "post_check_ref")?.ref;
+  const snapshotRef = evidenceRefs.find((entry) => entry?.kind === "snapshot_ref")?.ref;
+  if (!exactKeys(normalized, ["canonical_url", "target_ref", "title", "summary", "source_status", "requested_path", "observed_path", "composition_state", "business_state_before", "business_state_after", "interaction", "composition_state_proof", "submitted", "prohibited_actions_observed", "no_submit_guard_status"]) ||
+    normalized.canonical_url !== expected.canonical_url || normalized.target_ref !== expected.target_ref ||
+    !string(normalized.title)?.trim() || !string(normalized.summary)?.trim() || !["located", "partially_located"].includes(string(normalized.source_status) ?? "") ||
+    normalized.requested_path !== expected.requested_path || observedPath !== "observed" ||
+    !["initialized", "not_initialized"].includes(composition ?? "") ||
+    !stateValid(before) || !stateValid(after) || after?.route_state !== "observed" || after.control_owner_state !== "observed" || after.observed_path !== "observed" ||
+    !exactKeys(interaction, ["allowed_action", "requested_control", "selection_status", "readback_status"]) ||
+    interaction!.allowed_action !== "exact_visible_path_control_selection" ||
+    interaction!.requested_control !== (expected.requested_path === "image_text_upload" ? "upload_image" : "generate_image") ||
+    interaction!.selection_status !== "selected" || interaction!.readback_status !== "read" ||
+    !exactKeys(proof, ["basis", "path_entry_alone_proves_initialized"]) || proof!.path_entry_alone_proves_initialized !== false ||
+    (composition === "initialized" ? proof!.basis !== "business_state_readback" : proof!.basis !== "unknown") || after!.composition_state !== composition ||
+    !allProhibitedFalse || normalized.submitted !== false || normalized.no_submit_guard_status !== "active" ||
+    !string(operation.observed_at) || !Number.isFinite(Date.parse(string(operation.observed_at)!)) ||
+    !opaquePublicRef(operation.identity_ref) || !opaquePublicRef(operation.target_ref) ||
+    sourceRefs.length !== 3 || sourceRefs.some((entry) => !exactKeys(entry, ["kind", "ref"]) || !string(entry?.kind) || !opaquePublicRef(entry?.ref)) || new Set(sourceKinds).size !== 3 ||
+    !["creator_publish_page_summary", "dom_snapshot_summary", "business_state_summary"].every((kind) => sourceKinds.includes(kind)) ||
+    evidenceRefs.length !== 2 || evidenceRefs.some((entry) => !exactKeys(entry, ["kind", "ref"]) || !string(entry?.kind) || !opaquePublicRef(entry?.ref)) || new Set(evidenceKinds).size !== 2 ||
+    !evidenceKinds.includes("snapshot_ref") || !evidenceKinds.includes("post_check_ref") ||
+    new Set(sourceValues).size !== sourceValues.length || new Set(evidenceValues).size !== evidenceValues.length ||
+    new Set([...sourceValues, ...evidenceValues]).size !== sourceValues.length + evidenceValues.length ||
+    !opaquePublicRef(postCheckRef) || !opaquePublicRef(snapshotRef) || postCheck?.post_check_ref !== postCheckRef) {
+    return { ok: false, failure: writePrecheckFailure("harbor_path_prepare_output_invalid", "result_projection") };
+  }
+  if (!exactKeys(postCheck, ["status", "reason", "post_check_ref", "source_refs", "evidence_refs", "submitted", "requested_path", "observed_path", "composition_state", "business_state_before", "business_state_after", "no_submit_guard_status"]) ||
+    postCheck!.status !== "passed" || postCheck!.reason !== "validated_creator_path_without_submission" ||
+    canonicalJson(postCheck!.source_refs) !== canonicalJson(sourceRefs) || canonicalJson(postCheck!.evidence_refs) !== canonicalJson(evidenceRefs) ||
+    postCheck!.submitted !== false || postCheck!.requested_path !== normalized.requested_path || postCheck!.observed_path !== normalized.observed_path ||
+    postCheck!.composition_state !== normalized.composition_state || canonicalJson(postCheck!.business_state_before) !== canonicalJson(before) ||
+    canonicalJson(postCheck!.business_state_after) !== canonicalJson(after) || postCheck!.no_submit_guard_status !== "active") {
+    return { ok: false, failure: writePrecheckFailure("harbor_path_prepare_post_check_invalid", "evidence_reference") };
+  }
+  return {
+    ok: true,
+    operation,
+    source_refs: sourceRefs.map((entry) => string(entry?.ref)!).filter((ref): ref is string => opaquePublicRef(ref)),
+    evidence_refs: evidenceRefs.map((entry) => string(entry?.ref)!).filter((ref): ref is string => opaquePublicRef(ref))
+  };
+}
+
+function writePathPreparePreviewResult(taskIntent: TaskIntentEnvelope, evidenceRefs: readonly string[]): PreviewResult {
+  return {
+    schema_version: "webenvoy.preview-result.v0",
+    state: "available",
+    submitted: false,
+    action_refs: { action_request_id: `action-request:${taskIntent.intent_id}` },
+    capability: {
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+      ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
+      package_ref: xhsPathPreparePackageRef
+    },
+    evidence_refs: [...evidenceRefs],
+    consumer_boundary: "Core preview result is validate-only path preparation; it is not submitted result, approval execution, or post-submit truth."
+  };
+}
+
+async function completeAcceptedXhsPathPrepare(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  operation: unknown,
+  runtimeSessionRef: string,
+  targetRef: string,
+  requestedPath: XhsPathPrepareRequestedPath,
+  identityRef: string | undefined,
+  canonicalUrl: string
+): Promise<TaskSubmissionResult> {
+  const validation = validateCompletedXhsPathPrepare(operation, {
+    runtime_session_ref: runtimeSessionRef,
+    identity_ref: identityRef,
+    canonical_url: canonicalUrl,
+    target_ref: targetRef,
+    requested_path: requestedPath
+  });
+  if (!validation.ok) return completeAcceptedWritePrecheckUnknown(store, result, "harbor_path_prepare_outcome_unknown");
+  const completedOperation = validation.operation;
+  const normalized = object(completedOperation.normalized)!;
+  const postCheckRef = string(object(completedOperation.post_check)?.post_check_ref)!;
+  await store.updateRunRecord(result.run_record.run_id, { status: "running" });
+  const completed = await store.updateRunRecord(result.run_record.run_id, {
+    status: "succeeded",
+    result_ref: `result:core/${result.run_record.run_id}`,
+    result_kind: "xhs_publish_note_path_prepare",
+    result_outcome: "partial",
+    output_schema_id: xhsPathPrepareOutputSchemaRef,
+    projection_ref: `projection:core/${result.run_record.run_id}`,
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-path-prepare-projection.v0",
+      canonical_url: normalized.canonical_url,
+      target_ref: normalized.target_ref,
+      title: normalized.title,
+      summary: normalized.summary,
+      source_status: normalized.source_status,
+      requested_path: normalized.requested_path,
+      observed_path: normalized.observed_path,
+      composition_state: normalized.composition_state,
+      business_state_before: normalized.business_state_before,
+      business_state_after: normalized.business_state_after,
+      interaction: normalized.interaction,
+      composition_state_proof: normalized.composition_state_proof,
+      submitted: false,
+      prohibited_actions_observed: normalized.prohibited_actions_observed,
+      no_submit_guard_status: "active",
+      post_check_ref: postCheckRef,
+      lode_pin: completedOperation.lode_pin,
+      consumer_boundary: "Core stores only the bounded path/business-state summary and opaque refs; raw browser material is excluded."
+    },
+    source_refs: validation.source_refs,
+    evidence_refs: validation.evidence_refs,
+    preview_result: writePathPreparePreviewResult(result.task_intent, validation.evidence_refs),
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "passed",
+      summary: "Harbor selected the requested visible path and read back business state without submission.",
+      checked_at: string(completedOperation.observed_at) ?? new Date().toISOString(),
+      evidence_refs: validation.evidence_refs,
+      source_refs: validation.source_refs,
+      consumer_boundary: "Core records submitted=false and refs-only path preparation state."
+    },
+    retention_state: "active"
+  });
+  return { ok: true, task_intent: result.task_intent, run_record: completed };
 }
 
 function writePrecheckPreviewResult(taskIntent: TaskIntentEnvelope, operation: JsonObject, evidenceRefs: readonly string[]): PreviewResult {
@@ -1299,6 +1492,7 @@ async function dispatchApprovedWritePrecheck(
   deps: RuntimeTaskSubmissionDependencies,
   policy: EvaluatedWritePrecheckPolicy
 ): Promise<TaskSubmissionResult> {
+  const pathPrepare = request.package_ref === xhsPathPreparePackageRef;
   const client = deps.harborRuntimeClient;
   if (!client || !client.validateOnlyWritePrecheck) {
     return completeAcceptedWritePrecheckAdmissionFailure(
@@ -1320,7 +1514,7 @@ async function dispatchApprovedWritePrecheck(
     admission = await client.collectAdmissionFacts({
       run_id: request.run_id,
       task_intent: result.task_intent,
-      package_ref: xhsWritePrecheckPackageRef,
+      package_ref: request.package_ref ?? xhsWritePrecheckPackageRef,
       admission_mode: "write_precheck",
       harbor: request.harbor
     });
@@ -1369,7 +1563,9 @@ async function dispatchApprovedWritePrecheck(
       holder_ref: request.run_id,
       url: result.task_intent.scope.target_ref,
       target_ref: target.target_ref,
-      ...(request.harbor?.composition_path === undefined ? {} : { composition_path: request.harbor.composition_path }),
+      ...(pathPrepare
+        ? (request.harbor?.requested_path === undefined ? {} : { requested_path: request.harbor.requested_path })
+        : (request.harbor?.composition_path === undefined ? {} : { composition_path: request.harbor.composition_path })),
       requested_fields: ["title", "summary", "canonical_url", "source_status"],
       include_source_refs: true,
       proposed_input_summary: result.task_intent.input.summary
@@ -1416,7 +1612,9 @@ async function dispatchApprovedWritePrecheck(
   }
   const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef);
   if (cleanup) return cleanup;
-  return completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor?.composition_path);
+  return pathPrepare
+    ? completeAcceptedXhsPathPrepare(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor!.requested_path!, request.harbor?.identity_environment_ref, result.task_intent.scope.target_ref)
+    : completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor?.composition_path);
 }
 
 export type ContinueWritePrecheckTaskRequest = {
@@ -1445,9 +1643,14 @@ export async function continueWritePrecheckTask(
   if (isFailure(taskIntent) || !request.package_ref) {
     return { ok: false, failure: isFailure(taskIntent) ? taskIntent : failure("request_invalid", "package_ref_required", "pre_admission", "fix_input"), run_record: existing };
   }
+  const pathPrepare = request.package_ref === xhsPathPreparePackageRef;
+  const requestedPath = taskIntent.input.requested_path;
   if (existing.task_intent_ref !== taskIntent.intent_id || existing.package_ref !== request.package_ref ||
     existing.capability_ref !== taskIntent.capability.ref || existing.scope_target_ref !== taskIntent.scope.target_ref ||
-    request.package_ref !== "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0" ||
+    (!pathPrepare && request.package_ref !== xhsWritePrecheckPackageRef) ||
+    (pathPrepare && requestedPath !== "image_text_upload" && requestedPath !== "image_text_generate") ||
+    (pathPrepare && request.harbor?.requested_path !== requestedPath) ||
+    (pathPrepare && request.harbor?.composition_path !== undefined) ||
     taskIntent.policy.risk !== "write" || taskIntent.policy.execution_intent !== "validate_only") {
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
@@ -1461,7 +1664,7 @@ export async function continueWritePrecheckTask(
     contract = failure("capability_contract", "lode_registry_unavailable", "admission", "connect_lode_registry");
   }
   if (isFailure(contract)) return { ok: false, failure: contract, run_record: existing };
-  if (!isUnifiedWritePrecheckTask(taskIntent, contract)) {
+  if (!(pathPrepare ? isXhsPathPrepareTask(taskIntent, contract) : isUnifiedWritePrecheckTask(taskIntent, contract))) {
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
   const policy = await evaluateWritePrecheckTaskPolicy({
@@ -1803,14 +2006,31 @@ export async function submitRuntimeTask(
   }
 
   const unifiedWritePrecheck = isUnifiedWritePrecheckTask(validatedTaskIntent, lode_package_contract);
-  if (lode_package_contract.package_ref === xhsWritePrecheckPackageRef && !unifiedWritePrecheck) {
+  const pathPrepare = isXhsPathPrepareTask(validatedTaskIntent, lode_package_contract);
+  const requestedPath = validatedTaskIntent.input.requested_path;
+  if (pathPrepare && requestedPath !== "image_text_upload" && requestedPath !== "image_text_generate") {
+    return acceptReadOnlyTaskSubmission(store, {
+      ...base,
+      lode_package_contract,
+      lode_resolution_failure: failure("request_invalid", "requested_path_invalid", "pre_admission", "choose_image_text_path")
+    });
+  }
+  if (pathPrepare && request.harbor?.requested_path !== requestedPath) {
+    return acceptReadOnlyTaskSubmission(store, {
+      ...base,
+      lode_package_contract,
+      lode_resolution_failure: failure("request_invalid", "requested_path_binding_mismatch", "pre_admission", "choose_image_text_path")
+    });
+  }
+  if ((lode_package_contract.package_ref === xhsWritePrecheckPackageRef && !unifiedWritePrecheck) ||
+    (lode_package_contract.package_ref === xhsPathPreparePackageRef && !pathPrepare)) {
     return acceptReadOnlyTaskSubmission(store, {
       ...base,
       lode_package_contract,
       lode_resolution_failure: failure("capability_contract", "write_precheck_binding_invalid", "admission", "repair_package_contract")
     });
   }
-  if (unifiedWritePrecheck) {
+  if (unifiedWritePrecheck || pathPrepare) {
     const policy = deps.authorizationDecisionStore === undefined
       ? failure("action_risk", "authorization_decision_owner_unavailable", "admission", "retry_when_policy_owner_ready")
       : await evaluateWritePrecheckTaskPolicy({
@@ -2858,6 +3078,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
             url: input.url,
             target_ref: input.target_ref,
             ...(input.composition_path === undefined ? {} : { composition_path: input.composition_path }),
+            ...(input.requested_path === undefined ? {} : { requested_path: input.requested_path }),
             no_submit_guard: "active",
             ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
             ...(input.requested_fields === undefined ? {} : { requested_fields: input.requested_fields }),
@@ -2867,7 +3088,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         });
         const payload = await readBoundedJsonResponse(response, 1024 * 1024);
         const body = object(payload);
-        if (body?.schema_version === "harbor-validate-only-write-precheck/v0" && body.submitted === false &&
+        if ((body?.schema_version === "harbor-validate-only-write-precheck/v0" || body?.schema_version === "harbor-xhs-publish-note-path-prepare/v0") && body.submitted === false &&
           ((body.status === "completed" && body.runtime_session_ref === input.runtime_session_ref) ||
             (body.status === "unavailable" && body.runtime_session_ref === input.runtime_session_ref && typeof body.failure_class === "string" && typeof body.retryable === "boolean"))) return payload;
         return failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");

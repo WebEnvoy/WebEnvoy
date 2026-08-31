@@ -56,6 +56,8 @@ export function projectStandardBusinessResult(
   skills: readonly ResultSkill[] = [],
 ): StandardBusinessResult {
   const result = state.status === "ready" ? state.result : undefined;
+  const xhsPathPrepare = result == null ? undefined : xhsPathPrepareResult(result);
+  if (xhsPathPrepare != null) return xhsPathPrepare;
   const xhsWritePrecheck = result == null ? undefined : xhsWritePrecheckResult(result);
   if (xhsWritePrecheck != null) return xhsWritePrecheck;
   if (run.writePrecheck != null) {
@@ -88,6 +90,48 @@ export function projectStandardBusinessResult(
     .filter((row) => !technicalResultLabels.has(row.label))
     .map((row) => ({ label: row.label, value: row.value }));
   return fields.length > 0 ? { kind: "object", fields } : { kind: "generic", fields: [], resultKind };
+}
+
+function xhsPathPrepareResult(result: CoreRunResult): StandardBusinessResult | undefined {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+  if (result.packageRef !== packageRef) return undefined;
+  const data = result.data;
+  const requestedPath = data?.requested_path;
+  const observedPath = data?.observed_path;
+  const compositionState = data?.composition_state;
+  const before = isRecord(data?.business_state_before) ? data.business_state_before : undefined;
+  const after = isRecord(data?.business_state_after) ? data.business_state_after : undefined;
+  const interaction = isRecord(data?.interaction) ? data.interaction : undefined;
+  const prohibited = isRecord(data?.prohibited_actions_observed) ? data.prohibited_actions_observed : undefined;
+  const validPath = requestedPath === "image_text_upload" || requestedPath === "image_text_generate";
+  const validObserved = observedPath === "observed" || observedPath === "unknown" || observedPath === "mismatch";
+  const validComposition = compositionState === "initialized" || compositionState === "not_initialized" || compositionState === "unknown";
+  const prohibitedSafe = prohibited != null && ["file_chooser", "file_select", "upload", "generate", "field_fill", "save_draft", "publish", "submit", "retry", "bypass"].every((key) => prohibited[key] === false);
+  if (result.outcome !== "partial" || result.payloadState !== "available" || result.envelopeState !== "available" ||
+    result.resultKind !== "xhs_publish_note_path_prepare" || result.outputSchemaId !== "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0" ||
+    result.capabilityVersion !== "0.1.0" || result.capabilityLockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0" ||
+    data?.schema_version !== "webenvoy.core-xhs-path-prepare-projection.v0" || data.submitted !== false || data.no_submit_guard_status !== "active" ||
+    !validPath || !validObserved || !validComposition || !before || !after || !interaction || !prohibitedSafe) {
+    return { kind: "object", fields: [{ label: "结果不可用", value: "图文子路径结果与当前锁定契约不一致，已阻断。请检查登录、页面路径或重新选择后恢复。" }] };
+  }
+  const pathLabel = requestedPath === "image_text_upload" ? "上传图片" : "文字配图";
+  const observedLabel = observedPath === "observed" ? pathLabel : observedPath === "mismatch" ? "路径不匹配（已阻断）" : "未知（已阻断）";
+  const compositionLabel = compositionState === "initialized" ? "已初始化（业务状态已证明）" : compositionState === "not_initialized" ? "尚未初始化" : "未知（未以业务状态证明）";
+  const stateLabel = (state: Record<string, unknown> | undefined) => state == null ? "未知" : `${String(state.route_state)} / ${String(state.control_owner_state)} / ${String(state.observed_path)} / ${String(state.composition_state)}`;
+  return {
+    kind: "object",
+    fields: [
+      { label: "请求路径", value: `${pathLabel}（${requestedPath}）` },
+      { label: "观察路径", value: observedLabel },
+      { label: "composition 状态", value: compositionLabel },
+      { label: "业务状态（前）", value: stateLabel(before) },
+      { label: "业务状态（后）", value: stateLabel(after) },
+      { label: "路径控件", value: interaction.selection_status === "selected" && interaction.readback_status === "read" ? "已选择并完成回读" : "未完成回读（已阻断）" },
+      { label: "提交状态", value: "未提交（submitted=false）" },
+      { label: "阻断/恢复", value: observedPath === "observed" ? "无阻断；如需继续请由用户选择新的路径" : "已阻断；检查受管身份、挑战与创作页路径后重试" },
+      { label: "禁止动作", value: "文件选择、上传、生成、填写、保存、发布、提交、重试、绕过均未执行" },
+    ],
+  };
 }
 
 function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult | undefined {
