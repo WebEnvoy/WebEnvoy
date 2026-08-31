@@ -15,6 +15,8 @@ const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
 const lockRef = "lode://lock/site-capability/xiaohongshu/search-notes@0.1.0";
 const detailPackageRef = "lode://site-capability/xiaohongshu/read-note-detail@0.1.0";
 const detailLockRef = "lode://lock/site-capability/xiaohongshu/read-note-detail@0.1.0";
+const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const detailRef = "detail_ref_12345678-1234-4123-8123-123456789abc";
 const now = new Date("2026-07-21T08:00:00.000Z");
 const providerStatus = {
@@ -108,6 +110,29 @@ function detailPackageContract(): LodePackageAdmissionContract {
       lock_ref: detailLockRef,
       operation_id: "xhs_read_note_detail",
       resource_requirements_id: "xiaohongshu.read-note-detail.resources"
+    }
+  };
+}
+
+function pathPreparePackageContract(): LodePackageAdmissionContract {
+  return {
+    package_ref: pathPreparePackageRef,
+    source_ref: pathPreparePackageRef,
+    lock_ref: pathPrepareLockRef,
+    capability_id: "publish-note-path-prepare",
+    operation_id: "xhs_publish_note_path_prepare",
+    operation_mode: "validate_only",
+    version: "0.1.0",
+    lifecycle: "proposed",
+    resource_requirements: {
+      resource_requirements_id: "xiaohongshu.publish-note-path-prepare.resources",
+      package_ref: pathPreparePackageRef,
+      operation_mode: "validate_only",
+      resource_requirement_profiles: [{
+        requirement_profile_id: "xhs-creator-publish-page-path-prepare",
+        operation_boundary: "validate_only",
+        required_harbor_facts: [{ fact_key: "snapshot.requested_path_control.visible", owner: "Harbor", required: true, freshness: "current_execution_window" }]
+      }]
     }
   };
 }
@@ -322,6 +347,37 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(matchLockedOperationIdentity(creatorPrecheckMatch, identityFacts("identity-other-origin", {
     site_binding: { site_id: "xiaohongshu", origin: "https://example.com" }
   }), "identity-other-origin")?.code, "runtime_origin_not_allowed");
+
+  const pathPrepareRequest = request(["identity-compatible"], {
+    package_ref: pathPreparePackageRef,
+    lock_ref: pathPrepareLockRef,
+    operation_id: "xhs_publish_note_path_prepare",
+    operation_mode: "validate_only",
+    target_ref: "https://creator.xiaohongshu.com/",
+    target_origin: "https://creator.xiaohongshu.com",
+    resource_requirement_ref: "xiaohongshu.publish-note-path-prepare.resources",
+    resource_requirement_profile_id: "xhs-creator-publish-page-path-prepare"
+  });
+  const pathPreparePreview = await previewIdentityCompatibility(pathPrepareRequest, {
+    ...baseDependencies,
+    lodePackageResolver: async () => pathPreparePackageContract()
+  });
+  assert(!("category" in pathPreparePreview));
+  assert.equal(pathPreparePreview.candidates[0]?.status, "unknown_until_runtime");
+  assert.deepEqual(pathPreparePreview.candidates[0]?.reason_codes, ["runtime_facts_require_task_admission"]);
+  assert.equal(pathPreparePreview.target_ref, "https://creator.xiaohongshu.com/");
+
+  const neighboringContract = { ...pathPreparePackageContract(), package_ref: `${pathPreparePackageRef}-candidate`, source_ref: `${pathPreparePackageRef}-candidate` };
+  const neighboringPreview = await previewIdentityCompatibility({
+    ...pathPrepareRequest,
+    package_ref: neighboringContract.package_ref,
+    lock_ref: `${pathPrepareLockRef}-candidate`
+  }, {
+    ...baseDependencies,
+    lodePackageResolver: async () => ({ ...neighboringContract, lock_ref: `${pathPrepareLockRef}-candidate` })
+  });
+  assert(!("category" in neighboringPreview));
+  assert.deepEqual(neighboringPreview.candidates[0]?.reason_codes, ["resource_requirement_mismatch"]);
 
   const uncertainAuthentication = identityFacts("identity-auth-uncertain", {
     login_state: {
