@@ -346,6 +346,7 @@ async function probeProviderWritePrecheck(
           }
         });
         let selected: WritePrecheckObservation | undefined;
+        let completedPathPrepare: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> | undefined;
         try {
           await sendWritePrecheckCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
@@ -378,7 +379,7 @@ async function probeProviderWritePrecheck(
           if (!after || after.path_observed !== "observed") {
             return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false);
           }
-          return {
+          completedPathPrepare = {
             ...selectedValidation,
             observed_at: new Date(observedAt).toISOString(),
             evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
@@ -397,6 +398,10 @@ async function probeProviderWritePrecheck(
             stopInterceptingRequests();
           }
         }
+        if (fileChooserOpened || networkRequestAttempted || !completedPathPrepare) {
+          return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction.", false);
+        }
+        return completedPathPrepare;
       }
       const screenshot = await captureWritePrecheckScreenshot(client);
       if (!screenshot) {
