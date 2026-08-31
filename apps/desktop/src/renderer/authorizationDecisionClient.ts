@@ -134,7 +134,7 @@ function validOwnerDeclaration(value: unknown) {
     "matcher", "declaration_ref", "declaration_version", "resource_match_ref", "resource_match_version",
   ]) && (declaration.matcher === "lode_action_declaration" || declaration.matcher === "harbor_operation_catalog") &&
     [declaration.declaration_ref, declaration.declaration_version, declaration.resource_match_ref, declaration.resource_match_version]
-      .every((item) => typeof item === "string" && item.length > 0 && item.length <= 512 && !item.includes("://"));
+      .every((item) => typeof item === "string" && item.length > 0 && item.length <= 512 && !/^https?:\/\//i.test(item));
 }
 
 function taskApplicability(value: unknown) {
