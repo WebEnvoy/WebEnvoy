@@ -3,6 +3,7 @@ import { createLocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentFacts
 import {
   HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA,
   LocalIdentityEnvironmentManager,
+  rebindUserConfirmedManagedSession,
   type LocalIdentityEnvironmentManagerOptions,
   type LocalIdentityEnvironmentPublicRecord,
   type LocalIdentityEnvironmentStateUpdate,
@@ -365,7 +366,14 @@ export class HarborRuntime {
     this.identityEnvironments = new LocalIdentityEnvironmentManager(ownerOptions);
     this.runtimeSessions = new RuntimeSessionStore(this.viewerControls, launcher, {
       resolve_proxy: ownerOptions.resolve_proxy,
-      on_session_closed: (runtimeSessionRef) => this.detailReadTargets.clearSession(runtimeSessionRef)
+      on_session_closed: (runtimeSessionRef) => {
+        this.detailReadTargets.clearSession(runtimeSessionRef);
+        try {
+          this.identityEnvironments.invalidateUserConfirmedManagedSession(runtimeSessionRef);
+        } catch {
+          // Session closure must not be turned into a cleanup failure by recovery bookkeeping.
+        }
+      }
     });
     this.providerLifecycle = new ManagedProviderLifecycle(providerLifecycleOptions);
   }
@@ -422,6 +430,19 @@ export class HarborRuntime {
   }
 
   async openIdentityEnvironmentSession(input: OpenIdentityEnvironmentSessionInput): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    const managedIdentityEnvironmentRef = input.identity_environment.identity_environment_ref;
+    if (managedIdentityEnvironmentRef && this.identityEnvironments.get(managedIdentityEnvironmentRef)) {
+      const managedIdentityEnvironment = this.identityEnvironments.getFacts(managedIdentityEnvironmentRef);
+      if (!managedIdentityEnvironment || !managedIdentityInputMatches(managedIdentityEnvironment, input.identity_environment)) {
+        return managedIdentityCompatibilityUnavailable();
+      }
+      // Keep the legacy inline API, but route registered identities through the
+      // managed path so restart recovery and live rebind checks cannot be bypassed.
+      return this.openManagedIdentityEnvironmentSession({
+        ...input,
+        identity_environment_ref: managedIdentityEnvironmentRef
+      });
+    }
     return this.runtimeSessions.openIdentityEnvironmentSession(input);
   }
 
@@ -579,6 +600,7 @@ export class HarborRuntime {
   }
 
   async openManagedIdentityEnvironmentSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment"> & { identity_environment_ref: string }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
       return {
@@ -594,12 +616,14 @@ export class HarborRuntime {
       };
     }
     const session = await this.runtimeSessions.openIdentityEnvironmentSession({ ...input, identity_environment });
-    this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
+    const rebindFailure = await this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
+    if (rebindFailure) return rebindFailure;
     this.bindPersistedAuthenticationToCoreReadSession(identity_environment, session, input);
     return session;
   }
 
   async openManagedDefaultSiteSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment" | "url"> & { identity_environment_ref: string }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
       return {
@@ -619,9 +643,18 @@ export class HarborRuntime {
       identity_environment,
       url: defaultIdentitySiteUrl(identity_environment.site_binding.site_id, identity_environment.site_binding.origin)
     });
-    this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
+    const rebindFailure = await this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
+    if (rebindFailure) return rebindFailure;
     this.bindPersistedAuthenticationToCoreReadSession(identity_environment, session, input);
     return session;
+  }
+
+  private requiresPersistedAuthenticationRecovery(
+    identity_environment_ref: string,
+    input: Pick<OpenIdentityEnvironmentSessionInput, "control_owner" | "headless">
+  ): boolean {
+    return this.identityEnvironments.requiresPersistedAuthenticationRecovery(identity_environment_ref) &&
+      (input.control_owner !== "user" || input.headless === true);
   }
 
   private bindPersistedAuthenticationToCoreReadSession(
@@ -633,29 +666,106 @@ export class HarborRuntime {
       identity_environment.login_state.state !== "logged_in" ||
       (identity_environment.login_state.manual_authentication_state !== "completed" &&
         identity_environment.login_state.manual_authentication_state !== "not_required") ||
-      identity_environment.login_state.recovery_required || identity_environment.browser_storage.state !== "present") return;
+      identity_environment.login_state.recovery_required || identity_environment.browser_storage.state !== "present" ||
+      (identity_environment.login_state.reason === "user_confirmed_managed_session" &&
+        !this.identityEnvironments.hasUserConfirmedManagedSession(identity_environment.identity_environment_ref, session.runtime_session_ref))) return;
     this.runtimeSessions.markPersistedReadOperationEligible(session.runtime_session_ref);
   }
 
-  private bindPersistedAuthenticationToHeadedUserSession(
+  private async bindPersistedAuthenticationToHeadedUserSession(
     identity_environment: LocalIdentityEnvironmentFacts,
     session: RuntimeSessionFacts | RuntimeSessionUnavailable,
     input: Pick<OpenIdentityEnvironmentSessionInput, "control_owner" | "headless">
-  ): void {
-    if ("status" in session) return;
+  ): Promise<RuntimeSessionUnavailable | null> {
+    if ("status" in session) return null;
     const record = this.runtimeSessions.getRecord(session.runtime_session_ref);
+    const probeInput = persistedAuthenticationProbeInput(identity_environment.site_binding.site_id);
+    const persistedAuthenticationRecovery = input.control_owner === "user" &&
+      input.headless !== true &&
+      identity_environment.login_state.state === "logged_in" &&
+      identity_environment.login_state.reason === "user_confirmed_managed_session" &&
+      identity_environment.login_state.manual_authentication_state === "completed" &&
+      identity_environment.login_state.recovery_required &&
+      identity_environment.browser_storage.state === "present";
+    if (persistedAuthenticationRecovery && record && record.execution_surface !== "local_provider") {
+      return this.failClosedPersistedAuthentication(
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref
+      );
+    }
     if (
       input.control_owner !== "user" ||
       input.headless === true ||
+      identity_environment.login_state.state !== "logged_in" ||
+      identity_environment.login_state.reason !== "user_confirmed_managed_session" ||
+      identity_environment.login_state.manual_authentication_state !== "completed" ||
+      identity_environment.browser_storage.state !== "present" ||
+      (!identity_environment.login_state.recovery_required &&
+        this.identityEnvironments.hasUserConfirmedManagedSession(identity_environment.identity_environment_ref, session.runtime_session_ref)) ||
       !record ||
+      record.facts.lifecycle_state !== "active" ||
       !sameManagedIdentity(record, identity_environment) ||
       !this.runtimeSessions.isSupervisorConfirmableLocalProviderUserSession(session.runtime_session_ref)
-    ) return;
-    if (!this.identityEnvironments.rebindUserConfirmedManagedSession(
-      identity_environment.identity_environment_ref,
-      session.runtime_session_ref
-    )) return;
+    ) return null;
+    if (!probeInput) {
+      return this.failClosedPersistedAuthentication(
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref
+      );
+    }
+    const controlGeneration = record.control_generation;
+    const probe = await this.runtimeSessions.probeSiteResource(session.runtime_session_ref, probeInput);
+    const current = this.runtimeSessions.getRecord(session.runtime_session_ref);
+    if (probe.status !== "available" || current !== record || record.control_generation !== controlGeneration ||
+      !sameManagedIdentity(record, identity_environment) ||
+      !this.runtimeSessions.isSupervisorConfirmableLocalProviderUserSession(session.runtime_session_ref)) {
+      return this.failClosedPersistedAuthentication(
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref
+      );
+    }
+    try {
+      if (!rebindUserConfirmedManagedSession(
+        this.identityEnvironments,
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref,
+        {
+          execution_identity_ref: identity_environment.execution_identity_ref,
+          profile_ref: record.facts.profile_ref,
+          profile_storage_ref: record.identity_binding.profile_storage_ref
+        }
+      )) {
+        return this.failClosedPersistedAuthentication(
+          identity_environment.identity_environment_ref,
+          session.runtime_session_ref
+        );
+      }
+    } catch {
+      return this.failClosedPersistedAuthentication(
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref
+      );
+    }
     this.runtimeSessions.markReadOperationUserConfirmed(session.runtime_session_ref);
+    return null;
+  }
+
+  private async failClosedPersistedAuthentication(
+    identity_environment_ref: string,
+    runtime_session_ref: string
+  ): Promise<RuntimeSessionUnavailable> {
+    try {
+      this.identityEnvironments.requireAuthenticationRecovery(identity_environment_ref);
+    } catch {
+      // Probe failures remain fail-closed even if recording recovery is unavailable.
+    }
+    try {
+      const closed = await this.runtimeSessions.closeSession(runtime_session_ref);
+      if (closed?.lifecycle_state !== "closed") return persistedAuthenticationCleanupFailure();
+    } catch {
+      return persistedAuthenticationCleanupFailure();
+    }
+    return persistedAuthenticationUnavailable();
   }
 
   getIdentityConsistencyFacts(input: IdentityConsistencyFactsInput): IdentityConsistencyFacts {
@@ -808,7 +918,9 @@ export class HarborRuntime {
       managedIdentity.login_state.state !== "logged_in" ||
       (managedIdentity.login_state.manual_authentication_state !== "completed" &&
         managedIdentity.login_state.manual_authentication_state !== "not_required") ||
-      managedIdentity.login_state.recovery_required
+      managedIdentity.login_state.recovery_required ||
+      (managedIdentity.login_state.reason === "user_confirmed_managed_session" &&
+        !this.identityEnvironments.hasUserConfirmedManagedSession(managedIdentity.identity_environment_ref, runtime_session_ref))
     ) return "not_logged_in";
     if (!hasStableReadOperationController(session, admission.request.holder_ref)) return "session_user_controlled";
     return isChallengeLike(session.facts.current_page.current_url, session.facts.current_page.title) ? "safety_challenge" : null;
@@ -1222,6 +1334,62 @@ function sameManagedIdentity(session: RuntimeSessionRecord, identity: LocalIdent
     session.facts.execution_identity_ref === identity.execution_identity_ref &&
     session.facts.profile_ref === identity.profile_ref &&
     session.identity_binding.profile_storage_ref === identity.browser_storage.profile_storage_ref;
+}
+
+function persistedAuthenticationProbeInput(siteId: string) {
+  if (siteId === "xiaohongshu") return { site_id: "xiaohongshu", task_kind: "search_notes" } as const;
+  if (siteId === "boss") return { site_id: "boss", task_kind: "job_search" } as const;
+  return null;
+}
+
+function persistedAuthenticationUnavailable(): RuntimeSessionUnavailable {
+  const message = "Fresh headed managed session did not pass Harbor's live authentication probe.";
+  return {
+    status: "unavailable",
+    failure_class: "identity_environment_unavailable",
+    message,
+    retryable: true,
+    current_error: { code: "identity_environment_unavailable", message, retryable: true }
+  };
+}
+
+function persistedAuthenticationCleanupFailure(): RuntimeSessionUnavailable {
+  const message = "Fresh headed managed session could not be closed safely after live authentication probe failure.";
+  return {
+    status: "unavailable",
+    failure_class: "session_cleanup_failed",
+    message,
+    retryable: true,
+    current_error: { code: "session_cleanup_failed", message, retryable: true }
+  };
+}
+
+function managedIdentityInputMatches(
+  managed: LocalIdentityEnvironmentFacts,
+  input: LocalIdentityEnvironmentInput | LocalIdentityEnvironmentFacts
+): boolean {
+  const site = "site_binding" in input
+    ? { site_id: input.site_binding.site_id, origin: input.site_binding.origin }
+    : { site_id: input.site.site_id, origin: input.site.origin };
+  // Full facts carry only the redacted profile-storage ref; compare the raw
+  // compatibility input when available and let the managed path own storage.
+  const profileStorageRef = "browser_storage" in input ? undefined : input.profile_storage_ref;
+  return site.site_id === managed.site_binding.site_id &&
+    site.origin === managed.site_binding.origin &&
+    (!input.execution_identity_ref || input.execution_identity_ref === managed.execution_identity_ref) &&
+    (!input.profile_ref || input.profile_ref === managed.profile_ref) &&
+    (!profileStorageRef || profileStorageRef === managed.browser_storage.profile_storage_ref);
+}
+
+function managedIdentityCompatibilityUnavailable(): RuntimeSessionUnavailable {
+  const message = "Inline identity facts do not match the registered Harbor identity environment.";
+  return {
+    status: "unavailable",
+    failure_class: "identity_environment_unavailable",
+    message,
+    retryable: false,
+    current_error: { code: "identity_environment_unavailable", message, retryable: false }
+  };
 }
 
 function hasStableReadOperationController(session: RuntimeSessionRecord, holderRef?: string): boolean {

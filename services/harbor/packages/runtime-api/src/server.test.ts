@@ -732,7 +732,8 @@ test("records user-confirmed manual authentication for an active managed session
     assert.equal(persisted.status.login_state, "logged_in");
     assert.equal(persisted.status.authentication_provenance, "user_confirmed_managed_session");
     assert.equal(persisted.status.manual_authentication_state, "completed");
-    assert.equal(persisted.status.recovery_required, false);
+    assert.equal(persisted.status.recovery_required, true);
+    assert.equal(persisted.status.readiness, "needs_auth");
   } finally {
     await second.close();
   }
@@ -859,6 +860,12 @@ test("never reuses a released headless user-action session for manual visibility
   const launches: LocalProviderLaunchInput[] = [];
   const closes: string[] = [];
   const fixture = createFixtureLauncher("ready");
+  const liveProbe = trustLocalProviderSiteResourceProbe(async () => ({
+    status: "available" as const,
+    observed_at: "2026-08-31T00:00:00.000Z",
+    evidence_ref: "validation_visibility-handoff",
+    verified_fact_keys: ["page.boss_spa.ready"] as const
+  }));
   const runtime = new HarborRuntime(async (input) => {
     launches.push({ ...input });
     const launch = await fixture(input);
@@ -866,6 +873,7 @@ test("never reuses a released headless user-action session for manual visibility
     return {
       ...launch,
       execution_surface: "local_provider",
+      probeSiteResource: liveProbe,
       close: async () => { closes.push(input.profile_ref); }
     };
   });
@@ -920,8 +928,44 @@ test("never reuses a released headless user-action session for manual visibility
   }
 });
 
+test("blocks persisted logged-in state without user-confirmed provenance before Core launch", async () => {
+  const persistence_path = join(mkdtempSync(join(tmpdir(), "harbor-unknown-auth-restart-")), "identity-environments.json");
+  const firstRuntime = new HarborRuntime(unsupportedViewerLauncher("local_provider"), { persistence_path });
+  const created = firstRuntime.createLocalIdentityEnvironment({
+    identity_environment_ref: "identity-env_unknown-auth-restart",
+    execution_identity_ref: "execution-identity_unknown-auth-restart",
+    profile_ref: "profile_unknown-auth-restart",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+    login_state: "logged_in",
+    manual_authentication_state: "completed",
+    storage_state: "present"
+  });
+  await firstRuntime.close();
+
+  const launches: LocalProviderLaunchInput[] = [];
+  const secondRuntime = new HarborRuntime(async (input) => {
+    launches.push({ ...input });
+    return unsupportedViewerLauncher("local_provider")(input);
+  }, { persistence_path });
+  const restarted = secondRuntime.getManagedLocalIdentityEnvironment(created.identity_environment_ref);
+  assert.equal(restarted?.status.authentication_provenance, "unknown");
+  assert.equal(restarted?.status.recovery_required, true);
+
+  const blocked = await secondRuntime.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: created.identity_environment_ref,
+    url: "https://www.xiaohongshu.com/explore",
+    control_owner: "core_task"
+  });
+  assert.equal("status" in blocked, true);
+  if (!("status" in blocked)) throw new Error("unknown persisted authentication must fail before Core launch");
+  assert.equal(blocked.failure_class, "identity_environment_unavailable");
+  assert.equal(launches.length, 0);
+  await secondRuntime.close();
+});
+
 test("rebinds persisted user-confirmed authentication to a fresh headed session before Core handoff", async () => {
   const persistence_path = join(mkdtempSync(join(tmpdir(), "harbor-persisted-headed-handoff-")), "identity-environments.json");
+  let initialSessionRef = "";
   const first = await startHarborRuntimeServer({
     port: 0,
     runtime: new HarborRuntime(unsupportedViewerLauncher("local_provider"), { persistence_path }),
@@ -931,6 +975,239 @@ test("rebinds persisted user-confirmed authentication to a fresh headed session 
     await postIdentityEnvironment(`${first.url}/runtime/identity-environments`, manualAuthenticationEnvironment("identity-env_persisted-headed-handoff"));
     const initial = await postJson(`${first.url}/runtime/identity-environment-sessions`, {
       identity_environment_ref: "identity-env_persisted-headed-handoff",
+      url: "https://www.zhipin.com/web/geek/job",
+      control_owner: "user"
+    });
+    initialSessionRef = initial.runtime_session_ref;
+    const confirmed = await fetch(`${first.url}/runtime/sessions/${initial.runtime_session_ref}/manual-authentication-completed`, {
+      method: "POST",
+      headers: manualAuthHeaders()
+    });
+    assert.equal(confirmed.status, 200);
+  } finally {
+    await first.close();
+  }
+
+  const launches: LocalProviderLaunchInput[] = [];
+  let liveProbeCalls = 0;
+  const fixture = createFixtureLauncher("ready");
+  const liveProbe = trustLocalProviderSiteResourceProbe(async () => {
+    liveProbeCalls += 1;
+    return {
+      status: "available",
+      observed_at: "2026-08-31T00:00:00.000Z",
+      evidence_ref: "validation_persisted-auth",
+      verified_fact_keys: ["page.boss_spa.ready"]
+    };
+  });
+  const secondRuntime = new HarborRuntime(async (input) => {
+    launches.push({ ...input });
+    const launch = await fixture(input);
+    return launch.status === "ready" ? { ...launch, execution_surface: "local_provider", probeSiteResource: liveProbe } : launch;
+  }, { persistence_path });
+  const second = await startHarborRuntimeServer({ port: 0, runtime: secondRuntime });
+  try {
+    assert.equal(secondRuntime.getSession(initialSessionRef), null);
+    const oldSession = await fetch(`${second.url}/runtime/sessions/${initialSessionRef}`);
+    assert.equal(oldSession.status, 404);
+    assert.equal((await oldSession.json()).failure_class, "session_missing");
+    const recovering = secondRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"));
+    assert.equal(recovering?.status.authentication_provenance, "user_confirmed_managed_session");
+    assert.equal(recovering?.status.recovery_required, true);
+    const manual = await postJson(`${second.url}/runtime/identity-environment-sessions`, {
+      identity_environment_ref: "identity-env_persisted-headed-handoff",
+      url: "https://www.zhipin.com/web/geek/job",
+      control_owner: "user"
+    });
+    assert.equal(launches[0]?.headless, false);
+    assert.equal(liveProbeCalls, 1);
+    assert.notEqual(manual.runtime_session_ref, initialSessionRef);
+    const rebound = secondRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"));
+    assert.equal(rebound?.status.recovery_required, false);
+    await postJson(`${second.url}/runtime/sessions/${manual.runtime_session_ref}/release`, { control_owner: "user" });
+
+    const core = await postJson(`${second.url}/runtime/identity-environment-sessions`, {
+      identity_environment_ref: "identity-env_persisted-headed-handoff",
+      url: "https://www.zhipin.com/web/geek/job?query=frontend",
+      control_owner: "core_task"
+    });
+    assert.equal(core.runtime_session_ref, manual.runtime_session_ref);
+    assert.equal(core.control_owner, "core_task");
+    assert.equal(core.viewer_entry.transport, "local_window");
+    assert.equal(launches.length, 1);
+    await secondRuntime.stopSession(core.runtime_session_ref);
+    const stoppedIdentity = secondRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"));
+    assert.equal(stoppedIdentity?.status.authentication_provenance, "user_confirmed_managed_session");
+    assert.equal(stoppedIdentity?.status.recovery_required, true);
+  } finally {
+    await second.close();
+  }
+
+  const staleProbe = trustLocalProviderSiteResourceProbe(async () => ({
+    status: "blocked",
+    failure_class: "not_logged_in",
+    message: "The current page requires login.",
+    verified_fact_keys: []
+  }));
+  let staleCloseCalls = 0;
+  const thirdRuntime = new HarborRuntime(async (input) => {
+    const launch = await fixture(input);
+    return launch.status === "ready" ? {
+      ...launch,
+      execution_surface: "local_provider",
+      probeSiteResource: staleProbe,
+      close: async () => { staleCloseCalls += 1; await launch.close(); }
+    } : launch;
+  }, { persistence_path });
+  const staleSession = await thirdRuntime.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: resolvedIdentityRef("identity-env_persisted-headed-handoff"),
+    url: "https://www.zhipin.com/web/geek/job",
+    control_owner: "user"
+  });
+  assert.equal("status" in staleSession, true);
+  if (!("status" in staleSession)) throw new Error("blocked live probe must fail closed");
+  assert.equal(staleSession.failure_class, "identity_environment_unavailable");
+  assert.equal(staleCloseCalls, 1);
+  assert.equal(thirdRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"))?.status.recovery_required, true);
+  await thirdRuntime.close();
+
+  let throwingCloseCalls = 0;
+  const throwingProbe = trustLocalProviderSiteResourceProbe(async () => {
+    throw new Error("probe adapter failed");
+  });
+  const throwingRuntime = new HarborRuntime(async (input) => {
+    const launch = await fixture(input);
+    return launch.status === "ready" ? {
+      ...launch,
+      execution_surface: "local_provider",
+      probeSiteResource: throwingProbe,
+      close: async () => { throwingCloseCalls += 1; await launch.close(); }
+    } : launch;
+  }, { persistence_path });
+  const thrownProbe = await throwingRuntime.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: resolvedIdentityRef("identity-env_persisted-headed-handoff"),
+    url: "https://www.zhipin.com/web/geek/job",
+    control_owner: "user"
+  });
+  assert.equal("status" in thrownProbe, true);
+  if (!("status" in thrownProbe)) throw new Error("throwing live probe must fail closed");
+  assert.equal(thrownProbe.failure_class, "identity_environment_unavailable");
+  assert.equal(throwingCloseCalls, 1);
+  assert.equal(throwingRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"))?.status.recovery_required, true);
+  await throwingRuntime.close();
+
+  const recoveryControls = [
+    { control_owner: "agent" as const },
+    { control_owner: "core_task" as const },
+    { control_owner: "user" as const, headless: true }
+  ] as const;
+  for (const method of ["identity", "default"] as const) {
+    for (const control of recoveryControls) {
+      const launches: LocalProviderLaunchInput[] = [];
+      let probeCalls = 0;
+      const probe = trustLocalProviderSiteResourceProbe(async () => {
+        probeCalls += 1;
+        return {
+          status: "available" as const,
+          observed_at: "2026-08-31T00:00:00.000Z",
+          evidence_ref: "validation_persisted-auth-recovery-preflight",
+          verified_fact_keys: ["page.boss_spa.ready"] as const
+        };
+      });
+      const failClosedRuntime = new HarborRuntime(async (input) => {
+        launches.push({ ...input });
+        const launch = await fixture(input);
+        return launch.status === "ready" ? { ...launch, execution_surface: "local_provider" as const, probeSiteResource: probe } : launch;
+      }, { persistence_path });
+      const identityEnvironmentRef = resolvedIdentityRef("identity-env_persisted-headed-handoff");
+      const failClosed = method === "identity"
+        ? await failClosedRuntime.openManagedIdentityEnvironmentSession({
+            identity_environment_ref: identityEnvironmentRef,
+            url: "https://www.zhipin.com/web/geek/job",
+            ...control
+          })
+        : await failClosedRuntime.openManagedDefaultSiteSession({
+            identity_environment_ref: identityEnvironmentRef,
+            ...control
+          });
+      assert.equal("status" in failClosed, true);
+      if (!("status" in failClosed)) throw new Error("persisted auth recovery preflight must fail closed");
+      assert.equal(failClosed.failure_class, "identity_environment_unavailable");
+      assert.equal(failClosed.message, "Fresh headed managed session did not pass Harbor's live authentication probe.");
+      assert.equal(launches.length, 0);
+      assert.equal(probeCalls, 0);
+      const sessionStore = (failClosedRuntime as unknown as {
+        runtimeSessions: { records: Map<unknown, unknown>; getActiveIdentityEnvironmentSession: (ref: string) => unknown }
+      }).runtimeSessions;
+      assert.equal(sessionStore.records.size, 0);
+      assert.equal(sessionStore.getActiveIdentityEnvironmentSession(identityEnvironmentRef), null);
+      assert.equal(failClosedRuntime.getManagedLocalIdentityEnvironment(identityEnvironmentRef)?.status.recovery_required, true);
+      await failClosedRuntime.close();
+    }
+  }
+
+  for (const method of ["identity", "default"] as const) {
+    const launches: LocalProviderLaunchInput[] = [];
+    let closeCalls = 0;
+    const fixtureRecoveryRuntime = new HarborRuntime(async (input) => {
+      launches.push({ ...input });
+      const launch = await fixture(input);
+      return launch.status === "ready"
+        ? { ...launch, close: async () => { closeCalls += 1; await launch.close(); } }
+        : launch;
+    }, { persistence_path });
+    const identityEnvironmentRef = resolvedIdentityRef("identity-env_persisted-headed-handoff");
+    const failClosed = method === "identity"
+      ? await fixtureRecoveryRuntime.openManagedIdentityEnvironmentSession({
+          identity_environment_ref: identityEnvironmentRef,
+          url: "https://www.zhipin.com/web/geek/job",
+          control_owner: "user"
+        })
+      : await fixtureRecoveryRuntime.openManagedDefaultSiteSession({
+          identity_environment_ref: identityEnvironmentRef,
+          control_owner: "user"
+        });
+    assert.equal("status" in failClosed, true);
+    if (!("status" in failClosed)) throw new Error("fixture persisted auth recovery must fail closed");
+    assert.equal(failClosed.failure_class, "identity_environment_unavailable");
+    assert.equal(failClosed.message, "Fresh headed managed session did not pass Harbor's live authentication probe.");
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0]?.headless, false);
+    assert.equal(closeCalls, 1);
+    const sessionStore = (fixtureRecoveryRuntime as unknown as {
+      runtimeSessions: {
+        records: Map<string, { facts: { lifecycle_state: string }; identity_binding: { profile_storage_ref: string | null }; profile_ownership?: unknown }>;
+        getActiveIdentityEnvironmentSession: (ref: string) => unknown;
+        isProfileStorageInUse: (ref: string) => boolean;
+      }
+    }).runtimeSessions;
+    const records = [...sessionStore.records.values()];
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.facts.lifecycle_state, "closed");
+    assert.equal(records[0]?.profile_ownership, undefined);
+    assert.equal(sessionStore.getActiveIdentityEnvironmentSession(identityEnvironmentRef), null);
+    const profileStorageRef = records[0]?.identity_binding.profile_storage_ref;
+    assert.ok(profileStorageRef);
+    assert.equal(sessionStore.isProfileStorageInUse(profileStorageRef), false);
+    assert.equal(fixtureRecoveryRuntime.getManagedLocalIdentityEnvironment(identityEnvironmentRef)?.status.recovery_required, true);
+    await fixtureRecoveryRuntime.close();
+  }
+});
+
+test("routes inline compatibility opens through the persisted authentication recovery guard", async () => {
+  const persistence_path = join(mkdtempSync(join(tmpdir(), "harbor-inline-recovery-compat-")), "identity-environments.json");
+  const identityEnvironmentAlias = "identity-env_inline-recovery-compat";
+  const first = await startHarborRuntimeServer({
+    port: 0,
+    runtime: new HarborRuntime(unsupportedViewerLauncher("local_provider"), { persistence_path }),
+    manual_authentication_supervisor_token: supervisorToken()
+  });
+  let identityEnvironmentRef = "";
+  try {
+    const created = await postIdentityEnvironment(`${first.url}/runtime/identity-environments`, manualAuthenticationEnvironment(identityEnvironmentAlias));
+    identityEnvironmentRef = created.identity_environment_ref;
+    const initial = await postJson(`${first.url}/runtime/identity-environment-sessions`, {
+      identity_environment_ref: identityEnvironmentAlias,
       url: "https://www.zhipin.com/web/geek/job",
       control_owner: "user"
     });
@@ -944,31 +1221,70 @@ test("rebinds persisted user-confirmed authentication to a fresh headed session 
   }
 
   const launches: LocalProviderLaunchInput[] = [];
+  let probeCalls = 0;
   const fixture = createFixtureLauncher("ready");
+  const probe = trustLocalProviderSiteResourceProbe(async () => {
+    probeCalls += 1;
+    return {
+      status: "available" as const,
+      observed_at: "2026-08-31T00:00:00.000Z",
+      evidence_ref: "validation_inline-recovery-compat",
+      verified_fact_keys: ["page.boss_spa.ready"] as const
+    };
+  });
   const secondRuntime = new HarborRuntime(async (input) => {
     launches.push({ ...input });
     const launch = await fixture(input);
-    return launch.status === "ready" ? { ...launch, execution_surface: "local_provider" } : launch;
+    return launch.status === "ready"
+      ? { ...launch, execution_surface: "local_provider" as const, probeSiteResource: probe }
+      : launch;
   }, { persistence_path });
   const second = await startHarborRuntimeServer({ port: 0, runtime: secondRuntime });
   try {
-    const manual = await postJson(`${second.url}/runtime/identity-environment-sessions`, {
-      identity_environment_ref: "identity-env_persisted-headed-handoff",
-      url: "https://www.zhipin.com/web/geek/job",
-      control_owner: "user"
-    });
-    assert.equal(launches[0]?.headless, false);
-    await postJson(`${second.url}/runtime/sessions/${manual.runtime_session_ref}/release`, { control_owner: "user" });
+    const inlineIdentityEnvironment = {
+      identity_environment_ref: identityEnvironmentRef,
+      site: { site_id: "boss", origin: "https://www.zhipin.com", display_name: "BOSS" },
+      login_state: "logged_in" as const,
+      manual_authentication_state: "completed" as const,
+      storage_state: "present" as const
+    };
+    for (const control of [
+      { control_owner: "agent" as const },
+      { control_owner: "core_task" as const },
+      { control_owner: "user" as const, headless: true }
+    ]) {
+      const response = await fetch(`${second.url}/runtime/identity-environment-sessions`, {
+        method: "POST",
+        body: JSON.stringify({
+          identity_environment: inlineIdentityEnvironment,
+          url: "https://www.zhipin.com/web/geek/job",
+          ...control
+        }),
+        headers: { "content-type": "application/json", ...manualAuthHeaders() }
+      });
+      assert.equal(response.status, 409);
+      const failure = await response.json();
+      assert.equal(failure.failure_class, "identity_environment_unavailable");
+    }
+    assert.equal(launches.length, 0);
+    assert.equal(probeCalls, 0);
 
-    const core = await postJson(`${second.url}/runtime/identity-environment-sessions`, {
-      identity_environment_ref: "identity-env_persisted-headed-handoff",
-      url: "https://www.zhipin.com/web/geek/job?query=frontend",
-      control_owner: "core_task"
+    const headed = await fetch(`${second.url}/runtime/identity-environment-sessions`, {
+      method: "POST",
+      body: JSON.stringify({
+        identity_environment: inlineIdentityEnvironment,
+        url: "https://www.zhipin.com/web/geek/job",
+        control_owner: "user"
+      }),
+      headers: { "content-type": "application/json", ...manualAuthHeaders() }
     });
-    assert.equal(core.runtime_session_ref, manual.runtime_session_ref);
-    assert.equal(core.control_owner, "core_task");
-    assert.equal(core.viewer_entry.transport, "local_window");
+    assert.equal(headed.status, 201);
+    const session = await headed.json();
+    assert.equal(session.lifecycle_state, "active");
     assert.equal(launches.length, 1);
+    assert.equal(launches[0]?.headless, false);
+    assert.equal(probeCalls, 1);
+    assert.equal(secondRuntime.getManagedLocalIdentityEnvironment(identityEnvironmentRef)?.status.recovery_required, false);
   } finally {
     await second.close();
   }
@@ -1242,7 +1558,7 @@ test("ignores caller-supplied owner refs when creating identities through the co
   }
 });
 
-test("does not reuse or confirm a session with a different execution identity", async () => {
+test("fails closed for inline identity facts with a different execution identity", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const running = await startHarborRuntimeServer({ port: 0, runtime, manual_authentication_supervisor_token: supervisorToken() });
   try {
@@ -1259,25 +1575,25 @@ test("does not reuse or confirm a session with a different execution identity", 
       url: "https://example.test/execution-identity-a",
       control_owner: "user"
     });
-    const second = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
-      identity_environment: {
-        identity_environment_ref: "identity-env_execution-boundary",
-        execution_identity_ref: "execution-identity_b",
-        profile_ref: "profile_execution-boundary",
-        site: { site_id: "boss", origin: "https://www.zhipin.com", display_name: "BOSS" },
-        login_state: "manual_auth_required",
-        storage_state: "present"
-      },
-      url: "https://example.test/execution-identity-b",
-      control_owner: "user"
+    const response = await fetch(`${running.url}/runtime/identity-environment-sessions`, {
+      method: "POST",
+      body: JSON.stringify({
+        identity_environment: {
+          identity_environment_ref: resolvedIdentityRef("identity-env_execution-boundary"),
+          execution_identity_ref: "execution-identity_b",
+          profile_ref: "profile_execution-boundary",
+          site: { site_id: "boss", origin: "https://www.zhipin.com", display_name: "BOSS" },
+          login_state: "manual_auth_required",
+          storage_state: "present"
+        },
+        url: "https://example.test/execution-identity-b",
+        control_owner: "user"
+      }),
+      headers: { "content-type": "application/json", ...manualAuthHeaders() }
     });
-    assert.notEqual(first.runtime_session_ref, second.runtime_session_ref);
-    assert.equal(second.execution_identity_ref, "execution-identity_b");
-
-    runtime.recordHandoff(second.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
-    const response = await fetch(`${running.url}/runtime/sessions/${second.runtime_session_ref}/manual-authentication-completed`, { method: "POST", headers: manualAuthHeaders() });
     assert.equal(response.status, 409);
-    assert.equal((await response.json()).failure_class, "identity_environment_unmanaged");
+    assert.equal((await response.json()).failure_class, "identity_environment_unavailable");
+    assert.equal(runtime.getSession(first.runtime_session_ref)?.lifecycle_state, "active");
     const managedIdentity = await getJson(`${running.url}/runtime/identity-environments/identity-env_execution-boundary`);
     assert.equal(managedIdentity.status.login_state, "manual_auth_required");
   } finally {
@@ -1285,7 +1601,7 @@ test("does not reuse or confirm a session with a different execution identity", 
   }
 });
 
-test("rejects manual authentication when a session differs from the managed profile and storage binding", async () => {
+test("fails closed for inline identity facts with a different profile and storage binding", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const running = await startHarborRuntimeServer({ port: 0, runtime, manual_authentication_supervisor_token: supervisorToken() });
   try {
@@ -1298,24 +1614,27 @@ test("rejects manual authentication when a session differs from the managed prof
       login_state: "manual_auth_required",
       storage_state: "present"
     });
-    const session = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
-      identity_environment: {
-        identity_environment_ref: "identity-env_profile-storage-boundary",
-        execution_identity_ref: "execution-identity_profile-storage-boundary",
-        profile_ref: "profile_different",
-        profile_storage_ref: "profile-storage_different",
-        site: { site_id: "boss", origin: "https://www.zhipin.com", display_name: "BOSS" },
-        login_state: "manual_auth_required",
-        storage_state: "present"
-      },
-      url: "https://example.test/profile-storage-boundary",
-      control_owner: "user"
+    const response = await fetch(`${running.url}/runtime/identity-environment-sessions`, {
+      method: "POST",
+      body: JSON.stringify({
+        identity_environment: {
+          identity_environment_ref: resolvedIdentityRef("identity-env_profile-storage-boundary"),
+          execution_identity_ref: "execution-identity_profile-storage-boundary",
+          profile_ref: "profile_different",
+          profile_storage_ref: "profile-storage_different",
+          site: { site_id: "boss", origin: "https://www.zhipin.com", display_name: "BOSS" },
+          login_state: "manual_auth_required",
+          storage_state: "present"
+        },
+        url: "https://example.test/profile-storage-boundary",
+        control_owner: "user"
+      }),
+      headers: { "content-type": "application/json", ...manualAuthHeaders() }
     });
-
-    runtime.recordHandoff(session.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
-    const response = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/manual-authentication-completed`, { method: "POST", headers: manualAuthHeaders() });
     assert.equal(response.status, 409);
-    assert.equal((await response.json()).failure_class, "identity_environment_unmanaged");
+    assert.equal((await response.json()).failure_class, "identity_environment_unavailable");
+    const sessions = (runtime as unknown as { runtimeSessions: { records: Map<unknown, unknown> } }).runtimeSessions.records;
+    assert.equal(sessions.size, 0);
     const unchanged = await getJson(`${running.url}/runtime/identity-environments/identity-env_profile-storage-boundary`);
     assert.equal(unchanged.status.login_state, "manual_auth_required");
     assert.equal(unchanged.status.authentication_provenance, "unknown");

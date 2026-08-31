@@ -1534,6 +1534,75 @@ test("opens an identity environment session with page and controller facts", asy
   assert.equal(publicJson.includes("token"), false);
 });
 
+test("routes registered inline identity facts through the managed session path", async () => {
+  const launches: LocalProviderLaunchInput[] = [];
+  const runtime = new HarborRuntime(capturingLauncher(launches));
+  runtime.createLocalIdentityEnvironment({
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    identity_environment_ref: "identity-env_inline-managed",
+    execution_identity_ref: "execution-identity_inline-managed",
+    profile_ref: "profile_inline-managed",
+    profile_storage_ref: "profile-storage_inline-managed",
+    site: {
+      site_id: "xiaohongshu",
+      origin: "https://www.xiaohongshu.com",
+      display_name: "小红书"
+    },
+    login_state: "logged_in",
+    storage_state: "present"
+  });
+
+  const mismatchedInlineFacts = runtime.getLocalIdentityEnvironmentFacts({
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    identity_environment_ref: "identity-env_inline-managed",
+    execution_identity_ref: "execution-identity_inline-bypass",
+    profile_ref: "profile_inline-bypass",
+    profile_storage_ref: "profile-storage_inline-bypass",
+    site: {
+      site_id: "xiaohongshu",
+      origin: "https://www.xiaohongshu.com",
+      display_name: "小红书"
+    },
+    login_state: "logged_in",
+    storage_state: "present"
+  });
+  const mismatch = await runtime.openIdentityEnvironmentSession({
+    identity_environment: mismatchedInlineFacts,
+    url: "https://www.xiaohongshu.com/explore",
+    control_owner: "agent"
+  });
+  assert.equal("status" in mismatch, true);
+  if (!("status" in mismatch)) throw new Error("mismatched registered identity must fail closed");
+  assert.equal(mismatch.failure_class, "identity_environment_unavailable");
+  assert.equal(launches.length, 0);
+
+  const inlineFacts = runtime.getLocalIdentityEnvironmentFacts({
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    identity_environment_ref: "identity-env_inline-managed",
+    execution_identity_ref: "execution-identity_inline-managed",
+    profile_ref: "profile_inline-managed",
+    profile_storage_ref: "profile-storage_inline-managed",
+    site: {
+      site_id: "xiaohongshu",
+      origin: "https://www.xiaohongshu.com",
+      display_name: "小红书"
+    },
+    login_state: "logged_in",
+    storage_state: "present"
+  });
+  const session = await runtime.openIdentityEnvironmentSession({
+    identity_environment: inlineFacts,
+    url: "https://www.xiaohongshu.com/explore",
+    control_owner: "agent"
+  });
+
+  assert.equal("status" in session, false);
+  if ("status" in session) throw new Error("registered inline identity should open");
+  assert.equal(session.profile_ref, "profile_inline-managed");
+  assert.equal(launches[0]?.profile_ref, "profile_inline-managed");
+  assert.notEqual(session.profile_ref, "profile_inline-bypass");
+});
+
 test("reuses, locks, releases, and stops identity environment sessions", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const identity_environment = runtime.getLocalIdentityEnvironmentFacts({
