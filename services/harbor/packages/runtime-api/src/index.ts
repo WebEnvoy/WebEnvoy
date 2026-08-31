@@ -716,9 +716,17 @@ export class HarborRuntime {
     const controlGeneration = record.control_generation;
     const probe = await this.runtimeSessions.probeSiteResource(session.runtime_session_ref, probeInput);
     const current = this.runtimeSessions.getRecord(session.runtime_session_ref);
-    if (probe.status !== "available" || current !== record || record.control_generation !== controlGeneration ||
+    if (current !== record || record.control_generation !== controlGeneration ||
       !sameManagedIdentity(record, identity_environment) ||
       !this.runtimeSessions.isSupervisorConfirmableLocalProviderUserSession(session.runtime_session_ref)) {
+      return this.failClosedPersistedAuthentication(
+        identity_environment.identity_environment_ref,
+        session.runtime_session_ref
+      );
+    }
+    if (probe.status !== "available") {
+      if (probe.status === "blocked" &&
+        (probe.failure_class === "not_logged_in" || probe.failure_class === "safety_challenge")) return null;
       return this.failClosedPersistedAuthentication(
         identity_environment.identity_environment_ref,
         session.runtime_session_ref

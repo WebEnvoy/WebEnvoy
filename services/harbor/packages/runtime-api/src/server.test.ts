@@ -1064,11 +1064,21 @@ test("rebinds persisted user-confirmed authentication to a fresh headed session 
     url: "https://www.zhipin.com/web/geek/job",
     control_owner: "user"
   });
-  assert.equal("status" in staleSession, true);
-  if (!("status" in staleSession)) throw new Error("blocked live probe must fail closed");
-  assert.equal(staleSession.failure_class, "identity_environment_unavailable");
-  assert.equal(staleCloseCalls, 1);
+  assert.equal("status" in staleSession, false);
+  if ("status" in staleSession) throw new Error("manual authentication recovery must keep the headed user session active");
+  assert.equal(staleSession.lifecycle_state, "active");
+  assert.equal(staleSession.control_owner, "user");
+  assert.equal(staleCloseCalls, 0);
   assert.equal(thirdRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"))?.status.recovery_required, true);
+  const blockedCore = await thirdRuntime.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: resolvedIdentityRef("identity-env_persisted-headed-handoff"),
+    url: "https://www.zhipin.com/web/geek/job",
+    control_owner: "core_task"
+  });
+  assert.equal("status" in blockedCore, true);
+  if (!("status" in blockedCore)) throw new Error("recovery session must remain unavailable to Core");
+  assert.equal(blockedCore.failure_class, "identity_environment_unavailable");
+  assert.equal(staleCloseCalls, 0);
   await thirdRuntime.close();
 
   let throwingCloseCalls = 0;
