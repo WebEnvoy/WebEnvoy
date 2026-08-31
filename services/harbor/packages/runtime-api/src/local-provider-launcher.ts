@@ -496,8 +496,11 @@ function pathSelectionProbeExpression(): string {
             const rect = el?.getBoundingClientRect();
             return Boolean(el && style && style.visibility !== 'hidden' && style.display !== 'none' &&
               style.pointerEvents !== 'none' && rect && rect.width > 0 && rect.height > 0 &&
+              style.zIndex !== '-1' && Number(style.opacity) >= 0.01 &&
+              rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
               !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
-              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]'));
+              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]') &&
+              (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
           };
           const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
