@@ -1252,8 +1252,7 @@ export class HarborRuntime {
       target_url: admitted.url,
       expected_origin: XHS_PUBLISH_PRECHECK_PIN.origin,
       target_ref: admitted.target_ref,
-      requested_path: admitted.requested_path,
-      select_path: true
+      requested_path: admitted.requested_path
     });
     if (probe.status === "unavailable") return unavailableXhsPathPrepare(runtime_session_ref, probe.failure_class, probe.retryable);
     const current = this.runtimeSessions.getRecord(runtime_session_ref);

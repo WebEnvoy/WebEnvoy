@@ -126,6 +126,7 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /selectPath = true/);
   assert.match(upload, /pathLabels = \["上传图片"\]/);
   assert.match(upload, /input\[type=["']file["']\]/);
+  assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });
 
@@ -134,8 +135,7 @@ test("#405 observation preserves path state for the bounded path branch", () => 
     target_url: "https://creator.xiaohongshu.com/publish/publish",
     expected_origin: "https://creator.xiaohongshu.com" as const,
     target_ref: "target-ref:xiaohongshu/creator-publish-page",
-    requested_path: "image_text_upload" as const,
-    select_path: true
+    requested_path: "image_text_upload" as const
   };
   const base = {
     url: input.target_url,

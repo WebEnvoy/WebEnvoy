@@ -201,8 +201,6 @@ export interface LocalProviderWritePrecheckProbeInput {
   composition_path?: XhsWritePrecheckCompositionPath;
   /** #405 user-selected path; Harbor may select only this exact visible control. */
   requested_path?: XhsPathPrepareRequestedPath;
-  /** Internal bounded operation mode; only #405 enables one exact control click. */
-  select_path?: boolean;
 }
 
 /** Public, bounded path ids owned by the Lode composition catalog. */

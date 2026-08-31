@@ -547,6 +547,8 @@ export function completeXhsPathPrepare(
   const pathPrepare = probe.path_prepare;
   if (!pathPrepare) return null;
   const postCheckRef = opaqueRef("post_check");
+  const snapshotRefs = probe.evidence_ref_kinds.filter(({ kind }) => kind === "snapshot_ref");
+  if (snapshotRefs.length !== 1) return null;
   return {
     schema_version: HARBOR_XHS_PATH_PREPARE_SCHEMA,
     status: "completed",
@@ -565,12 +567,11 @@ export function completeXhsPathPrepare(
       ...pathPrepare
     },
     source_refs: [
-      { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
-      { kind: "dom_snapshot_summary", ref: opaqueRef("source") },
+      ...probe.source_refs,
       { kind: "business_state_summary", ref: opaqueRef("source") }
     ],
     evidence_refs: [
-      { kind: "snapshot_ref", ref: opaqueRef("evidence") },
+      snapshotRefs[0]!,
       { kind: "post_check_ref", ref: postCheckRef }
     ],
     post_check: {

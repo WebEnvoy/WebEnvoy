@@ -478,7 +478,7 @@ function pathSelectionProbeExpression(): string {
               !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]'));
           };
           const controls = [...document.querySelectorAll('button, [role="button"], [role="tab"]')]
-            .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected || normalizeControlLabel(el).includes(expected)) &&
+            .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
           const control = controls[0];
           if (!control) return { ...ready, selection_status: 'blocked' };

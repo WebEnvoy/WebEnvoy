@@ -218,6 +218,7 @@ test("#405 admits both explicit paths and returns refs-only no-submit state", ()
   assert.equal(completed?.normalized.composition_state, "initialized");
   assert.equal(completed?.normalized.composition_state_proof.path_entry_alone_proves_initialized, false);
   assert.equal(completed?.submitted, false);
+  assert.equal(completed?.evidence_refs[0]?.ref, pathProbe.evidence_ref_kinds[0]?.ref);
   assert.equal(completed?.lode_pin.package_ref, XHS_PUBLISH_PATH_PREPARE_PIN.package_ref);
   assert.equal(completed?.public_boundary.external_write_actions, "not_performed");
 });

@@ -1560,7 +1560,7 @@ async function dispatchApprovedWritePrecheck(
   const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef);
   if (cleanup) return cleanup;
   return pathPrepare
-    ? completeAcceptedXhsPathPrepare(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor?.requested_path ?? "image_text_upload")
+    ? completeAcceptedXhsPathPrepare(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor!.requested_path!)
     : completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor?.composition_path);
 }
 
