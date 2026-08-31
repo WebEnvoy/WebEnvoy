@@ -660,7 +660,16 @@ export class RuntimeSessionStore {
         verified_fact_keys: []
       };
     }
-    return probe(input);
+    try {
+      return await probe(input);
+    } catch {
+      return {
+        status: "unknown",
+        failure_class: "provider_probe_unavailable",
+        message: "The trusted site-resource probe failed before it could return a structured result.",
+        verified_fact_keys: []
+      };
+    }
   }
 
   async probeWritePrecheck(

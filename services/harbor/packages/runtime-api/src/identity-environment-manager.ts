@@ -88,6 +88,7 @@ export interface StoredLocalIdentityEnvironmentRecord {
     local_secret_ref: string | null;
   };
   imported_from: string | null;
+  authentication_provenance?: "unknown" | "user_confirmed_managed_session";
   user_confirmed_session_ref: string | null;
   repair_state: "clean" | "repair_required";
   repair_reasons: string[];
@@ -151,10 +152,14 @@ export interface LocalIdentityEnvironmentPublicRecord {
   risk_boundary: LocalIdentityEnvironmentFacts["risk_boundary"];
 }
 
+const LOCAL_IDENTITY_ENVIRONMENT_REBIND_CAPABILITY = Symbol("harbor.local_identity_environment.rebind");
+
 export class LocalIdentityEnvironmentManager {
   private readonly records = new Map<string, StoredLocalIdentityEnvironmentRecord>();
   private readonly receipts = new Map<string, StoredIdentityEnvironmentMutationReceipt>();
   private readonly repairs = new Map<string, StoredIdentityEnvironmentRepair>();
+  private readonly currentProcessIdentityEnvironmentRefs = new Set<string>();
+  private readonly currentProcessConfirmedSessionRefs = new Set<string>();
 
   constructor(private readonly options: LocalIdentityEnvironmentManagerOptions = {}) {
     if (Boolean(options.persist_state) !== Boolean(options.load_state)) {
@@ -172,13 +177,17 @@ export class LocalIdentityEnvironmentManager {
   }
 
   mutate(request: IdentityEnvironmentMutationRequest, conflict: IdentityEnvironmentMutationConflict | null = null): IdentityEnvironmentMutationResult {
-    return this.withStoreMutation(() => executeIdentityEnvironmentMutation(request, {
+    const result = this.withStoreMutation(() => executeIdentityEnvironmentMutation(request, {
         records: this.records,
         receipts: this.receipts,
         repairs: this.repairs,
         persist: (records, receipts, repairs) => this.persist(records, receipts, repairs),
         public_record: publicRecord
       }, this.options, conflict));
+    if (result.status === "completed" && result.identity_environment_ref) {
+      this.currentProcessIdentityEnvironmentRefs.add(result.identity_environment_ref);
+    }
+    return result;
   }
 
   update(identity_environment_ref: string, input: LocalIdentityEnvironmentStateUpdate): LocalIdentityEnvironmentPublicRecord | null {
@@ -190,11 +199,13 @@ export class LocalIdentityEnvironmentManager {
   }
 
   completeManualAuthentication(identity_environment_ref: string, runtime_session_ref: string): LocalIdentityEnvironmentPublicRecord | null {
-    return this.updateRecord(identity_environment_ref, {
+    const record = this.updateRecord(identity_environment_ref, {
       login_state: "logged_in",
       manual_authentication_state: "completed",
       login_state_reason: USER_CONFIRMED_MANAGED_SESSION_REASON
     }, runtime_session_ref);
+    if (record) this.currentProcessConfirmedSessionRefs.add(runtime_session_ref);
+    return record;
   }
 
   private updateRecord(
@@ -209,11 +220,20 @@ export class LocalIdentityEnvironmentManager {
       const facts = snapshot(current.identity_environment);
       const loginState = input.login_state ?? facts.login_state.state;
       const storageState = input.storage_state ?? facts.browser_storage.state;
+      const loginStateReason = input.login_state_reason ?? facts.login_state.reason;
+      const authenticationProvenance = user_confirmed_session_ref
+        ? USER_CONFIRMED_MANAGED_SESSION_REASON
+        : facts.login_state.reason === USER_CONFIRMED_MANAGED_SESSION_REASON
+          ? current.authentication_provenance
+          : "unknown";
       facts.login_state = {
         ...facts.login_state,
         state: loginState,
-        reason: input.login_state_reason ?? facts.login_state.reason,
-        recovery_required: loginState === "logged_out" || loginState === "expired" || loginState === "unknown" || loginState === "manual_auth_required",
+        reason: loginStateReason,
+        recovery_required: loginState === "logged_out" || loginState === "expired" || loginState === "unknown" || loginState === "manual_auth_required" ||
+          storageState !== "present" ||
+          (loginStateReason === USER_CONFIRMED_MANAGED_SESSION_REASON &&
+            (authenticationProvenance !== USER_CONFIRMED_MANAGED_SESSION_REASON || !user_confirmed_session_ref)),
         manual_authentication_state: input.manual_authentication_state ?? facts.login_state.manual_authentication_state
       };
       facts.browser_storage = {
@@ -240,12 +260,14 @@ export class LocalIdentityEnvironmentManager {
           cookie_jar_ref: input.cookie_jar_ref ?? current.local_material_refs.cookie_jar_ref,
           browser_storage_ref: input.browser_storage_ref ?? current.local_material_refs.browser_storage_ref
         },
+        authentication_provenance: authenticationProvenance,
         user_confirmed_session_ref
       };
       const nextRecords = new Map(this.records);
       nextRecords.set(identity_environment_ref, record);
       this.persist(nextRecords);
       this.records.set(identity_environment_ref, record);
+      this.currentProcessIdentityEnvironmentRefs.add(identity_environment_ref);
       return publicRecord(record);
     });
   }
@@ -278,21 +300,116 @@ export class LocalIdentityEnvironmentManager {
       !login.recovery_required;
   }
 
-  rebindUserConfirmedManagedSession(identity_environment_ref: string, runtime_session_ref: string): boolean {
+  requiresPersistedAuthenticationRecovery(identity_environment_ref: string): boolean {
+    this.refresh();
+    const record = this.records.get(identity_environment_ref);
+    if (!record?.identity_environment.login_state.recovery_required) return false;
+    return record.authentication_provenance === USER_CONFIRMED_MANAGED_SESSION_REASON ||
+      !this.currentProcessIdentityEnvironmentRefs.has(identity_environment_ref);
+  }
+
+  rebindUserConfirmedManagedSession(
+    identity_environment_ref: string,
+    runtime_session_ref: string,
+    binding?: { execution_identity_ref: string; profile_ref: string; profile_storage_ref: string | null },
+    capability?: typeof LOCAL_IDENTITY_ENVIRONMENT_REBIND_CAPABILITY
+  ): boolean {
+    if (capability !== LOCAL_IDENTITY_ENVIRONMENT_REBIND_CAPABILITY || !binding) return false;
     return this.withStoreMutation(() => {
       const current = this.records.get(identity_environment_ref);
       const login = current?.identity_environment.login_state;
       if (!current ||
+        current.authentication_provenance !== USER_CONFIRMED_MANAGED_SESSION_REASON ||
+        current.identity_environment.execution_identity_ref !== binding.execution_identity_ref ||
+        current.identity_environment.profile_ref !== binding.profile_ref ||
+        current.local_material_refs.profile_storage_ref !== binding.profile_storage_ref ||
         login?.state !== "logged_in" ||
         login.reason !== USER_CONFIRMED_MANAGED_SESSION_REASON ||
         login.manual_authentication_state !== "completed" ||
-        login.recovery_required
+        current.identity_environment.browser_storage.state !== "present"
       ) return false;
-      const record = { ...current, user_confirmed_session_ref: runtime_session_ref, updated_at: new Date().toISOString() };
+      const facts = snapshot(current.identity_environment);
+      facts.login_state = { ...facts.login_state, recovery_required: false };
+      const record = {
+        ...current,
+        user_confirmed_session_ref: runtime_session_ref,
+        updated_at: new Date().toISOString(),
+        identity_environment: facts,
+        consistency: createIdentityConsistencyFacts({ identity_environment: facts })
+      };
       const records = new Map(this.records).set(identity_environment_ref, record);
       this.persist(records);
       this.records.set(identity_environment_ref, record);
+      this.currentProcessConfirmedSessionRefs.add(runtime_session_ref);
       return true;
+    });
+  }
+
+  /**
+   * Invalidate a process-local confirmed session while retaining persisted provenance.
+   * A persistence failure remains fail-closed in memory and will be re-derived on reload.
+   */
+  invalidateUserConfirmedManagedSession(runtime_session_ref: string): void {
+    this.withStoreMutation(() => {
+      this.currentProcessConfirmedSessionRefs.delete(runtime_session_ref);
+      const nextRecords = new Map(this.records);
+      let changed = false;
+      for (const [identityEnvironmentRef, current] of this.records) {
+        if (current.user_confirmed_session_ref !== runtime_session_ref) continue;
+        const facts = snapshot(current.identity_environment);
+        facts.login_state = { ...facts.login_state, recovery_required: true };
+        nextRecords.set(identityEnvironmentRef, {
+          ...current,
+          updated_at: new Date().toISOString(),
+          identity_environment: facts,
+          consistency: createIdentityConsistencyFacts({
+            identity_environment: facts,
+            risk_events: ["login_missing"]
+          }),
+          // Keep provenance for a later legal rebind; only this runtime ref is invalidated.
+          user_confirmed_session_ref: null
+        });
+        changed = true;
+      }
+      if (!changed) return;
+      // Publish fail-closed memory state before persistence so a failed write cannot leave
+      // the process claiming that a stopped session is still trusted.
+      replaceMap(this.records, nextRecords);
+      try {
+        this.persist(nextRecords);
+      } catch {
+        // The stale persisted ref will be treated as expired on the next load because the
+        // process-local confirmed-session set no longer contains it.
+      }
+    });
+  }
+
+  /** Mark authentication as needing recovery without discarding persisted provenance. */
+  requireAuthenticationRecovery(identity_environment_ref: string): void {
+    this.withStoreMutation(() => {
+      const current = this.records.get(identity_environment_ref);
+      if (!current || (current.identity_environment.login_state.recovery_required && !current.user_confirmed_session_ref)) return;
+      if (current.user_confirmed_session_ref) this.currentProcessConfirmedSessionRefs.delete(current.user_confirmed_session_ref);
+      const facts = snapshot(current.identity_environment);
+      facts.login_state = { ...facts.login_state, recovery_required: true };
+      const record: StoredLocalIdentityEnvironmentRecord = {
+        ...current,
+        updated_at: new Date().toISOString(),
+        identity_environment: facts,
+        consistency: createIdentityConsistencyFacts({
+          identity_environment: facts,
+          risk_events: ["login_missing"]
+        }),
+        user_confirmed_session_ref: null
+      };
+      const nextRecords = new Map(this.records).set(identity_environment_ref, record);
+      // Keep the in-memory state fail-closed even when the durable write is unavailable.
+      this.records.set(identity_environment_ref, record);
+      try {
+        this.persist(nextRecords);
+      } catch {
+        // A subsequent load derives recovery_required from the retained provenance and stale ref.
+      }
     });
   }
 
@@ -304,16 +421,29 @@ export class LocalIdentityEnvironmentManager {
       records.delete(identity_environment_ref);
       this.persist(records);
       this.records.delete(identity_environment_ref);
+      this.currentProcessIdentityEnvironmentRefs.delete(identity_environment_ref);
       return publicRecord(record);
     });
   }
 
   private upsert(input: ManagedLocalIdentityEnvironmentInput, operation: LocalIdentityEnvironmentOperation, created_at = new Date().toISOString()): LocalIdentityEnvironmentPublicRecord {
     const record = createStoredIdentityRecord(input, operation, created_at);
+    if (record.identity_environment.browser_storage.state !== "present" ||
+      record.identity_environment.login_state.reason === USER_CONFIRMED_MANAGED_SESSION_REASON) {
+      record.identity_environment.login_state = {
+        ...record.identity_environment.login_state,
+        recovery_required: true
+      };
+      record.consistency = createIdentityConsistencyFacts({
+        identity_environment: record.identity_environment,
+        risk_events: ["login_missing"]
+      });
+    }
     const facts = record.identity_environment;
     const records = new Map(this.records).set(facts.identity_environment_ref, record);
     this.persist(records);
     this.records.set(facts.identity_environment_ref, record);
+    this.currentProcessIdentityEnvironmentRefs.add(facts.identity_environment_ref);
     return publicRecord(record);
   }
 
@@ -334,14 +464,28 @@ export class LocalIdentityEnvironmentManager {
     const repairs = new Map<string, StoredIdentityEnvironmentRepair>();
     for (const record of parsed.records ?? []) {
       if (record.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA && record.identity_environment.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA) {
+        const identityEnvironment = snapshot(record.identity_environment);
+        const persistedSessionRef = record.user_confirmed_session_ref ?? null;
+        const authenticationProvenance = storedAuthenticationProvenance(record);
+        const isCurrentProcessSession = persistedSessionRef !== null && this.currentProcessConfirmedSessionRefs.has(persistedSessionRef);
+        if (identityEnvironment.browser_storage.state !== "present" ||
+          (identityEnvironment.login_state.state === "logged_in" &&
+            !isCurrentProcessSession &&
+            !this.currentProcessIdentityEnvironmentRefs.has(identityEnvironment.identity_environment_ref)) ||
+          (identityEnvironment.login_state.reason === USER_CONFIRMED_MANAGED_SESSION_REASON &&
+            authenticationProvenance !== USER_CONFIRMED_MANAGED_SESSION_REASON)) {
+          identityEnvironment.login_state = { ...identityEnvironment.login_state, recovery_required: true };
+        }
         const consistency = createIdentityConsistencyFacts({
-          identity_environment: record.identity_environment,
-          risk_events: record.identity_environment.login_state.recovery_required ? ["login_missing"] : []
+          identity_environment: identityEnvironment,
+          risk_events: identityEnvironment.login_state.recovery_required ? ["login_missing"] : []
         });
-        records.set(record.identity_environment.identity_environment_ref, {
+        records.set(identityEnvironment.identity_environment_ref, {
           ...record,
+          identity_environment: identityEnvironment,
           consistency,
-          user_confirmed_session_ref: record.user_confirmed_session_ref ?? null,
+          authentication_provenance: authenticationProvenance,
+          user_confirmed_session_ref: isCurrentProcessSession ? persistedSessionRef : null,
           repair_state: record.repair_state ?? "clean",
           repair_reasons: record.repair_reasons ?? []
         });
@@ -414,6 +558,21 @@ export class LocalIdentityEnvironmentManager {
   }
 }
 
+/** Internal Harbor-only wrapper; this function is intentionally not exported from the package index. */
+export function rebindUserConfirmedManagedSession(
+  manager: LocalIdentityEnvironmentManager,
+  identity_environment_ref: string,
+  runtime_session_ref: string,
+  binding: { execution_identity_ref: string; profile_ref: string; profile_storage_ref: string | null }
+): boolean {
+  return manager.rebindUserConfirmedManagedSession(
+    identity_environment_ref,
+    runtime_session_ref,
+    binding,
+    LOCAL_IDENTITY_ENVIRONMENT_REBIND_CAPABILITY
+  );
+}
+
 function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdentityEnvironmentPublicRecord {
   const facts = record.identity_environment;
   return {
@@ -431,7 +590,7 @@ function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdenti
     status: {
       readiness: record.repair_state === "repair_required" ? "blocked" : readiness(facts, record.consistency),
       login_state: facts.login_state.state,
-      authentication_provenance: facts.login_state.reason === USER_CONFIRMED_MANAGED_SESSION_REASON && record.user_confirmed_session_ref
+      authentication_provenance: record.authentication_provenance === USER_CONFIRMED_MANAGED_SESSION_REASON
         ? "user_confirmed_managed_session"
         : "unknown",
       browser_storage_state: facts.browser_storage.state,
@@ -478,6 +637,22 @@ function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdenti
 }
 
 const USER_CONFIRMED_MANAGED_SESSION_REASON = "user_confirmed_managed_session";
+
+function hasUserConfirmedAuthentication(facts: LocalIdentityEnvironmentFacts): boolean {
+  return facts.login_state.state === "logged_in" &&
+    facts.login_state.reason === USER_CONFIRMED_MANAGED_SESSION_REASON &&
+    facts.login_state.manual_authentication_state === "completed" &&
+    facts.browser_storage.state === "present";
+}
+
+function storedAuthenticationProvenance(
+  record: Pick<StoredLocalIdentityEnvironmentRecord, "authentication_provenance" | "identity_environment" | "user_confirmed_session_ref">
+): "unknown" | "user_confirmed_managed_session" {
+  if (record.authentication_provenance === USER_CONFIRMED_MANAGED_SESSION_REASON) return USER_CONFIRMED_MANAGED_SESSION_REASON;
+  return record.user_confirmed_session_ref && hasUserConfirmedAuthentication(record.identity_environment)
+    ? USER_CONFIRMED_MANAGED_SESSION_REASON
+    : "unknown";
+}
 
 function readiness(facts: LocalIdentityEnvironmentFacts, consistency: IdentityConsistencyFacts): LocalIdentityEnvironmentReadiness {
   if (facts.login_state.recovery_required) return "needs_auth";

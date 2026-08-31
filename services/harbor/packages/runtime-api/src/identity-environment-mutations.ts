@@ -68,6 +68,7 @@ export function createStoredIdentityRecord(
       local_secret_ref: facts.credential_recovery.local_secret_ref
     },
     imported_from: input.imported_from ?? null,
+    authentication_provenance: "unknown",
     user_confirmed_session_ref: null,
     repair_state: "clean",
     repair_reasons: []
@@ -334,6 +335,7 @@ function copiedRecord(
       local_secret_ref: null
     },
     imported_from: source.identity_environment.identity_environment_ref,
+    authentication_provenance: "unknown",
     user_confirmed_session_ref: null,
     repair_state: "clean",
     repair_reasons: []
