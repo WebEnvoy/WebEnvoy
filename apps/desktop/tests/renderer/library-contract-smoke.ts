@@ -390,6 +390,13 @@ function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
     ownerRefs: { ownerRef, fieldOwnerRefs: { url: `${ownerRef}/url` }, attachmentRefs: {} },
     executionPolicy: automaticExecutionPolicy(skill), runtime,
   }).ok) throw new Error("Xiaohongshu publish precheck accepted a non-canonical identity origin.");
+  const invalidTargetDraft = createSkillInputDraft(submissionSkill);
+  invalidTargetDraft.values.url = "https://creator.xiaohongshu.com/evil";
+  if (prepareTaskTurnRequest({
+    endpoint: "http://core.owner", skill: submissionSkill, identity, draft: invalidTargetDraft,
+    ownerRefs: { ownerRef, fieldOwnerRefs: { url: `${ownerRef}/url` }, attachmentRefs: {} },
+    executionPolicy: automaticExecutionPolicy(skill), runtime,
+  }).ok) throw new Error("Xiaohongshu publish precheck accepted a non-canonical creator path.");
 
   const blockedModes = ["draft", "preview"] as const;
   for (const operationMode of blockedModes) {
