@@ -185,7 +185,7 @@ function completedRead(state: FixtureState): JsonObject {
     schema_version: "harbor-allowlisted-read-operation/v0", status: "completed",
     operation_ref: fixtureRef("read_operation", state.holderRef), runtime_session_ref: "session_vertical",
     site_id: "xiaohongshu", operation_id: "xhs_search_notes", operation_mode: "read",
-    observed_at: "2026-08-03T00:00:00.000Z", public_summary_ref: fixtureRef("read_result", state.holderRef),
+    observed_at: new Date().toISOString(), public_summary_ref: fixtureRef("read_result", state.holderRef),
     public_summary: {
       schema_version: "harbor-read-operation-public-summary/v1", operation_id: "xhs_search_notes",
       result_kind: "xiaohongshu_search_notes_surface", surface: "search_result",
