@@ -197,6 +197,38 @@ export interface LocalProviderWritePrecheckProbeInput {
   target_url: string;
   expected_origin: "https://creator.xiaohongshu.com";
   target_ref: string;
+  /** Controlled path hint; no selector/script is accepted at this boundary. */
+  composition_path?: XhsWritePrecheckCompositionPath;
+}
+
+/** Public, bounded path ids owned by the Lode composition catalog. */
+export type XhsWritePrecheckCompositionPath =
+  | "image_text_upload"
+  | "image_text_generate"
+  | "video"
+  | "long_article"
+  | "podcast";
+
+export type XhsWritePrecheckCompositionState =
+  | "composition_initialized"
+  | "composition_not_initialized"
+  | "composition_unknown";
+
+export type XhsWritePrecheckObservationStatus = "observed" | "unobserved" | "unknown";
+export type XhsWritePrecheckAvailability = "available" | "unavailable" | "unknown";
+
+export interface XhsWritePrecheckFieldState {
+  availability: XhsWritePrecheckAvailability;
+  observation: "observed" | "not_observed" | "unknown";
+  required?: XhsWritePrecheckObservationStatus;
+  editable?: XhsWritePrecheckObservationStatus;
+  value_state?: "empty" | "present" | "unknown";
+}
+
+export interface XhsWritePrecheckMediaState {
+  availability: XhsWritePrecheckAvailability;
+  observation: "observed" | "not_observed" | "unknown";
+  controls?: Record<string, XhsWritePrecheckFieldState>;
 }
 
 export type LocalProviderWritePrecheckProbeResult =
@@ -208,19 +240,23 @@ export type LocalProviderWritePrecheckProbeResult =
       source_refs: LocalProviderReadProbeRef[];
       evidence_ref_kinds: LocalProviderReadProbeRef[];
       classification: "partial_result";
-      precheck_scope: "entrypoint_only";
-      composition_state: "composition_not_initialized";
+      precheck_scope: "entrypoint_only" | "composition_observation";
+      composition_path: XhsWritePrecheckCompositionPath;
+      composition_state: XhsWritePrecheckCompositionState;
       entrypoint_observations: {
-        route_loaded: true;
-        publish_vue_container_visible: true;
-        upload_image_tab_active: true;
-        upload_image_entry_visible: true;
-        text_image_entry_visible: true;
+        route_loaded: boolean;
+        publish_vue_container_visible: boolean;
+        upload_image_tab_active: boolean;
+        upload_image_entry_visible: boolean;
+        text_image_entry_visible: boolean;
+        path_observed?: XhsWritePrecheckObservationStatus;
+        path_entry_visible?: XhsWritePrecheckObservationStatus;
       };
-      field_states: Record<
-        "title_input" | "content_editor" | "publish_control",
-        { availability: "unavailable"; observation: "not_observed" }
-      >;
+      field_states: Record<string, XhsWritePrecheckFieldState>;
+      media_state: XhsWritePrecheckMediaState;
+      validation_state: XhsWritePrecheckFieldState;
+      save_draft_control: XhsWritePrecheckFieldState;
+      publish_control: XhsWritePrecheckFieldState;
       prohibited_actions_observed: { upload: false; generate: false; save: false; publish: false };
       target_ref: string;
     }

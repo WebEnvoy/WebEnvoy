@@ -308,6 +308,13 @@ export type {
   LocalProviderSiteResourceReadinessFactKey,
   /** @deprecated Provider-specific site readiness probe result retained for legacy adapter compatibility. */
   LocalProviderSiteResourceProbeResult,
+  LocalProviderWritePrecheckProbeInput,
+  LocalProviderWritePrecheckProbeResult,
+  XhsWritePrecheckCompositionPath,
+  XhsWritePrecheckCompositionState,
+  XhsWritePrecheckFieldState,
+  XhsWritePrecheckMediaState,
+  XhsWritePrecheckObservationStatus,
   OpenIdentityEnvironmentSessionInput,
   ProviderMode,
   RuntimeControlLockFacts,
@@ -1189,7 +1196,8 @@ export class HarborRuntime {
     const probe = await this.runtimeSessions.probeWritePrecheck(runtime_session_ref, {
       target_url: admitted.url,
       expected_origin: XHS_PUBLISH_PRECHECK_PIN.origin,
-      target_ref: admitted.target_ref
+      target_ref: admitted.target_ref,
+      ...(admitted.composition_path === undefined ? {} : { composition_path: admitted.composition_path })
     });
     if (probe.status === "unavailable") {
       return unavailableWritePrecheck(runtime_session_ref, probe.failure_class, probe.retryable);

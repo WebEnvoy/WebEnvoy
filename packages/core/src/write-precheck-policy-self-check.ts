@@ -150,6 +150,7 @@ function completedWritePrecheckOperation(input: {
     observed_at: evaluatedAt,
     classification: "partial_result",
     precheck_scope: "entrypoint_only",
+    composition_path: "image_text_upload",
     composition_state: "composition_not_initialized",
     no_submit_guard: "active",
     submitted: false,
@@ -189,9 +190,25 @@ function completedWritePrecheckOperation(input: {
       source_refs: [{ ref: pageSourceRef }, { ref: domSourceRef }],
       evidence_refs: [{ ref: snapshotRef }]
     },
-    entrypoint_observations: { creator_publish_page: true, title_field: true, summary_field: true },
-    field_states: { title: "available", summary: "available", canonical_url: "available", source_status: "located" },
-    prohibited_actions_observed: { submit: false, publish: false, upload: false }
+    entrypoint_observations: {
+      route_loaded: true,
+      publish_vue_container_visible: true,
+      upload_image_tab_active: true,
+      upload_image_entry_visible: true,
+      text_image_entry_visible: true,
+      path_observed: "observed",
+      path_entry_visible: "observed"
+    },
+    field_states: {
+      title_input: { availability: "unavailable", observation: "not_observed" },
+      content_editor: { availability: "unavailable", observation: "not_observed" },
+      publish_control: { availability: "unavailable", observation: "not_observed" }
+    },
+    media_state: { availability: "unknown", observation: "unknown", controls: {} },
+    validation_state: { availability: "unknown", observation: "unknown" },
+    save_draft_control: { availability: "unknown", observation: "unknown" },
+    publish_control: { availability: "unavailable", observation: "not_observed" },
+    prohibited_actions_observed: { submit: false, publish: false, upload: false, generate: false, save: false }
   };
 }
 
@@ -378,6 +395,12 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       assert.equal(releaseCalls, mode === "auto" ? 1 : 0);
       if (mode === "auto") {
         assert.equal(result.run_record?.public_result_summary && (result.run_record.public_result_summary as Record<string, unknown>).submitted, false);
+        const summary = result.run_record?.public_result_summary as Record<string, unknown> | undefined;
+        assert.equal(summary?.composition_path, "image_text_upload");
+        assert.deepEqual(summary?.media_state, { availability: "unknown", observation: "unknown", controls: {} });
+        assert.deepEqual(summary?.validation_state, { availability: "unknown", observation: "unknown" });
+        assert.deepEqual(summary?.save_draft_control, { availability: "unknown", observation: "unknown" });
+        assert.deepEqual(summary?.publish_control, { availability: "unavailable", observation: "not_observed" });
         assert.equal(result.run_record?.preview_result?.submitted, false);
       }
     } finally {

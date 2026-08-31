@@ -99,8 +99,49 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
   const title = isRecord(fields?.title_input) ? fields.title_input : undefined;
   const content = isRecord(fields?.content_editor) ? fields.content_editor : undefined;
   const publish = isRecord(fields?.publish_control) ? fields.publish_control : undefined;
+  const media = isRecord(data?.media_state) ? data.media_state : undefined;
+  const mediaControls = isRecord(media?.controls) ? media.controls : undefined;
+  const validation = isRecord(data?.validation_state) ? data.validation_state : undefined;
+  const saveDraft = isRecord(data?.save_draft_control) ? data.save_draft_control : undefined;
+  const publishControl = isRecord(data?.publish_control) ? data.publish_control : publish;
   const prohibited = isRecord(data?.prohibited_actions_observed) ? data.prohibited_actions_observed : undefined;
   const pin = isRecord(data?.lode_pin) ? data.lode_pin : undefined;
+  const compositionPaths = new Set(["image_text_upload", "image_text_generate", "video", "long_article", "podcast"]);
+  const compositionStates = new Set(["composition_initialized", "composition_not_initialized", "composition_unknown"]);
+  const validFieldState = (field: unknown): field is Record<string, unknown> => {
+    if (!isRecord(field) || !["available", "unavailable", "unknown"].includes(String(field.availability)) ||
+      !["observed", "not_observed", "unknown"].includes(String(field.observation))) return false;
+    return (field.required === undefined || ["observed", "unobserved", "unknown"].includes(String(field.required))) &&
+      (field.editable === undefined || ["observed", "unobserved", "unknown"].includes(String(field.editable))) &&
+      (field.value_state === undefined || ["empty", "present", "unknown"].includes(String(field.value_state)));
+  };
+  const validMediaState = media != null && ["available", "unavailable", "unknown"].includes(String(media.availability)) &&
+    ["observed", "not_observed", "unknown"].includes(String(media.observation)) &&
+    (mediaControls == null || Object.values(mediaControls).every(validFieldState));
+  const validFields = fields != null && Object.keys(fields).length >= 3 &&
+    ["title_input", "content_editor", "publish_control"].every((key) => validFieldState(fields[key])) &&
+    Object.values(fields).every(validFieldState);
+  const fieldSummary = (field: Record<string, unknown> | undefined) => {
+    if (!field) return "未知（未观察）";
+    const availability = String(field.availability);
+    const observation = String(field.observation);
+    if (availability === "available" && observation === "observed") return "可用（已观察）";
+    if (availability === "unavailable" && observation === "not_observed") return "不可用（未观察）";
+    if (availability === "unknown" || observation === "unknown") return "未知（未观察）";
+    return `${availability}（${observation}）`;
+  };
+  const compositionPathLabels: Record<string, string> = {
+    image_text_upload: "上传图文",
+    image_text_generate: "文字配图",
+    video: "视频",
+    long_article: "长文",
+    podcast: "播客",
+  };
+  const compositionStateLabels: Record<string, string> = {
+    composition_initialized: "创作内容已初始化",
+    composition_not_initialized: "创作内容尚未初始化",
+    composition_unknown: "创作内容状态未知（未观察）",
+  };
   if (
     result.outcome !== "partial" || result.payloadState !== "available" || result.envelopeState !== "available" ||
     result.resultKind !== "validate_only_write_precheck" ||
@@ -109,17 +150,17 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     result.capabilityLockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
     data?.schema_version !== "webenvoy.core-xhs-write-precheck-projection.v0" ||
     data.classification !== "partial_result" ||
-    data.precheck_scope !== "entrypoint_only" ||
-    data.composition_state !== "composition_not_initialized" ||
+    !["entrypoint_only", "composition_observation"].includes(String(data.precheck_scope)) ||
+    !compositionPaths.has(String(data.composition_path)) ||
+    !compositionStates.has(String(data.composition_state)) ||
     data.no_submit_guard !== "active" ||
     data.submitted !== false ||
     observations?.route_loaded !== true || observations.publish_vue_container_visible !== true ||
-    observations.upload_image_tab_active !== true || observations.upload_image_entry_visible !== true ||
-    observations.text_image_entry_visible !== true || observations.user_confirmed_identity !== true ||
+    typeof observations.upload_image_tab_active !== "boolean" || typeof observations.upload_image_entry_visible !== "boolean" ||
+    typeof observations.text_image_entry_visible !== "boolean" || observations.user_confirmed_identity !== true ||
     observations.challenge_absent !== true ||
-    title?.availability !== "unavailable" || title.observation !== "not_observed" ||
-    content?.availability !== "unavailable" || content.observation !== "not_observed" ||
-    publish?.availability !== "unavailable" || publish.observation !== "not_observed" ||
+    !validFields || !validFieldState(validation) || !validFieldState(saveDraft) || !validFieldState(publishControl) ||
+    !validMediaState ||
     prohibited?.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false ||
     typeof data.post_check_ref !== "string" || !/^post_check_[A-Za-z0-9._-]+$/.test(data.post_check_ref) ||
     pin?.package_ref !== packageRef || pin.lock_ref !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
@@ -133,9 +174,15 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     kind: "object",
     fields: [
       { label: "状态", value: "未提交（submitted=false）" },
-      { label: "验证范围", value: "仅创作入口（entrypoint_only）" },
-      { label: "页面状态", value: "创作内容尚未初始化" },
-      { label: "验证结论", value: "入口验证完成；标题、正文和发布控件尚不可验证" },
+      { label: "验证范围", value: data.precheck_scope === "composition_observation" ? "创作形态与内容区（composition_observation）" : "仅创作入口（entrypoint_only）" },
+      { label: "创作形态", value: `${compositionPathLabels[String(data.composition_path)]}（${String(data.composition_path)}）` },
+      { label: "页面状态", value: compositionStateLabels[String(data.composition_state)] },
+      { label: "标题字段", value: fieldSummary(title) },
+      { label: "正文字段", value: fieldSummary(content) },
+      { label: "媒体控件", value: fieldSummary(media) },
+      { label: "校验状态", value: fieldSummary(validation) },
+      { label: "保存草稿控件", value: fieldSummary(saveDraft) },
+      { label: "发布控件", value: fieldSummary(publishControl) },
       { label: "安全边界", value: "No-submit guard 已启用" },
     ],
   };
