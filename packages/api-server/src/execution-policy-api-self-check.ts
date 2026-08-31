@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -40,6 +40,8 @@ async function request(
 }
 
 const skillRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
+const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
 const environmentAuthorizationSubject = { scope: "environment", operation_ref: "harbor-operation:policy-api/1" } as const;
 
 function authorizationEvaluationInput(input: {
@@ -337,6 +339,164 @@ export async function assertExecutionPolicyApi(): Promise<void> {
       subject: environmentAuthorizationSubject
     }), /authorization_single_action_confirmation_inactive/);
     assert.equal((await request(port, "/authorization-decisions/not-a-ref/single-action", "POST", singleCommand)).status, 400);
+
+    const { thread: genericThread } = await taskThreadStore.createOrGetTaskThread({
+      capability_ref: "lode:capability/search-notes",
+      identity_environment_ref: "identity-env_888888888888888888888888"
+    });
+    const genericReservation = await taskThreadStore.reserveTaskTurn(genericThread.thread_id, {
+      idempotency_key: "generic-task-confirmation-turn",
+      request_hash: "generic-task-confirmation-request",
+      run_id: "run_generic_task_confirmation",
+      creation_channel: "app",
+      package_ref: skillRef,
+      input: { schema_version: taskTurnInputSchemaVersion, fields: [] }
+    });
+    await runStore.createRunRecord({
+      run_id: genericReservation.turn.run_id,
+      task_intent_ref: "intent:generic-task-confirmation",
+      capability_ref: "lode:capability/search-notes",
+      package_ref: skillRef,
+      status: "requires_user_action",
+      admission: { decision: "requires_user_action", action_risk: "read" }
+    }, genericReservation.run_claim_token);
+    const genericEvaluation = evaluateExecutionPolicy(authorizationEvaluationInput({
+      evaluatedAt: new Date().toISOString(),
+      policyRef: global.source_ref as string,
+      policyVersion: global.source_version as string,
+      actionInstance: "action-instance:policy-api/generic-task"
+    }));
+    const genericConfirmation = await authorizationStore.recordAuthorizationDecision({
+      idempotency_key: "generic-task-confirmation",
+      evaluation: genericEvaluation,
+      subject: {
+        scope: "task",
+        run_id: genericReservation.turn.run_id,
+        thread_id: genericThread.thread_id,
+        turn_id: genericReservation.turn.turn_id
+      },
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString()
+    });
+    const genericSingle = await request(
+      port,
+      `/authorization-decisions/${encodeURIComponent(genericConfirmation.decision_ref)}/single-action`,
+      "POST",
+      { ...singleCommand, idempotency_key: "generic-task-allow" }
+    );
+    assert.equal(genericSingle.status, 200, "generic task confirmation keeps the standard single-action response");
+    assert.equal(asRecord(genericSingle.body.single_action_decision).mode, "auto");
+    assert.equal((await runStore.getRunRecord(genericReservation.turn.run_id))?.status, "requires_user_action");
+
+    const { thread: deniedThread } = await taskThreadStore.createOrGetTaskThread({
+      capability_ref: "lode:capability/publish-note-precheck",
+      identity_environment_ref: "identity-env_999999999999999999999999"
+    });
+    const deniedReservation = await taskThreadStore.reserveTaskTurn(deniedThread.thread_id, {
+      idempotency_key: "write-precheck-deny-turn",
+      request_hash: "write-precheck-deny-request",
+      run_id: "run_write_precheck_deny",
+      creation_channel: "app",
+      package_ref: writePrecheckPackageRef,
+      input: { schema_version: taskTurnInputSchemaVersion, fields: [] }
+    });
+    await runStore.createRunRecord({
+      run_id: deniedReservation.turn.run_id,
+      task_intent_ref: "intent:write-precheck-deny",
+      capability_ref: "lode:capability/publish-note-precheck",
+      capability_version: "0.1.0",
+      capability_source_ref: writePrecheckPackageRef,
+      capability_lock_ref: writePrecheckLockRef,
+      package_ref: writePrecheckPackageRef,
+      scope_target_ref: "https://creator.xiaohongshu.com/publish/publish",
+      status: "requires_user_action",
+      admission: { decision: "requires_user_action", action_risk: "write" },
+      action_request: {
+        schema_version: "webenvoy.action-request.v0",
+        action_request_id: "action-request:write-precheck-deny",
+        task_intent_ref: "intent:write-precheck-deny",
+        capability_ref: "lode:capability/publish-note-precheck",
+        capability_version: "0.1.0",
+        capability_source_ref: writePrecheckPackageRef,
+        capability_lock_ref: writePrecheckLockRef,
+        package_ref: writePrecheckPackageRef,
+        operation_mode: "validate_only",
+        risk_classification: {
+          risk: "write",
+          execution_intent: "validate_only",
+          level: "low",
+          true_write_requested: false,
+          reasons: ["write_precheck_validate_only_boundary"]
+        },
+        no_submit_guard: {
+          status: "active",
+          enforced_by: "core",
+          blocked_execution_intents: ["execute_after_approval", "reconcile_status", "request_cancel"],
+          source_refs: [writePrecheckPackageRef, writePrecheckLockRef]
+        },
+        target_refs: { scope_target_ref: "https://creator.xiaohongshu.com/publish/publish" },
+        consumer_boundary: "Test fixture contains public refs only."
+      }
+    }, deniedReservation.run_claim_token);
+    const deniedEvaluation = evaluateExecutionPolicy(authorizationEvaluationInput({
+      evaluatedAt: new Date().toISOString(),
+      policyRef: global.source_ref as string,
+      policyVersion: global.source_version as string,
+      actionInstance: "action-instance:policy-api/write-precheck-deny"
+    }));
+    const deniedConfirmation = await authorizationStore.recordAuthorizationDecision({
+      idempotency_key: "write-precheck-deny-confirmation",
+      evaluation: deniedEvaluation,
+      subject: {
+        scope: "task",
+        run_id: deniedReservation.turn.run_id,
+        thread_id: deniedThread.thread_id,
+        turn_id: deniedReservation.turn.turn_id
+      },
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString()
+    });
+    await runStore.updateRunRecord(deniedReservation.turn.run_id, {
+      policy_binding_snapshot: {
+        schema_version: "webenvoy.policy-binding-snapshot.v0",
+        decision_ref: deniedConfirmation.decision_ref,
+        effective_policy_source: "global_user_config",
+        effective_policy_source_ref: global.source_ref as string,
+        effective_policy_source_version: global.source_version as string,
+        action_fingerprint: `sha256:${"b".repeat(64)}`,
+        resource_match_ref: "resource-match:write-precheck-deny",
+        resource_match_version: "1",
+        expires_at: new Date(Date.now() + 10 * 60_000).toISOString()
+      }
+    });
+    await taskThreadStore.recordTaskTurnSubmission(deniedThread.thread_id, deniedReservation.turn.turn_id, {
+      accepted: true,
+      http_status: 202,
+      ok: false,
+      failure_code: "authorization_confirmation_required",
+      error: {
+        category: "action_risk",
+        code: "authorization_confirmation_required",
+        phase: "policy",
+        recovery_hint: "confirm_action"
+      }
+    });
+    const deniedSingle = await request(
+      port,
+      `/authorization-decisions/${encodeURIComponent(deniedConfirmation.decision_ref)}/single-action`,
+      "POST",
+      { ...singleCommand, idempotency_key: "write-precheck-deny", choice: "deny_once" }
+    );
+    assert.equal(deniedSingle.status, 200);
+    assert.equal(asRecord(deniedSingle.body.single_action_decision).mode, "deny");
+    const deniedRun = await runStore.getRunRecord(deniedReservation.turn.run_id);
+    assert.equal(deniedRun?.status, "failed");
+    assert.equal(deniedRun?.failure?.code, "execution_policy_denied");
+    const deniedTurn = (await taskThreadStore.getTaskThread(deniedThread.thread_id))?.turns.at(0);
+    assert.equal(deniedTurn?.status, "failed");
+    assert.equal(deniedTurn?.failure_code, "execution_policy_denied");
+    const persistedDeniedThread = asRecord(JSON.parse(await readFile(join(directory, "threads", `${deniedThread.thread_id}.json`), "utf8")));
+    const persistedDeniedTurn = asRecord((persistedDeniedThread.turns as unknown[])[0]);
+    assert.equal(persistedDeniedTurn.failure_code, undefined, "denial clears the stale confirmation failure");
+    assert.equal(persistedDeniedTurn.submission_error, undefined);
 
     assert.equal((await request(port, "/execution-policy-configs/global", "PUT", mutation("global-private", "1", {
       read: "auto", prepare: "auto", commit: "confirm", destructive: "auto"

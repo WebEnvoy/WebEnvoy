@@ -50,6 +50,7 @@ export type TaskSubmissionInput = HarborAdmissionInput & {
   lode_package_contract?: LodePackageAdmissionContract;
   lode_resolution_failure?: FailureRecord;
   harbor_admission_failure?: FailureRecord;
+  execution_policy_failure?: FailureRecord;
   resource_match_ref?: string;
   runtime_binding_refs?: readonly string[];
   evidence_refs?: readonly string[];
@@ -87,6 +88,10 @@ const actionRisks = new Set<TaskActionRisk>(["read", "write", "submit", "destruc
 const executionIntents = new Set<TaskExecutionIntent>(["read", "validate_only", "draft", "preview", "execute_after_approval", "reconcile_status", "request_cancel"]);
 const trueWriteExecutionIntents = new Set<TaskExecutionIntent>(["execute_after_approval", "reconcile_status", "request_cancel"]);
 const writePrecheckExecutionIntents = new Set<TaskExecutionIntent>(["validate_only", "draft", "preview"]);
+const approvedWritePrecheckCapability = Symbol("approved-write-precheck");
+type ApprovedWritePrecheckInput = TaskSubmissionInput & {
+  readonly [approvedWritePrecheckCapability]: true;
+};
 const allowedTaskIntentFields = new Set([
   "$schema",
   "schema_version",
@@ -528,6 +533,52 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     };
   }
 
+  if (input.execution_policy_failure) {
+    const confirmationRequired = input.execution_policy_failure.code === "authorization_confirmation_required";
+    const runRecord = await createRunRecord({
+      run_id: input.run_id,
+      status: confirmationRequired ? "requires_user_action" : "failed",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(lodeAdmission.capability_source_ref === undefined ? {} : { capability_source_ref: lodeAdmission.capability_source_ref }),
+      ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
+      package_ref: lodeAdmission.package_ref,
+      admission: {
+        decision: confirmationRequired ? "requires_user_action" : "blocked_pre_admission",
+        action_risk: taskIntent.policy.risk,
+        resource_requirement_refs: lodeAdmission.resource_requirement_refs
+      },
+      action_request: buildActionRequest(taskIntent, input, { package_ref: lodeAdmission.package_ref }),
+      failure: input.execution_policy_failure,
+      retention_state: "active"
+    });
+    return { ok: false, failure: input.execution_policy_failure, run_record: runRecord };
+  }
+
+  if ((input as ApprovedWritePrecheckInput)[approvedWritePrecheckCapability] === true) {
+    const runRecord = await createRunRecord({
+      run_id: input.run_id,
+      status: "admitted",
+      task_intent_ref: taskIntent.intent_id,
+      entrypoint_ref: `entrypoint:${taskIntent.entrypoint}`,
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(lodeAdmission.capability_source_ref === undefined ? {} : { capability_source_ref: lodeAdmission.capability_source_ref }),
+      ...(lodeAdmission.capability_lock_ref === undefined ? {} : { capability_lock_ref: lodeAdmission.capability_lock_ref }),
+      package_ref: lodeAdmission.package_ref,
+      admission: {
+        decision: "accepted_with_warnings",
+        action_risk: taskIntent.policy.risk,
+        resource_requirement_refs: lodeAdmission.resource_requirement_refs
+      },
+      action_request: buildActionRequest(taskIntent, input, { package_ref: lodeAdmission.package_ref }),
+      retention_state: "active"
+    });
+    return { ok: true, task_intent: taskIntent, run_record: runRecord };
+  }
+
   if (input.harbor_admission_failure) {
     const runRecord = await createRunRecord({
       run_id: input.run_id,
@@ -639,4 +690,15 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     task_intent: taskIntent,
     run_record: runRecord
   };
+}
+
+/** Internal Core-only admission wrapper; the capability is module-private and cannot be supplied by callers. */
+export async function acceptApprovedWritePrecheckTask(
+  store: FileRunRecordStore,
+  input: TaskSubmissionInput
+): Promise<TaskSubmissionResult> {
+  return acceptReadOnlyTaskSubmission(store, {
+    ...input,
+    [approvedWritePrecheckCapability]: true
+  } as ApprovedWritePrecheckInput);
 }

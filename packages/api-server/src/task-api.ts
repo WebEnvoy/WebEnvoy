@@ -3,10 +3,13 @@ import {
   submitRuntimeTask,
   validateTaskIntent,
   type FailureRecord,
+  type FileAuthorizationDecisionStore,
+  type FileExecutionPolicyConfigStore,
   type FileRunRecordStore,
   type HarborRuntimeClient,
   type LodePackageResolver,
   type RuntimeTaskSubmissionRequest,
+  type WritePrecheckAuthorizationContext,
   type TaskSubmissionResult
 } from "@webenvoy/core-runtime";
 
@@ -23,6 +26,8 @@ export type TaskSubmissionDependencies = {
   runRecordStore?: FileRunRecordStore;
   lodePackageResolver?: LodePackageResolver;
   harborRuntimeClient?: HarborRuntimeClient;
+  executionPolicyConfigStore?: FileExecutionPolicyConfigStore;
+  authorizationDecisionStore?: FileAuthorizationDecisionStore;
 };
 
 const allowedHarborInputFields = new Set(["identity_environment_ref", "url", "reuse_existing", "timeout_ms", "evidence_policy", "session", "snapshot"]);
@@ -162,12 +167,16 @@ async function validateRuntimeTaskSubmissionRequest(
     const reuse_existing = optionalBoolean(harborInput.reuse_existing, "reuse_existing_invalid");
     const timeout_ms = optionalPositiveInteger(harborInput.timeout_ms, "timeout_ms_invalid");
     const evidence_policy = harborInput.evidence_policy === undefined ? undefined : jsonObject(harborInput.evidence_policy);
+    const session = harborInput.session === undefined ? undefined : jsonObject(harborInput.session);
+    const snapshot = harborInput.snapshot === undefined ? undefined : jsonObject(harborInput.snapshot);
     if (isFailureRecord(identity_environment_ref)) return identity_environment_ref;
     if (isFailureRecord(url)) return url;
     if (isFailureRecord(reuse_existing)) return reuse_existing;
     if (isFailureRecord(timeout_ms)) return timeout_ms;
     if (harborInput.evidence_policy !== undefined && !evidence_policy) return requestInvalid("evidence_policy_invalid");
-    const privateField = findForbiddenField(evidence_policy, privateHarborInputFieldNames);
+    if (harborInput.session !== undefined && !session) return requestInvalid("harbor_session_invalid");
+    if (harborInput.snapshot !== undefined && !snapshot) return requestInvalid("harbor_snapshot_invalid");
+    const privateField = findForbiddenField([evidence_policy, session, snapshot], privateHarborInputFieldNames);
     if (privateField) return requestInvalid(`private_field_rejected:${privateField}`, "remove_private_field");
     harbor = {
       ...(identity_environment_ref === undefined ? {} : { identity_environment_ref }),
@@ -210,7 +219,12 @@ export async function validateThreadTaskBody(
   return isFailureRecord(taskIntent) ? taskIntent : undefined;
 }
 
-export async function submitTaskBody(body: JsonBody, options: TaskSubmissionDependencies, runClaimToken?: string): Promise<TaskSubmissionHttpResult> {
+export async function submitTaskBody(
+  body: JsonBody,
+  options: TaskSubmissionDependencies,
+  runClaimToken?: string,
+  authorizationContext?: WritePrecheckAuthorizationContext
+): Promise<TaskSubmissionHttpResult> {
   if (!options.runRecordStore) {
     return {
       status: 503,
@@ -230,10 +244,13 @@ export async function submitTaskBody(body: JsonBody, options: TaskSubmissionDepe
   }
   const result = await submitRuntimeTask(options.runRecordStore, {
     ...validated,
-    ...(runClaimToken === undefined ? {} : { run_claim_token: runClaimToken })
+    ...(runClaimToken === undefined ? {} : { run_claim_token: runClaimToken }),
+    ...(authorizationContext === undefined ? {} : { authorization_context: authorizationContext })
   }, {
     ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
-    ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient })
+    ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient }),
+    ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
+    ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
   }).catch((error: unknown) =>
     error instanceof Error && /^run record already exists: /.test(error.message)
       ? submitDuplicateRunId()

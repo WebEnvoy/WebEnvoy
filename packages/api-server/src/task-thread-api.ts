@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import {
   TaskThreadStoreError,
+  isExactWritePrecheckRun,
   validateTaskTurnInputSnapshot,
+  type FileAuthorizationDecisionStore,
+  type FileRunRecordStore,
+  type RunRecord,
+  type WritePrecheckAuthorizationContext,
   type TaskThreadView,
   type TaskTurnView
 } from "@webenvoy/core-runtime";
@@ -26,9 +31,171 @@ export type TaskThreadApiInput = {
   path: string;
   body?: JsonBody;
   store?: FileTaskThreadStore;
+  runRecordStore?: FileRunRecordStore;
+  authorizationDecisionStore?: FileAuthorizationDecisionStore;
+  withWritePrecheckRunLock?: <T>(runId: string, action: () => Promise<T>) => Promise<T>;
   validateTask: (body: JsonBody) => Promise<unknown | undefined>;
-  submitTask: (body: JsonBody, runClaimToken: string) => Promise<TaskSubmissionHttpResult>;
+  submitTask: (
+    body: JsonBody,
+    runClaimToken: string,
+    authorizationContext: WritePrecheckAuthorizationContext
+  ) => Promise<TaskSubmissionHttpResult>;
 };
+
+const writePrecheckRunTails = new Map<string, Promise<void>>();
+
+/** Serialize policy continuation and cancellation for one task run. */
+export async function withWritePrecheckRunLock<T>(runId: string, action: () => Promise<T>): Promise<T> {
+  const previous = writePrecheckRunTails.get(runId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => current);
+  writePrecheckRunTails.set(runId, tail);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (writePrecheckRunTails.get(runId) === tail) writePrecheckRunTails.delete(runId);
+  }
+}
+
+/**
+ * A bounded, process-local continuation captured only for a waiting write
+ * precheck. The body is already validated by this API before it enters the
+ * map; it never contains Harbor private material.
+ */
+export type PendingWritePrecheckContinuation = {
+  run_id: string;
+  turn_id: string;
+  package_ref: string;
+  task_intent: JsonBody;
+  harbor?: JsonBody;
+  authorization_context: WritePrecheckAuthorizationContext;
+  confirmation_decision_ref: string;
+  expires_at: string;
+};
+
+const pendingWritePrecheckContinuations = new Map<string, PendingWritePrecheckContinuation>();
+const pendingWritePrecheckMaxEntries = 256;
+const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+
+function prunePendingWritePrecheckContinuations(now = Date.now()): void {
+  for (const [ref, pending] of pendingWritePrecheckContinuations) {
+    if (Date.parse(pending.expires_at) <= now) pendingWritePrecheckContinuations.delete(ref);
+  }
+  while (pendingWritePrecheckContinuations.size > pendingWritePrecheckMaxEntries) {
+    const oldest = pendingWritePrecheckContinuations.keys().next().value;
+    if (typeof oldest !== "string") break;
+    pendingWritePrecheckContinuations.delete(oldest);
+  }
+}
+
+/** Atomically remove a pending continuation before any Core dispatch. */
+export function takePendingWritePrecheckContinuation(
+  confirmationDecisionRef: string,
+  now = Date.now()
+): PendingWritePrecheckContinuation | undefined {
+  prunePendingWritePrecheckContinuations(now);
+  const pending = pendingWritePrecheckContinuations.get(confirmationDecisionRef);
+  if (!pending) return undefined;
+  pendingWritePrecheckContinuations.delete(confirmationDecisionRef);
+  return Date.parse(pending.expires_at) > now ? pending : undefined;
+}
+
+export function clearPendingWritePrecheckContinuations(runId: string): void {
+  for (const [ref, pending] of pendingWritePrecheckContinuations) {
+    if (pending.run_id === runId) pendingWritePrecheckContinuations.delete(ref);
+  }
+}
+
+export function clearPendingWritePrecheckContinuation(confirmationDecisionRef: string): void {
+  pendingWritePrecheckContinuations.delete(confirmationDecisionRef);
+}
+
+function exactWritePrecheckTaskBody(body: JsonBody, packageRef: string, run: RunRecord | undefined, confirmationDecisionRef: string): boolean {
+  const taskIntent = asObject(body.task_intent);
+  const capability = asObject(taskIntent?.capability);
+  const policy = asObject(taskIntent?.policy);
+  return packageRef === writePrecheckPackageRef &&
+    capability?.ref === "lode:capability/publish-note-precheck" &&
+    capability.version === "0.1.0" &&
+    capability.source_ref === writePrecheckPackageRef &&
+    capability.lock_ref === writePrecheckLockRef &&
+    policy?.risk === "write" &&
+    policy.execution_intent === "validate_only" &&
+    isExactWritePrecheckRun(run, confirmationDecisionRef);
+}
+
+function publicContinuationHarbor(value: unknown): JsonBody | undefined {
+  const input = asObject(value);
+  if (!input) return undefined;
+  const harbor: JsonBody = {};
+  if (typeof input.identity_environment_ref === "string") harbor.identity_environment_ref = input.identity_environment_ref;
+  if (typeof input.url === "string") harbor.url = input.url;
+  if (typeof input.reuse_existing === "boolean") harbor.reuse_existing = input.reuse_existing;
+  if (typeof input.timeout_ms === "number") harbor.timeout_ms = input.timeout_ms;
+  const evidencePolicy = asObject(input.evidence_policy);
+  if (evidencePolicy) harbor.evidence_policy = JSON.parse(JSON.stringify(evidencePolicy));
+  return Object.keys(harbor).length === 0 ? undefined : harbor;
+}
+
+/** Capture the validated public request only when Core persisted confirmation. */
+async function registerPendingWritePrecheckContinuation(input: {
+  authorizationDecisionStore?: FileAuthorizationDecisionStore;
+  runRecordStore?: FileRunRecordStore;
+  body: JsonBody;
+  submitted: TaskSubmissionHttpResult;
+  run_id: string;
+  turn_id: string;
+  authorization_context: WritePrecheckAuthorizationContext;
+}): Promise<void> {
+  if (input.submitted.failure_code !== "authorization_confirmation_required" || !input.authorizationDecisionStore) return;
+  const run = asObject(input.submitted.body.run);
+  const refs = Array.isArray(run?.authorization_decision_refs)
+    ? run.authorization_decision_refs.filter((ref): ref is string => typeof ref === "string")
+    : [];
+  const now = Date.now();
+  prunePendingWritePrecheckContinuations(now);
+  for (const ref of refs) {
+    let decision;
+    try {
+      decision = await input.authorizationDecisionStore.getAuthorizationDecision(ref);
+    } catch {
+      continue;
+    }
+    if (!decision || decision.decision_ref !== ref || decision.state !== "active" || decision.outcome !== "confirm" ||
+      decision.applicability.scope !== "task" || decision.applicability.run_id !== input.run_id ||
+      decision.applicability.thread_id !== input.authorization_context.thread_id ||
+      decision.applicability.turn_id !== input.turn_id || !decision.expires_at || Date.parse(decision.expires_at) <= now) continue;
+    const taskIntent = asObject(input.body.task_intent);
+    if (!taskIntent) return;
+    const packageRef = nonEmptyString(input.body.package_ref);
+    if (!packageRef) return;
+    if (!input.runRecordStore) return;
+    let run: RunRecord | undefined;
+    try {
+      run = await input.runRecordStore.getRunRecord(input.run_id);
+    } catch {
+      return;
+    }
+    if (!exactWritePrecheckTaskBody(input.body, packageRef, run, ref)) return;
+    const harbor = publicContinuationHarbor(input.body.harbor);
+    pendingWritePrecheckContinuations.set(ref, {
+      run_id: input.run_id,
+      turn_id: input.turn_id,
+      package_ref: packageRef,
+      task_intent: JSON.parse(JSON.stringify(taskIntent)) as JsonBody,
+      ...(harbor === undefined ? {} : { harbor }),
+      authorization_context: input.authorization_context,
+      confirmation_decision_ref: ref,
+      expires_at: decision.expires_at
+    });
+    prunePendingWritePrecheckContinuations(now);
+    return;
+  }
+}
 
 const threadIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 
@@ -107,6 +274,7 @@ function requestHash(body: JsonBody): string {
 function errorStatus(error: TaskThreadStoreError): number {
   if (error.code === "thread_not_found" || error.code === "turn_not_found") return 404;
   if (error.code === "thread_lock_timeout" || error.code === "lode_input_policy_unavailable" || error.code.startsWith("owner_ref_check_unavailable:")) return 503;
+  if (error.code === "authorization_decision_cancellation_failed") return 503;
   if (error.code === "input_schema_invalid" || error.code === "input_schema_ref_mismatch" || error.code === "input_package_not_found") return 422;
   if (error.code.startsWith("owner_ref_unavailable:")) return 409;
   if (error.code === "thread_has_active_turn" || error.code === "idempotency_payload_mismatch" || error.code === "run_id_already_linked" || error.code === "turn_not_active" || error.code === "turn_run_still_active" || error.code === "input_capability_mismatch" || error.code === "turn_definition_refs_unavailable" || error.code === "turn_definition_refs_mismatch") return 409;
@@ -127,6 +295,26 @@ function threadTurn(thread: TaskThreadView, turnId: string): TaskTurnView {
   const turn = thread.turns.find((candidate) => candidate.turn_id === turnId);
   if (!turn) throw new TaskThreadStoreError("turn_not_found");
   return turn;
+}
+
+async function cancelAuthorizationDecisions(
+  store: FileAuthorizationDecisionStore | undefined,
+  turn: TaskTurnView
+): Promise<void> {
+  const refs = turn.authorization_decision_refs;
+  if (!store || !refs || refs.length === 0) return;
+  try {
+    for (const ref of refs) {
+      const decision = await store.getAuthorizationDecision(ref);
+      if (!decision) throw new Error("authorization_decision_not_found");
+      if (decision.applicability.scope !== "task" || decision.applicability.run_id !== turn.run_id) {
+        throw new Error("authorization_decision_binding_mismatch");
+      }
+      if (decision.state === "active") await store.invalidateAuthorizationDecision(ref, "cancelled");
+    }
+  } catch {
+    throw new TaskThreadStoreError("authorization_decision_cancellation_failed");
+  }
 }
 
 function recoveredSubmissionOutcome(turn: TaskTurnView): { ok: boolean; outcome: string } {
@@ -270,7 +458,12 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
       if (!reserved.run_claim_token) throw new TaskThreadStoreError("run_claim_missing");
       let submitted: TaskSubmissionHttpResult;
       try {
-        submitted = await input.submitTask(body, reserved.run_claim_token);
+        submitted = await input.submitTask(body, reserved.run_claim_token, {
+          thread_id: threadId,
+          turn_id: reserved.turn.turn_id,
+          turn_sequence: reserved.turn.sequence,
+          idempotency_key: idempotencyKey
+        });
       } catch {
         const updated = await input.store.recordTaskTurnSubmission(threadId, reserved.turn.turn_id, {
           accepted: true,
@@ -297,6 +490,20 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
         ...(submitted.failure_code === undefined ? {} : { failure_code: submitted.failure_code }),
         ...(submitted.body.error === undefined ? {} : { error: submitted.body.error })
       });
+      await registerPendingWritePrecheckContinuation({
+        ...(input.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: input.authorizationDecisionStore }),
+        ...(input.runRecordStore === undefined ? {} : { runRecordStore: input.runRecordStore }),
+        body,
+        submitted,
+        run_id: runId,
+        turn_id: reserved.turn.turn_id,
+        authorization_context: {
+          thread_id: threadId,
+          turn_id: reserved.turn.turn_id,
+          turn_sequence: reserved.turn.sequence,
+          idempotency_key: idempotencyKey
+        }
+      });
       return {
         handled: true,
         status: submitted.status,
@@ -313,7 +520,23 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
       const threadId = decodedIdentifier(terminateMatch[1]);
       const turnId = decodedIdentifier(terminateMatch[2]);
       if (!threadId || !turnId) return { handled: true, status: 400, body: requestError("turn_id_invalid") };
-      const thread = await input.store.terminateTaskTurn(threadId, turnId);
+      const before = await input.store.getTaskThread(threadId);
+      if (!before) throw new TaskThreadStoreError("thread_not_found");
+      const turn = threadTurn(before, turnId);
+      const terminate = async () => {
+        const run = input.runRecordStore
+          ? await input.runRecordStore.getRunRecord(turn.run_id)
+          : undefined;
+        if (isExactWritePrecheckRun(run)) {
+          await cancelAuthorizationDecisions(input.authorizationDecisionStore, turn);
+          clearPendingWritePrecheckContinuations(turn.run_id);
+          await input.runRecordStore!.cancelRequiresUserActionRun(turn.run_id);
+        }
+        return input.store!.terminateTaskTurn(threadId, turnId);
+      };
+      const thread = input.withWritePrecheckRunLock
+        ? await input.withWritePrecheckRunLock(turn.run_id, terminate)
+        : await terminate();
       return { handled: true, status: 200, body: { ok: true, thread, turn: threadTurn(thread, turnId) } };
     }
 

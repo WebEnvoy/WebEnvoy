@@ -4,6 +4,7 @@ import {
   type AdmissionDecision,
   type FailureRecord,
   type FileRunRecordStore,
+  type PolicyBindingSnapshot,
   type PostCheckResult,
   type RetentionState,
   type RunRecord,
@@ -85,6 +86,10 @@ export type RunSummary = {
   timeline: RunTimeline;
   task: RunCapabilitySummary;
   admission: RunAdmissionSummary;
+  /** References into the Core authorization-decision journal; details remain queryable there. */
+  authorization_decision_refs?: string[];
+  /** Minimal binding needed to compare a run against its persisted policy decision. */
+  policy_binding_snapshot?: PolicyBindingSnapshot;
   runtime_refs: RunRuntimeRefs;
   terminal_summary?: RunTerminalSummary;
 };
@@ -234,6 +239,12 @@ export function projectRunSummary(record: RunRecord): RunSummary {
       ...(record.admission.resource_requirement_refs === undefined ? {} : { resource_requirement_refs: [...record.admission.resource_requirement_refs] }),
       ...(record.admission.resource_match_ref === undefined ? {} : { resource_match_ref: record.admission.resource_match_ref })
     },
+    ...(record.authorization_decision_refs === undefined
+      ? {}
+      : { authorization_decision_refs: [...record.authorization_decision_refs] }),
+    ...(record.policy_binding_snapshot === undefined
+      ? {}
+      : { policy_binding_snapshot: structuredClone(record.policy_binding_snapshot) }),
     runtime_refs: {
       ...(record.runtime_binding_refs === undefined ? {} : { binding_refs: [...record.runtime_binding_refs] }),
       ...(record.admission.runtime_binding_refs === undefined ? {} : { admission_binding_refs: [...record.admission.runtime_binding_refs] }),

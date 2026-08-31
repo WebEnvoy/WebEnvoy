@@ -1025,6 +1025,7 @@ async function assertBossProductionAdmissionDisabled(): Promise<void> {
   let harborCalls = 0;
   const harborRuntimeClient: HarborRuntimeClient = {
     async collectAdmissionFacts() { harborCalls += 1; throw new Error("Harbor must not be called"); },
+    async validateOnlyWritePrecheck() { harborCalls += 1; throw new Error("Harbor must not be called"); },
     async executeReadOperation() { harborCalls += 1; throw new Error("Harbor must not be called"); },
     async releaseCoreTaskSession() { harborCalls += 1; throw new Error("Harbor must not be called"); }
   };
@@ -2966,6 +2967,20 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
       });
       assert.equal(privateEvidencePolicy.status, 400);
       assert.equal(asRecord(asRecord(privateEvidencePolicy.body).error).code, "private_field_rejected:token");
+
+      const privateSession = await postJson(port, "/tasks", {
+        run_id: "run_api_submit_private_session",
+        package_ref: packageRef,
+        task_intent: taskIntent("intent_api_submit_private_session"),
+        harbor: {
+          identity_environment_ref: "identity-env_runtime_api",
+          url: "https://example.org/",
+          session: { cookie: "must-not-leave-api" }
+        }
+      });
+      assert.equal(privateSession.status, 400);
+      assert.equal(asRecord(asRecord(privateSession.body).error).code, "private_field_rejected:cookie");
+      assert.equal(JSON.stringify(privateSession.body).includes("must-not-leave-api"), false);
 
       const payloadSupervisorToken = await postJson(port, "/tasks", {
         run_id: "run_api_submit_payload_supervisor_token",

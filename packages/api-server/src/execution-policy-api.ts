@@ -14,6 +14,7 @@ import {
   resolveSkillActionCatalog,
   validateThreadPolicyContext
 } from "@webenvoy/core-runtime";
+import type { SingleActionDecision } from "@webenvoy/core-runtime";
 
 type JsonBody = Record<string, unknown>;
 
@@ -28,6 +29,19 @@ export type ExecutionPolicyApiDependencies = {
   taskThreadStore?: FileTaskThreadStore;
   lodePackageResolver?: LodePackageResolver;
   clock?: () => Date;
+  /** Dispatches a previously captured write-precheck continuation after allow_once. */
+  continueWritePrecheck?: (decision: SingleActionDecision) => Promise<ExecutionPolicyContinuationResult | undefined>;
+  /** Clears a waiting continuation when the user chooses deny. */
+  clearWritePrecheckContinuation?: (confirmationDecisionRef: string) => void;
+  /** Serializes decision, continuation, and cancellation for a task run. */
+  withWritePrecheckDecisionLock?: <T>(confirmationDecisionRef: string, action: () => Promise<T>) => Promise<T>;
+  /** Invalidates the confirmation and terminates its waiting task on deny. */
+  denyWritePrecheck?: (decision: SingleActionDecision) => Promise<void>;
+};
+
+export type ExecutionPolicyContinuationResult = {
+  status: number;
+  body: JsonBody;
 };
 
 const unavailableCodes = new Set([
@@ -233,15 +247,35 @@ export async function handleExecutionPolicyApi(input: {
       if (!input.dependencies.authorizationDecisionStore) return error(503, "authorization_decision_store_unavailable");
       const decisionRef = decode(singleMatch[1], "authorization_decision_ref_invalid");
       const command = normalizeSingleActionDecisionCommand(input.body);
-      const decision = await decideSingleAction(decisionRef, command, {
-        authorizationDecisionStore: input.dependencies.authorizationDecisionStore,
+      const decide = () => decideSingleAction(decisionRef, command, {
+        authorizationDecisionStore: input.dependencies.authorizationDecisionStore!,
         configStore,
         ...(input.dependencies.taskThreadStore === undefined ? {} : {
           taskThreadStore: input.dependencies.taskThreadStore
         }),
         ...(input.dependencies.clock === undefined ? {} : { clock: input.dependencies.clock })
       });
-      return { handled: true, status: 200, body: { ok: true, single_action_decision: decision } };
+      const decideAndContinue = async (): Promise<ExecutionPolicyApiResult> => {
+        const decision = await decide();
+        if (decision.mode === "deny") {
+          await input.dependencies.denyWritePrecheck?.(decision);
+          input.dependencies.clearWritePrecheckContinuation?.(decision.confirmation_decision_ref);
+        } else if (decision.mode === "auto" && input.dependencies.continueWritePrecheck) {
+          const continuation = await input.dependencies.continueWritePrecheck(decision);
+          if (continuation) return { handled: true, status: continuation.status, body: continuation.body };
+        }
+        return { handled: true, status: 200, body: { ok: true, single_action_decision: decision } };
+      };
+      try {
+        return input.dependencies.withWritePrecheckDecisionLock
+          ? await input.dependencies.withWritePrecheckDecisionLock(decisionRef, decideAndContinue)
+          : await decideAndContinue();
+      } catch (cause) {
+        if (cause instanceof Error && (goneCodes.has(cause.message) || cause.message === "single_action_confirmation_effective_policy_changed")) {
+          input.dependencies.clearWritePrecheckContinuation?.(decisionRef);
+        }
+        throw cause;
+      }
     }
     return { handled: false };
   } catch (cause) {

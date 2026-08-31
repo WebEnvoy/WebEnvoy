@@ -7,6 +7,7 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
+  isExactWritePrecheckRun,
   previewIdentityCompatibility,
   type FailureRecord,
   type FileAuthorizationDecisionStore,
@@ -14,13 +15,22 @@ import {
   type FileRunRecordStore,
   type HarborIdentityFactsReader,
   type HarborRuntimeClient,
-  type LodePackageResolver
+  type LodePackageResolver,
+  type WritePrecheckAuthorizationContext,
+  type TaskSubmissionResult,
+  continueWritePrecheckTask
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
-import { submitTaskBody, validateThreadTaskBody } from "./task-api.js";
+import { submitTaskBody, taskSubmissionFailureStatusCode, validateThreadTaskBody } from "./task-api.js";
 import { handleAuthorizationDecisionApi } from "./authorization-decision-api.js";
 import { handleExecutionPolicyApi } from "./execution-policy-api.js";
-import { handleTaskThreadApi } from "./task-thread-api.js";
+import {
+  clearPendingWritePrecheckContinuations,
+  clearPendingWritePrecheckContinuation,
+  handleTaskThreadApi,
+  takePendingWritePrecheckContinuation,
+  withWritePrecheckRunLock
+} from "./task-thread-api.js";
 
 type JsonBody = Record<string, unknown>;
 type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
@@ -84,6 +94,40 @@ function queryStatusCode(failure: FailureRecord): number {
   if (failure.code === "run_not_found") return 404;
   if (failure.code === "run_store_unavailable") return 503;
   return 400;
+}
+
+function continuationUnavailable(): FailureRecord {
+  return {
+    category: "action_risk",
+    code: "single_action_continuation_unavailable",
+    phase: "admission",
+    recovery_hint: "request_new_confirmation"
+  };
+}
+
+function continuationHttpResult(result: TaskSubmissionResult, decision: import("@webenvoy/core-runtime").SingleActionDecision): { status: number; body: JsonBody } {
+  if (result.ok) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        single_action_decision: decision,
+        task_intent: result.task_intent,
+        run: result.run_record,
+        evidence_refs: result.run_record.evidence_refs ?? [],
+        runtime_binding_refs: result.run_record.runtime_binding_refs ?? []
+      }
+    };
+  }
+  return {
+    status: taskSubmissionFailureStatusCode(result.failure),
+    body: {
+      ok: false,
+      single_action_decision: decision,
+      error: result.failure,
+      ...(result.run_record === undefined ? {} : { run: result.run_record })
+    }
+  };
 }
 
 
@@ -176,7 +220,117 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       ...(options.executionPolicyConfigStore === undefined ? {} : { configStore: options.executionPolicyConfigStore }),
       ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore }),
       ...(options.taskThreadStore === undefined ? {} : { taskThreadStore: options.taskThreadStore }),
-      ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver })
+      ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
+      withWritePrecheckDecisionLock: async <T>(confirmationDecisionRef: string, action: () => Promise<T>): Promise<T> => {
+        const confirmation = options.authorizationDecisionStore
+          ? await options.authorizationDecisionStore.getAuthorizationDecision(confirmationDecisionRef)
+          : undefined;
+        const runId = confirmation?.applicability.scope === "task" ? confirmation.applicability.run_id : undefined;
+        return runId === undefined ? action() : withWritePrecheckRunLock(runId, action);
+      },
+      denyWritePrecheck: async (decision: import("@webenvoy/core-runtime").SingleActionDecision): Promise<void> => {
+        const authorizationStore = options.authorizationDecisionStore;
+        if (!authorizationStore) return;
+        const confirmation = await authorizationStore.getAuthorizationDecision(decision.confirmation_decision_ref);
+        if (!confirmation) return;
+        const applicability = confirmation.applicability;
+        if (applicability.scope !== "task") return;
+        const run = options.runRecordStore
+          ? await options.runRecordStore.getRunRecord(applicability.run_id)
+          : undefined;
+        if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref)) return;
+        try {
+          await authorizationStore.invalidateAuthorizationDecision(confirmation.decision_ref, "cancelled");
+        } catch (error) {
+          if (confirmation.state === "active") throw error;
+        }
+        clearPendingWritePrecheckContinuations(applicability.run_id);
+        if (options.runRecordStore) {
+          await options.runRecordStore.denyRequiresUserActionRun(
+            applicability.run_id,
+            {
+              category: "action_risk",
+              code: "execution_policy_denied",
+              phase: "admission",
+              recovery_hint: "change_execution_policy_or_cancel"
+            }
+          );
+        }
+        const taskStore = options.taskThreadStore;
+        if (!taskStore) return;
+        const thread = await taskStore.getTaskThread(applicability.thread_id);
+        const turn = thread?.turns.find((candidate) => candidate.turn_id === applicability.turn_id);
+        if (turn && turn.run_id === applicability.run_id && turn.failure_code === "authorization_confirmation_required") {
+          await taskStore.continueRequiresUserActionTurn(applicability.thread_id, applicability.turn_id);
+        }
+      },
+      continueWritePrecheck: async (decision: import("@webenvoy/core-runtime").SingleActionDecision) => {
+        // Environment-scoped confirmations have no task continuation and keep
+        // the existing policy API response semantics.
+        if (options.authorizationDecisionStore) {
+          try {
+            const confirmation = await options.authorizationDecisionStore.getAuthorizationDecision(decision.confirmation_decision_ref);
+            if (confirmation && confirmation.applicability.scope !== "task") return undefined;
+            if (confirmation?.applicability.scope === "task") {
+              const run = options.runRecordStore
+                ? await options.runRecordStore.getRunRecord(confirmation.applicability.run_id)
+                : undefined;
+              if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref)) return undefined;
+            }
+          } catch {
+            // A missing/failed lookup keeps the generic single-action response;
+            // only a proven XHS precheck may consume a continuation.
+            return undefined;
+          }
+        }
+        const pending = takePendingWritePrecheckContinuation(decision.confirmation_decision_ref);
+        if (!pending || !options.runRecordStore) {
+          return {
+            status: 409,
+            body: { ok: false, single_action_decision: decision, error: continuationUnavailable() }
+          };
+        }
+        const result = await continueWritePrecheckTask(options.runRecordStore, {
+          run_id: pending.run_id,
+          task_intent: pending.task_intent,
+          package_ref: pending.package_ref,
+          ...(pending.harbor === undefined ? {} : { harbor: pending.harbor }),
+          authorization_context: pending.authorization_context,
+          single_action_decision: decision
+        }, {
+          ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
+          ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient }),
+          ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
+          ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
+        });
+        let continuation = continuationHttpResult(result, decision);
+        if (options.taskThreadStore && result.run_record && result.run_record.status !== "requires_user_action") {
+          try {
+            const thread = await options.taskThreadStore.continueRequiresUserActionTurn(pending.authorization_context.thread_id, pending.turn_id);
+            continuation = {
+              ...continuation,
+              body: { ...continuation.body, thread, turn: thread.turns.find((turn) => turn.turn_id === pending.turn_id) }
+            };
+          } catch {
+            continuation = {
+              status: 503,
+              body: {
+                ok: false,
+                single_action_decision: decision,
+                error: {
+                  category: "persistence_observability",
+                  code: "task_turn_continuation_persistence_failed",
+                  phase: "persistence",
+                  recovery_hint: "inspect_run_status_or_contact_operator"
+                },
+                run: result.run_record
+              }
+            };
+          }
+        }
+        return continuation;
+      },
+      clearWritePrecheckContinuation: clearPendingWritePrecheckContinuation
     }
   };
   let executionPolicyResult = await handleExecutionPolicyApi(executionPolicyInput);
@@ -213,8 +367,12 @@ async function route(request: IncomingMessage, response: ServerResponse, options
       method: request.method,
       path,
       ...(options.taskThreadStore === undefined ? {} : { store: options.taskThreadStore }),
+      ...(options.runRecordStore === undefined ? {} : { runRecordStore: options.runRecordStore }),
+      ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore }),
+      withWritePrecheckRunLock,
       validateTask: (taskBody: JsonBody) => validateThreadTaskBody(taskBody, options),
-      submitTask: (taskBody: JsonBody, runClaimToken: string) => submitTaskBody(taskBody, options, runClaimToken)
+      submitTask: (taskBody: JsonBody, runClaimToken: string, authorizationContext: WritePrecheckAuthorizationContext) =>
+        submitTaskBody(taskBody, options, runClaimToken, authorizationContext)
     };
     let result = await handleTaskThreadApi(taskThreadInput);
     if (!result.handled && result.requires_body) {

@@ -25,6 +25,7 @@ import { assertIdentityCompatibilityPreview } from "./identity-compatibility-pre
 import { assertExecutionPolicyEvaluator } from "./execution-policy-self-check.js";
 import { assertAuthorizationDecisionStore } from "./authorization-decision-self-check.js";
 import { assertExecutionPolicyConfigStore } from "./execution-policy-config-self-check.js";
+import { assertWritePrecheckPolicyWiring } from "./write-precheck-policy-self-check.js";
 
 let tick = 0;
 
@@ -1536,4 +1537,5 @@ console.log("Validated read-only Lode and Harbor identity compatibility preview 
 assertExecutionPolicyEvaluator();
 await assertAuthorizationDecisionStore();
 await assertExecutionPolicyConfigStore();
+await assertWritePrecheckPolicyWiring();
 console.log("Validated unified execution policy evaluation and fail-closed action matching.");
