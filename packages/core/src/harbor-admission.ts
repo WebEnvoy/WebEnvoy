@@ -153,6 +153,19 @@ export type HarborAdmission =
       runtime_session_binding?: RuntimeSessionBindingFacts;
     };
 
+export type HarborRuntimeBindingAdmission =
+  | {
+      ok: true;
+      runtime_binding_refs: readonly string[];
+      runtime_session_binding: RuntimeSessionBindingFacts;
+    }
+  | {
+      ok: false;
+      failure: FailureRecord;
+      runtime_binding_refs?: readonly string[];
+      runtime_session_binding?: RuntimeSessionBindingFacts;
+    };
+
 type RuntimeAdmission =
   | {
       ok: true;
@@ -578,6 +591,42 @@ function validateRuntimeFacts(
 
   const runtimeBindingRefs = uniqueRefs([runtimeSessionRef, profileRef, providerRef, viewerRef, identity.identity_environment_ref, identity.execution_identity_ref]);
   return { ok: true, runtime_session_ref: runtimeSessionRef, runtime_binding_refs: runtimeBindingRefs, availability, session_binding: binding };
+}
+
+/** Validate the public runtime facts that Core must bind before a write-precheck dispatch. */
+export function validateHarborRuntimeBinding(input: HarborAdmissionInput): HarborRuntimeBindingAdmission {
+  const forbiddenField = findForbiddenField(input);
+  if (forbiddenField) {
+    return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
+  }
+
+  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts, "write_precheck");
+  if ("category" in identity) return { ok: false, failure: identity };
+  const providerStatusFailure = validateProviderStatus(input, identity);
+  if (providerStatusFailure) return { ok: false, failure: providerStatusFailure };
+
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, "write_precheck");
+  if (!runtime.ok) {
+    return {
+      ok: false,
+      failure: runtime.failure,
+      ...(runtime.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: runtime.runtime_binding_refs }),
+      ...(runtime.session_binding === undefined ? {} : { runtime_session_binding: runtime.session_binding })
+    };
+  }
+  if (runtime.session_binding.control_owner !== "core_task" || runtime.session_binding.session_use !== "core_task_run" || runtime.session_binding.core_task_run !== true) {
+    return {
+      ok: false,
+      failure: failure("resource_admission", "runtime_session_binding_invalid", "runtime_binding", "connect_runtime"),
+      runtime_binding_refs: runtime.runtime_binding_refs,
+      runtime_session_binding: runtime.session_binding
+    };
+  }
+  return {
+    ok: true,
+    runtime_binding_refs: runtime.runtime_binding_refs,
+    runtime_session_binding: runtime.session_binding
+  };
 }
 
 function validateSceneRef(

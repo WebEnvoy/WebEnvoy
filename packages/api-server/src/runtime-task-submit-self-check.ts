@@ -3197,12 +3197,100 @@ export async function assertRuntimeTaskSubmitApi(): Promise<void> {
         }
       });
       await store.updateRunRecord("run_api_preserve_manual_session", { status: "running" });
+      await store.createRunRecord({
+        run_id: "run_api_recover_interrupted_before_runtime_binding",
+        status: "admitted",
+        task_intent_ref: "intent:recovery/before-runtime-binding",
+        capability_ref: "lode:capability/publish-note-path-prepare",
+        package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+        admission: {
+          decision: "requires_user_action",
+          action_risk: "write",
+          resource_requirement_refs: ["xiaohongshu.publish-note-path-prepare.resources"]
+        },
+        policy_binding_snapshot: {
+          schema_version: "webenvoy.policy-binding-snapshot.v0",
+          decision_ref: "authorization-decision:11111111111111111111111111111111:22222222222222222222222222222222",
+          effective_policy_source: "single_action_decision",
+          effective_policy_source_ref: "execution-policy:single-action:precheck",
+          effective_policy_source_version: "1",
+          action_fingerprint: `sha256:${"1".repeat(64)}`,
+          resource_match_ref: "resource-match:before-runtime-binding",
+          resource_match_version: "sha256:before-runtime-binding",
+          expires_at: "2026-08-31T08:10:00.000Z"
+        }
+      });
+      await store.updateRunRecord("run_api_recover_interrupted_before_runtime_binding", { status: "running" });
+      await store.createRunRecord({
+        run_id: "run_api_preserve_waiting_confirmation",
+        status: "requires_user_action",
+        task_intent_ref: "intent:recovery/waiting-confirmation",
+        capability_ref: "lode:capability/publish-note-path-prepare",
+        package_ref: "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+        admission: {
+          decision: "requires_user_action",
+          action_risk: "write",
+          resource_requirement_refs: ["xiaohongshu.publish-note-path-prepare.resources"]
+        },
+        policy_binding_snapshot: {
+          schema_version: "webenvoy.policy-binding-snapshot.v0",
+          decision_ref: "authorization-decision:33333333333333333333333333333333:44444444444444444444444444444444",
+          effective_policy_source: "single_action_decision",
+          effective_policy_source_ref: "execution-policy:single-action:precheck",
+          effective_policy_source_version: "1",
+          action_fingerprint: `sha256:${"2".repeat(64)}`,
+          resource_match_ref: "resource-match:waiting-confirmation",
+          resource_match_version: "sha256:waiting-confirmation",
+          expires_at: "2026-08-31T08:10:00.000Z"
+        }
+      });
+      await store.createRunRecord({
+        run_id: "run_api_preserve_unrelated_running",
+        status: "admitted",
+        task_intent_ref: "intent:recovery/unrelated-running",
+        capability_ref: "lode:capability/read-public-page",
+        package_ref: packageRef,
+        admission: {
+          decision: "requires_user_action",
+          action_risk: "write"
+        },
+        policy_binding_snapshot: {
+          schema_version: "webenvoy.policy-binding-snapshot.v0",
+          decision_ref: "authorization-decision:55555555555555555555555555555555:66666666666666666666666666666666",
+          effective_policy_source: "single_action_decision",
+          effective_policy_source_ref: "execution-policy:single-action:precheck",
+          effective_policy_source_version: "1",
+          action_fingerprint: `sha256:${"3".repeat(64)}`,
+          resource_match_ref: "resource-match:unrelated-running",
+          resource_match_version: "sha256:unrelated-running",
+          expires_at: "2026-08-31T08:10:00.000Z"
+        }
+      });
+      await store.updateRunRecord("run_api_preserve_unrelated_running", { status: "running" });
+      const recoveryPathsBeforePreBinding = paths.length;
+      const recoveryBodiesBeforePreBinding = bodies.length;
       const recovered = await recoverInterruptedCoreTaskSessions(store, recoveryClient);
-      assert.deepEqual(recovered, { recovered: ["run_api_recover_interrupted_core_task"], cleanup_failed: [] });
+      assert.deepEqual(recovered, { recovered: ["run_api_recover_interrupted_before_runtime_binding", "run_api_recover_interrupted_core_task"], cleanup_failed: [] });
       const recoveredRun = await store.getRunRecord("run_api_recover_interrupted_core_task");
       assert.equal(recoveredRun?.status, "failed");
       assert.equal(recoveredRun?.failure?.code, "core_task_interrupted");
       assert.equal((await store.getRunRecord("run_api_preserve_manual_session"))?.status, "running");
+      assert.equal((await store.getRunRecord("run_api_preserve_waiting_confirmation"))?.status, "requires_user_action");
+      assert.equal((await store.getRunRecord("run_api_preserve_unrelated_running"))?.status, "running");
+      const preBindingRun = await store.getRunRecord("run_api_recover_interrupted_before_runtime_binding");
+      assert.equal(preBindingRun?.status, "unknown_outcome");
+      assert.equal(preBindingRun?.failure?.code, "core_task_interrupted_before_runtime_binding");
+      assert.equal(preBindingRun?.public_result_summary?.submitted, false);
+      assert.equal(preBindingRun?.public_result_summary?.outcome, "unknown");
+      assert.equal(preBindingRun?.post_check?.status, "not_run");
+      assert.equal(preBindingRun?.post_check?.code, "core_task_interrupted_before_runtime_binding");
+      assert.equal(paths.length, recoveryPathsBeforePreBinding + 3);
+      assert.equal(
+        bodies.slice(recoveryBodiesBeforePreBinding).some(({ body }) =>
+          JSON.stringify(body).includes("run_api_recover_interrupted_before_runtime_binding")
+        ),
+        false
+      );
     } finally {
       await close(server);
       await close(mismatchedSceneServer);

@@ -14,7 +14,8 @@ import type {
 import {
   projectHarborPublicIdentityEnvironmentRecord,
   validateHarborIdentityEnvironmentFacts,
-  validateHarborIdentityProviderStatus
+  validateHarborIdentityProviderStatus,
+  validateHarborRuntimeBinding
 } from "./harbor-admission.js";
 import {
   lodeRuntimeAdmissionFailure,
@@ -1474,6 +1475,46 @@ async function completeAcceptedWritePrecheckAdmissionFailure(
   return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
 }
 
+async function completeAcceptedWritePrecheckBindingPersistenceFailure(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  client: HarborRuntimeClient,
+  runtimeSessionRef: string
+): Promise<TaskSubmissionResult> {
+  const persistenceFailure = failure("persistence_observability", "runtime_binding_persistence_failed", "persistence", "contact_operator");
+  const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef, persistenceFailure);
+  if (cleanup) return cleanup;
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    runtime_binding_refs: [runtimeSessionRef],
+    preview_result: writePrecheckPreviewResult(result.task_intent, {}, []),
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+      submitted: false,
+      outcome: "unavailable",
+      runtime_session_ref: runtimeSessionRef,
+      consumer_boundary: "Core records only the structured binding persistence failure and opaque runtime session ref; no browser or write material is stored."
+    }
+  });
+  const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    status: "failed",
+    failure: persistenceFailure,
+    retention_state: "active",
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "failed",
+      summary: "Core could not durably bind the Harbor core_task session before validate-only dispatch; no external write action was performed.",
+      checked_at: new Date().toISOString(),
+      code: persistenceFailure.code,
+      attribution: "unknown",
+      recovery_hint: persistenceFailure.recovery_hint,
+      source_refs: [runtimeSessionRef],
+      consumer_boundary: "Core records only the structured binding persistence failure and submitted=false boundary."
+    }
+  });
+  return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+}
+
 function writePrecheckUnavailableFailure(value: JsonObject): FailureRecord {
   const failureClass = string(value.failure_class);
   const retryable = value.retryable === true;
@@ -1554,6 +1595,37 @@ async function dispatchApprovedWritePrecheck(
       collectionFailure?.cleanup_failure,
       client
     );
+  }
+
+  const runtimeBinding = validateHarborRuntimeBinding(admissionValue);
+  if (!runtimeBinding.ok) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      runtimeBinding.failure,
+      runtimeSessionRef,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+  if (runtimeBinding.runtime_session_binding.runtime_session_ref !== runtimeSessionRef) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime"),
+      runtimeSessionRef,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+  try {
+    await store.bindCoreTaskRuntimeSession(
+      result.run_record.run_id,
+      runtimeBinding.runtime_session_binding,
+      runtimeBinding.runtime_binding_refs
+    );
+  } catch {
+    return completeAcceptedWritePrecheckBindingPersistenceFailure(store, result, client, runtimeSessionRef);
   }
 
   let operation: unknown;
@@ -2385,6 +2457,42 @@ export async function recoverInterruptedCoreTaskSessions(
   const recovered: string[] = [];
   const cleanup_failed: string[] = [];
   for (const record of await store.listRunRecords()) {
+    const preBindingInterrupted = record.status === "running" &&
+      (record.package_ref === xhsWritePrecheckPackageRef || record.package_ref === xhsPathPreparePackageRef) &&
+      record.admission.action_risk === "write" &&
+      record.admission.decision === "requires_user_action" &&
+      record.policy_binding_snapshot?.effective_policy_source === "single_action_decision" &&
+      record.admission.runtime_session_binding === undefined;
+    if (preBindingInterrupted) {
+      const code = "core_task_interrupted_before_runtime_binding";
+      const interruptionFailure = failure("runtime_execution", code, "runtime_binding", "request_new_confirmation");
+      await store.updateRunRecord(record.run_id, {
+        status: "running",
+        public_result_summary: {
+          schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+          submitted: false,
+          outcome: "unknown",
+          consumer_boundary: "Core records only the interrupted-before-binding outcome; no browser or write material is stored."
+        }
+      });
+      await completeRunWithFailure(store, record.run_id, {
+        status: "unknown_outcome",
+        failure: interruptionFailure,
+        retention_state: "active",
+        post_check: {
+          schema_version: "webenvoy.post-check-result.v0",
+          status: "not_run",
+          summary: "Core restart found a confirmed validate-only write-precheck interrupted before Harbor runtime binding; it did not call Harbor or retry the action.",
+          checked_at: new Date().toISOString(),
+          code,
+          attribution: "runtime",
+          recovery_hint: interruptionFailure.recovery_hint,
+          consumer_boundary: "Recovery records submitted=false and an indeterminate outcome without calling Harbor or storing private browser material."
+        }
+      });
+      recovered.push(record.run_id);
+      continue;
+    }
     const binding = record.admission.runtime_session_binding;
     if (
       terminalRunRecordStatuses.has(record.status) ||
