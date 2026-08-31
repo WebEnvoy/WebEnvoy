@@ -327,7 +327,7 @@ function completedPathPrepareOperation(input: {
       operation_mode: "validate_only",
       origin: "https://creator.xiaohongshu.com",
       repository: "WebEnvoy/Lode",
-      commit: "317f4d66d680d66b3ac3ab7f73bd7a6bbf1d9a01",
+      commit: "d09a2d683007c9f396838bdab92ecf7c0e6b339c",
       asset_path: "sites/xiaohongshu/publish-note-path-prepare/manifest.json"
     },
     public_boundary: { raw_dom: "not_exposed", raw_har: "not_exposed", screenshot_body: "not_exposed", credentials: "not_exposed", external_write_actions: "not_performed" }
