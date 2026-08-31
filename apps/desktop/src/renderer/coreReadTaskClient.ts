@@ -204,13 +204,13 @@ export const coreReadTaskSpecs: CoreReadTaskSpec[] = [
   {
     taskId: "task-xhs-publish-write-preview",
     mode: "write-precheck",
-    packageName: "@lode/xiaohongshu-write-pre-preview",
+    packageName: "@lode/xiaohongshu-publish-note-precheck",
     packageVersion: "0.1.0",
     capabilities: [
       {
-        capabilityRef: "lode:capability/xiaohongshu-draft-precheck",
+        capabilityRef: "lode:capability/publish-note-precheck",
         capabilityVersion: "0.1.0",
-        packageRef: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+        packageRef: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
       },
     ],
     resourceRequirementRefs: ["xiaohongshu.publish-note-precheck.resources"],
@@ -815,7 +815,6 @@ function coreWritePrecheck(
   runtimeSessionRef: string | undefined,
 ): NonNullable<RunProjection["writePrecheck"]> {
   const expectedChange = preview?.expected_change;
-  const targetRef = expectedChange?.target_ref ?? "owner writable target ref";
   const expectedSummary = expectedChange?.summary ?? "Core write-precheck projection is available from owner refs.";
   const externalSubmit = expectedChange?.external_submit === false ? "false" : "not exposed";
   const submitted = submittedLabel(preview);
@@ -824,7 +823,7 @@ function coreWritePrecheck(
     modeLabel: `真实页面写前验证 / ${state}`,
     expectedChangeSummary: expectedSummary,
     beforeLabel: runtimeSessionRef ?? "Core owner refs",
-    afterLabel: targetRef,
+    afterLabel: "未提交；不产生站点写入",
     submittedLabel: submitted,
     diffRows: [
       {
