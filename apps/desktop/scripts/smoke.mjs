@@ -2918,10 +2918,10 @@ const writePreviewRuns = [
     status: "succeeded",
     timeline: { updated_at: "2026-07-06T11:00:04.000Z", terminal_at: "2026-07-06T11:00:04.000Z" },
     task: {
-      capability_ref: "lode:capability/xiaohongshu-draft-precheck",
+      capability_ref: "lode:capability/publish-note-precheck",
       capability_version: "0.1.0",
-      capability_source_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
-      package_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+      capability_source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     },
     admission: { action_risk: "write" },
     runtime_refs: {
@@ -2934,10 +2934,10 @@ const writePreviewRuns = [
     status: "cancelled",
     timeline: { updated_at: "2026-07-06T11:03:02.000Z", terminal_at: "2026-07-06T11:03:02.000Z" },
     task: {
-      capability_ref: "lode:capability/xiaohongshu-draft-precheck",
+      capability_ref: "lode:capability/publish-note-precheck",
       capability_version: "0.1.0",
-      capability_source_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
-      package_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+      capability_source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     },
     admission: { action_risk: "write" },
   },
@@ -2947,10 +2947,10 @@ const writePreviewRuns = [
     status: "expired",
     timeline: { updated_at: "2026-07-06T11:14:01.000Z", terminal_at: "2026-07-06T11:14:01.000Z" },
     task: {
-      capability_ref: "lode:capability/xiaohongshu-draft-precheck",
+      capability_ref: "lode:capability/publish-note-precheck",
       capability_version: "0.1.0",
-      capability_source_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
-      package_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+      capability_source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     },
     admission: { action_risk: "write" },
   },
@@ -2960,10 +2960,10 @@ const writePreviewRuns = [
     status: "failed",
     timeline: { updated_at: "2026-07-06T11:15:01.000Z", terminal_at: "2026-07-06T11:15:01.000Z" },
     task: {
-      capability_ref: "lode:capability/xiaohongshu-draft-precheck",
+      capability_ref: "lode:capability/publish-note-precheck",
       capability_version: "0.1.0",
-      capability_source_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
-      package_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+      capability_source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+      package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     },
     admission: { action_risk: "write" },
   },
@@ -3064,7 +3064,7 @@ const bossWritePreviewRuns = [
 globalThis.fetch = async (url) => {
   const pathname = String(url);
   const runId = decodeURIComponent(pathname.match(/\/runs\/([^/]+)/)?.[1] ?? "");
-  const json = pathname.includes("/capability-runs") && pathname.includes("xiaohongshu-draft-precheck")
+  const json = pathname.includes("/capability-runs") && pathname.includes("publish-note-precheck")
     ? { ok: true, capability_runs: { runs: writePreviewRuns } }
     : pathname.includes("/capability-runs") && pathname.includes("boss-greeting-precheck")
     ? { ok: true, capability_runs: { runs: bossWritePreviewRuns } }
@@ -3290,9 +3290,9 @@ globalThis.fetch = async (url) => {
                 },
                 action_refs: { action_request_id: "action-request:intent_real_site_xiaohongshu_draft_preview" },
                 capability: {
-                  capability_ref: "lode:capability/xiaohongshu-draft-precheck",
+                  capability_ref: "lode:capability/publish-note-precheck",
                   capability_version: "0.1.0",
-                  capability_source_ref: "lode://site-capability/xiaohongshu/draft-precheck@0.1.0",
+                  capability_source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
                 },
                 evidence_refs: [
                   "harbor:evidence/xiaohongshu/draft-editor/precheck",

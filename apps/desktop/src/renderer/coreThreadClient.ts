@@ -330,6 +330,7 @@ function labelsForCapabilityRef(capabilityRef: string) {
     "lode:capability/search-notes": { site: "小红书", skill: "搜索并读取笔记" },
     "lode:capability/read-note-detail": { site: "小红书", skill: "读取笔记详情" },
     "lode:capability/job-search": { site: "BOSS 直聘", skill: "职位搜索" },
+    "lode:capability/publish-note-precheck": { site: "小红书", skill: "发布笔记写前验证" },
     "lode:capability/xiaohongshu-draft-precheck": { site: "小红书", skill: "发布笔记草稿" },
   };
   return knownLabels[capabilityRef] ?? { site: "未解析站点", skill: capabilityRef };

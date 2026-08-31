@@ -56,6 +56,8 @@ export function projectStandardBusinessResult(
   skills: readonly ResultSkill[] = [],
 ): StandardBusinessResult {
   const result = state.status === "ready" ? state.result : undefined;
+  const xhsWritePrecheck = result == null ? undefined : xhsWritePrecheckResult(result);
+  if (xhsWritePrecheck != null) return xhsWritePrecheck;
   if (run.writePrecheck != null) {
     return {
       kind: "object",
@@ -86,6 +88,57 @@ export function projectStandardBusinessResult(
     .filter((row) => !technicalResultLabels.has(row.label))
     .map((row) => ({ label: row.label, value: row.value }));
   return fields.length > 0 ? { kind: "object", fields } : { kind: "generic", fields: [], resultKind };
+}
+
+function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult | undefined {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+  if (result.packageRef !== packageRef) return undefined;
+  const data = result.data;
+  const observations = isRecord(data?.entrypoint_observations) ? data.entrypoint_observations : undefined;
+  const fields = isRecord(data?.field_states) ? data.field_states : undefined;
+  const title = isRecord(fields?.title_input) ? fields.title_input : undefined;
+  const content = isRecord(fields?.content_editor) ? fields.content_editor : undefined;
+  const publish = isRecord(fields?.publish_control) ? fields.publish_control : undefined;
+  const prohibited = isRecord(data?.prohibited_actions_observed) ? data.prohibited_actions_observed : undefined;
+  const pin = isRecord(data?.lode_pin) ? data.lode_pin : undefined;
+  if (
+    result.outcome !== "partial" || result.payloadState !== "available" || result.envelopeState !== "available" ||
+    result.resultKind !== "validate_only_write_precheck" ||
+    result.outputSchemaId !== "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0" ||
+    result.capabilityVersion !== "0.1.0" ||
+    result.capabilityLockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
+    data?.schema_version !== "webenvoy.core-xhs-write-precheck-projection.v0" ||
+    data.classification !== "partial_result" ||
+    data.precheck_scope !== "entrypoint_only" ||
+    data.composition_state !== "composition_not_initialized" ||
+    data.no_submit_guard !== "active" ||
+    data.submitted !== false ||
+    observations?.route_loaded !== true || observations.publish_vue_container_visible !== true ||
+    observations.upload_image_tab_active !== true || observations.upload_image_entry_visible !== true ||
+    observations.text_image_entry_visible !== true || observations.user_confirmed_identity !== true ||
+    observations.challenge_absent !== true ||
+    title?.availability !== "unavailable" || title.observation !== "not_observed" ||
+    content?.availability !== "unavailable" || content.observation !== "not_observed" ||
+    publish?.availability !== "unavailable" || publish.observation !== "not_observed" ||
+    prohibited?.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false ||
+    typeof data.post_check_ref !== "string" || !/^post_check_[A-Za-z0-9._-]+$/.test(data.post_check_ref) ||
+    pin?.package_ref !== packageRef || pin.lock_ref !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
+    pin.output_schema_ref !== result.outputSchemaId || pin.version !== "0.1.0" ||
+    pin.operation_id !== "xhs_publish_note_precheck" || pin.operation_mode !== "validate_only" ||
+    !publicText(data.consumer_boundary, 500)
+  ) {
+    return { kind: "object", fields: [{ label: "结果不可用", value: "写前验证结果与当前锁定契约不一致，已停止展示。" }] };
+  }
+  return {
+    kind: "object",
+    fields: [
+      { label: "状态", value: "未提交（submitted=false）" },
+      { label: "验证范围", value: "仅创作入口（entrypoint_only）" },
+      { label: "页面状态", value: "创作内容尚未初始化" },
+      { label: "验证结论", value: "入口验证完成；标题、正文和发布控件尚不可验证" },
+      { label: "安全边界", value: "No-submit guard 已启用" },
+    ],
+  };
 }
 
 export function projectBusinessResultMessage(

@@ -622,6 +622,82 @@ async function runDesktopChecks() {
     readyResult({ normalized: { notes: [{ title: "A" }] } }, "search_results"),
   );
   assert(unboundResult.kind === "generic", "A result without an exact package/version/lock/schema binding used a specialized renderer.");
+  const xhsPrecheckResult = {
+    status: "ready" as const,
+    result: {
+      outcome: "partial",
+      resultKind: "validate_only_write_precheck",
+      outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
+      packageRef: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+      capabilityVersion: "0.1.0",
+      capabilityLockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+      data: {
+        schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+        classification: "partial_result",
+        precheck_scope: "entrypoint_only",
+        composition_state: "composition_not_initialized",
+        no_submit_guard: "active",
+        submitted: false,
+        target_ref: "target:sha256:hidden-from-business-result",
+        entrypoint_observations: {
+          route_loaded: true,
+          publish_vue_container_visible: true,
+          upload_image_tab_active: true,
+          upload_image_entry_visible: true,
+          text_image_entry_visible: true,
+          user_confirmed_identity: true,
+          challenge_absent: true,
+        },
+        field_states: {
+          title_input: { availability: "unavailable", observation: "not_observed" },
+          content_editor: { availability: "unavailable", observation: "not_observed" },
+          publish_control: { availability: "unavailable", observation: "not_observed" },
+        },
+        prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false },
+        post_check_ref: "post_check_00000000-0000-0000-0000-000000000361",
+        lode_pin: {
+          package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
+          lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+          output_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
+          version: "0.1.0",
+          operation_id: "xhs_publish_note_precheck",
+          operation_mode: "validate_only",
+        },
+        consumer_boundary: "Core exposes a bounded public summary only.",
+      },
+      payloadState: "available",
+      envelopeState: "available",
+    },
+  };
+  const legacyWritePrecheck = taskThreadFixtures.flatMap((task) => task.runs).find((run) => run.writePrecheck)?.writePrecheck;
+  assert(legacyWritePrecheck, "A legacy write-precheck fixture is required for canonical precedence coverage.");
+  const xhsPrecheckModel = projectStandardBusinessResult({ ...resultRun, writePrecheck: legacyWritePrecheck }, xhsPrecheckResult);
+  assert(
+    xhsPrecheckModel.kind === "object" &&
+      xhsPrecheckModel.fields.some((field) => field.value === "未提交（submitted=false）") &&
+      xhsPrecheckModel.fields.some((field) => field.value === "No-submit guard 已启用") &&
+      !xhsPrecheckModel.fields.some((field) => field.label === "target_ref"),
+    "The canonical XHS write-precheck did not render its submitted=false business boundary.",
+  );
+  const invalidXhsPrecheck = projectStandardBusinessResult(resultRun, {
+    ...xhsPrecheckResult,
+    result: { ...xhsPrecheckResult.result, data: { ...xhsPrecheckResult.result.data, submitted: true } },
+  });
+  assert(
+    invalidXhsPrecheck.kind === "object" && invalidXhsPrecheck.fields[0]?.label === "结果不可用",
+    "A contradictory XHS write-precheck was rendered as a business result.",
+  );
+  const incompleteXhsPrecheck = projectStandardBusinessResult(resultRun, {
+    ...xhsPrecheckResult,
+    result: {
+      ...xhsPrecheckResult.result,
+      data: { ...xhsPrecheckResult.result.data, entrypoint_observations: undefined },
+    },
+  });
+  assert(
+    incompleteXhsPrecheck.kind === "object" && incompleteXhsPrecheck.fields[0]?.label === "结果不可用",
+    "An incomplete XHS write-precheck was rendered as verified.",
+  );
   const stateTitles = [
     projectBusinessResultMessage({ ...resultRun, turnStatus: "cancelled" }, { status: "fixture" })?.title,
     projectBusinessResultMessage({ ...resultRun, turnStatus: "status_unknown" }, { status: "fixture" })?.title,
