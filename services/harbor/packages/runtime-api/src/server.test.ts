@@ -993,6 +993,14 @@ test("rebinds persisted user-confirmed authentication to a fresh headed session 
   const fixture = createFixtureLauncher("ready");
   const liveProbe = trustLocalProviderSiteResourceProbe(async () => {
     liveProbeCalls += 1;
+    if (liveProbeCalls === 1) {
+      return {
+        status: "unavailable",
+        failure_class: "page_not_ready",
+        message: "The SPA is still initializing.",
+        verified_fact_keys: []
+      };
+    }
     return {
       status: "available",
       observed_at: "2026-08-31T00:00:00.000Z",
@@ -1020,7 +1028,7 @@ test("rebinds persisted user-confirmed authentication to a fresh headed session 
       control_owner: "user"
     });
     assert.equal(launches[0]?.headless, false);
-    assert.equal(liveProbeCalls, 1);
+    assert.equal(liveProbeCalls, 2);
     assert.notEqual(manual.runtime_session_ref, initialSessionRef);
     const rebound = secondRuntime.getManagedLocalIdentityEnvironment(resolvedIdentityRef("identity-env_persisted-headed-handoff"));
     assert.equal(rebound?.status.recovery_required, false);
