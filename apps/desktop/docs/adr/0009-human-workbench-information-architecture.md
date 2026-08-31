@@ -7,8 +7,8 @@ Accepted by App #306 as the direction for App #298 product correction, 2026-07-1
 本 ADR 只接受产品方向和设计约束，不代表 IA inventory、原型或场景验收已经完成，
 也不关闭 App #298 或其 #299-#305、#308 子项。
 
-2026-07-15 process correction：App #298 在 IA 定稿前增加 Loom Story 用户确认
-Gate，并以高保真原型用户验收替代低保真场景验收。Loom review、自动 review、PR
+2026-07-15 process correction：App #298 在 IA 定稿前增加 Story 用户确认
+Gate，并以高保真原型用户验收替代低保真场景验收。GitHub review、自动检查、PR
 merge 或 agent 判断不能代替这两次用户确认。
 
 2026-07-15 Story Gate 已由用户明确确认。#300-#304 的 canonical IA candidate
@@ -155,7 +155,7 @@ App 不建立站点专用审批状态机，也不把 owner policy truth 复制�
 
 生产 UI Work Item 前必须完成：
 
-- Loom User Story、Story Readiness 与 Story Business Confirmation；confirmation
+- User Story、Story Readiness 与 Story Business Confirmation；confirmation
   初始为 `pending`，只有用户明确确认后才可进入 IA 定稿；
 - 当前页面 inventory，并标记保留、重命名、移动、折叠、仅诊断或删除；
 - 三域导航和页面清单；
@@ -166,7 +166,7 @@ App 不建立站点专用审批状态机，也不把 owner policy truth 复制�
   关键旅程的载体，但必须由用户明确批准。
 
 用户要求修订 Story 或原型时，状态保持 `revision-requested`，不得进入生产 UI
-Work Item。Loom review 与自动检查只可验证载体，不构成产品审核。
+Work Item。GitHub review 与自动检查只可验证交付载体，不构成产品审核。
 
 固定三栏、右侧 tabs、navigation rail 或 Task Thread 树只能作为候选组件，不再是
 未经场景验证的全局结构约束。

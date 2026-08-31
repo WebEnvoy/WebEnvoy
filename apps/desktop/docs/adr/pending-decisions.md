@@ -281,7 +281,7 @@ format v0（Lode ADR 0002/0003/0004 与 pending-decisions 第一阶段结论）�
 | schema / API client / generated types / storage / runtime | 本轮不实现。 | Core/Harbor/Lode schema/API 稳定且有 implementation Work Item。 | deferred |
 | shared fixture files / conformance runner | 本轮只消费 Core fixture shape。 | Core fixture files 存在并授权 App implementation。 | deferred |
 | true write / approval execute / reconcile / cancellation implementation | Stage 2 只保留 display boundary。 | Core action risk、Harbor completion evidence、Lode write contract、App approval UI 都稳定。 | deferred |
-| issue closeout / merge | 本 PR Ready 不代表 issue 完成。 | merge 后由 coordinator 消费 PR、head、hosted checks、repo carrier 和 issue state。 | deferred |
+| issue closeout / merge | 本 PR Ready 不代表 issue 完成。 | merge 后由协调者消费 GitHub PR、exact head、hosted checks 和 issue state。 | deferred |
 
 ## 待决策索引
 

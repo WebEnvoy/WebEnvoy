@@ -33,12 +33,3 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-
-.loom/runtime/
-.loom/tmp/
-.loom/cache/
-.loom/attempts/**/raw-logs/
-.loom/attempts/**/scratch/
-.loom/local/
-.loom/bin/**/__pycache__/
-.loom/bin/**/*.py[cod]

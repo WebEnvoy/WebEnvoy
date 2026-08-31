@@ -71,26 +71,10 @@ Harbor 不理解具体站点业务，也不执行 Lode 任务封装。它只向 
 
 本仓库属于 AGPL 核心仓库，承载 Runtime Server、Profile、Execution Identity、Browser Drivers、Evidence 和正式运行时能力。面向外部集成的 Runtime API schema、client types、client SDK、OpenAPI 或生成模型，应优先评估是否放入未来的 `contracts` 或 SDK 类 MIT / Apache-2.0 仓库，不应默认进入 Harbor 的 AGPL 核心代码路径。
 
-<!-- LOOM_BOOTSTRAP_START -->
-## Loom Execution
+## GitHub-native 交付规则
 
-本仓库使用 Loom 编排 Work Item、build、review、merge-ready 与 host closeout。Loom
-消费 GitHub 与工作现场事实，不用 repo current、progress、review、shadow 或 closeout
-carrier 替代宿主真相。
-
-开始改文件前：
-
-1. 用 `loom route --target . --issue <issue> --json` 判断规划或执行入口。
-2. 实现必须显式绑定 Work Item 与 issue-scoped branch；PR 创建前可直接运行
-   `loom build --target . --issue <work-item> --branch <branch> --json`。
-3. 一次只推进一个有界目标；不要创建空提交、空 PR 或治理载体来满足 admission。
-4. PR 存在后再运行 `loom pre-review`、`loom review`、`loom merge-ready` 或 `loom ship`；
-   这些入口从 GitHub readback 取得 branch、head、review、checks 与 merge 状态。
-5. 验证证据记录命令、结果、时间或 head/run id；变更代码或 PR review 输入后重新确认
-   current-head attestation 与 gate freshness。
-6. merge 不等于产品完成；用 `loom attestation closeout` 消费宿主 closeout，用
-   `loom release readback` 消费发布事实，不创建 closeout/current-retire PR。
-
-环境或 provider 问题由 `loom doctor --target . --json` 分类；退役命令返回
-`unsupported_command_surface`，不得通过 compatibility flag 恢复。
-<!-- LOOM_BOOTSTRAP_END -->
+- 每个变更绑定真实 Work Item issue，并使用 issue-linked branch 与 PR。
+- PR 只修改当前 Work Item 范围，记录受影响验证；docs-only 可说明不适用。
+- 合并前由未参与实现的审查者针对 PR exact head 独立 review，required checks 必须通过。
+- 合并后回读 main 与 Issue，确认变更、验证、review、required checks 和状态一致。
+- GitHub issue/PR、review、checks 与 main 提交是唯一交付事实；不得创建 carrier、CLI 流程或第二状态机。

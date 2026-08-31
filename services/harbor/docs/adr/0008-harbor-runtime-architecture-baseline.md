@@ -89,7 +89,7 @@ When Harbor later adds runtime/provider/session/evidence/viewer code, the minimu
 - viewer/handoff/control ownership facts are readable when viewer or handoff code changes;
 - no default smoke uses real accounts, credentials, production payloads, raw cookies/storage, unredacted screenshots, raw HAR, raw DOM or video.
 
-Docs-only PRs may mark suite/runtime smoke not applicable only when they change documentation and item-specific Loom carriers. Runtime smoke becomes required when a PR adds or changes provider/session/evidence/viewer code, API/schema, storage schema, browser binary/install behavior, fixtures or generated facts.
+Docs-only PRs may mark suite/runtime smoke not applicable only when they change documentation and no runtime contracts. Runtime smoke becomes required when a PR adds or changes provider/session/evidence/viewer code, API/schema, storage schema, browser binary/install behavior, fixtures or generated facts.
 
 ## 研究吸收 / 裁剪 / 拒绝
 
