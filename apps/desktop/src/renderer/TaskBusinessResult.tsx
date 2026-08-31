@@ -108,17 +108,30 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
   const pin = isRecord(data?.lode_pin) ? data.lode_pin : undefined;
   const compositionPaths = new Set(["image_text_upload", "image_text_generate", "video", "long_article", "podcast"]);
   const compositionStates = new Set(["composition_initialized", "composition_not_initialized", "composition_unknown"]);
+  const fieldStateKeys = new Set(["availability", "observation", "required", "editable", "value_state"]);
+  const mediaStateKeys = new Set(["availability", "observation", "controls"]);
+  const mediaControlIds: Record<string, readonly string[]> = {
+    image_text_upload: ["upload_image"],
+    image_text_generate: ["generate_image"],
+    video: ["upload_video"],
+    long_article: ["add_media"],
+    podcast: ["upload_audio", "add_rss_subscription"],
+  };
   const validFieldState = (field: unknown): field is Record<string, unknown> => {
-    if (!isRecord(field) || !["available", "unavailable", "unknown"].includes(String(field.availability)) ||
+    if (!isRecord(field) || !Object.keys(field).every((key) => fieldStateKeys.has(key)) ||
+      !["available", "unavailable", "unknown"].includes(String(field.availability)) ||
       !["observed", "not_observed", "unknown"].includes(String(field.observation))) return false;
     return (field.required === undefined || ["observed", "unobserved", "unknown"].includes(String(field.required))) &&
       (field.editable === undefined || ["observed", "unobserved", "unknown"].includes(String(field.editable))) &&
       (field.value_state === undefined || ["empty", "present", "unknown"].includes(String(field.value_state)));
   };
-  const validMediaState = media != null && ["available", "unavailable", "unknown"].includes(String(media.availability)) &&
+  const validMediaState = media != null && Object.keys(media).every((key) => mediaStateKeys.has(key)) &&
+    ["available", "unavailable", "unknown"].includes(String(media.availability)) &&
     ["observed", "not_observed", "unknown"].includes(String(media.observation)) &&
-    (mediaControls == null || Object.values(mediaControls).every(validFieldState));
-  const validFields = fields != null && Object.keys(fields).length >= 3 &&
+    (media.controls === undefined || (mediaControls != null &&
+      Object.keys(mediaControls).every((key) => mediaControlIds[String(data?.composition_path)]?.includes(key) === true) &&
+      Object.values(mediaControls).every(validFieldState)));
+  const validFields = fields != null && Object.keys(fields).sort().join(",") === "content_editor,publish_control,title_input" &&
     ["title_input", "content_editor", "publish_control"].every((key) => validFieldState(fields[key])) &&
     Object.values(fields).every(validFieldState);
   const fieldSummary = (field: Record<string, unknown> | undefined) => {
@@ -159,6 +172,9 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     typeof observations.upload_image_tab_active !== "boolean" || typeof observations.upload_image_entry_visible !== "boolean" ||
     typeof observations.text_image_entry_visible !== "boolean" || observations.user_confirmed_identity !== true ||
     observations.challenge_absent !== true ||
+    (observations.path_observed !== undefined && !["observed", "unobserved", "unknown"].includes(String(observations.path_observed))) ||
+    (observations.path_entry_visible !== undefined && !["observed", "unobserved", "unknown"].includes(String(observations.path_entry_visible))) ||
+    (data.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" || observations.path_entry_visible !== "observed")) ||
     !validFields || !validFieldState(validation) || !validFieldState(saveDraft) || !validFieldState(publishControl) ||
     !validMediaState ||
     prohibited?.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false ||

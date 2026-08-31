@@ -179,6 +179,11 @@ test("keeps the browser probe read-only and freshness-bound", () => {
   assert.match(expression, /上传图文/);
   assert.match(expression, /上传图片/);
   assert.match(expression, /文字配图/);
+  assert.equal(expression.includes("hasLabel([/^上传图文$/]"), false);
+  assert.equal(expression.includes("querySelectorAll('main"), false);
+  assert.equal(expression.includes("semanticText"), false);
+  assert.equal(expression.includes("bodyText.includes('创作者')"), false);
+  assert.match(expression, /findControl = \(patterns, includeDisabled = false/);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 2_999), true);
   assert.equal(validWritePrecheckFreshness(input, observation, { ...observation, login_like: true }, 1_000, 2_000), false);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 3_001), false);
@@ -244,18 +249,30 @@ test("accepts dynamic composition observations without mistaking selector drift 
     assert.equal(unknown.field_states.title_input?.observation, "unknown");
   }
 
-  const absent = validateXhsWritePrecheckObservation(input, {
+  const selectorDrift = validateXhsWritePrecheckObservation(input, {
     ...observation,
     creator_app_owned: false,
     creator_root_count: 0,
+    creator_surface_state: "unknown",
     upload_image_tab_active: false,
     upload_image_entry_visible: false,
     text_image_entry_visible: false
   });
   assert.deepEqual(
-    absent.status === "unavailable" ? absent.failure_class : undefined,
-    "target_not_writable"
+    selectorDrift.status === "unavailable" ? selectorDrift.failure_class : undefined,
+    "evidence_unavailable"
   );
+
+  const explicitAbsent = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    creator_app_owned: false,
+    creator_root_count: 0,
+    creator_surface_state: "absent",
+    upload_image_tab_active: false,
+    upload_image_entry_visible: false,
+    text_image_entry_visible: false
+  });
+  assert.equal(explicitAbsent.status === "unavailable" ? explicitAbsent.failure_class : undefined, "target_not_writable");
 });
 
 test("keeps all catalog composition paths bounded and read-only", () => {
@@ -268,6 +285,51 @@ test("keeps all catalog composition paths bounded and read-only", () => {
     assert.equal(admitXhsPublishPrecheck({ ...lodeAdmissionFixture, composition_path: path })?.composition_path, path);
   }
   assert.equal(admitXhsPublishPrecheck({ ...lodeAdmissionFixture, composition_path: "arbitrary-selector" }), null);
+});
+
+test("drops and rejects field or media keys outside the bounded observation shape", () => {
+  const result = completedProbe();
+  const withExtraField = {
+    ...result,
+    field_states: { ...result.field_states, unexpected: { availability: "unknown", observation: "unknown" } }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withExtraField), false);
+  const withInnerExtraField = {
+    ...result,
+    field_states: {
+      ...result.field_states,
+      title_input: { ...result.field_states.title_input, detail: "unexpected" }
+    }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withInnerExtraField), false);
+  const withExtraMediaControl = {
+    ...result,
+    media_state: {
+      ...result.media_state,
+      controls: { ...result.media_state.controls, unexpected: { availability: "unknown", observation: "unknown" } }
+    }
+  } as typeof result;
+  assert.equal(validCompletedWritePrecheckProbe(withExtraMediaControl), false);
+  const sanitized = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    composition_path: "image_text_upload",
+    field_states: {
+      title_input: { availability: "unknown", observation: "unknown" },
+      content_editor: { availability: "unknown", observation: "unknown" },
+      publish_control: { availability: "unknown", observation: "unknown" },
+      unexpected: { availability: "available", observation: "observed" }
+    },
+    media_state: {
+      availability: "unknown",
+      observation: "unknown",
+      controls: { upload_image: { availability: "unknown", observation: "unknown" }, unexpected: { availability: "available", observation: "observed" } }
+    }
+  });
+  assert.equal(sanitized.status, "completed");
+  if (sanitized.status === "completed") {
+    assert.equal("unexpected" in sanitized.field_states, false);
+    assert.equal("unexpected" in (sanitized.media_state.controls ?? {}), false);
+  }
 });
 
 test("returns refs-only submitted=false evidence and fails fixtures closed", async () => {

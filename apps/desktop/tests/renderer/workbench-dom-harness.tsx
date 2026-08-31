@@ -704,6 +704,20 @@ async function runDesktopChecks() {
     incompleteXhsPrecheck.kind === "object" && incompleteXhsPrecheck.fields[0]?.label === "结果不可用",
     "An incomplete XHS write-precheck was rendered as verified.",
   );
+  const extraFieldXhsPrecheck = projectStandardBusinessResult(resultRun, {
+    ...xhsPrecheckResult,
+    result: {
+      ...xhsPrecheckResult.result,
+      data: {
+        ...xhsPrecheckResult.result.data,
+        field_states: { ...xhsPrecheckResult.result.data.field_states, unexpected: { availability: "unknown", observation: "unknown" } },
+      },
+    },
+  });
+  assert(
+    extraFieldXhsPrecheck.kind === "object" && extraFieldXhsPrecheck.fields[0]?.label === "结果不可用",
+    "An XHS write-precheck with an extra field key was rendered as verified.",
+  );
   const stateTitles = [
     projectBusinessResultMessage({ ...resultRun, turnStatus: "cancelled" }, { status: "fixture" })?.title,
     projectBusinessResultMessage({ ...resultRun, turnStatus: "status_unknown" }, { status: "fixture" })?.title,

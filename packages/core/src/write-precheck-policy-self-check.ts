@@ -197,7 +197,9 @@ function completedWritePrecheckOperation(input: {
       upload_image_entry_visible: true,
       text_image_entry_visible: true,
       path_observed: "observed",
-      path_entry_visible: "observed"
+      path_entry_visible: "observed",
+      user_confirmed_identity: true,
+      challenge_absent: true
     },
     field_states: {
       title_input: { availability: "unavailable", observation: "not_observed" },
@@ -406,6 +408,89 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+
+  const malformedObservationDirectory = await mkdtemp(join(tmpdir(), "webenvoy-write-policy-observation-shape-"));
+  try {
+    let currentRunId = "";
+    let mutateOperation: ((operation: Record<string, unknown>) => void) | undefined;
+    let requestedCompositionPath: "image_text_upload" | "video" | undefined;
+    const runStore = createFileRunRecordStore({ directory: join(malformedObservationDirectory, "runs"), clock: () => new Date(evaluatedAt) });
+    const authorizationStore = createFileAuthorizationDecisionStore({
+      directory: join(malformedObservationDirectory, "decisions"),
+      runRecordStore: runStore,
+      taskThreadStore: {
+        getTaskThread: async () => ({
+          thread_id: context.thread_id,
+          turns: [{ turn_id: context.turn_id, run_id: currentRunId }]
+        })
+      },
+      clock: () => new Date(evaluatedAt)
+    });
+    const harbor = {
+      collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: `session_${currentRunId}` } } as unknown as HarborAdmissionInput),
+      validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
+        const operation = completedWritePrecheckOperation({
+          runtime_session_ref: input.runtime_session_ref,
+          target_ref: input.target_ref,
+          suffix: currentRunId
+        });
+        mutateOperation?.(operation);
+        return operation;
+      },
+      executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+      releaseCoreTaskSession: async () => undefined
+    } as HarborRuntimeClient;
+    const malformedCases: readonly [
+      string,
+      ((operation: Record<string, unknown>) => void),
+      "image_text_upload" | "video" | undefined
+    ][] = [
+      ["path-mismatch", () => undefined, "video"],
+      ["identity-unconfirmed", (operation) => {
+        (operation.entrypoint_observations as Record<string, unknown>).user_confirmed_identity = false;
+      }, undefined],
+      ["challenge-present", (operation) => {
+        (operation.entrypoint_observations as Record<string, unknown>).challenge_absent = false;
+      }, undefined],
+      ["composition-scope-unknown-path", (operation) => {
+        operation.precheck_scope = "composition_observation";
+        const observations = operation.entrypoint_observations as Record<string, unknown>;
+        observations.path_observed = "unknown";
+        observations.path_entry_visible = "unknown";
+      }, undefined],
+      ["field-inner-extra", (operation) => {
+        const fields = operation.field_states as Record<string, Record<string, unknown>>;
+        fields.title_input = { ...fields.title_input, detail: "unexpected" };
+      }, undefined],
+      ["media-extra", (operation) => {
+        (operation.media_state as Record<string, unknown>).detail = "unexpected";
+      }, undefined]
+    ];
+    for (const [name, mutation, compositionPath] of malformedCases) {
+      currentRunId = `app-xhs-write-precheck-${name}`;
+      mutateOperation = mutation;
+      requestedCompositionPath = compositionPath;
+      const result = await submitRuntimeTask(runStore, {
+        run_id: currentRunId,
+        task_intent: { ...taskIntent(), intent_id: `intent_write_precheck_${name}` },
+        package_ref: contract().package_ref,
+        authorization_context: { ...context, idempotency_key: `turn-policy-check-${name}` },
+        ...(requestedCompositionPath === undefined ? {} : { harbor: { composition_path: requestedCompositionPath } })
+      }, {
+        lodePackageResolver: async () => contract(),
+        harborRuntimeClient: harbor,
+        executionPolicyConfigStore: configStore("auto"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(result.ok, false, name);
+      if (!result.ok) assert.equal(result.failure.code, "harbor_write_precheck_outcome_unknown", name);
+      assert.equal(result.run_record?.status, "unknown_outcome", name);
+      assert.equal(result.run_record?.public_result_summary?.submitted, false, name);
+    }
+  } finally {
+    await rm(malformedObservationDirectory, { recursive: true, force: true });
   }
 
   const missingSnapshotDirectory = await mkdtemp(join(tmpdir(), "webenvoy-write-policy-continuation-binding-"));

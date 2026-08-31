@@ -977,6 +977,15 @@ const xhsWritePrecheckLodeSemanticSha256 = "21f57cfd9f395bb13b322aec9e5dd0c9c5f0
 const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
 ]);
+const xhsWritePrecheckFieldStateKeys = new Set(["availability", "observation", "required", "editable", "value_state"]);
+const xhsWritePrecheckMediaStateKeys = new Set(["availability", "observation", "controls"]);
+const xhsWritePrecheckMediaControlIds: Record<XhsWritePrecheckCompositionPath, readonly string[]> = {
+  image_text_upload: ["upload_image"],
+  image_text_generate: ["generate_image"],
+  video: ["upload_video"],
+  long_article: ["add_media"],
+  podcast: ["upload_audio", "add_rss_subscription"]
+};
 
 type WritePrecheckValidation =
   | { ok: true; operation: JsonObject; source_refs: string[]; evidence_refs: string[] }
@@ -993,7 +1002,7 @@ function writePrecheckFailure(code: string, category: FailureRecord["category"] 
 
 function validateCompletedWritePrecheck(
   value: unknown,
-  expected: { runtime_session_ref: string; target_ref: string }
+  expected: { runtime_session_ref: string; target_ref: string; composition_path?: XhsWritePrecheckCompositionPath }
 ): WritePrecheckValidation {
   const operation = object(value);
   if (!operation || operation.schema_version !== "harbor-validate-only-write-precheck/v0" || operation.status !== "completed" || operation.submitted !== false ||
@@ -1052,7 +1061,8 @@ function validateCompletedWritePrecheck(
   const prohibited = object(operation.prohibited_actions_observed);
   const validFieldState = (field: unknown): boolean => {
     const value = object(field);
-    return Boolean(value && ["available", "unavailable", "unknown"].includes(string(value.availability) ?? "") &&
+    return Boolean(value && Object.keys(value).every((key) => xhsWritePrecheckFieldStateKeys.has(key)) &&
+      ["available", "unavailable", "unknown"].includes(string(value.availability) ?? "") &&
       ["observed", "not_observed", "unknown"].includes(string(value.observation) ?? "") &&
       (value.required === undefined || ["observed", "unobserved", "unknown"].includes(string(value.required) ?? "")) &&
       (value.editable === undefined || ["observed", "unobserved", "unknown"].includes(string(value.editable) ?? "")) &&
@@ -1061,22 +1071,30 @@ function validateCompletedWritePrecheck(
   const validMediaState = (media: unknown): boolean => {
     const value = object(media);
     const controls = value?.controls;
-    return Boolean(value && ["available", "unavailable", "unknown"].includes(string(value.availability) ?? "") &&
+    const compositionPath = operation.composition_path as XhsWritePrecheckCompositionPath;
+    return Boolean(value && Object.keys(value).every((key) => xhsWritePrecheckMediaStateKeys.has(key)) &&
+      xhsWritePrecheckCompositionPaths.has(compositionPath) &&
+      ["available", "unavailable", "unknown"].includes(string(value.availability) ?? "") &&
       ["observed", "not_observed", "unknown"].includes(string(value.observation) ?? "") &&
-      (controls === undefined || (object(controls) !== undefined && Object.values(object(controls)!).every(validFieldState))));
+      (controls === undefined || (object(controls) !== undefined &&
+        Object.keys(object(controls)!).every((key) => xhsWritePrecheckMediaControlIds[compositionPath].includes(key)) &&
+        Object.values(object(controls)!).every(validFieldState))));
   };
+  const expectedCompositionPath = expected.composition_path ?? "image_text_upload";
   if (operation.classification !== "partial_result" || !["entrypoint_only", "composition_observation"].includes(string(operation.precheck_scope) ?? "") ||
-    !xhsWritePrecheckCompositionPaths.has(operation.composition_path as XhsWritePrecheckCompositionPath) ||
+    !xhsWritePrecheckCompositionPaths.has(expectedCompositionPath) || operation.composition_path !== expectedCompositionPath ||
     !["composition_initialized", "composition_not_initialized", "composition_unknown"].includes(string(operation.composition_state) ?? "") ||
     operation.no_submit_guard !== "active" || !observations || !fields || !prohibited ||
+    observations.user_confirmed_identity !== true || observations.challenge_absent !== true ||
     observations.route_loaded !== true || observations.publish_vue_container_visible !== true ||
     !["upload_image_tab_active", "upload_image_entry_visible", "text_image_entry_visible"].every((key) => typeof observations[key] === "boolean") ||
     (observations.path_observed !== undefined && !["observed", "unobserved", "unknown"].includes(string(observations.path_observed) ?? "")) ||
     (observations.path_entry_visible !== undefined && !["observed", "unobserved", "unknown"].includes(string(observations.path_entry_visible) ?? "")) ||
-    Object.keys(fields).length < 3 || !["title_input", "content_editor", "publish_control"].every((key) => validFieldState(fields[key])) ||
+    Object.keys(fields).sort().join(",") !== "content_editor,publish_control,title_input" ||
     !Object.values(fields).every(validFieldState) || !validMediaState(operation.media_state) ||
     !validFieldState(operation.validation_state) || !validFieldState(operation.save_draft_control) ||
     !validFieldState(operation.publish_control) || !prohibited || Object.keys(prohibited).length === 0 ||
+    (operation.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" || observations.path_entry_visible !== "observed")) ||
     prohibited.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false) {
     return { ok: false, failure: writePrecheckFailure("write_precheck_observation_invalid", "result_projection") };
   }
@@ -1111,9 +1129,14 @@ async function completeAcceptedWritePrecheck(
   result: Extract<TaskSubmissionResult, { ok: true }>,
   operation: unknown,
   runtimeSessionRef: string,
-  targetRef: string
+  targetRef: string,
+  compositionPath?: XhsWritePrecheckCompositionPath
 ): Promise<TaskSubmissionResult> {
-  const validation = validateCompletedWritePrecheck(operation, { runtime_session_ref: runtimeSessionRef, target_ref: targetRef });
+  const validation = validateCompletedWritePrecheck(operation, {
+    runtime_session_ref: runtimeSessionRef,
+    target_ref: targetRef,
+    ...(compositionPath === undefined ? {} : { composition_path: compositionPath })
+  });
   if (!validation.ok) {
     // The operation response is untrusted at this boundary. A malformed or
     // contract-drift payload is indeterminate, never a retryable failure.
@@ -1393,7 +1416,7 @@ async function dispatchApprovedWritePrecheck(
   }
   const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef);
   if (cleanup) return cleanup;
-  return completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref);
+  return completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref, request.harbor?.composition_path);
 }
 
 export type ContinueWritePrecheckTaskRequest = {

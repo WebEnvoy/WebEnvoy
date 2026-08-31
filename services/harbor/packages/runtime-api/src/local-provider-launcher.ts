@@ -140,6 +140,7 @@ type WritePrecheckObservation = {
   challenge_like?: boolean;
   login_like?: boolean;
   creator_app_owned?: boolean;
+  creator_surface_state?: "observed" | "unknown" | "absent";
   creator_root_count?: number;
   upload_image_tab_active?: boolean;
   upload_image_entry_visible?: boolean;
@@ -167,6 +168,13 @@ const compositionPathLabels: Record<XhsWritePrecheckCompositionPath, readonly st
   long_article: ["长文", "写长文"],
   podcast: ["播客"]
 };
+const mediaControlIds: Record<XhsWritePrecheckCompositionPath, readonly string[]> = {
+  image_text_upload: ["upload_image"],
+  image_text_generate: ["generate_image"],
+  video: ["upload_video"],
+  long_article: ["add_media"],
+  podcast: ["upload_audio", "add_rss_subscription"]
+};
 
 function normalizedCompositionPath(value: XhsWritePrecheckCompositionPath | undefined): XhsWritePrecheckCompositionPath {
   return value && writePrecheckCompositionPaths.has(value) ? value : "image_text_upload";
@@ -190,22 +198,36 @@ function unknownFieldState(): XhsWritePrecheckFieldState {
   return { availability: "unknown", observation: "unknown" };
 }
 
-function unavailableFieldState(): XhsWritePrecheckFieldState {
-  return { availability: "unavailable", observation: "not_observed" };
-}
-
-function safeFieldStates(observation: WritePrecheckObservation, legacyEntrypoint = false): Record<string, XhsWritePrecheckFieldState> {
-  const missing = legacyEntrypoint ? unavailableFieldState() : unknownFieldState();
+function safeFieldState(value: XhsWritePrecheckFieldState | undefined): XhsWritePrecheckFieldState {
+  if (!value) return unknownFieldState();
   return {
-    title_input: observation.field_states?.title_input ?? missing,
-    content_editor: observation.field_states?.content_editor ?? missing,
-    publish_control: observation.field_states?.publish_control ?? observation.publish_control ?? missing,
-    ...(observation.field_states === undefined ? {} : observation.field_states)
+    availability: value.availability,
+    observation: value.observation,
+    ...(value.required === undefined ? {} : { required: value.required }),
+    ...(value.editable === undefined ? {} : { editable: value.editable }),
+    ...(value.value_state === undefined ? {} : { value_state: value.value_state })
   };
 }
 
-function safeMediaState(observation: WritePrecheckObservation): XhsWritePrecheckMediaState {
-  return observation.media_state ?? { availability: "unknown", observation: "unknown", controls: {} };
+function safeFieldStates(observation: WritePrecheckObservation): Record<string, XhsWritePrecheckFieldState> {
+  return {
+    title_input: safeFieldState(observation.field_states?.title_input),
+    content_editor: safeFieldState(observation.field_states?.content_editor),
+    publish_control: safeFieldState(observation.field_states?.publish_control ?? observation.publish_control)
+  };
+}
+
+function safeMediaState(observation: WritePrecheckObservation, compositionPath: XhsWritePrecheckCompositionPath): XhsWritePrecheckMediaState {
+  const media = observation.media_state;
+  if (!media) return { availability: "unknown", observation: "unknown", controls: {} };
+  const controls = media.controls ?? {};
+  return {
+    availability: media.availability,
+    observation: media.observation,
+    controls: Object.fromEntries(mediaControlIds[compositionPath]
+      .filter((id) => controls[id] !== undefined)
+      .map((id) => [id, safeFieldState(controls[id])]))
+  };
 }
 
 export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
@@ -228,29 +250,28 @@ export function validateXhsWritePrecheckObservation(
     observation.pathname !== "/publish/publish" ||
     !sameWritePrecheckUrl(observation.url, input.target_url)
   ) return writePrecheckUnavailable("page_changed", "The current page is not the exact requested creator publish page.");
-  // Production changes Vue roots and labels. Keep a semantic unknown instead
-  // of treating selector drift as a non-writable target.
-  if (observation.creator_app_owned === false && (observation.creator_root_count ?? 0) === 0) {
-    return writePrecheckUnavailable("target_not_writable", "The creator publish surface is not observable.", false);
+  // A missing semantic root can be selector drift just as easily as a page
+  // without the creator surface. Keep the distinction unknown; only an
+  // explicit absent classification may become target_not_writable.
+  if (observation.creator_surface_state === "absent") {
+    return writePrecheckUnavailable("target_not_writable", "The creator publish surface is explicitly absent.", false);
   }
-  if (observation.creator_app_owned !== true && observation.creator_root_count === undefined) {
+  if (observation.creator_app_owned !== true) {
     return writePrecheckUnavailable("evidence_unavailable", "The creator publish surface could not be classified.");
   }
   const composition_path = normalizedCompositionPath(input.composition_path ?? observation.composition_path);
-  const legacyEntrypoint = observation.creator_app_owned === true && observation.creator_root_count === 1 &&
-    observation.upload_image_tab_active === true && observation.upload_image_entry_visible === true && observation.text_image_entry_visible === true;
   const composition_state = observation.composition_state ?? (
     observation.composition_initialized === true
       ? "composition_initialized"
       : observation.composition_initialized === false
         ? "composition_not_initialized"
-        : legacyEntrypoint ? "composition_not_initialized" : "composition_unknown"
+        : "composition_unknown"
   );
-  const field_states = safeFieldStates(observation, legacyEntrypoint);
-  const media_state = safeMediaState(observation);
-  const validation_state = observation.validation_state ?? unknownFieldState();
-  const save_draft_control = observation.save_draft_control ?? unknownFieldState();
-  const publish_control = observation.publish_control ?? field_states.publish_control ?? unknownFieldState();
+  const field_states = safeFieldStates(observation);
+  const media_state = safeMediaState(observation, composition_path);
+  const validation_state = safeFieldState(observation.validation_state);
+  const save_draft_control = safeFieldState(observation.save_draft_control);
+  const publish_control = safeFieldState(observation.publish_control ?? field_states.publish_control);
   return {
     status: "completed",
     observed_at: new Date().toISOString(),
@@ -262,7 +283,7 @@ export function validateXhsWritePrecheckObservation(
     ],
     evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
     classification: "partial_result",
-    precheck_scope: observation.path_observed === "observed" ? "composition_observation" : "entrypoint_only",
+    precheck_scope: observation.path_observed === "observed" && observation.path_entry_visible === "observed" ? "composition_observation" : "entrypoint_only",
     composition_path,
     composition_state,
     entrypoint_observations: {
@@ -380,34 +401,36 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const label = (el) => normalize(el?.getAttribute('aria-label') || el?.getAttribute('name') ||
         el?.getAttribute('placeholder') || el?.textContent || '');
       const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], input, textarea, [contenteditable="true"], [role="textbox"]')];
-      const controls = interactive.filter((el) => visible(el));
-      const allControls = interactive.filter((el) => visible(el, true));
-      const hasLabel = (patterns, includeDisabled = false) => (includeDisabled ? allControls : controls)
-        .some((el) => patterns.some((pattern) => pattern.test(label(el))));
-      const findControl = (patterns, includeDisabled = true) => (includeDisabled ? allControls : controls)
-        .find((el) => patterns.some((pattern) => pattern.test(label(el))));
       const app = document.querySelector('#app, [data-v-app]');
-      const semanticRoots = [...document.querySelectorAll('main, [id*="publish"], [class*="publish"], [data-page*="publish"]')]
-        .filter((el) => visible(el));
-      const semanticText = [...controls, ...semanticRoots].map(label).join(' ');
-      const creatorSurface = semanticRoots.find((el) => /上传图文|上传图片|文字配图|上传视频|长文|播客/.test(label(el))) ||
-        (/上传图文|上传图片|文字配图|上传视频|长文|播客/.test(semanticText) ? app : undefined);
-      const creatorRootCandidates = semanticRoots.filter((el) => /上传图文|上传图片|文字配图|上传视频|长文|播客/.test(label(el)));
-      const roots = creatorRootCandidates.length > 0 ? creatorRootCandidates : (creatorSurface ? [creatorSurface] : []);
-      const pathEntryVisible = pathLabels.some((expected) => hasLabel([new RegExp(expected)]));
-      const activePath = allControls.some((el) => {
+      const appVisible = visible(app);
+      const controls = interactive.filter((el) => appVisible && app.contains(el) && visible(el));
+      const allControls = interactive.filter((el) => appVisible && app.contains(el) && visible(el, true));
+      const hasLabel = (patterns, includeDisabled = false, scopedControls = includeDisabled ? allControls : controls) => scopedControls
+        .some((el) => patterns.some((pattern) => pattern.test(label(el))));
+      const findControl = (patterns, includeDisabled = false, scopedControls = includeDisabled ? allControls : controls) => scopedControls
+        .find((el) => patterns.some((pattern) => pattern.test(label(el))));
+      const creatorLabel = /上传图文|上传图片|文字配图|上传视频|长文|播客|标题|正文|内容|简介|描述|发布|保存草稿|保存/;
+      const creatorControls = controls.filter((el) => creatorLabel.test(label(el)));
+      const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
+        .filter((el) => visible(el)) : [];
+      const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
+      const requestedPathEntryInApp = creatorControls.some((control) => pathLabels.some((expected) => label(control) === expected || label(control).includes(expected)));
+      const creatorSurface = semanticRootSurface || (appVisible && creatorControls.length >= 2 && requestedPathEntryInApp ? app : undefined);
+      const roots = creatorSurface ? [creatorSurface] : [];
+      const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
+      const pathEntryVisible = pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
+      const activePath = surfaceControls.some((el) => {
         const selected = el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
           /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
         return selected && pathLabels.some((expected) => label(el) === expected || label(el).includes(expected));
-      }) || requestedPath === 'image_text_upload' &&
-        hasLabel([/^上传图文$/], true) && hasLabel([/^上传图片$/], true) && hasLabel([/^文字配图$/], true);
+      });
       const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
-      const titleControl = findControl([/标题|title/i]);
-      const contentControl = findControl([/正文|内容|简介|描述|content/i]);
-      const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i]);
-      const saveControl = findControl([/保存草稿|保存|save draft/i]);
-      const validationControl = [...document.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error"], [class*="valid"]')]
+      const titleControl = findControl([/标题|title/i], false, surfaceControls);
+      const contentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls);
+      const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i], false, surfaceControls);
+      const saveControl = findControl([/保存草稿|保存|save draft/i], false, surfaceControls);
+      const validationControl = [...(creatorSurface?.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error"], [class*="valid"]') || [])]
         .find((el) => visible(el, true));
       const fieldState = (el) => {
         // A selector miss is not proof that the control is unavailable; keep
@@ -430,15 +453,16 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       };
       const mediaControls = {};
       for (const [id, patterns] of mediaDefinitions[requestedPath] || []) {
-        const control = findControl(patterns);
+        const control = findControl(patterns, false, surfaceControls);
         mediaControls[id] = fieldState(control);
       }
-      const mediaControl = (mediaDefinitions[requestedPath] || []).map(([, patterns]) => findControl(patterns)).find(Boolean);
+      const mediaControl = (mediaDefinitions[requestedPath] || []).map(([, patterns]) => findControl(patterns, false, surfaceControls)).find(Boolean);
       // Merely seeing an upload control is the entrypoint, not an initialized
       // composition. Initialization is observable only once an editing or
       // publication control is present; file selection is intentionally not
       // performed by this read-only probe.
-      const composition_initialized = Boolean(activePath && (titleControl || contentControl || publishControl || saveControl));
+      const editableControl = (el) => Boolean(el && !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true');
+      const composition_initialized = Boolean(activePath && [titleControl, contentControl, publishControl, saveControl].some(editableControl));
       const loginSurface = location.pathname.startsWith('/login') || [...document.querySelectorAll('[class*="login"], [class*="qrcode"], [class*="qr-code"]')]
         .some((el) => visible(el, true) && /扫码登录|手机号登录|登录二维码/.test(el.textContent || ''));
       return {
@@ -448,10 +472,11 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         challenge_like: /验证码|安全验证|访问受限|captcha/i.test(bodyText),
         login_like: loginSurface,
         creator_app_owned: Boolean(creatorSurface),
+        creator_surface_state: creatorSurface ? 'observed' : 'unknown',
         creator_root_count: roots.length,
         upload_image_tab_active: Boolean(activePath && requestedPath === 'image_text_upload'),
-        upload_image_entry_visible: hasLabel([/上传图片/]),
-        text_image_entry_visible: hasLabel([/文字配图/]),
+        upload_image_entry_visible: hasLabel([/上传图片/], false, surfaceControls),
+        text_image_entry_visible: hasLabel([/文字配图/], false, surfaceControls),
         composition_path: requestedPath,
         path_observed,
         path_entry_visible,

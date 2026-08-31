@@ -207,6 +207,40 @@ const requestedFieldSet = new Set(["title", "summary", "canonical_url", "source_
 const compositionPathSet = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
 ]);
+const fieldStateKeys = new Set(["availability", "observation", "required", "editable", "value_state"]);
+const mediaStateKeys = new Set(["availability", "observation", "controls"]);
+const mediaControlIds: Record<XhsWritePrecheckCompositionPath, readonly string[]> = {
+  image_text_upload: ["upload_image"],
+  image_text_generate: ["generate_image"],
+  video: ["upload_video"],
+  long_article: ["add_media"],
+  podcast: ["upload_audio", "add_rss_subscription"]
+};
+
+function validFieldState(field: unknown): field is XhsWritePrecheckFieldState {
+  if (!field || typeof field !== "object" || Array.isArray(field)) return false;
+  const value = field as Record<string, unknown>;
+  return Object.keys(value).every((key) => fieldStateKeys.has(key)) &&
+    ["available", "unavailable", "unknown"].includes(String(value.availability)) &&
+    ["observed", "not_observed", "unknown"].includes(String(value.observation)) &&
+    (value.required === undefined || ["observed", "unobserved", "unknown"].includes(String(value.required))) &&
+    (value.editable === undefined || ["observed", "unobserved", "unknown"].includes(String(value.editable))) &&
+    (value.value_state === undefined || ["empty", "present", "unknown"].includes(String(value.value_state)));
+}
+
+function validMediaState(media: unknown, compositionPath: XhsWritePrecheckCompositionPath): media is XhsWritePrecheckMediaState {
+  if (!media || typeof media !== "object" || Array.isArray(media)) return false;
+  const value = media as Record<string, unknown>;
+  const controls = value.controls;
+  return Object.keys(value).every((key) => mediaStateKeys.has(key)) &&
+    ["available", "unavailable", "unknown"].includes(String(value.availability)) &&
+    ["observed", "not_observed", "unknown"].includes(String(value.observation)) &&
+    (controls === undefined || Boolean(
+      controls && typeof controls === "object" && !Array.isArray(controls) &&
+      Object.keys(controls as Record<string, unknown>).every((key) => mediaControlIds[compositionPath].includes(key)) &&
+      Object.values(controls as Record<string, unknown>).every(validFieldState)
+    ));
+}
 
 export function admitXhsPublishPrecheck(value: unknown): AdmittedWritePrecheck | null {
   const input = object(value);
@@ -339,25 +373,6 @@ export function validCompletedWritePrecheckProbe(
 ): boolean {
   const sourceKinds = probe.source_refs.map((ref) => ref.kind);
   const sourceRefs = probe.source_refs.map((ref) => ref.ref);
-  const validFieldState = (field: unknown): field is XhsWritePrecheckFieldState => {
-    if (!field || typeof field !== "object" || Array.isArray(field)) return false;
-    const value = field as Record<string, unknown>;
-    return ["available", "unavailable", "unknown"].includes(String(value.availability)) &&
-      ["observed", "not_observed", "unknown"].includes(String(value.observation)) &&
-      (value.required === undefined || ["observed", "unobserved", "unknown"].includes(String(value.required))) &&
-      (value.editable === undefined || ["observed", "unobserved", "unknown"].includes(String(value.editable))) &&
-      (value.value_state === undefined || ["empty", "present", "unknown"].includes(String(value.value_state)));
-  };
-  const validMediaState = (media: unknown): media is XhsWritePrecheckMediaState => {
-    if (!media || typeof media !== "object" || Array.isArray(media)) return false;
-    const value = media as Record<string, unknown>;
-    return ["available", "unavailable", "unknown"].includes(String(value.availability)) &&
-      ["observed", "not_observed", "unknown"].includes(String(value.observation)) &&
-      (value.controls === undefined || Boolean(
-        value.controls && typeof value.controls === "object" && !Array.isArray(value.controls) &&
-        Object.values(value.controls as Record<string, unknown>).every(validFieldState)
-      ));
-  };
   const fieldKeys = Object.keys(probe.field_states);
   const observations = probe.entrypoint_observations;
   return probe.observed_url.startsWith(`${XHS_PUBLISH_PRECHECK_PIN.origin}/publish/publish`) &&
@@ -375,9 +390,10 @@ export function validCompletedWritePrecheckProbe(
     [observations.upload_image_tab_active, observations.upload_image_entry_visible, observations.text_image_entry_visible].every((value) => typeof value === "boolean") &&
     (observations.path_observed === undefined || ["observed", "unobserved", "unknown"].includes(observations.path_observed)) &&
     (observations.path_entry_visible === undefined || ["observed", "unobserved", "unknown"].includes(observations.path_entry_visible)) &&
-    fieldKeys.includes("title_input") && fieldKeys.includes("content_editor") && fieldKeys.includes("publish_control") &&
+    (probe.precheck_scope === "entrypoint_only" || (observations.path_observed === "observed" && observations.path_entry_visible === "observed")) &&
+    fieldKeys.sort().join(",") === "content_editor,publish_control,title_input" &&
     Object.values(probe.field_states).every(validFieldState) &&
-    validMediaState(probe.media_state) &&
+    validMediaState(probe.media_state, probe.composition_path) &&
     validFieldState(probe.validation_state) &&
     validFieldState(probe.save_draft_control) &&
     validFieldState(probe.publish_control) &&
