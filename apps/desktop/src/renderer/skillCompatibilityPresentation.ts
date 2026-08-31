@@ -6,6 +6,7 @@ import {
 import type { IdentityEnvironmentProjection } from "./identityEnvironmentFixtures";
 import type { LodeCatalogLoadState, LodeCatalogSkill } from "./lodeCatalogClient";
 import type { RuntimeSupervisorState } from "./runtimeSupervisorState";
+import { bossProductionDeferredReason, isBossProductionSkill } from "./productionTaskPolicy";
 
 export function compatibilityCandidateLabel(candidate: IdentityCompatibilityCandidate | undefined) {
   if (candidate?.status === "compatible") return "兼容";
@@ -65,6 +66,7 @@ export function skillLaunchState(
   runtime: RuntimeSupervisorState,
   catalogStatus: LodeCatalogLoadState["status"],
 ) {
+  if (isBossProductionSkill(skill)) return { ok: false, reason: bossProductionDeferredReason };
   if (catalogStatus !== "ready") return { ok: false, reason: "站点技能目录需要刷新后才能创建任务。" };
   if (skill.availability !== "available") return { ok: false, reason: skill.availabilityReason };
   if (compatibility.status !== "ready") return { ok: false, reason: compatibility.summary };

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ownerApiResponseMaxBytes, readBoundedJsonResponse } from "./boundedJsonResponse.js";
-import { runPackagedTaskBoundarySmoke } from "./packagedTaskBoundarySmoke.js";
+import { runPackagedBossDeferredSmoke, runPackagedTaskBoundarySmoke } from "./packagedTaskBoundarySmoke.js";
 import { createRuntimeSupervisor } from "./runtimeSupervisor.js";
 import { readLodeCatalog } from "./lodeCatalog.js";
 import {
@@ -15,6 +15,7 @@ import {
 import {
   harborSupervisorAuthorizationHeader,
   isHarborSupervisorProtectedRequest,
+  ownerApiProductionPostBlockReason,
   ownerApiTimeoutMs,
   parseOwnerApiRequest,
   projectHarborIdentityMutationErrorBody,
@@ -469,6 +470,10 @@ async function runPackagedSmoke(window: BrowserWindow, loadRenderer: Promise<voi
       await writeFile(packagedSmokeScreenshot, image.toPNG());
     }
 
+    const packagedBossDeferred = await runPackagedBossDeferredSmoke(window);
+    if (!packagedBossDeferred.uiDisabled || !packagedBossDeferred.deferredCopyVisible || packagedBossDeferred.bossSkillCount < 1) {
+      throw new Error(`packaged renderer smoke failed: BOSS production tasks were not visibly deferred. ${JSON.stringify(packagedBossDeferred)}`);
+    }
     const packagedTaskBoundary = packagedSmokeTaskBoundary
       ? await runPackagedTaskBoundarySmoke(window, packagedSmokeCoreEndpoint)
       : null;
@@ -476,6 +481,7 @@ async function runPackagedSmoke(window: BrowserWindow, loadRenderer: Promise<voi
       ...result,
       packagedViewport: { windowWidth: packagedWindowWidth, ...packagedViewport, horizontalOverflow: false },
       packagedTaskBoundary,
+      packagedBossDeferred,
     })}`);
     runtimeSupervisor.stop();
     app.exit(0);
@@ -566,6 +572,10 @@ app.on("before-quit", () => {
 async function requestOwnerApiJson(request: OwnerApiJsonRequest) {
   const parsed = parseOwnerApiRequest(request);
   if (!parsed.ok) return { ok: false, error: parsed.error };
+  const productionPostBlockReason = ownerApiProductionPostBlockReason(parsed);
+  if (productionPostBlockReason) {
+    return { ok: false, status: 503, error: productionPostBlockReason };
+  }
   const supervisorToken = isHarborSupervisorProtectedRequest(parsed)
     ? runtimeSupervisor.getHarborRuntimeSupervisorToken(parsed.base)
     : undefined;

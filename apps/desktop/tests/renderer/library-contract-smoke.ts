@@ -6,7 +6,7 @@ import {
   parseSkillIdentityCompatibilityResponse,
   projectCompatibilityTarget,
 } from "../../src/renderer/coreIdentityCompatibilityClient";
-import { buildCoreThreadInputSnapshot, prepareTaskTurnRequest, projectTaskSubmissionSkill } from "../../src/renderer/coreTaskThreadSubmitClient";
+import { appendTaskThreadTurn, buildCoreThreadInputSnapshot, createTaskThreadTurn, prepareTaskTurnRequest, projectTaskSubmissionSkill } from "../../src/renderer/coreTaskThreadSubmitClient";
 import { coreTaskSubmitFailureSummary, coreTaskSubmitReadiness, readOnlyIdentityAdmissionBlockReason } from "../../src/renderer/coreTaskSubmitClient";
 import { projectCoreThreadResponse } from "../../src/renderer/coreThreadClient";
 import { parseCoreThreadInputSnapshot } from "../../src/renderer/coreThreadInputContract";
@@ -22,7 +22,8 @@ import { terminalSkillInputOwnerRefs } from "../../src/renderer/skillInputOwnerC
 import { findCatalogSkillForTask } from "../../src/renderer/useAppController";
 import { identityFactsFromPublicRecord } from "../../src/renderer/harborIdentityClient";
 import { projectHarborIdentity } from "../../src/renderer/harborIdentityProjection";
-import { identity, identityB, runtime } from "./library-harness-fixtures";
+import { bossSkill, identity, identityB, runtime } from "./library-harness-fixtures";
+import { bossProductionDeferredReason, isBossProductionTask, projectDeferredBossTask } from "../../src/renderer/productionTaskPolicy";
 import { taskThreadFixtures } from "../../src/renderer/taskThreadFixtures";
 
 type SmokeInput = {
@@ -43,9 +44,139 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkXhsSearchTarget(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
+  await checkBossDeferredHelpers(bossSkill);
+  checkBossDeferredProjection();
   await checkDraftProjection(input);
   await checkOwnerBoundaries(input.catalog);
   await checkRejectedAuthorizationDecisions();
+}
+
+async function checkBossDeferredHelpers(skill: LodeCatalogSkill) {
+  const owner = window.webenvoyShell;
+  let productionPosts = 0;
+  window.webenvoyShell = {
+    ...owner!,
+    requestOwnerJson: async () => {
+      productionPosts += 1;
+      throw new Error("BOSS deferred task must not reach an owner POST");
+    },
+  };
+  try {
+    const options = {
+      endpoint: "http://core.owner",
+      skill,
+      identity,
+      draft: createSkillInputDraft(skill),
+      ownerRefs: { ownerRef: "", fieldOwnerRefs: {}, attachmentRefs: {} },
+      executionPolicy: automaticExecutionPolicy(skill),
+      runtime,
+    };
+    const created = await createTaskThreadTurn({ ...options, threadModes: { read: "auto" as const }, threadModeOverrides: {} });
+    const appended = await appendTaskThreadTurn({ ...options, threadRef: "thread_existing_boss" });
+    const prepared = prepareTaskTurnRequest(options);
+    if (created.status !== "blocked" || created.summary !== bossProductionDeferredReason ||
+      appended.status !== "blocked" || appended.summary !== bossProductionDeferredReason ||
+      prepared.ok || prepared.reason !== bossProductionDeferredReason || productionPosts !== 0) {
+      throw new Error("BOSS new/existing thread helpers did not fail closed before owner POST.");
+    }
+  } finally {
+    window.webenvoyShell = owner;
+  }
+}
+
+function checkBossDeferredProjection() {
+  const bossTask = taskThreadFixtures.find((task) => task.id === "task-boss-real-read");
+  const xhsTask = taskThreadFixtures.find((task) => task.id === "task-xhs-real-read");
+  if (bossTask == null || xhsTask == null) throw new Error("BOSS deferred projection fixture is missing.");
+  const fixtureFailure = bossTask.runs.find((run) => run.failureRecovery != null) ?? bossTask.runs[0]!;
+
+  const historicalFailure = {
+    ...fixtureFailure,
+    id: "run-boss-history-live-failure",
+    lifecycle: "completed" as const,
+    outcome: "failure" as const,
+    source: "Core live" as const,
+    updatedAt: "2026-07-20T12:34:56Z",
+    terminalAt: "2026-07-20T12:34:56Z",
+    capabilityAttribution: {
+      ...fixtureFailure.capabilityAttribution!,
+      failureClass: "runtime" as const,
+    },
+    failureRecovery: {
+      state: "访问受限",
+      reason: "site_access_restricted",
+      nextActions: ["等待 owner 修复"],
+      source: "Core live" as const,
+    },
+  };
+  const projected = projectDeferredBossTask({
+    ...bossTask,
+    runs: [
+      bossTask.runs[0]!,
+      { ...bossTask.runs[1]!, source: "Core live", outcome: "success" as const },
+      historicalFailure,
+    ],
+  });
+  const deferredRun = projected.runs[0];
+  const historyRun = projected.runs[1];
+  if (
+    projected.blocker !== bossProductionDeferredReason ||
+    deferredRun?.source !== "App local-only" ||
+    deferredRun?.lifecycle !== "blocked" ||
+    deferredRun?.outcome !== "unavailable" ||
+    deferredRun?.summary !== bossProductionDeferredReason ||
+    deferredRun?.capabilityAttribution?.failureClass !== "runtime_admission_disabled" ||
+    projected.runs.length !== 2 ||
+    historyRun?.source !== "Core live" ||
+    historyRun.lifecycle !== "blocked" ||
+    !historyRun.label.startsWith("历史失败 · ") ||
+    !historyRun.resultRows.some((row) => row.label === "来源" && row.value === "Core live") ||
+    !historyRun.resultRows.some((row) => row.label === "时间" && row.value === "2026-07-20T12:34:56Z") ||
+    !historyRun.resultRows.some((row) => row.label === "失败类别" && row.value === "runtime")
+  ) {
+    throw new Error("BOSS deferred projection exposed non-historical runs or lost failure provenance.");
+  }
+
+  const packageOnlyBoss = {
+    ...bossTask,
+    id: "task-custom-capability",
+    threadContext: undefined,
+    siteSkill: "Unknown capability",
+    packageSource: {
+      ...bossTask.packageSource,
+      capabilityRef: "lode://capability/boss-greeting-precheck",
+      sourceRef: "lode://package/boss-greeting-write-pre-preview@0.1.0",
+    },
+  };
+  const runOnlyBoss = {
+    ...packageOnlyBoss,
+    packageSource: {
+      ...packageOnlyBoss.packageSource,
+      name: "generic-package",
+      capabilityRef: "lode:capability/generic",
+      sourceRef: "lode://package/generic@0.1.0",
+      lockRef: "lode://lock/generic@0.1.0",
+    },
+    threadContext: { siteLabel: "Generic site", siteSkillKey: "generic", accountIdentityKey: "identity-generic" },
+    runs: [{
+      ...bossTask.runs[0]!,
+      id: "run-generic-ref",
+      source: "Core fixture" as const,
+      capabilityAttribution: {
+        ...bossTask.runs[0]!.capabilityAttribution!,
+        capabilityRef: "lode:capability/job-search",
+        sourceRef: "lode://site-capability/boss/job-search@0.1.0",
+      },
+      inputDefinition: {
+        packageRef: "lode://site-capability/boss/job-search@0.1.0",
+        inputSchemaRef: "lode://schema/site-capability/boss/job-search/input@0.1.0",
+      },
+    }],
+  };
+  if (!isBossProductionTask(packageOnlyBoss) || !isBossProductionTask(runOnlyBoss) ||
+    projectDeferredBossTask(runOnlyBoss).runs.length !== 1 || projectDeferredBossTask(xhsTask) !== xhsTask) {
+    throw new Error("BOSS production policy missed package-only BOSS references or changed Xiaohongshu history.");
+  }
 }
 
 function checkXhsSearchTarget(skill: LodeCatalogSkill) {

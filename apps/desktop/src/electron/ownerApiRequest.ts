@@ -1,6 +1,8 @@
 import { isManualAuthenticationCompletionPath } from "./manualAuthenticationCompletion.js";
+import { bossProductionDeferredReason, isBossProductionTaskPost } from "./productionTaskPolicy.js";
 
 export { projectOwnerApiError } from "./ownerApiErrorProjection.js";
+export { bossProductionDeferredReason, isBossProductionTaskPost } from "./productionTaskPolicy.js";
 
 export type OwnerApiJsonRequest = {
   base?: unknown;
@@ -14,6 +16,12 @@ type OwnerApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type ParsedOwnerApiRequest =
   | { ok: true; base: string; url: string; path: string; method: OwnerApiMethod; body?: unknown }
   | { ok: false; error: string };
+
+export function ownerApiProductionPostBlockReason(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
+  return isBossProductionTaskPost(request.path, request.method, request.body)
+    ? bossProductionDeferredReason
+    : undefined;
+}
 
 const ownerApiAllowedHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const sensitiveOwnerApiFragment =

@@ -64,6 +64,7 @@ export type RunProjection = {
       | "login_required"
       | "runtime"
       | "site_changed"
+      | "runtime_admission_disabled"
       | "none";
     summary: string;
   };

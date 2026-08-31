@@ -48,6 +48,13 @@ try {
     expectation: "live_ready",
   });
 
+  const productionPosts = core.requests.filter(({ method, pathname }) => method === "POST" &&
+    (pathname === "/tasks" || pathname === "/threads" || /^\/threads\/[^/]+\/turns$/.test(pathname)));
+  if (!result.packagedBossDeferred?.uiDisabled || !result.packagedBossDeferred?.deferredCopyVisible ||
+    result.packagedBossDeferred.bossSkillCount < 1 || productionPosts.length !== 0) {
+    throw new Error(`Packaged vertical smoke failed: BOSS deferred UI or zero-POST boundary is missing. ${JSON.stringify({ packagedBossDeferred: result.packagedBossDeferred, productionPosts })}`);
+  }
+
   if (!result.runtimeSupervisorState?.canUseLiveRuntime) {
     throw new Error(`Packaged vertical smoke failed: live runtime gate was not ready. ${JSON.stringify(result.runtimeSupervisorState)}`);
   }
@@ -94,6 +101,7 @@ try {
       `Lode asset source: ${result.runtimeSupervisorState.lodeAssets.source}`,
       `Screenshot: ${screenshotPath}`,
       "Fixture fail-closed check: passed.",
+      "BOSS production UI disabled; POST /tasks, /threads and /threads/*/turns: 0.",
       "Boundary: local owner-shaped health/admission/evidence refs only; no real account/profile/Cookie/production page and no submit/publish/send.",
     ].join("\n"),
   );
@@ -141,8 +149,10 @@ async function runElectronSmoke({ coreEndpoint, harborEndpoint, screenshotPath, 
 }
 
 async function startJsonServer(bodyForPath) {
+  const requests = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    requests.push({ method: request.method ?? "GET", pathname: url.pathname });
     const body = bodyForPath(url.pathname);
     if (body == null) {
       response.writeHead(404, {
@@ -171,6 +181,7 @@ async function startJsonServer(bodyForPath) {
 
   return {
     endpoint: `http://127.0.0.1:${address.port}`,
+    requests,
     close: () =>
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

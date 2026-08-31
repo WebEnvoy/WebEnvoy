@@ -28,6 +28,7 @@ import { compatibilityTargetValue, type SkillInputDraft } from "./skillInputDraf
 import { StructuredTaskComposer } from "./StructuredTaskComposer";
 import { createTaskThreadTurn } from "./coreTaskThreadSubmitClient";
 import type { TaskProjection } from "./taskThreadFixtures";
+import { bossProductionDeferredReason, isBossProductionSkill } from "./productionTaskPolicy";
 export type CreateTaskSelection = {
   skill: LodeCatalogSkill;
   identityId?: string;
@@ -88,6 +89,9 @@ export function CreateTaskShell(props: CreateTaskShellProps) {
 function CreateTaskContent(props: CreateTaskShellProps) {
   const { catalog, compatibilityBySkill, identities, selection, onRecover } = props;
   const identity = identities.find((item) => item.id === selection?.identityId);
+  if (selection != null && isBossProductionSkill(selection.skill)) {
+    return <OwnerState title="BOSS 功能延期" summary={bossProductionDeferredReason} />;
+  }
   if (catalog.status === "loading") return <OwnerState title="正在读取站点技能" summary={catalog.summary} />;
   if (catalog.status === "offline") return <OwnerState title="站点技能暂不可用" summary={catalog.summary} onRecover={onRecover} />;
   if (catalog.status === "stale") return <OwnerState title="站点技能目录需要刷新" summary={catalog.summary} onRecover={onRecover} />;
@@ -180,14 +184,15 @@ function CreateTaskRecommendation({
   onSelect,
   onRecoverCandidate,
 }: CreateTaskCombination & Pick<CreateTaskShellProps, "runtimeSupervisorState" | "onSelect" | "onRecoverCandidate">) {
-  const runtimeUnavailable = skill.availability !== "available" || !runtimeSupervisorState.canUseLiveRuntime;
+  const bossDeferred = isBossProductionSkill(skill);
+  const runtimeUnavailable = bossDeferred || skill.availability !== "available" || !runtimeSupervisorState.canUseLiveRuntime;
   const usable = !runtimeUnavailable && isCandidateUsable(candidate);
   const recovery = compatibilityRecoveryCopy(candidate);
   return (
     <button
       type="button"
-      disabled={!usable && recovery == null}
-      title={runtimeUnavailable ? skill.availabilityReason || runtimeSupervisorState.summary : compatibilityCandidateLabel(candidate)}
+      disabled={bossDeferred || !usable && recovery == null}
+      title={bossDeferred ? bossProductionDeferredReason : runtimeUnavailable ? skill.availabilityReason || runtimeSupervisorState.summary : compatibilityCandidateLabel(candidate)}
       onClick={() => usable ? onSelect(skill, identity.id) : candidate != null && onRecoverCandidate(skill, identity.id, candidate)}
     >
       <span className="create-task-recommendation-icon"><CircleUserRound size={16} /></span>

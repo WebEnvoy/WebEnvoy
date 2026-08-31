@@ -9,6 +9,7 @@ import { releaseSkillInputOwnerRefs, terminalSkillInputOwnerRefs } from "./skill
 import type { TaskProjection } from "./taskThreadFixtures";
 import { outcomeLabel } from "./TaskThreadFields";
 import type { ThreadNavigationItem } from "./ThreadNavigationRail";
+import { bossProductionDeferredReason, isBossProductionTask, projectDeferredBossTask } from "./productionTaskPolicy";
 
 type SubmittedTaskOverride = { endpoint: string; taskId: string; task: TaskProjection };
 export type TaskPreviewSelection = {
@@ -30,7 +31,10 @@ export function useAppTasks(
   const currentOverrides = useMemo(() => Object.values(submittedOverrides).filter((item) => item.endpoint === endpoint), [endpoint, submittedOverrides]);
   const effectiveCoreReadState = useMemo(() => mergeSubmittedCoreTaskOverrides(coreReadState, currentOverrides), [coreReadState, currentOverrides]);
   const effectiveCoreReadTasks = useMemo(() => effectiveCoreReadState.tasks.map((task) => applyLocalTaskContext(task, businessInputs)), [businessInputs, effectiveCoreReadState.tasks]);
-  const taskThreads = useMemo(() => projectRuntimeGatedTasks(effectiveCoreReadTasks, runtime, effectiveCoreReadState.liveTaskIds), [effectiveCoreReadState.liveTaskIds, effectiveCoreReadTasks, runtime]);
+  const taskThreads = useMemo(
+    () => projectRuntimeGatedTasks(effectiveCoreReadTasks, runtime, effectiveCoreReadState.liveTaskIds).map(projectDeferredBossTask),
+    [effectiveCoreReadState.liveTaskIds, effectiveCoreReadTasks, runtime],
+  );
   useEffect(() => {
     const ownerRefs = terminalSkillInputOwnerRefs(effectiveCoreReadTasks).filter((ownerRef) => !releasedOwnerRefs.current.has(ownerRef));
     if (ownerRefs.length === 0) return;
@@ -147,11 +151,13 @@ function useTaskSubmission(options: {
 function useThreadNavigation(task: TaskProjection | undefined) {
   return useMemo<ThreadNavigationItem[]>(() => (task?.runs ?? []).map((run) => ({
     id: run.id,
-    getLabel: () => `${run.label} · ${outcomeLabel(run.outcome)}`,
-    hasOutput: run.evidenceCards.length > 0,
+    getLabel: () => task != null && isBossProductionTask(task) && run.source !== "Core live"
+      ? `${run.label} · 功能延期`
+      : `${run.label} · ${outcomeLabel(run.outcome)}`,
+    hasOutput: task != null && isBossProductionTask(task) && run.source !== "Core live" ? false : run.evidenceCards.length > 0,
     getPreview: () => ({
-      response: run.summary,
-      outputs: [
+      response: task != null && isBossProductionTask(task) && run.source !== "Core live" ? bossProductionDeferredReason : run.summary,
+      outputs: task != null && isBossProductionTask(task) && run.source !== "Core live" ? [] : [
         { type: "outcome", label: outcomeLabel(run.outcome) },
         { type: "lifecycle", label: run.lifecycle },
         ...run.resultRows.slice(0, 2).map((row) => ({ type: "field", label: row.label })),

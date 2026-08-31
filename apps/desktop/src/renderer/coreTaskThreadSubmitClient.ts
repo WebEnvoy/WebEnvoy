@@ -15,6 +15,7 @@ import type { SkillInputProjectionRefs } from "./skillInputOwnerClient";
 import { projectCoreThreadResponse } from "./coreThreadClient";
 import type { CoreThreadInputSnapshot } from "./coreThreadInputContract";
 import type { TaskProjection } from "./taskThreadFixtures";
+import { bossProductionDeferredReason, isBossProductionSkill } from "./productionTaskPolicy";
 
 type Identity = HarborIdentityLoadState["identities"][number];
 type JsonRecord = Record<string, unknown>;
@@ -214,6 +215,7 @@ export function prepareTaskTurnRequest(options: SubmitOptions, requestedModes?: 
 }
 
 function submissionReadiness(options: SubmitOptions, requestedModes?: ExecutionPolicyModes) {
+  if (isBossProductionSkill(options.skill)) return bossProductionDeferredReason;
   const core = runtimeService(options.runtime, "core");
   const harbor = runtimeService(options.runtime, "harbor");
   if (!options.runtime.canUseLiveRuntime || core?.health.state !== "ready" || core.admission?.state !== "ready" || harbor?.health.state !== "ready") {

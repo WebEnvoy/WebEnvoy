@@ -11,6 +11,42 @@ export type PackagedTaskBoundarySmokeResult = {
   firstTurnFailureCode: string;
 };
 
+export type PackagedBossDeferredSmokeResult = {
+  uiDisabled: boolean;
+  deferredCopyVisible: boolean;
+  bossSkillCount: number;
+};
+
+export async function runPackagedBossDeferredSmoke(window: BrowserWindow): Promise<PackagedBossDeferredSmokeResult> {
+  return window.webContents.executeJavaScript(`
+    (async () => {
+      const waitFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      const library = Array.from(document.querySelectorAll(".global-nav button"))
+        .find((button) => button.textContent?.trim() === "站点技能");
+      if (!library) throw new Error("Packaged BOSS deferred smoke could not open the skill directory.");
+      library.click();
+      let sections = [];
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await waitFrame();
+        sections = Array.from(document.querySelectorAll(".production-skill-site"))
+          .filter((candidate) => candidate.querySelector("h2")?.textContent?.trim().startsWith("BOSS"));
+        if (sections.length > 0) break;
+      }
+      if (sections.length === 0) throw new Error("Packaged BOSS deferred smoke did not find packaged BOSS skills.");
+      const rows = sections.flatMap((section) => Array.from(section.querySelectorAll(".production-skill-row")));
+      const buttons = rows.map((row) => row.querySelector(".production-primary-button"));
+      const deferredCopy = ${JSON.stringify("目标站点当前访问受限，功能延期；不会创建生产任务。")};
+      buttons.forEach((button) => button?.click());
+      await waitFrame();
+      return {
+        uiDisabled: buttons.length > 0 && buttons.every((button) => button?.disabled === true && button.title === deferredCopy),
+        deferredCopyVisible: rows.every((row) => row.textContent?.includes(deferredCopy)),
+        bossSkillCount: rows.length
+      };
+    })();
+  `) as Promise<PackagedBossDeferredSmokeResult>;
+}
+
 export async function runPackagedTaskBoundarySmoke(
   window: BrowserWindow,
   coreEndpoint: string,
