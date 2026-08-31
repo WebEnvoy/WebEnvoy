@@ -124,9 +124,11 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /上传图片/);
   assert.match(generate, /文字配图/);
   assert.match(upload, /selectPath = true/);
+  assert.match(upload, /strictPath = true/);
   assert.match(upload, /pathLabels = \["上传图片"\]/);
   assert.match(upload, /input\[type=["']file["']\]/);
   assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
+  assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });
 

@@ -235,7 +235,9 @@ function safeMediaState(observation: WritePrecheckObservation, compositionPath: 
 export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
   "Runtime.enable",
   "Runtime.evaluate",
-  "Page.captureScreenshot"
+  "Page.enable",
+  "Page.captureScreenshot",
+  "Page.setInterceptFileChooserDialog"
 ] as const;
 
 type WritePrecheckCdpCommand = typeof XHS_WRITE_PRECHECK_CDP_COMMANDS[number];
@@ -328,7 +330,20 @@ async function probeProviderWritePrecheck(
       const validation = validateXhsWritePrecheckObservation(input, observation);
       if (validation.status === "unavailable") return validation;
       if (input.requested_path !== undefined) {
-        const selected = await evaluateWritePrecheck(client, input.requested_path, true);
+        await sendWritePrecheckCdp(client, "Page.enable");
+        let fileChooserOpened = false;
+        const stopObservingFileChooser = client.on("Page.fileChooserOpened", () => { fileChooserOpened = true; });
+        await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
+        let selected: WritePrecheckObservation | undefined;
+        try {
+          selected = await evaluateWritePrecheck(client, input.requested_path, true);
+        } finally {
+          await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: false });
+          stopObservingFileChooser();
+        }
+        if (fileChooserOpened) {
+          return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
+        }
         if (!selected || selected.selection_status !== "selected") {
           return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
         }
@@ -501,6 +516,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
     const requestedPath = ${JSON.stringify(requestedPath)};
     const pathLabels = ${JSON.stringify(labels)};
     const selectPath = ${JSON.stringify(selectPath)};
+    const strictPath = ${JSON.stringify(selectPath || exactPath)};
     const observe = () => {
       const bodyText = (document.body?.innerText || '').slice(0, 20000);
       const visible = (el, allowDisabled = true) => {
@@ -529,7 +545,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const creatorControls = controls.filter((el) => creatorLabel.test(label(el)));
       const isSelected = (el) => el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
         /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
-      const isRequestedPath = (el) => pathLabels.some((expected) => label(el) === expected || label(el).includes(expected));
+      const isRequestedPath = (el) => pathLabels.some((expected) => label(el) === expected || (!strictPath && label(el).includes(expected)));
       const selectedRequestedPath = controls.find((el) => isSelected(el) && isRequestedPath(el));
       const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
         .filter((el) => visible(el)) : [];
@@ -537,7 +553,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const creatorSurface = semanticRootSurface || (appVisible && selectedRequestedPath ? app : undefined);
       const roots = creatorSurface ? [creatorSurface] : [];
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
-      const pathEntryVisible = pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
+      const pathEntryVisible = strictPath
+        ? surfaceControls.some((el) => pathLabels.some((expected) => label(el) === expected))
+        : pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
       const activePath = Boolean(selectedRequestedPath && surfaceControls.includes(selectedRequestedPath));
       const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
