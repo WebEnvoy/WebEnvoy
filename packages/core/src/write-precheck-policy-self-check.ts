@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
-import { continueWritePrecheckTask, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
+import { continueWritePrecheckTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
 import type { LodePackageAdmissionContract } from "./lode-admission.js";
@@ -140,6 +140,54 @@ function configStore(mode: ExecutionPolicyMode): FileExecutionPolicyConfigStore 
       }
     })
   } as unknown as FileExecutionPolicyConfigStore;
+}
+
+function runtimeBindingFacts(runtimeSessionRef: string, identityRef = "identity-env_xhs-policy"): HarborAdmissionInput {
+  const executionIdentityRef = `${identityRef}:execution`;
+  const profileRef = `${identityRef}:profile`;
+  const providerRef = "provider_xhs";
+  const viewerRef = `${runtimeSessionRef}:viewer`;
+  return {
+    harbor_identity_environment_facts: {
+      schema_version: "harbor-local-identity-environment/v0",
+      identity_environment_ref: identityRef,
+      execution_identity_ref: executionIdentityRef,
+      profile_ref: profileRef,
+      site_binding: { site_id: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
+      login_state: {
+        state: "logged_in",
+        authentication_provenance: "user_confirmed_managed_session",
+        manual_authentication_state: "completed",
+        recovery_required: false
+      },
+      browser_storage: { state: "present" },
+      provider_binding: { selected_provider_id: providerRef, binding_status: "default_provider_available" },
+      consumer_boundary: {
+        core: "admission_facts_refs_and_blocking_reasons_only",
+        not_exposed: ["password", "verification_code", "cookie_value", "storage_value", "session_token"]
+      }
+    },
+    harbor_provider_status: {
+      schema_version: "harbor-browser-provider-status/v0",
+      providers: [{ provider_id: providerRef, install: { status: "installed", launchability: "launchable" } }]
+    },
+    harbor_runtime_facts: {
+      schema_version: "harbor-core-runtime-facts/v0",
+      runtime_session_ref: runtimeSessionRef,
+      identity_environment_ref: identityRef,
+      execution_identity_ref: executionIdentityRef,
+      profile_ref: profileRef,
+      provider_ref: providerRef,
+      provider_mode: "local_dedicated_profile",
+      lifecycle_state: "active",
+      availability: { cdp: "available", viewer: "unsupported", snapshot: "available", evidence: "available" },
+      viewer: { viewer_ref: viewerRef, availability: "unsupported", access_mode: "none", expires_at: evaluatedAt },
+      control: { owner: "core_task", handoff_reason: null, takeover: { available: false, unavailable_reason: "viewer_unavailable" }, updated_at: evaluatedAt },
+      current_error: null,
+      fact_refs: { session: runtimeSessionRef, viewer: viewerRef },
+      unavailable: null
+    }
+  } as unknown as HarborAdmissionInput;
 }
 
 function singleActionDecision(evaluation: Awaited<ReturnType<typeof evaluate>>, mode: "auto" | "deny" = "auto"): SingleActionDecision {
@@ -364,6 +412,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     let currentRunId = "";
     let mutatePathOperation: ((operation: Record<string, unknown>) => void) | undefined;
     let pathRequestBody: Record<string, unknown> | undefined;
+    let bindingAtValidate: string | undefined;
     const identityRef = "identity-env_xhs-path-prepare";
     const runStore = createFileRunRecordStore({ directory: join(pathDirectory, "runs"), clock: () => new Date(evaluatedAt) });
     const authorizationStore = createFileAuthorizationDecisionStore({
@@ -373,9 +422,11 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       clock: () => new Date(evaluatedAt)
     });
     const harbor = {
-      collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: `session_${currentRunId}` } } as unknown as HarborAdmissionInput),
+      collectAdmissionFacts: async () => runtimeBindingFacts(`session_${currentRunId}`, identityRef),
       validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string; url: string; requested_path?: string; holder_ref?: string; requested_fields?: readonly string[]; include_source_refs?: boolean; proposed_input_summary?: string }) => {
         pathRequestBody = { ...input };
+        bindingAtValidate = (await runStore.getRunRecord(currentRunId))?.admission.runtime_session_binding?.runtime_session_ref;
+        assert.equal(bindingAtValidate, `session_${currentRunId}`);
         const operation = completedPathPrepareOperation({
           runtime_session_ref: input.runtime_session_ref,
           identity_ref: identityRef,
@@ -423,6 +474,48 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     assert.equal(pathRequestBody.proposed_input_summary, undefined);
   } finally {
     await rm(pathDirectory, { recursive: true, force: true });
+  }
+  const bindingPersistenceDirectory = await mkdtemp(join(tmpdir(), "webenvoy-path-prepare-binding-persistence-"));
+  try {
+    const baseStore = createFileRunRecordStore({ directory: join(bindingPersistenceDirectory, "runs"), clock: () => new Date(evaluatedAt) });
+    const runStore = {
+      ...baseStore,
+      bindCoreTaskRuntimeSession: async () => { throw new Error("injected binding persistence failure"); }
+    };
+    const authorizationStore = createFileAuthorizationDecisionStore({
+      directory: join(bindingPersistenceDirectory, "decisions"),
+      runRecordStore: baseStore,
+      taskThreadStore: { getTaskThread: async () => ({ thread_id: context.thread_id, turns: [{ turn_id: context.turn_id, run_id: "app-xhs-path-prepare-binding-persistence" }] }) },
+      clock: () => new Date(evaluatedAt)
+    });
+    let validateCalls = 0;
+    let releaseCalls = 0;
+    const result = await submitRuntimeTask(runStore, {
+      run_id: "app-xhs-path-prepare-binding-persistence",
+      task_intent: { ...pathTask, intent_id: "intent_path_prepare_binding_persistence" },
+      package_ref: pathContract.package_ref,
+      authorization_context: { ...context, idempotency_key: "path-prepare-binding-persistence" },
+      harbor: { identity_environment_ref: "identity-env_xhs-policy", url: pathTask.scope.target_ref, requested_path: "image_text_upload" }
+    }, {
+      lodePackageResolver: async () => pathContract,
+      harborRuntimeClient: {
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_binding_persistence"),
+        validateOnlyWritePrecheck: async () => { validateCalls += 1; throw new Error("binding persistence must stop before validate"); },
+        executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+        releaseCoreTaskSession: async () => { releaseCalls += 1; return undefined; }
+      } as HarborRuntimeClient,
+      executionPolicyConfigStore: configStore("auto"),
+      authorizationDecisionStore: authorizationStore,
+      clock: () => new Date(evaluatedAt)
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.failure.code, "runtime_binding_persistence_failed");
+    assert.equal(result.run_record?.status, "failed");
+    assert.equal(result.run_record?.public_result_summary?.submitted, false);
+    assert.equal(validateCalls, 0);
+    assert.equal(releaseCalls, 1);
+  } finally {
+    await rm(bindingPersistenceDirectory, { recursive: true, force: true });
   }
   assert.equal(isUnifiedWritePrecheckTask(taskIntent(), contract()), true);
   const spoofedTask = structuredClone(taskIntent());
@@ -546,7 +639,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       const harbor = {
         collectAdmissionFacts: async () => {
           collectCalls += 1;
-          return { harbor_runtime_facts: { runtime_session_ref: `session_${mode}` } } as unknown as HarborAdmissionInput;
+          return runtimeBindingFacts(`session_${mode}`);
         },
         validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
           validateCalls += 1;
@@ -629,7 +722,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       clock: () => new Date(evaluatedAt)
     });
     const harbor = {
-      collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: `session_${currentRunId}` } } as unknown as HarborAdmissionInput),
+      collectAdmissionFacts: async () => runtimeBindingFacts(`session_${currentRunId}`),
       validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
         const operation = completedWritePrecheckOperation({
           runtime_session_ref: input.runtime_session_ref,
@@ -886,7 +979,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     }, {
       lodePackageResolver: async () => contract(),
       harborRuntimeClient: {
-        collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: "session_unavailable" } } as unknown as HarborAdmissionInput),
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_unavailable"),
         validateOnlyWritePrecheck: async () => {
           operationCalls += 1;
           return {
@@ -936,7 +1029,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     }, {
       lodePackageResolver: async () => contract(),
       harborRuntimeClient: {
-        collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: "session_incomplete_evidence" } } as unknown as HarborAdmissionInput),
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_incomplete_evidence"),
         validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
           const completed = completedWritePrecheckOperation({ runtime_session_ref: input.runtime_session_ref, target_ref: input.target_ref, suffix: "incomplete" });
           completed.evidence_ref_kinds = [{ kind: "post_check_ref", ref: "postcheck_incomplete" }];
@@ -974,7 +1067,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       harborRuntimeClient: {
         collectAdmissionFacts: async () => {
           collectCalls += 1;
-          return { harbor_runtime_facts: { runtime_session_ref: "session_unknown" } } as unknown as HarborAdmissionInput;
+          return runtimeBindingFacts("session_unknown");
         },
         validateOnlyWritePrecheck: async () => {
           validateCalls += 1;
@@ -1027,7 +1120,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       harborRuntimeClient: {
         collectAdmissionFacts: async () => {
           collectCalls += 1;
-          return { harbor_runtime_facts: { runtime_session_ref: "session_transport_unknown" } } as unknown as HarborAdmissionInput;
+          return runtimeBindingFacts("session_transport_unknown");
         },
         validateOnlyWritePrecheck: async () => {
           validateCalls += 1;

@@ -290,6 +290,8 @@ export type FileRunRecordStore = {
   createRunRecord(input: CreateRunRecordInput, claimToken?: string): Promise<RunRecord>;
   getRunRecord(runId: string): Promise<RunRecord | undefined>;
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
+  /** Narrow atomic transition that binds a Core-owned Harbor session before write-precheck dispatch. */
+  bindCoreTaskRuntimeSession(runId: string, binding: RuntimeSessionBindingFacts, runtimeBindingRefs: readonly string[]): Promise<RunRecord>;
   /** Narrow continuation seam for the policy-owned requires_user_action state. */
   continueRequiresUserActionRun(runId: string, patch?: RunRecordPatch): Promise<RunRecord>;
   /** Narrow denial seam for the policy-owned requires_user_action state. */
@@ -962,6 +964,42 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
         const now = clock().toISOString();
         const next = withOptionalFields({ ...record, status: nextStatus, updated_at: now }, patch);
         if (terminalRunRecordStatuses.has(nextStatus) && !next.terminal_at) next.terminal_at = now;
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
+
+    async bindCoreTaskRuntimeSession(runId, binding, runtimeBindingRefs) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        if (record.status !== "admitted" && record.status !== "running") {
+          throw new Error("run_runtime_binding_transition_unavailable");
+        }
+        if (binding.core_task_run !== true || binding.control_owner !== "core_task" || binding.session_use !== "core_task_run") {
+          throw new Error("run_runtime_binding_not_core_task");
+        }
+        if (record.admission.runtime_session_binding !== undefined) {
+          throw new Error("run_runtime_binding_already_bound");
+        }
+        const admissionRefs = [...new Set([...(record.admission.runtime_binding_refs ?? []), ...runtimeBindingRefs])];
+        const topLevelRefs = [...new Set([...(record.runtime_binding_refs ?? []), ...runtimeBindingRefs])];
+        if (!admissionRefs.includes(binding.runtime_session_ref) || !topLevelRefs.includes(binding.runtime_session_ref)) {
+          throw new Error("run_runtime_binding_refs_mismatch");
+        }
+        const next: RunRecord = {
+          ...record,
+          status: "running",
+          updated_at: clock().toISOString(),
+          admission: {
+            ...record.admission,
+            decision: "accepted_with_warnings",
+            runtime_binding_refs: admissionRefs,
+            runtime_session_binding: binding
+          },
+          runtime_binding_refs: topLevelRefs
+        };
         assertRunRecord(next);
         await writeRecord(directory, next);
         return next;
