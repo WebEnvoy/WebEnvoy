@@ -135,7 +135,8 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(upload, /rect\.right > 0.*rect\.left < innerWidth/);
   assert.match(upload, /el\.checkVisibility\(\{ checkOpacity: true, checkVisibilityCSS: true \}\)/);
-  assert.match(upload, /const visible = \(el, allowDisabled = false\)/);
+  assert.match(upload, /const visible = \(el, allowDisabled = true\)/);
+  assert.match(upload, /strictPath \? controls\.filter\(\(el\) => visible\(el, false\)\) : controls/);
   assert.doesNotMatch(upload, /querySelectorAll\('button, \[role="button"\], \[role="tab"\]'\)/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });

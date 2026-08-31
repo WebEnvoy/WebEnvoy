@@ -233,7 +233,7 @@ test("#405 admits both explicit paths and returns refs-only no-submit state", ()
 });
 
 test("keeps the browser probe read-only and freshness-bound", () => {
-  assert.deepEqual(XHS_WRITE_PRECHECK_CDP_COMMANDS, ["Runtime.enable", "Runtime.evaluate", "Page.enable", "Page.captureScreenshot", "Page.setInterceptFileChooserDialog"]);
+  assert.deepEqual(XHS_WRITE_PRECHECK_CDP_COMMANDS, ["Runtime.enable", "Runtime.evaluate", "Page.enable", "Page.captureScreenshot", "Page.setInterceptFileChooserDialog", "Fetch.enable", "Fetch.failRequest", "Fetch.disable"]);
   const expression = writePrecheckProbeExpression();
   for (const mutation of [".click(", ".value=", "dispatchEvent", "execCommand", "location.assign", ".submit("]) {
     assert.equal(expression.includes(mutation), false, mutation);

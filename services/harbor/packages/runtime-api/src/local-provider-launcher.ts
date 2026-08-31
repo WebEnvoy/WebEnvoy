@@ -237,7 +237,10 @@ export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
   "Runtime.evaluate",
   "Page.enable",
   "Page.captureScreenshot",
-  "Page.setInterceptFileChooserDialog"
+  "Page.setInterceptFileChooserDialog",
+  "Fetch.enable",
+  "Fetch.failRequest",
+  "Fetch.disable"
 ] as const;
 
 type WritePrecheckCdpCommand = typeof XHS_WRITE_PRECHECK_CDP_COMMANDS[number];
@@ -333,22 +336,38 @@ async function probeProviderWritePrecheck(
       if (input.requested_path !== undefined) {
         await sendWritePrecheckCdp(client, "Page.enable");
         let fileChooserOpened = false;
+        let networkRequestAttempted = false;
+        const blockedRequests: Promise<unknown>[] = [];
         const stopObservingFileChooser = client.on("Page.fileChooserOpened", () => { fileChooserOpened = true; });
+        const stopInterceptingRequests = client.on("Fetch.requestPaused", (event) => {
+          networkRequestAttempted = true;
+          if (typeof event.requestId === "string") {
+            blockedRequests.push(sendWritePrecheckCdp(client, "Fetch.failRequest", { requestId: event.requestId, errorReason: "Aborted" }));
+          }
+        });
         let selected: WritePrecheckObservation | undefined;
         try {
+          await sendWritePrecheckCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
           selected = await evaluateWritePrecheck(client, input.requested_path, true);
         } finally {
           try {
-            await withCdp(webSocketUrl, (cleanupClient) =>
-              sendWritePrecheckCdp(cleanupClient, "Page.setInterceptFileChooserDialog", { enabled: false }),
+            await Promise.allSettled(blockedRequests);
+            await withCdp(webSocketUrl, async (cleanupClient) => {
+              await sendWritePrecheckCdp(cleanupClient, "Page.setInterceptFileChooserDialog", { enabled: false });
+              await sendWritePrecheckCdp(cleanupClient, "Fetch.disable");
+            },
             AbortSignal.timeout(1500));
           } finally {
             stopObservingFileChooser();
+            stopInterceptingRequests();
           }
         }
         if (fileChooserOpened) {
           return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
+        }
+        if (networkRequestAttempted) {
+          return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a network request and was blocked.", false);
         }
         if (!selected || selected.selection_status !== "selected") {
           return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
@@ -529,7 +548,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
     const strictPath = ${JSON.stringify(selectPath || exactPath)};
     const observe = () => {
       const bodyText = (document.body?.innerText || '').slice(0, 20000);
-      const visible = (el, allowDisabled = false) => {
+      const visible = (el, allowDisabled = true) => {
         const s = el ? getComputedStyle(el) : null;
         const r = el?.getBoundingClientRect();
         return Boolean(el && !el.hidden && (allowDisabled || (!el.disabled && el.getAttribute('aria-disabled') !== 'true')) &&
@@ -556,17 +575,19 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const isSelected = (el) => el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-active') === 'true' ||
         /(^|\\s)(active|selected|current)(\\s|$)/i.test(el.className || '');
       const isRequestedPath = (el) => pathLabels.some((expected) => label(el) === expected || (!strictPath && label(el).includes(expected)));
-      const selectedRequestedPath = controls.find((el) => isSelected(el) && isRequestedPath(el));
+      const requestedPathControls = strictPath ? controls.filter((el) => visible(el, false)) : controls;
+      const selectedRequestedPath = requestedPathControls.find((el) => isSelected(el) && isRequestedPath(el));
       const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
         .filter((el) => visible(el)) : [];
       const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
       const creatorSurface = semanticRootSurface || (appVisible && selectedRequestedPath ? app : undefined);
       const roots = creatorSurface ? [creatorSurface] : [];
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
+      const pathControls = strictPath ? surfaceControls.filter((el) => visible(el, false)) : surfaceControls;
       const pathEntryVisible = strictPath
-        ? surfaceControls.some((el) => pathLabels.some((expected) => label(el) === expected))
+        ? pathControls.some((el) => pathLabels.some((expected) => label(el) === expected))
         : pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
-      const activePath = Boolean(selectedRequestedPath && surfaceControls.includes(selectedRequestedPath));
+      const activePath = Boolean(selectedRequestedPath && pathControls.includes(selectedRequestedPath));
       const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
       const titleControl = findControl([/标题|title/i], false, surfaceControls);
