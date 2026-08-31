@@ -1233,6 +1233,22 @@ const ownerApiClientModuleSource = rawOwnerApiClientModuleSource
   .replace(/from "\.\.\/electron\/ownerApiErrorProjection";/, `from "${ownerApiErrorProjectionModuleUrl}";`);
 const ownerApiClientModuleUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(ownerApiClientModuleSource)}`;
 const ownerApiClientModule = await import(ownerApiClientModuleUrl);
+if (
+  !ownerApiClientModule.isProjectedAuthorizationConfirmationRequired({
+    error: { category: "action_risk", code: "authorization_confirmation_required", retryable: false },
+  }) ||
+  ownerApiClientModule.isProjectedAuthorizationConfirmationRequired({
+    error: { category: "action_risk", code: "authorization_confirmation_required", retryable: false, message: "unexpected" },
+  }) !== true ||
+  ownerApiClientModule.isProjectedAuthorizationConfirmationRequired({
+    error: { category: "request_invalid", code: "authorization_confirmation_required" },
+  }) ||
+  ownerApiClientModule.isProjectedAuthorizationConfirmationRequired({
+    error: { category: "action_risk", code: "authorization_decision_required" },
+  })
+) {
+  throw new Error("Owner API confirmation error smoke failed: only the exact projected action-risk code may enter confirmation reconciliation.");
+}
 const { outputText: identityEnvironmentFixturesModuleSource } = ts.transpileModule(identityEnvironmentFixturesSource, {
   compilerOptions: {
     module: ts.ModuleKind.ESNext,
