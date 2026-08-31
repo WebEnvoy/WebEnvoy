@@ -193,6 +193,52 @@ export interface LocalProviderReadProbeInput {
   expected_origin: string;
 }
 
+export interface LocalProviderWritePrecheckProbeInput {
+  target_url: string;
+  expected_origin: "https://creator.xiaohongshu.com";
+  target_ref: string;
+}
+
+export type LocalProviderWritePrecheckProbeResult =
+  | {
+      status: "completed";
+      observed_at: string;
+      observed_url: string;
+      page: LocalProviderPageFacts;
+      source_refs: LocalProviderReadProbeRef[];
+      evidence_ref_kinds: LocalProviderReadProbeRef[];
+      classification: "partial_result";
+      precheck_scope: "entrypoint_only";
+      composition_state: "composition_not_initialized";
+      entrypoint_observations: {
+        route_loaded: true;
+        publish_vue_container_visible: true;
+        upload_image_tab_active: true;
+        upload_image_entry_visible: true;
+        text_image_entry_visible: true;
+      };
+      field_states: Record<
+        "title_input" | "content_editor" | "publish_control",
+        { availability: "unavailable"; observation: "not_observed" }
+      >;
+      prohibited_actions_observed: { upload: false; generate: false; save: false; publish: false };
+      target_ref: string;
+    }
+  | {
+      status: "unavailable";
+      failure_class:
+        | "login_required"
+        | "page_changed"
+        | "target_not_writable"
+        | "safety_challenge"
+        | "evidence_unavailable"
+        | "fixture_runtime"
+        | "provider_probe_unavailable";
+      message: string;
+      retryable: boolean;
+      page?: LocalProviderPageFacts;
+    };
+
 export type LocalProviderSiteResourceReadinessFactKey =
   | "page.vue_app.ready"
   | "page.pinia_store.ready"
@@ -342,6 +388,7 @@ export type LocalProviderLaunchResult =
       openUrl: (url: string) => Promise<LocalProviderPageFacts>;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
+      probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
       captureScreenshot: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
       close: () => Promise<void>;
     }

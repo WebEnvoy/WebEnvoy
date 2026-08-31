@@ -213,6 +213,7 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}/read-operations",
       "/runtime/sessions/{runtime_session_ref}/site-resource-facts",
       "/runtime/sessions/{runtime_session_ref}/write-precheck-facts",
+      "/runtime/sessions/{runtime_session_ref}/validate-only-write-precheck",
       "/runtime/evidence/{evidence_ref}"
     ],
     safety_boundary: {
@@ -347,7 +348,21 @@ async function routeSession(
     return;
   }
   if (action === "write-precheck-facts" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     writeJson(response, 200, runtime.getSessionWritePrecheckFacts(runtimeSessionRef, await readJson<WritePrecheckInput>(request, {})));
+    return;
+  }
+  if (action === "validate-only-write-precheck" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.executeXhsPublishPrecheck(runtimeSessionRef, await readJson<unknown>(request));
+    const statusCode = result.status === "completed"
+      ? 200
+      : result.failure_class === "invalid_contract"
+        ? 400
+        : result.failure_class === "session_missing"
+          ? 404
+          : 409;
+    writeJson(response, statusCode, result);
     return;
   }
   if (action === "read-operations" && method === "POST") {
