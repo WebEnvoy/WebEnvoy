@@ -714,7 +714,10 @@ export class HarborRuntime {
       );
     }
     const controlGeneration = record.control_generation;
-    const probe = await this.runtimeSessions.probeSiteResource(session.runtime_session_ref, probeInput);
+    let probe = await this.runtimeSessions.probeSiteResource(session.runtime_session_ref, probeInput);
+    if (probe.status === "unavailable" && probe.failure_class === "page_not_ready") {
+      probe = await this.runtimeSessions.probeSiteResource(session.runtime_session_ref, probeInput);
+    }
     const current = this.runtimeSessions.getRecord(session.runtime_session_ref);
     if (current !== record || record.control_generation !== controlGeneration ||
       !sameManagedIdentity(record, identity_environment) ||
