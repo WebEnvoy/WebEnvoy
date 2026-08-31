@@ -1558,18 +1558,21 @@ async function dispatchApprovedWritePrecheck(
 
   let operation: unknown;
   try {
-    operation = await client.validateOnlyWritePrecheck({
+    const requestBody = {
       runtime_session_ref: runtimeSessionRef,
       holder_ref: request.run_id,
       url: result.task_intent.scope.target_ref,
       target_ref: target.target_ref,
       ...(pathPrepare
         ? (request.harbor?.requested_path === undefined ? {} : { requested_path: request.harbor.requested_path })
-        : (request.harbor?.composition_path === undefined ? {} : { composition_path: request.harbor.composition_path })),
-      requested_fields: ["title", "summary", "canonical_url", "source_status"],
-      include_source_refs: true,
-      proposed_input_summary: result.task_intent.input.summary
-    });
+        : {
+            ...(request.harbor?.composition_path === undefined ? {} : { composition_path: request.harbor.composition_path }),
+            requested_fields: ["title", "summary", "canonical_url", "source_status"] as const,
+            include_source_refs: true,
+            proposed_input_summary: result.task_intent.input.summary
+          })
+    };
+    operation = await client.validateOnlyWritePrecheck(requestBody);
   } catch {
     operation = failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");
   }

@@ -363,6 +363,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
   try {
     let currentRunId = "";
     let mutatePathOperation: ((operation: Record<string, unknown>) => void) | undefined;
+    let pathRequestBody: Record<string, unknown> | undefined;
     const identityRef = "identity-env_xhs-path-prepare";
     const runStore = createFileRunRecordStore({ directory: join(pathDirectory, "runs"), clock: () => new Date(evaluatedAt) });
     const authorizationStore = createFileAuthorizationDecisionStore({
@@ -373,7 +374,8 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     });
     const harbor = {
       collectAdmissionFacts: async () => ({ harbor_runtime_facts: { runtime_session_ref: `session_${currentRunId}` } } as unknown as HarborAdmissionInput),
-      validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string; url: string }) => {
+      validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string; url: string; requested_path?: string; holder_ref?: string; requested_fields?: readonly string[]; include_source_refs?: boolean; proposed_input_summary?: string }) => {
+        pathRequestBody = { ...input };
         const operation = completedPathPrepareOperation({
           runtime_session_ref: input.runtime_session_ref,
           identity_ref: identityRef,
@@ -413,6 +415,12 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       assert.equal(result.ok, succeeds, `${name}:${JSON.stringify(result)}`);
       assert.equal(result.run_record?.status, succeeds ? "succeeded" : "failed", name);
     }
+    assert(pathRequestBody);
+    assert.deepEqual(Object.keys(pathRequestBody).sort(), ["holder_ref", "requested_path", "runtime_session_ref", "target_ref", "url"]);
+    assert.equal(pathRequestBody.requested_path, "image_text_upload");
+    assert.equal(pathRequestBody.requested_fields, undefined);
+    assert.equal(pathRequestBody.include_source_refs, undefined);
+    assert.equal(pathRequestBody.proposed_input_summary, undefined);
   } finally {
     await rm(pathDirectory, { recursive: true, force: true });
   }
@@ -534,6 +542,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       let collectCalls = 0;
       let validateCalls = 0;
       let releaseCalls = 0;
+      let legacyRequestBody: Record<string, unknown> | undefined;
       const harbor = {
         collectAdmissionFacts: async () => {
           collectCalls += 1;
@@ -541,6 +550,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
         },
         validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
           validateCalls += 1;
+          legacyRequestBody = { ...input };
           return completedWritePrecheckOperation({ runtime_session_ref: input.runtime_session_ref, target_ref: input.target_ref, suffix: mode });
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
@@ -581,6 +591,12 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
       assert.equal(validateCalls, mode === "auto" ? 1 : 0);
       assert.equal(releaseCalls, mode === "auto" ? 1 : 0);
       if (mode === "auto") {
+        assert(legacyRequestBody);
+        assert.deepEqual(Object.keys(legacyRequestBody).sort(), ["holder_ref", "include_source_refs", "proposed_input_summary", "requested_fields", "runtime_session_ref", "target_ref", "url"]);
+        assert.deepEqual(legacyRequestBody.requested_fields, ["title", "summary", "canonical_url", "source_status"]);
+        assert.equal(legacyRequestBody.include_source_refs, true);
+        assert.equal(legacyRequestBody.proposed_input_summary, "仅验证，不提交");
+        assert.equal(legacyRequestBody.requested_path, undefined);
         assert.equal(result.run_record?.public_result_summary && (result.run_record.public_result_summary as Record<string, unknown>).submitted, false);
         const summary = result.run_record?.public_result_summary as Record<string, unknown> | undefined;
         assert.equal(summary?.composition_path, "image_text_upload");
