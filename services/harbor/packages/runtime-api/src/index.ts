@@ -105,6 +105,19 @@ import {
   type ManagedProviderLifecycleStatus,
   type ManagedProviderOperationInput
 } from "./managed-provider-lifecycle.js";
+import {
+  admitXhsPublishPrecheck,
+  completeWritePrecheck,
+  HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA,
+  unavailableWritePrecheck,
+  validCompletedWritePrecheckProbe,
+  WritePrecheckObservationStore,
+  XHS_PUBLISH_PRECHECK_ALLOWED_ORIGINS,
+  XHS_PUBLISH_PRECHECK_PIN,
+  type ValidateOnlyWritePrecheckResult,
+  type WritePrecheckFailureClass,
+  type WritePrecheckObservationRecord
+} from "./write-precheck-operation.js";
 
 export const DEFAULT_IDENTITY_SITE_URLS = {
   xiaohongshu: "https://www.xiaohongshu.com/explore",
@@ -117,6 +130,7 @@ export { createLocalIdentityEnvironmentFacts, HARBOR_LOCAL_IDENTITY_ENVIRONMENT_
 export { HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 export { HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA } from "./identity-environment-mutation-types.js";
 export { HARBOR_MANAGED_PROVIDER_LIFECYCLE_SCHEMA, ManagedProviderLifecycle } from "./managed-provider-lifecycle.js";
+export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, XHS_PUBLISH_PRECHECK_PIN } from "./write-precheck-operation.js";
 export {
   bindIdentityEnvironmentDefaultProvider,
   detectBrowserProviders,
@@ -326,10 +340,16 @@ export type {
   ViewerRefFacts,
   ViewerTransport
 } from "./viewer-control.js";
+export type {
+  ValidateOnlyWritePrecheckResult,
+  WritePrecheckFailureClass,
+  WritePrecheckObservationRecord
+} from "./write-precheck-operation.js";
 
 export class HarborRuntime {
   private readonly pageScenes = new PageSceneStore();
   private readonly readOperationObservations = new ReadOperationObservationStore();
+  private readonly writePrecheckObservations = new WritePrecheckObservationStore();
   private readonly detailReadTargets = new DetailReadTargetStore();
   private readonly viewerControls = new ViewerControlStore();
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
@@ -806,10 +826,12 @@ export class HarborRuntime {
     return this.pageScenes.getEvidence(evidence_ref);
   }
 
-  getPublicEvidence(evidence_ref: string): EvidenceRecord | ReadOperationObservationRecord | PageSceneUnavailable {
+  getPublicEvidence(
+    evidence_ref: string
+  ): EvidenceRecord | ReadOperationObservationRecord | WritePrecheckObservationRecord | PageSceneUnavailable {
     const sceneEvidence = this.getEvidence(evidence_ref);
     if (!("status" in sceneEvidence)) return sceneEvidence;
-    return this.readOperationObservations.get(evidence_ref) ?? sceneEvidence;
+    return this.readOperationObservations.get(evidence_ref) ?? this.writePrecheckObservations.get(evidence_ref) ?? sceneEvidence;
   }
 
   expireEvidence(evidence_ref: string): EvidenceRecord | PageSceneUnavailable {
@@ -1027,6 +1049,70 @@ export class HarborRuntime {
 
   getSessionWritePrecheckFacts(runtime_session_ref: string, input: WritePrecheckInput = {}): WritePrecheckFacts | ViewerControlUnavailable {
     return this.getWritePrecheckFacts(runtime_session_ref, input);
+  }
+
+  async executeXhsPublishPrecheck(
+    runtime_session_ref: string,
+    input: unknown
+  ): Promise<ValidateOnlyWritePrecheckResult> {
+    const admitted = admitXhsPublishPrecheck(input);
+    if (!admitted) return unavailableWritePrecheck(runtime_session_ref, "invalid_contract", false);
+    const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url);
+    if (before) return unavailableWritePrecheck(runtime_session_ref, before, before !== "safety_challenge");
+    const session = this.runtimeSessions.getRecord(runtime_session_ref)!;
+    const controlGeneration = session.control_generation;
+    const holderRef = session.facts.control_lock.holder_ref;
+    const identityRef = session.facts.identity_environment_ref!;
+    const probe = await this.runtimeSessions.probeWritePrecheck(runtime_session_ref, {
+      target_url: admitted.url,
+      expected_origin: XHS_PUBLISH_PRECHECK_PIN.origin,
+      target_ref: admitted.target_ref
+    });
+    if (probe.status === "unavailable") {
+      return unavailableWritePrecheck(runtime_session_ref, probe.failure_class, probe.retryable);
+    }
+    const current = this.runtimeSessions.getRecord(runtime_session_ref);
+    if (
+      !current ||
+      current.control_generation !== controlGeneration ||
+      current.facts.control_lock.holder_ref !== holderRef ||
+      current.facts.identity_environment_ref !== identityRef
+    ) return unavailableWritePrecheck(runtime_session_ref, "session_user_controlled", false);
+    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url);
+    if (after) return unavailableWritePrecheck(runtime_session_ref, after, after !== "safety_challenge");
+    if (!validCompletedWritePrecheckProbe(probe)) {
+      return unavailableWritePrecheck(runtime_session_ref, "evidence_unavailable");
+    }
+    const completed = completeWritePrecheck(runtime_session_ref, identityRef, probe);
+    this.writePrecheckObservations.record(completed);
+    return completed;
+  }
+
+  private writePrecheckSessionFailure(
+    runtime_session_ref: string,
+    url: string
+  ): WritePrecheckFailureClass | null {
+    const session = this.runtimeSessions.getRecord(runtime_session_ref);
+    if (!session) return "session_missing";
+    if (session.facts.current_page.current_url !== url || session.facts.current_page.status !== "ready") return "page_changed";
+    const identityRef = session.facts.identity_environment_ref;
+    const identity = identityRef ? this.identityEnvironments.getFacts(identityRef) : null;
+    if (
+      !identity ||
+      identity.site_binding.site_id !== "xiaohongshu" ||
+      !XHS_PUBLISH_PRECHECK_ALLOWED_ORIGINS.some((origin) => origin === identity.site_binding.origin) ||
+      !sameManagedIdentity(session, identity) ||
+      !this.identityEnvironments.hasUserConfirmedManagedSession(identity.identity_environment_ref, runtime_session_ref) ||
+      identity.login_state.state !== "logged_in" ||
+      (identity.login_state.manual_authentication_state !== "completed" &&
+        identity.login_state.manual_authentication_state !== "not_required") ||
+      identity.login_state.recovery_required ||
+      identity.browser_storage.state !== "present"
+    ) return "login_required";
+    if (!hasStableReadOperationController(session)) return "session_user_controlled";
+    return isChallengeLike(session.facts.current_page.current_url, session.facts.current_page.title)
+      ? "safety_challenge"
+      : null;
   }
 
   /** @deprecated Site-specific resource facts remain only as a bounded compatibility adapter. */

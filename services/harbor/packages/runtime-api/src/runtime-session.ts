@@ -23,6 +23,8 @@ import {
   type LocalProviderScreenshotFacts,
   type LocalProviderSiteResourceProbeInput,
   type LocalProviderSiteResourceProbeResult,
+  type LocalProviderWritePrecheckProbeInput,
+  type LocalProviderWritePrecheckProbeResult,
   type OpenIdentityEnvironmentSessionInput,
   type RuntimeErrorCode,
   type RuntimeErrorFact,
@@ -34,7 +36,11 @@ import {
   type RuntimeViewerEntry,
   type ValidationRuntimeFacts
 } from "./runtime-session-types.js";
-import { isTrustedLocalProviderReadProbe, isTrustedLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
+import {
+  isTrustedLocalProviderReadProbe,
+  isTrustedLocalProviderSiteResourceProbe,
+  isTrustedLocalProviderWritePrecheckProbe
+} from "./read-operation-probe-trust.js";
 import type {
   ControlOwner,
   ControlOwnerFacts,
@@ -61,6 +67,8 @@ export type {
   LocalProviderSiteResourceProbeInput,
   LocalProviderSiteResourceReadinessFactKey,
   LocalProviderSiteResourceProbeResult,
+  LocalProviderWritePrecheckProbeInput,
+  LocalProviderWritePrecheckProbeResult,
   OpenIdentityEnvironmentSessionInput,
   ProviderMode,
   RuntimeControlLockFacts,
@@ -94,6 +102,7 @@ export interface RuntimeSessionRecord {
   openUrl?: (url: string) => Promise<LocalProviderPageFacts>;
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
+  probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
   captureScreenshot?: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
   close?: () => Promise<void>;
 }
@@ -243,6 +252,7 @@ export class RuntimeSessionStore {
       openUrl: ready ? launch.openUrl : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
+      probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined
     });
@@ -651,6 +661,41 @@ export class RuntimeSessionStore {
       };
     }
     return probe(input);
+  }
+
+  async probeWritePrecheck(
+    runtime_session_ref: string,
+    input: LocalProviderWritePrecheckProbeInput
+  ): Promise<LocalProviderWritePrecheckProbeResult> {
+    const record = this.records.get(runtime_session_ref);
+    const probe = record?.probeWritePrecheck;
+    if (!record) {
+      return {
+        status: "unavailable",
+        failure_class: "provider_probe_unavailable",
+        message: "Runtime Session is missing.",
+        retryable: true
+      };
+    }
+    if (record.execution_surface === "fixture") {
+      return {
+        status: "unavailable",
+        failure_class: "fixture_runtime",
+        message: "Fixture launchers cannot validate a real write-precheck page.",
+        retryable: false
+      };
+    }
+    if (record.execution_surface !== "local_provider" || !isTrustedLocalProviderWritePrecheckProbe(probe)) {
+      return {
+        status: "unavailable",
+        failure_class: "provider_probe_unavailable",
+        message: "The managed local provider has no trusted write-precheck probe.",
+        retryable: false
+      };
+    }
+    const result = await probe(input);
+    if (result.page) this.applyPageFacts(record, input.target_url, result.page);
+    return result;
   }
 
   private findIdentitySession(
