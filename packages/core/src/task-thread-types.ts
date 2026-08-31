@@ -117,6 +117,8 @@ export type FileTaskThreadStore = {
     failure_code?: string;
     error?: unknown;
   }): Promise<TaskThreadView>;
+  /** Clear the initial confirmation response once its run has continued. */
+  continueRequiresUserActionTurn(threadId: string, turnId: string): Promise<TaskThreadView>;
   terminateTaskTurn(threadId: string, turnId: string): Promise<TaskThreadView>;
 };
 

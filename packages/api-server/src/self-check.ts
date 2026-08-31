@@ -130,6 +130,7 @@ async function main(): Promise<void> {
         recovery_hint: "retry_task"
       };
     },
+    async validateOnlyWritePrecheck() { throw new Error("fixture admission must stop before execution"); },
     async executeReadOperation() { throw new Error("fixture admission must stop before execution"); },
     async releaseCoreTaskSession() { throw new Error("fixture admission must not acquire a session"); }
   };

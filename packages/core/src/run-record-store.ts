@@ -65,6 +65,18 @@ export type PostCheckResult = {
   consumer_boundary: string;
 };
 
+export type PolicyBindingSnapshot = {
+  schema_version: "webenvoy.policy-binding-snapshot.v0";
+  decision_ref: string;
+  effective_policy_source: string;
+  effective_policy_source_ref: string;
+  effective_policy_source_version: string;
+  action_fingerprint: string;
+  resource_match_ref: string;
+  resource_match_version: string;
+  expires_at: string;
+};
+
 export type AdmissionDecision = {
   decision: "accepted" | "accepted_with_warnings" | "blocked_pre_admission" | "requires_user_action" | "deferred_true_write";
   action_risk: "read" | "write" | "submit" | "destructive";
@@ -209,6 +221,7 @@ export type RunRecord = {
   authorization_decision_refs?: string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
+  policy_binding_snapshot?: PolicyBindingSnapshot;
   retention_state?: RetentionState;
 };
 
@@ -238,6 +251,7 @@ export type CreateRunRecordInput = {
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
+  policy_binding_snapshot?: PolicyBindingSnapshot;
   retention_state?: RetentionState;
 };
 
@@ -257,6 +271,7 @@ export type RunRecordPatch = {
   evidence_refs?: readonly string[];
   failure?: FailureRecord;
   post_check?: PostCheckResult;
+  policy_binding_snapshot?: PolicyBindingSnapshot;
   retention_state?: RetentionState;
 };
 
@@ -275,6 +290,12 @@ export type FileRunRecordStore = {
   createRunRecord(input: CreateRunRecordInput, claimToken?: string): Promise<RunRecord>;
   getRunRecord(runId: string): Promise<RunRecord | undefined>;
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
+  /** Narrow continuation seam for the policy-owned requires_user_action state. */
+  continueRequiresUserActionRun(runId: string, patch?: RunRecordPatch): Promise<RunRecord>;
+  /** Narrow denial seam for the policy-owned requires_user_action state. */
+  denyRequiresUserActionRun(runId: string, failure: FailureRecord, patch?: RunRecordPatch): Promise<RunRecord>;
+  /** Narrow cancellation seam for the policy-owned requires_user_action state. */
+  cancelRequiresUserActionRun(runId: string, failure?: FailureRecord, patch?: RunRecordPatch): Promise<RunRecord>;
   listRunRecords(): Promise<RunRecord[]>;
 };
 
@@ -472,6 +493,22 @@ function validatePreviewResult(preview: PreviewResult): void {
   requireRef(preview.consumer_boundary, "preview_result.consumer_boundary");
 }
 
+function validatePolicyBindingSnapshot(snapshot: PolicyBindingSnapshot): void {
+  if (snapshot.schema_version !== "webenvoy.policy-binding-snapshot.v0") {
+    throw new Error("policy_binding_snapshot.schema_version is unsupported");
+  }
+  parseAuthorizationDecisionRef(snapshot.decision_ref);
+  requireRef(snapshot.effective_policy_source, "policy_binding_snapshot.effective_policy_source");
+  requireRef(snapshot.effective_policy_source_ref, "policy_binding_snapshot.effective_policy_source_ref");
+  requireRef(snapshot.effective_policy_source_version, "policy_binding_snapshot.effective_policy_source_version");
+  requireRef(snapshot.action_fingerprint, "policy_binding_snapshot.action_fingerprint");
+  requireRef(snapshot.resource_match_ref, "policy_binding_snapshot.resource_match_ref");
+  requireRef(snapshot.resource_match_version, "policy_binding_snapshot.resource_match_version");
+  if (typeof snapshot.expires_at !== "string" || !Number.isFinite(Date.parse(snapshot.expires_at))) {
+    throw new Error("policy_binding_snapshot.expires_at is invalid");
+  }
+}
+
 function validateRunId(runId: string): string {
   return requireRunId(runId);
 }
@@ -621,6 +658,7 @@ function assertRunRecord(record: RunRecord): void {
   }
   copyRefs(record.evidence_refs, "evidence_refs");
   if (record.authorization_decision_refs !== undefined) copyAuthorizationDecisionRefs(record.authorization_decision_refs);
+  if (record.policy_binding_snapshot !== undefined) validatePolicyBindingSnapshot(record.policy_binding_snapshot);
   if (record.post_check !== undefined) {
     requireRef(record.post_check.schema_version, "post_check.schema_version");
     if (record.post_check.schema_version !== "webenvoy.post-check-result.v0") {
@@ -710,6 +748,9 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
   if (patch.post_check !== undefined) {
     next.post_check = patch.post_check;
   }
+  if (patch.policy_binding_snapshot !== undefined) {
+    next.policy_binding_snapshot = patch.policy_binding_snapshot;
+  }
   if (patch.retention_state !== undefined) {
     next.retention_state = patch.retention_state;
   }
@@ -794,6 +835,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
   }
   if (input.post_check !== undefined) {
     record.post_check = input.post_check;
+  }
+  if (input.policy_binding_snapshot !== undefined) {
+    record.policy_binding_snapshot = input.policy_binding_snapshot;
   }
   if (input.retention_state !== undefined) {
     record.retention_state = input.retention_state;
@@ -918,6 +962,105 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
         const now = clock().toISOString();
         const next = withOptionalFields({ ...record, status: nextStatus, updated_at: now }, patch);
         if (terminalRunRecordStatuses.has(nextStatus) && !next.terminal_at) next.terminal_at = now;
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
+
+    async continueRequiresUserActionRun(runId, patch = {}) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        if (record.status !== "requires_user_action") throw new Error("run_requires_user_action_continuation_unavailable");
+        const now = clock().toISOString();
+        const nextBase = { ...record, status: "running" as const, updated_at: now };
+        delete nextBase.failure;
+        delete nextBase.post_check;
+        delete nextBase.terminal_at;
+        const next = withOptionalFields(nextBase, patch);
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
+
+    async denyRequiresUserActionRun(runId, failure, patch = {}) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        if (record.status !== "requires_user_action") {
+          if (record.status === "failed" && record.failure?.code === failure.code) return record;
+          throw new Error("run_requires_user_action_denial_unavailable");
+        }
+        const now = clock().toISOString();
+        const next = withOptionalFields({ ...record, status: "failed" as const, updated_at: now }, {
+          ...patch,
+          failure
+        });
+        if (!next.public_result_summary) {
+          next.public_result_summary = {
+            schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+            submitted: false,
+            outcome: "denied",
+            consumer_boundary: "Core records policy denial only; no external write or browser material is stored."
+          };
+        }
+        if (!next.post_check) {
+          next.post_check = {
+            schema_version: "webenvoy.post-check-result.v0",
+            status: "blocked",
+            summary: "The user denied the validate-only write-precheck; no external write action was performed.",
+            checked_at: now,
+            code: failure.code,
+            attribution: "input",
+            recovery_hint: failure.recovery_hint,
+            consumer_boundary: "Core records only the policy denial and submitted=false boundary."
+          };
+        }
+        next.terminal_at = now;
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
+
+    async cancelRequiresUserActionRun(runId, failure = {
+      category: "action_risk",
+      code: "user_cancelled",
+      phase: "admission",
+      recovery_hint: "record_cancellation_without_submit"
+    }, patch = {}) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error(`run record not found: ${runId}`);
+        if (record.status !== "requires_user_action") {
+          if (record.status === "cancelled" && record.failure?.code === failure.code) return record;
+          throw new Error("run_requires_user_action_cancellation_unavailable");
+        }
+        const now = clock().toISOString();
+        const next = withOptionalFields({ ...record, status: "cancelled" as const, updated_at: now }, {
+          ...patch,
+          failure
+        });
+        next.public_result_summary = {
+          ...(next.public_result_summary ?? {}),
+          schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+          submitted: false,
+          outcome: "cancelled",
+          consumer_boundary: "Core records only the cancellation and submitted=false boundary; no external write or browser material is stored."
+        };
+        next.post_check = {
+          schema_version: "webenvoy.post-check-result.v0",
+          status: "blocked",
+          summary: "The pending validate-only write-precheck was cancelled; no external write action was performed.",
+          checked_at: now,
+          code: failure.code,
+          attribution: "input",
+          recovery_hint: failure.recovery_hint,
+          consumer_boundary: "Core records only the cancellation and submitted=false boundary."
+        };
+        next.terminal_at = now;
         assertRunRecord(next);
         await writeRecord(directory, next);
         return next;

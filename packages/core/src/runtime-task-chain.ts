@@ -35,8 +35,8 @@ import { readBoundedJsonResponse } from "./bounded-json-response.js";
 import { normalizePublicHttpTarget } from "./public-target-reference.js";
 import { completeRunWithReadOnlyEmptyResult, completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
-import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore } from "./run-record-store.js";
-import { acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
+import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PreviewResult, type RunRecord } from "./run-record-store.js";
+import { acceptApprovedWritePrecheckTask, acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 import {
   commitDetailTargetReservation,
   compensatePublishedSearchDetailTargets,
@@ -52,6 +52,17 @@ import {
   type DetailTargetReservation
 } from "./detail-target-store.js";
 import { sameOrigin } from "./execution-policy.js";
+import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
+import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
+import {
+  evaluateWritePrecheckTaskPolicy,
+  isExactWritePrecheckRun,
+  isUnifiedWritePrecheckTask,
+  persistWritePrecheckPolicyDecision,
+  writePrecheckPolicyFailure,
+  type EvaluatedWritePrecheckPolicy,
+  type WritePrecheckAuthorizationContext
+} from "./write-precheck-policy.js";
 
 type JsonObject = Record<string, unknown>;
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -73,6 +84,8 @@ export type RuntimeTaskSubmissionRequest = {
     session?: JsonObject;
     snapshot?: JsonObject;
   };
+  /** Internal task-thread binding; callers cannot supply this through /tasks. */
+  authorization_context?: WritePrecheckAuthorizationContext;
 };
 
 export type LodePackageResolverInput = {
@@ -102,6 +115,17 @@ type HarborRuntimeAdmissionResult = HarborAdmissionInput | FailureRecord | Harbo
 
 export type HarborRuntimeClient = {
   collectAdmissionFacts(input: HarborRuntimeAdmissionRequest): Promise<HarborRuntimeAdmissionResult>;
+  /** Execute the Lode-pinned, validate-only XHS publish precheck once a Core policy allows it. */
+  validateOnlyWritePrecheck(input: {
+    runtime_session_ref: string;
+    holder_ref?: string;
+    url: string;
+    target_ref: string;
+    requested_fields?: readonly ("title" | "summary" | "canonical_url" | "source_status")[];
+    include_source_refs?: boolean;
+    proposed_input_summary?: string;
+    signal?: AbortSignal;
+  }): Promise<unknown | FailureRecord>;
   executeReadOperation(input: { runtime_session_ref: string; holder_ref?: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
   releaseCoreTaskSession(input: { runtime_session_ref: string; run_id: string }): Promise<FailureRecord | undefined>;
 };
@@ -109,6 +133,9 @@ export type HarborRuntimeClient = {
 export type RuntimeTaskSubmissionDependencies = {
   lodePackageResolver?: LodePackageResolver;
   harborRuntimeClient?: HarborRuntimeClient;
+  executionPolicyConfigStore?: FileExecutionPolicyConfigStore;
+  authorizationDecisionStore?: FileAuthorizationDecisionStore;
+  clock?: () => Date;
 };
 
 export type LocalLodePackageResolverOptions = {
@@ -931,21 +958,524 @@ async function completeAcceptedUnknownOutcome(
   return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
 }
 
+const xhsWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const xhsWritePrecheckInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0";
+const xhsWritePrecheckOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0";
+const xhsWritePrecheckLodeCommit = "1fbef74b4bf1b4f0a86aacd885386d7a62181207";
+const xhsWritePrecheckLodeAssetSha256 = "c62ba191357e0056b03523a46c0bb26424c916333f388898a4cc457f9c1cc6fc";
+const xhsWritePrecheckLodeSemanticSha256 = "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0";
+
+type WritePrecheckValidation =
+  | { ok: true; operation: JsonObject; source_refs: string[]; evidence_refs: string[] }
+  | { ok: false; failure: FailureRecord };
+
+function opaquePublicRef(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9._:/-]*$/.test(value) &&
+    !/(?:cookie|token|password|secret|credential|profile|storage|raw[_-]?(?:dom|har)|network[_-]?(?:body|response)|cdp|screenshot)/i.test(value);
+}
+
+function writePrecheckFailure(code: string, category: FailureRecord["category"] = "runtime_execution"): FailureRecord {
+  return failure(category, code, category === "result_projection" ? "projection" : "execution", code === "harbor_write_precheck_outcome_unknown" ? "reconcile_status" : "retry_after_refresh");
+}
+
+function validateCompletedWritePrecheck(
+  value: unknown,
+  expected: { runtime_session_ref: string; target_ref: string }
+): WritePrecheckValidation {
+  const operation = object(value);
+  if (!operation || operation.schema_version !== "harbor-validate-only-write-precheck/v0" || operation.status !== "completed" || operation.submitted !== false ||
+    operation.runtime_session_ref !== expected.runtime_session_ref || operation.target_ref !== expected.target_ref) {
+    return { ok: false, failure: writePrecheckFailure("harbor_write_precheck_output_invalid", "result_projection") };
+  }
+  const pin = object(operation.lode_pin);
+  if (!pin || pin.package_ref !== xhsWritePrecheckPackageRef || pin.lock_ref !== xhsWritePrecheckLockRef ||
+    pin.input_schema_ref !== xhsWritePrecheckInputSchemaRef || pin.output_schema_ref !== xhsWritePrecheckOutputSchemaRef ||
+    pin.version !== "0.1.0" || pin.operation_id !== "xhs_publish_note_precheck" || pin.operation_mode !== "validate_only" ||
+    pin.origin !== "https://creator.xiaohongshu.com" || pin.repository !== "WebEnvoy/Lode" || pin.commit !== xhsWritePrecheckLodeCommit ||
+    pin.asset_path !== "registry/validate-only-runtime-consumption.json" || pin.asset_sha256 !== xhsWritePrecheckLodeAssetSha256 ||
+    pin.asset_semantic_sha256 !== xhsWritePrecheckLodeSemanticSha256) {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_contract_drift", "capability_contract") };
+  }
+  const boundary = object(operation.public_boundary);
+  if (!boundary || boundary.raw_dom !== "not_exposed" || boundary.raw_har !== "not_exposed" ||
+    boundary.screenshot_body !== "not_exposed" || boundary.credentials !== "not_exposed" || boundary.external_write_actions !== "not_performed") {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_privacy_boundary_invalid", "result_projection") };
+  }
+  const sourceRefs = Array.isArray(operation.source_refs) ? operation.source_refs.map(object) : [];
+  const evidenceRefs = Array.isArray(operation.evidence_ref_kinds) ? operation.evidence_ref_kinds.map(object) : [];
+  const sourceValues = sourceRefs.map((entry) => string(entry?.ref));
+  const evidenceValues = evidenceRefs.map((entry) => string(entry?.ref));
+  const sourceKinds = sourceRefs.map((entry) => string(entry?.kind));
+  const evidenceKinds = evidenceRefs.map((entry) => string(entry?.kind));
+  if (sourceRefs.length !== 2 || sourceRefs.some((entry) => !entry || !string(entry.kind) || !opaquePublicRef(entry.ref)) ||
+    new Set(sourceKinds).size !== sourceKinds.length ||
+    !["creator_publish_page_summary", "dom_snapshot_summary"].every((kind) => sourceKinds.includes(kind)) ||
+    evidenceRefs.length !== 2 || evidenceRefs.some((entry) => !entry || !string(entry.kind) || !opaquePublicRef(entry.ref)) ||
+    new Set(evidenceKinds).size !== evidenceKinds.length ||
+    !["snapshot_ref", "post_check_ref"].every((kind) => evidenceKinds.includes(kind)) ||
+    new Set(sourceValues).size !== sourceValues.length || new Set(evidenceValues).size !== evidenceValues.length ||
+    !opaquePublicRef(operation.page_ref) || !opaquePublicRef(operation.operation_ref) || !opaquePublicRef(operation.result_ref) ||
+    !opaquePublicRef(operation.submitted_result_ref) || !string(operation.observed_at) || !Number.isFinite(Date.parse(string(operation.observed_at)!))) {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_refs_invalid", "evidence_reference") };
+  }
+  const postCheck = object(operation.post_check);
+  const postSourceRefs = Array.isArray(postCheck?.source_refs) ? postCheck.source_refs.map(object).filter((entry): entry is JsonObject => entry !== undefined) : [];
+  const postEvidenceRefs = Array.isArray(postCheck?.evidence_refs) ? postCheck.evidence_refs.map(object).filter((entry): entry is JsonObject => entry !== undefined) : [];
+  const postCheckRef = evidenceRefs.find((entry) => entry?.kind === "post_check_ref")?.ref;
+  const snapshotRef = evidenceRefs.find((entry) => entry?.kind === "snapshot_ref")?.ref;
+  if (!postCheck || postCheck.status !== "passed" || postCheck.reason !== "validated_creator_entrypoint_without_submission" ||
+    postCheck.submitted !== false || postCheck.no_submit_guard !== "active" || !opaquePublicRef(postCheckRef) ||
+    !opaquePublicRef(snapshotRef) || postCheck.post_check_ref !== postCheckRef ||
+    !Array.isArray(postCheck.source_refs) || !Array.isArray(postCheck.evidence_refs) ||
+    postCheck.source_refs.some((entry) => !object(entry) || !opaquePublicRef(object(entry)?.ref)) ||
+    postCheck.evidence_refs.some((entry) => !object(entry) || !opaquePublicRef(object(entry)?.ref)) ||
+    postSourceRefs.length !== sourceValues.length ||
+    postSourceRefs.some((entry) => !sourceValues.includes(string(entry.ref)) || postSourceRefs.filter((candidate) => candidate.ref === entry.ref).length !== 1) ||
+    postEvidenceRefs.length !== 1 || postEvidenceRefs[0]?.ref !== snapshotRef) {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_post_check_invalid", "evidence_reference") };
+  }
+  const observations = object(operation.entrypoint_observations);
+  const fields = object(operation.field_states);
+  const prohibited = object(operation.prohibited_actions_observed);
+  if (operation.classification !== "partial_result" || operation.precheck_scope !== "entrypoint_only" || operation.composition_state !== "composition_not_initialized" ||
+    operation.no_submit_guard !== "active" || !observations || !fields || !prohibited || Object.keys(observations).length === 0 || Object.keys(fields).length === 0 || Object.keys(prohibited).length === 0 ||
+    Object.values(observations).some((entry) => entry !== true) || Object.values(prohibited).some((entry) => entry !== false)) {
+    return { ok: false, failure: writePrecheckFailure("write_precheck_observation_invalid", "result_projection") };
+  }
+  return {
+    ok: true,
+    operation,
+    source_refs: sourceValues as string[],
+    evidence_refs: evidenceValues as string[]
+  };
+}
+
+function writePrecheckPreviewResult(taskIntent: TaskIntentEnvelope, operation: JsonObject, evidenceRefs: readonly string[]): PreviewResult {
+  return {
+    schema_version: "webenvoy.preview-result.v0",
+    state: "available",
+    submitted: false,
+    action_refs: { action_request_id: `action-request:${taskIntent.intent_id}` },
+    capability: {
+      capability_ref: taskIntent.capability.ref,
+      capability_version: taskIntent.capability.version,
+      ...(taskIntent.capability.source_ref === undefined ? {} : { capability_source_ref: taskIntent.capability.source_ref }),
+      ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
+      package_ref: xhsWritePrecheckPackageRef
+    },
+    evidence_refs: [...evidenceRefs],
+    consumer_boundary: "Core preview result is validate-only/draft/preview projection; it is not submitted result, approval execution, reconciliation, or post-submit truth."
+  };
+}
+
+async function completeAcceptedWritePrecheck(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  operation: unknown,
+  runtimeSessionRef: string,
+  targetRef: string
+): Promise<TaskSubmissionResult> {
+  const validation = validateCompletedWritePrecheck(operation, { runtime_session_ref: runtimeSessionRef, target_ref: targetRef });
+  if (!validation.ok) {
+    // The operation response is untrusted at this boundary. A malformed or
+    // contract-drift payload is indeterminate, never a retryable failure.
+    return completeAcceptedWritePrecheckUnknown(store, result, "harbor_write_precheck_outcome_unknown");
+  }
+  const { operation: completedOperation, source_refs: sourceRefs, evidence_refs: evidenceRefs } = validation;
+  const postCheck = object(completedOperation.post_check)!;
+  const postCheckRef = string(postCheck.post_check_ref)!;
+  const publicSummary: Record<string, unknown> = {
+    schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+    operation_ref: completedOperation.operation_ref,
+    page_ref: completedOperation.page_ref,
+    result_ref: completedOperation.result_ref,
+    submitted_result_ref: completedOperation.submitted_result_ref,
+    target_ref: completedOperation.target_ref,
+    classification: completedOperation.classification,
+    precheck_scope: completedOperation.precheck_scope,
+    composition_state: completedOperation.composition_state,
+    entrypoint_observations: completedOperation.entrypoint_observations,
+    field_states: completedOperation.field_states,
+    prohibited_actions_observed: completedOperation.prohibited_actions_observed,
+    no_submit_guard: completedOperation.no_submit_guard,
+    submitted: false,
+    post_check_ref: postCheckRef,
+    lode_pin: completedOperation.lode_pin,
+    consumer_boundary: "Core stores only the Harbor public summary and opaque refs; raw DOM, HAR, screenshot bytes, credentials, and external write actions are excluded."
+  };
+  await store.updateRunRecord(result.run_record.run_id, { status: "running" });
+  const completed = await store.updateRunRecord(result.run_record.run_id, {
+    status: "succeeded",
+    result_ref: string(completedOperation.result_ref)!,
+    result_kind: "validate_only_write_precheck",
+    result_outcome: "partial",
+    output_schema_id: xhsWritePrecheckOutputSchemaRef,
+    projection_ref: string(completedOperation.operation_ref)!,
+    public_result_summary: publicSummary,
+    source_refs: sourceRefs,
+    evidence_refs: evidenceRefs,
+    preview_result: writePrecheckPreviewResult(result.task_intent, completedOperation, evidenceRefs),
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "passed",
+      summary: "Harbor validated the creator publish entrypoint without submission.",
+      checked_at: string(completedOperation.observed_at) ?? new Date().toISOString(),
+      evidence_refs: evidenceRefs,
+      source_refs: sourceRefs,
+      consumer_boundary: "Core records only the validated public summary and opaque refs; submitted=false is explicit and no external write action was performed."
+    },
+    retention_state: "active"
+  });
+  return { ok: true, task_intent: result.task_intent, run_record: completed };
+}
+
+async function completeAcceptedWritePrecheckUnknown(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  code: string
+): Promise<TaskSubmissionResult> {
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    preview_result: writePrecheckPreviewResult(result.task_intent, {}, []),
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+      submitted: false,
+      outcome: "unknown",
+      consumer_boundary: "Core stores only bounded outcome state and no write or browser material."
+    }
+  });
+  const failureRecord = failure("runtime_execution", code, code === "harbor_write_precheck_outcome_unknown" ? "verification" : "execution", code === "harbor_write_precheck_outcome_unknown" ? "reconcile_status" : "retry_after_refresh");
+  const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    status: code === "harbor_write_precheck_outcome_unknown" ? "unknown_outcome" : "failed",
+    failure: failureRecord,
+    retention_state: "active",
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "not_run",
+      summary: "The validate-only write-precheck did not produce a trustworthy terminal response; Core will not retry it automatically.",
+      checked_at: new Date().toISOString(),
+      code,
+      attribution: "runtime",
+      recovery_hint: failureRecord.recovery_hint,
+      consumer_boundary: "Core records submitted=false and an indeterminate outcome without storing raw browser or external write material."
+    }
+  });
+  return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+}
+
+async function completeAcceptedWritePrecheckAdmissionFailure(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  admissionFailure: FailureRecord,
+  runtimeSessionRef?: string,
+  cleanupFailure?: FailureRecord,
+  client?: HarborRuntimeClient
+): Promise<TaskSubmissionResult> {
+  let cleanup = cleanupFailure;
+  if (runtimeSessionRef && !cleanup && client) {
+    try {
+      cleanup = await client.releaseCoreTaskSession({
+        runtime_session_ref: runtimeSessionRef,
+        run_id: result.run_record.run_id
+      });
+    } catch {
+      cleanup = failure("runtime_execution", "core_task_session_cleanup_unverified", "runtime_binding", "inspect_runtime_session");
+    }
+  }
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    ...(runtimeSessionRef === undefined ? {} : { runtime_binding_refs: [runtimeSessionRef] }),
+    preview_result: writePrecheckPreviewResult(result.task_intent, {}, []),
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+      submitted: false,
+      outcome: "unavailable",
+      ...(runtimeSessionRef === undefined ? {} : { runtime_session_ref: runtimeSessionRef }),
+      consumer_boundary: "Core stores only structured admission failure state and an opaque runtime session ref; no browser or write material is stored."
+    }
+  });
+  const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    status: "failed",
+    failure: admissionFailure,
+    retention_state: "active",
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "blocked",
+      summary: cleanup
+        ? `Admission failed with ${admissionFailure.code}; Core also recorded Harbor session cleanup failure ${cleanup.code}.`
+        : `Harbor admission failed with ${admissionFailure.code}; no validate-only operation was called.`,
+      checked_at: new Date().toISOString(),
+      code: cleanup?.code ?? admissionFailure.code,
+      attribution: "runtime",
+      recovery_hint: cleanup?.recovery_hint ?? admissionFailure.recovery_hint,
+      ...(runtimeSessionRef === undefined ? {} : { source_refs: [runtimeSessionRef] }),
+      consumer_boundary: "Core exposes only structured admission and cleanup classifications plus opaque refs; no Harbor private material is persisted."
+    }
+  });
+  return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+}
+
+function writePrecheckUnavailableFailure(value: JsonObject): FailureRecord {
+  const failureClass = string(value.failure_class);
+  const retryable = value.retryable === true;
+  return failure(
+    "runtime_execution",
+    failureClass ? `write_precheck_${failureClass}` : "write_precheck_unavailable",
+    "execution",
+    retryable ? "retry_after_refresh" : "repair_browser_environment"
+  );
+}
+
+async function dispatchApprovedWritePrecheck(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  request: RuntimeTaskSubmissionRequest,
+  deps: RuntimeTaskSubmissionDependencies,
+  policy: EvaluatedWritePrecheckPolicy
+): Promise<TaskSubmissionResult> {
+  const client = deps.harborRuntimeClient;
+  if (!client || !client.validateOnlyWritePrecheck) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      failure("resource_admission", "harbor_runtime_api_unconfigured", "runtime_binding", "connect_runtime")
+    );
+  }
+  const target = policy.evaluation.status === "evaluated" ? policy.evaluation.action.target : undefined;
+  if (!target || !request.authorization_context) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      failure("capability_contract", "write_precheck_dispatch_binding_invalid", "admission", "request_new_confirmation")
+    );
+  }
+  let admission: HarborRuntimeAdmissionResult;
+  try {
+    admission = await client.collectAdmissionFacts({
+      run_id: request.run_id,
+      task_intent: result.task_intent,
+      package_ref: xhsWritePrecheckPackageRef,
+      admission_mode: "write_precheck",
+      harbor: request.harbor
+    });
+  } catch {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime"),
+      undefined,
+      undefined,
+      client
+    );
+  }
+  const collectionFailure = isAdmissionCollectionFailure(admission) ? admission : undefined;
+  const admissionValue: HarborAdmissionInput | FailureRecord = collectionFailure
+    ? collectionFailure.failure
+    : admission as HarborAdmissionInput | FailureRecord;
+  if (isFailure(admissionValue)) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      admissionValue.category === "resource_admission"
+        ? admissionValue
+        : failure("resource_admission", admissionValue.code || "harbor_runtime_admission_failed", "runtime_binding", "connect_runtime"),
+      collectionFailure?.runtime_session_ref,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+  const runtimeSessionRef = string(object(admissionValue.harbor_runtime_facts)?.runtime_session_ref);
+  if (!runtimeSessionRef) {
+    return completeAcceptedWritePrecheckAdmissionFailure(
+      store,
+      result,
+      failure("resource_admission", "harbor_runtime_session_missing", "runtime_binding", "connect_runtime"),
+      collectionFailure?.runtime_session_ref,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+
+  let operation: unknown;
+  try {
+    operation = await client.validateOnlyWritePrecheck({
+      runtime_session_ref: runtimeSessionRef,
+      holder_ref: request.run_id,
+      url: result.task_intent.scope.target_ref,
+      target_ref: target.target_ref,
+      requested_fields: ["title", "summary", "canonical_url", "source_status"],
+      include_source_refs: true,
+      proposed_input_summary: result.task_intent.input.summary
+    });
+  } catch {
+    operation = failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");
+  }
+  if (isFailure(operation)) {
+    const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef,
+      failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status"),
+      "unknown_outcome");
+    if (cleanup) return cleanup;
+    return completeAcceptedWritePrecheckUnknown(store, result, "harbor_write_precheck_outcome_unknown");
+  }
+  const operationObject = object(operation);
+  if (operationObject?.status === "unavailable") {
+    const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef, writePrecheckUnavailableFailure(operationObject));
+    if (cleanup) return cleanup;
+    await store.updateRunRecord(result.run_record.run_id, {
+      status: "running",
+      preview_result: writePrecheckPreviewResult(result.task_intent, operationObject, []),
+      public_result_summary: {
+        schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+        submitted: false,
+        outcome: "unavailable",
+        consumer_boundary: "Core stores only structured unavailable state and no write or browser material."
+      }
+    });
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      failure: writePrecheckUnavailableFailure(operationObject),
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "blocked",
+        summary: "Harbor could not validate the creator publish entrypoint; no external write action was performed.",
+        checked_at: new Date().toISOString(),
+        code: writePrecheckUnavailableFailure(operationObject).code,
+        attribution: "runtime",
+        recovery_hint: writePrecheckUnavailableFailure(operationObject).recovery_hint,
+        consumer_boundary: "Core records only structured unavailable state and opaque refs; no browser or write material is stored."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef);
+  if (cleanup) return cleanup;
+  return completeAcceptedWritePrecheck(store, result, operation, runtimeSessionRef, target.target_ref);
+}
+
+export type ContinueWritePrecheckTaskRequest = {
+  run_id: string;
+  task_intent: unknown;
+  package_ref: string;
+  harbor?: RuntimeTaskSubmissionRequest["harbor"];
+  authorization_context: WritePrecheckAuthorizationContext;
+  single_action_decision: import("./execution-policy.js").SingleActionDecision;
+};
+
+/** Continue only a previously-confirmed unified write-precheck run. */
+export async function continueWritePrecheckTask(
+  store: FileRunRecordStore,
+  request: ContinueWritePrecheckTaskRequest,
+  deps: RuntimeTaskSubmissionDependencies
+): Promise<TaskSubmissionResult> {
+  const existing = await store.getRunRecord(request.run_id);
+  if (!existing || existing.status !== "requires_user_action") {
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(existing ? { run_record: existing } : {}) };
+  }
+  if (!isExactWritePrecheckRun(existing, request.single_action_decision.confirmation_decision_ref)) {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  const taskIntent = validateTaskIntent(request.task_intent);
+  if (isFailure(taskIntent) || !request.package_ref) {
+    return { ok: false, failure: isFailure(taskIntent) ? taskIntent : failure("request_invalid", "package_ref_required", "pre_admission", "fix_input"), run_record: existing };
+  }
+  if (existing.task_intent_ref !== taskIntent.intent_id || existing.package_ref !== request.package_ref ||
+    existing.capability_ref !== taskIntent.capability.ref || existing.scope_target_ref !== taskIntent.scope.target_ref ||
+    request.package_ref !== "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0" ||
+    taskIntent.policy.risk !== "write" || taskIntent.policy.execution_intent !== "validate_only") {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  if (!deps.lodePackageResolver || !deps.executionPolicyConfigStore || !deps.authorizationDecisionStore) {
+    return { ok: false, failure: failure("action_risk", "authorization_decision_owner_unavailable", "admission", "retry_when_policy_owner_ready"), run_record: existing };
+  }
+  let contract: LodePackageAdmissionContract | FailureRecord;
+  try {
+    contract = await deps.lodePackageResolver({ package_ref: request.package_ref, task_intent: request.task_intent });
+  } catch {
+    contract = failure("capability_contract", "lode_registry_unavailable", "admission", "connect_lode_registry");
+  }
+  if (isFailure(contract)) return { ok: false, failure: contract, run_record: existing };
+  if (!isUnifiedWritePrecheckTask(taskIntent, contract)) {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  const policy = await evaluateWritePrecheckTaskPolicy({
+    run_id: request.run_id,
+    task_intent: taskIntent,
+    lode_contract: contract,
+    authorization_context: request.authorization_context,
+    config_store: deps.executionPolicyConfigStore,
+    single_action_decision: request.single_action_decision,
+    evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
+  });
+  if (isFailure(policy)) return { ok: false, failure: policy, run_record: existing };
+  if (!policy.evaluation || policy.evaluation.status !== "evaluated" || policy.evaluation.next_step !== "execute" ||
+    policy.evaluation.effective_policy.source !== "single_action_decision" || request.single_action_decision.mode !== "auto" ||
+    !(existing.authorization_decision_refs ?? []).includes(request.single_action_decision.confirmation_decision_ref)) {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  const confirmation = await deps.authorizationDecisionStore.getAuthorizationDecision(request.single_action_decision.confirmation_decision_ref);
+  if (!confirmation || confirmation.state !== "active" || confirmation.outcome !== "confirm") {
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  try {
+    await persistWritePrecheckPolicyDecision({
+      run_id: request.run_id,
+      policy,
+      authorization_store: deps.authorizationDecisionStore,
+      run_record_store: store
+    });
+  } catch {
+    return { ok: false, failure: failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator"), run_record: existing };
+  }
+  let continued: RunRecord;
+  try {
+    continued = await store.continueRequiresUserActionRun(request.run_id);
+  } catch {
+    const current = await store.getRunRecord(request.run_id);
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(current ? { run_record: current } : {}) };
+  }
+  return dispatchApprovedWritePrecheck(store, { ok: true, task_intent: taskIntent, run_record: continued }, {
+    run_id: request.run_id,
+    task_intent: taskIntent,
+    package_ref: request.package_ref,
+    ...(request.harbor === undefined ? {} : { harbor: request.harbor }),
+    authorization_context: request.authorization_context
+  }, deps, policy);
+}
+
 async function releaseAcceptedCoreTaskSession(
   store: FileRunRecordStore,
   result: Extract<TaskSubmissionResult, { ok: true }>,
   client: HarborRuntimeClient,
   runtimeSessionRef: string,
-  primaryFailure?: FailureRecord
+  primaryFailure?: FailureRecord,
+  terminalStatus: "failed" | "unknown_outcome" = "failed"
 ): Promise<TaskSubmissionResult | undefined> {
-  const cleanupFailure = await client.releaseCoreTaskSession({
-    runtime_session_ref: runtimeSessionRef,
-    run_id: result.run_record.run_id
-  });
+  let cleanupFailure: FailureRecord | undefined;
+  try {
+    cleanupFailure = await client.releaseCoreTaskSession({
+      runtime_session_ref: runtimeSessionRef,
+      run_id: result.run_record.run_id
+    });
+  } catch {
+    cleanupFailure = failure("runtime_execution", "core_task_session_cleanup_unverified", "runtime_binding", "inspect_runtime_session");
+  }
   if (!cleanupFailure) return undefined;
   const terminalFailure = primaryFailure ?? cleanupFailure;
-  await store.updateRunRecord(result.run_record.run_id, { status: "running" });
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    runtime_binding_refs: [runtimeSessionRef],
+    preview_result: writePrecheckPreviewResult(result.task_intent, {}, []),
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
+      submitted: false,
+      outcome: terminalStatus === "unknown_outcome" ? "unknown" : "cleanup_failed",
+      runtime_session_ref: runtimeSessionRef,
+      consumer_boundary: "Core records submitted=false plus the opaque session ref when cleanup cannot be verified; no browser or write material is stored."
+    }
+  });
   const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    status: terminalStatus,
     failure: terminalFailure,
     retention_state: "active",
     post_check: {
@@ -1204,6 +1734,100 @@ export async function submitRuntimeTask(
     }
     verifiedXhsDetailInput = true;
     xhsDetailRuntimeSessionRef = inspected.binding.runtime_session_ref;
+  }
+
+  const unifiedWritePrecheck = isUnifiedWritePrecheckTask(validatedTaskIntent, lode_package_contract);
+  if (lode_package_contract.package_ref === xhsWritePrecheckPackageRef && !unifiedWritePrecheck) {
+    return acceptReadOnlyTaskSubmission(store, {
+      ...base,
+      lode_package_contract,
+      lode_resolution_failure: failure("capability_contract", "write_precheck_binding_invalid", "admission", "repair_package_contract")
+    });
+  }
+  if (unifiedWritePrecheck) {
+    const policy = deps.authorizationDecisionStore === undefined
+      ? failure("action_risk", "authorization_decision_owner_unavailable", "admission", "retry_when_policy_owner_ready")
+      : await evaluateWritePrecheckTaskPolicy({
+          run_id: request.run_id,
+          task_intent: validatedTaskIntent,
+          lode_contract: lode_package_contract,
+          ...(request.authorization_context === undefined ? {} : { authorization_context: request.authorization_context }),
+          ...(deps.executionPolicyConfigStore === undefined ? {} : { config_store: deps.executionPolicyConfigStore }),
+          evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
+        });
+    if (isFailure(policy)) {
+      return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, execution_policy_failure: policy });
+    }
+    const policyFailure = writePrecheckPolicyFailure(policy.evaluation);
+    if (policy.evaluation.status !== "evaluated" || policy.evaluation.next_step !== "execute") {
+      const result = await acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        execution_policy_failure: policyFailure
+      });
+      try {
+        await persistWritePrecheckPolicyDecision({
+          run_id: request.run_id,
+          policy,
+          authorization_store: deps.authorizationDecisionStore!,
+          run_record_store: store
+        });
+        const runRecord = await store.getRunRecord(request.run_id);
+        return runRecord && !result.ok ? { ...result, run_record: runRecord } : result;
+      } catch {
+        const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
+        const runRecord = result.run_record
+          ? await store.updateRunRecord(request.run_id, {
+              status: result.run_record.status,
+              failure: persistenceFailure,
+              post_check: {
+                schema_version: "webenvoy.post-check-result.v0",
+                status: "blocked",
+                summary: "The unified policy decision could not be linked durably; Harbor was not called.",
+                checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
+                code: persistenceFailure.code,
+                attribution: "unknown",
+                recovery_hint: persistenceFailure.recovery_hint,
+                consumer_boundary: "Core exposes only the fail-closed policy persistence classification; no browser or private evidence material is stored."
+              }
+            })
+          : undefined;
+        return { ok: false, failure: persistenceFailure, ...(runRecord ? { run_record: runRecord } : {}) };
+      }
+    }
+    const admitted = await acceptApprovedWritePrecheckTask(store, {
+      ...base,
+      lode_package_contract
+    });
+    if (!admitted.ok) return admitted;
+    try {
+      await persistWritePrecheckPolicyDecision({
+        run_id: request.run_id,
+        policy,
+        authorization_store: deps.authorizationDecisionStore!,
+        run_record_store: store
+      });
+    } catch {
+      const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
+      const runRecord = await store.updateRunRecord(request.run_id, {
+        status: "failed",
+        failure: persistenceFailure,
+        post_check: {
+          schema_version: "webenvoy.post-check-result.v0",
+          status: "blocked",
+          summary: "The unified policy decision could not be linked durably; Harbor was not called.",
+          checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
+          code: persistenceFailure.code,
+          attribution: "unknown",
+          recovery_hint: persistenceFailure.recovery_hint,
+          consumer_boundary: "Core exposes only the fail-closed policy persistence classification; no browser or private evidence material is stored."
+        }
+      });
+      return { ok: false, failure: persistenceFailure, run_record: runRecord };
+    }
+    const runRecord = await store.getRunRecord(request.run_id);
+    if (!runRecord) return { ok: false, failure: failure("persistence_observability", "run_record_missing", "persistence", "contact_operator") };
+    return dispatchApprovedWritePrecheck(store, { ok: true, task_intent: validatedTaskIntent, run_record: runRecord }, request, deps, policy);
   }
 
   if (!deps.harborRuntimeClient) {
@@ -1936,7 +2560,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
   function protectedHeaders(method: "GET" | "POST", path: string): Record<string, string> | FailureRecord | undefined {
     const protectedRequest = method === "POST" && (
       path === "/runtime/identity-environment-sessions" ||
-      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations)$/.test(path)
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations|validate-only-write-precheck)$/.test(path)
     );
     if (!protectedRequest || !localHarbor) return undefined;
     if (!supervisorToken || supervisorToken.trim() !== supervisorToken || /[\r\n]/.test(supervisorToken)) {
@@ -2154,6 +2778,37 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         harbor_resource_facts: resourceFactsFromSiteFacts(siteResourceFacts) ?? resourceFactsFromSession(session, runtime)
       };
       return facts;
+    },
+    async validateOnlyWritePrecheck(input) {
+      const path = `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/validate-only-write-precheck`;
+      try {
+        const authorization = protectedHeaders("POST", path);
+        if (isFailure(authorization)) return authorization;
+        const response = await fetchJson(`${baseUrl}${path}`, {
+          method: "POST",
+          headers: { ...authorization, "content-type": "application/json" },
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          body: JSON.stringify({
+            url: input.url,
+            target_ref: input.target_ref,
+            no_submit_guard: "active",
+            ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
+            ...(input.requested_fields === undefined ? {} : { requested_fields: input.requested_fields }),
+            ...(input.include_source_refs === undefined ? {} : { include_source_refs: input.include_source_refs }),
+            ...(input.proposed_input_summary === undefined ? {} : { proposed_input_summary: input.proposed_input_summary })
+          })
+        });
+        const payload = await readBoundedJsonResponse(response, 1024 * 1024);
+        const body = object(payload);
+        if (body?.schema_version === "harbor-validate-only-write-precheck/v0" && body.submitted === false &&
+          ((body.status === "completed" && body.runtime_session_ref === input.runtime_session_ref) ||
+            (body.status === "unavailable" && body.runtime_session_ref === input.runtime_session_ref && typeof body.failure_class === "string" && typeof body.retryable === "boolean"))) return payload;
+        return failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");
+      } catch {
+        return input.signal?.aborted
+          ? failure("runtime_execution", "timeout", "execution", "retry_task")
+          : failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");
+      }
     },
     async executeReadOperation(input) {
       try {

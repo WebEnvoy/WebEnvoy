@@ -69,6 +69,7 @@ export {
   type FileRunRecordStoreOptions,
   type PostCheckResult,
   type PostCheckStatus,
+  type PolicyBindingSnapshot,
   type PreviewFailureClass,
   type PreviewResult,
   type PreviewResultState,
@@ -266,6 +267,7 @@ export {
 export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
+  continueWritePrecheckTask,
   recoverInterruptedCoreTaskSessions,
   submitRuntimeTask,
   type HarborRuntimeAdmissionRequest,
@@ -277,6 +279,10 @@ export {
   type RuntimeTaskSubmissionDependencies,
   type RuntimeTaskSubmissionRequest
 } from "./runtime-task-chain.js";
+export {
+  isExactWritePrecheckRun,
+  type WritePrecheckAuthorizationContext
+} from "./write-precheck-policy.js";
 export {
   actionRequestSchemaVersion,
   acceptReadOnlyTaskSubmission,

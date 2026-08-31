@@ -628,6 +628,32 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
       return project(record);
     },
 
+    async continueRequiresUserActionTurn(threadId, turnId) {
+      const record = await withFileLock(options.directory, threadId, lockTimeoutMs, async () => {
+        const thread = await getRecord(threadId);
+        if (!thread) throw new TaskThreadStoreError("thread_not_found");
+        const index = thread.turns.findIndex((turn) => turn.turn_id === turnId);
+        if (index < 0) throw new TaskThreadStoreError("turn_not_found");
+        const current = thread.turns[index];
+        if (!current) throw new TaskThreadStoreError("turn_not_found");
+        if (current.terminated_at || current.failure_code !== "authorization_confirmation_required") {
+          throw new TaskThreadStoreError("turn_continuation_unavailable");
+        }
+        const state = await turnState(current);
+        if (state.status === "waiting_for_user") {
+          throw new TaskThreadStoreError("turn_continuation_unavailable");
+        }
+        const { failure_code: _failureCode, submission_error: _submissionError, ...withoutSubmissionError } = current;
+        const now = clock().toISOString();
+        const turns = [...thread.turns];
+        turns[index] = { ...withoutSubmissionError, updated_at: now };
+        const next = { ...thread, updated_at: now, turns };
+        await writeThread(options.directory, next);
+        return next;
+      });
+      return project(record);
+    },
+
     async terminateTaskTurn(threadId, turnId) {
       const record = await withFileLock(options.directory, threadId, lockTimeoutMs, async () => {
         const thread = await getRecord(threadId);
@@ -637,13 +663,21 @@ export function createFileTaskThreadStore(options: FileTaskThreadStoreOptions): 
         const current = thread.turns[index];
         if (!current) throw new TaskThreadStoreError("turn_not_found");
         const state = await turnState(current);
-        if (!statusKeepsThreadLocked(state.status)) return thread;
-        if (state.status !== "status_unknown" && state.status !== "waiting_for_user") {
+        const completedPolicyCancellation = state.status === "cancelled" &&
+          current.failure_code === "authorization_confirmation_required" &&
+          !current.terminated_at;
+        if (!statusKeepsThreadLocked(state.status) && !completedPolicyCancellation) return thread;
+        if (!completedPolicyCancellation && state.status !== "status_unknown" && state.status !== "waiting_for_user") {
           throw new TaskThreadStoreError("turn_run_still_active");
         }
         const now = clock().toISOString();
         const turns = [...thread.turns];
-        turns[index] = { ...current, updated_at: now, terminated_at: now };
+        if (completedPolicyCancellation) {
+          const { failure_code: _failureCode, submission_error: _submissionError, ...withoutConfirmationFailure } = current;
+          turns[index] = { ...withoutConfirmationFailure, updated_at: now, terminated_at: now };
+        } else {
+          turns[index] = { ...current, updated_at: now, terminated_at: now };
+        }
         const next = { ...thread, updated_at: now, turns };
         await writeThread(options.directory, next);
         return next;

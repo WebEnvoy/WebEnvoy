@@ -4,10 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createFileRunRecordStore, taskTurnInputSchemaVersion, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { createFileRunRecordStore, taskTurnInputSchemaVersion, type FileAuthorizationDecisionStore, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { createApiServer } from "./server.js";
-import { handleTaskThreadApi } from "./task-thread-api.js";
+import { handleTaskThreadApi, takePendingWritePrecheckContinuation, withWritePrecheckRunLock } from "./task-thread-api.js";
 
 function record(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
@@ -135,7 +135,10 @@ async function assertInFlightReplay(): Promise<void> {
       idempotency_key: "submit-recovered",
       run_id: "run_api_recovered",
       task_intent: { entrypoint: "app", capability: { ref: "lode:capability/recovered", source_ref: packageRef } },
-      harbor: { identity_environment_ref: "identity-env_222222222222222222222222" }
+      harbor: {
+        identity_environment_ref: "identity-env_222222222222222222222222",
+        session: { cookie: "must-not-enter-continuation" }
+      }
     };
     const recoveredTurn = await store.reserveTaskTurn(recoveredThread.thread.thread_id, {
       idempotency_key: recoveredBody.idempotency_key,
@@ -321,6 +324,311 @@ async function assertMissingRunStorePrecedesBodyParsing(): Promise<void> {
   }
 }
 
+async function assertAuthorizationCancellation(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-thread-api-cancel-"));
+  const decisionRef = "authorization-decision:11111111111111111111111111111111:22222222222222222222222222222222";
+  const baseRunStore = createFileRunRecordStore({ directory: join(directory, "runs") });
+  const runStore = {
+    ...baseRunStore,
+    getRunRecord: async (runId: string) => {
+      const record = await baseRunStore.getRunRecord(runId);
+      return record && runId === "run_api_cancel"
+        ? { ...record, authorization_decision_refs: [decisionRef] }
+        : record;
+    }
+  };
+  const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore, resolveInputPolicy });
+  const invalidated: string[] = [];
+  let activeTurnId = "";
+  let activeThreadId = "";
+  const authorizationDecisionStore = {
+    getAuthorizationDecision: async (ref: string) => ref === decisionRef
+      ? {
+          decision_ref: decisionRef,
+          applicability: { scope: "task", run_id: "run_api_cancel", thread_id: activeThreadId, turn_id: activeTurnId, config_refs: [] },
+          outcome: "confirm",
+          state: invalidated.includes(ref) ? "invalidated" : "active",
+          expires_at: new Date(Date.now() + 60_000).toISOString()
+        }
+      : undefined,
+    invalidateAuthorizationDecision: async (ref: string) => {
+      invalidated.push(ref);
+      return {};
+    }
+  } as unknown as FileAuthorizationDecisionStore;
+  try {
+    const created = await store.createOrGetTaskThread({
+      capability_ref: "lode:capability/cancel",
+      identity_environment_ref: "identity-env_111111111111111111111111"
+    });
+    const body = {
+      idempotency_key: "submit-cancel",
+      run_id: "run_api_cancel",
+      package_ref: packageRef,
+      input_snapshot: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "keyword", kind: "scalar", summary: "cancel" }]
+      },
+      task_intent: { entrypoint: "app", capability: { ref: "lode:capability/cancel", source_ref: packageRef } },
+      harbor: { identity_environment_ref: "identity-env_111111111111111111111111" }
+    };
+    const submitted = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${created.thread.thread_id}/turns`,
+      body,
+      store,
+      validateTask: async () => undefined,
+      submitTask: async (_request, claimToken, authorizationContext) => {
+        activeThreadId = authorizationContext.thread_id;
+        activeTurnId = authorizationContext.turn_id;
+        await runStore.createRunRecord({
+          run_id: body.run_id,
+          task_intent_ref: "intent:cancel",
+          entrypoint_ref: "entrypoint:app",
+          capability_ref: "lode:capability/cancel",
+          status: "requires_user_action",
+          admission: { decision: "requires_user_action", action_risk: "write" }
+        }, claimToken);
+        return {
+          status: 202,
+          body: {
+            ok: false,
+            error: {
+              category: "action_risk",
+              code: "authorization_confirmation_required",
+              phase: "policy",
+              recovery_hint: "confirm_action"
+            },
+            run: { run_id: body.run_id, authorization_decision_refs: [decisionRef] }
+          },
+          run_record_present: true,
+          failure_code: "authorization_confirmation_required"
+        };
+      }
+    });
+    assert(submitted.handled);
+    assert.equal(submitted.status, 202, JSON.stringify(submitted.body));
+    const turn = record(submitted.body.turn);
+    assert.equal(turn.status, "waiting_for_user");
+    assert.deepEqual(turn.authorization_decision_refs, [decisionRef]);
+      const terminated = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${created.thread.thread_id}/turns/${String(turn.turn_id)}/terminate`,
+      store,
+      runRecordStore: runStore,
+      authorizationDecisionStore,
+      validateTask: async () => undefined,
+      submitTask: async () => { throw new Error("unexpected submit"); }
+    });
+    assert(terminated.handled);
+    assert.equal(terminated.status, 200);
+    assert.deepEqual(invalidated, [], "generic task termination must not invalidate its policy decision");
+    assert.equal(takePendingWritePrecheckContinuation(decisionRef), undefined, "cancellation clears pending continuation");
+    const genericRun = await runStore.getRunRecord(body.run_id);
+    assert.equal(genericRun?.status, "requires_user_action", "generic task termination must not use the XHS cancellation seam");
+    assert.equal(genericRun?.failure, undefined);
+    assert.equal(genericRun?.public_result_summary, undefined);
+    const cancelledTurn = record(terminated.body.turn);
+    assert.equal(cancelledTurn.status, "cancelled");
+    assert.equal(cancelledTurn.run_status, "requires_user_action");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function assertExactWritePrecheckCancellation(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-thread-api-precheck-cancel-"));
+  const decisionRef = "authorization-decision:33333333333333333333333333333333:44444444444444444444444444444444";
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
+  const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+  const baseRunStore = createFileRunRecordStore({ directory: join(directory, "runs") });
+  const runStore = {
+    ...baseRunStore,
+    getRunRecord: async (runId: string) => {
+      const stored = await baseRunStore.getRunRecord(runId);
+      return stored ? { ...stored, authorization_decision_refs: [decisionRef] } : stored;
+    }
+  };
+  const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore, resolveInputPolicy });
+  let activeThreadId = "";
+  let activeTurnId = "";
+  let invalidated = false;
+  const authorizationDecisionStore = {
+    getAuthorizationDecision: async (ref: string) => ref === decisionRef
+      ? {
+          decision_ref: decisionRef,
+          applicability: { scope: "task", run_id: "run_api_precheck_cancel", thread_id: activeThreadId, turn_id: activeTurnId, config_refs: [] },
+          outcome: "confirm",
+          state: invalidated ? "invalidated" : "active",
+          expires_at: new Date(Date.now() + 60_000).toISOString()
+        }
+      : undefined,
+    invalidateAuthorizationDecision: async () => {
+      invalidated = true;
+      return {};
+    }
+  } as unknown as FileAuthorizationDecisionStore;
+  try {
+    const created = await store.createOrGetTaskThread({
+      capability_ref: "lode:capability/publish-note-precheck",
+      identity_environment_ref: "identity-env_222222222222222222222222"
+    });
+    const body = {
+      idempotency_key: "submit-precheck-cancel",
+      run_id: "run_api_precheck_cancel",
+      package_ref: packageRef,
+      input_snapshot: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "keyword", kind: "scalar", summary: "cancel" }]
+      },
+      task_intent: {
+        intent_id: "intent:precheck-cancel",
+        entrypoint: "app",
+        capability: {
+          ref: "lode:capability/publish-note-precheck",
+          version: "0.1.0",
+          source_ref: packageRef,
+          lock_ref: lockRef
+        },
+        policy: { risk: "write", execution_intent: "validate_only" }
+      },
+      harbor: { identity_environment_ref: "identity-env_222222222222222222222222" }
+    };
+    const submitted = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${created.thread.thread_id}/turns`,
+      body,
+      store,
+      runRecordStore: runStore,
+      authorizationDecisionStore,
+      validateTask: async () => undefined,
+      submitTask: async (_request, claimToken, authorizationContext) => {
+        activeThreadId = authorizationContext.thread_id;
+        activeTurnId = authorizationContext.turn_id;
+        await runStore.createRunRecord({
+          run_id: body.run_id,
+          task_intent_ref: body.task_intent.intent_id,
+          capability_ref: body.task_intent.capability.ref,
+          capability_version: "0.1.0",
+          capability_source_ref: packageRef,
+          capability_lock_ref: lockRef,
+          package_ref: packageRef,
+          scope_target_ref: "https://creator.xiaohongshu.com/publish/publish",
+          status: "requires_user_action",
+          admission: { decision: "requires_user_action", action_risk: "write" },
+          action_request: {
+            schema_version: "webenvoy.action-request.v0",
+            action_request_id: "action-request:precheck-cancel",
+            task_intent_ref: body.task_intent.intent_id,
+            capability_ref: body.task_intent.capability.ref,
+            capability_version: "0.1.0",
+            capability_source_ref: packageRef,
+            capability_lock_ref: lockRef,
+            package_ref: packageRef,
+            operation_mode: "validate_only",
+            risk_classification: {
+              risk: "write",
+              execution_intent: "validate_only",
+              level: "medium",
+              true_write_requested: false,
+              reasons: ["validate_only_precheck"]
+            },
+            no_submit_guard: {
+              status: "active",
+              enforced_by: "core",
+              blocked_execution_intents: ["execute_after_approval", "reconcile_status", "request_cancel"],
+              source_refs: [packageRef, lockRef]
+            },
+            target_refs: { scope_target_ref: "https://creator.xiaohongshu.com/publish/publish" },
+            consumer_boundary: "Test fixture contains public refs only."
+          },
+          policy_binding_snapshot: {
+            schema_version: "webenvoy.policy-binding-snapshot.v0",
+            decision_ref: decisionRef,
+            effective_policy_source: "global_user_config",
+            effective_policy_source_ref: "execution-policy:global",
+            effective_policy_source_version: "1",
+            action_fingerprint: `sha256:${"a".repeat(64)}`,
+            resource_match_ref: "resource-match:precheck-cancel",
+            resource_match_version: "1",
+            expires_at: new Date(Date.now() + 60_000).toISOString()
+          }
+        }, claimToken);
+        return {
+          status: 202,
+          body: {
+            ok: false,
+            error: {
+              category: "action_risk",
+              code: "authorization_confirmation_required",
+              phase: "policy",
+              recovery_hint: "confirm_action"
+            },
+            run: { run_id: body.run_id, authorization_decision_refs: [decisionRef] }
+          },
+          run_record_present: true,
+          failure_code: "authorization_confirmation_required"
+        };
+      }
+    });
+    assert(submitted.handled);
+    assert.equal(submitted.status, 202, JSON.stringify(submitted.body));
+    const turn = record(submitted.body.turn);
+    const pending = takePendingWritePrecheckContinuation(decisionRef);
+    assert(pending);
+    assert.equal(Object.hasOwn(pending.harbor ?? {}, "session"), false);
+    assert.equal(JSON.stringify(pending).includes("must-not-enter-continuation"), false);
+    const terminated = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${created.thread.thread_id}/turns/${String(turn.turn_id)}/terminate`,
+      store,
+      runRecordStore: runStore,
+      authorizationDecisionStore,
+      validateTask: async () => undefined,
+      submitTask: async () => { throw new Error("unexpected submit"); }
+    });
+    assert(terminated.handled);
+    assert.equal(terminated.status, 200);
+    assert.equal(invalidated, true);
+    assert.equal(takePendingWritePrecheckContinuation(decisionRef), undefined);
+    const cancelledRun = await runStore.getRunRecord(body.run_id);
+    assert.equal(cancelledRun?.status, "cancelled");
+    assert.equal(cancelledRun?.failure?.code, "user_cancelled");
+    assert.equal(cancelledRun?.public_result_summary?.submitted, false);
+    const cancelledTurn = record(terminated.body.turn);
+    assert.equal(cancelledTurn.status, "cancelled");
+    assert.equal(typeof cancelledTurn.terminated_at, "string");
+    assert.equal(cancelledTurn.failure_code, "user_cancelled");
+    const persistedThread = record(JSON.parse(await readFile(join(directory, "threads", `${created.thread.thread_id}.json`), "utf8")));
+    const persistedTurn = record((persistedThread.turns as unknown[])[0]);
+    assert.equal(persistedTurn.failure_code, undefined);
+    assert.equal(persistedTurn.submission_error, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function assertWritePrecheckCancellationWinsBarrier(): Promise<void> {
+  let releaseCancellation!: () => void;
+  let cancellationEntered!: () => void;
+  const cancellationGate = new Promise<void>((resolve) => { releaseCancellation = resolve; });
+  const entered = new Promise<void>((resolve) => { cancellationEntered = resolve; });
+  let cancelled = false;
+  let harborCalls = 0;
+  const cancel = withWritePrecheckRunLock("run_api_barrier", async () => {
+    cancelled = true;
+    cancellationEntered();
+    await cancellationGate;
+  });
+  await entered;
+  const allow = withWritePrecheckRunLock("run_api_barrier", async () => {
+    if (!cancelled) harborCalls += 1;
+  });
+  releaseCancellation();
+  await Promise.all([cancel, allow]);
+  assert.equal(harborCalls, 0, "cancel-first run barrier must suppress continuation dispatch");
+}
+
 async function assertInternalErrorsAreRedacted(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-thread-api-redaction-"));
   const blockedDirectory = join(directory, "not-a-directory");
@@ -350,5 +658,8 @@ async function assertInternalErrorsAreRedacted(): Promise<void> {
 export async function assertTaskThreadApiRaces(): Promise<void> {
   await assertInFlightReplay();
   await assertMissingRunStorePrecedesBodyParsing();
+  await assertAuthorizationCancellation();
+  await assertExactWritePrecheckCancellation();
+  await assertWritePrecheckCancellationWinsBarrier();
   await assertInternalErrorsAreRedacted();
 }
