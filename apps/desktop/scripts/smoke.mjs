@@ -1300,6 +1300,8 @@ const validCoreThreadEnvelope = {
           idempotency_key: "idem-1",
           run_id: "run-owner-mcp",
           creation_channel: "mcp",
+          package_ref: "lode://site-capability/xiaohongshu/search-notes@0.1.0",
+          input_schema_ref: "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0",
           input: {
             schema_version: "webenvoy.task-turn-input.v0",
             fields: [
@@ -1400,6 +1402,8 @@ const invalidThreadEnvelopes = [
   { ...validCoreThreadEnvelope, threads: [{ ...validThread, created_at: "2026-07-20T24:00:00Z" }] },
   { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{ ...validTurn, turn_id: "turn_invalid" }] }] },
   { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{ ...validTurn, unexpected: true }] }] },
+  { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{ ...validTurn, input_schema_ref: undefined }] }] },
+  { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{ ...validTurn, package_ref: "lode://site-capability/xiaohongshu/search-notes" }] }] },
   { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{ ...validTurn, run_status: "completed" }] }] },
   { ...validCoreThreadEnvelope, threads: [{ ...validThread, turns: [{
     ...validTurn,
@@ -1500,6 +1504,9 @@ if (
   coreThreadState.tasks.length !== 2 ||
   projectedOwnerThread?.id !== "thread_11111111111111111111111111111111" ||
   projectedOwnerThread.runs[0]?.creationChannel !== "mcp" ||
+  projectedOwnerThread.runs[0]?.inputDefinition?.packageRef !== "lode://site-capability/xiaohongshu/search-notes@0.1.0" ||
+  projectedOwnerThread.runs[0]?.inputDefinition?.inputSchemaRef !== "lode://schema/site-capability/xiaohongshu/search-notes/input@0.1.0" ||
+  projectedOwnerThread.runs[1]?.inputDefinition !== undefined ||
   projectedOwnerThread.runs[0]?.resultRows.some((row) => row.label === "创建渠道" && row.value === "MCP") !== true ||
   projectedOwnerThread.runs[1]?.turnStatus !== "cancelled" ||
   projectedOwnerThread.runs[1]?.creationChannel !== "app" ||

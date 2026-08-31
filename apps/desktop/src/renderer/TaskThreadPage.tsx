@@ -110,6 +110,13 @@ function RunTurn({
     });
     return () => controller.abort();
   }, [coreEndpoint, run.id, run.source, run.updatedAt]);
+  const inputDefinition = run.inputDefinition;
+  const inputSkill = inputDefinition == null
+    ? undefined
+    : [skill, ...(skills ?? [])].find((candidate) =>
+        candidate?.packageRef === inputDefinition.packageRef &&
+        candidate?.inputSchemaId === inputDefinition.inputSchemaRef,
+      );
 
   return (
     <article
@@ -117,7 +124,7 @@ function RunTurn({
       data-content-search-unit-key={run.id}
       data-turn-key={run.id}
     >
-      {run.businessInput == null ? null : <TaskTurnBusinessInput input={run.businessInput} skill={skill} />}
+      {run.businessInput == null ? null : <TaskTurnBusinessInput input={run.businessInput} skill={inputSkill} />}
       <SingleActionConfirmation endpoint={coreEndpoint} identityLabel={identityLabel} run={run} threadRef={threadRef} />
       <TurnExecutionStatus isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: "evidence" })} run={run} />
       <TaskBusinessResult

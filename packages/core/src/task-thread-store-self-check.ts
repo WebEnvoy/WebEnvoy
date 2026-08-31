@@ -20,10 +20,11 @@ import { taskThreadStoreSchemaVersion } from "./task-thread-types.js";
 
 let tick = 0;
 const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
+let inputSchemaRef = "lode://schema/test/input@0.1.0";
 const resolveInputPolicy: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
   package_ref,
   capability_ref,
-  input_schema_ref: "lode://schema/test/input@0.1.0",
+  input_schema_ref: inputSchemaRef,
   fields: new Map([
     ["keyword", { field_id: "keyword", projection: "safe_summary" }],
     ["count", { field_id: "count", projection: "safe_summary" }],
@@ -284,6 +285,8 @@ export async function assertTaskThreadStore(): Promise<void> {
     const first = await store.reserveTaskTurn(threadId, turnInput("run_thread_001", "submit-001", "hash-001"));
     assert.equal(first.turn.sequence, 1);
     assert.equal(first.turn.status, "submitting");
+    assert.equal(first.turn.package_ref, packageRef);
+    assert.equal(first.turn.input_schema_ref, inputSchemaRef);
     assert.equal(first.turn.input.consumer_boundary, taskTurnInputConsumerBoundary);
     await assert.rejects(() => store.terminateTaskTurn(threadId, first.turn.turn_id), /turn_run_still_active/);
     await assert.rejects(
@@ -314,6 +317,15 @@ export async function assertTaskThreadStore(): Promise<void> {
     assert.equal(unavailableReplay.turn.input_gaps?.at(0)?.code, "owner_ref_unavailable");
     unavailableOwnerRefs.clear();
 
+    const persistedBeforeDrift = await readFile(join(threadDirectory, `${threadId}.json`), "utf8");
+    inputSchemaRef = "lode://schema/test/input@0.2.0";
+    await assert.rejects(
+      () => store.reserveTaskTurn(threadId, turnInput("run_thread_001", "submit-001", "hash-001")),
+      /turn_definition_refs_mismatch/
+    );
+    assert.equal(await readFile(join(threadDirectory, `${threadId}.json`), "utf8"), persistedBeforeDrift);
+    inputSchemaRef = "lode://schema/test/input@0.1.0";
+
     const duplicateRequest = turnInput("run_thread_002", "submit-002", "hash-002");
     const duplicate = await Promise.all([
       store.reserveTaskTurn(threadId, duplicateRequest),
@@ -331,7 +343,10 @@ export async function assertTaskThreadStore(): Promise<void> {
       ok: false,
       failure_code: "task_intent_invalid"
     });
-    assert.equal((await store.getTaskThread(threadId))?.turns.at(1)?.status, "failed");
+    const failedTurn = (await store.getTaskThread(threadId))?.turns.at(1);
+    assert.equal(failedTurn?.status, "failed");
+    assert.equal(failedTurn?.package_ref, duplicate.at(0)!.turn.package_ref);
+    assert.equal(failedTurn?.input_schema_ref, duplicate.at(0)!.turn.input_schema_ref);
 
     const acceptedBeforeThreadUpdate = await store.reserveTaskTurn(
       threadId,
@@ -340,6 +355,8 @@ export async function assertTaskThreadStore(): Promise<void> {
     await runStore.createRunRecord(runInput("run_thread_003"), acceptedBeforeThreadUpdate.run_claim_token);
     const recoveredStore = createFileTaskThreadStore({ directory: threadDirectory, runRecordStore: runStore, clock: nextInstant, checkOwnerRef, resolveInputPolicy });
     const recoveredAccepted = await recoveredStore.getTaskThread(threadId);
+    assert.equal(recoveredAccepted?.turns.at(1)?.package_ref, duplicate.at(0)!.turn.package_ref);
+    assert.equal(recoveredAccepted?.turns.at(1)?.input_schema_ref, duplicate.at(0)!.turn.input_schema_ref);
     assert.equal(recoveredAccepted?.turns.at(2)?.submission_state, "accepted");
     assert.equal(recoveredAccepted?.turns.at(2)?.status, "accepted");
     const acceptedReplay = await recoveredStore.reserveTaskTurn(
@@ -353,6 +370,8 @@ export async function assertTaskThreadStore(): Promise<void> {
     await runStore.updateRunRecord("run_thread_003", { status: "succeeded" });
     const recoveredCompleted = await recoveredStore.getTaskThread(threadId);
     assert.equal(recoveredCompleted?.turns.at(2)?.status, "completed");
+    assert.equal(recoveredCompleted?.turns.at(2)?.package_ref, packageRef);
+    assert.equal(recoveredCompleted?.turns.at(2)?.input_schema_ref, inputSchemaRef);
     assert.equal(recoveredCompleted?.turns.at(2)?.terminal_at, recoveredCompleted?.turns.at(2)?.updated_at);
     assert.equal(recoveredCompleted?.updated_at, recoveredCompleted?.turns.at(2)?.updated_at);
 
@@ -367,7 +386,10 @@ export async function assertTaskThreadStore(): Promise<void> {
     await writeFile(interruptedClaimPath, `${JSON.stringify({ ...interruptedOwner, pid: deadPid })}\n`, "utf8");
     assert.equal((await recoveredStore.getTaskThread(threadId))?.turns.at(3)?.status, "status_unknown");
     await recoveredStore.terminateTaskTurn(threadId, interrupted.turn.turn_id);
-    assert.equal((await recoveredStore.getTaskThread(threadId))?.turns.at(3)?.status, "cancelled");
+    const cancelledInterrupted = (await recoveredStore.getTaskThread(threadId))?.turns.at(3);
+    assert.equal(cancelledInterrupted?.status, "cancelled");
+    assert.equal(cancelledInterrupted?.package_ref, interrupted.turn.package_ref);
+    assert.equal(cancelledInterrupted?.input_schema_ref, interrupted.turn.input_schema_ref);
 
     const waiting = await recoveredStore.reserveTaskTurn(threadId, turnInput("run_thread_005", "submit-005", "hash-005"));
     await runStore.createRunRecord({
@@ -383,7 +405,10 @@ export async function assertTaskThreadStore(): Promise<void> {
     );
     await recoveredStore.terminateTaskTurn(threadId, waiting.turn.turn_id);
     assert.equal((await runStore.getRunRecord("run_thread_005"))?.status, "requires_user_action");
-    assert.equal((await recoveredStore.getTaskThread(threadId))?.turns.at(4)?.status, "cancelled");
+    const cancelledWaiting = (await recoveredStore.getTaskThread(threadId))?.turns.at(4);
+    assert.equal(cancelledWaiting?.status, "cancelled");
+    assert.equal(cancelledWaiting?.package_ref, waiting.turn.package_ref);
+    assert.equal(cancelledWaiting?.input_schema_ref, waiting.turn.input_schema_ref);
 
     const unknown = await recoveredStore.reserveTaskTurn(threadId, turnInput("run_thread_006", "submit-006", "hash-006"));
     await runStore.createRunRecord(runInput("run_thread_006"), unknown.run_claim_token);
@@ -396,8 +421,15 @@ export async function assertTaskThreadStore(): Promise<void> {
       /thread_has_active_turn/
     );
     await runStore.updateRunRecord("run_thread_006", { status: "unknown_outcome" });
-    assert.equal((await recoveredStore.getTaskThread(threadId))?.turns.at(5)?.status, "status_unknown");
+    const unknownOutcome = (await recoveredStore.getTaskThread(threadId))?.turns.at(5);
+    assert.equal(unknownOutcome?.status, "status_unknown");
+    assert.equal(unknownOutcome?.package_ref, unknown.turn.package_ref);
+    assert.equal(unknownOutcome?.input_schema_ref, unknown.turn.input_schema_ref);
     await recoveredStore.terminateTaskTurn(threadId, unknown.turn.turn_id);
+    const cancelledUnknown = (await recoveredStore.getTaskThread(threadId))?.turns.at(5);
+    assert.equal(cancelledUnknown?.status, "cancelled");
+    assert.equal(cancelledUnknown?.package_ref, unknown.turn.package_ref);
+    assert.equal(cancelledUnknown?.input_schema_ref, unknown.turn.input_schema_ref);
 
     await assert.rejects(
       () => recoveredStore.reserveTaskTurn(threadId, {
@@ -539,6 +571,31 @@ export async function assertTaskThreadStore(): Promise<void> {
     assert.equal(finalThread?.schema_version, "webenvoy.task-thread.v0");
     assert.equal(finalThread?.turns.some((turn) => Object.hasOwn(turn, "request_hash")), false);
     assert.equal((await recoveredStore.listTaskThreads()).some((thread) => thread.thread_id === threadId), true);
+
+    const legacyThreadDirectory = join(directory, "legacy-threads");
+    const legacyRecord = JSON.parse(await readFile(join(threadDirectory, `${threadId}.json`), "utf8")) as {
+      turns: Array<{ package_ref?: string; input_schema_ref?: string }>;
+    };
+    delete legacyRecord.turns[0]?.package_ref;
+    delete legacyRecord.turns[0]?.input_schema_ref;
+    await mkdir(legacyThreadDirectory, { recursive: true });
+    await writeFile(join(legacyThreadDirectory, `${threadId}.json`), `${JSON.stringify(legacyRecord, null, 2)}\n`, "utf8");
+    const legacyStore = createFileTaskThreadStore({
+      directory: legacyThreadDirectory,
+      runRecordStore: runStore,
+      clock: nextInstant,
+      checkOwnerRef,
+      resolveInputPolicy
+    });
+    const legacyView = await legacyStore.getTaskThread(threadId);
+    assert.equal(legacyView?.turns[0]?.package_ref, undefined);
+    assert.equal(legacyView?.turns[0]?.input_schema_ref, undefined);
+    const legacyBeforeReplay = await readFile(join(legacyThreadDirectory, `${threadId}.json`), "utf8");
+    await assert.rejects(
+      () => legacyStore.reserveTaskTurn(threadId, turnInput("run_thread_001", "submit-001", "hash-001")),
+      /turn_definition_refs_unavailable/
+    );
+    assert.equal(await readFile(join(legacyThreadDirectory, `${threadId}.json`), "utf8"), legacyBeforeReplay);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

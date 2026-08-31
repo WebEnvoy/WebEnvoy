@@ -63,6 +63,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "dependentRequired": {
+          "package_ref": ["input_schema_ref"],
+          "input_schema_ref": ["package_ref"]
+        },
         "required": [
           "turn_id",
           "sequence",
@@ -95,6 +99,15 @@
           "creation_channel": {
             "type": "string",
             "enum": ["api", "cli", "mcp", "sdk", "app"]
+          },
+          "package_ref": {
+            "type": "string",
+            "pattern": "^lode://site-capability/[A-Za-z0-9][A-Za-z0-9._~/-]{0,1980}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "input_schema_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
           },
           "input": {
             "allOf": [

@@ -30,10 +30,11 @@ function requestHash(body: Record<string, unknown>): string {
 }
 
 const packageRef = "lode://site-capability/test/thread@0.1.0";
+const inputSchemaRef = "lode://schema/test/thread-input@0.1.0";
 const resolveInputPolicy: TaskTurnInputPolicyResolver = async ({ package_ref, capability_ref }) => ({
   package_ref,
   capability_ref,
-  input_schema_ref: "lode://schema/test/thread-input@0.1.0",
+  input_schema_ref: inputSchemaRef,
   fields: new Map([["keyword", { field_id: "keyword", projection: "safe_summary" }]])
 });
 
@@ -89,6 +90,8 @@ async function assertInFlightReplay(): Promise<void> {
     await waitForTurn(store, created.thread.thread_id);
     const inFlight = (await store.getTaskThread(created.thread.thread_id))!.turns[0]!;
     assert.equal(inFlight.status, "submitting");
+    assert.equal(inFlight.package_ref, packageRef);
+    assert.equal(inFlight.input_schema_ref, inputSchemaRef);
 
     const terminate = await handleTaskThreadApi({
       method: "POST",
@@ -112,6 +115,8 @@ async function assertInFlightReplay(): Promise<void> {
     assert.equal(replay.body.pending, true);
     assert.equal(replay.body.outcome, "submission_in_flight");
     assert.equal(record(replay.body.turn).turn_id, inFlight.turn_id);
+    assert.equal(record(replay.body.turn).package_ref, packageRef);
+    assert.equal(record(replay.body.turn).input_schema_ref, inputSchemaRef);
     assert.equal(record(replay.body.thread).thread_id, created.thread.thread_id);
 
     releaseSubmit!();
