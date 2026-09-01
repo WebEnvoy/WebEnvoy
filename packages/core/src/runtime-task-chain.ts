@@ -2084,10 +2084,33 @@ async function dispatchApprovedXhsMediaAction(
     return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
   }
   const operationObject = object(operation);
+  const unavailableReason = string(operationObject?.unavailable_reason);
+  if (operationObject?.status === "unavailable" &&
+    (unavailableReason === "operation_result_unknown" || unavailableReason === "reconciliation_unknown")) {
+    const canonical = normalizePublicHttpTarget(result.task_intent.scope.target_ref);
+    if (!canonical.ok) {
+      return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_target_invalid", "admission", "fix_input"), runtimeSessionRef, undefined, client);
+    }
+    // Harbor's synchronous adapter reports an unresolved operation as an
+    // unavailable envelope (not an async accepted/running response). Reuse
+    // the strict result validator so Core persists its operation ref and
+    // exposes manual reconciliation without claiming a recheck endpoint.
+    return completeAcceptedXhsMediaAction(
+      store,
+      result,
+      operation,
+      runtimeSessionRef,
+      target.target_ref,
+      actionId,
+      requestedPath,
+      canonical.target_ref,
+      client
+    );
+  }
   if (operationObject?.status === "unavailable") {
     const unavailableFailure = failure(
       "runtime_execution",
-      `harbor_media_action_${string(operationObject.failure_class) ?? "unavailable"}`,
+      `harbor_media_action_${unavailableReason ?? "unavailable"}`,
       "execution",
       operationObject.retryable === true ? "retry_after_refresh" : "repair_browser_environment"
     );

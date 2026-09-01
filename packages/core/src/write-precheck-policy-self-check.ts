@@ -256,9 +256,12 @@ function mediaOutput(input: {
   suffix: string;
   producer?: "core" | "harbor" | "fixture";
   operation_status?: "accepted" | "running" | "terminal" | "unknown_outcome";
+  result_status?: "available" | "unavailable";
+  unavailable_reason?: "operation_result_unknown" | "reconciliation_unknown";
 }): Record<string, unknown> {
   const producer = input.producer ?? "harbor";
   const operationStatus = input.operation_status ?? "terminal";
+  const resultStatus = input.result_status ?? "available";
   const operationRef = `operation_media_${input.suffix}`;
   const postCheckRef = `postcheck_media_${input.suffix}`;
   const reconciliationRef = `reconcile_media_${input.suffix}`;
@@ -269,8 +272,9 @@ function mediaOutput(input: {
     : { status: "not_required", entrypoint: "none" };
   return {
     result_kind: "xhs_publish_note_image_text_media",
-    status: "available",
-    classification: "success_result",
+    status: resultStatus,
+    classification: resultStatus === "available" ? "success_result" : "not_normalizable",
+    ...(input.unavailable_reason === undefined ? {} : { unavailable_reason: input.unavailable_reason }),
     normalized: {
       action_id: input.action_id,
       requested_path: input.requested_path,
@@ -1445,9 +1449,10 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
   }
 
   for (const testCase of [
-    { name: "fixture", producer: "fixture" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const },
-    { name: "accepted", producer: "harbor" as const, operation_status: "accepted" as const, expectedStatus: "unknown_outcome" as const },
-    { name: "running", producer: "harbor" as const, operation_status: "running" as const, expectedStatus: "unknown_outcome" as const }
+    { name: "fixture", producer: "fixture" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "available" as const },
+    { name: "accepted", producer: "harbor" as const, operation_status: "accepted" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
+    { name: "running", producer: "harbor" as const, operation_status: "running" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
+    { name: "unavailable-unknown", producer: "harbor" as const, operation_status: "unknown_outcome" as const, expectedStatus: "unknown_outcome" as const, result_status: "unavailable" as const }
   ]) {
     const directory = await mkdtemp(join(tmpdir(), `webenvoy-xhs-media-${testCase.name}-`));
     try {
@@ -1501,7 +1506,8 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
             runtime_session_ref: runtimeSessionRef,
             suffix: testCase.name,
             producer: testCase.producer,
-            operation_status: testCase.operation_status
+            operation_status: testCase.operation_status,
+            ...(testCase.result_status === undefined ? {} : { result_status: testCase.result_status, unavailable_reason: "operation_result_unknown" as const })
           });
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
