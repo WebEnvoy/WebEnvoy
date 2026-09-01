@@ -106,6 +106,13 @@ export function takePendingWritePrecheckContinuation(
   return Date.parse(pending.expires_at) > now ? pending : undefined;
 }
 
+/** Check a pending continuation without consuming it. */
+export function hasPendingWritePrecheckContinuation(confirmationDecisionRef: string, now = Date.now()): boolean {
+  prunePendingWritePrecheckContinuations(now);
+  const pending = pendingWritePrecheckContinuations.get(confirmationDecisionRef);
+  return pending !== undefined && Date.parse(pending.expires_at) > now;
+}
+
 export function clearPendingWritePrecheckContinuations(runId: string): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {
     if (pending.run_id === runId) pendingWritePrecheckContinuations.delete(ref);
@@ -470,64 +477,71 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
         };
       }
       if (!reserved.run_claim_token) throw new TaskThreadStoreError("run_claim_missing");
-      let submitted: TaskSubmissionHttpResult;
-      try {
-        submitted = await input.submitTask(body, reserved.run_claim_token, {
-          thread_id: threadId,
-          turn_id: reserved.turn.turn_id,
-          turn_sequence: reserved.turn.sequence,
-          idempotency_key: idempotencyKey
+      const runClaimToken = reserved.run_claim_token;
+      const finishSubmission = async (): Promise<TaskThreadApiResult> => {
+        let submitted: TaskSubmissionHttpResult;
+        try {
+          submitted = await input.submitTask(body, runClaimToken, {
+            thread_id: threadId,
+            turn_id: reserved.turn.turn_id,
+            turn_sequence: reserved.turn.sequence,
+            idempotency_key: idempotencyKey
+          });
+        } catch {
+          const updated = await input.store!.recordTaskTurnSubmission(threadId, reserved.turn.turn_id, {
+            accepted: true,
+            http_status: 500,
+            ok: false,
+            failure_code: "task_submission_interrupted",
+            error: submissionInterrupted().error
+          });
+          return {
+            handled: true,
+            status: 500,
+            body: {
+              ...submissionInterrupted(),
+              replayed: false,
+              thread: updated,
+              turn: threadTurn(updated, reserved.turn.turn_id)
+            }
+          };
+        }
+        const updated = await input.store!.recordTaskTurnSubmission(threadId, reserved.turn.turn_id, {
+          accepted: submitted.run_record_present,
+          http_status: submitted.status,
+          ok: submitted.body.ok === true,
+          ...(submitted.failure_code === undefined ? {} : { failure_code: submitted.failure_code }),
+          ...(submitted.body.error === undefined ? {} : { error: submitted.body.error })
         });
-      } catch {
-        const updated = await input.store.recordTaskTurnSubmission(threadId, reserved.turn.turn_id, {
-          accepted: true,
-          http_status: 500,
-          ok: false,
-          failure_code: "task_submission_interrupted",
-          error: submissionInterrupted().error
+        await registerPendingWritePrecheckContinuation({
+          ...(input.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: input.authorizationDecisionStore }),
+          ...(input.runRecordStore === undefined ? {} : { runRecordStore: input.runRecordStore }),
+          body,
+          submitted,
+          run_id: runId,
+          turn_id: reserved.turn.turn_id,
+          authorization_context: {
+            thread_id: threadId,
+            turn_id: reserved.turn.turn_id,
+            turn_sequence: reserved.turn.sequence,
+            idempotency_key: idempotencyKey
+          }
         });
         return {
           handled: true,
-          status: 500,
+          status: submitted.status,
           body: {
-            ...submissionInterrupted(),
+            ...submitted.body,
             replayed: false,
             thread: updated,
             turn: threadTurn(updated, reserved.turn.turn_id)
           }
         };
-      }
-      const updated = await input.store.recordTaskTurnSubmission(threadId, reserved.turn.turn_id, {
-        accepted: submitted.run_record_present,
-        http_status: submitted.status,
-        ok: submitted.body.ok === true,
-        ...(submitted.failure_code === undefined ? {} : { failure_code: submitted.failure_code }),
-        ...(submitted.body.error === undefined ? {} : { error: submitted.body.error })
-      });
-      await registerPendingWritePrecheckContinuation({
-        ...(input.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: input.authorizationDecisionStore }),
-        ...(input.runRecordStore === undefined ? {} : { runRecordStore: input.runRecordStore }),
-        body,
-        submitted,
-        run_id: runId,
-        turn_id: reserved.turn.turn_id,
-        authorization_context: {
-          thread_id: threadId,
-          turn_id: reserved.turn.turn_id,
-          turn_sequence: reserved.turn.sequence,
-          idempotency_key: idempotencyKey
-        }
-      });
-      return {
-        handled: true,
-        status: submitted.status,
-        body: {
-          ...submitted.body,
-          replayed: false,
-          thread: updated,
-          turn: threadTurn(updated, reserved.turn.turn_id)
-        }
       };
+      const isWritePrecheckPackage = packageRef === writePrecheckPackageRef || packageRef === pathPreparePackageRef;
+      return isWritePrecheckPackage
+        ? await (input.withWritePrecheckRunLock ?? withWritePrecheckRunLock)(runId, finishSubmission)
+        : await finishSubmission();
     }
 
     if (terminateMatch && input.method === "POST") {
@@ -536,20 +550,28 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
       if (!threadId || !turnId) return { handled: true, status: 400, body: requestError("turn_id_invalid") };
       const before = await input.store.getTaskThread(threadId);
       if (!before) throw new TaskThreadStoreError("thread_not_found");
-      const turn = threadTurn(before, turnId);
+      const initialTurn = threadTurn(before, turnId);
       const terminate = async () => {
+        const latest = await input.store!.getTaskThread(threadId);
+        if (!latest) throw new TaskThreadStoreError("thread_not_found");
+        const turn = threadTurn(latest, turnId);
         const run = input.runRecordStore
           ? await input.runRecordStore.getRunRecord(turn.run_id)
           : undefined;
-        if (isExactWritePrecheckRun(run)) {
+        const terminalWritePrecheckOverride = run?.status === "unknown_outcome" || run?.status === "manual_recovery_required";
+        const exactTerminalWritePrecheck = run !== undefined &&
+          (isExactWritePrecheckRun(run) || (terminalWritePrecheckOverride && isExactWritePrecheckRun({ ...run, status: "requires_user_action" })));
+        if (run && exactTerminalWritePrecheck) {
           await cancelAuthorizationDecisions(input.authorizationDecisionStore, turn);
           clearPendingWritePrecheckContinuations(turn.run_id);
-          await input.runRecordStore!.cancelRequiresUserActionRun(turn.run_id);
+          if (run.status === "requires_user_action") {
+            await input.runRecordStore!.cancelRequiresUserActionRun(turn.run_id);
+          }
         }
         return input.store!.terminateTaskTurn(threadId, turnId);
       };
       const thread = input.withWritePrecheckRunLock
-        ? await input.withWritePrecheckRunLock(turn.run_id, terminate)
+        ? await input.withWritePrecheckRunLock(initialTurn.run_id, terminate)
         : await terminate();
       return { handled: true, status: 200, body: { ok: true, thread, turn: threadTurn(thread, turnId) } };
     }
