@@ -2,7 +2,9 @@ import { ownerApiResponseMaxBytes, readBoundedJsonResponse } from "../../src/ele
 import { checkRejectedAuthorizationDecisions } from "./authorization-decision-contract-smoke";
 import {
   compatibilityTargetFieldId,
+  createActionPendingCompatibility,
   createSkillIdentityCompatibilityRequest,
+  isCandidateUsable,
   parseSkillIdentityCompatibilityResponse,
   projectCompatibilityTarget,
 } from "../../src/renderer/coreIdentityCompatibilityClient";
@@ -612,6 +614,10 @@ function checkTurnInputProjection(xhsSkill: LodeCatalogSkill) {
 }
 
 function checkRequestProjection({ detailSkill, identityEnvironmentRef, xhsSkill }: SmokeInput) {
+  const actionPending = createActionPendingCompatibility([identityEnvironmentRef]);
+  if (!isCandidateUsable(actionPending.candidates[0]) || actionPending.candidates[0]?.recoveryAction !== "retry_at_task_submission") {
+    throw new Error("A multi-action skill could not enter composition before its exact action compatibility check.");
+  }
   const request = createSkillIdentityCompatibilityRequest(xhsSkill, [identityEnvironmentRef]);
   if (request == null) throw new Error("Compatibility request was not projected from owner metadata.");
   const ambiguousAction = createSkillIdentityCompatibilityRequest({ ...xhsSkill, actions: [...xhsSkill.actions, xhsSkill.actions[0]!] }, [identityEnvironmentRef]);

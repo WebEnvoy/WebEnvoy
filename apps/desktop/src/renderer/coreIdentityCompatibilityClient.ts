@@ -165,6 +165,20 @@ export function createAwaitingTargetCompatibility(identityEnvironmentRefs: strin
   };
 }
 
+export function createActionPendingCompatibility(identityEnvironmentRefs: string[]): SkillIdentityCompatibilityState {
+  const refs = [...new Set(identityEnvironmentRefs.filter((value) => value.length > 0))];
+  return {
+    status: "ready",
+    summary: refs.length > 0 ? "选择具体动作后在提交时检查账号身份。" : "当前站点没有账号身份候选。",
+    candidates: refs.map((identityEnvironmentRef) => ({
+      identityEnvironmentRef,
+      status: "unknown_until_runtime",
+      reasonCodes: ["action_required"],
+      recoveryAction: "retry_at_task_submission",
+    })),
+  };
+}
+
 export function compatibilityTargetFieldId(skill: LodeCatalogSkill) {
   if (!skillRequiresExactTarget(skill)) return undefined;
   const fields = skill.inputFields.filter((field) => field.required && field.format === "uri");

@@ -39,6 +39,7 @@ type CheckCompatibility = (
   skill: LodeCatalogSkill,
   identityId: string,
   targetRef?: string,
+  actionId?: string,
 ) => Promise<SkillIdentityCompatibilityState | null>;
 
 type CreateTaskShellProps = {
@@ -250,7 +251,8 @@ function CreateTaskComposer(props: CreateTaskComposerProps) {
     onPreSubmit={async (draft: SkillInputDraft) => {
       const fieldId = compatibilityTargetFieldId(selection.skill);
       const targetRef = selection.targetRef ?? compatibilityTargetValue(draft, fieldId);
-      const state = await props.onCheckCompatibility(selection.skill, identity.id, targetRef);
+      const actionId = typeof draft.values.action_id === "string" ? draft.values.action_id : undefined;
+      const state = await props.onCheckCompatibility(selection.skill, identity.id, targetRef, actionId);
       const candidate = compatibilityCandidate(identity, state ?? props.compatibility);
       return isCandidateUsable(candidate)
         ? { ok: true }
