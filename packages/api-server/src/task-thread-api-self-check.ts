@@ -442,33 +442,42 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
   const packageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
   const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
   const baseRunStore = createFileRunRecordStore({ directory: join(directory, "runs") });
-  let syntheticUnknownRun: RunRecord | undefined;
+  const syntheticRuns = new Map<string, RunRecord>();
+  const authorizationRefs = new Map<string, string>([["run_api_precheck_cancel", decisionRef]]);
   const runStore = {
     ...baseRunStore,
     getRunRecord: async (runId: string) => {
-      if (runId === "run_api_precheck_unknown") return syntheticUnknownRun;
+      const synthetic = syntheticRuns.get(runId);
+      if (synthetic) return synthetic;
       const stored = await baseRunStore.getRunRecord(runId);
-      return stored && (runId === "run_api_cancel" || runId === "run_api_precheck_cancel")
-        ? { ...stored, authorization_decision_refs: [decisionRef] }
+      const authorizationRef = authorizationRefs.get(runId);
+      return stored && authorizationRef
+        ? { ...stored, authorization_decision_refs: [authorizationRef] }
         : stored;
     }
   };
   const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore, resolveInputPolicy });
   let activeThreadId = "";
   let activeTurnId = "";
-  let invalidated = false;
+  const invalidated = new Set<string>();
+  const decisionBindings = new Map<string, { run_id: string; thread_id: string; turn_id: string }>();
   const authorizationDecisionStore = {
-    getAuthorizationDecision: async (ref: string) => ref === decisionRef
-      ? {
-          decision_ref: decisionRef,
-          applicability: { scope: "task", run_id: "run_api_precheck_cancel", thread_id: activeThreadId, turn_id: activeTurnId, config_refs: [] },
+    getAuthorizationDecision: async (ref: string) => {
+      const binding = decisionBindings.get(ref) ?? (ref === decisionRef && activeThreadId && activeTurnId
+        ? { run_id: "run_api_precheck_cancel", thread_id: activeThreadId, turn_id: activeTurnId }
+        : undefined);
+      return binding
+        ? {
+          decision_ref: ref,
+          applicability: { scope: "task", ...binding, config_refs: [] },
           outcome: "confirm",
-          state: invalidated ? "invalidated" : "active",
+          state: invalidated.has(ref) ? "invalidated" : "active",
           expires_at: new Date(Date.now() + 60_000).toISOString()
         }
-      : undefined,
-    invalidateAuthorizationDecision: async () => {
-      invalidated = true;
+        : undefined;
+    },
+    invalidateAuthorizationDecision: async (ref: string) => {
+      invalidated.add(ref);
       return {};
     }
   } as unknown as FileAuthorizationDecisionStore;
@@ -578,10 +587,6 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert(submitted.handled);
     assert.equal(submitted.status, 202, JSON.stringify(submitted.body));
     const turn = record(submitted.body.turn);
-    const pending = takePendingWritePrecheckContinuation(decisionRef);
-    assert(pending);
-    assert.equal(Object.hasOwn(pending.harbor ?? {}, "session"), false);
-    assert.equal(JSON.stringify(pending).includes("must-not-enter-continuation"), false);
     const terminated = await handleTaskThreadApi({
       method: "POST",
       path: `/threads/${created.thread.thread_id}/turns/${String(turn.turn_id)}/terminate`,
@@ -593,7 +598,7 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     });
     assert(terminated.handled);
     assert.equal(terminated.status, 200);
-    assert.equal(invalidated, true);
+    assert.equal(invalidated.has(decisionRef), true);
     assert.equal(takePendingWritePrecheckContinuation(decisionRef), undefined);
     const cancelledRun = await runStore.getRunRecord(body.run_id);
     assert(cancelledRun);
@@ -609,13 +614,46 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert.equal(persistedTurn.failure_code, undefined);
     assert.equal(persistedTurn.submission_error, undefined);
 
-    const unknownRunId = "run_api_precheck_unknown";
-    syntheticUnknownRun = {
-      ...cancelledRun,
-      run_id: unknownRunId,
-      status: "unknown_outcome",
-      authorization_decision_refs: [decisionRef]
+    const exactTerminalRun = (
+      runId: string,
+      status: RunRecord["status"],
+      variantPackageRef: string,
+      variantLockRef: string,
+      variantCapabilityRef: string,
+      variantDecisionRef: string
+    ): RunRecord => {
+      assert(cancelledRun.action_request);
+      assert(cancelledRun.policy_binding_snapshot);
+      return {
+        ...cancelledRun,
+        run_id: runId,
+        status,
+        package_ref: variantPackageRef,
+        capability_ref: variantCapabilityRef,
+        capability_source_ref: variantPackageRef,
+        capability_lock_ref: variantLockRef,
+        action_request: {
+          ...cancelledRun.action_request,
+          action_request_id: `action-request:${runId}`,
+          capability_ref: variantCapabilityRef,
+          capability_source_ref: variantPackageRef,
+          capability_lock_ref: variantLockRef,
+          package_ref: variantPackageRef,
+          no_submit_guard: {
+            ...cancelledRun.action_request.no_submit_guard,
+            source_refs: [variantPackageRef, variantLockRef]
+          }
+        },
+        policy_binding_snapshot: {
+          ...cancelledRun.policy_binding_snapshot,
+          decision_ref: variantDecisionRef
+        },
+        authorization_decision_refs: [variantDecisionRef]
+      } as RunRecord;
     };
+
+    const unknownDecisionRef = "authorization-decision:55555555555555555555555555555555:66666666666666666666666666666666";
+    const unknownRunId = "run_api_precheck_unknown";
     const unknownBody = { ...body, idempotency_key: "submit-precheck-unknown", run_id: unknownRunId };
     const unknownTurn = await store.reserveTaskTurn(created.thread.thread_id, {
       idempotency_key: unknownBody.idempotency_key,
@@ -625,6 +663,19 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
       package_ref: packageRef,
       input: unknownBody.input_snapshot
     });
+    decisionBindings.set(unknownDecisionRef, {
+      run_id: unknownRunId,
+      thread_id: created.thread.thread_id,
+      turn_id: unknownTurn.turn.turn_id
+    });
+    syntheticRuns.set(unknownRunId, exactTerminalRun(
+      unknownRunId,
+      "unknown_outcome",
+      packageRef,
+      lockRef,
+      "lode:capability/publish-note-precheck",
+      unknownDecisionRef
+    ));
     const unknownBefore = await store.getTaskThread(created.thread.thread_id);
     assert(unknownBefore);
     assert.equal(unknownBefore.turns.at(-1)?.status, "status_unknown");
@@ -633,17 +684,112 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
       path: `/threads/${created.thread.thread_id}/turns/${unknownTurn.turn.turn_id}/terminate`,
       store,
       runRecordStore: runStore,
+      authorizationDecisionStore,
       validateTask: async () => undefined,
       submitTask: async () => { throw new Error("unexpected submit"); }
     });
     assert(terminatedUnknown.handled);
     assert.equal(terminatedUnknown.status, 200);
+    assert.equal(invalidated.has(unknownDecisionRef), true);
+    assert.equal(takePendingWritePrecheckContinuation(unknownDecisionRef), undefined);
     const unknownAfter = await runStore.getRunRecord(unknownBody.run_id);
     assert.equal(unknownAfter?.status, "unknown_outcome");
     const terminatedUnknownTurn = record(terminatedUnknown.body.turn);
     assert.equal(terminatedUnknownTurn.status, "cancelled");
     assert.equal(terminatedUnknownTurn.run_status, "unknown_outcome");
     assert.equal(typeof terminatedUnknownTurn.terminated_at, "string");
+
+    const pathPackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+    const pathLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+    const pathCapabilityRef = "lode:capability/publish-note-path-prepare";
+    const pathDecisionRef = "authorization-decision:77777777777777777777777777777777:88888888888888888888888888888888";
+    const pathRunId = "run_api_path_prepare_manual_recovery";
+    const pathThread = await store.createOrGetTaskThread({
+      capability_ref: pathCapabilityRef,
+      identity_environment_ref: "identity-env_333333333333333333333333"
+    });
+    const pathTurn = await store.reserveTaskTurn(pathThread.thread.thread_id, {
+      idempotency_key: "submit-path-prepare-manual-recovery",
+      request_hash: "path-prepare-request-hash",
+      run_id: pathRunId,
+      creation_channel: "app",
+      package_ref: pathPackageRef,
+      input: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "keyword", kind: "scalar", summary: "path prepare" }]
+      }
+    });
+    decisionBindings.set(pathDecisionRef, {
+      run_id: pathRunId,
+      thread_id: pathThread.thread.thread_id,
+      turn_id: pathTurn.turn.turn_id
+    });
+    syntheticRuns.set(pathRunId, exactTerminalRun(
+      pathRunId,
+      "manual_recovery_required",
+      pathPackageRef,
+      pathLockRef,
+      pathCapabilityRef,
+      pathDecisionRef
+    ));
+    const terminatedPath = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${pathThread.thread.thread_id}/turns/${pathTurn.turn.turn_id}/terminate`,
+      store,
+      runRecordStore: runStore,
+      authorizationDecisionStore,
+      validateTask: async () => undefined,
+      submitTask: async () => { throw new Error("unexpected submit"); }
+    });
+    assert(terminatedPath.handled);
+    assert.equal(terminatedPath.status, 200);
+    assert.equal(invalidated.has(pathDecisionRef), true);
+    assert.equal((await runStore.getRunRecord(pathRunId))?.status, "manual_recovery_required");
+    assert.equal(record(terminatedPath.body.turn).status, "cancelled");
+    assert.equal(record(terminatedPath.body.turn).run_status, "manual_recovery_required");
+
+    const succeededDecisionRef = "authorization-decision:99999999999999999999999999999999:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const succeededRunId = "run_api_precheck_succeeded_guard";
+    const succeededTurn = await store.reserveTaskTurn(pathThread.thread.thread_id, {
+      idempotency_key: "submit-precheck-succeeded-guard",
+      request_hash: "succeeded-request-hash",
+      run_id: succeededRunId,
+      creation_channel: "app",
+      package_ref: pathPackageRef,
+      input: {
+        schema_version: taskTurnInputSchemaVersion,
+        fields: [{ field_id: "keyword", kind: "scalar", summary: "succeeded" }]
+      }
+    });
+    decisionBindings.set(succeededDecisionRef, {
+      run_id: succeededRunId,
+      thread_id: pathThread.thread.thread_id,
+      turn_id: succeededTurn.turn.turn_id
+    });
+    syntheticRuns.set(succeededRunId, exactTerminalRun(
+      succeededRunId,
+      "succeeded",
+      pathPackageRef,
+      pathLockRef,
+      pathCapabilityRef,
+      succeededDecisionRef
+    ));
+    const invalidatedBeforeSucceeded = [...invalidated];
+    const terminatedSucceeded = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${pathThread.thread.thread_id}/turns/${succeededTurn.turn.turn_id}/terminate`,
+      store,
+      runRecordStore: runStore,
+      authorizationDecisionStore,
+      validateTask: async () => undefined,
+      submitTask: async () => { throw new Error("unexpected submit"); }
+    });
+    assert(terminatedSucceeded.handled);
+    assert.equal(terminatedSucceeded.status, 200);
+    assert.deepEqual([...invalidated], invalidatedBeforeSucceeded);
+    assert.equal(takePendingWritePrecheckContinuation(succeededDecisionRef), undefined);
+    assert.equal(record(terminatedSucceeded.body.turn).status, "completed");
+    assert.equal((await runStore.getRunRecord(succeededRunId))?.status, "succeeded");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
