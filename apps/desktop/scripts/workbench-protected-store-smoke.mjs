@@ -7,6 +7,9 @@ import { pathToFileURL } from "node:url";
 const { ProtectedWorkbenchStore } = await import(
   pathToFileURL(path.resolve("dist-electron/protectedWorkbenchStore.js")).href
 );
+const { createProtectedMediaRefResolver } = await import(
+  pathToFileURL(path.resolve("dist-electron/runtimeSupervisor.js")).href
+);
 const root = await mkdtemp(path.join(os.tmpdir(), "webenvoy-protected-store-"));
 const storePath = path.join(root, "protected-workbench.bin");
 const selectedPath = path.join(root, "selected.txt");
@@ -47,6 +50,48 @@ try {
     lastModified: Date.now(),
   });
   if (localRef == null) throw new Error("Selected file was not registered.");
+  const mediaResolver = createProtectedMediaRefResolver(first, "smoke-media-resolver-token");
+  let mediaResolverProtected = false;
+  try {
+    const mediaResolverConfig = await mediaResolver.start();
+    if (!mediaResolverConfig.endpoint.startsWith("http://127.0.0.1:") || !mediaResolverConfig.endpoint.endsWith("/internal/media/resolve")) {
+      throw new Error("Protected media resolver did not bind its bounded loopback endpoint.");
+    }
+    const unauthorized = await fetch(mediaResolverConfig.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ local_file_ref: localRef }),
+    });
+    if (unauthorized.status !== 404) throw new Error("Protected media resolver accepted a request without its token.");
+    const resolved = await fetch(mediaResolverConfig.endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer smoke-media-resolver-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ local_file_ref: localRef }),
+    });
+    const resolvedBody = await resolved.json();
+    if (resolved.status !== 200 || JSON.stringify(resolvedBody) !== JSON.stringify({ path: selectedPath })) {
+      throw new Error("Protected media resolver did not resolve the registered readable file.");
+    }
+    const arbitraryPath = await fetch(mediaResolverConfig.endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer smoke-media-resolver-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ local_file_ref: selectedPath }),
+    });
+    const extraField = await fetch(mediaResolverConfig.endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer smoke-media-resolver-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ local_file_ref: localRef, path: selectedPath }),
+    });
+    const wrongMethod = await fetch(mediaResolverConfig.endpoint, {
+      headers: { Authorization: "Bearer smoke-media-resolver-token" },
+    });
+    if (arbitraryPath.status !== 404 || extraField.status !== 400 || wrongMethod.status !== 404) {
+      throw new Error("Protected media resolver accepted an arbitrary path, extra request field, or non-POST route.");
+    }
+    mediaResolverProtected = true;
+  } finally {
+    await mediaResolver.stop();
+  }
   const orphanRef = await first.registerFile({
     path: selectedPath,
     name: "orphan.txt",
@@ -206,7 +251,7 @@ try {
   if (unavailable.available || await unavailable.saveDraft({ context, values: {}, attachments: {}, omittedFieldIds: [] })) {
     throw new Error("Unavailable safe storage did not fail closed.");
   }
-  process.stdout.write(`${JSON.stringify({ restartRestored: true, sealedOwnerRefs: true, sealedInputReleased: true, sealedCapacityReused: true, sealedCapacityFailedClosed: true, v1Migrated: true, unknownTopLevelRejected: true, arbitraryPathRejected: true, capacityPreservedOwnedRef: true, queueRecovered: true, orphanRefReleased: true, removedRefRevoked: true, sensitiveValuesRejected: true, corruptRecovered: true })}\n`);
+  process.stdout.write(`${JSON.stringify({ restartRestored: true, sealedOwnerRefs: true, sealedInputReleased: true, sealedCapacityReused: true, sealedCapacityFailedClosed: true, v1Migrated: true, unknownTopLevelRejected: true, arbitraryPathRejected: true, mediaResolverProtected, capacityPreservedOwnedRef: true, queueRecovered: true, orphanRefReleased: true, removedRefRevoked: true, sensitiveValuesRejected: true, corruptRecovered: true })}\n`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

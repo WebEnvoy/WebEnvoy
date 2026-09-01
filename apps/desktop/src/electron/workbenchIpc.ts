@@ -65,6 +65,8 @@ export async function registerWorkbenchIpc(
       ? { status: "rejected" }
       : !store.available ? { status: "unavailable" } : { status: await store.releaseSealedInputs(ownerRefs) ? "ready" : "rejected" },
   );
+
+  return store;
 }
 
 export function authorizedWorkbenchWindow(

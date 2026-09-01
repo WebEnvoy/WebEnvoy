@@ -185,14 +185,14 @@ const parentTokenEnvironment = {
 const harborChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "harbor",
   "packaged-path",
-  { HARBOR_RUNTIME_PORT: "8788" },
+  { HARBOR_RUNTIME_PORT: "8788", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
 );
 const coreChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "core",
   "packaged-path",
-  { PORT: "8787" },
+  { PORT: "8787", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
 );
@@ -201,6 +201,10 @@ if (
   coreChildEnvironment.HARBOR_RUNTIME_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   harborChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   coreChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== undefined ||
+  harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== "http://127.0.0.1:48123/internal/media/resolve" ||
+  harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_TOKEN !== "resolver-token" ||
+  coreChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== undefined ||
+  coreChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_TOKEN !== undefined ||
   harborChildEnvironment.SAFE_PARENT_VALUE !== "kept" ||
   coreChildEnvironment.SAFE_PARENT_VALUE !== "kept"
 ) {
