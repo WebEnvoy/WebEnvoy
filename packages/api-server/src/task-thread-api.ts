@@ -106,6 +106,13 @@ export function takePendingWritePrecheckContinuation(
   return Date.parse(pending.expires_at) > now ? pending : undefined;
 }
 
+/** Check a pending continuation without consuming it. */
+export function hasPendingWritePrecheckContinuation(confirmationDecisionRef: string, now = Date.now()): boolean {
+  prunePendingWritePrecheckContinuations(now);
+  const pending = pendingWritePrecheckContinuations.get(confirmationDecisionRef);
+  return pending !== undefined && Date.parse(pending.expires_at) > now;
+}
+
 export function clearPendingWritePrecheckContinuations(runId: string): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {
     if (pending.run_id === runId) pendingWritePrecheckContinuations.delete(ref);
