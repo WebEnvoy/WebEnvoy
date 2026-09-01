@@ -7,10 +7,19 @@ import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionSto
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
 import { projectRunSummary } from "./run-query.js";
-import { continueWritePrecheckTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
+import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
-import type { LodePackageAdmissionContract } from "./lode-admission.js";
+import {
+  xhsMediaActionPaths,
+  xhsMediaCapabilityId,
+  xhsMediaLockRef,
+  xhsMediaOperationId,
+  xhsMediaPackageRef,
+  type LodePackageAdmissionContract,
+  type XhsMediaActionId
+} from "./lode-admission.js";
+import type { AuthorizationDecisionSummary } from "./authorization-decision.js";
 import type { TaskIntentEnvelope } from "./task-submission.js";
 import {
   evaluateWritePrecheckTaskPolicy,
@@ -141,6 +150,201 @@ function configStore(mode: ExecutionPolicyMode): FileExecutionPolicyConfigStore 
       }
     })
   } as unknown as FileExecutionPolicyConfigStore;
+}
+
+function mediaConfigStore(mode: ExecutionPolicyMode): FileExecutionPolicyConfigStore {
+  return {
+    resolveSources: async () => ({
+      global_user_config: {
+        source_ref: "execution-policy:global_user_config:media",
+        source_version: "1",
+        modes: { read: "auto", prepare: "auto", commit: mode, destructive: "deny" }
+      }
+    })
+  } as unknown as FileExecutionPolicyConfigStore;
+}
+
+function mediaContract(): LodePackageAdmissionContract {
+  const action = (actionId: XhsMediaActionId, profileId: string, effect: string) => ({
+    action_id: actionId,
+    category: "commit" as const,
+    target_scope: {
+      site_slug: "xiaohongshu",
+      target_types: ["creator_publish_page"],
+      supported_origins: ["https://creator.xiaohongshu.com"]
+    },
+    resource_requirements: {
+      path: "resource-requirements.json",
+      id: "xiaohongshu.publish-note-image-text-media.resources",
+      profile_ids: [profileId]
+    },
+    external_effects: [effect]
+  });
+  return {
+    package_ref: xhsMediaPackageRef,
+    source_ref: xhsMediaPackageRef,
+    lock_ref: xhsMediaLockRef,
+    capability_id: xhsMediaCapabilityId,
+    operation_id: xhsMediaOperationId,
+    operation_mode: "write",
+    version: "0.1.0",
+    lifecycle: "proposed",
+    runtime_admission: {
+      enabled: true,
+      status: "controlled_evidence",
+      recheck_condition: "formal_live_evidence_required"
+    },
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [
+        action("xhs_publish_note_image_text_media.image_upload", "xhs-image-upload", "upload"),
+        action("xhs_publish_note_image_text_media.text_to_image_generate", "xhs-text-to-image-generate", "create")
+      ]
+    },
+    resource_requirements: {
+      schema_version: "lode.resource-requirements.v0",
+      resource_requirements_id: "xiaohongshu.publish-note-image-text-media.resources",
+      package_ref: xhsMediaPackageRef,
+      operation_mode: "write",
+      resource_requirement_profiles: [
+        { requirement_profile_id: "xhs-image-upload" },
+        { requirement_profile_id: "xhs-text-to-image-generate" }
+      ]
+    }
+  };
+}
+
+function mediaTaskIntent(
+  actionId: XhsMediaActionId = "xhs_publish_note_image_text_media.image_upload",
+  intentId = "intent_xhs_media_action",
+  refs = ["attachment:fixture/image-1"]
+): TaskIntentEnvelope {
+  const requestedPath = xhsMediaActionPaths[actionId];
+  const profileId = actionId === "xhs_publish_note_image_text_media.image_upload"
+    ? "xhs-image-upload"
+    : "xhs-text-to-image-generate";
+  return {
+    schema_version: "webenvoy.task-intent.v0",
+    intent_id: intentId,
+    entrypoint: "app",
+    user_intent: { summary: "准备小红书图文媒体" },
+    capability: {
+      ref: `lode:capability/${xhsMediaCapabilityId}`,
+      version: "0.1.0",
+      source_ref: xhsMediaPackageRef,
+      lock_ref: xhsMediaLockRef
+    },
+    input: { summary: "准备一条图文媒体动作", action_id: actionId, requested_path: requestedPath, refs },
+    scope: {
+      target_type: "creator_publish_page",
+      target_ref: "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image"
+    },
+    policy: { risk: "write", execution_intent: "execute_after_approval" },
+    resource_requirement_refs: ["xiaohongshu.publish-note-image-text-media.resources"],
+    resource_requirement_profile_id: profileId,
+    evidence_policy_ref: "policy:no-raw-evidence"
+  };
+}
+
+function mediaOutput(input: {
+  action_id: XhsMediaActionId;
+  requested_path: string;
+  canonical_url: string;
+  target_ref: string;
+  runtime_session_ref: string;
+  suffix: string;
+  producer?: "core" | "harbor" | "fixture";
+  operation_status?: "accepted" | "running" | "terminal" | "unknown_outcome";
+}): Record<string, unknown> {
+  const producer = input.producer ?? "harbor";
+  const operationStatus = input.operation_status ?? "terminal";
+  const operationRef = `operation_media_${input.suffix}`;
+  const postCheckRef = `postcheck_media_${input.suffix}`;
+  const reconciliationRef = `reconcile_media_${input.suffix}`;
+  const mediaRefId = `media_readback_${input.suffix}`;
+  const pageRef = `page_readback_${input.suffix}`;
+  const recovery = operationStatus === "unknown_outcome"
+    ? { status: "required", entrypoint: "manual_reconciliation" }
+    : { status: "not_required", entrypoint: "none" };
+  return {
+    result_kind: "xhs_publish_note_image_text_media",
+    status: "available",
+    classification: "success_result",
+    normalized: {
+      action_id: input.action_id,
+      requested_path: input.requested_path,
+      canonical_url: input.canonical_url,
+      target_ref: input.target_ref,
+      summary: "Harbor returned bounded media action evidence.",
+      source_status: "located",
+      business_effect: {
+        kind: input.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate",
+        status: operationStatus === "terminal" ? "observed" : "unknown"
+      },
+      operation: {
+        status: operationStatus,
+        operation_ref: operationRef,
+        ...(operationStatus === "terminal" ? { terminal_state: "success" } : {})
+      },
+      media_readback: {
+        status: operationStatus === "terminal" ? "observed" : "unknown",
+        media_count: operationStatus === "terminal" ? 1 : null,
+        order_status: operationStatus === "terminal" ? "observed" : "unknown",
+        generation_result_ref: null,
+        ordered_item_refs: operationStatus === "terminal" ? [mediaRefId] : []
+      },
+      page_readback: {
+        status: operationStatus === "terminal" ? "observed" : "unknown",
+        page_state_ref: pageRef,
+        route_state: operationStatus === "terminal" ? "observed" : "unknown"
+      },
+      post_check: { status: operationStatus === "terminal" ? "passed" : "skipped", ref: postCheckRef },
+      reconciliation: { status: operationStatus === "terminal" ? "matched" : "unknown", ref: reconciliationRef },
+      recovery,
+      save_draft: "not_in_scope",
+      publish: "not_in_scope",
+      submitted: false
+    },
+    source_refs: [
+      { ref_id: `source_media_${input.suffix}`, source_kind: "media_action_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" },
+      { ref_id: pageRef, source_kind: "creator_publish_page_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" }
+    ],
+    evidence_refs: [
+      { ref_id: operationRef, evidence_kind: "operation_ref", producer, redaction: "placeholder_only" },
+      { ref_id: postCheckRef, evidence_kind: "post_check_ref", producer, redaction: "placeholder_only" },
+      { ref_id: reconciliationRef, evidence_kind: "reconciliation_ref", producer, redaction: "placeholder_only" }
+    ]
+  };
+}
+
+function mediaDecisionFromConfirmation(confirmation: AuthorizationDecisionSummary): SingleActionDecision {
+  if (!confirmation.business_action || !confirmation.owner_declaration || !confirmation.effective_policy ||
+    confirmation.effective_policy.source === "single_action" || confirmation.expires_at === null) {
+    throw new Error("media_confirmation_summary_invalid");
+  }
+  return {
+    schema_version: "webenvoy.single-action-decision.v0",
+    confirmation_decision_ref: confirmation.decision_ref,
+    source_ref: "execution-policy:single-action:media",
+    source_version: "1",
+    action_instance_ref: confirmation.business_action.action_instance_ref,
+    action_id: confirmation.business_action.action_id,
+    category: confirmation.business_action.category ?? "commit",
+    target: confirmation.business_action.target,
+    owner_matcher: confirmation.owner_declaration.matcher,
+    owner_declaration_ref: confirmation.owner_declaration.declaration_ref,
+    owner_declaration_version: confirmation.owner_declaration.declaration_version,
+    resource_match_ref: confirmation.owner_declaration.resource_match_ref,
+    resource_match_version: confirmation.owner_declaration.resource_match_version,
+    effective_policy_source_ref: confirmation.applicability.config_refs[0]!,
+    effective_policy_source_version: confirmation.effective_policy.source_version,
+    effective_policy_source: confirmation.effective_policy.source,
+    mode: "auto",
+    state: "active",
+    issued_at: confirmation.decided_at,
+    expires_at: confirmation.expires_at
+  };
 }
 
 function runtimeBindingFacts(runtimeSessionRef: string, identityRef = "identity-env_xhs-policy"): HarborAdmissionInput {
@@ -1185,5 +1389,158 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     assert.deepEqual(result.run_record?.post_check?.source_refs, ["session_transport_unknown"]);
   } finally {
     await rm(unknownDirectory, { recursive: true, force: true });
+  }
+
+  await assertXhsMediaActionP1Wiring();
+}
+
+async function assertXhsMediaActionP1Wiring(): Promise<void> {
+  const mediaPackage = mediaContract();
+  const mediaIntent = mediaTaskIntent();
+
+  // Initial submission always creates a user-action checkpoint, even when
+  // the global policy says auto. Harbor must not receive a dispatch before
+  // the persisted single-action decision is supplied to continuation.
+  const autoDirectory = await mkdtemp(join(tmpdir(), "webenvoy-xhs-media-auto-confirm-"));
+  try {
+    let harborCalls = 0;
+    const runStore = createFileRunRecordStore({ directory: join(autoDirectory, "runs"), clock: () => new Date(evaluatedAt) });
+    const authorizationStore = createFileAuthorizationDecisionStore({
+      directory: join(autoDirectory, "decisions"),
+      runRecordStore: runStore,
+      taskThreadStore: {
+        getTaskThread: async () => ({
+          thread_id: context.thread_id,
+          turns: [{ turn_id: context.turn_id, run_id: "app-xhs-media-auto-confirm" }]
+        })
+      },
+      clock: () => new Date(evaluatedAt)
+    });
+    const result = await submitRuntimeTask(runStore, {
+      run_id: "app-xhs-media-auto-confirm",
+      task_intent: mediaIntent,
+      package_ref: mediaPackage.package_ref,
+      authorization_context: { ...context, idempotency_key: "xhs-media-auto-confirm" }
+    }, {
+      lodePackageResolver: async () => mediaPackage,
+      harborRuntimeClient: {
+        collectAdmissionFacts: async () => { harborCalls += 1; throw new Error("auto media action must wait for confirmation"); },
+        executeMediaAction: async () => { harborCalls += 1; throw new Error("auto media action must wait for confirmation"); },
+        executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+        validateOnlyWritePrecheck: async () => { throw new Error("unexpected write-precheck dispatch"); },
+        releaseCoreTaskSession: async () => undefined
+      } as HarborRuntimeClient,
+      executionPolicyConfigStore: mediaConfigStore("auto"),
+      authorizationDecisionStore: authorizationStore,
+      clock: () => new Date(evaluatedAt)
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.failure.code, "authorization_confirmation_required");
+    assert.equal(result.run_record?.status, "requires_user_action");
+    assert.equal(result.run_record?.action_request?.action_id, mediaIntent.input.action_id);
+    assert.deepEqual(result.run_record?.action_request?.target_refs, { scope_target_ref: mediaIntent.scope.target_ref });
+    assert.equal(harborCalls, 0);
+  } finally {
+    await rm(autoDirectory, { recursive: true, force: true });
+  }
+
+  for (const testCase of [
+    { name: "fixture", producer: "fixture" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const },
+    { name: "accepted", producer: "harbor" as const, operation_status: "accepted" as const, expectedStatus: "unknown_outcome" as const },
+    { name: "running", producer: "harbor" as const, operation_status: "running" as const, expectedStatus: "unknown_outcome" as const }
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), `webenvoy-xhs-media-${testCase.name}-`));
+    try {
+      const runId = `app-xhs-media-${testCase.name}`;
+      let harborCalls = 0;
+      let releaseCalls = 0;
+      const runStore = createFileRunRecordStore({ directory: join(directory, "runs"), clock: () => new Date(evaluatedAt) });
+      const authorizationStore = createFileAuthorizationDecisionStore({
+        directory: join(directory, "decisions"),
+        runRecordStore: runStore,
+        taskThreadStore: {
+          getTaskThread: async () => ({
+            thread_id: context.thread_id,
+            turns: [{ turn_id: context.turn_id, run_id: runId }]
+          })
+        },
+        clock: () => new Date(evaluatedAt)
+      });
+      const authorizationContext = { ...context, idempotency_key: `xhs-media-${testCase.name}` };
+      const initial = await submitRuntimeTask(runStore, {
+        run_id: runId,
+        task_intent: { ...mediaIntent, intent_id: `${mediaIntent.intent_id}_${testCase.name}` },
+        package_ref: mediaPackage.package_ref,
+        authorization_context: authorizationContext
+      }, {
+        lodePackageResolver: async () => mediaPackage,
+        executionPolicyConfigStore: mediaConfigStore("auto"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(initial.ok, false, testCase.name);
+      assert.equal(initial.run_record?.status, "requires_user_action", testCase.name);
+      const confirmationRef = initial.run_record?.authorization_decision_refs?.[0];
+      assert(confirmationRef, testCase.name);
+      const confirmation = await authorizationStore.getAuthorizationDecision(confirmationRef);
+      assert(confirmation, testCase.name);
+      const singleActionDecision = mediaDecisionFromConfirmation(confirmation);
+      const runtimeSessionRef = `session_xhs_media_${testCase.name}`;
+      const harbor = {
+        collectAdmissionFacts: async () => runtimeBindingFacts(runtimeSessionRef),
+        executeMediaAction: async (input: Parameters<NonNullable<HarborRuntimeClient["executeMediaAction"]>>[0]) => {
+          harborCalls += 1;
+          assert.equal(input.authorization_binding.action_id, input.action_id, testCase.name);
+          assert.equal(input.authorization_binding.target_ref, input.target_ref, testCase.name);
+          assert.equal(input.authorization_binding.idempotency_key, authorizationContext.idempotency_key, testCase.name);
+          return mediaOutput({
+            action_id: input.action_id,
+            requested_path: input.requested_path,
+            canonical_url: input.url,
+            target_ref: input.target_ref,
+            runtime_session_ref: runtimeSessionRef,
+            suffix: testCase.name,
+            producer: testCase.producer,
+            operation_status: testCase.operation_status
+          });
+        },
+        executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+        validateOnlyWritePrecheck: async () => { throw new Error("unexpected write-precheck dispatch"); },
+        releaseCoreTaskSession: async () => { releaseCalls += 1; return undefined; }
+      } as HarborRuntimeClient;
+      const continued = await continueXhsMediaActionTask(runStore, {
+        run_id: runId,
+        task_intent: { ...mediaIntent, intent_id: `${mediaIntent.intent_id}_${testCase.name}` },
+        package_ref: mediaPackage.package_ref,
+        authorization_context: authorizationContext,
+        single_action_decision: singleActionDecision
+      }, {
+        lodePackageResolver: async () => mediaPackage,
+        harborRuntimeClient: harbor,
+        // The persisted confirmation records the source as confirm; the
+        // continuation consumes it against that same source before dispatch.
+        executionPolicyConfigStore: mediaConfigStore("confirm"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(harborCalls, 1, testCase.name);
+      assert.equal(releaseCalls, 1, testCase.name);
+      assert.equal(continued.ok, false, testCase.name);
+      assert.equal(continued.run_record?.status, testCase.expectedStatus, testCase.name);
+      if (!continued.ok && testCase.name === "fixture") {
+        assert.equal(continued.failure.code, "harbor_xhs_media_output_invalid");
+      }
+      if (!continued.ok && testCase.expectedStatus === "unknown_outcome") {
+        assert.equal(continued.failure.code, "harbor_xhs_media_operation_unknown", testCase.name);
+        assert.equal(continued.run_record?.post_check?.recovery_hint, "reconcile_status", testCase.name);
+        assert.equal(continued.run_record?.public_result_summary?.submitted, false, testCase.name);
+        const normalized = continued.run_record?.public_result_summary?.normalized as Record<string, unknown> | undefined;
+        const operation = normalized?.operation as Record<string, unknown> | undefined;
+        assert.equal(operation?.status, testCase.operation_status, testCase.name);
+        assert.equal(operation?.operation_ref, `operation_media_${testCase.name}`, testCase.name);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 }

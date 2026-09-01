@@ -6,6 +6,7 @@ import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-s
 import { matchLodeBusinessActionOwner, readBusinessActionOwnerProof } from "./execution-policy-owner-proof.js";
 import {
   evaluateExecutionPolicy,
+  type ExecutionPolicySources,
   type ExecutionPolicyEvaluation,
   type SingleActionDecision
 } from "./execution-policy.js";
@@ -168,6 +169,8 @@ export async function evaluateXhsMediaActionPolicy(input: {
   authorization_context?: MediaActionAuthorizationContext;
   config_store?: FileExecutionPolicyConfigStore;
   single_action_decision?: SingleActionDecision;
+  /** Initial submission always asks the user once, even when the configured mode is auto. */
+  require_confirmation?: boolean;
   evaluated_at: string;
 }): Promise<EvaluatedXhsMediaActionPolicy | FailureRecord> {
   const context = input.authorization_context;
@@ -219,7 +222,7 @@ export async function evaluateXhsMediaActionPolicy(input: {
     return failure("execution_policy_owner_unavailable", "retry_when_policy_owner_ready");
   }
   const targetFingerprint = hash({ target_ref: target.target_ref, target_type: input.task_intent.scope.target_type });
-  const evaluation = evaluateExecutionPolicy({
+  const evaluationInput = {
     caller: input.task_intent.entrypoint,
     evaluated_at: input.evaluated_at,
     action: {
@@ -241,7 +244,23 @@ export async function evaluateXhsMediaActionPolicy(input: {
     policies: input.single_action_decision === undefined
       ? policies
       : { ...policies, single_action_decision: input.single_action_decision }
-  });
+  } as const;
+  let evaluation = evaluateExecutionPolicy(evaluationInput);
+  if (input.require_confirmation && input.single_action_decision === undefined &&
+    evaluation.status === "evaluated" && evaluation.next_step === "execute") {
+    const source = evaluation.effective_policy.source;
+    const sourcePolicy = source === "single_action_decision" ? undefined : policies[source];
+    if (sourcePolicy) {
+      const confirmationPolicies: ExecutionPolicySources = {
+        ...policies,
+        [source]: {
+          ...sourcePolicy,
+          modes: { ...sourcePolicy.modes, [variant.action.category]: "confirm" }
+        }
+      };
+      evaluation = evaluateExecutionPolicy({ ...evaluationInput, policies: confirmationPolicies });
+    }
+  }
   return {
     evaluation,
     expires_at: new Date(Date.parse(input.evaluated_at) + confirmationTtlMs).toISOString(),

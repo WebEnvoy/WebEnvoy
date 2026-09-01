@@ -1645,7 +1645,7 @@ function validateCompletedXhsMediaAction(
     exactObjectKeys(entry, ["ref_id", "source_kind", "producer", "redaction", "schema_hint"]) &&
     mediaRef(entry.ref_id) !== undefined &&
     ["media_action_summary", "creator_publish_page_summary", "business_state_summary"].includes(string(entry.source_kind) ?? "") &&
-    ["core", "harbor", "fixture"].includes(string(entry.producer) ?? "") &&
+    ["core", "harbor"].includes(string(entry.producer) ?? "") &&
     ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "") &&
     string(entry.schema_hint) !== undefined
   ) && new Set(sourceValues).size === sourceValues.length;
@@ -1653,7 +1653,7 @@ function validateCompletedXhsMediaAction(
     exactObjectKeys(entry, ["ref_id", "evidence_kind", "producer", "redaction"]) &&
     mediaRef(entry.ref_id) !== undefined &&
     ["operation_ref", "post_check_ref", "reconciliation_ref", "snapshot_ref"].includes(string(entry.evidence_kind) ?? "") &&
-    ["core", "harbor", "fixture"].includes(string(entry.producer) ?? "") &&
+    ["core", "harbor"].includes(string(entry.producer) ?? "") &&
     ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "")
   ) && new Set(evidenceValues).size === evidenceValues.length;
   const expectedBusinessEffect = expected.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate";
@@ -1830,7 +1830,8 @@ async function completeAcceptedXhsMediaAction(
   const postCheck = object(normalized.post_check)!;
   const operationStatus = string(lifecycle.status);
   if (operationStatus === "accepted" || operationStatus === "running") {
-    const running = await store.updateRunRecord(result.run_record.run_id, {
+    const unknownFailure = mediaActionFailure("harbor_xhs_media_operation_unknown", "runtime_execution");
+    await store.updateRunRecord(result.run_record.run_id, {
       status: "running",
       runtime_binding_refs: [runtimeSessionRef],
       source_refs: validation.source_refs,
@@ -1839,17 +1840,37 @@ async function completeAcceptedXhsMediaAction(
       post_check: {
         schema_version: "webenvoy.post-check-result.v0",
         status: "not_run",
-        summary: "Media action accepted by Harbor; terminal post-check is pending operation reconciliation.",
+        summary: "Harbor returned a non-terminal media operation state without a Core recheck endpoint; the outcome remains unknown and will not be retried.",
         checked_at: new Date().toISOString(),
-        code: "media_action_operation_running",
-        attribution: "runtime",
-        recovery_hint: "inspect_operation_ref",
+        code: unknownFailure.code,
+        attribution: "unknown",
+        recovery_hint: "reconcile_status",
         evidence_refs: validation.evidence_refs,
         source_refs: validation.source_refs,
-        consumer_boundary: "Core records operation and opaque refs only while the external media operation remains active."
+        consumer_boundary: "Core preserves the operation ref and manual reconciliation entrypoint; it does not claim asynchronous recheck support."
       }
     });
-    return { ok: true, task_intent: result.task_intent, run_record: running };
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome");
+    if (cleanup) return cleanup;
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      status: "unknown_outcome",
+      failure: unknownFailure,
+      evidence_refs: validation.evidence_refs,
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "not_run",
+        summary: "Harbor returned accepted/running without a supported recheck path; Core preserves unknown outcome and will not retry automatically.",
+        checked_at: new Date().toISOString(),
+        code: unknownFailure.code,
+        attribution: "unknown",
+        recovery_hint: "reconcile_status",
+        evidence_refs: validation.evidence_refs,
+        source_refs: validation.source_refs,
+        consumer_boundary: "Core preserves operation ref and manual reconciliation only; no asynchronous media-operation support is claimed."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
   }
   if (operationStatus === "unknown_outcome") {
     const unknownFailure = mediaActionFailure("harbor_xhs_media_operation_unknown", "runtime_execution");
@@ -2851,53 +2872,22 @@ export async function submitRuntimeTask(
           lode_contract: lode_package_contract,
           ...(request.authorization_context === undefined ? {} : { authorization_context: request.authorization_context }),
           ...(deps.executionPolicyConfigStore === undefined ? {} : { config_store: deps.executionPolicyConfigStore }),
+          require_confirmation: true,
           evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
         });
     if (isFailure(policy)) {
       return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, execution_policy_failure: policy });
     }
     const policyFailure = xhsMediaActionPolicyFailure(policy.evaluation);
-    if (policy.evaluation.status !== "evaluated" || policy.evaluation.next_step !== "execute") {
-      const result = await acceptReadOnlyTaskSubmission(store, {
-        ...base,
-        lode_package_contract,
-        execution_policy_failure: policyFailure
-      });
-      try {
-        await persistXhsMediaActionPolicyDecision({
-          run_id: request.run_id,
-          policy,
-          authorization_store: deps.authorizationDecisionStore!,
-          run_record_store: store
-        });
-        const runRecord = await store.getRunRecord(request.run_id);
-        return runRecord && !result.ok ? { ...result, run_record: runRecord } : result;
-      } catch {
-        const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
-        const runRecord = result.run_record
-          ? await store.updateRunRecord(request.run_id, {
-              status: result.run_record.status,
-              failure: persistenceFailure,
-              post_check: {
-                schema_version: "webenvoy.post-check-result.v0",
-                status: "blocked",
-                summary: "The media action policy decision could not be linked durably; Harbor was not called.",
-                checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
-                code: persistenceFailure.code,
-                attribution: "unknown",
-                recovery_hint: persistenceFailure.recovery_hint,
-                consumer_boundary: "Core exposes only the fail-closed media policy persistence classification."
-              }
-            })
-          : undefined;
-        return { ok: false, failure: persistenceFailure, ...(runRecord ? { run_record: runRecord } : {}) };
-      }
-    }
-    const admitted = await acceptApprovedWritePrecheckTask(store, {
+    const needsConfirmation = policy.evaluation.status === "evaluated" &&
+      (policy.evaluation.next_step === "execute" || policy.evaluation.next_step === "request_confirmation");
+    const result = await acceptReadOnlyTaskSubmission(store, {
       ...base,
-      lode_package_contract
+      lode_package_contract,
+      execution_policy_failure: needsConfirmation
+        ? failure("action_risk", "authorization_confirmation_required", "admission", "confirm_or_deny_current_action")
+        : policyFailure
     });
-    if (!admitted.ok) return admitted;
     try {
       await persistXhsMediaActionPolicyDecision({
         run_id: request.run_id,
@@ -2905,27 +2895,28 @@ export async function submitRuntimeTask(
         authorization_store: deps.authorizationDecisionStore!,
         run_record_store: store
       });
+      const runRecord = await store.getRunRecord(request.run_id);
+      return runRecord && !result.ok ? { ...result, run_record: runRecord } : result;
     } catch {
       const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
-      const runRecord = await store.updateRunRecord(request.run_id, {
-        status: "failed",
-        failure: persistenceFailure,
-        post_check: {
-          schema_version: "webenvoy.post-check-result.v0",
-          status: "blocked",
-          summary: "The media action policy decision could not be linked durably; Harbor was not called.",
-          checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
-          code: persistenceFailure.code,
-          attribution: "unknown",
-          recovery_hint: persistenceFailure.recovery_hint,
-          consumer_boundary: "Core exposes only the fail-closed media policy persistence classification."
-        }
-      });
-      return { ok: false, failure: persistenceFailure, run_record: runRecord };
+      const runRecord = result.run_record
+        ? await store.updateRunRecord(request.run_id, {
+            status: result.run_record.status,
+            failure: persistenceFailure,
+            post_check: {
+              schema_version: "webenvoy.post-check-result.v0",
+              status: "blocked",
+              summary: "The media action policy decision could not be linked durably; Harbor was not called.",
+              checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
+              code: persistenceFailure.code,
+              attribution: "unknown",
+              recovery_hint: persistenceFailure.recovery_hint,
+              consumer_boundary: "Core exposes only the fail-closed media policy persistence classification."
+            }
+          })
+        : undefined;
+      return { ok: false, failure: persistenceFailure, ...(runRecord ? { run_record: runRecord } : {}) };
     }
-    const runRecord = await store.getRunRecord(request.run_id);
-    if (!runRecord) return { ok: false, failure: failure("persistence_observability", "run_record_missing", "persistence", "contact_operator") };
-    return dispatchApprovedXhsMediaAction(store, { ok: true, task_intent: validatedTaskIntent, run_record: runRecord }, request, deps, policy);
   }
   if (unifiedWritePrecheck || pathPrepare) {
     const policy = deps.authorizationDecisionStore === undefined
