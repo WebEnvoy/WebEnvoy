@@ -29,7 +29,7 @@ export type { LodeCatalogField } from "./lodeCatalogInput.js";
 export type LodeCatalogAction = {
   id: string;
   category: "read" | "prepare" | "commit" | "destructive";
-  operationMode: "read" | "validate_only" | "draft" | "preview";
+  operationMode: "read" | "validate_only" | "draft" | "preview" | "write";
   targetTypes: string[];
   supportedOrigins: string[];
   externalEffects: string[];

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   TaskThreadStoreError,
+  isExactXhsMediaActionRun,
   isExactWritePrecheckRun,
   validateTaskTurnInputSnapshot,
   type FileAuthorizationDecisionStore,
@@ -12,7 +13,7 @@ import {
   type TaskTurnView
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
-import { taskSubmissionFailureStatusCode, type TaskSubmissionHttpResult } from "./task-api.js";
+import { isExactXhsMediaTaskBody, taskSubmissionFailureStatusCode, type TaskSubmissionHttpResult } from "./task-api.js";
 
 type JsonBody = Record<string, unknown>;
 type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
@@ -82,6 +83,7 @@ const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note
 const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
 const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
+const mediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 
 function prunePendingWritePrecheckContinuations(now = Date.now()): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {
@@ -144,6 +146,10 @@ function exactWritePrecheckTaskBody(body: JsonBody, packageRef: string, run: Run
     isExactWritePrecheckRun(run, confirmationDecisionRef);
 }
 
+function exactMediaActionTaskBody(body: JsonBody, run: RunRecord | undefined, confirmationDecisionRef: string): boolean {
+  return isExactXhsMediaTaskBody(body) && isExactXhsMediaActionRun(run, confirmationDecisionRef);
+}
+
 function publicContinuationHarbor(value: unknown): JsonBody | undefined {
   const input = asObject(value);
   if (!input) return undefined;
@@ -201,7 +207,7 @@ async function registerPendingWritePrecheckContinuation(input: {
     } catch {
       return;
     }
-    if (!exactWritePrecheckTaskBody(input.body, packageRef, run, ref)) return;
+    if (!exactWritePrecheckTaskBody(input.body, packageRef, run, ref) && !exactMediaActionTaskBody(input.body, run, ref)) return;
     const harbor = publicContinuationHarbor(input.body.harbor);
     pendingWritePrecheckContinuations.set(ref, {
       run_id: input.run_id,
@@ -538,7 +544,7 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
           }
         };
       };
-      const isWritePrecheckPackage = packageRef === writePrecheckPackageRef || packageRef === pathPreparePackageRef;
+      const isWritePrecheckPackage = packageRef === writePrecheckPackageRef || packageRef === pathPreparePackageRef || packageRef === mediaPackageRef;
       return isWritePrecheckPackage
         ? await (input.withWritePrecheckRunLock ?? withWritePrecheckRunLock)(runId, finishSubmission)
         : await finishSubmission();
@@ -560,7 +566,9 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
           : undefined;
         const terminalWritePrecheckOverride = run?.status === "unknown_outcome" || run?.status === "manual_recovery_required";
         const exactTerminalWritePrecheck = run !== undefined &&
-          (isExactWritePrecheckRun(run) || (terminalWritePrecheckOverride && isExactWritePrecheckRun({ ...run, status: "requires_user_action" })));
+          (isExactWritePrecheckRun(run) || isExactXhsMediaActionRun(run) ||
+            (terminalWritePrecheckOverride && (isExactWritePrecheckRun({ ...run, status: "requires_user_action" }) ||
+              isExactXhsMediaActionRun({ ...run, status: "requires_user_action" }))));
         if (run && exactTerminalWritePrecheck) {
           await cancelAuthorizationDecisions(input.authorizationDecisionStore, turn);
           clearPendingWritePrecheckContinuations(turn.run_id);

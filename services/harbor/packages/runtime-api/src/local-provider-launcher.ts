@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   bindIdentityEnvironmentDefaultProvider,
   classifyLaunchFailure,
@@ -19,6 +19,7 @@ import { prepareProfileStorage } from "./profile-storage.js";
 import {
   trustLocalProviderReadProbe,
   trustLocalProviderSiteResourceProbe,
+  trustLocalProviderMediaActionProbe,
   trustLocalProviderWritePrecheckProbe
 } from "./read-operation-probe-trust.js";
 import { isCanonicalDetailUrl } from "./detail-read-target.js";
@@ -27,6 +28,8 @@ import type {
   LocalProviderLaunchInput,
   LocalProviderLauncher,
   LocalProviderLaunchResult,
+  LocalProviderMediaActionInput,
+  LocalProviderMediaActionResult,
   LocalProviderDetailPublicSummary,
   LocalProviderPageFacts,
   LocalProviderReadProbeInput,
@@ -119,6 +122,9 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
       }),
       probeWritePrecheck: trustLocalProviderWritePrecheckProbe((probe) =>
         probeProviderWritePrecheck(port, currentUrl, probe)
+      ),
+      executeMediaAction: trustLocalProviderMediaActionProbe((action) =>
+        executeXhsMediaAction(port, currentUrl, action)
       ),
       captureScreenshot: () => captureProviderScreenshot(port, currentUrl),
       close: () => closeBrowser(child, profileStorage.profileDir, !profileStorage.persistent)
@@ -452,6 +458,281 @@ async function probeProviderWritePrecheck(
   }
 }
 
+const XHS_MEDIA_ACTION_CDP_COMMANDS = [
+  "Runtime.enable",
+  "Runtime.evaluate",
+  "Runtime.releaseObject",
+  "Page.enable",
+  "Page.bringToFront",
+  "DOM.enable",
+  "DOM.requestNode",
+  "DOM.setFileInputFiles",
+  "Fetch.enable",
+  "Fetch.continueRequest",
+  "Fetch.failRequest",
+  "Fetch.disable"
+] as const;
+type XhsMediaActionCdpCommand = typeof XHS_MEDIA_ACTION_CDP_COMMANDS[number];
+
+type MediaPageObservation = {
+  url?: string;
+  origin?: string;
+  pathname?: string;
+  challenge_like?: boolean;
+  login_like?: boolean;
+  route_loaded?: boolean;
+  media_count?: number;
+  generated_result_visible?: boolean;
+};
+
+type MediaActionNetwork = {
+  forbidden_commit: boolean;
+};
+
+/**
+ * Bounded #307 adapter.  It deliberately has two branches rather than a
+ * generic browser/media runner: one branch sets the named file input, the
+ * other fills the visible text-to-image input and clicks its generate control.
+ */
+async function executeXhsMediaAction(
+  port: string,
+  currentUrl: string,
+  input: LocalProviderMediaActionInput
+): Promise<LocalProviderMediaActionResult> {
+  const operationRef = opaqueRef("media_operation");
+  const failure = (failure_class: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["failure_class"], message: string, retryable = false, page?: LocalProviderPageFacts): LocalProviderMediaActionResult => ({
+    status: "unavailable",
+    failure_class,
+    message,
+    retryable,
+    operation_ref: operationRef,
+    ...(page === undefined ? {} : { page }),
+    submitted: false as const
+  });
+  if (input.expected_origin !== "https://creator.xiaohongshu.com" || input.no_submit_guard !== "active" ||
+    (input.action_id === "xhs_publish_note_image_text_media.image_upload" && input.requested_path !== "image_text_upload") ||
+    (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate" && input.requested_path !== "image_text_generate") ||
+    input.authorization_binding.action_id !== input.action_id || input.authorization_binding.target_ref !== input.target_ref) {
+    return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
+  }
+  if (!sameWritePrecheckUrl(currentUrl, input.target_url)) return failure("page_changed", "The managed session is not on the requested creator publish page.", true);
+  const pageTarget = await activePage(port, input.target_url, AbortSignal.timeout(3000)).catch(() => undefined);
+  if (!pageTarget?.webSocketDebuggerUrl) return failure("provider_probe_unavailable", "The managed creator page has no controlled target.", true);
+  const page = readyPage(input.target_url, "Xiaohongshu creator media action");
+  const resolvedFiles: string[] = [];
+  if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
+    for (const ref of input.refs) {
+      try {
+        resolvedFiles.push(await resolveLocalMediaRef(ref));
+      } catch {
+        return failure("media_ref_unavailable", "An authorized local image reference could not be resolved.", false, page);
+      }
+    }
+  }
+  return withCdp(pageTarget.webSocketDebuggerUrl, async (client) => {
+    await sendMediaActionCdp(client, "Runtime.enable");
+    await sendMediaActionCdp(client, "Page.enable");
+    const before = await evaluateMediaActionObservation(client);
+    const pageFailure = mediaPageFailure(before, input.target_url);
+    if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
+    const network: MediaActionNetwork = { forbidden_commit: false };
+    const stopFetch = client.on("Fetch.requestPaused", (event) => {
+      const requestId = typeof event.requestId === "string" ? event.requestId : "";
+      const request = event.request && typeof event.request === "object" ? event.request as { method?: unknown; url?: unknown } : {};
+      const method = typeof request.method === "string" ? request.method.toUpperCase() : "";
+      const url = typeof request.url === "string" ? request.url : "";
+      if (!requestId) return;
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+        if (/(?:^|[/?_-])(save|draft|submit|publish)(?:[/?_-]|$)/i.test(url)) {
+          network.forbidden_commit = true;
+          void sendMediaActionCdp(client, "Fetch.failRequest", { requestId, errorReason: "Aborted" }).catch(() => undefined);
+          return;
+        }
+      }
+      void sendMediaActionCdp(client, "Fetch.continueRequest", { requestId }).catch(() => undefined);
+    });
+    let after: MediaPageObservation | undefined;
+    try {
+      await sendMediaActionCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+      if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
+        const objectId = await findImageFileInput(client);
+        if (!objectId) return failure("media_ref_unavailable", "The creator page has no supported image upload input.", false, page);
+        const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
+        const nodeId = typeof node.nodeId === "number" ? node.nodeId : 0;
+        if (!nodeId) return failure("media_ref_unavailable", "The creator image file input could not be controlled.", false, page);
+        await sendMediaActionCdp(client, "DOM.setFileInputFiles", { nodeId, files: resolvedFiles });
+      } else {
+        const generated = await executeTextToImageControl(client, input.summary);
+        if (!generated) return failure("generation_unavailable", "The visible text-to-image input or generate control is unavailable.", false, page);
+      }
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        after = await evaluateMediaActionObservation(client);
+        if ((input.action_id.endsWith("image_upload") && (after?.media_count ?? 0) - (before?.media_count ?? 0) >= input.refs.length) ||
+          (input.action_id.endsWith("text_to_image_generate") && before?.generated_result_visible !== true && after?.generated_result_visible === true)) break;
+        await abortableDelay(250);
+      }
+    } finally {
+      stopFetch();
+      await sendMediaActionCdp(client, "Fetch.disable").catch(() => undefined);
+    }
+    const observed = after ?? await evaluateMediaActionObservation(client);
+    const routeObserved = observed?.origin === input.expected_origin && observed.pathname === "/publish/publish" && sameWritePrecheckUrl(observed.url, input.target_url);
+    const expectedMediaObserved = input.action_id.endsWith("image_upload")
+      ? (observed?.media_count ?? 0) - (before?.media_count ?? 0) >= input.refs.length
+      : before?.generated_result_visible !== true && observed?.generated_result_visible === true;
+    const effectStatus: "requested" | "observed" | "unknown" | "failed" = network.forbidden_commit
+      ? "failed"
+      : expectedMediaObserved ? "observed" : "unknown";
+    const operationStatus = effectStatus === "observed" || effectStatus === "failed" ? "terminal" as const : "unknown_outcome" as const;
+    const mediaReadback = input.action_id.endsWith("image_upload")
+      ? {
+          status: expectedMediaObserved ? "observed" as const : "unknown" as const,
+          media_count: typeof observed?.media_count === "number" ? Math.max(0, observed.media_count - (before?.media_count ?? 0)) : null,
+          order_status: "unknown" as const,
+          ordered_item_refs: [],
+          generation_result_ref: null
+        }
+      : {
+          status: expectedMediaObserved ? "observed" as const : "unknown" as const,
+          media_count: typeof observed?.media_count === "number" ? observed.media_count : null,
+          order_status: "not_applicable" as const,
+          generation_result_ref: expectedMediaObserved ? opaqueRef("generated_media") : null
+        };
+    return {
+      status: "completed" as const,
+      observed_at: new Date().toISOString(),
+      observed_url: observed?.url ?? input.target_url,
+      page,
+      action_id: input.action_id,
+      requested_path: input.requested_path,
+      effect_kind: input.action_id.endsWith("image_upload") ? "upload" as const : "generate" as const,
+      effect_status: effectStatus,
+      operation_status: operationStatus,
+      operation_ref: operationRef,
+      ...(operationStatus === "terminal" ? { terminal_state: effectStatus === "observed" ? "success" as const : "failure" as const } : {}),
+      media_readback: mediaReadback,
+      page_readback: {
+        status: routeObserved ? "observed" as const : "unknown" as const,
+        page_state_ref: opaqueRef("page_state"),
+        route_state: routeObserved ? "observed" as const : "unknown" as const
+      },
+      source_refs: [
+        { kind: "media_action_summary", ref: opaqueRef("source") },
+        { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
+        { kind: "business_state_summary", ref: opaqueRef("source") }
+      ],
+      evidence_ref_kinds: [
+        { kind: "operation_ref", ref: operationRef },
+        { kind: "snapshot_ref", ref: opaqueRef("evidence") }
+      ],
+      submitted: false as const
+    };
+  }, AbortSignal.timeout(15_000)).catch(() => failure("operation_result_unknown", "The media action outcome could not be determined.", false, page));
+}
+
+function mediaPageFailure(observation: MediaPageObservation | undefined, targetUrl: string): { failure_class: "page_changed" | "login_required" | "safety_challenge"; message: string; retryable: boolean } | null {
+  if (!observation) return { failure_class: "page_changed", message: "The creator page returned no semantic observation.", retryable: true };
+  if (observation.challenge_like) return { failure_class: "safety_challenge", message: "The creator page shows a safety challenge.", retryable: false };
+  if (observation.login_like) return { failure_class: "login_required", message: "The creator page requires manual login.", retryable: false };
+  if (observation.origin !== "https://creator.xiaohongshu.com" || observation.pathname !== "/publish/publish" || !sameWritePrecheckUrl(observation.url, targetUrl)) {
+    return { failure_class: "page_changed", message: "The current page is not the requested creator publish page.", retryable: true };
+  }
+  return null;
+}
+
+async function resolveLocalMediaRef(localFileRef: string): Promise<string> {
+  if (!/^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(localFileRef)) throw new Error("media_ref_unavailable");
+  const resolverUrl = process.env.HARBOR_MEDIA_REF_RESOLVER_URL ?? "";
+  const token = process.env.HARBOR_MEDIA_REF_RESOLVER_TOKEN ?? "";
+  if (!resolverUrl || !token) throw new Error("media_ref_unavailable");
+  const response = await fetch(resolverUrl, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ local_file_ref: localFileRef }),
+    signal: AbortSignal.timeout(5_000)
+  });
+  if (response.status === 404) throw new Error("media_ref_unavailable");
+  if (!response.ok) throw new Error("media_ref_request_invalid");
+  const value = await response.json() as { path?: unknown };
+  if (typeof value.path !== "string" || !isAbsolute(value.path)) throw new Error("media_ref_unavailable");
+  return value.path;
+}
+
+async function findImageFileInput(client: CdpClient): Promise<string | undefined> {
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: String.raw`(() => {
+      const input = [...document.querySelectorAll('input.upload-input[type="file"]')]
+        .find((el) => /image\/(?:jpeg|png|webp)/i.test(el.accept));
+      return input || null;
+    })()`,
+    returnByValue: false,
+    awaitPromise: true
+  });
+  return typeof (evaluated.result as { objectId?: unknown } | undefined)?.objectId === "string"
+    ? (evaluated.result as { objectId: string }).objectId
+    : undefined;
+}
+
+async function executeTextToImageControl(client: CdpClient, summary: string): Promise<boolean> {
+  const summaryLiteral = JSON.stringify(summary);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+      expression: String.raw`(() => {
+        const visible = (el) => { const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; };
+        const label = (el) => (el.getAttribute('aria-label') || el.getAttribute('name') || el.textContent || '').replace(/\s+/g, ' ').trim();
+        const controls = [...document.querySelectorAll('button,[role="button"],a')].filter(visible);
+        const path = controls.find((el) => label(el).includes('文字配图'));
+        if (path) path.click();
+        const inputs = [...document.querySelectorAll('textarea,input:not([type="file"]),[contenteditable="true"]')].filter(visible);
+        const candidate = inputs.find((el) => /配图|描述|文字|prompt|image/i.test(label(el) + ' ' + (el.getAttribute('placeholder') || '')));
+        if (candidate) {
+          const value = ${summaryLiteral};
+          if ('value' in candidate) { candidate.value = value; } else { candidate.textContent = value; }
+          candidate.dispatchEvent(new Event('input', { bubbles: true }));
+          candidate.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const generate = controls.find((el) => /^(生成|生成图片|立即生成|确认生成)$/.test(label(el)));
+        if (generate) generate.click();
+        return Boolean(path && candidate && generate);
+      })()`,
+      returnByValue: true,
+      awaitPromise: true
+    });
+    if ((evaluated.result as { value?: unknown } | undefined)?.value === true) return true;
+    await abortableDelay(250);
+  }
+  return false;
+}
+
+async function evaluateMediaActionObservation(client: CdpClient): Promise<MediaPageObservation | undefined> {
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: String.raw`(() => {
+      const visible = (el) => { const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; };
+      const text = (document.body?.innerText || '').slice(0, 4000);
+      const media = [...document.querySelectorAll('img')].filter((el) => visible(el) && (el.naturalWidth > 24 || /image|img|media|upload/i.test(el.className || '')));
+      const generated = [...document.querySelectorAll('[data-testid*="generated"],[class*="generated"],[class*="ai-image"],img')].some((el) => visible(el) && /生成|配图|generated|ai-image/i.test((el.getAttribute('alt') || '') + ' ' + (el.getAttribute('class') || '')));
+      return {
+        url: location.href,
+        origin: location.origin,
+        pathname: location.pathname,
+        route_loaded: document.readyState === 'interactive' || document.readyState === 'complete',
+        challenge_like: /captcha|challenge|verify|verification|安全验证|风险验证/.test(text),
+        login_like: /请先登录|立即登录|登录后/.test(text),
+        media_count: media.length,
+        generated_result_visible: generated
+      };
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
+  return (evaluated.result as { value?: MediaPageObservation } | undefined)?.value;
+}
+
+function sendMediaActionCdp(client: CdpClient, method: XhsMediaActionCdpCommand, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  if (!XHS_MEDIA_ACTION_CDP_COMMANDS.includes(method)) throw new Error(`Media-action CDP command is not allowlisted: ${method}`);
+  return client.send(method, params);
+}
+
 async function evaluateWritePrecheck(
   client: CdpClient,
   compositionPath?: XhsWritePrecheckCompositionPath,
@@ -478,7 +759,7 @@ function pathPrepareState(
     control_owner_state: observation?.creator_app_owned === true ? "observed" : "unknown",
     observed_path: observation?.path_observed === "observed" ? "observed" : observation?.path_observed === "unobserved" ? "mismatch" : "unknown",
     composition_state: observation?.composition_state === "composition_initialized" ? "initialized" : observation?.composition_state === "composition_not_initialized" ? "not_initialized" : "unknown",
-    submitted: false as const
+    submitted: false
   });
   const afterState = businessState(after);
   const compositionState = afterState.composition_state;
@@ -498,7 +779,7 @@ function pathPrepareState(
       basis: compositionState === "initialized" ? "business_state_readback" as const : "unknown" as const,
       path_entry_alone_proves_initialized: false as const
     },
-    submitted: false as const,
+    submitted: false,
     prohibited_actions_observed: {
       file_chooser: false as const,
       file_select: false as const,

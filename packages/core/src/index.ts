@@ -180,7 +180,15 @@ export {
   type RuntimeSessionBindingFacts,
   type RuntimeSessionUse
 } from "./harbor-admission.js";
-export { type LodePackageAdmissionContract } from "./lode-admission.js";
+export {
+  xhsMediaActionPaths,
+  xhsMediaCapabilityId,
+  xhsMediaLockRef,
+  xhsMediaOperationId,
+  xhsMediaPackageRef,
+  type LodePackageAdmissionContract,
+  type XhsMediaActionId
+} from "./lode-admission.js";
 export {
   matchLockedLodeOperation,
   matchLockedOperationIdentity,
@@ -267,6 +275,7 @@ export {
 export {
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
+  continueXhsMediaActionTask,
   continueWritePrecheckTask,
   recoverInterruptedCoreTaskSessions,
   submitRuntimeTask,
@@ -281,8 +290,18 @@ export {
   type XhsPathPrepareRequestedPath,
   type XhsPathPrepareObservedPath,
   type XhsPathPrepareCompositionState,
+  type ContinueXhsMediaActionTaskRequest,
   type RuntimeTaskSubmissionRequest
 } from "./runtime-task-chain.js";
+export {
+  evaluateXhsMediaActionPolicy,
+  isExactXhsMediaActionRun,
+  isExactXhsMediaActionTask,
+  persistXhsMediaActionPolicyDecision,
+  xhsMediaActionPolicyFailure,
+  type EvaluatedXhsMediaActionPolicy,
+  type MediaActionAuthorizationContext
+} from "./media-action-policy.js";
 export {
   isExactWritePrecheckRun,
   isXhsPathPrepareTask,

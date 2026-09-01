@@ -43,6 +43,7 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkTurnInputProjection(input.xhsSkill);
   checkXhsSearchTarget(input.xhsSkill);
   checkXhsPublishPrecheck(input.xhsSkill);
+  checkXhsMediaAction(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
   await checkBossDeferredHelpers(bossSkill);
@@ -415,6 +416,108 @@ function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
       executionPolicy: automaticExecutionPolicy(blockedSkill), runtime,
     }).ok) throw new Error(`Xiaohongshu ${category} action was not blocked.`);
   }
+}
+
+function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+  const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+  const uploadAction = {
+    id: "xhs_publish_note_image_text_media.image_upload",
+    category: "commit" as const,
+    operationMode: "write" as const,
+    targetTypes: ["creator_publish_page"],
+    supportedOrigins: ["https://creator.xiaohongshu.com"],
+    externalEffects: ["upload"],
+    resourceRequirementRef: "xiaohongshu.publish-note-image-text-media.resources",
+    resourceRequirementProfileIds: ["xhs-image-upload"],
+  };
+  const generateAction = {
+    ...uploadAction,
+    id: "xhs_publish_note_image_text_media.text_to_image_generate",
+    externalEffects: ["create"],
+    resourceRequirementProfileIds: ["xhs-text-to-image-generate"],
+  };
+  const skill: LodeCatalogSkill = {
+    ...baseSkill,
+    id: packageRef,
+    packageRef,
+    lockRef,
+    name: "小红书图文媒体动作",
+    summary: "准备一次受控图文媒体动作。",
+    category: "media",
+    inputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/input@0.1.0",
+    outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/output@0.1.0",
+    outputKind: "xhs_publish_note_image_text_media",
+    inputFields: [
+      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri" },
+      { id: "target_ref", label: "目标引用", kind: "text", required: true, description: "Harbor 目标引用", inputProjection: "owner_ref" },
+      { id: "action_id", label: "动作", kind: "select", required: true, description: "独立媒体动作", inputProjection: "safe_summary", options: [uploadAction.id, generateAction.id] },
+      { id: "requested_path", label: "图文路径", kind: "select", required: true, description: "明确图文路径", inputProjection: "safe_summary", options: ["image_text_upload", "image_text_generate"] },
+      { id: "refs", label: "图片附件", kind: "file", required: false, description: "受保护本地附件", inputProjection: "owner_ref", maxItems: 18 },
+      { id: "summary", label: "动作摘要", kind: "text", required: true, description: "不超过 512 字符的动作摘要", inputProjection: "safe_summary", minLength: 1, maxLength: 512 },
+    ],
+    actions: [uploadAction, generateAction],
+  };
+  const submissionSkill = projectTaskSubmissionSkill(skill);
+  if (submissionSkill.inputFields.some((field) => field.id === "target_ref")) throw new Error("Media target_ref was exposed in the composer.");
+  const ownerRef = "draft:app-protected/00000000-0000-4000-8000-000000000040";
+  const ownerAttachmentRef = "attachment:app-protected/00000000-0000-4000-8000-000000000040/attachments/0";
+  const localRef = "local_file_ref_00000000-0000-4000-8000-000000000041";
+  const policy = mediaExecutionPolicy(skill);
+  const uploadDraft = createSkillInputDraft(submissionSkill);
+  uploadDraft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  uploadDraft.values.action_id = uploadAction.id;
+  uploadDraft.values.requested_path = "image_text_upload";
+  uploadDraft.values.summary = "一次图文图片上传";
+  uploadDraft.files.refs = [{ id: "upload-1", name: "cover.png", size: 5, type: "image/png", lastModified: 1, localRef, state: "ready" }];
+  const refs = { ownerRef, fieldOwnerRefs: { refs: `${ownerRef}/refs` }, attachmentRefs: { refs: [ownerAttachmentRef] } };
+  const upload = prepareTaskTurnRequest({ endpoint: "http://core.owner", skill: submissionSkill, identity, draft: uploadDraft, ownerRefs: refs, executionPolicy: policy, runtime });
+  if (!upload.ok) throw new Error(`Media upload action was rejected: ${upload.reason}`);
+  const uploadIntent = upload.request.task_intent as { input?: Record<string, unknown>; policy?: Record<string, unknown>; scope?: Record<string, unknown>; resource_requirement_profile_id?: string };
+  const uploadInput = uploadIntent.input;
+  const uploadSnapshot = upload.request.input_snapshot as { attachment_refs?: string[] };
+  const uploadHarbor = upload.request.harbor as { url?: string; requested_path?: string };
+  if (JSON.stringify(uploadInput) !== JSON.stringify({ action_id: uploadAction.id, requested_path: "image_text_upload", refs: [localRef], summary: "一次图文图片上传" }) ||
+    uploadIntent.policy?.risk !== "write" || uploadIntent.policy.execution_intent !== "execute_after_approval" ||
+    uploadIntent.scope?.target_ref !== "https://creator.xiaohongshu.com/publish/publish" ||
+    uploadIntent.resource_requirement_profile_id !== "xhs-image-upload" || uploadHarbor.url !== uploadIntent.scope.target_ref || uploadHarbor.requested_path !== "image_text_upload" ||
+    JSON.stringify(uploadSnapshot.attachment_refs) !== JSON.stringify([ownerAttachmentRef]) || JSON.stringify(uploadInput).includes("/Volumes")) {
+    throw new Error("Media upload action did not preserve exact action, local ref, target, or owner projection.");
+  }
+
+  const generateDraft = createSkillInputDraft(submissionSkill);
+  generateDraft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  generateDraft.values.action_id = generateAction.id;
+  generateDraft.values.requested_path = "image_text_generate";
+  generateDraft.values.summary = "根据文字意图生成配图";
+  const generate = prepareTaskTurnRequest({ endpoint: "http://core.owner", skill: submissionSkill, identity, draft: generateDraft, ownerRefs: { ownerRef, fieldOwnerRefs: {}, attachmentRefs: {} }, executionPolicy: policy, runtime });
+  if (!generate.ok) throw new Error(`Media generate action was rejected: ${generate.reason}`);
+  const generateInput = (generate.request.task_intent as { input?: Record<string, unknown> }).input;
+  if (JSON.stringify(generateInput) !== JSON.stringify({ action_id: generateAction.id, requested_path: "image_text_generate", refs: [], summary: "根据文字意图生成配图" })) {
+    throw new Error("Media generate action did not emit an empty refs list and bounded summary.");
+  }
+
+  const mismatched = { ...uploadDraft, values: { ...uploadDraft.values, requested_path: "image_text_generate" } };
+  if (prepareTaskTurnRequest({ endpoint: "http://core.owner", skill: submissionSkill, identity, draft: mismatched, ownerRefs: refs, executionPolicy: policy, runtime }).ok) {
+    throw new Error("Media action accepted a mismatched action/path pair.");
+  }
+  const invalidRef = { ...uploadDraft, files: { ...uploadDraft.files, refs: [{ ...uploadDraft.files.refs[0]!, localRef: "/tmp/private.png" }] } };
+  if (prepareTaskTurnRequest({ endpoint: "http://core.owner", skill: submissionSkill, identity, draft: invalidRef, ownerRefs: refs, executionPolicy: policy, runtime }).ok) {
+    throw new Error("Media upload accepted a raw local path instead of a protected local_file_ref.");
+  }
+}
+
+function mediaExecutionPolicy(skill: LodeCatalogSkill) {
+  return {
+    skillRef: skill.packageRef,
+    actions: skill.actions.map((action) => ({
+      actionId: action.id,
+      category: action.category,
+      riskMarker: null,
+      targetScope: { siteSlug: skill.siteSlug, targetTypes: action.targetTypes, supportedOrigins: action.supportedOrigins },
+      policy: { mode: "auto" as const, source: "installed_skill_user_version" as const, sourceRef: `execution-policy:skill/${skill.id}`, sourceVersion: "1" },
+    })),
+  };
 }
 
 function checkExecutionPolicyMutation() {

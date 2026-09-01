@@ -30,13 +30,14 @@ export type LodeCatalogField = {
 };
 
 const maxCatalogFields = 100;
-const schemaKeys = ["$schema", "$id", "title", "description", "type", "additionalProperties", "required", "properties", "examples", "x-lode"];
+const schemaKeys = ["$schema", "$id", "title", "description", "type", "additionalProperties", "required", "properties", "examples", "oneOf", "x-lode"];
 const fieldKeys = [
   "type", "title", "description", "enum", "default", "minimum", "maximum", "minLength", "maxLength",
   "minItems", "maxItems", "uniqueItems", "pattern", "format", "contentMediaType", "contentEncoding",
   "const", "items", "examples",
 ];
 const itemKeys = ["type", "enum"];
+const ownerRefItemKeys = ["type", "minLength", "maxLength", "pattern", "description"];
 
 type InputContract = {
   operationMode: string;
@@ -45,9 +46,17 @@ type InputContract = {
   schemaId: string;
 };
 
+const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuMediaSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/input@0.1.0";
+const xiaohongshuMediaOperationRef = "lode://operation/xhs_publish_note_image_text_media";
+
 export function projectInputFields(schema: Record<string, unknown>, contract?: InputContract): LodeCatalogField[] {
   if (schema.type !== "object" || schema.additionalProperties !== false || !hasOnlyAllowedKeys(schema, schemaKeys)) {
     throw new Error("Input schema uses an unsupported object contract.");
+  }
+  const mediaContract = contract != null && isXiaohongshuMediaInputContract(contract);
+  if (schema.oneOf !== undefined && (!mediaContract || !validXiaohongshuMediaBranches(schema.oneOf))) {
+    throw new Error("Input schema uses an unsupported conditional contract.");
   }
   if (contract != null && !inputContractMatches(schema, contract)) {
     throw new Error("Input schema does not match the selected business action.");
@@ -61,7 +70,7 @@ export function projectInputFields(schema: Record<string, unknown>, contract?: I
     throw new Error("Input schema field declaration is invalid.");
   }
   return Object.entries(properties).map(([id, value]) =>
-    projectField(id, value, required.has(id), optionalString(sensitivity?.[id])),
+    projectField(id, value, required.has(id) && !(mediaContract && id === "refs"), optionalString(sensitivity?.[id]), mediaContract),
   );
 }
 
@@ -72,12 +81,12 @@ function inputContractMatches(schema: Record<string, unknown>, contract: InputCo
     extension.operation_mode === contract.operationMode;
 }
 
-function projectField(id: string, value: unknown, required: boolean, sensitivity: string | undefined): LodeCatalogField {
+function projectField(id: string, value: unknown, required: boolean, sensitivity: string | undefined, mediaContract: boolean): LodeCatalogField {
   if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(id) || !isRecord(value) || !hasOnlyAllowedKeys(value, fieldKeys)) {
     return incompatibleField(id, required);
   }
   try {
-    return projectSupportedField(id, value, required, sensitivity);
+    return projectSupportedField(id, value, required, sensitivity, mediaContract);
   } catch {
     return incompatibleField(id, required);
   }
@@ -88,11 +97,12 @@ function projectSupportedField(
   value: Record<string, unknown>,
   required: boolean,
   sensitivity: string | undefined,
+  mediaContract: boolean,
 ): LodeCatalogField {
   const type = optionalString(value.type);
   const constant = primitive(value.const);
   const options = value.enum === undefined ? undefined : requiredStringArray(value.enum, `${id} enum`);
-  const array = type === "array" ? projectArray(value, id) : undefined;
+  const array = type === "array" ? projectArray(value, id, mediaContract && sensitivity === "opaque_owner_refs") : undefined;
   const pattern = projectPattern(value.pattern);
   const format = projectFormat(value.format);
   const minimum = finiteNumber(value.minimum);
@@ -111,8 +121,8 @@ function projectSupportedField(
     kind,
     required,
     description: optionalString(value.description) ?? "由技能合同定义。",
-    inputProjection: fieldProjection(value, sensitivity),
-    ...(options == null && array == null ? {} : { options: options ?? array?.options }),
+    inputProjection: fieldProjection(value, sensitivity, mediaContract),
+    ...(options == null && array?.options == null ? {} : { options: options ?? array?.options }),
     ...(defaultValue === undefined ? {} : { defaultValue }),
     ...(minimum === undefined ? {} : { minimum }),
     ...(maximum === undefined ? {} : { maximum }),
@@ -136,6 +146,7 @@ function projectSupportedField(
 function fieldProjection(
   schema: Record<string, unknown>,
   sensitivity: string | undefined,
+  mediaContract: boolean,
 ): LodeCatalogField["inputProjection"] {
   if (schema.type === "string" && (schema.format === "uri" || schema.format === "uri-reference")) {
     return sensitivity === "public" ? "sanitized_url" : "owner_ref";
@@ -143,6 +154,7 @@ function fieldProjection(
   if (
     sensitivity === "public" ||
     sensitivity === "public_safe_summary" ||
+    mediaContract && sensitivity === "bounded_summary" ||
     schema.type === "boolean" ||
     schema.type === "integer" ||
     schema.type === "number" ||
@@ -154,9 +166,30 @@ function fieldProjection(
   return "owner_ref";
 }
 
-function projectArray(value: Record<string, unknown>, id: string) {
-  const items = isRecord(value.items) && hasOnlyAllowedKeys(value.items, itemKeys) ? value.items : null;
+function projectArray(value: Record<string, unknown>, id: string, opaqueOwnerRefs: boolean): {
+  options?: string[];
+  ownerRefs?: boolean;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+} {
+  const items = isRecord(value.items) && hasOnlyAllowedKeys(value.items, opaqueOwnerRefs ? ownerRefItemKeys : itemKeys) ? value.items : null;
   if (items?.type !== "string") throw new Error(`Unsupported ${id} items.`);
+  if (opaqueOwnerRefs) {
+    if (items.minLength !== 1 || items.maxLength !== 2048 || items.pattern !== "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" || items.description !== "由上游 owner 持有的 opaque media/owner ref；Lode 不读取或保存其内容。") {
+      throw new Error(`Unsupported ${id} owner refs.`);
+    }
+    const minItems = nonNegativeInteger(value.minItems);
+    const maxItems = nonNegativeInteger(value.maxItems);
+    const uniqueItems = value.uniqueItems === undefined ? undefined : value.uniqueItems === true ? true : value.uniqueItems === false ? false : null;
+    if (uniqueItems === null || minItems != null && maxItems != null && minItems > maxItems) throw new Error(`Invalid ${id} owner refs.`);
+    return {
+      ownerRefs: true as const,
+      minItems,
+      maxItems,
+      uniqueItems,
+    };
+  }
   const options = requiredStringArray(items.enum, `${id} items enum`);
   const minItems = nonNegativeInteger(value.minItems);
   const maxItems = nonNegativeInteger(value.maxItems);
@@ -198,6 +231,7 @@ function fieldKind(
   format: "uri" | undefined,
 ): LodeCatalogField["kind"] {
   if (constant !== undefined) return "constant";
+  if (array?.ownerRefs) return "file";
   if (array != null) return "multi-select";
   if (options != null) return "select";
   if (type === "string" && file) return "file";
@@ -294,4 +328,41 @@ function incompatibleField(id: string, required: boolean): LodeCatalogField {
 
 function fieldLabel(id: string) {
   return id.replaceAll("_", " ");
+}
+
+function isXiaohongshuMediaInputContract(contract: InputContract) {
+  return contract.packageRef === xiaohongshuMediaPackageRef &&
+    contract.schemaId === xiaohongshuMediaSchemaId &&
+    contract.operationRef === xiaohongshuMediaOperationRef &&
+    contract.operationMode === "write";
+}
+
+function validXiaohongshuMediaBranches(value: unknown) {
+  if (!Array.isArray(value) || value.length !== 2 || !value.every(isRecord)) return false;
+  const upload = value.find((branch) => branch.properties && isRecord(branch.properties) && isRecord(branch.properties.action_id) && branch.properties.action_id.const === "xhs_publish_note_image_text_media.image_upload");
+  const generate = value.find((branch) => branch.properties && isRecord(branch.properties) && isRecord(branch.properties.action_id) && branch.properties.action_id.const === "xhs_publish_note_image_text_media.text_to_image_generate");
+  return upload != null && generate != null &&
+    validMediaBranch(upload, ["action_id", "requested_path", "refs"], "xhs_publish_note_image_text_media.image_upload", "image_text_upload", { minItems: 1 }) &&
+    validMediaBranch(generate, ["action_id", "requested_path", "summary"], "xhs_publish_note_image_text_media.text_to_image_generate", "image_text_generate", { maxItems: 0 });
+}
+
+function validMediaBranch(
+  branch: Record<string, unknown>,
+  required: string[],
+  actionId: string,
+  requestedPath: string,
+  refsConstraint: { minItems?: number; maxItems?: number },
+) {
+  const branchRequired = branch.required as unknown[];
+  if (!hasOnlyAllowedKeys(branch, ["title", "required", "properties"]) ||
+    !Array.isArray(branchRequired) || branchRequired.length !== required.length ||
+    !branchRequired.every((field) => typeof field === "string") ||
+    !required.every((field) => branchRequired.includes(field)) || !isRecord(branch.properties)) return false;
+  const properties = branch.properties;
+  const action = properties.action_id;
+  const path = properties.requested_path;
+  const refs = properties.refs;
+  return isRecord(action) && hasOnlyAllowedKeys(action, ["const"]) && action.const === actionId &&
+    isRecord(path) && hasOnlyAllowedKeys(path, ["const"]) && path.const === requestedPath &&
+    isRecord(refs) && refsConstraint.minItems === refs.minItems && refsConstraint.maxItems === refs.maxItems;
 }

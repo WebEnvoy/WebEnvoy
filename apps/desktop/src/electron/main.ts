@@ -525,7 +525,11 @@ function reloadWindow(window: BrowserWindow) {
 }
 
 app.whenReady().then(async () => {
-  runtimeSupervisor = createRuntimeSupervisor({ dataDir: path.join(app.getPath("userData"), "runtime") });
+  const protectedWorkbenchStore = await registerWorkbenchIpc(mainWindows, expectedRendererUrl());
+  runtimeSupervisor = createRuntimeSupervisor({
+    dataDir: path.join(app.getPath("userData"), "runtime"),
+    protectedWorkbenchStore,
+  });
   ipcMain.handle("webenvoy:shell-context", () => ({
     platform: process.platform,
     colorScheme: getSystemColorScheme(),
@@ -541,7 +545,6 @@ app.whenReady().then(async () => {
   ipcMain.handle("webenvoy:harbor-manual-authentication-completed", (event, intent) =>
     requestHarborManualAuthenticationCompletion(event, intent),
   );
-  await registerWorkbenchIpc(mainWindows, expectedRendererUrl());
 
   nativeTheme.on("updated", () => {
     const colorScheme = getSystemColorScheme();

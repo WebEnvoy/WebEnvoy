@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { coreLodeAssetEnvironment, resolveLodeAssetBundle, type LodeAssetBundleState } from "./lodeAssetBundle.js";
+import type { ProtectedWorkbenchStore } from "./protectedWorkbenchStore.js";
 
 export type RuntimeServiceId = "core" | "harbor";
 
@@ -15,7 +17,15 @@ export type RuntimeEndpointConfig = {
 
 export type RuntimeSupervisorOptions = {
   dataDir?: string;
+  protectedWorkbenchStore?: Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef">;
 };
+
+export type ProtectedMediaResolverConfig = {
+  endpoint: string;
+  token: string;
+};
+
+type ProtectedMediaResolverStore = Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef">;
 
 export type RuntimeServiceLaunchConfig = {
   command: string;
@@ -145,6 +155,11 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
   const processSnapshots = new Map<RuntimeServiceId, ProcessSnapshot>();
   const runtimeDataDir = options.dataDir ?? process.env.WEBENVOY_RUNTIME_DATA_DIR;
   const supervisorToken = randomBytes(32).toString("base64url");
+  const mediaResolverToken = options.protectedWorkbenchStore ? randomBytes(32).toString("base64url") : undefined;
+  const mediaResolver = options.protectedWorkbenchStore
+    ? createProtectedMediaRefResolver(options.protectedWorkbenchStore, mediaResolverToken)
+    : undefined;
+  let mediaResolverConfigPromise: Promise<ProtectedMediaResolverConfig | undefined> | undefined;
   const getHarborSupervisorToken = (harborEndpoint: string) => {
     const snapshot = processSnapshots.get("harbor");
     return snapshot?.endpoint === normalizeEndpoint(harborEndpoint) && snapshot.child
@@ -156,9 +171,11 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
     async readState(config: RuntimeEndpointConfig): Promise<RuntimeSupervisorState> {
       const checkedAt = new Date().toISOString();
       const lodeAssets = resolveLodeAssetBundle();
+      mediaResolverConfigPromise ??= mediaResolver?.start();
+      const mediaResolverConfig = await mediaResolverConfigPromise;
       const services = await Promise.all(
         (["core", "harbor"] as const).map((id) =>
-          readServiceState(id, config, checkedAt, processSnapshots, lodeAssets, runtimeDataDir, supervisorToken),
+          readServiceState(id, config, checkedAt, processSnapshots, lodeAssets, runtimeDataDir, supervisorToken, mediaResolverConfig),
         ),
       );
       const readiness = summarizeRuntimeReadiness(services, lodeAssets);
@@ -172,6 +189,7 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
       };
     },
     stop() {
+      void mediaResolver?.stop();
       for (const snapshot of processSnapshots.values()) {
         snapshot.child?.kill();
       }
@@ -189,6 +207,7 @@ async function readServiceState(
   lodeAssets: LodeAssetBundleState,
   runtimeDataDir: string | undefined,
   supervisorToken: string,
+  mediaResolverConfig: ProtectedMediaResolverConfig | undefined,
 ): Promise<RuntimeServiceState> {
   const endpoint = endpointFor(id, config);
   const launch = resolveRuntimeServiceLaunchConfig(id);
@@ -196,9 +215,10 @@ async function readServiceState(
     id,
     launch,
     processSnapshots,
-    runtimeProcessEnvironment(id, config, lodeAssets, runtimeDataDir),
+    runtimeProcessEnvironment(id, config, lodeAssets, runtimeDataDir, mediaResolverConfig),
     endpoint,
     supervisorToken,
+    mediaResolverConfig?.token,
   );
   let health = await probeFirst(endpoint, serviceHealthPaths[id]);
   if (id === "harbor" && process.env.HARBOR_RUNTIME_PROVIDER === "fixture") {
@@ -237,6 +257,7 @@ function ensureProcess(
   extraEnv: NodeJS.ProcessEnv = {},
   endpoint?: string,
   supervisorToken?: string,
+  mediaResolverToken?: string,
 ): ProcessSnapshot {
   const current = processSnapshots.get(id);
   if (current?.child && current.endpoint === endpoint && current.processState !== "exited" && current.processState !== "failed") {
@@ -265,8 +286,8 @@ function ensureProcess(
       endpoint,
       processState: "starting",
       supervisorToken,
-      outputRedactor: createRuntimeOutputRedactor(supervisorToken),
-      errorRedactor: createRuntimeOutputRedactor(supervisorToken),
+      outputRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken),
+      errorRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken),
     };
     processSnapshots.set(id, snapshot);
     child.on("spawn", () => {
@@ -310,25 +331,40 @@ export function runtimeSupervisorChildEnvironment(
   const {
     HARBOR_RUNTIME_SUPERVISOR_TOKEN: _ignoredRuntimeSupervisorToken,
     HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: _ignoredManualAuthSupervisorToken,
+    HARBOR_MEDIA_REF_RESOLVER_URL: _ignoredMediaResolverUrl,
+    HARBOR_MEDIA_REF_RESOLVER_TOKEN: _ignoredMediaResolverToken,
     ...parentEnv
   } = parentEnvironment;
+  const {
+    HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl,
+    HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverToken,
+    ...serviceEnv
+  } = extraEnv;
   return {
     ...parentEnv,
     ...(launchSource === "packaged-path" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-    ...extraEnv,
+    ...serviceEnv,
     ...(supervisorToken ? { HARBOR_RUNTIME_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "harbor" && supervisorToken ? { HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: supervisorToken } : {}),
+    ...(id === "harbor"
+      ? {
+          ...(mediaResolverUrl ? { HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl } : {}),
+          ...(mediaResolverToken ? { HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverToken } : {}),
+        }
+      : {}),
   };
 }
 
-export function createRuntimeOutputRedactor(sensitiveValue?: string): RuntimeOutputRedactor {
+export function createRuntimeOutputRedactor(...sensitiveValues: Array<string | undefined>): RuntimeOutputRedactor {
   let carry = "";
-  const carryLength = Math.max(runtimeOutputRedactionCarryLength, (sensitiveValue?.length ?? 0) + 1);
+  const sensitive = sensitiveValues.filter((value): value is string => Boolean(value));
+  const carryLength = Math.max(runtimeOutputRedactionCarryLength, ...sensitive.map((value) => value.length + 1));
 
   const drain = (flush: boolean) => {
     let output = "";
     while (carry.length > (flush ? 0 : carryLength)) {
-      if (sensitiveValue && carry.startsWith(sensitiveValue)) {
+      const sensitiveValue = sensitive.find((value) => carry.startsWith(value));
+      if (sensitiveValue) {
         output += "[redacted]";
         carry = carry.slice(sensitiveValue.length);
       } else {
@@ -350,6 +386,123 @@ export function createRuntimeOutputRedactor(sensitiveValue?: string): RuntimeOut
   };
 }
 
+export function createProtectedMediaRefResolver(
+  store: ProtectedMediaResolverStore,
+  token = randomBytes(32).toString("base64url"),
+) {
+  const route = "/internal/media/resolve";
+  let server: ReturnType<typeof createServer> | undefined;
+  let started: Promise<ProtectedMediaResolverConfig> | undefined;
+
+  const start = () => {
+    if (started) return started;
+    started = new Promise<ProtectedMediaResolverConfig>((resolve, reject) => {
+      const nextServer = createServer((request, response) => {
+        void handleProtectedMediaRefRequest(request, response, route, token, store);
+      });
+      nextServer.once("error", reject);
+      nextServer.listen(0, "127.0.0.1", () => {
+        const address = nextServer.address();
+        if (address == null || typeof address === "string") {
+          reject(new Error("Protected media resolver did not receive a local port."));
+          return;
+        }
+        server = nextServer;
+        resolve({ endpoint: `http://127.0.0.1:${address.port}${route}`, token });
+      });
+    });
+    return started;
+  };
+
+  const stop = async () => {
+    const pending = started;
+    if (!server && pending) await pending.catch(() => undefined);
+    const active = server;
+    server = undefined;
+    started = undefined;
+    if (!active) return;
+    await new Promise<void>((resolve) => active.close(() => resolve()));
+  };
+
+  return { start, stop };
+}
+
+async function handleProtectedMediaRefRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  route: string,
+  token: string,
+  store: ProtectedMediaResolverStore,
+) {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Content-Type", "application/json");
+  if (request.method !== "POST" || request.url !== route ||
+    !["127.0.0.1", "::ffff:127.0.0.1"].includes(request.socket.remoteAddress ?? "") ||
+    request.headers.authorization !== `Bearer ${token}`) {
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "media_ref_unavailable" }));
+    return;
+  }
+
+  const body = await readResolverRequestBody(request);
+  if (body == null) {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
+    return;
+  }
+
+  let input: unknown;
+  try {
+    input = JSON.parse(body) as unknown;
+  } catch {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
+    return;
+  }
+  if (!isRecord(input) || Object.keys(input).length !== 1 || typeof input.local_file_ref !== "string") {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
+    return;
+  }
+
+  const readability = await store.checkLocalRef(input.local_file_ref);
+  if (!readability.readable) {
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "media_ref_unavailable", reason: readability.reason }));
+    return;
+  }
+  const filePath = store.resolveLocalRef(input.local_file_ref);
+  if (filePath == null) {
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "media_ref_unavailable" }));
+    return;
+  }
+  response.statusCode = 200;
+  response.end(JSON.stringify({ path: filePath }));
+}
+
+function readResolverRequestBody(request: IncomingMessage): Promise<string | null> {
+  const maxBytes = 4096;
+  const contentLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    request.resume();
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    request.on("data", (chunk: Buffer | string) => {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += value.length;
+      if (size <= maxBytes) chunks.push(value);
+      else tooLarge = true;
+    });
+    request.on("end", () => resolve(tooLarge ? null : Buffer.concat(chunks).toString("utf8")));
+    request.on("error", () => resolve(null));
+  });
+}
+
 function appendRuntimeOutput(current: string | undefined, next: string): string {
   return trimRuntimeOutput(`${current ?? ""}${next}`);
 }
@@ -364,6 +517,7 @@ function runtimeProcessEnvironment(
   config: RuntimeEndpointConfig,
   lodeAssets: LodeAssetBundleState,
   runtimeDataDir: string | undefined,
+  mediaResolverConfig: ProtectedMediaResolverConfig | undefined,
 ): NodeJS.ProcessEnv {
   const endpoint = endpointFor(id, config);
   const port = endpointPort(endpoint);
@@ -377,6 +531,12 @@ function runtimeProcessEnvironment(
       ...baseEnv,
       ...(port ? { HARBOR_RUNTIME_PORT: port } : {}),
       ...(runtimeDataDir ? { HARBOR_IDENTITY_ENVIRONMENTS_PATH: path.join(runtimeDataDir, "harbor", "identity-environments.json") } : {}),
+      ...(mediaResolverConfig
+        ? {
+            HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverConfig.endpoint,
+            HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverConfig.token,
+          }
+        : {}),
     };
   }
 

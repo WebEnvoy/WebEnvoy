@@ -15,6 +15,8 @@ import {
   HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA,
   isRuntimeSessionReadable,
   type CreateRuntimeSessionInput,
+  type LocalProviderMediaActionInput,
+  type LocalProviderMediaActionResult,
   type LocalProviderLauncher,
   type LocalProviderPageFacts,
   type LocalProviderReadProbeInput,
@@ -37,6 +39,7 @@ import {
   type ValidationRuntimeFacts
 } from "./runtime-session-types.js";
 import {
+  isTrustedLocalProviderMediaActionProbe,
   isTrustedLocalProviderReadProbe,
   isTrustedLocalProviderSiteResourceProbe,
   isTrustedLocalProviderWritePrecheckProbe
@@ -59,6 +62,8 @@ export type {
   LocalProviderLauncher,
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderMediaActionInput,
+  LocalProviderMediaActionResult,
   LocalProviderPageFacts,
   LocalProviderReadProbeInput,
   LocalProviderReadProbePublicSummary,
@@ -113,6 +118,7 @@ export interface RuntimeSessionRecord {
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
   probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
+  executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
   captureScreenshot?: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
   close?: () => Promise<void>;
 }
@@ -263,6 +269,7 @@ export class RuntimeSessionStore {
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
+      executeMediaAction: ready ? launch.executeMediaAction : undefined,
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined
     });
@@ -715,6 +722,55 @@ export class RuntimeSessionStore {
     const result = await probe(input);
     if (result.page) this.applyPageFacts(record, input.target_url, result.page);
     return result;
+  }
+
+  async executeMediaAction(
+    runtime_session_ref: string,
+    input: LocalProviderMediaActionInput
+  ): Promise<LocalProviderMediaActionResult> {
+    const record = this.records.get(runtime_session_ref);
+    if (!record) {
+      return {
+        status: "unavailable",
+        failure_class: "session_missing",
+        message: "Runtime Session is missing.",
+        retryable: true,
+        submitted: false
+      };
+    }
+    if (record.execution_surface === "fixture") {
+      return {
+        status: "unavailable",
+        failure_class: "fixture_runtime",
+        message: "Fixture launchers cannot execute media actions.",
+        retryable: false,
+        submitted: false
+      };
+    }
+    const probe = record.executeMediaAction;
+    if (record.execution_surface !== "local_provider" || !isTrustedLocalProviderMediaActionProbe(probe)) {
+      return {
+        status: "unavailable",
+        failure_class: "provider_probe_unavailable",
+        message: "The managed local provider has no trusted media-action adapter.",
+        retryable: false,
+        submitted: false
+      };
+    }
+    try {
+      const result = await probe(input);
+      if (result.page) this.applyPageFacts(record, input.target_url, result.page);
+      return result;
+    } catch {
+      return {
+        status: "unavailable",
+        failure_class: "operation_result_unknown",
+        message: "The media action outcome could not be determined.",
+        retryable: false,
+        operation_ref: opaqueRef("media_operation"),
+        submitted: false
+      };
+    }
   }
 
   private findIdentitySession(

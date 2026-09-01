@@ -1,6 +1,12 @@
 import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
-import { validateLodePackageAdmission, type LodePackageAdmissionContract } from "./lode-admission.js";
+import {
+  validateLodePackageAdmission,
+  xhsMediaActionPaths,
+  xhsMediaPackageRef,
+  type LodePackageAdmissionContract,
+  type XhsMediaActionId
+} from "./lode-admission.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 
 export const taskIntentSchemaVersion = "webenvoy.task-intent.v0";
@@ -28,6 +34,7 @@ export type TaskIntentEnvelope = {
     summary: string;
     refs?: string[];
     requested_path?: string;
+    action_id?: string;
   };
   scope: {
     target_type: string;
@@ -110,6 +117,21 @@ const allowedTaskIntentFields = new Set([
 ]);
 const privateFieldNames = new Set(["raw_payload", "dom", "har", "screenshot", "video", "cookie", "token", "local_path", "ui_state", "runtime_session"]);
 type WritePrecheckExecutionIntent = Extract<TaskExecutionIntent, "validate_only" | "draft" | "preview">;
+
+export type { XhsMediaActionId } from "./lode-admission.js";
+
+export function isXhsMediaActionIntent(taskIntent: TaskIntentEnvelope, packageRef?: string): taskIntent is TaskIntentEnvelope & {
+  input: TaskIntentEnvelope["input"] & { action_id: XhsMediaActionId; requested_path: "image_text_upload" | "image_text_generate" };
+} {
+  const actionId = taskIntent.input.action_id as XhsMediaActionId | undefined;
+  const refs = taskIntent.input.refs;
+  return packageRef === xhsMediaPackageRef && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
+    Array.isArray(refs) &&
+    taskIntent.input.requested_path === xhsMediaActionPaths[actionId] &&
+    ((actionId === "xhs_publish_note_image_text_media.image_upload" && refs.length > 0) ||
+      (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && refs.length === 0)) &&
+    taskIntent.policy.risk === "write" && taskIntent.policy.execution_intent === "execute_after_approval";
+}
 
 function requestInvalid(code: string, recoveryHint: string): FailureRecord {
   return {
@@ -264,6 +286,9 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   const requestedPath = fields.input.requested_path === undefined
     ? undefined
     : asNonEmptyString(fields.input.requested_path, "input_requested_path_invalid");
+  const actionId = fields.input.action_id === undefined
+    ? undefined
+    : asNonEmptyString(fields.input.action_id, "input_action_id_invalid");
   const scopeTargetType = asNonEmptyString(fields.scope.target_type, "scope_target_type_required");
   const rawScopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
   if (isFailure(userIntentSummary)) return userIntentSummary;
@@ -273,6 +298,7 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   if (isFailure(capabilityLockRef)) return capabilityLockRef;
   if (isFailure(inputSummary)) return inputSummary;
   if (isFailure(requestedPath)) return requestedPath;
+  if (isFailure(actionId)) return actionId;
   if (isFailure(scopeTargetType)) return scopeTargetType;
   if (isFailure(rawScopeTargetRef)) return rawScopeTargetRef;
   const scopeTargetRef = normalizeStoredTargetRef(rawScopeTargetRef);
@@ -297,7 +323,8 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
     input: {
       summary: inputSummary,
       ...(normalizedInputRefs === undefined ? {} : { refs: normalizedInputRefs as string[] }),
-      ...(requestedPath === undefined ? {} : { requested_path: requestedPath })
+      ...(requestedPath === undefined ? {} : { requested_path: requestedPath }),
+      ...(actionId === undefined ? {} : { action_id: actionId })
     },
     scope: {
       target_type: scopeTargetType,
@@ -335,13 +362,14 @@ export function validateTaskIntent(value: unknown): TaskIntentEnvelope | Failure
   return isFailure(fields) ? fields : buildTaskIntent(fields);
 }
 
-function writeGuardrailFailure(taskIntent: TaskIntentEnvelope): FailureRecord | undefined {
+function writeGuardrailFailure(taskIntent: TaskIntentEnvelope, packageRef?: string): FailureRecord | undefined {
   if (taskIntent.policy.risk === "read" && taskIntent.policy.execution_intent === "read") {
     return undefined;
   }
   if (taskIntent.policy.risk === "write" && writePrecheckExecutionIntents.has(taskIntent.policy.execution_intent)) {
     return undefined;
   }
+  if (isXhsMediaActionIntent(taskIntent, packageRef)) return undefined;
   const trueWriteRequested =
     taskIntent.policy.risk === "submit" ||
     taskIntent.policy.risk === "destructive" ||
@@ -373,7 +401,8 @@ function buildActionRequest(
   } = {}
 ): ActionRequest {
   const blocked = refs.blocked === true;
-  const requestOperationMode = writePrecheckOperationMode(taskIntent.policy.execution_intent);
+  const mediaAction = isXhsMediaActionIntent(taskIntent, refs.package_ref ?? input.package_ref);
+  const requestOperationMode = mediaAction ? "execute_after_approval" : writePrecheckOperationMode(taskIntent.policy.execution_intent);
   const sourceRefs = [
     taskIntent.capability.source_ref,
     taskIntent.capability.lock_ref,
@@ -392,17 +421,18 @@ function buildActionRequest(
     ...(taskIntent.capability.lock_ref === undefined ? {} : { capability_lock_ref: taskIntent.capability.lock_ref }),
     ...((refs.package_ref ?? input.package_ref) === undefined ? {} : { package_ref: refs.package_ref ?? input.package_ref }),
     operation_mode: blocked ? "blocked_true_write" : requestOperationMode,
+    ...(taskIntent.input.action_id === undefined ? {} : { action_id: taskIntent.input.action_id }),
     risk_classification: {
       risk: taskIntent.policy.risk,
       execution_intent: taskIntent.policy.execution_intent,
-      level: blocked ? "blocked" : taskIntent.policy.execution_intent === "validate_only" ? "low" : "medium",
+      level: blocked ? "blocked" : mediaAction ? "high" : taskIntent.policy.execution_intent === "validate_only" ? "low" : "medium",
       true_write_requested: blocked,
-      reasons: blocked ? ["true_write_execution_intent_blocked"] : ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+      reasons: blocked ? ["true_write_execution_intent_blocked"] : mediaAction ? ["media_action_requires_exact_confirmation", "save_draft_and_publish_not_in_scope"] : ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
     },
     no_submit_guard: {
       status: "active",
       enforced_by: "core",
-      blocked_execution_intents: ["execute_after_approval", "reconcile_status", "request_cancel"],
+      blocked_execution_intents: mediaAction ? ["draft", "submit", "destructive", "reconcile_status", "request_cancel"] : ["execute_after_approval", "reconcile_status", "request_cancel"],
       source_refs: sourceRefs
     },
     target_refs: {
@@ -457,7 +487,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
     scope_target_ref: taskIntent.scope.target_ref
   }, input.run_claim_token);
 
-  const writeGuardrail = writeGuardrailFailure(taskIntent);
+  const writeGuardrail = writeGuardrailFailure(taskIntent, input.package_ref);
   if (writeGuardrail) {
     const runRecord = await createRunRecord({
       run_id: input.run_id,
@@ -616,7 +646,8 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
   }
 
   const writePrecheck = isWritePrecheckIntent(taskIntent);
-  const harborAdmission = validateHarborAdmission(input, writePrecheck ? "write_precheck" : "read", lodeAdmission.required_harbor_facts);
+  const mediaAction = isXhsMediaActionIntent(taskIntent, lodeAdmission.package_ref);
+  const harborAdmission = validateHarborAdmission(input, mediaAction ? "media_action" : writePrecheck ? "write_precheck" : "read", lodeAdmission.required_harbor_facts);
   if (!harborAdmission.ok) {
     if (harborAdmission.failure.code.startsWith("forbidden_field:")) {
       return {
@@ -673,7 +704,7 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       ...(harborAdmission.runtime_session_binding === undefined ? {} : { runtime_session_binding: harborAdmission.runtime_session_binding })
     }
   } as const;
-  const actionRequest = writePrecheck
+  const actionRequest = writePrecheck || mediaAction
     ? buildActionRequest(taskIntent, input, {
         package_ref: lodeAdmission.package_ref,
         runtime_binding_refs: harborAdmission.runtime_binding_refs,

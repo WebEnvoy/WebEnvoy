@@ -185,14 +185,14 @@ const parentTokenEnvironment = {
 const harborChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "harbor",
   "packaged-path",
-  { HARBOR_RUNTIME_PORT: "8788" },
+  { HARBOR_RUNTIME_PORT: "8788", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
 );
 const coreChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "core",
   "packaged-path",
-  { PORT: "8787" },
+  { PORT: "8787", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
 );
@@ -201,6 +201,10 @@ if (
   coreChildEnvironment.HARBOR_RUNTIME_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   harborChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   coreChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== undefined ||
+  harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== "http://127.0.0.1:48123/internal/media/resolve" ||
+  harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_TOKEN !== "resolver-token" ||
+  coreChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== undefined ||
+  coreChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_TOKEN !== undefined ||
   harborChildEnvironment.SAFE_PARENT_VALUE !== "kept" ||
   coreChildEnvironment.SAFE_PARENT_VALUE !== "kept"
 ) {
@@ -718,6 +722,7 @@ const lodeCatalog = lodeCatalogModule.readLodeCatalog(lodeBundle);
 const xhsSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/search-notes@"));
 const xhsPublishPrecheckSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-precheck@"));
 const xhsPathPrepareSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-path-prepare@"));
+const xhsMediaSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-image-text-media@"));
 const bossSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/boss/job-search@"));
 if (
   lodeCatalog.status !== "ready" ||
@@ -743,6 +748,12 @@ if (
   xhsPathPrepareSkill.actions[0]?.operationMode !== "validate_only" ||
   xhsPathPrepareSkill.actions[0]?.externalEffects.length !== 0 ||
   xhsPathPrepareSkill.inputFields.find((field) => field.id === "requested_path")?.options?.join(",") !== "image_text_upload,image_text_generate" ||
+  xhsMediaSkill?.availability !== "available" ||
+  xhsMediaSkill.actions.length !== 2 ||
+  xhsMediaSkill.actions.some((action) => action.category !== "commit" || action.operationMode !== "write") ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.kind !== "file" ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.maxItems !== 18 ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "summary")?.inputProjection !== "safe_summary" ||
   bossSearchSkill?.availability !== "incompatible" ||
   !bossSearchSkill.availabilityReason.includes("动作声明")
 ) {

@@ -102,7 +102,8 @@ export type ActionRequest = {
   capability_source_ref?: string;
   capability_lock_ref?: string;
   package_ref?: string;
-  operation_mode: "validate_only" | "draft" | "preview" | "blocked_true_write";
+  operation_mode: "validate_only" | "draft" | "preview" | "execute_after_approval" | "blocked_true_write";
+  action_id?: string;
   risk_classification: {
     risk: AdmissionDecision["action_risk"];
     execution_intent: string;

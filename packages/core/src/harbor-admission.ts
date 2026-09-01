@@ -215,7 +215,7 @@ export type HarborWritePrecheckFacts = {
   unavailable: null;
 };
 
-export type HarborAdmissionMode = "read" | "write_precheck";
+export type HarborAdmissionMode = "read" | "write_precheck" | "media_action";
 export type HarborIdentityValidationMode = HarborAdmissionMode;
 
 export type HarborBrowserProviderCatalog = {
@@ -817,7 +817,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
   }
 
-  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts, mode);
+  const identity = validateHarborIdentityEnvironmentFacts(input.harbor_identity_environment_facts, mode === "media_action" ? "write_precheck" : mode);
   if ("category" in identity) {
     return { ok: false, failure: identity };
   }
@@ -826,7 +826,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: providerStatusFailure };
   }
 
-  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode);
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode === "media_action" ? "write_precheck" : mode);
   if (!runtime.ok) {
     return {
       ok: false,

@@ -36,6 +36,7 @@ export const supportedLodePackageRefs = [
   "lode://site-capability/xiaohongshu/read-note-detail@0.1.0",
   "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
   "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0",
+  "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0",
   "lode://site-capability/boss/job-search@0.1.0",
   "lode://site-capability/boss/read-job-detail@0.1.1",
   "lode://site-capability/boss/greet-precheck@0.1.0",
