@@ -237,10 +237,7 @@ export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
   "Runtime.evaluate",
   "Page.enable",
   "Page.captureScreenshot",
-  "Page.setInterceptFileChooserDialog",
-  "Fetch.enable",
-  "Fetch.failRequest",
-  "Fetch.disable"
+  "Page.setInterceptFileChooserDialog"
 ] as const;
 
 type WritePrecheckCdpCommand = typeof XHS_WRITE_PRECHECK_CDP_COMMANDS[number];
@@ -336,26 +333,14 @@ async function probeProviderWritePrecheck(
       if (input.requested_path !== undefined) {
         await sendWritePrecheckCdp(client, "Page.enable");
         let fileChooserOpened = false;
-        let networkRequestAttempted = false;
-        const blockedRequests: Promise<unknown>[] = [];
         const stopObservingFileChooser = client.on("Page.fileChooserOpened", () => { fileChooserOpened = true; });
-        const stopInterceptingRequests = client.on("Fetch.requestPaused", (event) => {
-          networkRequestAttempted = true;
-          if (typeof event.requestId === "string") {
-            blockedRequests.push(sendWritePrecheckCdp(client, "Fetch.failRequest", { requestId: event.requestId, errorReason: "Aborted" }));
-          }
-        });
         let selected: WritePrecheckObservation | undefined;
         let completedPathPrepare: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> | undefined;
         try {
-          await sendWritePrecheckCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
           selected = await evaluateWritePrecheck(client, input.requested_path, true);
           if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
-          }
-          if (networkRequestAttempted) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a network request and was blocked.", false);
           }
           if (!selected || selected.selection_status !== "selected") {
             return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
@@ -370,7 +355,7 @@ async function probeProviderWritePrecheck(
             return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
           }
           const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
-          if (fileChooserOpened || networkRequestAttempted) {
+          if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false);
           }
           if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
@@ -387,18 +372,15 @@ async function probeProviderWritePrecheck(
           };
         } finally {
           try {
-            await Promise.allSettled(blockedRequests);
             await withCdp(webSocketUrl, async (cleanupClient) => {
               await sendWritePrecheckCdp(cleanupClient, "Page.setInterceptFileChooserDialog", { enabled: false });
-              await sendWritePrecheckCdp(cleanupClient, "Fetch.disable");
             },
             AbortSignal.timeout(1500));
           } finally {
             stopObservingFileChooser();
-            stopInterceptingRequests();
           }
         }
-        if (fileChooserOpened || networkRequestAttempted || !completedPathPrepare) {
+        if (fileChooserOpened || !completedPathPrepare) {
           return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction.", false);
         }
         return completedPathPrepare;
