@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createFileRunRecordStore, taskTurnInputSchemaVersion, type FileAuthorizationDecisionStore, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { createFileRunRecordStore, taskTurnInputSchemaVersion, type FileAuthorizationDecisionStore, type RunRecord, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { createApiServer } from "./server.js";
 import { handleTaskThreadApi, takePendingWritePrecheckContinuation, withWritePrecheckRunLock } from "./task-thread-api.js";
@@ -442,11 +442,15 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
   const packageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
   const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
   const baseRunStore = createFileRunRecordStore({ directory: join(directory, "runs") });
+  let syntheticUnknownRun: RunRecord | undefined;
   const runStore = {
     ...baseRunStore,
     getRunRecord: async (runId: string) => {
+      if (runId === "run_api_precheck_unknown") return syntheticUnknownRun;
       const stored = await baseRunStore.getRunRecord(runId);
-      return stored ? { ...stored, authorization_decision_refs: [decisionRef] } : stored;
+      return stored && (runId === "run_api_cancel" || runId === "run_api_precheck_cancel")
+        ? { ...stored, authorization_decision_refs: [decisionRef] }
+        : stored;
     }
   };
   const store = createFileTaskThreadStore({ directory: join(directory, "threads"), runRecordStore: runStore, resolveInputPolicy });
@@ -592,6 +596,7 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert.equal(invalidated, true);
     assert.equal(takePendingWritePrecheckContinuation(decisionRef), undefined);
     const cancelledRun = await runStore.getRunRecord(body.run_id);
+    assert(cancelledRun);
     assert.equal(cancelledRun?.status, "cancelled");
     assert.equal(cancelledRun?.failure?.code, "user_cancelled");
     assert.equal(cancelledRun?.public_result_summary?.submitted, false);
@@ -603,6 +608,42 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     const persistedTurn = record((persistedThread.turns as unknown[])[0]);
     assert.equal(persistedTurn.failure_code, undefined);
     assert.equal(persistedTurn.submission_error, undefined);
+
+    const unknownRunId = "run_api_precheck_unknown";
+    syntheticUnknownRun = {
+      ...cancelledRun,
+      run_id: unknownRunId,
+      status: "unknown_outcome",
+      authorization_decision_refs: [decisionRef]
+    };
+    const unknownBody = { ...body, idempotency_key: "submit-precheck-unknown", run_id: unknownRunId };
+    const unknownTurn = await store.reserveTaskTurn(created.thread.thread_id, {
+      idempotency_key: unknownBody.idempotency_key,
+      request_hash: requestHash(unknownBody),
+      run_id: unknownBody.run_id,
+      creation_channel: "app",
+      package_ref: packageRef,
+      input: unknownBody.input_snapshot
+    });
+    const unknownBefore = await store.getTaskThread(created.thread.thread_id);
+    assert(unknownBefore);
+    assert.equal(unknownBefore.turns.at(-1)?.status, "status_unknown");
+    const terminatedUnknown = await handleTaskThreadApi({
+      method: "POST",
+      path: `/threads/${created.thread.thread_id}/turns/${unknownTurn.turn.turn_id}/terminate`,
+      store,
+      runRecordStore: runStore,
+      validateTask: async () => undefined,
+      submitTask: async () => { throw new Error("unexpected submit"); }
+    });
+    assert(terminatedUnknown.handled);
+    assert.equal(terminatedUnknown.status, 200);
+    const unknownAfter = await runStore.getRunRecord(unknownBody.run_id);
+    assert.equal(unknownAfter?.status, "unknown_outcome");
+    const terminatedUnknownTurn = record(terminatedUnknown.body.turn);
+    assert.equal(terminatedUnknownTurn.status, "cancelled");
+    assert.equal(terminatedUnknownTurn.run_status, "unknown_outcome");
+    assert.equal(typeof terminatedUnknownTurn.terminated_at, "string");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

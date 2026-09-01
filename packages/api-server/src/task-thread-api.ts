@@ -541,10 +541,20 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
         const run = input.runRecordStore
           ? await input.runRecordStore.getRunRecord(turn.run_id)
           : undefined;
-        if (isExactWritePrecheckRun(run)) {
+        const exactTerminalWritePrecheck = run !== undefined &&
+          (isExactWritePrecheckRun(run) || (
+            run.status !== "requires_user_action" &&
+            run.status !== "pending" &&
+            run.status !== "admitted" &&
+            run.status !== "running" &&
+            isExactWritePrecheckRun({ ...run, status: "requires_user_action" })
+          ));
+        if (run && exactTerminalWritePrecheck) {
           await cancelAuthorizationDecisions(input.authorizationDecisionStore, turn);
           clearPendingWritePrecheckContinuations(turn.run_id);
-          await input.runRecordStore!.cancelRequiresUserActionRun(turn.run_id);
+          if (run.status === "requires_user_action") {
+            await input.runRecordStore!.cancelRequiresUserActionRun(turn.run_id);
+          }
         }
         return input.store!.terminateTaskTurn(threadId, turnId);
       };
