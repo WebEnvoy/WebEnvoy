@@ -1523,9 +1523,10 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
       }, {
         lodePackageResolver: async () => mediaPackage,
         harborRuntimeClient: harbor,
-        // The persisted confirmation records the source as confirm; the
-        // continuation consumes it against that same source before dispatch.
-        executionPolicyConfigStore: mediaConfigStore("confirm"),
+        // The persisted one-time decision must be consumable even though the
+        // underlying global policy remains auto; no policy setting change is
+        // required between submission and continuation.
+        executionPolicyConfigStore: mediaConfigStore("auto"),
         authorizationDecisionStore: authorizationStore,
         clock: () => new Date(evaluatedAt)
       });

@@ -2528,6 +2528,7 @@ export async function continueXhsMediaActionTask(
     authorization_context: request.authorization_context,
     config_store: deps.executionPolicyConfigStore,
     single_action_decision: request.single_action_decision,
+    require_confirmation: true,
     evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
   });
   if (isFailure(policy)) return { ok: false, failure: policy, run_record: existing };

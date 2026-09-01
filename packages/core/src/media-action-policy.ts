@@ -246,10 +246,10 @@ export async function evaluateXhsMediaActionPolicy(input: {
       : { ...policies, single_action_decision: input.single_action_decision }
   } as const;
   let evaluation = evaluateExecutionPolicy(evaluationInput);
-  if (input.require_confirmation && input.single_action_decision === undefined &&
-    evaluation.status === "evaluated" && evaluation.next_step === "execute") {
+  if (input.require_confirmation && evaluation.status === "evaluated" &&
+    evaluation.effective_policy.source !== "single_action_decision") {
     const source = evaluation.effective_policy.source;
-    const sourcePolicy = source === "single_action_decision" ? undefined : policies[source];
+    const sourcePolicy = policies[source];
     if (sourcePolicy) {
       const confirmationPolicies: ExecutionPolicySources = {
         ...policies,
@@ -258,6 +258,9 @@ export async function evaluateXhsMediaActionPolicy(input: {
           modes: { ...sourcePolicy.modes, [variant.action.category]: "confirm" }
         }
       };
+      if (input.single_action_decision !== undefined) {
+        confirmationPolicies.single_action_decision = input.single_action_decision;
+      }
       evaluation = evaluateExecutionPolicy({ ...evaluationInput, policies: confirmationPolicies });
     }
   }
