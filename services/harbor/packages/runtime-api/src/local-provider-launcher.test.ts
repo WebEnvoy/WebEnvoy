@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readTargetPageFacts, selectPage, validateXhsWritePrecheckObservation, writePrecheckProbeExpression } from "./local-provider-launcher.js";
+import {
+  observeXhsPathPrepareRequest,
+  readTargetPageFacts,
+  selectPage,
+  validateXhsWritePrecheckObservation,
+  writePrecheckProbeExpression
+} from "./local-provider-launcher.js";
 
 test("selectPage matches equivalent page URLs by structured URL semantics", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?keyword=AI%20%E5%B7%A5%E5%85%B7&source=web#notes";
@@ -139,6 +145,19 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /strictPath \? controls\.filter\(\(el\) => visible\(el, false\)\) : controls/);
   assert.doesNotMatch(upload, /querySelectorAll\('button, \[role="button"\], \[role="tab"\]'\)/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
+});
+
+test("#405 path request observation continues requests and leaves external effects unknown", () => {
+  const continued: string[] = [];
+  const continueRequest = (requestId: string) => { continued.push(requestId); };
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "get", resourceType: "XHR", request: { method: "GET" } }, continueRequest), false);
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "head", resourceType: "Document", request: { method: "HEAD" } }, continueRequest), false);
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "options", resourceType: "Fetch", request: { method: "OPTIONS" } }, continueRequest), false);
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "post", resourceType: "XHR", request: { method: "POST" } }, continueRequest), true);
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "script-post", resourceType: "Script", request: { method: "POST" } }, continueRequest), false);
+  assert.equal(observeXhsPathPrepareRequest({ requestId: "missing-method", resourceType: "XHR", request: {} }, continueRequest), false);
+  assert.equal(observeXhsPathPrepareRequest({ resourceType: "XHR", request: { method: "POST" } }, continueRequest), false);
+  assert.deepEqual(continued, ["get", "head", "options", "post", "script-post", "missing-method"]);
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {
