@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CreateTaskSelection } from "./CreateTaskShell";
 import {
   createAwaitingTargetCompatibility,
+  createActionPendingCompatibility,
   fetchSkillIdentityCompatibility,
   isCandidateUsable,
   loadingSkillIdentityCompatibility,
@@ -51,12 +52,12 @@ export function useSkillWorkbench(options: SkillWorkbenchOptions) {
   const recovery = useSkillRecovery(options, setCreateTaskSelection);
   useSkillWorkbenchEffects(options, contextKey, requestGateRef, setCompatibilityBySkill, setCreateTaskSelection);
 
-  async function resolveCompatibility(skill: LodeCatalogSkill, identityId?: string, targetRef?: string) {
+  async function resolveCompatibility(skill: LodeCatalogSkill, identityId?: string, targetRef?: string, actionId?: string) {
     const request = requestGateRef.current.begin();
     const context = contextRef.current;
     const refreshedCatalog = await fetchLodeCatalog(request.signal);
     if (!request.isCurrent() || contextRef.current !== context) return;
-    const result = await resolveRefreshedCompatibility(options, refreshedCatalog, skill, identityId, targetRef, request.signal);
+    const result = await resolveRefreshedCompatibility(options, refreshedCatalog, skill, identityId, targetRef, actionId, request.signal);
     if (!request.isCurrent() || contextRef.current !== context) return;
     options.onCatalogChange(refreshedCatalog);
     if (result == null) return;
@@ -100,8 +101,8 @@ export function useSkillWorkbench(options: SkillWorkbenchOptions) {
     createTaskSelection,
     identityRecoveryRequest: recovery.identityRecoveryRequest,
     siteSkillRecoveryRequest: recovery.siteSkillRecoveryRequest,
-    checkCreateTaskCompatibility: async (skill: LodeCatalogSkill, identityId: string, targetRef?: string) =>
-      (await resolveCompatibility(skill, identityId, targetRef))?.compatibility ?? null,
+    checkCreateTaskCompatibility: async (skill: LodeCatalogSkill, identityId: string, targetRef?: string, actionId?: string) =>
+      (await resolveCompatibility(skill, identityId, targetRef, actionId))?.compatibility ?? null,
     clearCreateTaskSelection: () => setCreateTaskSelection(null),
     invalidateRequests: () => requestGateRef.current.invalidate(),
     recoverCandidate: recovery.recoverCandidate,
@@ -228,7 +229,7 @@ function loadCompatibility(
     return () => { cancelled = true; };
   }
   setCompatibility(initialCompatibility(skills, options));
-  const pending = skills.filter((skill) => skill.availability === "available" && !skillRequiresExactTarget(skill));
+  const pending = skills.filter((skill) => skill.availability === "available" && !skillRequiresExactTarget(skill) && skill.actions.length === 1);
   const refs = options.identities.map((identity) => identity.identityEnvironmentRef);
   let index = 0;
   const worker = async () => {
@@ -249,6 +250,8 @@ function initialCompatibility(skills: LodeCatalogSkill[], options: SkillWorkbenc
       .map((identity) => identity.identityEnvironmentRef);
     const state = skill.availability !== "available"
       ? unavailableSkillIdentityCompatibility(skill.availabilityReason)
+      : skill.actions.length > 1
+      ? createActionPendingCompatibility(matchingRefs)
       : skillRequiresExactTarget(skill)
       ? createAwaitingTargetCompatibility(matchingRefs)
       : loadingSkillIdentityCompatibility();
@@ -262,15 +265,22 @@ async function resolveRefreshedCompatibility(
   originalSkill: LodeCatalogSkill,
   identityId: string | undefined,
   targetRef: string | undefined,
+  actionId: string | undefined,
   signal: AbortSignal,
 ): Promise<ResolvedCompatibility | undefined> {
   const skill = catalog.skills.find((item) => item.packageRef === originalSkill.packageRef);
   const identity = options.identities.find((item) => item.id === identityId);
   if (catalog.status !== "ready" || skill?.availability !== "available" || identity == null ||
     skillVersionKey(skill) !== skillVersionKey(originalSkill) || !options.runtime.canUseLiveRuntime) return;
-  const compatibility = skillRequiresExactTarget(skill) && targetRef == null
+  const actionSkill = actionId == null
+    ? skill
+    : { ...skill, actions: skill.actions.filter((action) => action.id === actionId) };
+  if (actionId != null && actionSkill.actions.length !== 1) return;
+  const compatibility = actionId == null && skill.actions.length > 1
+    ? createActionPendingCompatibility([identity.identityEnvironmentRef])
+    : skillRequiresExactTarget(actionSkill) && targetRef == null
     ? createAwaitingTargetCompatibility([identity.identityEnvironmentRef])
-    : await fetchSkillIdentityCompatibility(options.coreEndpoint, skill, [identity.identityEnvironmentRef], signal, targetRef);
+    : await fetchSkillIdentityCompatibility(options.coreEndpoint, actionSkill, [identity.identityEnvironmentRef], signal, targetRef);
   const candidate = compatibility.candidates.find((item) => item.identityEnvironmentRef === identity.identityEnvironmentRef);
   return { skill, identity, compatibility, candidate };
 }
