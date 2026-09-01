@@ -76,6 +76,8 @@ import {
   RuntimeSessionStore,
   type CreateRuntimeSessionInput,
   type LocalProviderLauncher,
+  type LocalProviderMediaActionInput,
+  type LocalProviderMediaActionResult,
   type OpenIdentityEnvironmentSessionInput,
   type RuntimeSessionControlInput,
   type RuntimeSessionFacts,
@@ -125,6 +127,17 @@ import {
   type WritePrecheckFailureClass,
   type WritePrecheckObservationRecord
 } from "./write-precheck-operation.js";
+import {
+  HARBOR_XHS_MEDIA_ACTION_SCHEMA,
+  XHS_MEDIA_ACTION_LOCK_REF,
+  XHS_MEDIA_ACTION_PACKAGE_REF,
+  admitXhsMediaAction,
+  completeXhsMediaAction,
+  unavailableXhsMediaAction,
+  type AdmittedXhsMediaAction,
+  type XhsMediaActionResult,
+  type XhsMediaUnavailableReason
+} from "./xhs-media-action.js";
 
 export const DEFAULT_IDENTITY_SITE_URLS = {
   xiaohongshu: "https://www.xiaohongshu.com/explore",
@@ -138,6 +151,7 @@ export { HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, LocalIdentityEnvironmen
 export { HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA } from "./identity-environment-mutation-types.js";
 export { HARBOR_MANAGED_PROVIDER_LIFECYCLE_SCHEMA, ManagedProviderLifecycle } from "./managed-provider-lifecycle.js";
 export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, HARBOR_XHS_PATH_PREPARE_SCHEMA, XHS_PUBLISH_PRECHECK_PIN, XHS_PUBLISH_PATH_PREPARE_PIN } from "./write-precheck-operation.js";
+export { HARBOR_XHS_MEDIA_ACTION_SCHEMA, XHS_MEDIA_ACTION_LOCK_REF, XHS_MEDIA_ACTION_PACKAGE_REF } from "./xhs-media-action.js";
 export {
   bindIdentityEnvironmentDefaultProvider,
   detectBrowserProviders,
@@ -300,6 +314,8 @@ export type {
   LocalProviderLauncher,
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderMediaActionInput,
+  LocalProviderMediaActionResult,
   LocalProviderPageFacts,
   /** @deprecated Provider-specific read probe input retained for legacy adapter compatibility. */
   LocalProviderReadProbeInput,
@@ -341,6 +357,16 @@ export type {
   RuntimeViewerEntry,
   ValidationRuntimeFacts
 } from "./runtime-session.js";
+export type {
+  AdmittedXhsMediaAction,
+  XhsMediaActionResult,
+  XhsMediaActionNormalizedResult,
+  XhsMediaActionId,
+  XhsMediaActionPath,
+  XhsMediaEffectKind,
+  XhsMediaOperationStatus,
+  XhsMediaUnavailableReason
+} from "./xhs-media-action.js";
 export type {
   AppBrowserStatus,
   AppRuntimeStatusFixture,
@@ -1236,6 +1262,50 @@ export class HarborRuntime {
     return completed;
   }
 
+  /** Execute exactly one Lode #307 image-text media action after Core confirmation. */
+  async executeXhsMediaAction(
+    runtime_session_ref: string,
+    input: unknown
+  ): Promise<XhsMediaActionResult> {
+    const admitted = admitXhsMediaAction(input);
+    if (!admitted) return unavailableXhsMediaAction(
+      runtime_session_ref,
+      invalidMediaInput(input),
+      "invalid_contract"
+    );
+    const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
+    if (before) return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(before));
+    const session = this.runtimeSessions.getRecord(runtime_session_ref);
+    if (!session) return unavailableXhsMediaAction(runtime_session_ref, admitted, "resource_unavailable");
+    const controlGeneration = session.control_generation;
+    const holderRef = session.facts.control_lock.holder_ref;
+    const identityRef = session.facts.identity_environment_ref;
+    if (!identityRef) return unavailableXhsMediaAction(runtime_session_ref, admitted, "login_required");
+    const result = await this.runtimeSessions.executeMediaAction(runtime_session_ref, {
+      target_url: admitted.url,
+      expected_origin: "https://creator.xiaohongshu.com",
+      target_ref: admitted.target_ref,
+      action_id: admitted.action_id,
+      requested_path: admitted.requested_path,
+      refs: admitted.refs,
+      summary: admitted.summary,
+      ...(admitted.holder_ref === undefined ? {} : { holder_ref: admitted.holder_ref }),
+      no_submit_guard: "active",
+      authorization_binding: admitted.authorization_binding
+    });
+    const current = this.runtimeSessions.getRecord(runtime_session_ref);
+    if (!current || current.control_generation !== controlGeneration ||
+      current.facts.control_lock.holder_ref !== holderRef || current.facts.identity_environment_ref !== identityRef) {
+      return unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.status === "completed" ? result.operation_ref : undefined);
+    }
+    if (result.status === "unavailable") {
+      return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref);
+    }
+    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
+    if (after) return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(after), result.operation_ref);
+    return completeXhsMediaAction(runtime_session_ref, admitted, result);
+  }
+
   private async executeXhsPublishPathPrepare(
     runtime_session_ref: string,
     input: unknown
@@ -1487,6 +1557,36 @@ function hasStableReadOperationController(session: RuntimeSessionRecord, holderR
 
 function requestIdentity(input: { site_id: string; operation_id: string }): { site_id: string; operation_id: string } {
   return { site_id: input.site_id, operation_id: input.operation_id };
+}
+
+function invalidMediaInput(input: unknown): Pick<AdmittedXhsMediaAction, "url" | "target_ref" | "action_id" | "requested_path" | "summary"> {
+  // Never echo malformed or potentially sensitive input into a public failure.
+  return {
+    url: "https://creator.xiaohongshu.com/publish/publish",
+    target_ref: "invalid-target-ref",
+    action_id: "xhs_publish_note_image_text_media.image_upload",
+    requested_path: "image_text_upload",
+    summary: "invalid media action request"
+  };
+}
+
+function mediaFailureReason(
+  failureClass: string
+): XhsMediaUnavailableReason {
+  switch (failureClass) {
+    case "login_required": return "login_required";
+    case "permission_insufficient":
+    case "session_user_controlled": return "permission_insufficient";
+    case "page_changed": return "page_changed";
+    case "safety_challenge": return "safety_challenge";
+    case "media_ref_unavailable": return "media_ref_unavailable";
+    case "generation_unavailable": return "generation_unavailable";
+    case "operation_result_unknown": return "operation_result_unknown";
+    case "post_check_failed": return "post_check_failed";
+    case "reconciliation_unknown": return "reconciliation_unknown";
+    case "session_missing": return "resource_unavailable";
+    default: return "resource_unavailable";
+  }
 }
 
 function isChallengeLike(url?: string | null, title?: string | null): boolean {

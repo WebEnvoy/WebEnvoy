@@ -214,6 +214,7 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}/site-resource-facts",
       "/runtime/sessions/{runtime_session_ref}/write-precheck-facts",
       "/runtime/sessions/{runtime_session_ref}/validate-only-write-precheck",
+      "/runtime/sessions/{runtime_session_ref}/xhs-media-actions",
       "/runtime/evidence/{evidence_ref}"
     ],
     safety_boundary: {
@@ -365,6 +366,12 @@ async function routeSession(
     writeJson(response, statusCode, result);
     return;
   }
+  if (action === "xhs-media-actions" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.executeXhsMediaAction(runtimeSessionRef, await readJson<unknown>(request));
+    writeJson(response, xhsMediaActionStatusCode(result), result);
+    return;
+  }
   if (action === "read-operations" && method === "POST") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.executeLegacyReadOperation(runtimeSessionRef, await readJson<unknown>(request));
@@ -438,6 +445,13 @@ function readOperationStatusCode(result: { status: string; failure_class?: strin
   if (result.status === "completed") return 201;
   if (result.failure_class === "session_missing") return 404;
   if (["invalid_request", "operation_not_allowlisted", "allowlist_pin_invalid", "target_url_invalid", "target_origin_not_allowed", "target_path_not_allowlisted", "detail_ref_invalid"].includes(result.failure_class ?? "")) return 400;
+  return 409;
+}
+
+function xhsMediaActionStatusCode(result: { status: string; unavailable_reason?: string }): number {
+  if (result.status === "available") return 201;
+  if (result.unavailable_reason === "invalid_contract") return 400;
+  if (result.unavailable_reason === "resource_unavailable") return 404;
   return 409;
 }
 

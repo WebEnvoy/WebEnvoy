@@ -215,6 +215,91 @@ export type XhsPathPrepareRequestedPath = "image_text_upload" | "image_text_gene
 export type XhsPathPrepareObservedPath = "observed" | "unknown" | "mismatch";
 export type XhsPathPrepareCompositionState = "initialized" | "not_initialized" | "unknown";
 
+/** The two Lode #307 media actions.  This is intentionally not a mode enum. */
+export type XhsMediaActionId =
+  | "xhs_publish_note_image_text_media.image_upload"
+  | "xhs_publish_note_image_text_media.text_to_image_generate";
+export type XhsMediaActionPath = "image_text_upload" | "image_text_generate";
+export type XhsMediaEffectKind = "upload" | "generate";
+export type XhsMediaOperationStatus = "accepted" | "running" | "terminal" | "unknown_outcome";
+
+export interface LocalProviderMediaAuthorizationBinding {
+  /** Core's existing authorization decision reference; Harbor does not persist or resolve it. */
+  decision_ref: string;
+  action_id: XhsMediaActionId;
+  target_ref: string;
+  /** Core's existing TaskTurnRecord idempotency key; Harbor does not persist it. */
+  idempotency_key: string;
+}
+
+export interface LocalProviderMediaActionInput {
+  target_url: string;
+  expected_origin: "https://creator.xiaohongshu.com";
+  target_ref: string;
+  action_id: XhsMediaActionId;
+  requested_path: XhsMediaActionPath;
+  refs: readonly string[];
+  summary: string;
+  holder_ref?: string;
+  no_submit_guard: "active";
+  /** Transient Core binding checked before the first external effect. */
+  authorization_binding: LocalProviderMediaAuthorizationBinding;
+}
+
+export type LocalProviderMediaActionResult =
+  | {
+      status: "completed";
+      observed_at: string;
+      observed_url: string;
+      page: LocalProviderPageFacts;
+      action_id: XhsMediaActionId;
+      requested_path: XhsMediaActionPath;
+      effect_kind: XhsMediaEffectKind;
+      effect_status: "requested" | "observed" | "unknown" | "failed";
+      operation_status: XhsMediaOperationStatus;
+      operation_ref: string;
+      terminal_state?: "success" | "failure";
+      media_readback: {
+        status: "observed" | "unknown" | "mismatch" | "not_applicable";
+        media_count: number | null;
+        order_status: "observed" | "unknown" | "not_applicable";
+        ordered_item_refs?: readonly string[];
+        generation_result_ref: string | null;
+      };
+      page_readback: {
+        status: "observed" | "unknown" | "mismatch";
+        page_state_ref: string;
+        route_state: "observed" | "unknown" | "mismatch";
+      };
+      source_refs: LocalProviderReadProbeRef[];
+      evidence_ref_kinds: LocalProviderReadProbeRef[];
+      submitted: false;
+    }
+  | {
+      status: "unavailable";
+      failure_class:
+        | "invalid_contract"
+        | "login_required"
+        | "permission_insufficient"
+        | "page_changed"
+        | "safety_challenge"
+        | "media_ref_unavailable"
+        | "generation_unavailable"
+        | "operation_result_unknown"
+        | "post_check_failed"
+        | "reconciliation_unknown"
+        | "session_missing"
+        | "session_not_ready"
+        | "session_user_controlled"
+        | "fixture_runtime"
+        | "provider_probe_unavailable";
+      message: string;
+      retryable: boolean;
+      operation_ref?: string;
+      page?: LocalProviderPageFacts;
+      submitted: false;
+    };
+
 export interface XhsPathPrepareBusinessState {
   route_state: XhsPathPrepareObservedPath;
   control_owner_state: XhsPathPrepareObservedPath;
@@ -484,6 +569,7 @@ export type LocalProviderLaunchResult =
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
+      executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
       captureScreenshot: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
       close: () => Promise<void>;
     }
