@@ -2,8 +2,8 @@
   "schema_version": "webenvoy-desktop-source-lock/v1",
   "lode": {
     "repository": "WebEnvoy/Lode",
-    "commit": "d020f55787ee033b57f04447aa2fdfe0eb65f786",
-    "tree": "03d6ec71ad17ca6237eb5cc8dff39113e7ff3545",
-    "raw_assets_sha256": "305b9cd0b9bd9b76984c20cca5168cee9976e5d9c08aff5ebcd11d92f5e77442"
+    "commit": "cd6633e993f038578d017be81ad0bbe36794bdcc",
+    "tree": "e456de2d0b895c4f5ba681f65634e12ef4e758d0",
+    "raw_assets_sha256": "2416f6ba4a8a0bdd04d3f62474d8cf0178be07262def652b29c0a925faf822a7"
   }
 }
