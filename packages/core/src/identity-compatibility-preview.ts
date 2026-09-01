@@ -10,8 +10,12 @@ import {
 } from "./harbor-admission.js";
 import {
   validateLodePackageAdmission,
+  xhsMediaActionPaths,
+  xhsMediaCapabilityId,
+  xhsMediaPackageRef,
   type LodePackageAdmissionContract,
-  type LodeRequiredHarborFact
+  type LodeRequiredHarborFact,
+  type XhsMediaActionId
 } from "./lode-admission.js";
 import {
   matchLockedLodeOperation,
@@ -51,7 +55,7 @@ export type IdentityCompatibilityPreviewRequest = {
   lock_ref: string;
   version: string;
   operation_id: string;
-  operation_mode: "read" | "validate_only" | "draft" | "preview";
+  operation_mode: "read" | "validate_only" | "draft" | "preview" | "write";
   target_ref: string;
   target_origin: string;
   resource_requirement_ref: string;
@@ -107,7 +111,7 @@ const requestFields = new Set([
   "schema_version", "package_ref", "lock_ref", "version", "operation_id", "operation_mode", "target_ref", "target_origin",
   "resource_requirement_ref", "resource_requirement_profile_id", "identity_environment_refs"
 ]);
-const operationModes = new Set(["read", "validate_only", "draft", "preview"]);
+const operationModes = new Set(["read", "validate_only", "draft", "preview", "write"]);
 const consumerBoundary =
   "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed." as const;
 const maxCandidates = 32;
@@ -280,6 +284,10 @@ function validateResolvedPackage(
   requiredFacts: readonly LodeRequiredHarborFact[];
   normalizedTargetRef: string;
 } {
+  if (request.package_ref === xhsMediaPackageRef || contract.package_ref === xhsMediaPackageRef) {
+    return validateResolvedMediaAction(contract, request);
+  }
+  if (request.operation_mode === "write") return failure("identity_compatibility_request_invalid");
   const pathPrepare =
     contract.package_ref === xhsPathPrepareContract.package_ref && contract.lock_ref === xhsPathPrepareContract.lock_ref &&
     contract.capability_id === xhsPathPrepareContract.capability_id && contract.operation_id === xhsPathPrepareContract.operation_id &&
@@ -309,17 +317,59 @@ function validateResolvedPackage(
   return validateResolvedIdentityBinding(contract, request, operation, operation.selection.target_ref);
 }
 
+function validateResolvedMediaAction(
+  contract: LodePackageAdmissionContract,
+  request: IdentityCompatibilityPreviewRequest
+): ReturnType<typeof validateResolvedIdentityBinding> {
+  const actionId = request.operation_id as XhsMediaActionId;
+  const action = contract.action_declaration?.actions.find((candidate) => candidate.action_id === actionId);
+  const target = normalizePublicHttpTarget(request.target_ref);
+  if (
+    request.operation_mode !== "write" || !Object.hasOwn(xhsMediaActionPaths, actionId) || !action ||
+    action.resource_requirements.id !== request.resource_requirement_ref ||
+    !action.resource_requirements.profile_ids.includes(request.resource_requirement_profile_id) ||
+    !target.ok || target.target_origin !== "https://creator.xiaohongshu.com" ||
+    request.target_origin !== "https://creator.xiaohongshu.com"
+  ) return failure("identity_compatibility_request_invalid");
+
+  const admissionIntent = {
+    capability: {
+      ref: `lode:capability/${xhsMediaCapabilityId}`,
+      version: request.version,
+      source_ref: request.package_ref,
+      lock_ref: request.lock_ref
+    },
+    policy: { risk: "write" as const, execution_intent: "execute_after_approval" as const },
+    resource_requirement_refs: [request.resource_requirement_ref],
+    resource_requirement_profile_id: request.resource_requirement_profile_id,
+    input: {
+      action_id: actionId,
+      refs: actionId === "xhs_publish_note_image_text_media.image_upload" ? ["compatibility-preview-ref"] : []
+    }
+  };
+  return validateResolvedIdentityBinding(contract, request, {
+    package_ref: request.package_ref,
+    lock_ref: request.lock_ref,
+    operation_id: actionId,
+    operation_mode: "write",
+    target_origin: request.target_origin,
+    site_slug: "xiaohongshu",
+    allowed_origins: ["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"]
+  }, target.target_ref, admissionIntent);
+}
+
 function validateResolvedIdentityBinding(
   contract: LodePackageAdmissionContract,
   request: IdentityCompatibilityPreviewRequest,
   operation: LockedOperationMatch | LockedOperationIdentityBinding,
-  normalizedTargetRef: string
+  normalizedTargetRef: string,
+  admissionIntent?: Parameters<typeof validateLodePackageAdmission>[0]
 ): FailureRecord | {
   operation: LockedOperationMatch | LockedOperationIdentityBinding;
   requiredFacts: readonly LodeRequiredHarborFact[];
   normalizedTargetRef: string;
 } {
-  const admission = validateLodePackageAdmission({
+  const admission = validateLodePackageAdmission(admissionIntent ?? {
     capability: {
       ref: `lode:capability/${contract.capability_id}`,
       version: request.version,
@@ -328,7 +378,7 @@ function validateResolvedIdentityBinding(
     },
     policy: {
       risk: request.operation_mode === "read" ? "read" : "write",
-      execution_intent: request.operation_mode
+      execution_intent: request.operation_mode === "write" ? "preview" : request.operation_mode
     },
     resource_requirement_refs: [request.resource_requirement_ref],
     resource_requirement_profile_id: request.resource_requirement_profile_id
