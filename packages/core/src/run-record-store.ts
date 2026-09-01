@@ -52,6 +52,12 @@ export type SuccessfulRunResultOutcome = "success" | "partial" | "empty";
 export type RetentionState = "active" | "summary_only" | "expired" | "redacted" | "access_denied" | "deleted_by_policy";
 export type PostCheckStatus = "passed" | "failed" | "blocked" | "not_run";
 
+export type WritePrecheckFailureStage =
+  | "session_precheck"
+  | "provider_probe_initial"
+  | "provider_selection"
+  | "provider_readback_freshness";
+
 export type PostCheckResult = {
   schema_version: "webenvoy.post-check-result.v0";
   status: PostCheckStatus;
@@ -187,6 +193,7 @@ export type FailureRecord = {
     | "write_verification"
     | "reconciliation";
   recovery_hint: string;
+  failure_stage?: WritePrecheckFailureStage;
   attribution?: FailureAttribution;
 };
 

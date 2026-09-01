@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
+import { projectRunSummary } from "./run-query.js";
 import { continueWritePrecheckTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
@@ -412,6 +413,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     let currentRunId = "";
     let mutatePathOperation: ((operation: Record<string, unknown>) => void) | undefined;
     let pathRequestBody: Record<string, unknown> | undefined;
+    let pathFailureStage: "session_precheck" | "provider_probe_initial" | "provider_selection" | "provider_readback_freshness" | undefined;
     let bindingAtValidate: string | undefined;
     const identityRef = "identity-env_xhs-path-prepare";
     const runStore = createFileRunRecordStore({ directory: join(pathDirectory, "runs"), clock: () => new Date(evaluatedAt) });
@@ -427,6 +429,17 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
         pathRequestBody = { ...input };
         bindingAtValidate = (await runStore.getRunRecord(currentRunId))?.admission.runtime_session_binding?.runtime_session_ref;
         assert.equal(bindingAtValidate, `session_${currentRunId}`);
+        if (pathFailureStage !== undefined) {
+          return {
+            schema_version: "harbor-xhs-publish-note-path-prepare/v0",
+            status: "unavailable",
+            runtime_session_ref: input.runtime_session_ref,
+            failure_class: "evidence_unavailable",
+            retryable: false,
+            failure_stage: pathFailureStage,
+            submitted: false
+          };
+        }
         const operation = completedPathPrepareOperation({
           runtime_session_ref: input.runtime_session_ref,
           identity_ref: identityRef,
@@ -472,6 +485,34 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     assert.equal(pathRequestBody.requested_fields, undefined);
     assert.equal(pathRequestBody.include_source_refs, undefined);
     assert.equal(pathRequestBody.proposed_input_summary, undefined);
+    for (const failure_stage of [
+      "session_precheck",
+      "provider_probe_initial",
+      "provider_selection",
+      "provider_readback_freshness"
+    ] as const) {
+      currentRunId = `app-xhs-path-prepare-failure-${failure_stage}`;
+      pathFailureStage = failure_stage;
+      const result = await submitRuntimeTask(runStore, {
+        run_id: currentRunId,
+        task_intent: { ...pathTask, intent_id: `intent_path_prepare_failure_${failure_stage}` },
+        package_ref: pathContract.package_ref,
+        authorization_context: { ...context, idempotency_key: `path-prepare-failure-${failure_stage}` },
+        harbor: { identity_environment_ref: identityRef, url: pathTask.scope.target_ref, requested_path: "image_text_upload" }
+      }, {
+        lodePackageResolver: async () => pathContract,
+        harborRuntimeClient: harbor,
+        executionPolicyConfigStore: configStore("auto"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(result.ok, false, failure_stage);
+      if (!result.ok) assert.equal(result.failure.failure_stage, failure_stage);
+      assert.equal(result.run_record?.failure?.failure_stage, failure_stage);
+      assert.equal(projectRunSummary(result.run_record!).terminal_summary?.failure?.failure_stage, failure_stage);
+      assert.equal(result.run_record?.status, "failed", failure_stage);
+    }
+    pathFailureStage = undefined;
   } finally {
     await rm(pathDirectory, { recursive: true, force: true });
   }

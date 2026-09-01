@@ -325,6 +325,10 @@
           "type": "string",
           "minLength": 1
         },
+        "failure_stage": {
+          "type": "string",
+          "enum": ["session_precheck", "provider_probe_initial", "provider_selection", "provider_readback_freshness"]
+        },
         "attribution": {
           "type": "string",
           "enum": ["capability", "input", "runtime", "site", "evidence", "unknown"]

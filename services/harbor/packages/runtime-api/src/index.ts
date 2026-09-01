@@ -1241,9 +1241,9 @@ export class HarborRuntime {
     input: unknown
   ): Promise<ValidateOnlyXhsPathPrepareResult> {
     const admitted = admitXhsPublishPathPrepare(input);
-    if (!admitted) return unavailableXhsPathPrepare(runtime_session_ref, "invalid_contract", false);
+    if (!admitted) return unavailableXhsPathPrepare(runtime_session_ref, "invalid_contract", false, "session_precheck");
     const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
-    if (before) return unavailableXhsPathPrepare(runtime_session_ref, before, before !== "safety_challenge");
+    if (before) return unavailableXhsPathPrepare(runtime_session_ref, before, before !== "safety_challenge", "session_precheck");
     const session = this.runtimeSessions.getRecord(runtime_session_ref)!;
     const controlGeneration = session.control_generation;
     const holderRef = session.facts.control_lock.holder_ref;
@@ -1254,23 +1254,28 @@ export class HarborRuntime {
       target_ref: admitted.target_ref,
       requested_path: admitted.requested_path
     });
-    if (probe.status === "unavailable") return unavailableXhsPathPrepare(runtime_session_ref, probe.failure_class, probe.retryable);
+    if (probe.status === "unavailable") {
+      return unavailableXhsPathPrepare(runtime_session_ref, probe.failure_class, probe.retryable, probe.failure_stage ?? "provider_probe_initial");
+    }
     const current = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!current || current.control_generation !== controlGeneration ||
       current.facts.control_lock.holder_ref !== holderRef || current.facts.identity_environment_ref !== identityRef) {
-      return unavailableXhsPathPrepare(runtime_session_ref, "session_user_controlled", false);
+      return unavailableXhsPathPrepare(runtime_session_ref, "session_user_controlled", false, "provider_readback_freshness");
     }
     const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
-    if (after) return unavailableXhsPathPrepare(runtime_session_ref, after, after !== "safety_challenge");
+    if (after) return unavailableXhsPathPrepare(runtime_session_ref, after, after !== "safety_challenge", "provider_readback_freshness");
     const completed = completeXhsPathPrepare(runtime_session_ref, identityRef, probe);
-    if (!completed) return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable");
+    if (!completed) return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable", true, "provider_readback_freshness");
     const prohibited = Object.values(completed.normalized.prohibited_actions_observed).some((observed) => observed);
     if (completed.normalized.requested_path !== admitted.requested_path || completed.normalized.observed_path !== "observed") {
-      return unavailableXhsPathPrepare(runtime_session_ref, "path_mismatch", false);
+      return unavailableXhsPathPrepare(runtime_session_ref, "path_mismatch", false, "provider_readback_freshness");
     }
-    if (completed.normalized.interaction.selection_status !== "selected" || completed.normalized.interaction.readback_status !== "read" ||
-      completed.normalized.submitted !== false || completed.normalized.no_submit_guard_status !== "active" || prohibited) {
-      return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable", false);
+    if (completed.normalized.interaction.selection_status !== "selected") {
+      return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable", false, "provider_selection");
+    }
+    if (completed.normalized.interaction.readback_status !== "read" || completed.normalized.submitted !== false ||
+      completed.normalized.no_submit_guard_status !== "active" || prohibited) {
+      return unavailableXhsPathPrepare(runtime_session_ref, "evidence_unavailable", false, "provider_readback_freshness");
     }
     this.writePrecheckObservations.record(completed);
     return completed;

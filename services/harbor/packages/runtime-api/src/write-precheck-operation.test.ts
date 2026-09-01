@@ -13,6 +13,7 @@ import {
   admitXhsPublishPathPrepare,
   completeXhsPathPrepare,
   completeWritePrecheck,
+  unavailableXhsPathPrepare,
   validCompletedWritePrecheckProbe,
   WritePrecheckObservationStore
 } from "./write-precheck-operation.js";
@@ -230,6 +231,22 @@ test("#405 admits both explicit paths and returns refs-only no-submit state", ()
   assert.equal(completed?.post_check.no_submit_guard_status, "active");
   assert.equal(completed?.lode_pin.package_ref, XHS_PUBLISH_PATH_PREPARE_PIN.package_ref);
   assert.equal(completed?.public_boundary.external_write_actions, "not_performed");
+});
+
+test("#405 keeps path-preparation failure stages bounded and refs-safe", () => {
+  const stages = [
+    "session_precheck",
+    "provider_probe_initial",
+    "provider_selection",
+    "provider_readback_freshness"
+  ] as const;
+  for (const failure_stage of stages) {
+    const unavailable = unavailableXhsPathPrepare("session_path_prepare", "evidence_unavailable", false, failure_stage);
+    assert.equal(unavailable.failure_stage, failure_stage);
+    assert.equal(unavailable.failure_class, "evidence_unavailable");
+    assert.equal(unavailable.submitted, false);
+    assert.equal(Object.hasOwn(unavailable, "message"), false);
+  }
 });
 
 test("keeps the browser probe read-only and freshness-bound", () => {
@@ -512,6 +529,24 @@ test("fails closed when session control changes during the trusted probe", async
   assert.deepEqual(
     { status: drifted.status, failure_class: "failure_class" in drifted ? drifted.failure_class : null, submitted: drifted.submitted },
     { status: "unavailable", failure_class: "session_user_controlled", submitted: false }
+  );
+  const pathDrifted = await runtime.executeXhsPublishPrecheck(sessionRef, {
+    ...request,
+    requested_path: "image_text_upload"
+  });
+  assert.deepEqual(
+    {
+      status: pathDrifted.status,
+      failure_class: "failure_class" in pathDrifted ? pathDrifted.failure_class : null,
+      failure_stage: "failure_stage" in pathDrifted ? pathDrifted.failure_stage : null,
+      submitted: pathDrifted.submitted
+    },
+    {
+      status: "unavailable",
+      failure_class: "session_user_controlled",
+      failure_stage: "provider_readback_freshness",
+      submitted: false
+    }
   );
 });
 

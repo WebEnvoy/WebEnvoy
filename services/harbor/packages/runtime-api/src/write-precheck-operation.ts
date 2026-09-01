@@ -5,6 +5,7 @@ import type {
   XhsWritePrecheckCompositionState,
   XhsWritePrecheckFieldState,
   XhsWritePrecheckMediaState,
+  XhsPathPrepareFailureStage,
   XhsPathPrepareNormalizedState,
   XhsPathPrepareRequestedPath
 } from "./runtime-session-types.js";
@@ -124,6 +125,7 @@ export type ValidateOnlyXhsPathPrepareResult =
       runtime_session_ref: string;
       failure_class: WritePrecheckFailureClass | "path_mismatch" | "composition_unknown" | "composition_not_initialized";
       retryable: boolean;
+      failure_stage: XhsPathPrepareFailureStage;
       submitted: false;
     };
 
@@ -528,7 +530,8 @@ export function validCompletedWritePrecheckProbe(
 export function unavailableXhsPathPrepare(
   runtime_session_ref: string,
   failure_class: WritePrecheckFailureClass | "path_mismatch" | "composition_unknown" | "composition_not_initialized",
-  retryable = true
+  retryable = true,
+  failure_stage: XhsPathPrepareFailureStage = "session_precheck"
 ): Extract<ValidateOnlyXhsPathPrepareResult, { status: "unavailable" }> {
   return {
     schema_version: HARBOR_XHS_PATH_PREPARE_SCHEMA,
@@ -536,6 +539,7 @@ export function unavailableXhsPathPrepare(
     runtime_session_ref,
     failure_class,
     retryable,
+    failure_stage,
     submitted: false
   };
 }

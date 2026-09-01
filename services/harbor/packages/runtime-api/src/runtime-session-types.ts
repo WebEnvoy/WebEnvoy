@@ -263,6 +263,17 @@ export type XhsWritePrecheckCompositionState =
 export type XhsWritePrecheckObservationStatus = "observed" | "unobserved" | "unknown";
 export type XhsWritePrecheckAvailability = "available" | "unavailable" | "unknown";
 
+/**
+ * Refs-safe stage for a validate-only path-preparation failure.  This stays
+ * deliberately small so the next live attempt has one bounded root cause to
+ * inspect without exposing browser material.
+ */
+export type XhsPathPrepareFailureStage =
+  | "session_precheck"
+  | "provider_probe_initial"
+  | "provider_selection"
+  | "provider_readback_freshness";
+
 export interface XhsWritePrecheckFieldState {
   availability: XhsWritePrecheckAvailability;
   observation: "observed" | "not_observed" | "unknown";
@@ -319,6 +330,7 @@ export type LocalProviderWritePrecheckProbeResult =
         | "provider_probe_unavailable";
       message: string;
       retryable: boolean;
+      failure_stage?: XhsPathPrepareFailureStage;
       page?: LocalProviderPageFacts;
     };
 
