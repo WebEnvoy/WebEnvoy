@@ -144,7 +144,8 @@ import {
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
-  createLocalTaskTurnInputPolicyResolver
+  createLocalTaskTurnInputPolicyResolver,
+  recoverInterruptedCoreTaskSessions
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 
@@ -177,6 +178,13 @@ const authorizationDecisionStore = createFileAuthorizationDecisionStore({
   taskThreadStore
 });
 const harborRuntimeUrl = process.env.WEBENVOY_HARBOR_RUNTIME_URL;
+const harborRuntimeClient = harborRuntimeUrl
+  ? createHttpHarborRuntimeClient({ baseUrl: harborRuntimeUrl })
+  : undefined;
+
+if (harborRuntimeClient) {
+  await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
+}
 
 const server = createApiServer({
   runRecordStore,
@@ -191,7 +199,7 @@ const server = createApiServer({
   } : {}),
   ...(harborRuntimeUrl ? {
     harborIdentityFactsReader: createHttpHarborIdentityFactsReader({ baseUrl: harborRuntimeUrl }),
-    harborRuntimeClient: createHttpHarborRuntimeClient({ baseUrl: harborRuntimeUrl })
+    harborRuntimeClient
   } : {})
 });
 

@@ -126,6 +126,18 @@ if (
   throw new Error("Packaged Core runtime smoke failed: thread, policy, authorization, identity-facts, or default-policy wiring is missing.");
 }
 
+const recoveryCallIndex = packagedCoreRuntimeSource.indexOf(
+  "await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient)",
+);
+const createApiServerIndex = packagedCoreRuntimeSource.indexOf("const server = createApiServer(");
+if (
+  recoveryCallIndex < 0 ||
+  createApiServerIndex < 0 ||
+  recoveryCallIndex >= createApiServerIndex
+) {
+  throw new Error("Packaged Core runtime smoke failed: interrupted task recovery is missing or runs after createApiServer.");
+}
+
 const lodeLock = runtimeSourceLock.lode;
 const workspaceRoot = path.resolve("../..");
 const workspaceCommit = readGitObject("HEAD", workspaceRoot);
