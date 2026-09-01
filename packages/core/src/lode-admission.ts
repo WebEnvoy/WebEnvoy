@@ -41,12 +41,24 @@ export type LodePackageAdmissionContract = {
   };
 };
 
+/** Exact Lode #307 package boundary consumed by the first media vertical slice. */
+export const xhsMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+export const xhsMediaLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+export const xhsMediaCapabilityId = "publish-note-image-text-media";
+export const xhsMediaOperationId = "xhs_publish_note_image_text_media";
+export const xhsMediaActionPaths = {
+  "xhs_publish_note_image_text_media.image_upload": "image_text_upload",
+  "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate"
+} as const;
+export type XhsMediaActionId = keyof typeof xhsMediaActionPaths;
+
 export type LodeRuntimeAdmissionPolicy = {
   enabled: boolean;
-  status: "current" | "deferred_experimental";
+  status: "current" | "deferred_experimental" | "controlled_evidence";
   recheck_condition:
     | "not_applicable"
-    | "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence";
+    | "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence"
+    | "formal_live_evidence_required";
 };
 
 export type LodeRuntimeConsumptionEntry = {
@@ -216,7 +228,11 @@ export function parseLodeRuntimeAdmissionPolicy(
     policy.status === "deferred_experimental" &&
     policy.recheck_condition ===
       "deferred_milestone_scope_restored_with_current_head_review_and_runtime_live_evidence";
-  if (!current && !deferred) {
+  const controlledEvidence =
+    policy.enabled === true &&
+    policy.status === "controlled_evidence" &&
+    policy.recheck_condition === "formal_live_evidence_required";
+  if (!current && !deferred && !controlledEvidence) {
     return invalidLodeContract("runtime_admission_policy_invalid");
   }
   return policy as LodeRuntimeAdmissionPolicy;
@@ -252,6 +268,43 @@ function lifecycleFailure(lifecycle: string): FailureRecord | undefined {
     return admissionFailure("capability_contract", "capability_suspected_broken", "admission", "run_validation_or_choose_known_good");
   }
   return undefined;
+}
+
+function isXhsMediaActionContract(
+  taskIntent: LodeAdmissionTaskIntent & { input?: { action_id?: unknown; refs?: readonly unknown[] } },
+  packageRef: string,
+  lodePackage: Record<string, unknown>,
+  capabilityId: string,
+  operationMode: string
+): boolean {
+  const actionId = taskIntent.input?.action_id;
+  if (packageRef !== xhsMediaPackageRef ||
+    lodePackage.source_ref !== xhsMediaPackageRef ||
+    lodePackage.lock_ref !== xhsMediaLockRef ||
+    capabilityId !== xhsMediaCapabilityId ||
+    lodePackage.operation_id !== xhsMediaOperationId ||
+    operationMode !== "write" ||
+    taskIntent.capability.ref !== expectedCapabilityRef(xhsMediaCapabilityId) ||
+    taskIntent.capability.version !== "0.1.0" ||
+    taskIntent.capability.source_ref !== xhsMediaPackageRef ||
+    taskIntent.capability.lock_ref !== xhsMediaLockRef ||
+    taskIntent.policy.risk !== "write" ||
+    taskIntent.policy.execution_intent !== "execute_after_approval" ||
+    typeof actionId !== "string" ||
+    !Object.hasOwn(xhsMediaActionPaths, actionId)) return false;
+  const inputRefs = taskIntent.input?.refs;
+  if (!Array.isArray(inputRefs)) return false;
+  if ((actionId === "xhs_publish_note_image_text_media.image_upload" && inputRefs.length === 0) ||
+    (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0)) return false;
+  const declaration = lodePackage.action_declaration as LodeBusinessActionOwnerContract["action_declaration"] | undefined;
+  const action = declaration?.actions.find((candidate) => candidate.action_id === actionId);
+  if (!action || action.category !== "commit" ||
+    action.target_scope.site_slug !== "xiaohongshu" ||
+    !action.target_scope.target_types.includes("creator_publish_page") ||
+    !action.target_scope.supported_origins.includes("https://creator.xiaohongshu.com") ||
+    action.resource_requirements.profile_ids.length === 0) return false;
+  const expectedEffect = actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create";
+  return action.external_effects.length === 1 && action.external_effects[0] === expectedEffect;
 }
 
 function validateLodeResourceRequirements(
@@ -373,10 +426,11 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
       return { ok: false, failure, package_ref: packageRef };
     }
   }
-  if (operationMode === "write") {
+  const mediaAction = isXhsMediaActionContract(taskIntent, packageRef, lodePackage, capabilityId, operationMode);
+  if (operationMode === "write" && !mediaAction) {
     return { ok: false, failure: admissionFailure("action_risk", "true_write_deferred", "admission", "use_read_intent"), package_ref: packageRef };
   }
-  if (operationMode !== taskIntent.policy.execution_intent) {
+  if (!mediaAction && operationMode !== taskIntent.policy.execution_intent) {
     return { ok: false, failure: invalidLodeContract("operation_mode_mismatch"), package_ref: packageRef };
   }
   if (operationMode !== "read" && taskIntent.policy.risk === "read") {

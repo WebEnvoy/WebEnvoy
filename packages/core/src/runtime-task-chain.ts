@@ -35,9 +35,9 @@ import {
 import { readBoundedJsonResponse } from "./bounded-json-response.js";
 import { normalizePublicHttpTarget } from "./public-target-reference.js";
 import { completeRunWithReadOnlyEmptyResult, completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
-import { completeRunWithFailure } from "./result-envelope.js";
+import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PreviewResult, type RunRecord, type WritePrecheckFailureStage } from "./run-record-store.js";
-import { acceptApprovedWritePrecheckTask, acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
+import { acceptApprovedWritePrecheckTask, acceptReadOnlyTaskSubmission, isXhsMediaActionIntent, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 import {
   commitDetailTargetReservation,
   compensatePublishedSearchDetailTargets,
@@ -65,6 +65,18 @@ import {
   type EvaluatedWritePrecheckPolicy,
   type WritePrecheckAuthorizationContext
 } from "./write-precheck-policy.js";
+import {
+  evaluateXhsMediaActionPolicy,
+  isExactXhsMediaActionRun,
+  isExactXhsMediaActionTask,
+  persistXhsMediaActionPolicyDecision,
+  xhsMediaActionPolicyFailure,
+  xhsMediaActionPaths,
+  xhsMediaLockRef,
+  xhsMediaPackageRef,
+  type EvaluatedXhsMediaActionPolicy,
+  type MediaActionAuthorizationContext
+} from "./media-action-policy.js";
 
 type JsonObject = Record<string, unknown>;
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -99,7 +111,7 @@ export type RuntimeTaskSubmissionRequest = {
     snapshot?: JsonObject;
   };
   /** Internal task-thread binding; callers cannot supply this through /tasks. */
-  authorization_context?: WritePrecheckAuthorizationContext;
+  authorization_context?: WritePrecheckAuthorizationContext | MediaActionAuthorizationContext;
 };
 
 export type LodePackageResolverInput = {
@@ -113,7 +125,7 @@ export type HarborRuntimeAdmissionRequest = {
   run_id: string;
   task_intent: unknown;
   package_ref: string;
-  admission_mode?: "read" | "write_precheck";
+  admission_mode?: "read" | "write_precheck" | "media_action";
   harbor?: RuntimeTaskSubmissionRequest["harbor"];
   runtime_session_ref?: string;
 };
@@ -140,6 +152,24 @@ export type HarborRuntimeClient = {
     requested_fields?: readonly ("title" | "summary" | "canonical_url" | "source_status")[];
     include_source_refs?: boolean;
     proposed_input_summary?: string;
+    signal?: AbortSignal;
+  }): Promise<unknown | FailureRecord>;
+  /** Execute one exact Lode #307 media commit action after Core confirmation. */
+  executeMediaAction?(input: {
+    runtime_session_ref: string;
+    holder_ref?: string;
+    url: string;
+    target_ref: string;
+    action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate";
+    requested_path: "image_text_upload" | "image_text_generate";
+    refs: readonly string[];
+    summary: string;
+    authorization_binding: {
+      decision_ref: string;
+      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate";
+      target_ref: string;
+      idempotency_key: string;
+    };
     signal?: AbortSignal;
   }): Promise<unknown | FailureRecord>;
   executeReadOperation(input: { runtime_session_ref: string; holder_ref?: string; site_id: string; operation_id: string; query?: string; city_code?: string; limit?: number; detail_ref?: string; url?: string; signal?: AbortSignal }): Promise<unknown | FailureRecord>;
@@ -1536,6 +1566,611 @@ function writePrecheckUnavailableFailure(value: JsonObject, allowFailureStage = 
   return failureStage === undefined ? failureRecord : { ...failureRecord, failure_stage: failureStage };
 }
 
+type XhsMediaActionValidation =
+  | { ok: true; operation: JsonObject; source_refs: string[]; evidence_refs: string[]; result_ref: string; result_status: "available" | "empty" | "unavailable" }
+  | { ok: false; failure: FailureRecord };
+
+/**
+ * Harbor owns its transport envelope; Core projects that envelope to the
+ * Lode output shape before any result validation or persistence.  Keeping the
+ * adapter here avoids making the Lode package carry runtime-session metadata.
+ */
+function projectHarborXhsMediaActionResult(value: unknown, runtimeSessionRef: string): JsonObject | undefined {
+  const body = object(value);
+  if (!body || body.schema_version !== "harbor-xhs-publish-note-image-text-media/v0" ||
+    body.runtime_session_ref !== runtimeSessionRef ||
+    !["available", "empty", "unavailable"].includes(string(body.status) ?? "") ||
+    !["success_result", "partial_result", "empty_result", "not_normalizable"].includes(string(body.classification) ?? "") ||
+    !object(body.normalized) || !Array.isArray(body.source_refs) || !Array.isArray(body.evidence_refs)) return undefined;
+  const evidenceRefs = body.evidence_refs.map((entry) => {
+    const ref = object(entry);
+    // Harbor's transport uses refs_only; Lode's public output uses the
+    // equivalent placeholder_only redaction vocabulary.
+    return ref?.redaction === "refs_only" ? { ...ref, redaction: "placeholder_only" } : entry;
+  });
+  return {
+    result_kind: "xhs_publish_note_image_text_media",
+    status: body.status,
+    classification: body.classification,
+    normalized: body.normalized,
+    source_refs: body.source_refs,
+    evidence_refs: evidenceRefs,
+    ...(body.empty_reason === undefined ? {} : { empty_reason: body.empty_reason }),
+    ...(body.unavailable_reason === undefined ? {} : { unavailable_reason: body.unavailable_reason }),
+    ...(body.warnings === undefined ? {} : { warnings: body.warnings })
+  };
+}
+
+function mediaActionFailure(code: string, category: FailureRecord["category"] = "result_projection"): FailureRecord {
+  return failure(category, code, category === "result_projection" ? "projection" : "verification", code === "harbor_xhs_media_operation_unknown" ? "reconcile_status" : "repair_media_contract");
+}
+
+function mediaRef(value: unknown): string | undefined {
+  return opaquePublicRef(value) && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value as string) ? value as string : undefined;
+}
+
+function exactObjectKeys(value: unknown, required: readonly string[], optional: readonly string[] = []): value is JsonObject {
+  const entry = object(value);
+  if (!entry) return false;
+  const allowed = new Set([...required, ...optional]);
+  return required.every((key) => Object.hasOwn(entry, key)) && Object.keys(entry).every((key) => allowed.has(key));
+}
+
+function validateCompletedXhsMediaAction(
+  value: unknown,
+  expected: {
+    runtime_session_ref: string;
+    action_id: keyof typeof xhsMediaActionPaths;
+    requested_path: (typeof xhsMediaActionPaths)[keyof typeof xhsMediaActionPaths];
+    canonical_url: string;
+    target_ref: string;
+  }
+): XhsMediaActionValidation {
+  const operation = object(value);
+  const normalized = object(operation?.normalized);
+  const lifecycle = object(normalized?.operation);
+  const mediaReadback = object(normalized?.media_readback);
+  const pageReadback = object(normalized?.page_readback);
+  const postCheck = object(normalized?.post_check);
+  const reconciliation = object(normalized?.reconciliation);
+  const recovery = object(normalized?.recovery);
+  const businessEffect = object(normalized?.business_effect);
+  const sourceRefs = Array.isArray(operation?.source_refs) ? operation.source_refs.map(object) : [];
+  const evidenceRefs = Array.isArray(operation?.evidence_refs) ? operation.evidence_refs.map(object) : [];
+  const sourceValues = sourceRefs.map((entry) => mediaRef(entry?.ref_id));
+  const evidenceValues = evidenceRefs.map((entry) => mediaRef(entry?.ref_id));
+  const sourceKinds = sourceRefs.map((entry) => string(entry?.source_kind));
+  const evidenceKinds = evidenceRefs.map((entry) => string(entry?.evidence_kind));
+  const sourceValid = sourceRefs.every((entry) =>
+    exactObjectKeys(entry, ["ref_id", "source_kind", "producer", "redaction", "schema_hint"]) &&
+    mediaRef(entry.ref_id) !== undefined &&
+    ["media_action_summary", "creator_publish_page_summary", "business_state_summary"].includes(string(entry.source_kind) ?? "") &&
+    ["core", "harbor", "fixture"].includes(string(entry.producer) ?? "") &&
+    ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "") &&
+    string(entry.schema_hint) !== undefined
+  ) && new Set(sourceValues).size === sourceValues.length;
+  const evidenceValid = evidenceRefs.every((entry) =>
+    exactObjectKeys(entry, ["ref_id", "evidence_kind", "producer", "redaction"]) &&
+    mediaRef(entry.ref_id) !== undefined &&
+    ["operation_ref", "post_check_ref", "reconciliation_ref", "snapshot_ref"].includes(string(entry.evidence_kind) ?? "") &&
+    ["core", "harbor", "fixture"].includes(string(entry.producer) ?? "") &&
+    ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "")
+  ) && new Set(evidenceValues).size === evidenceValues.length;
+  const expectedBusinessEffect = expected.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate";
+  const operationStatus = string(lifecycle?.status);
+  const operationRef = mediaRef(lifecycle?.operation_ref);
+  const topStatus = string(operation?.status) as "available" | "empty" | "unavailable" | undefined;
+  const classification = string(operation?.classification);
+  const resultRef = mediaRef(operation?.result_ref) ?? operationRef;
+  const validOperation = exactObjectKeys(lifecycle, ["status", "operation_ref"], ["terminal_state"]) &&
+    ["accepted", "running", "terminal", "unknown_outcome"].includes(operationStatus ?? "") &&
+    operationRef !== undefined &&
+    (operationStatus !== "terminal"
+      ? lifecycle.terminal_state === undefined
+      : ["success", "failure"].includes(string(lifecycle.terminal_state) ?? ""));
+  const validMediaReadback = exactObjectKeys(mediaReadback, ["status", "media_count", "order_status", "generation_result_ref"], ["ordered_item_refs"]) &&
+    ["observed", "unknown", "mismatch", "not_applicable"].includes(string(mediaReadback.status) ?? "") &&
+    (mediaReadback.media_count === null || (Number.isSafeInteger(mediaReadback.media_count) && (mediaReadback.media_count as number) >= 0)) &&
+    ["observed", "unknown", "not_applicable"].includes(string(mediaReadback.order_status) ?? "") &&
+    (mediaReadback.ordered_item_refs === undefined || (Array.isArray(mediaReadback.ordered_item_refs) && mediaReadback.ordered_item_refs.every((ref) => mediaRef(ref) !== undefined))) &&
+    (mediaReadback.generation_result_ref === null || mediaRef(mediaReadback.generation_result_ref) !== undefined);
+  const validPageReadback = exactObjectKeys(pageReadback, ["status", "page_state_ref", "route_state"]) &&
+    ["observed", "unknown", "mismatch"].includes(string(pageReadback.status) ?? "") &&
+    mediaRef(pageReadback.page_state_ref) !== undefined &&
+    ["observed", "unknown", "mismatch"].includes(string(pageReadback.route_state) ?? "");
+  const validPostCheck = exactObjectKeys(postCheck, ["status", "ref"]) &&
+    ["passed", "failed", "skipped"].includes(string(postCheck.status) ?? "") && mediaRef(postCheck.ref) !== undefined;
+  const validReconciliation = exactObjectKeys(reconciliation, ["status", "ref"]) &&
+    ["matched", "mismatched", "unknown", "not_run"].includes(string(reconciliation.status) ?? "") && mediaRef(reconciliation.ref) !== undefined;
+  const validRecovery = exactObjectKeys(recovery, ["status", "entrypoint"]) &&
+    ["not_required", "required", "unknown"].includes(string(recovery.status) ?? "") &&
+    ["inspect_operation_ref", "await_post_check", "manual_reconciliation", "none"].includes(string(recovery.entrypoint) ?? "");
+  if (!operation || operation.result_kind !== "xhs_publish_note_image_text_media" ||
+    !["available", "empty", "unavailable"].includes(topStatus ?? "") ||
+    !["success_result", "partial_result", "empty_result", "not_normalizable"].includes(classification ?? "") ||
+    !exactObjectKeys(operation, ["result_kind", "status", "classification", "normalized", "source_refs", "evidence_refs"], ["empty_reason", "unavailable_reason", "warnings"]) ||
+    !normalized || normalized.action_id !== expected.action_id || normalized.requested_path !== expected.requested_path ||
+    normalized.canonical_url !== expected.canonical_url || normalized.target_ref !== expected.target_ref ||
+    string(normalized.summary) === undefined ||
+    !["located", "partially_located", "unknown"].includes(string(normalized.source_status) ?? "") ||
+    !exactObjectKeys(normalized, ["action_id", "requested_path", "canonical_url", "target_ref", "summary", "source_status", "business_effect", "operation", "media_readback", "page_readback", "post_check", "reconciliation", "recovery", "save_draft", "publish", "submitted"]) ||
+    !exactObjectKeys(businessEffect, ["kind", "status"]) || businessEffect?.kind !== expectedBusinessEffect ||
+    !["requested", "observed", "unknown", "failed"].includes(string(businessEffect?.status) ?? "") ||
+    !validOperation || !validMediaReadback || !validPageReadback || !validPostCheck || !validReconciliation || !validRecovery ||
+    normalized.save_draft !== "not_in_scope" || normalized.publish !== "not_in_scope" || normalized.submitted !== false ||
+    !sourceValid || !evidenceValid || resultRef === undefined ||
+    (topStatus === "available" && (!(classification === "success_result" || classification === "partial_result") || sourceRefs.length === 0 || evidenceRefs.length === 0)) ||
+    (topStatus === "empty" && (classification !== "empty_result" || !["target_not_found", "action_not_observed", "media_not_present"].includes(string(operation.empty_reason) ?? ""))) ||
+    (topStatus === "unavailable" && (classification !== "not_normalizable" || !["invalid_contract", "resource_unavailable", "login_required", "permission_insufficient", "safety_challenge", "page_changed", "media_ref_unavailable", "generation_unavailable", "operation_result_unknown", "post_check_failed", "reconciliation_unknown"].includes(string(operation.unavailable_reason) ?? "")))) {
+    return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_invalid") };
+  }
+  if ((topStatus === "available" && !sourceKinds.includes("media_action_summary")) ||
+    (topStatus === "available" && !evidenceKinds.includes("operation_ref")) ||
+    (operationStatus === "unknown_outcome" && recovery?.status !== "unknown" && recovery?.status !== "required")) {
+    return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_refs_invalid") };
+  }
+  return {
+    ok: true,
+    operation,
+    source_refs: sourceValues as string[],
+    evidence_refs: evidenceValues as string[],
+    result_ref: resultRef,
+    result_status: topStatus as "available" | "empty" | "unavailable"
+  };
+}
+
+function mediaActionPublicSummary(operation: JsonObject, runtimeSessionRef: string): Record<string, unknown> {
+  const normalized = object(operation.normalized)!;
+  return {
+    schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+    result_kind: operation.result_kind,
+    status: operation.status,
+    classification: operation.classification,
+    normalized,
+    source_refs: operation.source_refs,
+    evidence_refs: operation.evidence_refs,
+    runtime_session_ref: runtimeSessionRef,
+    submitted: false,
+    save_draft: "not_in_scope",
+    publish: "not_in_scope",
+    consumer_boundary: "Core stores structured media action refs, lifecycle and readback summaries only; no media bytes, browser material, draft or publish payload is stored."
+  };
+}
+
+async function releaseAcceptedMediaSession(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  client: HarborRuntimeClient,
+  runtimeSessionRef: string,
+  primaryFailure?: FailureRecord,
+  terminalStatus: "failed" | "unknown_outcome" = "failed"
+): Promise<TaskSubmissionResult | undefined> {
+  let cleanupFailure: FailureRecord | undefined;
+  try {
+    cleanupFailure = await client.releaseCoreTaskSession({ runtime_session_ref: runtimeSessionRef, run_id: result.run_record.run_id });
+  } catch {
+    cleanupFailure = failure("runtime_execution", "core_task_session_cleanup_unverified", "runtime_binding", "inspect_runtime_session");
+  }
+  if (!cleanupFailure) return undefined;
+  const terminalFailure = primaryFailure ?? cleanupFailure;
+  await store.updateRunRecord(result.run_record.run_id, {
+    status: "running",
+    runtime_binding_refs: [runtimeSessionRef],
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+      submitted: false,
+      outcome: terminalStatus === "unknown_outcome" ? "unknown" : "cleanup_failed",
+      runtime_session_ref: runtimeSessionRef,
+      consumer_boundary: "Core records only structured media action failure and opaque runtime session ref when cleanup cannot be verified; no browser or media material is stored."
+    }
+  });
+  const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    status: terminalStatus,
+    failure: terminalFailure,
+    retention_state: "active",
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "blocked",
+      summary: primaryFailure
+        ? `The media action failed with ${primaryFailure.code}; Core also could not release or stop its Harbor session lock.`
+        : "Core could not release or stop its Harbor media action session lock, so the result remains unresolved.",
+      checked_at: new Date().toISOString(),
+      code: cleanupFailure.code,
+      attribution: "runtime",
+      recovery_hint: cleanupFailure.recovery_hint,
+      source_refs: [runtimeSessionRef],
+      consumer_boundary: "Core exposes only structured media action failure, cleanup classification and opaque runtime session ref."
+    }
+  });
+  return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+}
+
+async function completeAcceptedXhsMediaAction(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  operationValue: unknown,
+  runtimeSessionRef: string,
+  targetRef: string,
+  actionId: keyof typeof xhsMediaActionPaths,
+  requestedPath: (typeof xhsMediaActionPaths)[keyof typeof xhsMediaActionPaths],
+  canonicalUrl: string,
+  client: HarborRuntimeClient
+): Promise<TaskSubmissionResult> {
+  const validation = validateCompletedXhsMediaAction(operationValue, {
+    runtime_session_ref: runtimeSessionRef,
+    action_id: actionId,
+    requested_path: requestedPath,
+    canonical_url: canonicalUrl,
+    target_ref: targetRef
+  });
+  if (!validation.ok) {
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, validation.failure);
+    if (cleanup) return cleanup;
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      failure: validation.failure,
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "failed",
+        summary: "Harbor returned a media action payload that did not satisfy the Lode #307 output contract.",
+        checked_at: new Date().toISOString(),
+        code: validation.failure.code,
+        attribution: "runtime",
+        recovery_hint: validation.failure.recovery_hint,
+        source_refs: [runtimeSessionRef],
+        consumer_boundary: "Core rejects malformed media output without exposing private browser or media material."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const operationObject = validation.operation;
+  const summary = mediaActionPublicSummary(operationObject, runtimeSessionRef);
+  const normalized = object(operationObject.normalized)!;
+  const lifecycle = object(normalized.operation)!;
+  const postCheck = object(normalized.post_check)!;
+  const operationStatus = string(lifecycle.status);
+  if (operationStatus === "accepted" || operationStatus === "running") {
+    const running = await store.updateRunRecord(result.run_record.run_id, {
+      status: "running",
+      runtime_binding_refs: [runtimeSessionRef],
+      source_refs: validation.source_refs,
+      evidence_refs: validation.evidence_refs,
+      public_result_summary: summary,
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "not_run",
+        summary: "Media action accepted by Harbor; terminal post-check is pending operation reconciliation.",
+        checked_at: new Date().toISOString(),
+        code: "media_action_operation_running",
+        attribution: "runtime",
+        recovery_hint: "inspect_operation_ref",
+        evidence_refs: validation.evidence_refs,
+        source_refs: validation.source_refs,
+        consumer_boundary: "Core records operation and opaque refs only while the external media operation remains active."
+      }
+    });
+    return { ok: true, task_intent: result.task_intent, run_record: running };
+  }
+  if (operationStatus === "unknown_outcome") {
+    const unknownFailure = mediaActionFailure("harbor_xhs_media_operation_unknown", "runtime_execution");
+    await store.updateRunRecord(result.run_record.run_id, {
+      status: "running",
+      runtime_binding_refs: [runtimeSessionRef],
+      source_refs: validation.source_refs,
+      evidence_refs: validation.evidence_refs,
+      public_result_summary: summary
+    });
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome");
+    if (cleanup) return cleanup;
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      status: "unknown_outcome",
+      failure: unknownFailure,
+      evidence_refs: validation.evidence_refs,
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "not_run",
+        summary: "Harbor reported an unknown media action outcome; Core will not retry automatically.",
+        checked_at: new Date().toISOString(),
+        code: unknownFailure.code,
+        attribution: "unknown",
+        recovery_hint: "reconcile_status",
+        evidence_refs: validation.evidence_refs,
+        source_refs: validation.source_refs,
+        consumer_boundary: "Core preserves unknown external effect state and operation ref without guessing or retrying."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef);
+  if (cleanup) return cleanup;
+  const corePostCheck = {
+    schema_version: "webenvoy.post-check-result.v0" as const,
+    status: postCheck.status === "passed" ? "passed" as const : postCheck.status === "failed" ? "failed" as const : "not_run" as const,
+    summary: postCheck.status === "passed" ? "Harbor verified media readback and page state after the media action." : "Harbor media action post-check did not pass.",
+    checked_at: new Date().toISOString(),
+    attribution: postCheck.status === "passed" ? "runtime" as const : "unknown" as const,
+    recovery_hint: postCheck.status === "passed" ? "none" : "reconcile_status",
+    evidence_refs: [postCheck.ref as string],
+    source_refs: validation.source_refs,
+    consumer_boundary: "Core persists only redacted media action refs, page/media readback and post-check state; save draft and publish remain out of scope.",
+    ...(postCheck.status === "passed" ? {} : { code: "media_action_post_check_failed" })
+  };
+  if (operationObject.status !== "available" || lifecycle.terminal_state !== "success" || postCheck.status !== "passed") {
+    const terminalFailure = mediaActionFailure(
+      postCheck.status === "passed" ? `media_action_${operationObject.status}` : "media_action_post_check_failed",
+      "runtime_execution"
+    );
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      failure: terminalFailure,
+      evidence_refs: validation.evidence_refs,
+      retention_state: "active",
+      post_check: corePostCheck
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const completed = await completeRunWithResult(store, result.run_record.run_id, {
+    result_ref: validation.result_ref,
+    result_kind: "xhs_publish_note_image_text_media",
+    output_schema_id: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/output@0.1.0",
+    data: {
+      result_kind: operationObject.result_kind,
+      status: operationObject.status,
+      classification: operationObject.classification,
+      normalized,
+      source_refs: operationObject.source_refs,
+      evidence_refs: operationObject.evidence_refs
+    },
+    persisted_public_summary: summary,
+    source_refs: validation.source_refs,
+    evidence_refs: validation.evidence_refs,
+    retention_state: "active",
+    post_check: corePostCheck
+  });
+  return { ok: true, task_intent: result.task_intent, run_record: completed.run_record };
+}
+
+async function dispatchApprovedXhsMediaAction(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  request: RuntimeTaskSubmissionRequest,
+  deps: RuntimeTaskSubmissionDependencies,
+  policy: EvaluatedXhsMediaActionPolicy
+): Promise<TaskSubmissionResult> {
+  const client = deps.harborRuntimeClient;
+  if (!client?.executeMediaAction) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("resource_admission", "harbor_media_action_unconfigured", "runtime_binding", "connect_runtime"));
+  }
+  const target = policy.evaluation.status === "evaluated" ? policy.evaluation.action.target : undefined;
+  if (!target || !request.authorization_context || !isXhsMediaActionIntent(result.task_intent, request.package_ref)) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_dispatch_binding_invalid", "admission", "request_new_confirmation"));
+  }
+  let admission: HarborRuntimeAdmissionResult;
+  try {
+    admission = await client.collectAdmissionFacts({
+      run_id: request.run_id,
+      task_intent: result.task_intent,
+      package_ref: request.package_ref ?? xhsMediaPackageRef,
+      admission_mode: "media_action",
+      harbor: request.harbor
+    });
+  } catch {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("resource_admission", "harbor_runtime_api_unavailable", "runtime_binding", "connect_runtime"));
+  }
+  const collectionFailure = isAdmissionCollectionFailure(admission) ? admission : undefined;
+  const admissionValue: HarborAdmissionInput | FailureRecord = collectionFailure
+    ? collectionFailure.failure
+    : admission as HarborAdmissionInput | FailureRecord;
+  if (isFailure(admissionValue)) {
+    return completeAcceptedMediaAdmissionFailure(
+      store,
+      result,
+      admissionValue.category === "resource_admission"
+        ? admissionValue
+        : failure("resource_admission", admissionValue.code || "harbor_runtime_admission_failed", "runtime_binding", "connect_runtime"),
+      collectionFailure?.runtime_session_ref,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+  const runtimeSessionRef = string(object(admissionValue.harbor_runtime_facts)?.runtime_session_ref);
+  if (!runtimeSessionRef) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("resource_admission", "harbor_runtime_session_missing", "runtime_binding", "connect_runtime"));
+  }
+  const runtimeBinding = validateHarborRuntimeBinding(admissionValue);
+  if (!runtimeBinding.ok || runtimeBinding.runtime_session_binding.runtime_session_ref !== runtimeSessionRef) {
+    return completeAcceptedMediaAdmissionFailure(
+      store,
+      result,
+      !runtimeBinding.ok ? runtimeBinding.failure : failure("resource_admission", "runtime_ref_mismatch", "runtime_binding", "connect_runtime"),
+      runtimeSessionRef,
+      collectionFailure?.cleanup_failure,
+      client
+    );
+  }
+  try {
+    await store.bindCoreTaskRuntimeSession(result.run_record.run_id, runtimeBinding.runtime_session_binding, runtimeBinding.runtime_binding_refs);
+  } catch {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("persistence_observability", "runtime_binding_persistence_failed", "persistence", "contact_operator"), runtimeSessionRef, undefined, client);
+  }
+  const actionId = result.task_intent.input.action_id;
+  const requestedPath = result.task_intent.input.requested_path;
+  if (actionId !== "xhs_publish_note_image_text_media.image_upload" && actionId !== "xhs_publish_note_image_text_media.text_to_image_generate") {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_id_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
+  }
+  if (requestedPath !== xhsMediaActionPaths[actionId]) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_path_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
+  }
+  const currentRun = await store.getRunRecord(result.run_record.run_id);
+  const decisionRef = currentRun?.policy_binding_snapshot?.decision_ref;
+  if (!decisionRef || !request.authorization_context) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("action_risk", "media_action_authorization_binding_missing", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
+  }
+  let operation: unknown;
+  try {
+    operation = await client.executeMediaAction({
+      runtime_session_ref: runtimeSessionRef,
+      holder_ref: request.run_id,
+      url: result.task_intent.scope.target_ref,
+      target_ref: target.target_ref,
+      action_id: actionId,
+      requested_path: requestedPath,
+      refs: result.task_intent.input.refs ?? [],
+      summary: result.task_intent.input.summary,
+      authorization_binding: {
+        decision_ref: decisionRef,
+        action_id: actionId,
+        target_ref: target.target_ref,
+        idempotency_key: request.authorization_context.idempotency_key
+      }
+    });
+  } catch {
+    operation = failure("runtime_execution", "harbor_xhs_media_operation_unknown", "verification", "reconcile_status");
+  }
+  if (isFailure(operation)) {
+    const unknownFailure = operation.code === "harbor_xhs_media_operation_unknown"
+      ? operation
+      : failure("runtime_execution", "harbor_xhs_media_operation_unknown", "verification", "reconcile_status");
+    await store.updateRunRecord(result.run_record.run_id, {
+      status: "running",
+      runtime_binding_refs: [runtimeSessionRef],
+      public_result_summary: {
+        schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+        submitted: false,
+        outcome: "unknown",
+        runtime_session_ref: runtimeSessionRef,
+        consumer_boundary: "Core preserves an unknown media action outcome without retrying or exposing private browser material."
+      }
+    });
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome");
+    if (cleanup) return cleanup;
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      status: "unknown_outcome",
+      failure: unknownFailure,
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "not_run",
+        summary: "Harbor did not provide a trustworthy media operation response; Core will not retry automatically.",
+        checked_at: new Date().toISOString(),
+        code: unknownFailure.code,
+        attribution: "unknown",
+        recovery_hint: "reconcile_status",
+        source_refs: [runtimeSessionRef],
+        consumer_boundary: "Core records unknown outcome and opaque runtime binding only."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const operationObject = object(operation);
+  if (operationObject?.status === "unavailable") {
+    const unavailableFailure = failure(
+      "runtime_execution",
+      `harbor_media_action_${string(operationObject.failure_class) ?? "unavailable"}`,
+      "execution",
+      operationObject.retryable === true ? "retry_after_refresh" : "repair_browser_environment"
+    );
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unavailableFailure);
+    if (cleanup) return cleanup;
+    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+      failure: unavailableFailure,
+      retention_state: "active",
+      post_check: {
+        schema_version: "webenvoy.post-check-result.v0",
+        status: "blocked",
+        summary: "Harbor could not execute the bounded media action; no draft or publish action was attempted.",
+        checked_at: new Date().toISOString(),
+        code: unavailableFailure.code,
+        attribution: "runtime",
+        recovery_hint: unavailableFailure.recovery_hint,
+        source_refs: [runtimeSessionRef],
+        consumer_boundary: "Core stores only structured media action availability and opaque runtime refs."
+      }
+    });
+    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+  }
+  const canonical = normalizePublicHttpTarget(result.task_intent.scope.target_ref);
+  if (!canonical.ok) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_target_invalid", "admission", "fix_input"), runtimeSessionRef, undefined, client);
+  }
+  return completeAcceptedXhsMediaAction(
+    store,
+    result,
+    operation,
+    runtimeSessionRef,
+    target.target_ref,
+    actionId,
+    requestedPath,
+    canonical.target_ref,
+    client
+  );
+}
+
+async function completeAcceptedMediaAdmissionFailure(
+  store: FileRunRecordStore,
+  result: Extract<TaskSubmissionResult, { ok: true }>,
+  admissionFailure: FailureRecord,
+  runtimeSessionRef?: string,
+  cleanupFailure?: FailureRecord,
+  client?: HarborRuntimeClient
+): Promise<TaskSubmissionResult> {
+  if (runtimeSessionRef) {
+    const cleanup = cleanupFailure ?? (client ? await (async () => {
+      try {
+        return client.releaseCoreTaskSession({ runtime_session_ref: runtimeSessionRef, run_id: result.run_record.run_id });
+      } catch {
+        return failure("runtime_execution", "core_task_session_cleanup_unverified", "runtime_binding", "retry_session_cleanup");
+      }
+    })() : undefined);
+    if (cleanup) {
+      await store.updateRunRecord(result.run_record.run_id, {
+        status: "running",
+        runtime_binding_refs: [runtimeSessionRef],
+        public_result_summary: {
+          schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+          submitted: false,
+          outcome: "unavailable",
+          runtime_session_ref: runtimeSessionRef,
+          consumer_boundary: "Core records media action admission and cleanup classification only."
+        }
+      });
+      const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+        status: "failed",
+        failure: admissionFailure,
+        retention_state: "active",
+        post_check: {
+          schema_version: "webenvoy.post-check-result.v0",
+          status: "blocked",
+          summary: `Media action admission failed with ${admissionFailure.code}; Harbor session cleanup also failed.`,
+          checked_at: new Date().toISOString(),
+          code: cleanup.code,
+          attribution: "runtime",
+          recovery_hint: cleanup.recovery_hint,
+          source_refs: [runtimeSessionRef],
+          consumer_boundary: "Core stores only structured failure and opaque runtime refs."
+        }
+      });
+      return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+    }
+  }
+  const completed = await completeRunWithFailure(store, result.run_record.run_id, {
+    failure: admissionFailure,
+    retention_state: "active",
+    post_check: {
+      schema_version: "webenvoy.post-check-result.v0",
+      status: "blocked",
+      summary: `Media action admission failed with ${admissionFailure.code}; no media action was attempted.`,
+      checked_at: new Date().toISOString(),
+      code: admissionFailure.code,
+      attribution: "runtime",
+      recovery_hint: admissionFailure.recovery_hint,
+      ...(runtimeSessionRef === undefined ? {} : { source_refs: [runtimeSessionRef] }),
+      consumer_boundary: "Core stores only structured admission failure state and opaque runtime refs."
+    }
+  });
+  return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
+}
+
 async function dispatchApprovedWritePrecheck(
   store: FileRunRecordStore,
   result: Extract<TaskSubmissionResult, { ok: true }>,
@@ -1790,6 +2425,95 @@ export async function continueWritePrecheckTask(
     return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(current ? { run_record: current } : {}) };
   }
   return dispatchApprovedWritePrecheck(store, { ok: true, task_intent: taskIntent, run_record: continued }, {
+    run_id: request.run_id,
+    task_intent: taskIntent,
+    package_ref: request.package_ref,
+    ...(request.harbor === undefined ? {} : { harbor: request.harbor }),
+    authorization_context: request.authorization_context
+  }, deps, policy);
+}
+
+export type ContinueXhsMediaActionTaskRequest = {
+  run_id: string;
+  task_intent: unknown;
+  package_ref: string;
+  harbor?: RuntimeTaskSubmissionRequest["harbor"];
+  authorization_context: MediaActionAuthorizationContext;
+  single_action_decision: import("./execution-policy.js").SingleActionDecision;
+};
+
+/** Continue only a previously-confirmed exact #307 media action. */
+export async function continueXhsMediaActionTask(
+  store: FileRunRecordStore,
+  request: ContinueXhsMediaActionTaskRequest,
+  deps: RuntimeTaskSubmissionDependencies
+): Promise<TaskSubmissionResult> {
+  const existing = await store.getRunRecord(request.run_id);
+  if (!existing || existing.status !== "requires_user_action") {
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(existing ? { run_record: existing } : {}) };
+  }
+  if (!isExactXhsMediaActionRun(existing, request.single_action_decision.confirmation_decision_ref)) {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  const taskIntent = validateTaskIntent(request.task_intent);
+  if (isFailure(taskIntent) || request.package_ref !== xhsMediaPackageRef) {
+    return { ok: false, failure: isFailure(taskIntent) ? taskIntent : failure("request_invalid", "package_ref_required", "pre_admission", "fix_input"), run_record: existing };
+  }
+  if (existing.task_intent_ref !== taskIntent.intent_id || existing.package_ref !== request.package_ref ||
+    existing.capability_ref !== taskIntent.capability.ref || existing.scope_target_ref !== taskIntent.scope.target_ref ||
+    taskIntent.policy.risk !== "write" || taskIntent.policy.execution_intent !== "execute_after_approval") {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  if (!deps.lodePackageResolver || !deps.executionPolicyConfigStore || !deps.authorizationDecisionStore) {
+    return { ok: false, failure: failure("action_risk", "authorization_decision_owner_unavailable", "admission", "retry_when_policy_owner_ready"), run_record: existing };
+  }
+  let contract: LodePackageAdmissionContract | FailureRecord;
+  try {
+    contract = await deps.lodePackageResolver({ package_ref: request.package_ref, task_intent: request.task_intent });
+  } catch {
+    contract = failure("capability_contract", "lode_registry_unavailable", "admission", "connect_lode_registry");
+  }
+  if (isFailure(contract)) return { ok: false, failure: contract, run_record: existing };
+  if (!isExactXhsMediaActionTask(taskIntent, contract)) {
+    return { ok: false, failure: failure("capability_contract", "media_action_binding_invalid", "admission", "repair_package_contract"), run_record: existing };
+  }
+  const policy = await evaluateXhsMediaActionPolicy({
+    run_id: request.run_id,
+    task_intent: taskIntent,
+    lode_contract: contract,
+    authorization_context: request.authorization_context,
+    config_store: deps.executionPolicyConfigStore,
+    single_action_decision: request.single_action_decision,
+    evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
+  });
+  if (isFailure(policy)) return { ok: false, failure: policy, run_record: existing };
+  if (policy.evaluation.status !== "evaluated" || policy.evaluation.next_step !== "execute" ||
+    policy.evaluation.effective_policy.source !== "single_action_decision" || request.single_action_decision.mode !== "auto" ||
+    !(existing.authorization_decision_refs ?? []).includes(request.single_action_decision.confirmation_decision_ref)) {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  const confirmation = await deps.authorizationDecisionStore.getAuthorizationDecision(request.single_action_decision.confirmation_decision_ref);
+  if (!confirmation || confirmation.state !== "active" || confirmation.outcome !== "confirm") {
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  try {
+    await persistXhsMediaActionPolicyDecision({
+      run_id: request.run_id,
+      policy,
+      authorization_store: deps.authorizationDecisionStore,
+      run_record_store: store
+    });
+  } catch {
+    return { ok: false, failure: failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator"), run_record: existing };
+  }
+  let continued: RunRecord;
+  try {
+    continued = await store.continueRequiresUserActionRun(request.run_id);
+  } catch {
+    const current = await store.getRunRecord(request.run_id);
+    return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(current ? { run_record: current } : {}) };
+  }
+  return dispatchApprovedXhsMediaAction(store, { ok: true, task_intent: taskIntent, run_record: continued }, {
     run_id: request.run_id,
     task_intent: taskIntent,
     package_ref: request.package_ref,
@@ -2093,6 +2817,7 @@ export async function submitRuntimeTask(
 
   const unifiedWritePrecheck = isUnifiedWritePrecheckTask(validatedTaskIntent, lode_package_contract);
   const pathPrepare = isXhsPathPrepareTask(validatedTaskIntent, lode_package_contract);
+  const mediaAction = isExactXhsMediaActionTask(validatedTaskIntent, lode_package_contract);
   const requestedPath = validatedTaskIntent.input.requested_path;
   if (pathPrepare && requestedPath !== "image_text_upload" && requestedPath !== "image_text_generate") {
     return acceptReadOnlyTaskSubmission(store, {
@@ -2109,12 +2834,98 @@ export async function submitRuntimeTask(
     });
   }
   if ((lode_package_contract.package_ref === xhsWritePrecheckPackageRef && !unifiedWritePrecheck) ||
-    (lode_package_contract.package_ref === xhsPathPreparePackageRef && !pathPrepare)) {
+    (lode_package_contract.package_ref === xhsPathPreparePackageRef && !pathPrepare) ||
+    (lode_package_contract.package_ref === xhsMediaPackageRef && !mediaAction)) {
     return acceptReadOnlyTaskSubmission(store, {
       ...base,
       lode_package_contract,
       lode_resolution_failure: failure("capability_contract", "write_precheck_binding_invalid", "admission", "repair_package_contract")
     });
+  }
+  if (mediaAction) {
+    const policy = deps.authorizationDecisionStore === undefined
+      ? failure("action_risk", "authorization_decision_owner_unavailable", "admission", "retry_when_policy_owner_ready")
+      : await evaluateXhsMediaActionPolicy({
+          run_id: request.run_id,
+          task_intent: validatedTaskIntent,
+          lode_contract: lode_package_contract,
+          ...(request.authorization_context === undefined ? {} : { authorization_context: request.authorization_context }),
+          ...(deps.executionPolicyConfigStore === undefined ? {} : { config_store: deps.executionPolicyConfigStore }),
+          evaluated_at: (deps.clock ?? (() => new Date()))().toISOString()
+        });
+    if (isFailure(policy)) {
+      return acceptReadOnlyTaskSubmission(store, { ...base, lode_package_contract, execution_policy_failure: policy });
+    }
+    const policyFailure = xhsMediaActionPolicyFailure(policy.evaluation);
+    if (policy.evaluation.status !== "evaluated" || policy.evaluation.next_step !== "execute") {
+      const result = await acceptReadOnlyTaskSubmission(store, {
+        ...base,
+        lode_package_contract,
+        execution_policy_failure: policyFailure
+      });
+      try {
+        await persistXhsMediaActionPolicyDecision({
+          run_id: request.run_id,
+          policy,
+          authorization_store: deps.authorizationDecisionStore!,
+          run_record_store: store
+        });
+        const runRecord = await store.getRunRecord(request.run_id);
+        return runRecord && !result.ok ? { ...result, run_record: runRecord } : result;
+      } catch {
+        const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
+        const runRecord = result.run_record
+          ? await store.updateRunRecord(request.run_id, {
+              status: result.run_record.status,
+              failure: persistenceFailure,
+              post_check: {
+                schema_version: "webenvoy.post-check-result.v0",
+                status: "blocked",
+                summary: "The media action policy decision could not be linked durably; Harbor was not called.",
+                checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
+                code: persistenceFailure.code,
+                attribution: "unknown",
+                recovery_hint: persistenceFailure.recovery_hint,
+                consumer_boundary: "Core exposes only the fail-closed media policy persistence classification."
+              }
+            })
+          : undefined;
+        return { ok: false, failure: persistenceFailure, ...(runRecord ? { run_record: runRecord } : {}) };
+      }
+    }
+    const admitted = await acceptApprovedWritePrecheckTask(store, {
+      ...base,
+      lode_package_contract
+    });
+    if (!admitted.ok) return admitted;
+    try {
+      await persistXhsMediaActionPolicyDecision({
+        run_id: request.run_id,
+        policy,
+        authorization_store: deps.authorizationDecisionStore!,
+        run_record_store: store
+      });
+    } catch {
+      const persistenceFailure = failure("persistence_observability", "authorization_decision_persistence_failed", "persistence", "contact_operator");
+      const runRecord = await store.updateRunRecord(request.run_id, {
+        status: "failed",
+        failure: persistenceFailure,
+        post_check: {
+          schema_version: "webenvoy.post-check-result.v0",
+          status: "blocked",
+          summary: "The media action policy decision could not be linked durably; Harbor was not called.",
+          checked_at: (deps.clock ?? (() => new Date()))().toISOString(),
+          code: persistenceFailure.code,
+          attribution: "unknown",
+          recovery_hint: persistenceFailure.recovery_hint,
+          consumer_boundary: "Core exposes only the fail-closed media policy persistence classification."
+        }
+      });
+      return { ok: false, failure: persistenceFailure, run_record: runRecord };
+    }
+    const runRecord = await store.getRunRecord(request.run_id);
+    if (!runRecord) return { ok: false, failure: failure("persistence_observability", "run_record_missing", "persistence", "contact_operator") };
+    return dispatchApprovedXhsMediaAction(store, { ok: true, task_intent: validatedTaskIntent, run_record: runRecord }, request, deps, policy);
   }
   if (unifiedWritePrecheck || pathPrepare) {
     const policy = deps.authorizationDecisionStore === undefined
@@ -2814,6 +3625,14 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         break;
       }
     }
+    // #307 owns the media action admission tuple in the registry. Its package
+    // has no legacy runtime-consumption asset; consume that exact tuple rather
+    // than manufacturing a second operation declaration.
+    if (operationPolicy === undefined && packageRef === xhsMediaPackageRef) {
+      return registryPolicy.enabled
+        ? registryPolicy
+        : failure("capability_contract", "runtime_admission_disabled", "admission", "wait_for_scope_activation");
+    }
     const operationAdmission = parseLodeRuntimeAdmissionPolicy(packageRef, operationPolicy);
     if (operationAdmission === undefined || isFailure(operationAdmission)) return operationAdmission;
     if (canonicalJson(registryPolicy) !== canonicalJson(operationAdmission)) {
@@ -2968,7 +3787,7 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
   function protectedHeaders(method: "GET" | "POST", path: string): Record<string, string> | FailureRecord | undefined {
     const protectedRequest = method === "POST" && (
       path === "/runtime/identity-environment-sessions" ||
-      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations|validate-only-write-precheck)$/.test(path)
+      /^\/runtime\/(?:identity-environment-)?sessions\/[^/]+\/(?:lock|release|stop|snapshot|read-operations|validate-only-write-precheck|xhs-media-actions)$/.test(path)
     );
     if (!protectedRequest || !localHarbor) return undefined;
     if (!supervisorToken || supervisorToken.trim() !== supervisorToken || /[\r\n]/.test(supervisorToken)) {
@@ -3218,6 +4037,37 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
         return input.signal?.aborted
           ? failure("runtime_execution", "timeout", "execution", "retry_task")
           : failure("runtime_execution", "harbor_write_precheck_outcome_unknown", "verification", "reconcile_status");
+      }
+    },
+    async executeMediaAction(input) {
+      const path = `/runtime/sessions/${encodeURIComponent(input.runtime_session_ref)}/xhs-media-actions`;
+      try {
+        const authorization = protectedHeaders("POST", path);
+        if (isFailure(authorization)) return authorization;
+        const response = await fetchJson(`${baseUrl}${path}`, {
+          method: "POST",
+          headers: { ...authorization, "content-type": "application/json" },
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          body: JSON.stringify({
+            url: input.url,
+            target_ref: input.target_ref,
+            action_id: input.action_id,
+            requested_path: input.requested_path,
+            refs: input.refs,
+            summary: input.summary,
+            no_submit_guard: "active",
+            ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
+            authorization_binding: input.authorization_binding
+          })
+        });
+        const payload = await readBoundedJsonResponse(response, 1024 * 1024);
+        const projected = projectHarborXhsMediaActionResult(payload, input.runtime_session_ref);
+        if (projected) return projected;
+        return failure("runtime_execution", "harbor_xhs_media_operation_unknown", "verification", "reconcile_status");
+      } catch {
+        return input.signal?.aborted
+          ? failure("runtime_execution", "timeout", "execution", "retry_task")
+          : failure("runtime_execution", "harbor_xhs_media_operation_unknown", "verification", "reconcile_status");
       }
     },
     async executeReadOperation(input) {
