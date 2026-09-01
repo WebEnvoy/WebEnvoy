@@ -479,6 +479,7 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     capabilityRef: string;
     identityRef: string;
     requestedPath?: "image_text_upload" | "image_text_generate";
+    session?: Record<string, unknown>;
   };
   const precheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
   const precheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
@@ -508,7 +509,8 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
       task_intent: taskIntent,
       harbor: {
         identity_environment_ref: entry.identityRef,
-        ...(entry.requestedPath === undefined ? {} : { requested_path: entry.requestedPath })
+        ...(entry.requestedPath === undefined ? {} : { requested_path: entry.requestedPath }),
+        ...(entry.session === undefined ? {} : { session: entry.session })
       }
     };
     const targetRef = "https://creator.xiaohongshu.com/publish/publish";
@@ -647,8 +649,17 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert.equal(registrationObserved, true);
     assert.equal(invalidated.has(barrierEntry.decisionRef), true);
     assert.equal(hasPendingWritePrecheckContinuation(barrierEntry.decisionRef), false);
-    assert.equal((await runStore.getRunRecord(barrierEntry.runId))?.status, "cancelled");
-    assert.equal(record(terminated.body.turn).status, "cancelled");
+    const cancelledRun = await runStore.getRunRecord(barrierEntry.runId);
+    assert.equal(cancelledRun?.status, "cancelled");
+    assert.equal(cancelledRun?.failure?.code, "user_cancelled");
+    assert.equal(cancelledRun?.public_result_summary?.submitted, false);
+    const cancelledTurn = record(terminated.body.turn);
+    assert.equal(cancelledTurn.status, "cancelled");
+    assert.equal(cancelledTurn.failure_code, "user_cancelled");
+    const persistedThread = record(JSON.parse(await readFile(join(directory, "threads", `${barrierEntry.threadId}.json`), "utf8")));
+    const persistedTurn = record((persistedThread.turns as unknown[])[0]);
+    assert.equal(persistedTurn.failure_code, undefined);
+    assert.equal(persistedTurn.submission_error, undefined);
     assert.equal(record(submitted.result.body.turn).status, "waiting_for_user");
 
     const unknownEntry = await post(await prepare(variant({ id: "precheck-unknown", runId: "run_api_precheck_unknown", decisionRef: "authorization-decision:55555555555555555555555555555555:66666666666666666666666666666666", identityRef: "identity-env_222222222222222222222223" })));
@@ -667,7 +678,7 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert.equal((await runStore.getRunRecord(pathEntry.runId))?.status, "manual_recovery_required");
     assert.equal(record(terminatedPath.body.turn).run_status, "manual_recovery_required");
 
-    const succeededEntry = await post(await prepare(variant({ id: "path-succeeded", runId: "run_api_path_succeeded", decisionRef: "authorization-decision:99999999999999999999999999999999:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", identityRef: "identity-env_222222222222222222222225", pathPrepare: true, requestedPath: "image_text_generate" })));
+    const succeededEntry = await post(await prepare(variant({ id: "path-succeeded", runId: "run_api_path_succeeded", decisionRef: "authorization-decision:99999999999999999999999999999999:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", identityRef: "identity-env_222222222222222222222225", pathPrepare: true, requestedPath: "image_text_generate", session: { cookie_marker: "must-not-enter-continuation" } })));
     await projectTerminal(succeededEntry, "succeeded");
     const invalidatedBeforeSucceeded = [...invalidated];
     const terminatedSucceeded = await terminate(succeededEntry);
@@ -675,7 +686,10 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     assert.equal(hasPendingWritePrecheckContinuation(succeededEntry.decisionRef), true);
     assert.equal(record(terminatedSucceeded.body.turn).status, "completed");
     assert.equal((await runStore.getRunRecord(succeededEntry.runId))?.status, "succeeded");
-    assert(takePendingWritePrecheckContinuation(succeededEntry.decisionRef));
+    const pendingSucceeded = takePendingWritePrecheckContinuation(succeededEntry.decisionRef);
+    assert(pendingSucceeded);
+    assert.equal(pendingSucceeded.harbor?.session, undefined);
+    assert.equal(JSON.stringify(pendingSucceeded).includes("must-not-enter-continuation"), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
