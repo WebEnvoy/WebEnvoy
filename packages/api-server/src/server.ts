@@ -7,7 +7,9 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
+  continueXhsMediaActionTask,
   isExactWritePrecheckRun,
+  isExactXhsMediaActionRun,
   previewIdentityCompatibility,
   type FailureRecord,
   type FileAuthorizationDecisionStore,
@@ -16,6 +18,8 @@ import {
   type HarborIdentityFactsReader,
   type HarborRuntimeClient,
   type LodePackageResolver,
+  type MediaActionAuthorizationContext,
+  type SingleActionDecision,
   type WritePrecheckAuthorizationContext,
   type TaskSubmissionResult,
   continueWritePrecheckTask
@@ -29,6 +33,7 @@ import {
   clearPendingWritePrecheckContinuation,
   handleTaskThreadApi,
   takePendingWritePrecheckContinuation,
+  type PendingWritePrecheckContinuation,
   withWritePrecheckRunLock
 } from "./task-thread-api.js";
 
@@ -46,6 +51,7 @@ export type ApiServerOptions = {
 };
 
 const serviceName = "webenvoy-api-server";
+const xhsMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 
 function sendJson(response: ServerResponse, statusCode: number, body: JsonBody): void {
   response.writeHead(statusCode, {
@@ -128,6 +134,38 @@ function continuationHttpResult(result: TaskSubmissionResult, decision: import("
       ...(result.run_record === undefined ? {} : { run: result.run_record })
     }
   };
+}
+
+/** Dispatch one already-consumed confirmation through the package owner. */
+export async function continuePendingWriteContinuation(
+  runRecordStore: FileRunRecordStore,
+  pending: PendingWritePrecheckContinuation,
+  decision: SingleActionDecision,
+  options: ApiServerOptions
+): Promise<TaskSubmissionResult> {
+  const continuationDependencies = {
+    ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
+    ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient }),
+    ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
+    ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
+  };
+  return pending.package_ref === xhsMediaPackageRef
+    ? continueXhsMediaActionTask(runRecordStore, {
+        run_id: pending.run_id,
+        task_intent: pending.task_intent,
+        package_ref: pending.package_ref,
+        ...(pending.harbor === undefined ? {} : { harbor: pending.harbor }),
+        authorization_context: pending.authorization_context as MediaActionAuthorizationContext,
+        single_action_decision: decision
+      }, continuationDependencies)
+    : continueWritePrecheckTask(runRecordStore, {
+        run_id: pending.run_id,
+        task_intent: pending.task_intent,
+        package_ref: pending.package_ref,
+        ...(pending.harbor === undefined ? {} : { harbor: pending.harbor }),
+        authorization_context: pending.authorization_context,
+        single_action_decision: decision
+      }, continuationDependencies);
 }
 
 
@@ -238,7 +276,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
         const run = options.runRecordStore
           ? await options.runRecordStore.getRunRecord(applicability.run_id)
           : undefined;
-        if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref)) return;
+        if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
+          !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return;
         try {
           await authorizationStore.invalidateAuthorizationDecision(confirmation.decision_ref, "cancelled");
         } catch (error) {
@@ -275,7 +314,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
               const run = options.runRecordStore
                 ? await options.runRecordStore.getRunRecord(confirmation.applicability.run_id)
                 : undefined;
-              if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref)) return undefined;
+              if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
+                !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return undefined;
             }
           } catch {
             // A missing/failed lookup keeps the generic single-action response;
@@ -290,19 +330,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
             body: { ok: false, single_action_decision: decision, error: continuationUnavailable() }
           };
         }
-        const result = await continueWritePrecheckTask(options.runRecordStore, {
-          run_id: pending.run_id,
-          task_intent: pending.task_intent,
-          package_ref: pending.package_ref,
-          ...(pending.harbor === undefined ? {} : { harbor: pending.harbor }),
-          authorization_context: pending.authorization_context,
-          single_action_decision: decision
-        }, {
-          ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
-          ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient }),
-          ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
-          ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
-        });
+        const result = await continuePendingWriteContinuation(options.runRecordStore, pending, decision, options);
         let continuation = continuationHttpResult(result, decision);
         if (options.taskThreadStore && result.run_record && result.run_record.status !== "requires_user_action") {
           try {

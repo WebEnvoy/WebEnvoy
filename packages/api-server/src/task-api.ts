@@ -11,6 +11,11 @@ import {
   type RuntimeTaskSubmissionRequest,
   type XhsWritePrecheckCompositionPath,
   type XhsPathPrepareRequestedPath,
+  xhsMediaActionPaths,
+  xhsMediaCapabilityId,
+  xhsMediaLockRef,
+  xhsMediaPackageRef,
+  type XhsMediaActionId,
   type WritePrecheckAuthorizationContext,
   type TaskSubmissionResult
 } from "@webenvoy/core-runtime";
@@ -38,6 +43,12 @@ const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath
 ]);
 const xhsPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const xhsPathPreparePaths = new Set<XhsPathPrepareRequestedPath>(["image_text_upload", "image_text_generate"]);
+const xhsMediaResourceRequirementRef = "xiaohongshu.publish-note-image-text-media.resources";
+const xhsMediaProfileByAction: Record<XhsMediaActionId, string> = {
+  "xhs_publish_note_image_text_media.image_upload": "xhs-image-upload",
+  "xhs_publish_note_image_text_media.text_to_image_generate": "xhs-text-to-image-generate"
+};
+const xhsMediaLocalFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const privateHarborInputFieldNames = new Set([
   "raw_payload", "dom", "har", "screenshot", "video", "cookie", "cookies", "token", "tokens",
   "password", "verification_code", "local_path", "profile_path", "storage_value", "session_token",
@@ -110,6 +121,57 @@ function optionalPositiveInteger(value: unknown, code: string): number | Failure
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : requestInvalid(code);
 }
 
+function isCreatorPublishUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2_048) return false;
+  try {
+    const url = new URL(value);
+    return url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish" &&
+      !url.username && !url.password && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Structural API gate for the two #307 actions. Core remains the contract
+ * and admission owner; this gate only rejects malformed requests before a
+ * task thread or pending confirmation is created.
+ */
+export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
+  const taskIntent = jsonObject(body.task_intent);
+  const capability = jsonObject(taskIntent?.capability);
+  const input = jsonObject(taskIntent?.input);
+  const scope = jsonObject(taskIntent?.scope);
+  const policy = jsonObject(taskIntent?.policy);
+  const harbor = jsonObject(body.harbor);
+  const actionId = input?.action_id as XhsMediaActionId | undefined;
+  const requestedPath = input?.requested_path;
+  const refs = input?.refs;
+  const profileId = taskIntent?.resource_requirement_profile_id;
+  const requirementRefs = taskIntent?.resource_requirement_refs;
+  if (body.package_ref !== xhsMediaPackageRef ||
+    !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id"].includes(key)) ||
+    capability?.ref !== `lode:capability/${xhsMediaCapabilityId}` ||
+    capability.version !== "0.1.0" || capability.source_ref !== xhsMediaPackageRef || capability.lock_ref !== xhsMediaLockRef ||
+    scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref) ||
+    typeof harbor?.identity_environment_ref !== "string" || harbor.identity_environment_ref.length === 0 ||
+    !isCreatorPublishUrl(harbor?.url) || harbor?.url !== scope.target_ref ||
+    typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId) ||
+    requestedPath !== xhsMediaActionPaths[actionId] ||
+    policy?.risk !== "write" || policy.execution_intent !== "execute_after_approval" ||
+    profileId !== xhsMediaProfileByAction[actionId] ||
+    !Array.isArray(requirementRefs) || requirementRefs.length !== 1 || requirementRefs[0] !== xhsMediaResourceRequirementRef ||
+    !Array.isArray(refs) || refs.length > 18 || !refs.every((ref) => typeof ref === "string" && ref.length > 0 && ref.length <= 2_048)) {
+    return false;
+  }
+  const summary = input.summary;
+  if (typeof summary !== "string" || summary.trim() !== summary || summary.length === 0 || summary.length > 512) return false;
+  if (actionId === "xhs_publish_note_image_text_media.image_upload") {
+    return refs.length >= 1 && refs.every((ref) => xhsMediaLocalFileRefPattern.test(ref));
+  }
+  return refs.length === 0;
+}
+
 export function taskSubmissionFailureStatusCode(failure: { category: string; code: string }): number {
   if (failure.code === "run_id_already_exists") return 409;
   if (failure.code === "harbor_read_operation_outcome_unknown") return 202;
@@ -147,6 +209,10 @@ async function validateRuntimeTaskSubmissionRequest(
   const taskInput = jsonObject(task_intent.input);
   const pathPrepare = package_ref === xhsPathPreparePackageRef && capability?.ref === "lode:capability/publish-note-path-prepare" &&
     capability.source_ref === package_ref && scope?.target_type === "creator_publish_page";
+  const mediaAction = package_ref === xhsMediaPackageRef &&
+    capability?.ref === `lode:capability/${xhsMediaCapabilityId}` &&
+    capability.version === "0.1.0" && capability.source_ref === package_ref && capability.lock_ref === xhsMediaLockRef &&
+    scope?.target_type === "creator_publish_page";
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";
   const xhsSearch = package_ref === "lode://site-capability/xiaohongshu/search-notes@0.1.0" &&
@@ -211,7 +277,11 @@ async function validateRuntimeTaskSubmissionRequest(
     };
   }
 
-  if (pathPrepare) {
+  if (mediaAction) {
+    if (!isExactXhsMediaTaskBody(body)) return requestInvalid("media_action_binding_invalid");
+    if (harbor?.composition_path !== undefined) return requestInvalid("composition_path_not_allowed");
+    if (harbor?.requested_path !== taskInput?.requested_path) return requestInvalid("requested_path_binding_invalid");
+  } else if (pathPrepare) {
     if (!harbor?.requested_path || !xhsPathPreparePaths.has(harbor.requested_path) || taskInput?.requested_path !== harbor.requested_path) {
       return requestInvalid("requested_path_binding_invalid");
     }

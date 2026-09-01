@@ -6,7 +6,8 @@ import { join } from "node:path";
 
 import { createFileRunRecordStore, taskTurnInputSchemaVersion, type FileAuthorizationDecisionStore, type RunRecord, type TaskTurnInputPolicyResolver, type WritePrecheckAuthorizationContext } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
-import { createApiServer } from "./server.js";
+import { createApiServer, continuePendingWriteContinuation } from "./server.js";
+import { isExactXhsMediaTaskBody } from "./task-api.js";
 import { handleTaskThreadApi, hasPendingWritePrecheckContinuation, takePendingWritePrecheckContinuation, withWritePrecheckRunLock } from "./task-thread-api.js";
 
 function record(value: unknown): Record<string, unknown> {
@@ -742,6 +743,126 @@ async function assertInternalErrorsAreRedacted(): Promise<void> {
   }
 }
 
+async function assertMediaActionApiBoundary(): Promise<void> {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+  const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+  const capabilityRef = "lode:capability/publish-note-image-text-media";
+  const resourceRef = "xiaohongshu.publish-note-image-text-media.resources";
+  const targetRef = "https://creator.xiaohongshu.com/publish/publish";
+  const actionId = "xhs_publish_note_image_text_media.image_upload";
+  const decisionRef = "authorization-decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const taskIntent = {
+    schema_version: "webenvoy.task-intent.v0",
+    intent_id: "intent:media-api-boundary",
+    entrypoint: "app",
+    user_intent: { summary: "小红书图文图片上传" },
+    capability: { ref: capabilityRef, version: "0.1.0", source_ref: packageRef, lock_ref: lockRef },
+    input: {
+      summary: "upload one selected image",
+      refs: ["local_file_ref_11111111-1111-4111-8111-111111111111"],
+      requested_path: "image_text_upload",
+      action_id: actionId
+    },
+    scope: { target_type: "creator_publish_page", target_ref: targetRef },
+    policy: { risk: "write", execution_intent: "execute_after_approval" },
+    resource_requirement_refs: [resourceRef],
+    resource_requirement_profile_id: "xhs-image-upload",
+    evidence_policy_ref: "policy:no-raw-evidence"
+  };
+  const body = {
+    package_ref: packageRef,
+    task_intent: taskIntent,
+    harbor: { identity_environment_ref: "identity-env_111111111111111111111111", url: targetRef, requested_path: "image_text_upload" }
+  };
+  assert.equal(isExactXhsMediaTaskBody(body), true);
+  assert.equal(isExactXhsMediaTaskBody({
+    ...body,
+    task_intent: { ...taskIntent, input: { ...taskIntent.input, action_id: "xhs_publish_note_image_text_media.text_to_image_generate" } }
+  }), false, "action/path mismatch must be rejected");
+  assert.equal(isExactXhsMediaTaskBody({
+    ...body,
+    task_intent: { ...taskIntent, input: { ...taskIntent.input, refs: ["owner_ref:not-a-local-file"] } }
+  }), false, "upload must carry only opaque local file refs");
+  assert.equal(isExactXhsMediaTaskBody({
+    ...body,
+    task_intent: { ...taskIntent, resource_requirement_profile_id: "xhs-text-to-image-generate" }
+  }), false, "profile must match the named action");
+
+  const run = {
+    run_id: "run_media_api_boundary",
+    task_intent_ref: taskIntent.intent_id,
+    capability_ref: capabilityRef,
+    capability_version: "0.1.0",
+    capability_source_ref: packageRef,
+    capability_lock_ref: lockRef,
+    package_ref: packageRef,
+    scope_target_ref: targetRef,
+    status: "requires_user_action",
+    admission: { decision: "requires_user_action", action_risk: "write" },
+    authorization_decision_refs: [decisionRef],
+    action_request: {
+      schema_version: "webenvoy.action-request.v0",
+      action_request_id: "action-request:media-api-boundary",
+      task_intent_ref: taskIntent.intent_id,
+      capability_ref: capabilityRef,
+      capability_version: "0.1.0",
+      capability_source_ref: packageRef,
+      capability_lock_ref: lockRef,
+      package_ref: packageRef,
+      operation_mode: "execute_after_approval",
+      action_id: actionId,
+      risk_classification: {
+        risk: "write",
+        execution_intent: "execute_after_approval",
+        level: "high",
+        true_write_requested: false,
+        reasons: ["media_action_requires_exact_confirmation"]
+      },
+      no_submit_guard: {
+        status: "active",
+        enforced_by: "core",
+        blocked_execution_intents: ["draft", "submit", "destructive", "reconcile_status", "request_cancel"],
+        source_refs: [packageRef, lockRef]
+      },
+      target_refs: { scope_target_ref: targetRef },
+      consumer_boundary: "Test fixture contains public refs only."
+    },
+    policy_binding_snapshot: {
+      schema_version: "webenvoy.policy-binding-snapshot.v0",
+      decision_ref: decisionRef,
+      effective_policy_source: "global_user_config",
+      effective_policy_source_ref: "execution-policy:global",
+      effective_policy_source_version: "1",
+      action_fingerprint: `sha256:${"a".repeat(64)}`,
+      resource_match_ref: "resource-match:media-api-boundary",
+      resource_match_version: "1",
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    }
+  } as unknown as RunRecord;
+  const runStore = {
+    getRunRecord: async () => run
+  } as unknown as import("@webenvoy/core-runtime").FileRunRecordStore;
+  const pending = {
+    run_id: run.run_id,
+    turn_id: "turn_media_api_boundary",
+    package_ref: packageRef,
+    task_intent: taskIntent,
+    harbor: body.harbor,
+    authorization_context: {
+      thread_id: "thread_media_api_boundary",
+      turn_id: "turn_media_api_boundary",
+      turn_sequence: 1,
+      idempotency_key: "media-api-boundary-idempotency"
+    },
+    confirmation_decision_ref: decisionRef,
+    expires_at: new Date(Date.now() + 60_000).toISOString()
+  };
+  const decision = { confirmation_decision_ref: decisionRef } as unknown as import("@webenvoy/core-runtime").SingleActionDecision;
+  const continuation = await continuePendingWriteContinuation(runStore, pending, decision, {});
+  assert.equal(continuation.ok, false);
+  if (!continuation.ok) assert.equal(continuation.failure.code, "authorization_decision_owner_unavailable", "media package must use the Core media continuation");
+}
+
 export async function assertTaskThreadApiRaces(): Promise<void> {
   await assertInFlightReplay();
   await assertMissingRunStorePrecedesBodyParsing();
@@ -749,4 +870,5 @@ export async function assertTaskThreadApiRaces(): Promise<void> {
   await assertExactWritePrecheckCancellation();
   await assertWritePrecheckCancellationWinsBarrier();
   await assertInternalErrorsAreRedacted();
+  await assertMediaActionApiBoundary();
 }
