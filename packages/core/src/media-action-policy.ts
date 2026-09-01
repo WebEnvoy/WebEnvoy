@@ -246,7 +246,7 @@ export async function evaluateXhsMediaActionPolicy(input: {
       : { ...policies, single_action_decision: input.single_action_decision }
   } as const;
   let evaluation = evaluateExecutionPolicy(evaluationInput);
-  if (input.require_confirmation && evaluation.status === "evaluated" &&
+  if (input.require_confirmation && evaluation.status === "evaluated" && evaluation.next_step === "execute" &&
     evaluation.effective_policy.source !== "single_action_decision") {
     const source = evaluation.effective_policy.source;
     const sourcePolicy = policies[source];
