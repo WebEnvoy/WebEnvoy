@@ -722,6 +722,7 @@ const lodeCatalog = lodeCatalogModule.readLodeCatalog(lodeBundle);
 const xhsSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/search-notes@"));
 const xhsPublishPrecheckSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-precheck@"));
 const xhsPathPrepareSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-path-prepare@"));
+const xhsMediaSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-image-text-media@"));
 const bossSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/boss/job-search@"));
 if (
   lodeCatalog.status !== "ready" ||
@@ -747,6 +748,12 @@ if (
   xhsPathPrepareSkill.actions[0]?.operationMode !== "validate_only" ||
   xhsPathPrepareSkill.actions[0]?.externalEffects.length !== 0 ||
   xhsPathPrepareSkill.inputFields.find((field) => field.id === "requested_path")?.options?.join(",") !== "image_text_upload,image_text_generate" ||
+  xhsMediaSkill?.availability !== "available" ||
+  xhsMediaSkill.actions.length !== 2 ||
+  xhsMediaSkill.actions.some((action) => action.category !== "commit" || action.operationMode !== "write") ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.kind !== "file" ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.maxItems !== 18 ||
+  xhsMediaSkill.inputFields.find((field) => field.id === "summary")?.inputProjection !== "safe_summary" ||
   bossSearchSkill?.availability !== "incompatible" ||
   !bossSearchSkill.availabilityReason.includes("动作声明")
 ) {

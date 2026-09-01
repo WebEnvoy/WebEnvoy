@@ -1,5 +1,11 @@
 export type LodeCatalogSkill = WebEnvoyLodeCatalogSkill;
 
+const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuMediaActionContracts = {
+  "xhs_publish_note_image_text_media.image_upload": { effect: "upload", profileId: "xhs-image-upload" },
+  "xhs_publish_note_image_text_media.text_to_image_generate": { effect: "create", profileId: "xhs-text-to-image-generate" },
+} as const;
+
 export type LodeCatalogLoadState = {
   status: "loading" | "ready" | "stale" | "offline";
   fetchedAt: string;
@@ -206,7 +212,8 @@ function isSkill(value: unknown): value is LodeCatalogSkill {
     value.inputFields.every(isField) &&
     isResultView(value.resultView) &&
     Array.isArray(value.actions) &&
-    value.actions.every(isAction);
+    isString(value.packageRef) &&
+    value.actions.every((action) => isAction(action, value.packageRef as string));
 }
 
 function isResultView(value: unknown): value is WebEnvoyLodeCatalogResultView {
@@ -261,7 +268,7 @@ function validFieldConstraints(value: Record<string, unknown>) {
   if (value.pattern !== undefined && value.patternSafety !== "linear") return false;
   if (value.kind === "multi-select") {
     if (!isStringArray(value.options) || value.options.length === 0) return false;
-  } else if (value.minItems !== undefined || value.maxItems !== undefined || value.uniqueItems !== undefined) return false;
+  } else if (value.kind !== "file" && (value.minItems !== undefined || value.maxItems !== undefined || value.uniqueItems !== undefined)) return false;
   if (value.kind !== "number" && (value.minimum !== undefined || value.maximum !== undefined || value.integer !== undefined)) return false;
   if (!["text", "multiline", "select"].includes(String(value.kind)) &&
     (value.minLength !== undefined || value.maxLength !== undefined || value.pattern !== undefined || value.format !== undefined)) return false;
@@ -298,19 +305,25 @@ function validCachedString(field: Record<string, unknown>, value: string) {
   return true;
 }
 
-function isAction(value: unknown): value is WebEnvoyLodeCatalogAction {
+function isAction(value: unknown, packageRef: string): value is WebEnvoyLodeCatalogAction {
+  const mediaWrite = packageRef === xiaohongshuMediaPackageRef && isRecord(value) && value.operationMode === "write";
+  const mediaContract = mediaWrite && isRecord(value)
+    ? xiaohongshuMediaActionContracts[value.id as keyof typeof xiaohongshuMediaActionContracts]
+    : undefined;
   return isRecord(value) && hasOnlyKeys(value, [
     "id", "category", "operationMode", "targetTypes", "supportedOrigins", "externalEffects",
     "resourceRequirementRef", "resourceRequirementProfileIds",
   ]) &&
     isString(value.id) &&
     ["read", "prepare", "commit", "destructive"].includes(String(value.category)) &&
-    ["read", "validate_only", "draft", "preview"].includes(String(value.operationMode)) &&
     isStringArray(value.targetTypes) &&
     isStringArray(value.supportedOrigins) &&
     isStringArray(value.externalEffects) &&
     isString(value.resourceRequirementRef) &&
-    isStringArray(value.resourceRequirementProfileIds) && value.resourceRequirementProfileIds.length > 0;
+    isStringArray(value.resourceRequirementProfileIds) && value.resourceRequirementProfileIds.length > 0 &&
+    (mediaWrite
+      ? value.category === "commit" && mediaContract != null && value.externalEffects.length === 1 && value.externalEffects[0] === mediaContract.effect && value.resourceRequirementProfileIds.length === 1 && value.resourceRequirementProfileIds[0] === mediaContract.profileId
+      : ["read", "validate_only", "draft", "preview"].includes(String(value.operationMode)));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

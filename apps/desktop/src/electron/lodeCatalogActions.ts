@@ -2,6 +2,11 @@ import type { LodeCatalogAction } from "./lodeCatalog.js";
 import { hasOnlyKeys, isRecord, optionalString, strictStringArray } from "./lodeCatalogGuards.js";
 
 const maxCatalogActions = 50;
+const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuMediaActionContracts = {
+  "xhs_publish_note_image_text_media.image_upload": { effect: "upload", profileId: "xhs-image-upload", requestedPath: "image_text_upload" },
+  "xhs_publish_note_image_text_media.text_to_image_generate": { effect: "create", profileId: "xhs-text-to-image-generate", requestedPath: "image_text_generate" },
+} as const;
 
 type ActionContext = {
   actionDeclaration: Record<string, unknown>;
@@ -22,24 +27,26 @@ type ActionContext = {
 
 export function projectActions(context: ActionContext): LodeCatalogAction[] {
   const { actionDeclaration, operationMode } = context;
-  if (!["read", "validate_only", "draft", "preview"].includes(operationMode) ||
+  const mediaWrite = context.packageRef === xiaohongshuMediaPackageRef && operationMode === "write";
+  if ((!mediaWrite && !["read", "validate_only", "draft", "preview"].includes(operationMode)) ||
     !hasOnlyKeys(actionDeclaration, ["schema_version", "schema_ref", "actions"]) ||
     actionDeclaration.schema_version !== "lode.capability-action-declaration.v0" ||
     actionDeclaration.schema_ref !== "lode://schema/capability-action-declaration@0.1.0" ||
     !validRequirementContract(context)) return [];
   const value = actionDeclaration.actions;
-  if (!Array.isArray(value) || value.length === 0 || value.length > maxCatalogActions) return [];
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxCatalogActions || mediaWrite && value.length !== 2) return [];
   const projected: LodeCatalogAction[] = [];
   for (const action of value) {
-    const item = projectAction(action, context);
+    const item = projectAction(action, context, mediaWrite);
     if (item == null) return [];
     projected.push(item);
   }
   return new Set(projected.map((action) => action.id)).size === projected.length ? projected : [];
 }
 
-function projectAction(value: unknown, context: ActionContext) {
+function projectAction(value: unknown, context: ActionContext, mediaWrite: boolean) {
   if (!isRecord(value)) return null;
+  if (typeof value.action_id !== "string") return null;
   const { operationId, operationMode, requirementPath, requirementRef, requirements, siteOrigins, siteSlug, targetType } = context;
   const targetScope = isRecord(value.target_scope) ? value.target_scope : null;
   const actionRequirements = isRecord(value.resource_requirements) ? value.resource_requirements : null;
@@ -48,14 +55,21 @@ function projectAction(value: unknown, context: ActionContext) {
   const externalEffects = strictStringArray(value.external_effects);
   const profileIds = actionRequirements == null ? null : strictStringArray(actionRequirements.profile_ids);
   const declaredProfiles = requirementProfiles(requirements);
-  const expectedCategory = operationMode === "read" ? "read" : "prepare";
-  if (value.action_id !== operationId || value.category !== expectedCategory ||
+  const mediaContract = mediaWrite && isRecord(value) ? xiaohongshuMediaActionContracts[value.action_id as keyof typeof xiaohongshuMediaActionContracts] : undefined;
+  const expectedCategory = operationMode === "read" ? "read" : mediaWrite ? "commit" : "prepare";
+  if ((!mediaWrite && value.action_id !== operationId) ||
+    (mediaWrite && mediaContract == null) || value.category !== expectedCategory ||
     targetScope?.site_slug !== siteSlug || targetTypes?.length !== 1 || targetTypes[0] !== targetType ||
     supportedOrigins == null || supportedOrigins.length === 0 || supportedOrigins.some((origin) => !siteOrigins.includes(origin)) ||
-    externalEffects == null || externalEffects.length !== 0 || actionRequirements?.path !== requirementPath ||
+    externalEffects == null ||
+    (mediaWrite
+      ? mediaContract == null || externalEffects.length !== 1 || externalEffects[0] !== mediaContract.effect
+      : externalEffects.length !== 0) ||
+    actionRequirements?.path !== requirementPath ||
     actionRequirements?.id !== requirementRef || profileIds == null || profileIds.length === 0 ||
     profileIds.some((id) => !declaredProfiles.has(id)) ||
-    profileIds.some((id) => !profileMatchesContract(context, id, supportedOrigins))) return null;
+    profileIds.some((id) => !profileMatchesContract(context, id, supportedOrigins)) ||
+    mediaWrite && (mediaContract == null || profileIds.length !== 1 || profileIds[0] !== mediaContract.profileId || !mediaProfileMatchesContract(requirements, mediaContract, profileIds[0]))) return null;
   return {
     id: value.action_id,
     category: value.category as LodeCatalogAction["category"],
@@ -66,6 +80,20 @@ function projectAction(value: unknown, context: ActionContext) {
     resourceRequirementRef: requirementRef,
     resourceRequirementProfileIds: profileIds,
   };
+}
+
+function mediaProfileMatchesContract(
+  requirements: Record<string, unknown>,
+  mediaContract: (typeof xiaohongshuMediaActionContracts)[keyof typeof xiaohongshuMediaActionContracts],
+  profileId: string,
+) {
+  const profile = requirementProfiles(requirements).get(profileId);
+  const inputBinding = isRecord(profile?.input_binding) ? profile.input_binding : null;
+  return inputBinding?.action_id === mediaContractId(mediaContract) && inputBinding?.requested_path === mediaContract.requestedPath;
+}
+
+function mediaContractId(contract: (typeof xiaohongshuMediaActionContracts)[keyof typeof xiaohongshuMediaActionContracts]) {
+  return Object.entries(xiaohongshuMediaActionContracts).find(([, value]) => value === contract)?.[0];
 }
 
 function validRequirementContract(context: ActionContext) {

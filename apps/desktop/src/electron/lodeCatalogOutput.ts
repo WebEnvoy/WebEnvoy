@@ -3,8 +3,8 @@ import { isSafeCatalogPattern } from "./safeCatalogPattern.js";
 
 const schemaKeys = [
   "$defs", "$id", "$ref", "$schema", "additionalProperties", "allOf", "const", "default", "description",
-  "enum", "examples", "format", "if", "items", "maxLength", "minItems", "minLength", "oneOf", "pattern",
-  "properties", "required", "then", "title", "type", "uniqueItems", "x-lode",
+  "enum", "examples", "format", "if", "items", "maximum", "maxLength", "minimum", "minItems", "minLength", "oneOf", "pattern",
+  "not", "properties", "required", "then", "title", "type", "uniqueItems", "x-lode",
 ];
 const resultKindKeys = ["const", "title", "description"];
 const schemaTypes = new Set(["array", "boolean", "integer", "null", "number", "object", "string"]);
@@ -12,6 +12,7 @@ const maxSchemaDepth = 24;
 const maxSchemaNodes = 2_000;
 const maxSchemaMapEntries = 200;
 const maxCompositionEntries = 32;
+const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 
 type OutputContract = {
   operationMode: string;
@@ -23,7 +24,7 @@ type OutputContract = {
 
 export function projectOutputKind(schema: Record<string, unknown>, contract: OutputContract) {
   if (schema.$schema !== "https://json-schema.org/draft/2020-12/schema" || schema.$id !== contract.schemaId ||
-    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema)) return undefined;
+    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema, contract.packageRef === xiaohongshuMediaPackageRef)) return undefined;
   const properties = isRecord(schema.properties) ? schema.properties : null;
   const required = strictStringArray(schema.required);
   const resultKind = properties != null && isRecord(properties.result_kind) ? properties.result_kind : null;
@@ -39,10 +40,10 @@ export function projectOutputKind(schema: Record<string, unknown>, contract: Out
   return resultKind.const as string;
 }
 
-function validateOutputSchema(schema: Record<string, unknown>) {
+function validateOutputSchema(schema: Record<string, unknown>, allowMediaNot: boolean) {
   const definitions = isRecord(schema.$defs) ? schema.$defs : {};
   const budget = { remaining: maxSchemaNodes };
-  return validateSchemaNode(schema, definitions, budget, 0);
+  return validateSchemaNode(schema, definitions, budget, 0, allowMediaNot);
 }
 
 function validateSchemaNode(
@@ -50,25 +51,30 @@ function validateSchemaNode(
   definitions: Record<string, unknown>,
   budget: { remaining: number },
   depth: number,
+  allowMediaNot: boolean,
 ): boolean {
   if (!isRecord(node) || depth > maxSchemaDepth || --budget.remaining < 0 || !hasOnlyAllowedKeys(node, schemaKeys)) return false;
   if (depth > 0 && ["$defs", "$id", "$schema", "x-lode"].some((key) => node[key] !== undefined)) return false;
   if (!validOptionalText(node.title, 512) || !validOptionalText(node.description, 8_192) ||
-    !validOptionalText(node.format, 128) || !validOptionalText(node.pattern, 512) || !validType(node.type) ||
+    !validOptionalText(node.format, 128) || !validOptionalText(node.pattern, 512) || !validType(node.type, allowMediaNot) ||
     !validOptionalBoolean(node.additionalProperties) || !validOptionalBoolean(node.uniqueItems) ||
     !validOptionalInteger(node.minLength) || !validOptionalInteger(node.maxLength) || !validOptionalInteger(node.minItems) ||
+    !allowMediaNot && (node.minimum !== undefined || node.maximum !== undefined) ||
+    allowMediaNot && (!validOptionalNumber(node.minimum) || !validOptionalNumber(node.maximum) ||
+      typeof node.minimum === "number" && typeof node.maximum === "number" && node.minimum > node.maximum) ||
     typeof node.pattern === "string" && !isSafeCatalogPattern(node.pattern)) return false;
   if (!validLiteral(node.const) || !validLiteral(node.default) || !validEnum(node.enum) || !validExamples(node.examples)) return false;
   if (!validReference(node.$ref, definitions) || !validRequired(node.required)) return false;
-  if (!validateSchemaMap(node.properties, definitions, budget, depth) ||
-    !validateSchemaMap(node.$defs, definitions, budget, depth) ||
-    !validateSchemaChild(node.items, definitions, budget, depth) ||
-    !validateSchemaList(node.allOf, definitions, budget, depth) ||
-    !validateSchemaList(node.oneOf, definitions, budget, depth)) return false;
+  if (!validateSchemaMap(node.properties, definitions, budget, depth, allowMediaNot) ||
+    !validateSchemaMap(node.$defs, definitions, budget, depth, allowMediaNot) ||
+    !validateSchemaChild(node.items, definitions, budget, depth, allowMediaNot) ||
+    !validateSchemaList(node.allOf, definitions, budget, depth, allowMediaNot) ||
+    !validateSchemaList(node.oneOf, definitions, budget, depth, allowMediaNot) ||
+    node.not !== undefined && (!allowMediaNot || !validateSchemaChild(node.not, definitions, budget, depth, allowMediaNot))) return false;
   const hasIf = node.if !== undefined;
   const hasThen = node.then !== undefined;
-  return hasIf === hasThen && validateSchemaChild(node.if, definitions, budget, depth) &&
-    validateSchemaChild(node.then, definitions, budget, depth);
+  return hasIf === hasThen && validateSchemaChild(node.if, definitions, budget, depth, allowMediaNot) &&
+    validateSchemaChild(node.then, definitions, budget, depth, allowMediaNot);
 }
 
 function validateSchemaMap(
@@ -76,10 +82,11 @@ function validateSchemaMap(
   definitions: Record<string, unknown>,
   budget: { remaining: number },
   depth: number,
+  allowMediaNot: boolean,
 ) {
   if (value === undefined) return true;
   if (!isRecord(value) || Object.keys(value).length === 0 || Object.keys(value).length > maxSchemaMapEntries) return false;
-  return Object.entries(value).every(([key, child]) => validSchemaName(key) && validateSchemaNode(child, definitions, budget, depth + 1));
+  return Object.entries(value).every(([key, child]) => validSchemaName(key) && validateSchemaNode(child, definitions, budget, depth + 1, allowMediaNot));
 }
 
 function validateSchemaChild(
@@ -87,8 +94,9 @@ function validateSchemaChild(
   definitions: Record<string, unknown>,
   budget: { remaining: number },
   depth: number,
+  allowMediaNot: boolean,
 ) {
-  return value === undefined || validateSchemaNode(value, definitions, budget, depth + 1);
+  return value === undefined || validateSchemaNode(value, definitions, budget, depth + 1, allowMediaNot);
 }
 
 function validateSchemaList(
@@ -96,9 +104,10 @@ function validateSchemaList(
   definitions: Record<string, unknown>,
   budget: { remaining: number },
   depth: number,
+  allowMediaNot: boolean,
 ) {
   return value === undefined || Array.isArray(value) && value.length > 0 && value.length <= maxCompositionEntries &&
-    value.every((child) => validateSchemaNode(child, definitions, budget, depth + 1));
+    value.every((child) => validateSchemaNode(child, definitions, budget, depth + 1, allowMediaNot));
 }
 
 function validReference(value: unknown, definitions: Record<string, unknown>) {
@@ -115,8 +124,10 @@ function validRequired(value: unknown) {
   return true;
 }
 
-function validType(value: unknown) {
-  return value === undefined || typeof value === "string" && schemaTypes.has(value);
+function validType(value: unknown, allowMediaNullable: boolean) {
+  return value === undefined || typeof value === "string" && schemaTypes.has(value) ||
+    allowMediaNullable && Array.isArray(value) && value.length === 2 && value.includes("null") &&
+    value.some((item) => item === "integer" || item === "string") && new Set(value).size === 2;
 }
 
 function validOptionalText(value: unknown, max: number) {
@@ -129,6 +140,10 @@ function validOptionalBoolean(value: unknown) {
 
 function validOptionalInteger(value: unknown) {
   return value === undefined || Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function validOptionalNumber(value: unknown) {
+  return value === undefined || typeof value === "number" && Number.isFinite(value);
 }
 
 function validEnum(value: unknown) {
