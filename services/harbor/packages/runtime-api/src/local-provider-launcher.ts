@@ -239,11 +239,28 @@ export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
   "Page.captureScreenshot",
   "Page.setInterceptFileChooserDialog",
   "Fetch.enable",
-  "Fetch.failRequest",
+  "Fetch.continueRequest",
   "Fetch.disable"
 ] as const;
 
 type WritePrecheckCdpCommand = typeof XHS_WRITE_PRECHECK_CDP_COMMANDS[number];
+
+export function observeXhsPathPrepareRequest(
+  event: { requestId?: unknown; resourceType?: unknown; request?: unknown },
+  continueRequest: (requestId: string) => void
+): boolean {
+  const requestId = typeof event.requestId === "string" ? event.requestId : "";
+  if (!requestId) return false;
+  continueRequest(requestId);
+  const request = event.request && typeof event.request === "object"
+    ? event.request as { method?: unknown }
+    : undefined;
+  const method = typeof request?.method === "string" ? request.method.toUpperCase() : "";
+  const resourceType = typeof event.resourceType === "string" ? event.resourceType : "";
+  return Boolean(method) &&
+    !["GET", "HEAD", "OPTIONS"].includes(method) &&
+    ["XHR", "Fetch", "Document"].includes(resourceType);
+}
 
 export function validateXhsWritePrecheckObservation(
   input: LocalProviderWritePrecheckProbeInput,
@@ -336,14 +353,17 @@ async function probeProviderWritePrecheck(
       if (input.requested_path !== undefined) {
         await sendWritePrecheckCdp(client, "Page.enable");
         let fileChooserOpened = false;
-        let networkRequestAttempted = false;
-        const blockedRequests: Promise<unknown>[] = [];
+        let unclassifiedExternalEffectCandidate = false;
+        let continueRequestFailed = false;
+        const continuedRequests: Promise<unknown>[] = [];
         const stopObservingFileChooser = client.on("Page.fileChooserOpened", () => { fileChooserOpened = true; });
-        const stopInterceptingRequests = client.on("Fetch.requestPaused", (event) => {
-          networkRequestAttempted = true;
-          if (typeof event.requestId === "string") {
-            blockedRequests.push(sendWritePrecheckCdp(client, "Fetch.failRequest", { requestId: event.requestId, errorReason: "Aborted" }));
-          }
+        const stopObservingRequests = client.on("Fetch.requestPaused", (event) => {
+          const candidate = observeXhsPathPrepareRequest(event, (requestId) => {
+            continuedRequests.push(sendWritePrecheckCdp(client, "Fetch.continueRequest", { requestId }).catch(() => {
+              continueRequestFailed = true;
+            }));
+          });
+          if (candidate) unclassifiedExternalEffectCandidate = true;
         });
         let selected: WritePrecheckObservation | undefined;
         let completedPathPrepare: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> | undefined;
@@ -354,8 +374,8 @@ async function probeProviderWritePrecheck(
           if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
           }
-          if (networkRequestAttempted) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a network request and was blocked.", false);
+          if (unclassifiedExternalEffectCandidate) {
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false);
           }
           if (!selected || selected.selection_status !== "selected") {
             return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
@@ -370,8 +390,11 @@ async function probeProviderWritePrecheck(
             return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
           }
           const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
-          if (fileChooserOpened || networkRequestAttempted) {
+          if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false);
+          }
+          if (unclassifiedExternalEffectCandidate) {
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false);
           }
           if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
             return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.");
@@ -387,7 +410,8 @@ async function probeProviderWritePrecheck(
           };
         } finally {
           try {
-            await Promise.allSettled(blockedRequests);
+            stopObservingRequests();
+            await Promise.allSettled(continuedRequests);
             await withCdp(webSocketUrl, async (cleanupClient) => {
               await sendWritePrecheckCdp(cleanupClient, "Page.setInterceptFileChooserDialog", { enabled: false });
               await sendWritePrecheckCdp(cleanupClient, "Fetch.disable");
@@ -395,11 +419,10 @@ async function probeProviderWritePrecheck(
             AbortSignal.timeout(1500));
           } finally {
             stopObservingFileChooser();
-            stopInterceptingRequests();
           }
         }
-        if (fileChooserOpened || networkRequestAttempted || !completedPathPrepare) {
-          return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction.", false);
+        if (fileChooserOpened || unclassifiedExternalEffectCandidate || continueRequestFailed || !completedPathPrepare) {
+          return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction or unknown external-effect outcome.", false);
         }
         return completedPathPrepare;
       }
