@@ -65,7 +65,7 @@ export type RunSessionRefsSummary = {
 
 export type TerminalRunStatus = Exclude<RunRecordStatus, "pending" | "admitted" | "running">;
 
-export type RunTerminalFailureSummary = Pick<FailureRecord, "category" | "code" | "phase" | "attribution">;
+export type RunTerminalFailureSummary = Pick<FailureRecord, "category" | "code" | "phase" | "failure_stage" | "attribution">;
 
 export type RunPostCheckSummary = Pick<PostCheckResult, "schema_version" | "status" | "summary" | "checked_at" | "code" | "attribution" | "recovery_hint">;
 
@@ -163,6 +163,7 @@ function terminalSummary(record: RunRecord): RunTerminalSummary | undefined {
             category: normalized.category,
             code: normalized.code,
             phase: normalized.phase,
+            ...(normalized.failure_stage === undefined ? {} : { failure_stage: normalized.failure_stage }),
             ...(normalized.attribution === undefined ? {} : { attribution: normalized.attribution })
           };
         })();

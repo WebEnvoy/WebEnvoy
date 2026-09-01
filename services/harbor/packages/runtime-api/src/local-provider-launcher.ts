@@ -42,6 +42,7 @@ import type {
   XhsWritePrecheckFieldState,
   XhsWritePrecheckMediaState,
   XhsWritePrecheckObservationStatus,
+  XhsPathPrepareFailureStage,
   XhsPathPrepareNormalizedState,
   RuntimeErrorCode,
   RuntimeErrorFact,
@@ -264,24 +265,25 @@ export function observeXhsPathPrepareRequest(
 
 export function validateXhsWritePrecheckObservation(
   input: LocalProviderWritePrecheckProbeInput,
-  observation: WritePrecheckObservation | undefined
+  observation: WritePrecheckObservation | undefined,
+  failure_stage?: XhsPathPrepareFailureStage
 ): LocalProviderWritePrecheckProbeResult {
-  if (!observation) return writePrecheckUnavailable("page_changed", "The creator page returned no public semantic observation.");
-  if (observation.challenge_like) return writePrecheckUnavailable("safety_challenge", "The creator page shows a safety challenge.", false);
-  if (observation.login_like) return writePrecheckUnavailable("login_required", "The creator page requires manual login.");
+  if (!observation) return writePrecheckUnavailable("page_changed", "The creator page returned no public semantic observation.", true, failure_stage);
+  if (observation.challenge_like) return writePrecheckUnavailable("safety_challenge", "The creator page shows a safety challenge.", false, failure_stage);
+  if (observation.login_like) return writePrecheckUnavailable("login_required", "The creator page requires manual login.", true, failure_stage);
   if (
     observation.origin !== input.expected_origin ||
     observation.pathname !== "/publish/publish" ||
     !sameWritePrecheckUrl(observation.url, input.target_url)
-  ) return writePrecheckUnavailable("page_changed", "The current page is not the exact requested creator publish page.");
+  ) return writePrecheckUnavailable("page_changed", "The current page is not the exact requested creator publish page.", true, failure_stage);
   // A missing semantic root can be selector drift just as easily as a page
   // without the creator surface. Keep the distinction unknown; only an
   // explicit absent classification may become target_not_writable.
   if (observation.creator_surface_state === "absent") {
-    return writePrecheckUnavailable("target_not_writable", "The creator publish surface is explicitly absent.", false);
+    return writePrecheckUnavailable("target_not_writable", "The creator publish surface is explicitly absent.", false, failure_stage);
   }
   if (observation.creator_app_owned !== true) {
-    return writePrecheckUnavailable("evidence_unavailable", "The creator publish surface could not be classified.");
+    return writePrecheckUnavailable("evidence_unavailable", "The creator publish surface could not be classified.", true, failure_stage);
   }
   const composition_path = normalizedCompositionPath(input.composition_path ?? observation.composition_path);
   const composition_state = observation.composition_state ?? (
@@ -334,13 +336,16 @@ async function probeProviderWritePrecheck(
   currentUrl: string,
   input: LocalProviderWritePrecheckProbeInput
 ): Promise<LocalProviderWritePrecheckProbeResult> {
+  let failureStage: XhsPathPrepareFailureStage | undefined = input.requested_path === undefined
+    ? undefined
+    : "provider_probe_initial";
   try {
     if (!sameWritePrecheckUrl(currentUrl, input.target_url)) {
-      return writePrecheckUnavailable("page_changed", "The managed session is not on the requested creator publish page.");
+      return writePrecheckUnavailable("page_changed", "The managed session is not on the requested creator publish page.", true, failureStage);
     }
     const page = await activePage(port, currentUrl, AbortSignal.timeout(3000));
     if (!page.webSocketDebuggerUrl) {
-      return writePrecheckUnavailable("provider_probe_unavailable", "The creator page has no controlled CDP target.");
+      return writePrecheckUnavailable("provider_probe_unavailable", "The creator page has no controlled CDP target.", true, failureStage);
     }
     const webSocketUrl = page.webSocketDebuggerUrl;
     return withCdp(webSocketUrl, async (client) => {
@@ -348,9 +353,10 @@ async function probeProviderWritePrecheck(
       await sendWritePrecheckCdp(client, "Runtime.enable");
       const path = input.requested_path ?? input.composition_path;
       const observation = await evaluateWritePrecheck(client, path);
-      const validation = validateXhsWritePrecheckObservation(input, observation);
+      const validation = validateXhsWritePrecheckObservation(input, observation, failureStage);
       if (validation.status === "unavailable") return validation;
       if (input.requested_path !== undefined) {
+        failureStage = "provider_selection";
         await sendWritePrecheckCdp(client, "Page.enable");
         let fileChooserOpened = false;
         let unclassifiedExternalEffectCandidate = false;
@@ -372,35 +378,36 @@ async function probeProviderWritePrecheck(
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
           selected = await evaluateWritePrecheck(client, input.requested_path, true);
           if (fileChooserOpened) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false);
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false, failureStage);
           }
           if (unclassifiedExternalEffectCandidate) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false);
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false, failureStage);
           }
           if (!selected || selected.selection_status !== "selected") {
-            return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.");
+            return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.", true, failureStage);
           }
-          const selectedValidation = validateXhsWritePrecheckObservation(input, selected);
+          const selectedValidation = validateXhsWritePrecheckObservation(input, selected, failureStage);
           if (selectedValidation.status === "unavailable") return selectedValidation;
           if (selected.path_observed !== "observed") {
-            return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false);
+            return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false, failureStage);
           }
+          failureStage = "provider_readback_freshness";
           const screenshot = await captureWritePrecheckScreenshot(client);
           if (!screenshot) {
-            return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.");
+            return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.", true, failureStage);
           }
           const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
           if (fileChooserOpened) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false);
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false, failureStage);
           }
           if (unclassifiedExternalEffectCandidate) {
-            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false);
+            return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false, failureStage);
           }
           if (!validWritePrecheckFreshness(input, selected, after, observedAt, Date.now(), true)) {
-            return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.");
+            return writePrecheckUnavailable("page_changed", "The creator page changed while path state was read back.", true, failureStage);
           }
           if (!after || after.path_observed !== "observed") {
-            return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false);
+            return writePrecheckUnavailable("page_changed", "The requested path readback is unknown or mismatched.", false, failureStage);
           }
           completedPathPrepare = {
             ...selectedValidation,
@@ -422,7 +429,7 @@ async function probeProviderWritePrecheck(
           }
         }
         if (fileChooserOpened || unclassifiedExternalEffectCandidate || continueRequestFailed || !completedPathPrepare) {
-          return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction or unknown external-effect outcome.", false);
+          return writePrecheckUnavailable("evidence_unavailable", "The requested control did not complete without a prohibited external interaction or unknown external-effect outcome.", false, failureStage);
         }
         return completedPathPrepare;
       }
@@ -441,7 +448,7 @@ async function probeProviderWritePrecheck(
       };
     }, AbortSignal.timeout(3000));
   } catch {
-    return writePrecheckUnavailable("provider_probe_unavailable", "The creator write-precheck probe failed.");
+    return writePrecheckUnavailable("provider_probe_unavailable", "The creator write-precheck probe failed.", true, failureStage);
   }
 }
 
@@ -530,9 +537,16 @@ function sendWritePrecheckCdp(
 function writePrecheckUnavailable(
   failure_class: Extract<LocalProviderWritePrecheckProbeResult, { status: "unavailable" }>["failure_class"],
   message: string,
-  retryable = true
+  retryable = true,
+  failure_stage?: XhsPathPrepareFailureStage
 ): LocalProviderWritePrecheckProbeResult {
-  return { status: "unavailable", failure_class, message, retryable };
+  return {
+    status: "unavailable",
+    failure_class,
+    message,
+    retryable,
+    ...(failure_stage === undefined ? {} : { failure_stage })
+  };
 }
 
 function pathSelectionProbeExpression(): string {

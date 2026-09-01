@@ -36,7 +36,7 @@ import { readBoundedJsonResponse } from "./bounded-json-response.js";
 import { normalizePublicHttpTarget } from "./public-target-reference.js";
 import { completeRunWithReadOnlyEmptyResult, completeRunWithReadOnlyFailure, completeRunWithReadOnlyProjection, type LodeReadOnlyFailureClass, type LodeReadOnlyProjection } from "./read-only-result-projection.js";
 import { completeRunWithFailure } from "./result-envelope.js";
-import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PreviewResult, type RunRecord } from "./run-record-store.js";
+import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PreviewResult, type RunRecord, type WritePrecheckFailureStage } from "./run-record-store.js";
 import { acceptApprovedWritePrecheckTask, acceptReadOnlyTaskSubmission, validateTaskIntent, type TaskIntentEnvelope, type TaskSubmissionResult } from "./task-submission.js";
 import {
   commitDetailTargetReservation,
@@ -987,6 +987,12 @@ const xhsPathPrepareInputSchemaRef = "lode://schema/site-capability/xiaohongshu/
 const xhsPathPrepareOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-path-prepare/output@0.1.0";
 const xhsPathPrepareLodeCommit = "d09a2d683007c9f396838bdab92ecf7c0e6b339c";
 const xhsPathPrepareAssetPath = "sites/xiaohongshu/publish-note-path-prepare/manifest.json";
+const xhsPathPrepareFailureStages = new Set<WritePrecheckFailureStage>([
+  "session_precheck",
+  "provider_probe_initial",
+  "provider_selection",
+  "provider_readback_freshness"
+]);
 const xhsWritePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
 ]);
@@ -1515,15 +1521,19 @@ async function completeAcceptedWritePrecheckBindingPersistenceFailure(
   return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
 }
 
-function writePrecheckUnavailableFailure(value: JsonObject): FailureRecord {
+function writePrecheckUnavailableFailure(value: JsonObject, allowFailureStage = false): FailureRecord {
   const failureClass = string(value.failure_class);
   const retryable = value.retryable === true;
-  return failure(
+  const failureStage = allowFailureStage && typeof value.failure_stage === "string" && xhsPathPrepareFailureStages.has(value.failure_stage as WritePrecheckFailureStage)
+    ? value.failure_stage as WritePrecheckFailureStage
+    : undefined;
+  const failureRecord = failure(
     "runtime_execution",
     failureClass ? `write_precheck_${failureClass}` : "write_precheck_unavailable",
     "execution",
     retryable ? "retry_after_refresh" : "repair_browser_environment"
   );
+  return failureStage === undefined ? failureRecord : { ...failureRecord, failure_stage: failureStage };
 }
 
 async function dispatchApprovedWritePrecheck(
@@ -1657,7 +1667,8 @@ async function dispatchApprovedWritePrecheck(
   }
   const operationObject = object(operation);
   if (operationObject?.status === "unavailable") {
-    const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef, writePrecheckUnavailableFailure(operationObject));
+    const unavailableFailure = writePrecheckUnavailableFailure(operationObject, pathPrepare);
+    const cleanup = await releaseAcceptedCoreTaskSession(store, result, client, runtimeSessionRef, unavailableFailure);
     if (cleanup) return cleanup;
     await store.updateRunRecord(result.run_record.run_id, {
       status: "running",
@@ -1670,16 +1681,16 @@ async function dispatchApprovedWritePrecheck(
       }
     });
     const completed = await completeRunWithFailure(store, result.run_record.run_id, {
-      failure: writePrecheckUnavailableFailure(operationObject),
+      failure: unavailableFailure,
       retention_state: "active",
       post_check: {
         schema_version: "webenvoy.post-check-result.v0",
         status: "blocked",
         summary: "Harbor could not validate the creator publish entrypoint; no external write action was performed.",
         checked_at: new Date().toISOString(),
-        code: writePrecheckUnavailableFailure(operationObject).code,
+        code: unavailableFailure.code,
         attribution: "runtime",
-        recovery_hint: writePrecheckUnavailableFailure(operationObject).recovery_hint,
+        recovery_hint: unavailableFailure.recovery_hint,
         consumer_boundary: "Core records only structured unavailable state and opaque refs; no browser or write material is stored."
       }
     });
