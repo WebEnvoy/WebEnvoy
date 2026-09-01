@@ -467,8 +467,6 @@ const XHS_MEDIA_ACTION_CDP_COMMANDS = [
   "DOM.enable",
   "DOM.requestNode",
   "DOM.setFileInputFiles",
-  "Network.enable",
-  "Network.disable",
   "Fetch.enable",
   "Fetch.continueRequest",
   "Fetch.failRequest",
@@ -488,9 +486,7 @@ type MediaPageObservation = {
 };
 
 type MediaActionNetwork = {
-  candidate: boolean;
   forbidden_commit: boolean;
-  response_status?: number;
 };
 
 /**
@@ -539,8 +535,7 @@ async function executeXhsMediaAction(
     const before = await evaluateMediaActionObservation(client);
     const pageFailure = mediaPageFailure(before, input.target_url);
     if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
-    const network: MediaActionNetwork = { candidate: false, forbidden_commit: false };
-    const effectRequestIds = new Set<string>();
+    const network: MediaActionNetwork = { forbidden_commit: false };
     const stopFetch = client.on("Fetch.requestPaused", (event) => {
       const requestId = typeof event.requestId === "string" ? event.requestId : "";
       const request = event.request && typeof event.request === "object" ? event.request as { method?: unknown; url?: unknown } : {};
@@ -553,24 +548,15 @@ async function executeXhsMediaAction(
           void sendMediaActionCdp(client, "Fetch.failRequest", { requestId, errorReason: "Aborted" }).catch(() => undefined);
           return;
         }
-        network.candidate = true;
-        effectRequestIds.add(requestId);
       }
       void sendMediaActionCdp(client, "Fetch.continueRequest", { requestId }).catch(() => undefined);
     });
-    const stopResponses = client.on("Network.responseReceived", (event) => {
-      const requestId = typeof event.requestId === "string" ? event.requestId : "";
-      if (!requestId || !effectRequestIds.has(requestId)) return;
-      const response = event.response && typeof event.response === "object" ? event.response as { status?: unknown } : {};
-      if (typeof response.status === "number") network.response_status = response.status;
-    });
     let after: MediaPageObservation | undefined;
     try {
-      await sendMediaActionCdp(client, "Network.enable");
       await sendMediaActionCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
-        const objectId = await findVisibleFileInput(client);
-        if (!objectId) return failure("media_ref_unavailable", "The creator page has no visible image file input.", false, page);
+        const objectId = await findImageFileInput(client);
+        if (!objectId) return failure("media_ref_unavailable", "The creator page has no supported image upload input.", false, page);
         const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
         const nodeId = typeof node.nodeId === "number" ? node.nodeId : 0;
         if (!nodeId) return failure("media_ref_unavailable", "The creator image file input could not be controlled.", false, page);
@@ -587,11 +573,7 @@ async function executeXhsMediaAction(
       }
     } finally {
       stopFetch();
-      stopResponses();
-      await Promise.allSettled([
-        sendMediaActionCdp(client, "Fetch.disable"),
-        sendMediaActionCdp(client, "Network.disable")
-      ]);
+      await sendMediaActionCdp(client, "Fetch.disable").catch(() => undefined);
     }
     const observed = after ?? await evaluateMediaActionObservation(client);
     const routeObserved = observed?.origin === input.expected_origin && observed.pathname === "/publish/publish" && sameWritePrecheckUrl(observed.url, input.target_url);
@@ -600,9 +582,7 @@ async function executeXhsMediaAction(
       : observed?.generated_result_visible === true;
     const effectStatus: "requested" | "observed" | "unknown" | "failed" = network.forbidden_commit
       ? "failed"
-      : network.response_status !== undefined && network.response_status >= 200 && network.response_status < 300
-        ? "observed"
-        : network.response_status !== undefined ? "failed" : "unknown";
+      : expectedMediaObserved ? "observed" : "unknown";
     const operationStatus = effectStatus === "observed" || effectStatus === "failed" ? "terminal" as const : "unknown_outcome" as const;
     const mediaReadback = input.action_id.endsWith("image_upload")
       ? {
@@ -678,11 +658,11 @@ async function resolveLocalMediaRef(localFileRef: string): Promise<string> {
   return value.path;
 }
 
-async function findVisibleFileInput(client: CdpClient): Promise<string | undefined> {
+async function findImageFileInput(client: CdpClient): Promise<string | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
     expression: String.raw`(() => {
-      const visible = (el) => { const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; };
-      const input = [...document.querySelectorAll('input[type="file"]')].find(visible);
+      const input = [...document.querySelectorAll('input.upload-input[type="file"]')]
+        .find((el) => /image\/(?:jpeg|png|webp)/i.test(el.accept));
       return input || null;
     })()`,
     returnByValue: false,
