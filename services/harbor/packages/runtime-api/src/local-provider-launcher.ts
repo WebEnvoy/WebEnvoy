@@ -567,8 +567,8 @@ async function executeXhsMediaAction(
       }
       for (let attempt = 0; attempt < 20; attempt += 1) {
         after = await evaluateMediaActionObservation(client);
-        if ((input.action_id.endsWith("image_upload") && (after?.media_count ?? 0) >= input.refs.length) ||
-          (input.action_id.endsWith("text_to_image_generate") && after?.generated_result_visible === true)) break;
+        if ((input.action_id.endsWith("image_upload") && (after?.media_count ?? 0) - (before?.media_count ?? 0) >= input.refs.length) ||
+          (input.action_id.endsWith("text_to_image_generate") && before?.generated_result_visible !== true && after?.generated_result_visible === true)) break;
         await abortableDelay(250);
       }
     } finally {
@@ -578,8 +578,8 @@ async function executeXhsMediaAction(
     const observed = after ?? await evaluateMediaActionObservation(client);
     const routeObserved = observed?.origin === input.expected_origin && observed.pathname === "/publish/publish" && sameWritePrecheckUrl(observed.url, input.target_url);
     const expectedMediaObserved = input.action_id.endsWith("image_upload")
-      ? (observed?.media_count ?? 0) >= input.refs.length
-      : observed?.generated_result_visible === true;
+      ? (observed?.media_count ?? 0) - (before?.media_count ?? 0) >= input.refs.length
+      : before?.generated_result_visible !== true && observed?.generated_result_visible === true;
     const effectStatus: "requested" | "observed" | "unknown" | "failed" = network.forbidden_commit
       ? "failed"
       : expectedMediaObserved ? "observed" : "unknown";
@@ -587,9 +587,9 @@ async function executeXhsMediaAction(
     const mediaReadback = input.action_id.endsWith("image_upload")
       ? {
           status: expectedMediaObserved ? "observed" as const : "unknown" as const,
-          media_count: typeof observed?.media_count === "number" ? observed.media_count : null,
-          order_status: expectedMediaObserved ? "observed" as const : "unknown" as const,
-          ordered_item_refs: expectedMediaObserved ? input.refs.map(() => opaqueRef("media_item")) : [],
+          media_count: typeof observed?.media_count === "number" ? Math.max(0, observed.media_count - (before?.media_count ?? 0)) : null,
+          order_status: "unknown" as const,
+          ordered_item_refs: [],
           generation_result_ref: null
         }
       : {
