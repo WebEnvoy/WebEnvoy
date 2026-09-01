@@ -418,6 +418,19 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert(!("category" in persistedReadPreview));
   assert.equal(persistedReadPreview.candidates[0]?.status, "compatible");
 
+  const persistedAuthenticationRecovery = identityFacts("identity-persisted-auth-recovery", {
+    login_state: {
+      state: "logged_in",
+      authentication_provenance: "user_confirmed_managed_session",
+      manual_authentication_state: "completed",
+      recovery_required: true
+    },
+    environment_recovery_reasons: []
+  });
+  const persistedAuthenticationRecoveryFailure = matchLockedOperationIdentity(operation, persistedAuthenticationRecovery, "identity-persisted-auth-recovery");
+  assert.equal(persistedAuthenticationRecoveryFailure?.code, "identity_auth_required");
+  assert.equal(persistedAuthenticationRecoveryFailure?.recovery_hint, "open_manual_auth");
+
   const projectedBrowserRepair = projectHarborPublicIdentityEnvironmentRecord({
     schema_version: "harbor-local-identity-environment-store/v0",
     identity_environment_ref: "identity-browser-repair",

@@ -444,8 +444,11 @@ export function validateHarborIdentityEnvironmentFacts(
   if (!contractString(provider?.selected_provider_id) || provider?.binding_status === "no_launchable_provider") {
     return failure("resource_admission", "browser_provider_unavailable", "runtime_binding", "install_or_select_provider");
   }
-  if (recoveryReasons.length > 0 || login?.recovery_required === true) {
+  if (recoveryReasons.length > 0) {
     return failure("resource_admission", "browser_environment_repair_required", "runtime_binding", "repair_browser_environment");
+  }
+  if (login?.recovery_required === true) {
+    return failure("resource_admission", "identity_auth_required", "runtime_binding", "open_manual_auth");
   }
   const manuallyAuthenticated = login?.manual_authentication_state === "completed" || login?.manual_authentication_state === "not_required";
   const authenticatedForMode = mode === "read"
