@@ -121,7 +121,7 @@ function projectSupportedField(
     kind,
     required,
     description: optionalString(value.description) ?? "由技能合同定义。",
-    inputProjection: fieldProjection(value, sensitivity, mediaContract),
+    inputProjection: fieldProjection(value, sensitivity),
     ...(options == null && array?.options == null ? {} : { options: options ?? array?.options }),
     ...(defaultValue === undefined ? {} : { defaultValue }),
     ...(minimum === undefined ? {} : { minimum }),
@@ -146,7 +146,6 @@ function projectSupportedField(
 function fieldProjection(
   schema: Record<string, unknown>,
   sensitivity: string | undefined,
-  mediaContract: boolean,
 ): LodeCatalogField["inputProjection"] {
   if (schema.type === "string" && (schema.format === "uri" || schema.format === "uri-reference")) {
     return sensitivity === "public" ? "sanitized_url" : "owner_ref";
@@ -154,7 +153,6 @@ function fieldProjection(
   if (
     sensitivity === "public" ||
     sensitivity === "public_safe_summary" ||
-    mediaContract && sensitivity === "bounded_summary" ||
     schema.type === "boolean" ||
     schema.type === "integer" ||
     schema.type === "number" ||

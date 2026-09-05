@@ -46,8 +46,10 @@ export const opaqueDetailOperationContract = {
 } as const;
 
 const xhsCreatorOperationPins = new Set([
-  "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1|xhs_publish_note_precheck",
-  "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|xhs_publish_note_path_prepare"
+  "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1|xhs_publish_note_precheck|validate_only",
+  "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|xhs_publish_note_path_prepare|validate_only",
+  "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0|xhs_publish_note_image_text_media.image_upload|write",
+  "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0|xhs_publish_note_image_text_media.text_to_image_generate|write"
 ]);
 
 function failure(code: string, phase: FailureRecord["phase"], recovery_hint: string): FailureRecord {
@@ -181,8 +183,8 @@ export function matchLockedOperationIdentityBinding(
   ) return failure("identity_auth_required", "runtime_binding", "open_manual_auth");
 
   const origin = identity.site_binding.origin;
-  const exactCreatorOperationPair = xhsCreatorOperationPins.has(`${binding.package_ref}|${binding.lock_ref}|${binding.operation_id}`) &&
-    binding.operation_mode === "validate_only" && binding.site_slug === "xiaohongshu" &&
+  const exactCreatorOperationPair = xhsCreatorOperationPins.has(`${binding.package_ref}|${binding.lock_ref}|${binding.operation_id}|${binding.operation_mode}`) &&
+    binding.site_slug === "xiaohongshu" &&
     sameOrigin(origin, "https://www.xiaohongshu.com") &&
     sameOrigin(binding.target_origin, "https://creator.xiaohongshu.com") &&
     ["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"].every((requiredOrigin) =>

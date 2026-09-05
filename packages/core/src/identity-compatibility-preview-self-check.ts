@@ -8,7 +8,11 @@ import {
   type HarborIdentityFactsReader,
   type IdentityCompatibilityPreviewRequest
 } from "./identity-compatibility-preview.js";
-import type { LodePackageAdmissionContract } from "./lode-admission.js";
+import {
+  xhsMediaLockRef,
+  xhsMediaPackageRef,
+  type LodePackageAdmissionContract
+} from "./lode-admission.js";
 import { matchLockedLodeOperation, matchLockedOperationIdentity } from "./operation-identity-matcher.js";
 
 const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
@@ -133,6 +137,58 @@ function pathPreparePackageContract(): LodePackageAdmissionContract {
         operation_boundary: "validate_only",
         required_harbor_facts: [{ fact_key: "snapshot.requested_path_control.visible", owner: "Harbor", required: true, freshness: "current_execution_window" }]
       }]
+    }
+  };
+}
+
+function mediaPackageContract(): LodePackageAdmissionContract {
+  const resourceId = "xiaohongshu.publish-note-image-text-media.resources";
+  return {
+    package_ref: xhsMediaPackageRef,
+    source_ref: xhsMediaPackageRef,
+    lock_ref: xhsMediaLockRef,
+    capability_id: "publish-note-image-text-media",
+    operation_id: "xhs_publish_note_image_text_media",
+    operation_mode: "write",
+    version: "0.1.0",
+    lifecycle: "proposed",
+    runtime_admission: { enabled: true, status: "controlled_evidence", recheck_condition: "formal_live_evidence_required" },
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [
+        {
+          action_id: "xhs_publish_note_image_text_media.image_upload",
+          category: "commit",
+          target_scope: { site_slug: "xiaohongshu", target_types: ["creator_publish_page"], supported_origins: ["https://creator.xiaohongshu.com"] },
+          resource_requirements: { path: "resource-requirements.json", id: resourceId, profile_ids: ["xhs-image-upload"] },
+          external_effects: ["upload"]
+        },
+        {
+          action_id: "xhs_publish_note_image_text_media.text_to_image_generate",
+          category: "commit",
+          target_scope: { site_slug: "xiaohongshu", target_types: ["creator_publish_page"], supported_origins: ["https://creator.xiaohongshu.com"] },
+          resource_requirements: { path: "resource-requirements.json", id: resourceId, profile_ids: ["xhs-text-to-image-generate"] },
+          external_effects: ["create"]
+        }
+      ]
+    },
+    resource_requirements: {
+      resource_requirements_id: resourceId,
+      package_ref: xhsMediaPackageRef,
+      operation_mode: "write",
+      resource_requirement_profiles: [
+        {
+          requirement_profile_id: "xhs-image-upload",
+          operation_boundary: "write",
+          required_harbor_facts: [{ fact_key: "snapshot.image_upload_control.visible", owner: "Harbor", required: true, freshness: "current_execution_window" }]
+        },
+        {
+          requirement_profile_id: "xhs-text-to-image-generate",
+          operation_boundary: "write",
+          required_harbor_facts: [{ fact_key: "snapshot.text_to_image_control.visible", owner: "Harbor", required: true, freshness: "current_execution_window" }]
+        }
+      ]
     }
   };
 }
@@ -344,6 +400,10 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   });
   assert(!("category" in creatorPrecheckMatch));
   assert.equal(matchLockedOperationIdentity(creatorPrecheckMatch, identityFacts("identity-xhs-www"), "identity-xhs-www"), undefined);
+  assert.equal(matchLockedOperationIdentity({
+    ...creatorPrecheckMatch,
+    runtime_consumption: { ...creatorPrecheckMatch.runtime_consumption, operation_mode: "write" }
+  }, identityFacts("identity-xhs-www"), "identity-xhs-www")?.code, "runtime_origin_not_allowed");
   assert.equal(matchLockedOperationIdentity(creatorPrecheckMatch, identityFacts("identity-other-origin", {
     site_binding: { site_id: "xiaohongshu", origin: "https://example.com" }
   }), "identity-other-origin")?.code, "runtime_origin_not_allowed");
@@ -366,6 +426,45 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(pathPreparePreview.candidates[0]?.status, "unknown_until_runtime");
   assert.deepEqual(pathPreparePreview.candidates[0]?.reason_codes, ["runtime_facts_require_task_admission"]);
   assert.equal(pathPreparePreview.target_ref, "https://creator.xiaohongshu.com/");
+
+  for (const [actionId, profileId] of [
+    ["xhs_publish_note_image_text_media.image_upload", "xhs-image-upload"],
+    ["xhs_publish_note_image_text_media.text_to_image_generate", "xhs-text-to-image-generate"]
+  ] as const) {
+    const mediaPreview = await previewIdentityCompatibility(request(["identity-compatible"], {
+      package_ref: xhsMediaPackageRef,
+      lock_ref: xhsMediaLockRef,
+      operation_id: actionId,
+      operation_mode: "write",
+      target_ref: "https://creator.xiaohongshu.com/",
+      target_origin: "https://creator.xiaohongshu.com",
+      resource_requirement_ref: "xiaohongshu.publish-note-image-text-media.resources",
+      resource_requirement_profile_id: profileId
+    }), {
+      ...baseDependencies,
+      lodePackageResolver: async () => mediaPackageContract()
+    });
+    assert(!("category" in mediaPreview));
+    assert.equal(mediaPreview.operation_id, actionId);
+    assert.equal(mediaPreview.candidates[0]?.status, "unknown_until_runtime");
+    assert.deepEqual(mediaPreview.candidates[0]?.reason_codes, ["runtime_facts_require_task_admission"]);
+  }
+
+  const mismatchedMediaProfile = await previewIdentityCompatibility(request(["identity-compatible"], {
+    package_ref: xhsMediaPackageRef,
+    lock_ref: xhsMediaLockRef,
+    operation_id: "xhs_publish_note_image_text_media.image_upload",
+    operation_mode: "write",
+    target_ref: "https://creator.xiaohongshu.com/",
+    target_origin: "https://creator.xiaohongshu.com",
+    resource_requirement_ref: "xiaohongshu.publish-note-image-text-media.resources",
+    resource_requirement_profile_id: "xhs-text-to-image-generate"
+  }), {
+    ...baseDependencies,
+    lodePackageResolver: async () => mediaPackageContract()
+  });
+  assert(!("category" in mismatchedMediaProfile));
+  assert.equal(mismatchedMediaProfile.candidates[0]?.status, "incompatible");
 
   const neighboringContract = { ...pathPreparePackageContract(), package_ref: `${pathPreparePackageRef}-candidate`, source_ref: `${pathPreparePackageRef}-candidate` };
   const neighboringPreview = await previewIdentityCompatibility({
