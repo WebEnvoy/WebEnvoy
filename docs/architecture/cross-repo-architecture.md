@@ -1,24 +1,24 @@
 # WebEnvoy 跨仓架构
 
-> 2026-09-06：仓库拓扑已收敛为 `WebEnvoy/WebEnvoy` monorepo 中的 Core、Desktop、Harbor 加独立 Lode。产品方向和模块职责以 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 与 [ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 为准；本文其余内容仅保留接口边界参考，不得作为独立 App／Harbor 执行入口或合同先行依据。
+> 2026-09-06：产品方向和模块职责以 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 与 [ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 为准。本文只保留现行模块间接口边界，不构成独立 App／Harbor 仓库或合同先行依据。
 
-本文档定义 WebEnvoy 四个产品仓库的协作边界。它不是 ADR，也不是字段级 spec。
+本文档定义 `WebEnvoy/WebEnvoy` monorepo 中 Core、Desktop、Harbor 与独立 `WebEnvoy/Lode` 的协作边界。它不是 ADR，也不是字段级 spec。
 
 ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、状态机和校验规则。本文只回答：
 
-- 四个仓库分别拥有什么；
+- 各模块分别拥有什么；
 - 数据和控制如何跨仓流动；
 - 哪些边界不能跨；
 - 后续逐仓架构不应突破哪些边界。
 
 ## 仓库角色
 
-| 仓库 | 架构角色 | 真相源 | 不拥有 |
+| 位置 | 架构角色 | 真相源 | 不拥有 |
 |---|---|---|---|
-| `WebEnvoy/WebEnvoy` | Core 与公共任务路径 | Task、Run、Result Envelope、Run Record、Lode pin、capability admission、结果归一化、failure attribution、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、Lode package body、App UI 状态 |
-| `WebEnvoy/Harbor` | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | Lode pin、capability admission、normalized business output、task outcome、Core Run Record |
+| `WebEnvoy/WebEnvoy` Core | 公共任务路径 | Task、Run、Result Envelope、Run Record、Lode pin、capability admission、结果归一化、failure attribution、公共 API 入口 | 浏览器 Profile、Runtime Session 内部细节、站点知识、Lode package body、Desktop UI 状态 |
+| `WebEnvoy/WebEnvoy` Harbor | 浏览器身份和运行现场 | Profile、Execution Identity、Runtime Session、Provider facts、Snapshot、RefMap、Evidence refs、Viewer / handoff facts | Lode pin、capability admission、normalized business output、task outcome、Core Run Record |
 | `WebEnvoy/Lode` | 能力资产和站点知识 | Capability package、Workflow package、input/output schema、source schema、fixtures、post-check、asset registry | 浏览器会话、真实账号状态、Core admission、Run Record、App UI 状态 |
-| `WebEnvoy/App` | 人类用户入口 | Work / Library / Browser surfaces、用户意图、审批入口、handoff UI、run/evidence/catalog 展示状态 | Core run 状态机、Harbor runtime 状态机、Lode 资产真相、证据原始存储 |
+| `WebEnvoy/WebEnvoy` Desktop | 人类用户入口 | Activity、用户意图、确认与接管入口、run/evidence/catalog 展示状态 | Core run 状态机、Harbor runtime 状态机、Lode 资产真相、证据原始存储 |
 
 ## 核心原则
 
