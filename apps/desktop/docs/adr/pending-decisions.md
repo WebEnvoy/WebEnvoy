@@ -1,5 +1,7 @@
 # Pending Decisions
 
+> 2026-09-06：[Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 已替代首批完整工作台、Task Thread 和 Library-first 的实施前置。只有当前或下一批真实用户路径受阻时，下列历史问题才重新进入执行。
+
 ## 2026-07-14 人类工作台纠偏
 
 [ADR 0009](0009-human-workbench-information-architecture.md) 已接受以下产品判断：

@@ -1,82 +1,35 @@
-# 仓库指南
+# WebEnvoy monorepo 执行指南
 
-## 项目结构与模块组织
+本仓库是 `WebEnvoy/WebEnvoy` 产品 monorepo：`packages/*` 承载 Core，`apps/desktop` 承载 Desktop App，`services/harbor` 承载 Harbor Runtime；Lode 仍是独立资产仓。
 
-本仓库是 `WebEnvoy/WebEnvoy`，也称 WebEnvoy Core，负责 WebEnvoy API Server、Core Runtime、任务执行、结果归一和调用入口。统一产品入口和 App Shell 位于 `WebEnvoy/App`。
+产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。
 
-后续代码建议按以下方向组织：
+## 实施原则
 
-```text
-packages/
-  api-server/
-  core/
-  schemas/
-  cli/
-  mcp-server/
-  sdk-*/
-examples/
-docs/
-```
+- 用户或 Agent 的真实路径是交付单元；对象、Schema 和合同只细化到当前消费者需要的程度。
+- 先验证会推翻设计的页面或 Provider 假设。Camoufox 是首个默认 Provider 验证目标，不是已确认结论；Chrome 是显式兼容 Provider；不得引入 ego-lite／ego-browser 或 Wayfern。
+- Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
+- 每条业务规则只有一个 owner。预检和正式执行复用同一判定，不在 App、站点代码或 Lode 复制授权白名单。
+- 防御作用域不大于风险作用域。身份、授权、控制权和重复写入必须保护；可选 evidence、viewer 或未安装网站 SKILL 不得全局阻断通用浏览器与环境管理。
+- unknown 写入禁止重放，但允许安全查询、对账、人工接管和停止后续执行。
+- 复用现有存储、锁、授权、Run、结果和诊断；不为未来形态预建 DSL、服务、队列、Schema 或兼容层。
 
-## 构建、测试与开发命令
+## 构建与验证
 
-当前尚未初始化 `package.json`。新增工程脚手架后，优先统一为：`pnpm install` 安装依赖，`pnpm build` 构建，`pnpm test` 运行测试，`pnpm lint` 检查风格，`pnpm typecheck` 做 TypeScript 类型检查。新增命令必须写入 `package.json` 并同步 README 或 `docs/`。
+- 环境：Node.js `>=24 <25`、pnpm `>=10 <11`，锁定 pnpm `10.30.3`。
+- 安装：`pnpm install --frozen-lockfile`。
+- 常用检查：`pnpm build`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm conformance`、`pnpm smoke`。
+- Python 编译检查使用 `make py-compile` 或仓库脚本，不直接在 checkout 生成 `__pycache__`。
+- 非平凡逻辑至少留下一个最小可运行检查；错误修复优先证明修复前失败、修复后通过。
+- docs-only 变更至少运行 `git diff --check` 和相关 Markdown/JSON/YAML 可读性检查，不冒充产品 live 验收。
 
-## 代码风格与命名规范
+## 数据与安全
 
-默认主语言为 TypeScript / Node.js。API、Core、CLI、MCP、SDK 和 App-facing API 应复用共享 Schema，不要各自定义不兼容类型。
+不得提交 Cookie、Token、凭据、Profile 数据、raw DOM/HAR、未脱敏截图/视频、生产 payload 或用户私有业务内容。SKILL、脚本、CDP 和协议工具均不授予权限或绕过 ControlLease。
 
-目录和包名使用小写短横线，例如 `api-server`、`runtime-contract`。TypeScript 类型和类使用 `PascalCase`，函数和变量使用 `camelCase`。Schema 优先使用 JSON Schema，必要时配合 Zod。
+## GitHub-native 交付
 
-## 测试指南
-
-测试应覆盖 typecheck、lint、unit tests、schema validation 和 API contract tests。测试文件建议使用 `*.test.ts` 或 `*.spec.ts`。涉及 Harbor 或 Lode 的变更，至少补充契约测试或示例验证，避免只靠手工说明。
-
-## 提交与 Pull Request 规范
-
-提交信息使用 Conventional Commits，例如 `chore: initialize repository documentation`、`docs: refine runtime contract`。PR 需要说明变更范围、影响的仓库边界、验证命令和结果；涉及 App-facing API、API 或 Schema 时链接对应文档。
-
-## 架构与 Agent 专项说明
-
-API Server 是一等入口。SDK、CLI、MCP 和 WebEnvoy App 应通过 API Server 调用 Core，不得绕开 Core 建立独立执行入口。
-
-Core 不直接管理 Harbor 的浏览器身份、Runtime Session、Viewer 或 provider driver；这些属于 Harbor。站点知识、能力包、任务封装和模板资产属于 Lode。不要把 WebEnvoy Core 扩展成通用 Browser Agent、账号矩阵系统或业务决策系统。
-
-## Core 技术架构基线
-
-- 本仓默认技术栈是 TypeScript / Node.js / pnpm；首个代码骨架 PR 才创建 package、workspace、lockfile、CI 命令或测试 runner。
-- JSON Schema 是跨仓合同主载体；Zod 只能做 TypeScript 实现 helper，Ajv 只能做 JSON Schema runtime validation，二者不得成为第二 truth。
-- API Server 负责入口归一化、鉴权、脱敏和 private field rejection；Core Runtime 负责 admission、resource matching、action risk、run lifecycle 和 failure taxonomy；Run Record 是 durable truth，只保存 refs、summaries、states 和 failure/result envelope。
-- Core 不保存 Harbor Profile、Runtime Session 内部状态、CDP/VNC endpoint、Cookie、Token、raw evidence、完整 DOM/HAR/截图/视频；不复制 Lode package body、fixtures、normalizer/validator code；不保存 App UI state、用户草稿或本地显示缓存。
-- 新 runtime dependency 必须在 PR 或 ADR 中说明用途、替代方案、许可证、调用边界、测试方式和移除条件；没有明确收益不得新增框架、ORM、多后端抽象或生成链。
-- 后续 API/Schema/Runtime/Run Record/CLI/MCP/SDK/App-facing API 实现必须先引用 `docs/adr/0008-core-technical-architecture-baseline.md` 和 `docs/contracts/README.md`，不得从 issue 讨论、`docs/draft/` 或 research 草稿直接推断字段。
-- 入口实现必须补最小 conformance fixture 或测试：read-only submit、invalid input、admission failure、result/query；docs-only N/A 只适用于没有代码、schema、fixture、runner 或 runtime 行为变化的 PR。
-- 变更范围保持单一 Work Item；产品、规划、代码骨架、依赖、schema、OpenAPI、runtime、数据库和跨仓合同修改不得混入 docs-only 基线 PR。
-
-## 路线图 / 里程碑 / 功能需求 / 工作项
-
-- 跨仓长期方向以 `WebEnvoy/.github/ROADMAP.md` 为准。
-- 当前执行状态以 GitHub Milestones、Project、issues 和 PR 为准，不在仓库文档中复制维护。
-- GitHub Milestone 只承载当前 1-3 个可交付阶段，不承载全部远期设想。
-- 功能需求（FR）issue 表达用户可见或系统可验证的能力增量。
-- 工作项（Work Item）issue 是可由一个 PR 完成的最小执行单元。
-- 新建功能需求或工作项前，先确认它属于当前活跃 Milestone；不属于则回到总 ROADMAP 或 backlog。
-- 创建或调整 Milestone、功能需求或工作项前，先检查本仓 `docs/adr/pending-decisions.md`；会阻塞当前事项的决策必须链接到 issue，并标明阻塞级别：`Milestone blocker`、`FR blocker`、`Work Item blocker`、`Spec detail` 或 `Deferred`。
-- 被决策阻塞的 issue 使用 `status: needs-decision`；决策完成后必须回写对应 ADR 或 `docs/adr/pending-decisions.md`，再继续拆分或实施。
-- 仓库级 `ROADMAP.md` 是组织级 ROADMAP 的本仓投影，只能说明本仓如何服务总路线，不能新增跨仓阶段、重定义目标状态或覆盖组织级边界。
-- 除仓库级 `ROADMAP.md` 外，单仓 planning 文档只能解释本仓如何服务当前活跃 Milestone，不能新增跨仓 Milestone。
-- 不允许在单仓创建与总 ROADMAP 冲突的平行路线图。
-- 规格文档只服务当前或下一个活跃 Milestone，不提前铺满远期设计。
-- 涉及跨仓方向、阶段阶梯或边界调整时，先更新或评审总 ROADMAP / 跨仓架构，再拆单仓事项。
-
-## 许可证边界说明
-
-本仓库属于 AGPL 核心仓库，承载 Core、API Server、CLI、MCP Server、SDK 和正式执行逻辑。统一产品入口属于 `WebEnvoy/App`。公共 SDK、Client、跨语言 Schema、OpenAPI、JSON Schema、协议定义和生成类型如果面向外部集成，应优先评估是否放入未来的 `contracts`、`sdk-js` 或 `sdk-python` 等 MIT / Apache-2.0 仓库，不应默认进入 AGPL 核心代码路径。相关策略见组织级 `.github/docs/licensing.md`。
-
-## GitHub-native 交付规则
-
-- 每个变更绑定真实 Work Item issue，并使用 issue-linked branch 与 PR。
-- PR 只修改当前 Work Item 范围，记录受影响验证；docs-only 可说明不适用。
-- 合并前由未参与实现的审查者针对 PR exact head 独立 review，required checks 必须通过。
-- 合并后回读 main 与 Issue，确认变更、验证、review、required checks 和状态一致。
-- GitHub issue/PR、review、checks 与 main 提交是唯一交付事实；不得创建 carrier、CLI 流程或第二状态机。
+- 当前状态只以 GitHub Issue、原生 parent/sub-issue/dependency、Milestone、Project、PR、checks、review 和 `main` 回读为准；不创建 carrier 或第二状态机。
+- 普通工作可直接使用 Work Item；只细化当前和下一批，只有真实阻塞才建 dependency。
+- PR 绑定真实 Work Item，保持单一可验收范围；合并前完成 exact-head 独立 review 和 required checks。
+- `completed` 需要原验收证据；`not_planned` 对应 Won’t Do；延期保持 open、退出活跃 Milestone并进入 Backlog。PR 合并不自动关闭业务 Issue。

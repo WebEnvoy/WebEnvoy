@@ -1,5 +1,7 @@
 # Harbor
 
+> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Camoufox 是首个默认 Provider 验证目标，Chrome 是显式兼容 Provider。
+
 Harbor 让 Agent 可以长期、稳定、可接管地使用真实浏览器账号。
 
 很多 Agent 浏览器自动化的问题，不是“能不能打开 Chrome”，而是账号和环境不连续：这次登录了，下次又丢了；这次用一个代理，下次换了环境；验证码出现时没人接管；任务失败后只剩一堆截图和日志。对真实网站来说，这种临时、割裂的浏览器会话很容易变得不稳定。

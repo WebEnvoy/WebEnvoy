@@ -1,8 +1,10 @@
 # 0009. 本机 Browser Provider 生命周期管理
 
+> 2026-09-06：Provider 生命周期的所有权与数据保护边界保留；首选 Provider、横向扩张和自动修复优先级已被 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 替代。
+
 ## 状态
 
-Accepted for Harbor #278/#279, 2026-07-14.
+Superseded in part by Core ADR 0011, 2026-09-06. Harbor #278/#279 的历史结论保留。
 
 本 ADR 扩展 ADR 0006 的 provider facts，并 supersede ADR 0008 对 managed browser
 binary/dependency install 的拒绝。检测和下载引导不足以构成用户可恢复的 provider
@@ -29,8 +31,9 @@ Provider 负责实际浏览器内核、指纹、隔离和自动化能力；Harbo
 | `system` | 检测、定位、版本/架构校验、启动验证、官方安装入口 |
 | `external` | 用户绑定安装或连接信息，Harbor 验证可达性和能力 facts |
 
-CloakBrowser 作为首个 `managed` provider。官方 Chrome 作为 `system` provider。
-Remote CDP 等按 `external` provider 管理。
+本段原定 CloakBrowser 为首个 `managed` provider，现不再有效。V1 以 Camoufox
+作为默认 Provider 的有界验证目标，Chrome 作为显式兼容 Provider；验证结果不预定为
+成功。Remote CDP 等未来形态继续按 `external` provider 分类，但不属于当前批次。
 
 ### 生命周期
 

@@ -1,5 +1,7 @@
 # WebEnvoy App
 
+> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；首批以 Activity、同实例现场、必要确认和人工接管为主。
+
 WebEnvoy App 是 WebEnvoy 的统一人类用户入口。
 
 它面向市场、运营、产品经理等非技术用户，承载确定性网页任务的自动执行入口、WebEnvoy 全局运行事实观测、站点技能管理、账号身份管理、浏览器执行现场和异常处理入口。
@@ -24,25 +26,18 @@ WebEnvoy App 是产品外壳，不是执行真相源，也不是能力资产真�
 
 ## 核心心智
 
-当前 Desktop checkpoint 采用 Task Thread first：
-
-```text
-Task = 站点技能 + 账号身份 + 业务输入
-Run = 同一 Task 下的一次执行记录
-```
-
-这个定义约束 App 的自动任务入口。Agent、API、CLI、MCP、SDK、skills 或其他上层应用不受 App 自动执行入口限制；它们产生的运行事实仍应在 App 中可观测。
+V1 先把已有 Run／回执投影为 Activity，并围绕同一 Profile 实例提供目标与内容摘要、差异、必要确认和人工接管。Task Thread 是历史设计 checkpoint，不再作为当前首批实现的固定信息架构。
 
 ## 主要产品面
 
-### Task Thread
+### Activity 与运行现场
 
-Task Thread 是首个桌面闭环的主体验：
+首批只要求一条真实任务路径可观察、可确认、可接管：
 
-- 左侧任务列表默认按 `账号身份 -> 站点技能 -> Task` 组织；
-- 中间栏展示当前 Task、Run navigation rail、任务结束报告和执行过程；
-- 底部固定控制区提供修改输入、再次执行、查看结果依据、打开执行现场等操作；
-- 右侧上下文面板展示结果依据、执行现场、账号身份、站点技能和诊断。
+- Activity 投影既有 Run／回执，不另建一套运行状态机；
+- 同实例展示目标、内容摘要、差异和必要确认；
+- 未知结果进入复查、接管或停止后续执行，禁止未知写入重放；
+- Browser 与账号身份入口保留为通用受管浏览器入口，不以是否安装网站 SKILL 决定可用性。
 
 ### Library
 
