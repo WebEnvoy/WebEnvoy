@@ -1,5 +1,7 @@
 # 0009. 人类工作台信息架构与信息分层
 
+> 2026-09-06：首批 Task Thread／完整工作台的实施解释已被 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 部分替代；长期信息架构候选和 owner 边界保留。
+
 ## 状态
 
 Accepted by App #306 as the direction for App #298 product correction, 2026-07-14.

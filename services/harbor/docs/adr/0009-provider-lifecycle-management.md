@@ -1,5 +1,7 @@
 # 0009. 本机 Browser Provider 生命周期管理
 
+> 2026-09-06：Provider 生命周期边界保留；横向 Provider 扩张和自动修复优先级已被 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 部分替代。
+
 ## 状态
 
 Accepted for Harbor #278/#279, 2026-07-14.

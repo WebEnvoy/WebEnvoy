@@ -1,6 +1,6 @@
 # WebEnvoy
 
-`WebEnvoy/WebEnvoy` 是 WebEnvoy 模块化产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的唯一新产品开发入口。
+`WebEnvoy/WebEnvoy` 是 WebEnvoy 模块化产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的 canonical 产品开发入口。产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。
 
 Core 模块负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因；Desktop App 提供人类用户入口；Harbor 提供浏览器身份和运行现场；Lode 继续作为独立 MIT 能力资产仓维护站点知识、能力包和任务模板。
 

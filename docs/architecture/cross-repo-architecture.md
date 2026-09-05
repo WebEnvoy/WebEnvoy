@@ -1,5 +1,7 @@
 # WebEnvoy 跨仓架构
 
+> 2026-09-06：仓库拓扑已收敛为 `WebEnvoy/WebEnvoy` monorepo 中的 Core、Desktop、Harbor 加独立 Lode。产品方向和模块职责以 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 与 [ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 为准；本文其余内容仅保留接口边界参考，不得作为独立 App／Harbor 执行入口或合同先行依据。
+
 本文档定义 WebEnvoy 四个产品仓库的协作边界。它不是 ADR，也不是字段级 spec。
 
 ADR 记录为什么选择某个方向；spec 定义具体 JSON Schema、API、状态机和校验规则。本文只回答：

@@ -1,5 +1,7 @@
 # WebEnvoy App
 
+> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；首批以 Activity、同实例现场、必要确认和人工接管为主。
+
 WebEnvoy App 是 WebEnvoy 的统一人类用户入口。
 
 它面向市场、运营、产品经理等非技术用户，承载确定性网页任务的自动执行入口、WebEnvoy 全局运行事实观测、站点技能管理、账号身份管理、浏览器执行现场和异常处理入口。
