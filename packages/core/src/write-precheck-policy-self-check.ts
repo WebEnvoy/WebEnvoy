@@ -257,19 +257,30 @@ function mediaOutput(input: {
   producer?: "core" | "harbor" | "fixture";
   operation_status?: "accepted" | "running" | "terminal" | "unknown_outcome";
   result_status?: "available" | "unavailable";
-  unavailable_reason?: "operation_result_unknown" | "reconciliation_unknown";
+  unavailable_reason?: "media_ref_unavailable" | "operation_result_unknown" | "reconciliation_unknown";
+  operation_evidence?: "matching" | "missing" | "mismatch";
 }): Record<string, unknown> {
   const producer = input.producer ?? "harbor";
   const operationStatus = input.operation_status ?? "terminal";
   const resultStatus = input.result_status ?? "available";
+  const unavailable = resultStatus === "unavailable";
+  const unknown = operationStatus === "unknown_outcome";
   const operationRef = `operation_media_${input.suffix}`;
   const postCheckRef = `postcheck_media_${input.suffix}`;
   const reconciliationRef = `reconcile_media_${input.suffix}`;
   const mediaRefId = `media_readback_${input.suffix}`;
   const pageRef = `page_readback_${input.suffix}`;
-  const recovery = operationStatus === "unknown_outcome"
+  const recovery = unknown
     ? { status: "required", entrypoint: "manual_reconciliation" }
+    : unavailable
+      ? { status: "required", entrypoint: "inspect_operation_ref" }
     : { status: "not_required", entrypoint: "none" };
+  const operationEvidence = input.operation_evidence === "missing" ? [] : [{
+    ref_id: input.operation_evidence === "mismatch" ? `${operationRef}_mismatch` : operationRef,
+    evidence_kind: "operation_ref",
+    producer,
+    redaction: "placeholder_only"
+  }];
   return {
     result_kind: "xhs_publish_note_image_text_media",
     status: resultStatus,
@@ -281,41 +292,41 @@ function mediaOutput(input: {
       canonical_url: input.canonical_url,
       target_ref: input.target_ref,
       summary: "Harbor returned bounded media action evidence.",
-      source_status: "located",
+      source_status: unavailable ? "unknown" : "located",
       business_effect: {
         kind: input.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate",
-        status: operationStatus === "terminal" ? "observed" : "unknown"
+        status: unavailable ? unknown ? "unknown" : "failed" : operationStatus === "terminal" ? "observed" : "unknown"
       },
       operation: {
         status: operationStatus,
         operation_ref: operationRef,
-        ...(operationStatus === "terminal" ? { terminal_state: "success" } : {})
+        ...(operationStatus === "terminal" ? { terminal_state: unavailable ? "failure" : "success" } : {})
       },
       media_readback: {
-        status: operationStatus === "terminal" ? "observed" : "unknown",
-        media_count: operationStatus === "terminal" ? 1 : null,
-        order_status: operationStatus === "terminal" ? "observed" : "unknown",
+        status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
+        media_count: !unavailable && operationStatus === "terminal" ? 1 : null,
+        order_status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
         generation_result_ref: null,
-        ordered_item_refs: operationStatus === "terminal" ? [mediaRefId] : []
+        ordered_item_refs: !unavailable && operationStatus === "terminal" ? [mediaRefId] : []
       },
       page_readback: {
-        status: operationStatus === "terminal" ? "observed" : "unknown",
+        status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
         page_state_ref: pageRef,
-        route_state: operationStatus === "terminal" ? "observed" : "unknown"
+        route_state: !unavailable && operationStatus === "terminal" ? "observed" : "unknown"
       },
-      post_check: { status: operationStatus === "terminal" ? "passed" : "skipped", ref: postCheckRef },
-      reconciliation: { status: operationStatus === "terminal" ? "matched" : "unknown", ref: reconciliationRef },
+      post_check: { status: !unavailable && operationStatus === "terminal" ? "passed" : "skipped", ref: postCheckRef },
+      reconciliation: { status: !unavailable && operationStatus === "terminal" ? "matched" : "unknown", ref: reconciliationRef },
       recovery,
       save_draft: "not_in_scope",
       publish: "not_in_scope",
       submitted: false
     },
-    source_refs: [
+    source_refs: unavailable ? [] : [
       { ref_id: `source_media_${input.suffix}`, source_kind: "media_action_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" },
       { ref_id: pageRef, source_kind: "creator_publish_page_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" }
     ],
-    evidence_refs: [
-      { ref_id: operationRef, evidence_kind: "operation_ref", producer, redaction: "placeholder_only" },
+    evidence_refs: unavailable ? operationEvidence : [
+      ...operationEvidence,
       { ref_id: postCheckRef, evidence_kind: "post_check_ref", producer, redaction: "placeholder_only" },
       { ref_id: reconciliationRef, evidence_kind: "reconciliation_ref", producer, redaction: "placeholder_only" }
     ]
@@ -1452,7 +1463,12 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
     { name: "fixture", producer: "fixture" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "available" as const },
     { name: "accepted", producer: "harbor" as const, operation_status: "accepted" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
     { name: "running", producer: "harbor" as const, operation_status: "running" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
-    { name: "unavailable-unknown", producer: "harbor" as const, operation_status: "unknown_outcome" as const, expectedStatus: "unknown_outcome" as const, result_status: "unavailable" as const }
+    { name: "unavailable-unknown", producer: "harbor" as const, operation_status: "unknown_outcome" as const, expectedStatus: "unknown_outcome" as const, result_status: "unavailable" as const, unavailable_reason: "operation_result_unknown" as const },
+    { name: "unavailable-unknown-cleanup", producer: "harbor" as const, operation_status: "unknown_outcome" as const, expectedStatus: "unknown_outcome" as const, result_status: "unavailable" as const, unavailable_reason: "operation_result_unknown" as const, cleanupFailure: true },
+    { name: "unavailable-media-ref", producer: "harbor" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "unavailable" as const, unavailable_reason: "media_ref_unavailable" as const },
+    { name: "unavailable-media-ref-cleanup", producer: "harbor" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "unavailable" as const, unavailable_reason: "media_ref_unavailable" as const, cleanupFailure: true },
+    { name: "unavailable-operation-evidence-missing", producer: "harbor" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "unavailable" as const, unavailable_reason: "media_ref_unavailable" as const, operation_evidence: "missing" as const },
+    { name: "unavailable-operation-evidence-mismatch", producer: "harbor" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "unavailable" as const, unavailable_reason: "media_ref_unavailable" as const, operation_evidence: "mismatch" as const }
   ]) {
     const directory = await mkdtemp(join(tmpdir(), `webenvoy-xhs-media-${testCase.name}-`));
     try {
@@ -1507,12 +1523,18 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
             suffix: testCase.name,
             producer: testCase.producer,
             operation_status: testCase.operation_status,
-            ...(testCase.result_status === undefined ? {} : { result_status: testCase.result_status, unavailable_reason: "operation_result_unknown" as const })
+            ...(testCase.operation_evidence === undefined ? {} : { operation_evidence: testCase.operation_evidence }),
+            ...(testCase.result_status === undefined ? {} : { result_status: testCase.result_status, unavailable_reason: testCase.unavailable_reason })
           });
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
         validateOnlyWritePrecheck: async () => { throw new Error("unexpected write-precheck dispatch"); },
-        releaseCoreTaskSession: async () => { releaseCalls += 1; return undefined; }
+        releaseCoreTaskSession: async () => {
+          releaseCalls += 1;
+          return testCase.cleanupFailure
+            ? { category: "runtime_execution", code: "core_task_session_cleanup_unverified", phase: "runtime_binding", recovery_hint: "inspect_runtime_session" }
+            : undefined;
+        }
       } as HarborRuntimeClient;
       const continued = await continueXhsMediaActionTask(runStore, {
         run_id: runId,
@@ -1539,12 +1561,25 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
       }
       if (!continued.ok && testCase.expectedStatus === "unknown_outcome") {
         assert.equal(continued.failure.code, "harbor_xhs_media_operation_unknown", testCase.name);
-        assert.equal(continued.run_record?.post_check?.recovery_hint, "reconcile_status", testCase.name);
+        assert.equal(continued.run_record?.post_check?.recovery_hint, testCase.cleanupFailure ? "inspect_runtime_session" : "reconcile_status", testCase.name);
+        assert(continued.run_record?.evidence_refs?.includes(`operation_media_${testCase.name}`), testCase.name);
         assert.equal(continued.run_record?.public_result_summary?.submitted, false, testCase.name);
         const normalized = continued.run_record?.public_result_summary?.normalized as Record<string, unknown> | undefined;
         const operation = normalized?.operation as Record<string, unknown> | undefined;
         assert.equal(operation?.status, testCase.operation_status, testCase.name);
         assert.equal(operation?.operation_ref, `operation_media_${testCase.name}`, testCase.name);
+      }
+      if (!continued.ok && testCase.name.startsWith("unavailable-media-ref")) {
+        assert.equal(continued.failure.code, "harbor_media_action_media_ref_unavailable", testCase.name);
+        assert.deepEqual(continued.run_record?.evidence_refs, [`operation_media_${testCase.name}`], testCase.name);
+        assert.equal(continued.run_record?.public_result_summary?.submitted, false, testCase.name);
+        if (testCase.cleanupFailure) {
+          assert(continued.run_record?.post_check?.source_refs?.includes(runtimeSessionRef), testCase.name);
+          assert.equal(continued.run_record?.post_check?.code, "core_task_session_cleanup_unverified", testCase.name);
+        }
+      }
+      if (!continued.ok && testCase.name.startsWith("unavailable-operation-evidence-")) {
+        assert.equal(continued.failure.code, "harbor_xhs_media_output_refs_invalid", testCase.name);
       }
     } finally {
       await rm(directory, { recursive: true, force: true });

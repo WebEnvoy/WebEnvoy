@@ -64,6 +64,7 @@ test("preserves unknown upload outcome and never retries", () => {
   assert.equal(resolverFailure.normalized.operation.terminal_state, "failure");
   assert.equal(resolverFailure.normalized.recovery.entrypoint, "inspect_operation_ref");
   assert.equal(resolverFailure.normalized.submitted, false);
+  assert.equal(unavailableXhsMediaAction("session_1", upload, "resource_unavailable").unavailable_reason, "resource_unavailable");
 });
 
 test("does not promote a terminal effect without page/media readback", () => {

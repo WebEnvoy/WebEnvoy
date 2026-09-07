@@ -525,7 +525,7 @@ async function executeXhsMediaAction(
       try {
         resolvedFiles.push(await resolveLocalMediaRef(ref));
       } catch {
-        return failure("media_ref_unavailable", "An authorized local image reference could not be resolved.", false, page);
+        return failure("resource_unavailable", "An authorized local image reference could not be resolved.", false, page);
       }
     }
   }
