@@ -843,6 +843,8 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
         .filter((el) => visible(el) && /标题/.test(el.getAttribute('placeholder') || ''));
       const bodies = unique(roots.flatMap((root) => [...root.querySelectorAll('[contenteditable="true"]')]))
         .filter((el) => visible(el) && (el.textContent || '').includes(${markerLiteral}));
+      const imageInputs = unique(roots.flatMap((root) => [...root.querySelectorAll('input[type="file"][accept*="image"]')]))
+        .filter((el) => !el.matches(':disabled'));
       const title = titles.length === 1 ? titles[0] : undefined;
       const body = bodies.length === 1 ? bodies[0] : undefined;
       const bodyText = body?.textContent || '';
@@ -850,7 +852,10 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
       let scope = body;
       while (scope && title && !scope.contains(title)) scope = scope.parentElement;
       const compositionBound = Boolean(scope && !roots.includes(scope));
-      const media = compositionBound ? unique([...scope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
+      let mediaScope = imageInputs.length === 1 ? imageInputs[0].parentElement : undefined;
+      while (mediaScope && mediaScope !== scope && mediaScope.querySelectorAll('img.preview, img.preivew-image').length === 0) mediaScope = mediaScope.parentElement;
+      const mediaBound = Boolean(compositionBound && mediaScope && mediaScope !== scope && scope.contains(mediaScope));
+      const media = mediaBound ? unique([...mediaScope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
         const r = el.getBoundingClientRect();
         return visible(el) && r.width >= 80 && r.height >= 80;
       }).length : 0;
@@ -869,6 +874,10 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
         media_count: media
       };
     })()`;
+}
+
+export function xhsContentRef(marker: string, title: string): string {
+  return `xhs_content_${createHash("sha256").update(`${marker}\0${title}`).digest("hex").slice(0, 32)}`;
 }
 
 async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<CommitProbe | undefined> {
@@ -1061,6 +1070,10 @@ async function executeCleanupControl(
   before: CommitProbe
 ): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; content_readback: unknown }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
   const managerUrl = "https://creator.xiaohongshu.com/new/note-manager?source=official";
+  const contentRef = xhsContentRef(input.marker!, before.title_value);
+  if (input.refs[0] !== contentRef) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The cleanup provenance ref does not match the marker-bound page content.", retryable: false, submitted: false };
+  }
   if (!await openNoteManager(client)) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact note manager navigation is unavailable before cleanup.", retryable: false, submitted: false };
   }
@@ -1139,7 +1152,7 @@ async function executeCleanupControl(
       fields_state: "matched",
       media_state: "matched",
       marker_state: "matched",
-      content_ref: input.refs[0] ?? null,
+      content_ref: contentRef,
       canonical_url: observed ? managerUrl : null
     },
     page_readback: {
@@ -1225,7 +1238,7 @@ async function executeCommitControl(
   }
   const publishedDetailMatched = publishObserved && listMatched && publishedDetail?.marker_matched === true && publishedDetail.fields_matched && publishedDetail.media_count === before.media_count;
   const observed = detailMatched || publishedDetailMatched;
-  const contentRef = observed ? opaqueRef("xhs_content") : null;
+  const contentRef = observed ? xhsContentRef(marker, before.title_value) : null;
   return {
     status: "completed",
     observed_at: new Date().toISOString(),

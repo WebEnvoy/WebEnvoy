@@ -2105,9 +2105,34 @@ const xhsCommonRequiredFactKeys = new Set([
   "runtime.execution_surface.available", "runtime.site_identity.managed", "snapshot.creator_publish_entrypoint.available",
   "control_owner.xiaohongshu.managed", "operation_ref.accepted_or_running", "post_check.ref_available", "safety.challenge.absent"
 ]);
+const xhsRequiredFactPhases: Readonly<Record<string, "collector_admission" | "core_admission" | "core_pre_effect" | "harbor_pre_effect" | "harbor_result">> = {
+  "runtime.execution_surface.available": "collector_admission",
+  "safety.challenge.absent": "collector_admission",
+  "runtime.site_identity.managed": "core_admission",
+  "snapshot.creator_publish_entrypoint.available": "core_admission",
+  "control_owner.xiaohongshu.managed": "core_admission",
+  "snapshot.image_upload_control.visible": "harbor_pre_effect",
+  "business_state.media_readback.available": "harbor_result",
+  "snapshot.text_to_image_control.visible": "harbor_pre_effect",
+  "snapshot.text_to_image_input.available": "harbor_pre_effect",
+  "snapshot.image_text_title_input.editable": "harbor_pre_effect",
+  "snapshot.image_text_body_editor.editable": "harbor_pre_effect",
+  "snapshot.image_text_composition.initialized": "harbor_pre_effect",
+  "snapshot.image_text_fields.readback_available": "harbor_pre_effect",
+  "snapshot.image_text_media.observed": "harbor_pre_effect",
+  "snapshot.save_draft_control.available": "harbor_pre_effect",
+  "snapshot.publish_control.available": "harbor_pre_effect",
+  "snapshot.visibility_control.observed": "harbor_pre_effect",
+  "snapshot.cleanup_control.available": "harbor_pre_effect",
+  "business_state.cleanup_marker.unique_match": "harbor_pre_effect",
+  "business_state.cleanup_target.task_created": "core_pre_effect",
+  "business_state.cleanup_content.matched": "harbor_pre_effect",
+  "operation_ref.accepted_or_running": "harbor_result",
+  "post_check.ref_available": "harbor_result"
+};
 
 /**
- * The legacy HTTP collector can attest only these two Lode facts. Identity,
+ * The bounded HTTP collector can attest only these two Lode facts. Identity,
  * control ownership, action-specific page state, cleanup provenance and
  * post-action refs are checked by their existing authoritative boundaries.
  */
@@ -2116,9 +2141,9 @@ export function selectXhsCollectorAdmissionFacts(
   requiredFacts: readonly LodeRequiredHarborFact[]
 ): readonly LodeRequiredHarborFact[] | FailureRecord {
   const allowed = new Set([...xhsCommonRequiredFactKeys, ...xhsRequiredFactKeys[actionId]]);
-  const unknown = requiredFacts.find((fact) => !allowed.has(fact.fact_key));
+  const unknown = requiredFacts.find((fact) => !allowed.has(fact.fact_key) || xhsRequiredFactPhases[fact.fact_key] === undefined);
   if (unknown) return failure("capability_contract", `unsupported_required_harbor_fact:${unknown.fact_key}`, "admission", "repair_package_contract");
-  return requiredFacts.filter((fact) => fact.fact_key === "runtime.execution_surface.available" || fact.fact_key === "safety.challenge.absent");
+  return requiredFacts.filter((fact) => xhsRequiredFactPhases[fact.fact_key] === "collector_admission");
 }
 
 async function dispatchApprovedXhsMediaAction(

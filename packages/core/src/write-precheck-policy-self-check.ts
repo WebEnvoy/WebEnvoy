@@ -1391,15 +1391,25 @@ function assertXhsCommitProjection(): void {
   assert.equal(selectXhsCleanupCreationRef([creation, { ...creation, updated_at: "2026-08-31T08:00:01.000Z" }], marker, identity), undefined);
   const collectorFacts = selectXhsCollectorAdmissionFacts("xhs_publish_note_image_text_commit.publish", [
     { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true },
+    { fact_key: "runtime.site_identity.managed", owner: "Harbor", required: true },
+    { fact_key: "snapshot.creator_publish_entrypoint.available", owner: "Harbor", required: true },
+    { fact_key: "control_owner.xiaohongshu.managed", owner: "Harbor", required: true },
+    { fact_key: "snapshot.image_text_composition.initialized", owner: "Harbor", required: true },
+    { fact_key: "snapshot.image_text_fields.readback_available", owner: "Harbor", required: true },
+    { fact_key: "snapshot.image_text_media.observed", owner: "Harbor", required: true },
     { fact_key: "snapshot.publish_control.available", owner: "Harbor", required: true },
+    { fact_key: "snapshot.visibility_control.observed", owner: "Harbor", required: true },
+    { fact_key: "operation_ref.accepted_or_running", owner: "Harbor", required: true },
     { fact_key: "post_check.ref_available", owner: "Harbor", required: true },
     { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
   ]);
   assert(!("category" in collectorFacts));
   assert.deepEqual(collectorFacts.map((fact) => fact.fact_key), ["runtime.execution_surface.available", "safety.challenge.absent"]);
-  assert("category" in selectXhsCollectorAdmissionFacts("xhs_publish_note_image_text_commit.publish", [
+  const unsupported = selectXhsCollectorAdmissionFacts("xhs_publish_note_image_text_commit.publish", [
     { fact_key: "snapshot.unknown_future_control.available", owner: "Harbor", required: true }
-  ]));
+  ]);
+  assert("category" in unsupported);
+  assert.equal(unsupported.code, "unsupported_required_harbor_fact:snapshot.unknown_future_control.available");
 }
 
 async function assertXhsFieldActionWiring(): Promise<void> {

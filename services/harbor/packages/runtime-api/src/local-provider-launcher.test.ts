@@ -17,7 +17,8 @@ import {
   selectCleanupPage,
   selectPage,
   validateXhsWritePrecheckObservation,
-  writePrecheckProbeExpression
+  writePrecheckProbeExpression,
+  xhsContentRef
 } from "./local-provider-launcher.js";
 
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
@@ -25,28 +26,49 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   const title = { value: "WE测试", getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
   const media = { getBoundingClientRect: () => rect };
   const decoy = { getBoundingClientRect: () => rect };
+  const imageInput = {
+    parentElement: null as unknown,
+    matches: () => false,
+    getAttribute: () => "",
+    getBoundingClientRect: () => ({ ...rect, width: 0, height: 0 })
+  };
+  const mediaArea = {
+    parentElement: null as unknown,
+    querySelectorAll: () => [media]
+  };
   const editor: Record<string, unknown> = {
     parentElement: null,
-    contains: (value: unknown) => value === title,
-    querySelectorAll: () => [media]
+    contains: (value: unknown) => value === title || value === mediaArea,
+    querySelectorAll: (selector: string) => selector === "input" ? [title, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media, decoy]
   };
   const root: Record<string, unknown> = {
     parentElement: null,
     contains: (value: unknown) => value === title,
-    querySelectorAll: (selector: string) => selector === "input" ? [title] : selector.includes("contenteditable") ? [body] : [media, decoy]
+    querySelectorAll: (selector: string) => selector === "input" ? [title, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media, decoy]
   };
   editor.parentElement = root;
+  mediaArea.parentElement = editor;
+  imageInput.parentElement = mediaArea;
   const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: editor, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
   const document = { body: { innerText: "" }, querySelectorAll: () => [root] };
   const evaluate = new Function("document", "location", "getComputedStyle", `return ${commitProbeExpression("WE-XHS-E2E-1", "WE测试")}`);
   const result = evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" }));
   assert.equal(result.fields_matched, true);
   assert.equal(result.media_count, 1);
+  mediaArea.querySelectorAll = () => [];
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
+  mediaArea.querySelectorAll = () => [media];
   body.parentElement = root;
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
   body.parentElement = editor;
-  root.querySelectorAll = (selector: string) => selector === "input" ? [title, { ...title }] : selector.includes("contenteditable") ? [body] : [media];
+  root.querySelectorAll = (selector: string) => selector === "input" ? [title, { ...title }, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media];
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+});
+
+test("#423 cleanup content ref is derived from the marker-bound page identity", () => {
+  assert.equal(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "WE测试"));
+  assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-2", "WE测试"));
+  assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "其他标题"));
 });
 
 test("#423 published readback and cleanup select only the exact card actions", () => {
