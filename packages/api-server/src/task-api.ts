@@ -126,12 +126,12 @@ function optionalPositiveInteger(value: unknown, code: string): number | Failure
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : requestInvalid(code);
 }
 
-function isCreatorPublishUrl(value: unknown): value is string {
+function isCreatorPublishUrl(value: unknown, fieldAction = false): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 2_048) return false;
   try {
     const url = new URL(value);
-    return url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish" &&
-      !url.username && !url.password && !url.hash;
+    return url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname) &&
+      !url.username && !url.password && !url.hash && (!fieldAction || !url.search);
   } catch {
     return false;
   }
@@ -163,9 +163,9 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
     !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id"].includes(key)) ||
     capability?.ref !== `lode:capability/${expectedCapabilityId}` ||
     capability.version !== (fieldAction ? "0.1.1" : "0.1.0") || capability.source_ref !== expectedPackageRef || capability.lock_ref !== expectedLockRef ||
-    scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref) ||
+    scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref, fieldAction) ||
     typeof harbor?.identity_environment_ref !== "string" || harbor.identity_environment_ref.length === 0 ||
-    !isCreatorPublishUrl(harbor?.url) || harbor?.url !== scope.target_ref ||
+    !isCreatorPublishUrl(harbor?.url, fieldAction) || harbor?.url !== scope.target_ref ||
     typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId) ||
     requestedPath !== xhsMediaActionPaths[actionId] ||
     policy?.risk !== "write" || policy.execution_intent !== "execute_after_approval" ||

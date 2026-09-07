@@ -28,6 +28,12 @@ const pinnedSkills = [
     action_id: "xhs_publish_note_precheck",
     category: "prepare",
     mode: "confirm"
+  },
+  {
+    skill_ref: "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1",
+    action_id: "xhs_publish_note_image_text_fields.compose",
+    category: "commit",
+    mode: "confirm"
   }
 ] as const;
 

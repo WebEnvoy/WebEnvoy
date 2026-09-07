@@ -803,6 +803,16 @@ async function assertMediaActionApiBoundary(): Promise<void> {
   assert.equal(isExactXhsMediaTaskBody(fieldBody), true);
   assert.equal(isExactXhsMediaTaskBody({
     ...fieldBody,
+    task_intent: { ...fieldBody.task_intent, scope: { ...fieldBody.task_intent.scope, target_ref: `${targetRef}/` } },
+    harbor: { ...fieldBody.harbor, url: `${targetRef}/` }
+  }), true, "field contract accepts the declared trailing slash form");
+  assert.equal(isExactXhsMediaTaskBody({
+    ...fieldBody,
+    task_intent: { ...fieldBody.task_intent, scope: { ...fieldBody.task_intent.scope, target_ref: `${targetRef}?from=menu_left&target=image` } },
+    harbor: { ...fieldBody.harbor, url: `${targetRef}?from=menu_left&target=image` }
+  }), false, "field input contract rejects undeclared query parameters");
+  assert.equal(isExactXhsMediaTaskBody({
+    ...fieldBody,
     task_intent: { ...fieldBody.task_intent, input: { ...fieldBody.task_intent.input, refs: [...fieldBody.task_intent.input.refs].reverse() } }
   }), false, "field owner refs must preserve title/body order");
   assert.equal(isExactXhsMediaTaskBody({

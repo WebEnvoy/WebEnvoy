@@ -210,10 +210,10 @@ const lodeRuntimeAdmissionAssetPaths = [
   "registry/detail-runtime-consumption.json",
   "registry/validate-only-runtime-consumption.json"
 ] as const;
-// WebEnvoy/Lode@6bff1afd059a30571f8ed219d1dcd25e6fb20c6b.
+// WebEnvoy/Lode@242be638751b94e614bf5b595e2e59d5a7a2f2d5.
 const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
   "registry/detail-runtime-consumption.json": "ad17f4400ef745b1ebdb4cb46b2f4b50f274ee5ef3cfd5074e5980915a27a1a0",
-  "registry/validate-only-runtime-consumption.json": "21f57cfd9f395bb13b322aec9e5dd0c9c5f01ea959052e3ceb0aeaf14e636ce0"
+  "registry/validate-only-runtime-consumption.json": "6b09f930cca7f1d649a3150e1fabebd1e0b2380189d33150976281b853f652b9"
 };
 const lodeSearchRuntimeConsumptionDeclarationPath = "registry/search-runtime-consumption.json";
 const lodeSearchRuntimeConsumptionDeclarationSha256 = "76d017a5e5dc79e774d586c10fb2494d6704013118ab14b739ceb5547ce3f0b0";
@@ -3642,10 +3642,10 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         break;
       }
     }
-    // #307 owns the media action admission tuple in the registry. Its package
-    // has no legacy runtime-consumption asset; consume that exact tuple rather
+    // #307/#313 own these write admission tuples in the registry. Their packages
+    // have no legacy runtime-consumption asset; consume the exact tuple rather
     // than manufacturing a second operation declaration.
-    if (operationPolicy === undefined && packageRef === xhsMediaPackageRef) {
+    if (operationPolicy === undefined && (packageRef === xhsMediaPackageRef || packageRef === xhsFieldPackageRef)) {
       return registryPolicy.enabled
         ? registryPolicy
         : failure("capability_contract", "runtime_admission_disabled", "admission", "wait_for_scope_activation");

@@ -39,6 +39,7 @@ const generate = {
 
 const fieldFill = {
   ...upload,
+  url: "https://creator.xiaohongshu.com/publish/publish",
   action_id: "xhs_publish_note_image_text_fields.compose" as const,
   requested_path: "image_text_upload" as const,
   refs: [
@@ -64,6 +65,8 @@ test("keeps the two media actions independent and exact", () => {
   assert.equal(admitXhsMediaAction({ ...generate, refs: ["local_file_ref_11111111-1111-4111-8111-111111111111"] }), null);
   assert.equal(admitXhsMediaAction({ ...upload, requested_path: "image_text_generate" }), null);
   assert.equal(admitXhsMediaAction(fieldFill)?.refs.length, 2);
+  assert.equal(admitXhsMediaAction({ ...fieldFill, url: `${fieldFill.url}/` })?.refs.length, 2);
+  assert.equal(admitXhsMediaAction({ ...fieldFill, url: `${fieldFill.url}?from=menu_left&target=image` }), null);
   assert.equal(xhsMediaActionEffect(fieldFill.action_id), "modify");
   assert.equal(admitXhsMediaAction({ ...fieldFill, refs: [...fieldFill.refs].reverse() }), null);
 });

@@ -247,7 +247,7 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   if ((actionId.endsWith("image_upload") && input.refs.length < 1) ||
     (actionId.endsWith("text_to_image_generate") && input.refs.length !== 0) ||
     (actionId.endsWith(".compose") && (input.refs.length !== 2 || !String(input.refs[0]).endsWith("/title") || !String(input.refs[1]).endsWith("/body")))) return null;
-  if (!safeCreatorPublishUrl(input.url)) return null;
+  if (!safeCreatorPublishUrl(input.url, actionId === "xhs_publish_note_image_text_fields.compose")) return null;
   const binding = input.authorization_binding && typeof input.authorization_binding === "object" && !Array.isArray(input.authorization_binding)
     ? input.authorization_binding as Record<string, unknown>
     : undefined;
@@ -274,12 +274,13 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   };
 }
 
-function safeCreatorPublishUrl(value: unknown): value is string {
+function safeCreatorPublishUrl(value: unknown, fieldAction = false): value is string {
   if (!safeText(value, 2_048)) return false;
   try {
     const url = new URL(value);
-    return url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish" &&
+    return url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname) &&
       !url.username && !url.password && !url.hash &&
+      (!fieldAction || !url.search) &&
       [...url.searchParams].every(([key, item]) => safeText(key, 200) && (item === "" || safeText(item, 500)));
   } catch {
     return false;
