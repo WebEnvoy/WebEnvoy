@@ -85,6 +85,7 @@ const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-p
 const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const mediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const fieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
 
 function prunePendingWritePrecheckContinuations(now = Date.now()): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {
@@ -545,7 +546,7 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
           }
         };
       };
-      const isWritePrecheckPackage = packageRef === writePrecheckPackageRef || packageRef === pathPreparePackageRef || packageRef === mediaPackageRef || packageRef === fieldPackageRef;
+      const isWritePrecheckPackage = packageRef === writePrecheckPackageRef || packageRef === pathPreparePackageRef || packageRef === mediaPackageRef || packageRef === fieldPackageRef || packageRef === commitPackageRef;
       return isWritePrecheckPackage
         ? await (input.withWritePrecheckRunLock ?? withWritePrecheckRunLock)(runId, finishSubmission)
         : await finishSubmission();

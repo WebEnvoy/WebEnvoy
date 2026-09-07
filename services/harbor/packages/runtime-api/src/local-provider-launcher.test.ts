@@ -19,6 +19,8 @@ test("#412 field fill blocks every outbound mutation while media upload keeps it
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "GET", "https://creator.xiaohongshu.com/api/opaque"), false);
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/upload"), false);
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/publish"), true);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_commit.save_draft", "POST", "https://creator.xiaohongshu.com/api/save"), false);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_commit.publish", "POST", "https://creator.xiaohongshu.com/api/publish"), false);
 });
 
 test("#412 field fill writes only one visible app-owned title and body and returns match states", () => {

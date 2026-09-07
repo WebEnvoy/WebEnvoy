@@ -73,6 +73,7 @@ import {
   persistXhsMediaActionPolicyDecision,
   xhsMediaActionPolicyFailure,
   xhsMediaActionPaths,
+  xhsCommitPackageRef,
   xhsFieldPackageRef,
   xhsMediaLockRef,
   xhsMediaPackageRef,
@@ -162,13 +163,15 @@ export type HarborRuntimeClient = {
     holder_ref?: string;
     url: string;
     target_ref: string;
-    action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose";
+    action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
     requested_path: "image_text_upload" | "image_text_generate";
     refs: readonly string[];
     summary: string;
+    marker?: string;
+    visibility?: "not_applicable" | "only_me" | "public";
     authorization_binding: {
       decision_ref: string;
-      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose";
+      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
       target_ref: string;
       idempotency_key: string;
     };
@@ -211,7 +214,7 @@ const lodeRuntimeAdmissionAssetPaths = [
   "registry/detail-runtime-consumption.json",
   "registry/validate-only-runtime-consumption.json"
 ] as const;
-// WebEnvoy/Lode@242be638751b94e614bf5b595e2e59d5a7a2f2d5.
+// WebEnvoy/Lode@369aa554c71aa2a7b7177ad11b688d0f47e6d127.
 const lodeRuntimeAdmissionAssetSemanticSha256: Readonly<Record<string, string>> = {
   "registry/detail-runtime-consumption.json": "ad17f4400ef745b1ebdb4cb46b2f4b50f274ee5ef3cfd5074e5980915a27a1a0",
   "registry/validate-only-runtime-consumption.json": "6b09f930cca7f1d649a3150e1fabebd1e0b2380189d33150976281b853f652b9"
@@ -1586,7 +1589,9 @@ function projectHarborXhsMediaActionResult(value: unknown, runtimeSessionRef: st
   const body = object(value);
   const resultKind = body?.schema_version === "harbor-xhs-publish-note-image-text-fields/v0"
     ? "xhs_publish_note_image_text_fields"
-    : body?.schema_version === "harbor-xhs-publish-note-image-text-media/v0" ? "xhs_publish_note_image_text_media" : undefined;
+    : body?.schema_version === "harbor-xhs-publish-note-image-text-commit/v0"
+      ? "xhs_publish_note_image_text_commit"
+      : body?.schema_version === "harbor-xhs-publish-note-image-text-media/v0" ? "xhs_publish_note_image_text_media" : undefined;
   if (!body || resultKind === undefined ||
     body.runtime_session_ref !== runtimeSessionRef ||
     !["available", "empty", "unavailable"].includes(string(body.status) ?? "") ||
@@ -1641,6 +1646,7 @@ function validateCompletedXhsMediaAction(
   const lifecycle = object(normalized?.operation);
   const mediaReadback = object(normalized?.media_readback);
   const fieldReadback = object(normalized?.field_readback);
+  const contentReadback = object(normalized?.content_readback);
   const pageReadback = object(normalized?.page_readback);
   const postCheck = object(normalized?.post_check);
   const reconciliation = object(normalized?.reconciliation);
@@ -1654,7 +1660,7 @@ function validateCompletedXhsMediaAction(
   const sourceValid = sourceRefs.every((entry) =>
     exactObjectKeys(entry, ["ref_id", "source_kind", "producer", "redaction", "schema_hint"]) &&
     mediaRef(entry.ref_id) !== undefined &&
-    ["media_action_summary", "field_action_summary", "creator_publish_page_summary", "business_state_summary"].includes(string(entry.source_kind) ?? "") &&
+    ["media_action_summary", "field_action_summary", "commit_action_summary", "creator_publish_page_summary", "business_state_summary"].includes(string(entry.source_kind) ?? "") &&
     ["core", "harbor"].includes(string(entry.producer) ?? "") &&
     ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "") &&
     string(entry.schema_hint) !== undefined
@@ -1667,8 +1673,11 @@ function validateCompletedXhsMediaAction(
     ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "")
   ) && new Set(evidenceValues).size === evidenceValues.length;
   const fieldAction = expected.action_id === "xhs_publish_note_image_text_fields.compose";
-  const expectedBusinessEffect = fieldAction ? "modify" : expected.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate";
-  const expectedResultKind = fieldAction ? "xhs_publish_note_image_text_fields" : "xhs_publish_note_image_text_media";
+  const commitAction = expected.action_id === "xhs_publish_note_image_text_commit.save_draft" || expected.action_id === "xhs_publish_note_image_text_commit.publish";
+  const expectedBusinessEffect = fieldAction ? "modify" : expected.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
+    expected.action_id === "xhs_publish_note_image_text_commit.save_draft" ? "save_draft" :
+      expected.action_id === "xhs_publish_note_image_text_commit.publish" ? "publish" : "generate";
+  const expectedResultKind = fieldAction ? "xhs_publish_note_image_text_fields" : commitAction ? "xhs_publish_note_image_text_commit" : "xhs_publish_note_image_text_media";
   const operationStatus = string(lifecycle?.status);
   const operationRef = mediaRef(lifecycle?.operation_ref);
   const topStatus = string(operation?.status) as "available" | "empty" | "unavailable" | undefined;
@@ -1693,6 +1702,17 @@ function validateCompletedXhsMediaAction(
     ["observed", "unknown", "mismatch"].includes(string(fieldReadback?.status) ?? "") &&
     validFieldState(fieldReadback?.title) && validFieldState(fieldReadback?.body) &&
     ["passed", "failed", "unknown"].includes(string(fieldReadback?.validation_status) ?? "");
+  const contentCanonicalUrl = string(contentReadback?.canonical_url);
+  const normalizedCanonicalUrl = string(normalized?.canonical_url);
+  const validCommitReadback = exactObjectKeys(contentReadback, ["state", "management_list_state", "detail_state", "fields_state", "media_state", "marker_state", "content_ref", "canonical_url"]) &&
+    ["draft_saved", "published", "not_observed", "unknown"].includes(string(contentReadback?.state) ?? "") &&
+    ["matched", "not_found", "unknown", "not_run"].includes(string(contentReadback?.management_list_state) ?? "") &&
+    ["matched", "mismatched", "unknown", "not_run"].includes(string(contentReadback?.detail_state) ?? "") &&
+    ["matched", "mismatched", "unknown"].includes(string(contentReadback?.fields_state) ?? "") &&
+    ["matched", "mismatched", "unknown"].includes(string(contentReadback?.media_state) ?? "") &&
+    ["matched", "mismatched", "unknown"].includes(string(contentReadback?.marker_state) ?? "") &&
+    (contentReadback?.content_ref === null || mediaRef(contentReadback?.content_ref) !== undefined) &&
+    (contentReadback?.canonical_url === null || (contentCanonicalUrl !== undefined && normalizePublicHttpTarget(contentCanonicalUrl).ok));
   const validPageReadback = exactObjectKeys(pageReadback, ["status", "page_state_ref", "route_state"]) &&
     ["observed", "unknown", "mismatch"].includes(string(pageReadback.status) ?? "") &&
     mediaRef(pageReadback.page_state_ref) !== undefined &&
@@ -1706,29 +1726,33 @@ function validateCompletedXhsMediaAction(
     ["inspect_operation_ref", "await_post_check", "manual_reconciliation", "none"].includes(string(recovery.entrypoint) ?? "");
   const normalizedKeys = fieldAction
     ? ["action_id", "requested_path", "canonical_url", "target_ref", "source_status", "business_effect", "operation", "field_readback", "page_readback", "post_check", "reconciliation", "recovery", "save_draft", "publish", "submitted"]
-    : ["action_id", "requested_path", "canonical_url", "target_ref", "summary", "source_status", "business_effect", "operation", "media_readback", "page_readback", "post_check", "reconciliation", "recovery", "save_draft", "publish", "submitted"];
+    : commitAction
+      ? ["action_id", "requested_path", "canonical_url", "target_ref", "marker_state", "visibility_state", "business_effect", "operation", "content_readback", "post_check", "reconciliation", "recovery", "submitted"]
+      : ["action_id", "requested_path", "canonical_url", "target_ref", "summary", "source_status", "business_effect", "operation", "media_readback", "page_readback", "post_check", "reconciliation", "recovery", "save_draft", "publish", "submitted"];
   if (!operation || operation.result_kind !== expectedResultKind ||
     !["available", "empty", "unavailable"].includes(topStatus ?? "") ||
     !["success_result", "partial_result", "empty_result", "not_normalizable"].includes(classification ?? "") ||
     !exactObjectKeys(operation, ["result_kind", "status", "classification", "normalized", "source_refs", "evidence_refs"], ["empty_reason", "unavailable_reason", "warnings"]) ||
     !normalized || normalized.action_id !== expected.action_id || normalized.requested_path !== expected.requested_path ||
-    normalized.canonical_url !== expected.canonical_url || normalized.target_ref !== expected.target_ref ||
-    (!fieldAction && string(normalized.summary) === undefined) ||
-    !["located", "partially_located", "unknown"].includes(string(normalized.source_status) ?? "") ||
+    (!commitAction && normalized.canonical_url !== expected.canonical_url || commitAction && (normalizedCanonicalUrl === undefined || !normalizePublicHttpTarget(normalizedCanonicalUrl).ok)) || normalized.target_ref !== expected.target_ref ||
+    (!fieldAction && !commitAction && string(normalized.summary) === undefined) ||
+    (!commitAction && !["located", "partially_located", "unknown"].includes(string(normalized.source_status) ?? "")) ||
     !exactObjectKeys(normalized, normalizedKeys) ||
     !exactObjectKeys(businessEffect, ["kind", "status"]) || businessEffect?.kind !== expectedBusinessEffect ||
-    !["requested", "observed", "unknown", "failed"].includes(string(businessEffect?.status) ?? "") ||
-    !validOperation || (fieldAction ? !validFieldReadback : !validMediaReadback) || !validPageReadback || !validPostCheck || !validReconciliation || !validRecovery ||
-    normalized.save_draft !== "not_in_scope" || normalized.publish !== "not_in_scope" || normalized.submitted !== false ||
+    !(commitAction ? ["observed", "not_observed", "unknown"] : ["requested", "observed", "unknown", "failed"]).includes(string(businessEffect?.status) ?? "") ||
+    !validOperation || (fieldAction ? !validFieldReadback : commitAction ? !validCommitReadback : !validMediaReadback) || (!commitAction && !validPageReadback) || !validPostCheck || !validReconciliation || !validRecovery ||
+    (commitAction ? typeof normalized.submitted !== "boolean" || topStatus === "available" && normalized.submitted !== true : normalized.save_draft !== "not_in_scope" || normalized.publish !== "not_in_scope" || normalized.submitted !== false) ||
     !sourceValid || !evidenceValid || resultRef === undefined ||
     (topStatus === "available" && (!(classification === "success_result" || classification === "partial_result") || sourceRefs.length === 0 || evidenceRefs.length === 0)) ||
     (topStatus === "empty" && (classification !== "empty_result" || !(fieldAction
       ? ["target_not_found", "action_not_observed", "fields_not_present"]
       : ["target_not_found", "action_not_observed", "media_not_present"]).includes(string(operation.empty_reason) ?? ""))) ||
-    (topStatus === "unavailable" && (classification !== "not_normalizable" || !["invalid_contract", "resource_unavailable", "login_required", "permission_insufficient", "safety_challenge", "page_changed", "media_ref_unavailable", "generation_unavailable", "field_unavailable", "validation_failed", "operation_result_unknown", "post_check_failed", "reconciliation_unknown"].includes(string(operation.unavailable_reason) ?? "")))) {
+    (topStatus === "unavailable" && (classification !== "not_normalizable" || !["invalid_contract", "resource_unavailable", "login_required", "permission_insufficient", "safety_challenge", "page_changed", "commit_control_unavailable", "media_ref_unavailable", "generation_unavailable", "field_unavailable", "validation_failed", "operation_result_unknown", "post_check_failed", "reconciliation_unknown"].includes(string(operation.unavailable_reason) ?? "")))) {
     return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_invalid") };
   }
-  if ((topStatus === "available" && !sourceKinds.includes(fieldAction ? "field_action_summary" : "media_action_summary")) ||
+  const requiredEvidenceKinds = ["operation_ref", ...(commitAction && topStatus === "available" ? ["snapshot_ref", "post_check_ref", "reconciliation_ref"] : [])];
+  if ((topStatus === "available" && !sourceKinds.includes(fieldAction ? "field_action_summary" : commitAction ? "commit_action_summary" : "media_action_summary")) ||
+    !requiredEvidenceKinds.every((kind) => evidenceRefs.some((entry) => entry?.evidence_kind === kind && mediaRef(entry.ref_id) !== undefined)) ||
     !evidenceRefs.some((entry) => entry?.evidence_kind === "operation_ref" && mediaRef(entry.ref_id) === operationRef) ||
     (operationStatus === "unknown_outcome" && recovery?.status !== "unknown" && recovery?.status !== "required")) {
     return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_refs_invalid") };
@@ -1754,10 +1778,10 @@ function mediaActionPublicSummary(operation: JsonObject, runtimeSessionRef: stri
     source_refs: operation.source_refs,
     evidence_refs: operation.evidence_refs,
     runtime_session_ref: runtimeSessionRef,
-    submitted: false,
-    save_draft: "not_in_scope",
-    publish: "not_in_scope",
-    consumer_boundary: "Core stores structured media action refs, lifecycle and readback summaries only; no media bytes, browser material, draft or publish payload is stored."
+    submitted: normalized.submitted,
+    ...(normalized.save_draft === undefined ? {} : { save_draft: normalized.save_draft }),
+    ...(normalized.publish === undefined ? {} : { publish: normalized.publish }),
+    consumer_boundary: "Core stores structured action refs, lifecycle and redacted readback summaries only; no media bytes or browser material is stored."
   };
 }
 
@@ -1984,9 +2008,13 @@ async function completeAcceptedXhsMediaAction(
   }
   const completed = await completeRunWithResult(store, result.run_record.run_id, {
     result_ref: validation.result_ref,
-    result_kind: actionId === "xhs_publish_note_image_text_fields.compose" ? "xhs_publish_note_image_text_fields" : "xhs_publish_note_image_text_media",
+    result_kind: actionId === "xhs_publish_note_image_text_fields.compose"
+      ? "xhs_publish_note_image_text_fields"
+      : actionId.startsWith("xhs_publish_note_image_text_commit.") ? "xhs_publish_note_image_text_commit" : "xhs_publish_note_image_text_media",
     output_schema_id: actionId === "xhs_publish_note_image_text_fields.compose"
       ? "lode://schema/site-capability/xiaohongshu/publish-note-image-text-fields/output@0.1.1"
+      : actionId.startsWith("xhs_publish_note_image_text_commit.")
+        ? "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/output@0.1.0"
       : "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/output@0.1.0",
     data: {
       result_kind: operationObject.result_kind,
@@ -2070,10 +2098,11 @@ async function dispatchApprovedXhsMediaAction(
   }
   const actionId = result.task_intent.input.action_id;
   const requestedPath = result.task_intent.input.requested_path;
-  if (actionId !== "xhs_publish_note_image_text_media.image_upload" && actionId !== "xhs_publish_note_image_text_media.text_to_image_generate" && actionId !== "xhs_publish_note_image_text_fields.compose") {
+  if (typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId)) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_id_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
   }
-  if (requestedPath !== xhsMediaActionPaths[actionId]) {
+  const exactActionId = actionId as keyof typeof xhsMediaActionPaths;
+  if (requestedPath !== xhsMediaActionPaths[exactActionId]) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_path_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
   }
   const currentRun = await store.getRunRecord(result.run_record.run_id);
@@ -2088,13 +2117,15 @@ async function dispatchApprovedXhsMediaAction(
       holder_ref: request.run_id,
       url: result.task_intent.scope.target_ref,
       target_ref: target.target_ref,
-      action_id: actionId,
+      action_id: exactActionId,
       requested_path: requestedPath,
       refs: result.task_intent.input.refs ?? [],
       summary: result.task_intent.input.summary,
+      ...(result.task_intent.input.marker === undefined ? {} : { marker: result.task_intent.input.marker }),
+      ...(result.task_intent.input.visibility === undefined ? {} : { visibility: result.task_intent.input.visibility }),
       authorization_binding: {
         decision_ref: decisionRef,
-        action_id: actionId,
+        action_id: exactActionId,
         target_ref: target.target_ref,
         idempotency_key: request.authorization_context.idempotency_key
       }
@@ -2111,7 +2142,7 @@ async function dispatchApprovedXhsMediaAction(
       runtime_binding_refs: [runtimeSessionRef],
       public_result_summary: {
         schema_version: "webenvoy.core-xhs-media-action-projection.v0",
-        submitted: false,
+        submitted: exactActionId.startsWith("xhs_publish_note_image_text_commit."),
         outcome: "unknown",
         runtime_session_ref: runtimeSessionRef,
         consumer_boundary: "Core preserves an unknown media action outcome without retrying or exposing private browser material."
@@ -2147,7 +2178,7 @@ async function dispatchApprovedXhsMediaAction(
     operation,
     runtimeSessionRef,
     target.target_ref,
-    actionId,
+    exactActionId,
     requestedPath,
     canonical.target_ref,
     client
@@ -2508,7 +2539,7 @@ export async function continueXhsMediaActionTask(
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
   const taskIntent = validateTaskIntent(request.task_intent);
-  if (isFailure(taskIntent) || (request.package_ref !== xhsMediaPackageRef && request.package_ref !== xhsFieldPackageRef)) {
+  if (isFailure(taskIntent) || ![xhsMediaPackageRef, xhsFieldPackageRef, xhsCommitPackageRef].includes(request.package_ref)) {
     return { ok: false, failure: isFailure(taskIntent) ? taskIntent : failure("request_invalid", "package_ref_required", "pre_admission", "fix_input"), run_record: existing };
   }
   if (existing.task_intent_ref !== taskIntent.intent_id || existing.package_ref !== request.package_ref ||
@@ -2888,7 +2919,7 @@ export async function submitRuntimeTask(
   }
   if ((lode_package_contract.package_ref === xhsWritePrecheckPackageRef && !unifiedWritePrecheck) ||
     (lode_package_contract.package_ref === xhsPathPreparePackageRef && !pathPrepare) ||
-    ((lode_package_contract.package_ref === xhsMediaPackageRef || lode_package_contract.package_ref === xhsFieldPackageRef) && !mediaAction)) {
+    ([xhsMediaPackageRef, xhsFieldPackageRef, xhsCommitPackageRef].includes(lode_package_contract.package_ref) && !mediaAction)) {
     return acceptReadOnlyTaskSubmission(store, {
       ...base,
       lode_package_contract,
@@ -3648,10 +3679,10 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
         break;
       }
     }
-    // #307/#313 own these write admission tuples in the registry. Their packages
+    // These exact write packages own their admission tuples in the registry. They
     // have no legacy runtime-consumption asset; consume the exact tuple rather
     // than manufacturing a second operation declaration.
-    if (operationPolicy === undefined && (packageRef === xhsMediaPackageRef || packageRef === xhsFieldPackageRef)) {
+    if (operationPolicy === undefined && [xhsMediaPackageRef, xhsFieldPackageRef, xhsCommitPackageRef].includes(packageRef)) {
       return registryPolicy.enabled
         ? registryPolicy
         : failure("capability_contract", "runtime_admission_disabled", "admission", "wait_for_scope_activation");

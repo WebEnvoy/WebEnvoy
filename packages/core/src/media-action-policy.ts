@@ -11,6 +11,10 @@ import {
   type SingleActionDecision
 } from "./execution-policy.js";
 import {
+  xhsCommitCapabilityId,
+  xhsCommitLockRef,
+  xhsCommitOperationId,
+  xhsCommitPackageRef,
   xhsFieldCapabilityId,
   xhsFieldLockRef,
   xhsFieldOperationId,
@@ -46,13 +50,15 @@ const confirmationTtlMs = 10 * 60 * 1_000;
 
 function actionIdentity(actionId: XhsMediaActionId) {
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
   return {
-    package_ref: fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef,
-    lock_ref: fieldAction ? xhsFieldLockRef : xhsMediaLockRef,
-    capability_id: fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId,
-    operation_id: fieldAction ? xhsFieldOperationId : xhsMediaOperationId,
+    package_ref: fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef,
+    lock_ref: fieldAction ? xhsFieldLockRef : commitAction ? xhsCommitLockRef : xhsMediaLockRef,
+    capability_id: fieldAction ? xhsFieldCapabilityId : commitAction ? xhsCommitCapabilityId : xhsMediaCapabilityId,
+    operation_id: fieldAction ? xhsFieldOperationId : commitAction ? xhsCommitOperationId : xhsMediaOperationId,
     version: fieldAction ? "0.1.1" : "0.1.0",
-    effect: fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create"
+    effect: fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
+      actionId === "xhs_publish_note_image_text_commit.publish" ? "publish" : "create"
   } as const;
 }
 
@@ -88,7 +94,8 @@ function exactMediaAction(
   if (!Array.isArray(inputRefs)) return undefined;
   if ((actionId === "xhs_publish_note_image_text_media.image_upload" && inputRefs.length === 0) ||
     (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0) ||
-    (actionId === "xhs_publish_note_image_text_fields.compose" && inputRefs.length !== 2)) return undefined;
+    (actionId === "xhs_publish_note_image_text_fields.compose" && inputRefs.length !== 2) ||
+    (actionId.startsWith("xhs_publish_note_image_text_commit.") && inputRefs.length !== 0)) return undefined;
   const action = contract.action_declaration?.actions.find((candidate) => candidate.action_id === actionId);
   if (!action || action.category !== "commit" ||
     action.target_scope.site_slug !== "xiaohongshu" ||
@@ -123,6 +130,7 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
   const identity = actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId)
     ? actionIdentity(actionId as XhsMediaActionId)
     : undefined;
+  const commitAction = actionId?.startsWith("xhs_publish_note_image_text_commit.") === true;
   return run?.status === "requires_user_action" &&
     identity !== undefined &&
     run.package_ref === identity.package_ref &&
@@ -142,7 +150,7 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
     requestedPath !== undefined &&
     risk?.risk === "write" &&
     risk.execution_intent === "execute_after_approval" &&
-    risk.true_write_requested === false &&
+    risk.true_write_requested === commitAction &&
     guard?.status === "active" &&
     guard.enforced_by === "core" &&
     ["draft", "submit", "destructive", "reconcile_status", "request_cancel"].every((intent) => guard.blocked_execution_intents.includes(intent)) &&
@@ -334,4 +342,4 @@ export async function persistXhsMediaActionPolicyDecision(input: {
   }
 }
 
-export { xhsFieldPackageRef, xhsFieldLockRef, xhsFieldCapabilityId, xhsFieldOperationId, xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };
+export { xhsCommitPackageRef, xhsCommitLockRef, xhsCommitCapabilityId, xhsCommitOperationId, xhsFieldPackageRef, xhsFieldLockRef, xhsFieldCapabilityId, xhsFieldOperationId, xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };

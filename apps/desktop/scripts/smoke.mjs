@@ -743,6 +743,7 @@ const xhsSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.inclu
 const xhsPublishPrecheckSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-precheck@"));
 const xhsPathPrepareSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-path-prepare@"));
 const xhsMediaSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-image-text-media@"));
+const xhsCommitSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/xiaohongshu/publish-note-image-text-commit@"));
 const bossSearchSkill = lodeCatalog.skills.find((skill) => skill.packageRef.includes("/boss/job-search@"));
 if (
   lodeCatalog.status !== "ready" ||
@@ -769,6 +770,10 @@ if (
   xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.kind !== "file" ||
   xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.maxItems !== 18 ||
   xhsMediaSkill.inputFields.find((field) => field.id === "summary")?.inputProjection !== "safe_summary" ||
+  xhsCommitSkill?.availability !== "available" ||
+  xhsCommitSkill.actions.map((action) => action.id).sort().join(",") !== "xhs_publish_note_image_text_commit.publish,xhs_publish_note_image_text_commit.save_draft" ||
+  xhsCommitSkill.inputFields.find((field) => field.id === "marker")?.maxLength !== 128 ||
+  xhsCommitSkill.inputFields.find((field) => field.id === "visibility")?.options?.join(",") !== "not_applicable,only_me,public" ||
   bossSearchSkill?.availability !== "incompatible" ||
   !bossSearchSkill.availabilityReason.includes("动作声明")
 ) {

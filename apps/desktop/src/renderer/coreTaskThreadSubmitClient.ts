@@ -35,6 +35,8 @@ const xiaohongshuMediaLockRef = "lode://lock/site-capability/xiaohongshu/publish
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldActionId = "xhs_publish_note_image_text_fields.compose";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xiaohongshuCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
 const xiaohongshuMediaActionContracts = {
   "xhs_publish_note_image_text_media.image_upload": {
     requestedPath: "image_text_upload",
@@ -46,6 +48,10 @@ const xiaohongshuMediaActionContracts = {
     effect: "create",
     profileId: "xhs-text-to-image-generate",
   },
+} as const;
+const xiaohongshuCommitActionContracts = {
+  "xhs_publish_note_image_text_commit.save_draft": { effect: "create", profileId: "xhs-image-text-save-draft", visibility: ["not_applicable"] },
+  "xhs_publish_note_image_text_commit.publish": { effect: "publish", profileId: "xhs-image-text-publish", visibility: ["only_me", "public"] },
 } as const;
 const localFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -267,7 +273,7 @@ function submissionReadiness(options: SubmitOptions, requestedModes?: ExecutionP
   if (options.identity.readiness.state === "unknown") return "账号身份状态尚未确认；提交保持停止。";
   const singleAction = options.skill.actions.length === 1 ? options.skill.actions[0] : undefined;
   const readAction = singleAction?.operationMode === "read" && singleAction.resourceRequirementProfileIds.length === 1;
-  if (!readAction && !isXiaohongshuPublishPrecheckSkill(options.skill) && !isXiaohongshuPathPrepareSkill(options.skill) && !isXiaohongshuMediaSkill(options.skill) && !isXiaohongshuFieldSkill(options.skill)) {
+  if (!readAction && !isXiaohongshuPublishPrecheckSkill(options.skill) && !isXiaohongshuPathPrepareSkill(options.skill) && !isXiaohongshuMediaSkill(options.skill) && !isXiaohongshuFieldSkill(options.skill) && !isXiaohongshuCommitSkill(options.skill)) {
     return "当前 Core 仅接入已声明的单一只读动作；准备、发布与危险行为保持停止。";
   }
   if (requestedModes != null) {
@@ -305,6 +311,24 @@ function selectActionForDraft(
       requestedPath: "image_text_upload",
       executionIntent: "execute_after_approval",
       input: { action_id: xiaohongshuFieldActionId, requested_path: "image_text_upload", refs: [titleRef, bodyRef], summary: skill.name },
+    };
+  }
+  if (isXiaohongshuCommitSkill(skill)) {
+    const actionId = stringValue(draft.values.action_id) as keyof typeof xiaohongshuCommitActionContracts;
+    const action = skill.actions.find((item) => item.id === actionId);
+    const contract = xiaohongshuCommitActionContracts[actionId];
+    const marker = stringValue(draft.values.marker);
+    const visibility = stringValue(draft.values.visibility);
+    if (!action || !contract || stringValue(draft.values.requested_path) !== "image_text_upload" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) || !(contract.visibility as readonly string[]).includes(visibility)) {
+      return { ok: false, reason: "请选择一个精确保存或发布动作，并提供匹配的唯一标记与可见性。" };
+    }
+    return {
+      ok: true,
+      action,
+      requestedPath: "image_text_upload",
+      executionIntent: "execute_after_approval",
+      input: { action_id: actionId, requested_path: "image_text_upload", refs: [], summary: skill.name, marker, visibility },
     };
   }
   if (!isXiaohongshuMediaSkill(skill)) {
@@ -390,7 +414,7 @@ function taskTarget(skill: LodeCatalogSkill, identity: Identity, draft: SkillInp
   let url: URL;
   try { url = new URL(rawUrl); } catch { return { ok: false as const, reason: "目标网址无效。" }; }
   const identityOrigin = new URL(identity.origin).origin;
-  const exactCreatorPrecheck = (isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill) || isXiaohongshuMediaSkill(skill) || isXiaohongshuFieldSkill(skill)) &&
+  const exactCreatorPrecheck = (isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill) || isXiaohongshuMediaSkill(skill) || isXiaohongshuFieldSkill(skill) || isXiaohongshuCommitSkill(skill)) &&
     identity.siteId === "xiaohongshu" && identityOrigin === "https://www.xiaohongshu.com" &&
     url.origin === "https://creator.xiaohongshu.com" && url.pathname.replace(/\/$/, "") === "/publish/publish";
   if (url.username || url.password || !action.supportedOrigins.includes(url.origin) ||
@@ -449,7 +473,7 @@ export function projectTaskSubmissionSkill(skill: LodeCatalogSkill): LodeCatalog
         .map((field) => field.id === "limit" ? { ...field, maximum: Math.min(field.maximum ?? 15, 15) } : field),
     };
   }
-  return isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill) || isXiaohongshuMediaSkill(skill) || isXiaohongshuFieldSkill(skill)
+  return isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill) || isXiaohongshuMediaSkill(skill) || isXiaohongshuFieldSkill(skill) || isXiaohongshuCommitSkill(skill)
     ? { ...skill, inputFields: skill.inputFields.filter((field) => field.id !== "target_ref") }
     : skill;
 }
@@ -576,6 +600,20 @@ function isXiaohongshuFieldSkill(skill: LodeCatalogSkill) {
     action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === "xhs-image-text-field-fill" &&
     action.targetTypes.length === 1 && action.targetTypes[0] === "creator_publish_page" &&
     action.supportedOrigins.length === 1 && action.supportedOrigins[0] === "https://creator.xiaohongshu.com";
+}
+
+function isXiaohongshuCommitSkill(skill: LodeCatalogSkill) {
+  if (skill.packageRef !== xiaohongshuCommitPackageRef || skill.lockRef !== xiaohongshuCommitLockRef ||
+    skill.version !== "0.1.0" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 2) return false;
+  return Object.entries(xiaohongshuCommitActionContracts).every(([id, contract]) => {
+    const action = skill.actions.find((item) => item.id === id);
+    return action?.category === "commit" && action.operationMode === "write" &&
+      action.externalEffects.length === 1 && action.externalEffects[0] === contract.effect &&
+      action.resourceRequirementRef === "xiaohongshu.publish-note-image-text-commit.resources" &&
+      action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === contract.profileId &&
+      action.targetTypes.length === 1 && action.targetTypes[0] === "creator_publish_page" &&
+      action.supportedOrigins.length === 1 && action.supportedOrigins[0] === "https://creator.xiaohongshu.com";
+  });
 }
 
 function boundedScalarSummary(value: SkillInputValue | undefined) {

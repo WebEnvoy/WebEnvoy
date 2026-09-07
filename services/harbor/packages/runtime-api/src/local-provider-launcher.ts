@@ -483,10 +483,14 @@ async function probeProviderWritePrecheck(
 const XHS_MEDIA_ACTION_CDP_COMMANDS = [
   "Runtime.enable",
   "Runtime.evaluate",
+  "Runtime.callFunctionOn",
   "Runtime.releaseObject",
+  "Accessibility.enable",
+  "Accessibility.getFullAXTree",
   "Page.enable",
   "Page.bringToFront",
   "DOM.enable",
+  "DOM.resolveNode",
   "DOM.setFileInputFiles",
   "Fetch.enable",
   "Fetch.continueRequest",
@@ -512,6 +516,7 @@ type MediaActionNetwork = {
 
 export function blocksXhsMediaActionRequest(actionId: LocalProviderMediaActionInput["action_id"], method: string, url: string): boolean {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) return false;
+  if (actionId.startsWith("xhs_publish_note_image_text_commit.")) return false;
   return actionId === "xhs_publish_note_image_text_fields.compose" || /(?:^|[/?_-])(save|draft|submit|publish)(?:[/?_-]|$)/i.test(url);
 }
 
@@ -531,7 +536,8 @@ async function executeXhsMediaAction(
     message: string,
     retryable = false,
     page?: LocalProviderPageFacts,
-    diagnostics?: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]
+    diagnostics?: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"],
+    submitted = false
   ): LocalProviderMediaActionResult => {
     if (diagnostics) console.warn(JSON.stringify({ event: "xhs_media_action_unavailable", operation_ref: operationRef, failure_class, ...diagnostics }));
     return {
@@ -542,13 +548,14 @@ async function executeXhsMediaAction(
       operation_ref: operationRef,
       ...(page === undefined ? {} : { page }),
       ...(diagnostics === undefined ? {} : { diagnostics }),
-      submitted: false as const
+      submitted
     };
   };
   if (input.expected_origin !== "https://creator.xiaohongshu.com" || input.no_submit_guard !== "active" ||
     (input.action_id === "xhs_publish_note_image_text_media.image_upload" && input.requested_path !== "image_text_upload") ||
     (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate" && input.requested_path !== "image_text_generate") ||
     (input.action_id === "xhs_publish_note_image_text_fields.compose" && input.requested_path !== "image_text_upload") ||
+    (input.action_id.startsWith("xhs_publish_note_image_text_commit.") && (input.requested_path !== "image_text_upload" || !input.marker || !input.visibility)) ||
     input.authorization_binding.action_id !== input.action_id || input.authorization_binding.target_ref !== input.target_ref) {
     return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
   }
@@ -582,6 +589,7 @@ async function executeXhsMediaAction(
     await sendMediaActionCdp(client, "Runtime.enable");
     await sendMediaActionCdp(client, "Page.enable");
     await sendMediaActionCdp(client, "DOM.enable");
+    await sendMediaActionCdp(client, "Accessibility.enable");
     const before = await evaluateMediaActionObservation(client);
     const pageFailure = mediaPageFailure(before, input.target_url);
     if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
@@ -634,6 +642,10 @@ async function executeXhsMediaAction(
       } else if (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate") {
         const generated = await executeTextToImageControl(client, input.summary);
         if (!generated) return failure("generation_unavailable", "The visible text-to-image input or generate control is unavailable.", false, page);
+      } else if (input.action_id === "xhs_publish_note_image_text_commit.save_draft" || input.action_id === "xhs_publish_note_image_text_commit.publish") {
+        const commit = await executeCommitControl(client, input, operationRef);
+        if (commit.status === "unavailable") return failure(commit.failure_class, commit.message, false, page, undefined, commit.submitted);
+        return { ...commit, page };
       } else {
         const [title, body] = resolvedFields!;
         let fieldProbe = await evaluateFieldFill(client, title, body, true);
@@ -743,7 +755,9 @@ async function executeXhsMediaAction(
       ],
       submitted: false as const
     };
-  }, AbortSignal.timeout(15_000)).catch(() => failure("operation_result_unknown", "The media action outcome could not be determined.", false, page));
+  }, AbortSignal.timeout(input.action_id.startsWith("xhs_publish_note_image_text_commit.") ? 30_000 : 15_000))
+    .catch(() => failure("operation_result_unknown", "The media action outcome could not be determined.", false, page, undefined,
+      input.action_id.startsWith("xhs_publish_note_image_text_commit.")));
 }
 
 function mediaPageFailure(observation: MediaPageObservation | undefined, targetUrl: string): { failure_class: "page_changed" | "login_required" | "safety_challenge"; message: string; retryable: boolean } | null {
@@ -754,6 +768,170 @@ function mediaPageFailure(observation: MediaPageObservation | undefined, targetU
     return { failure_class: "page_changed", message: "The current page is not the requested creator publish page.", retryable: true };
   }
   return null;
+}
+
+type AxNode = { role?: { value?: unknown }; name?: { value?: unknown }; backendDOMNodeId?: unknown };
+type CommitProbe = {
+  url: string;
+  pathname: string;
+  login_like: boolean;
+  challenge_like: boolean;
+  marker_matched: boolean;
+  fields_matched: boolean;
+  media_count: number;
+};
+
+async function accessibilityNodes(client: CdpClient): Promise<AxNode[]> {
+  const tree = await sendMediaActionCdp(client, "Accessibility.getFullAXTree", { depth: 30 });
+  return Array.isArray(tree.nodes) ? tree.nodes as AxNode[] : [];
+}
+
+async function clickBackendNode(client: CdpClient, backendNodeId: number): Promise<boolean> {
+  const resolved = await sendMediaActionCdp(client, "DOM.resolveNode", { backendNodeId });
+  const objectId = (resolved.object as { objectId?: unknown } | undefined)?.objectId;
+  if (typeof objectId !== "string") return false;
+  try {
+    const clicked = await sendMediaActionCdp(client, "Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: "function(){const target=this.closest?.('button,a,[role=button],[role=link]')||this;if(target.disabled||target.getAttribute?.('aria-disabled')==='true')return false;target.click();return true;}",
+      returnByValue: true
+    });
+    return (clicked.result as { value?: unknown } | undefined)?.value === true;
+  } finally {
+    await sendMediaActionCdp(client, "Runtime.releaseObject", { objectId }).catch(() => undefined);
+  }
+}
+
+async function clickExactAxButton(client: CdpClient, name: string): Promise<boolean> {
+  const ids = [...new Set((await accessibilityNodes(client)).flatMap((node) =>
+    node.role?.value === "button" && node.name?.value === name && typeof node.backendDOMNodeId === "number"
+      ? [node.backendDOMNodeId]
+      : []
+  ))];
+  return ids.length === 1 && clickBackendNode(client, ids[0]!);
+}
+
+async function clickUniqueMarkerItem(client: CdpClient, marker: string): Promise<boolean> {
+  const nodes = await accessibilityNodes(client);
+  const interactive = [...new Set(nodes.flatMap((node) =>
+    (node.role?.value === "link" || node.role?.value === "button") && typeof node.name?.value === "string" && node.name.value.includes(marker) && typeof node.backendDOMNodeId === "number"
+      ? [node.backendDOMNodeId]
+      : []
+  ))];
+  if (interactive.length === 1) return clickBackendNode(client, interactive[0]!);
+  const text = [...new Set(nodes.flatMap((node) =>
+    node.role?.value === "StaticText" && typeof node.name?.value === "string" && node.name.value.includes(marker) && typeof node.backendDOMNodeId === "number"
+      ? [node.backendDOMNodeId]
+      : []
+  ))];
+  return interactive.length === 0 && text.length === 1 && clickBackendNode(client, text[0]!);
+}
+
+async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<CommitProbe | undefined> {
+  const markerLiteral = JSON.stringify(marker);
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: String.raw`(() => {
+      const text = document.body?.innerText || '';
+      const title = [...document.querySelectorAll('input')].find((el) => /标题/.test(el.getAttribute('placeholder') || ''))?.value || '';
+      const body = [...document.querySelectorAll('[contenteditable="true"]')].map((el) => el.textContent || '').join('\n');
+      const media = [...document.querySelectorAll('img')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width >= 80 && r.height >= 80 && r.bottom > 0 && r.right > 0;
+      }).length;
+      return {
+        url: location.href,
+        pathname: location.pathname,
+        login_like: /登录|扫码登录/.test(text) && /\/login/.test(location.pathname),
+        challenge_like: /验证码|安全验证|异常访问|请完成验证/.test(text),
+        marker_matched: text.includes(${markerLiteral}) || title.includes(${markerLiteral}) || body.includes(${markerLiteral}),
+        fields_matched: title.length > 0 && body.includes(${markerLiteral}),
+        media_count: media
+      };
+    })()`,
+    returnByValue: true
+  });
+  return (evaluated.result as { value?: CommitProbe } | undefined)?.value;
+}
+
+async function executeCommitControl(
+  client: CdpClient,
+  input: LocalProviderMediaActionInput,
+  operationRef: string
+): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
+  const save = input.action_id === "xhs_publish_note_image_text_commit.save_draft";
+  const marker = input.marker!;
+  if (!save && input.visibility !== "public") {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The requested non-public visibility has not been selected exactly.", retryable: false, submitted: false };
+  }
+  const clicked = await clickExactAxButton(client, save ? "暂存离开" : "发布");
+  if (!clicked) return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact commit control is unavailable or ambiguous.", retryable: false, submitted: false };
+  let probe: CommitProbe | undefined;
+  let listMatched = false;
+  if (save) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await abortableDelay(250);
+      probe = await evaluateCommitProbe(client, marker);
+      if (probe?.login_like || probe?.challenge_like) break;
+      if (!isCreatorPublishPath(probe?.pathname) && probe?.marker_matched) { listMatched = true; break; }
+    }
+    if (listMatched && await clickUniqueMarkerItem(client, marker)) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await abortableDelay(250);
+        probe = await evaluateCommitProbe(client, marker);
+        if (isCreatorPublishPath(probe?.pathname) && probe?.marker_matched && probe.fields_matched && probe.media_count > 0) break;
+      }
+    }
+  } else {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await abortableDelay(250);
+      probe = await evaluateCommitProbe(client, marker);
+      if (probe?.pathname.includes("/publish/success") || probe?.login_like || probe?.challenge_like) break;
+    }
+  }
+  const detailMatched = save && listMatched && isCreatorPublishPath(probe?.pathname) && probe?.marker_matched === true && probe.fields_matched && probe.media_count > 0;
+  const publishObserved = !save && probe?.pathname.includes("/publish/success") === true;
+  const observed = detailMatched || publishObserved;
+  const contentRef = observed ? opaqueRef("xhs_content") : null;
+  return {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_url: probe?.url ?? input.target_url,
+    page: readyPage(probe?.url ?? input.target_url, "Xiaohongshu creator commit action"),
+    action_id: input.action_id as "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish",
+    requested_path: "image_text_upload",
+    effect_kind: save ? "save_draft" : "publish",
+    effect_status: observed ? "observed" : "unknown",
+    operation_status: observed ? "terminal" : "unknown_outcome",
+    operation_ref: operationRef,
+    ...(observed ? { terminal_state: "success" as const } : {}),
+    marker_state: probe?.marker_matched ? "matched" : "unknown",
+    visibility_state: save ? "not_applicable" : input.visibility ?? "unknown",
+    content_readback: {
+      state: detailMatched ? "draft_saved" : publishObserved ? "published" : "unknown",
+      management_list_state: listMatched ? "matched" : publishObserved ? "not_run" : "unknown",
+      detail_state: detailMatched ? "matched" : publishObserved ? "not_run" : "unknown",
+      fields_state: detailMatched ? "matched" : "unknown",
+      media_state: detailMatched ? "matched" : "unknown",
+      marker_state: probe?.marker_matched ? "matched" : "unknown",
+      content_ref: contentRef,
+      canonical_url: observed ? probe?.url ?? null : null
+    },
+    page_readback: {
+      status: observed ? "observed" : "unknown",
+      page_state_ref: opaqueRef("page_state"),
+      route_state: observed ? "observed" : "unknown"
+    },
+    source_refs: [
+      { kind: "commit_action_summary", ref: opaqueRef("source") },
+      { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
+      { kind: "business_state_summary", ref: opaqueRef("source") }
+    ],
+    evidence_ref_kinds: [
+      { kind: "operation_ref", ref: operationRef },
+      { kind: "snapshot_ref", ref: opaqueRef("evidence") }
+    ],
+    submitted: true
+  };
 }
 
 async function resolveLocalMediaRef(localFileRef: string): Promise<string> {

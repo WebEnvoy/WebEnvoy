@@ -53,6 +53,7 @@ export type ApiServerOptions = {
 const serviceName = "webenvoy-api-server";
 const xhsMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xhsFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xhsCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
 
 function sendJson(response: ServerResponse, statusCode: number, body: JsonBody): void {
   response.writeHead(statusCode, {
@@ -150,7 +151,7 @@ export async function continuePendingWriteContinuation(
     ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
     ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
   };
-  return pending.package_ref === xhsMediaPackageRef || pending.package_ref === xhsFieldPackageRef
+  return pending.package_ref === xhsMediaPackageRef || pending.package_ref === xhsFieldPackageRef || pending.package_ref === xhsCommitPackageRef
     ? continueXhsMediaActionTask(runRecordStore, {
         run_id: pending.run_id,
         task_intent: pending.task_intent,

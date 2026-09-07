@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createFileRunRecordStore, taskTurnInputSchemaVersion, type FileAuthorizationDecisionStore, type RunRecord, type TaskTurnInputPolicyResolver, type WritePrecheckAuthorizationContext } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { createApiServer, continuePendingWriteContinuation } from "./server.js";
-import { isExactXhsMediaTaskBody } from "./task-api.js";
+import { isExactXhsMediaTaskBody, validateThreadTaskBody } from "./task-api.js";
 import { handleTaskThreadApi, hasPendingWritePrecheckContinuation, takePendingWritePrecheckContinuation, withWritePrecheckRunLock } from "./task-thread-api.js";
 
 function record(value: unknown): Record<string, unknown> {
@@ -801,6 +801,46 @@ async function assertMediaActionApiBoundary(): Promise<void> {
     }
   };
   assert.equal(isExactXhsMediaTaskBody(fieldBody), true);
+  const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+  const saveDraftBody = {
+    ...body,
+    package_ref: commitPackageRef,
+    task_intent: {
+      ...taskIntent,
+      capability: {
+        ref: "lode:capability/publish-note-image-text-commit",
+        version: "0.1.0",
+        source_ref: commitPackageRef,
+        lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0"
+      },
+      input: {
+        summary: "save the uniquely marked test draft",
+        refs: [],
+        requested_path: "image_text_upload",
+        action_id: "xhs_publish_note_image_text_commit.save_draft",
+        marker: "0907-2214",
+        visibility: "not_applicable"
+      },
+      resource_requirement_refs: ["xiaohongshu.publish-note-image-text-commit.resources"],
+      resource_requirement_profile_id: "xhs-image-text-save-draft"
+    }
+  };
+  assert.equal(isExactXhsMediaTaskBody(saveDraftBody), true);
+  const commitValidationDirectory = await mkdtemp(join(tmpdir(), "webenvoy-commit-api-boundary-"));
+  try {
+    assert.equal(await validateThreadTaskBody({
+      ...saveDraftBody,
+      run_id: "run_commit_api_boundary"
+    }, {
+      runRecordStore: createFileRunRecordStore({ directory: join(commitValidationDirectory, "runs") })
+    }), undefined, "commit package must enter the media-action API branch");
+  } finally {
+    await rm(commitValidationDirectory, { recursive: true, force: true });
+  }
+  assert.equal(isExactXhsMediaTaskBody({
+    ...saveDraftBody,
+    task_intent: { ...saveDraftBody.task_intent, input: { ...saveDraftBody.task_intent.input, visibility: "public" } }
+  }), false, "save-draft must not accept publish visibility");
   assert.equal(isExactXhsMediaTaskBody({
     ...fieldBody,
     task_intent: { ...fieldBody.task_intent, scope: { ...fieldBody.task_intent.scope, target_ref: `${targetRef}/` } },

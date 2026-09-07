@@ -49,13 +49,17 @@ type InputContract = {
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuMediaSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/input@0.1.0";
 const xiaohongshuMediaOperationRef = "lode://operation/xhs_publish_note_image_text_media";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xiaohongshuCommitSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.0";
+const xiaohongshuCommitOperationRef = "lode://operation/xhs_publish_note_image_text_commit";
 
 export function projectInputFields(schema: Record<string, unknown>, contract?: InputContract): LodeCatalogField[] {
   if (schema.type !== "object" || schema.additionalProperties !== false || !hasOnlyAllowedKeys(schema, schemaKeys)) {
     throw new Error("Input schema uses an unsupported object contract.");
   }
   const mediaContract = contract != null && isXiaohongshuMediaInputContract(contract);
-  if (schema.oneOf !== undefined && (!mediaContract || !validXiaohongshuMediaBranches(schema.oneOf))) {
+  const commitContract = contract != null && isXiaohongshuCommitInputContract(contract);
+  if (schema.oneOf !== undefined && !(mediaContract ? validXiaohongshuMediaBranches(schema.oneOf) : commitContract && validXiaohongshuCommitBranches(schema.oneOf))) {
     throw new Error("Input schema uses an unsupported conditional contract.");
   }
   if (contract != null && !inputContractMatches(schema, contract)) {
@@ -333,6 +337,29 @@ function isXiaohongshuMediaInputContract(contract: InputContract) {
     contract.schemaId === xiaohongshuMediaSchemaId &&
     contract.operationRef === xiaohongshuMediaOperationRef &&
     contract.operationMode === "write";
+}
+
+function isXiaohongshuCommitInputContract(contract: InputContract) {
+  return contract.packageRef === xiaohongshuCommitPackageRef &&
+    contract.schemaId === xiaohongshuCommitSchemaId &&
+    contract.operationRef === xiaohongshuCommitOperationRef &&
+    contract.operationMode === "write";
+}
+
+function validXiaohongshuCommitBranches(value: unknown) {
+  if (!Array.isArray(value) || value.length !== 2 || !value.every(isRecord)) return false;
+  const branch = (actionId: string) => value.find((item) => isRecord(item.properties) && isRecord(item.properties.action_id) && item.properties.action_id.const === actionId);
+  const save = branch("xhs_publish_note_image_text_commit.save_draft");
+  const publish = branch("xhs_publish_note_image_text_commit.publish");
+  if (!save || !publish || !hasOnlyAllowedKeys(save, ["properties"]) || !hasOnlyAllowedKeys(publish, ["properties"])) return false;
+  const exact = (item: Record<string, unknown>, actionId: string, visibility: unknown) => {
+    const properties = item.properties as Record<string, unknown>;
+    return hasOnlyAllowedKeys(properties, ["action_id", "visibility"]) && isRecord(properties.action_id) &&
+      hasOnlyAllowedKeys(properties.action_id, ["const"]) && properties.action_id.const === actionId &&
+      isRecord(properties.visibility) && JSON.stringify(properties.visibility) === JSON.stringify(visibility);
+  };
+  return exact(save, "xhs_publish_note_image_text_commit.save_draft", { const: "not_applicable" }) &&
+    exact(publish, "xhs_publish_note_image_text_commit.publish", { enum: ["only_me", "public"] });
 }
 
 function validXiaohongshuMediaBranches(value: unknown) {

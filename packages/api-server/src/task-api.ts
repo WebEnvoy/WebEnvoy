@@ -12,6 +12,9 @@ import {
   type XhsWritePrecheckCompositionPath,
   type XhsPathPrepareRequestedPath,
   xhsMediaActionPaths,
+  xhsCommitCapabilityId,
+  xhsCommitLockRef,
+  xhsCommitPackageRef,
   xhsFieldCapabilityId,
   xhsFieldLockRef,
   xhsFieldPackageRef,
@@ -50,7 +53,9 @@ const xhsMediaResourceRequirementRef = "xiaohongshu.publish-note-image-text-medi
 const xhsMediaProfileByAction: Record<XhsMediaActionId, string> = {
   "xhs_publish_note_image_text_media.image_upload": "xhs-image-upload",
   "xhs_publish_note_image_text_media.text_to_image_generate": "xhs-text-to-image-generate",
-  "xhs_publish_note_image_text_fields.compose": "xhs-image-text-field-fill"
+  "xhs_publish_note_image_text_fields.compose": "xhs-image-text-field-fill",
+  "xhs_publish_note_image_text_commit.save_draft": "xhs-image-text-save-draft",
+  "xhs_publish_note_image_text_commit.publish": "xhs-image-text-publish"
 };
 const xhsFieldOwnerRefPattern = /^draft:app-protected\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/(?:title|body)$/i;
 const xhsMediaLocalFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -155,12 +160,13 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
   const profileId = taskIntent?.resource_requirement_profile_id;
   const requirementRefs = taskIntent?.resource_requirement_refs;
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
-  const expectedPackageRef = fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef;
-  const expectedLockRef = fieldAction ? xhsFieldLockRef : xhsMediaLockRef;
-  const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId;
-  const expectedRequirementRef = fieldAction ? "xiaohongshu.publish-note-image-text-fields.resources" : xhsMediaResourceRequirementRef;
+  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
+  const expectedPackageRef = fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef;
+  const expectedLockRef = fieldAction ? xhsFieldLockRef : commitAction ? xhsCommitLockRef : xhsMediaLockRef;
+  const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : commitAction ? xhsCommitCapabilityId : xhsMediaCapabilityId;
+  const expectedRequirementRef = fieldAction ? "xiaohongshu.publish-note-image-text-fields.resources" : commitAction ? "xiaohongshu.publish-note-image-text-commit.resources" : xhsMediaResourceRequirementRef;
   if (body.package_ref !== expectedPackageRef ||
-    !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id"].includes(key)) ||
+    !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id", ...(commitAction ? ["marker", "visibility"] : [])].includes(key)) ||
     capability?.ref !== `lode:capability/${expectedCapabilityId}` ||
     capability.version !== (fieldAction ? "0.1.1" : "0.1.0") || capability.source_ref !== expectedPackageRef || capability.lock_ref !== expectedLockRef ||
     scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref, fieldAction) ||
@@ -180,6 +186,12 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
     return refs.length >= 1 && refs.every((ref) => xhsMediaLocalFileRefPattern.test(ref));
   }
   if (fieldAction) return refs.length === 2 && refs[0]?.endsWith("/title") && refs[1]?.endsWith("/body") && refs.every((ref) => xhsFieldOwnerRefPattern.test(ref));
+  if (commitAction) {
+    const marker = input.marker;
+    const visibility = input.visibility;
+    return refs.length === 0 && typeof marker === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) &&
+      (actionId.endsWith(".save_draft") ? visibility === "not_applicable" : visibility === "only_me" || visibility === "public");
+  }
   return refs.length === 0;
 }
 
@@ -220,9 +232,9 @@ async function validateRuntimeTaskSubmissionRequest(
   const taskInput = jsonObject(task_intent.input);
   const pathPrepare = package_ref === xhsPathPreparePackageRef && capability?.ref === "lode:capability/publish-note-path-prepare" &&
     capability.source_ref === package_ref && scope?.target_type === "creator_publish_page";
-  const mediaAction = (package_ref === xhsMediaPackageRef || package_ref === xhsFieldPackageRef) &&
-    capability?.ref === `lode:capability/${package_ref === xhsFieldPackageRef ? xhsFieldCapabilityId : xhsMediaCapabilityId}` &&
-    capability.version === (package_ref === xhsFieldPackageRef ? "0.1.1" : "0.1.0") && capability.source_ref === package_ref && capability.lock_ref === (package_ref === xhsFieldPackageRef ? xhsFieldLockRef : xhsMediaLockRef) &&
+  const mediaAction = (package_ref === xhsMediaPackageRef || package_ref === xhsFieldPackageRef || package_ref === xhsCommitPackageRef) &&
+    capability?.ref === `lode:capability/${package_ref === xhsFieldPackageRef ? xhsFieldCapabilityId : package_ref === xhsCommitPackageRef ? xhsCommitCapabilityId : xhsMediaCapabilityId}` &&
+    capability.version === (package_ref === xhsFieldPackageRef ? "0.1.1" : "0.1.0") && capability.source_ref === package_ref && capability.lock_ref === (package_ref === xhsFieldPackageRef ? xhsFieldLockRef : package_ref === xhsCommitPackageRef ? xhsCommitLockRef : xhsMediaLockRef) &&
     scope?.target_type === "creator_publish_page";
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";

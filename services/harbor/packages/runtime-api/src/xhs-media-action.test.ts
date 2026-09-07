@@ -53,6 +53,18 @@ const fieldFill = {
   }
 };
 
+const saveDraft = {
+  ...upload,
+  action_id: "xhs_publish_note_image_text_commit.save_draft" as const,
+  refs: [],
+  marker: "0907-2214",
+  visibility: "not_applicable" as const,
+  authorization_binding: {
+    ...upload.authorization_binding,
+    action_id: "xhs_publish_note_image_text_commit.save_draft" as const
+  }
+};
+
 test("keeps the two media actions independent and exact", () => {
   const admittedUpload = admitXhsMediaAction(upload);
   const admittedGenerate = admitXhsMediaAction(generate);
@@ -69,6 +81,18 @@ test("keeps the two media actions independent and exact", () => {
   assert.equal(admitXhsMediaAction({ ...fieldFill, url: `${fieldFill.url}?from=menu_left&target=image` }), null);
   assert.equal(xhsMediaActionEffect(fieldFill.action_id), "modify");
   assert.equal(admitXhsMediaAction({ ...fieldFill, refs: [...fieldFill.refs].reverse() }), null);
+});
+
+test("admits only an exact independently-authorized commit action", () => {
+  assert.equal(admitXhsMediaAction(saveDraft)?.marker, "0907-2214");
+  assert.equal(xhsMediaActionEffect(saveDraft.action_id), "save_draft");
+  assert.equal(admitXhsMediaAction({ ...saveDraft, visibility: "public" }), null);
+  assert.equal(admitXhsMediaAction({ ...saveDraft, refs: upload.refs }), null);
+  assert.equal(admitXhsMediaAction({
+    ...saveDraft,
+    action_id: "xhs_publish_note_image_text_commit.publish",
+    visibility: "only_me"
+  }), null);
 });
 
 test("normalizes field fill without exposing protected values", () => {
@@ -125,8 +149,8 @@ test("preserves unknown upload outcome and never retries", () => {
   assert.equal(result.normalized.operation.status, "unknown_outcome");
   assert.equal(result.normalized.recovery.entrypoint, "manual_reconciliation");
   assert.equal(result.normalized.submitted, false);
-  assert.equal(result.normalized.save_draft, "not_in_scope");
-  assert.equal(result.normalized.publish, "not_in_scope");
+  assert.equal("save_draft" in result.normalized && result.normalized.save_draft, "not_in_scope");
+  assert.equal("publish" in result.normalized && result.normalized.publish, "not_in_scope");
   const resolverFailure = unavailableXhsMediaAction("session_1", upload, "media_ref_unavailable");
   assert.equal(resolverFailure.normalized.business_effect.status, "failed");
   assert.equal(resolverFailure.normalized.operation.status, "terminal");
