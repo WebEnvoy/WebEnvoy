@@ -344,19 +344,22 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     ...element("图片编辑 1/18"),
     querySelectorAll: (selector: string) => selector === "img" ? [element("")] : []
   };
-  const publishHost = element("", {
+  const hostAttributes: Record<string, string> = {
     "is-publish": "true",
     "is-save-draft": "true",
     "submit-text": "发布",
     "save-text": "暂存离开",
     "submit-disabled": "false",
     "save-disabled": "false"
-  });
+  };
+  const publishHost = element("", hostAttributes);
+  const imageCompositions = [imageComposition];
   const controls = [title, body];
   const app = {
     ...element(""),
-    querySelector: (selector: string) => selector === ".publish-page-content-media" ? imageComposition : null,
-    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost] : selector.includes("aria-invalid") ? [] : [app]
+    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost]
+      : selector === ".publish-page-content-media" ? imageCompositions
+      : selector.includes("aria-invalid") ? [] : [app]
   };
   const document = {
     body: { innerText: "" },
@@ -367,9 +370,10 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout",
     `return ${writePrecheckProbeExpression("image_text_upload")}`
   );
+  const location = { href: "https://creator.xiaohongshu.com/publish/publish?from=tab_switch", origin: "https://creator.xiaohongshu.com", pathname: "/publish/publish" };
   const result = await evaluate(
     document,
-    { href: "https://creator.xiaohongshu.com/publish/publish?from=tab_switch", origin: "https://creator.xiaohongshu.com", pathname: "/publish/publish" },
+    location,
     () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }),
     1200,
     800,
@@ -381,6 +385,15 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.save_draft_control.availability, "available");
   assert.equal(result.publish_control.availability, "available");
   assert.equal(result.composition_state, "composition_initialized");
+
+  delete hostAttributes["submit-disabled"];
+  const missingDisabled = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  assert.equal(missingDisabled.publish_control.observation, "unknown");
+
+  hostAttributes["submit-disabled"] = "false";
+  controls.push(element("other body", { contenteditable: "true" }));
+  const ambiguousBody = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  assert.equal(ambiguousBody.field_states.content_editor.observation, "unknown");
 });
 
 test("#405 path request observation continues requests and leaves external effects unknown", () => {

@@ -218,7 +218,8 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     observations.challenge_absent !== true ||
     (observations.path_observed !== undefined && !["observed", "unobserved", "unknown"].includes(String(observations.path_observed))) ||
     (observations.path_entry_visible !== undefined && !["observed", "unobserved", "unknown"].includes(String(observations.path_entry_visible))) ||
-    (data.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" || observations.path_entry_visible !== "observed")) ||
+    (data.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" ||
+      (observations.path_entry_visible !== "observed" && data.composition_state !== "composition_initialized"))) ||
     !validFields || !validFieldState(validation) || !validFieldState(saveDraft) || !validFieldState(publishControl) ||
     !validMediaState ||
     prohibited?.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false ||

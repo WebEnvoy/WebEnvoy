@@ -687,6 +687,22 @@ async function runDesktopChecks() {
       !xhsPrecheckModel.fields.some((field) => field.label === "target_ref"),
     "The canonical XHS write-precheck did not render its submitted=false business boundary.",
   );
+  const initializedXhsPrecheck = projectStandardBusinessResult(resultRun, {
+    ...xhsPrecheckResult,
+    result: {
+      ...xhsPrecheckResult.result,
+      data: {
+        ...xhsPrecheckResult.result.data,
+        precheck_scope: "composition_observation",
+        composition_state: "composition_initialized",
+        entrypoint_observations: { ...xhsPrecheckResult.result.data.entrypoint_observations, path_observed: "observed", path_entry_visible: "unknown" },
+      },
+    },
+  });
+  assert(
+    initializedXhsPrecheck.kind === "object" && !initializedXhsPrecheck.fields.some((field) => field.label === "结果不可用"),
+    "An initialized XHS composition was rejected only because its path entry was hidden.",
+  );
   const invalidXhsPrecheck = projectStandardBusinessResult(resultRun, {
     ...xhsPrecheckResult,
     result: { ...xhsPrecheckResult.result, data: { ...xhsPrecheckResult.result.data, submitted: true } },

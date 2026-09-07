@@ -281,7 +281,7 @@ test("accepts dynamic composition observations without mistaking selector drift 
       text_image_entry_visible: false,
       composition_path: "image_text_upload",
       path_observed: "observed",
-      path_entry_visible: "observed",
+      path_entry_visible: "unknown",
       composition_state: "composition_initialized",
       field_states: {
         title_input: { availability: "available", observation: "observed", editable: "observed", value_state: "empty" },

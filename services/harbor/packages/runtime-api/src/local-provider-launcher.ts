@@ -1196,15 +1196,20 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         ? pathControls.some((el) => pathLabels.some((expected) => label(el) === expected))
         : pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
       const activePath = Boolean(selectedRequestedPath && pathControls.includes(selectedRequestedPath));
-      const imageCompositionSurface = requestedPath === 'image_text_upload' ? creatorSurface?.querySelector('.publish-page-content-media') : undefined;
-      const imageComposition = Boolean(imageCompositionSurface && visible(imageCompositionSurface) &&
-        imageCompositionSurface.querySelectorAll('img').length > 0 && /图片编辑/.test(imageCompositionSurface.textContent || ''));
+      const imageCompositionSurfaces = requestedPath === 'image_text_upload' && creatorSurface
+        ? [...creatorSurface.querySelectorAll('.publish-page-content-media')].filter((el) => visible(el))
+        : [];
+      const imageCompositionSurface = imageCompositionSurfaces.length === 1 ? imageCompositionSurfaces[0] : undefined;
+      const imageComposition = Boolean(imageCompositionSurface &&
+        [...imageCompositionSurface.querySelectorAll('img')].some((el) => visible(el)) &&
+        /图片编辑/.test(imageCompositionSurface.textContent || ''));
       const observedPath = activePath || imageComposition;
       const path_observed = observedPath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
       const titleControl = findControl([/标题|title/i], false, surfaceControls);
-      const contentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls) ||
-        surfaceControls.find((el) => el.getAttribute('contenteditable') === 'true');
+      const labeledContentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls);
+      const contentEditables = surfaceControls.filter((el) => el.getAttribute('contenteditable') === 'true');
+      const contentControl = labeledContentControl || (contentEditables.length === 1 ? contentEditables[0] : undefined);
       const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i], false, surfaceControls);
       const saveControl = findControl([/保存草稿|保存|save draft/i], false, surfaceControls);
       const publishHosts = creatorSurface ? [...creatorSurface.querySelectorAll('xhs-publish-btn')].filter((el) => visible(el, true)) : [];
@@ -1215,7 +1220,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         const text = publishHost?.getAttribute(isPublish ? 'submit-text' : 'save-text') || '';
         const expected = isPublish ? /^发布$|发布笔记|立即发布|publish/i : /暂存|保存草稿|保存|save draft/i;
         if (!present || !expected.test(text)) return { availability: 'unknown', observation: 'unknown' };
-        const disabled = publishHost?.getAttribute(isPublish ? 'submit-disabled' : 'save-disabled') === 'true';
+        const disabledState = publishHost?.getAttribute(isPublish ? 'submit-disabled' : 'save-disabled');
+        if (disabledState !== 'true' && disabledState !== 'false') return { availability: 'unknown', observation: 'unknown' };
+        const disabled = disabledState === 'true';
         return { availability: disabled ? 'unavailable' : 'available', observation: 'observed', editable: disabled ? 'unobserved' : 'observed', value_state: 'unknown' };
       };
       const validationControl = [...(creatorSurface?.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error"], [class*="valid"]') || [])]

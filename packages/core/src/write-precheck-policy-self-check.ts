@@ -777,7 +777,11 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
         validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
           validateCalls += 1;
           legacyRequestBody = { ...input };
-          return completedWritePrecheckOperation({ runtime_session_ref: input.runtime_session_ref, target_ref: input.target_ref, suffix: mode });
+          const operation = completedWritePrecheckOperation({ runtime_session_ref: input.runtime_session_ref, target_ref: input.target_ref, suffix: mode });
+          operation.precheck_scope = "composition_observation";
+          operation.composition_state = "composition_initialized";
+          (operation.entrypoint_observations as Record<string, unknown>).path_entry_visible = "unknown";
+          return operation;
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
         releaseCoreTaskSession: async () => { releaseCalls += 1; return undefined; }
