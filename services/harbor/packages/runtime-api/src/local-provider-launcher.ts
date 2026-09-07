@@ -545,6 +545,7 @@ async function executeXhsMediaAction(
   return withCdp(pageTarget.webSocketDebuggerUrl, async (client) => {
     await sendMediaActionCdp(client, "Runtime.enable");
     await sendMediaActionCdp(client, "Page.enable");
+    await sendMediaActionCdp(client, "DOM.enable");
     const before = await evaluateMediaActionObservation(client);
     const pageFailure = mediaPageFailure(before, input.target_url);
     if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
