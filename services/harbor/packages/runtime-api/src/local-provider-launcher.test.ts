@@ -393,4 +393,8 @@ test("#405 observation preserves path state for the bounded path branch", () => 
   };
   assert.equal(validateXhsWritePrecheckObservation(input, { ...base, path_observed: "unobserved" }).status, "completed");
   assert.equal(validateXhsWritePrecheckObservation(input, base).status, "completed");
+  assert.equal(validateXhsWritePrecheckObservation(
+    { ...input, target_url: `${input.target_url}/` },
+    { ...base, url: `${base.url}/`, pathname: "/publish/publish/" }
+  ).status, "completed");
 });

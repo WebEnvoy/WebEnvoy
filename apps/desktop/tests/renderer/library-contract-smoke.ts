@@ -329,7 +329,7 @@ function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
     outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
     outputKind: "xhs_publish_note_precheck",
     inputFields: [
-      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri" },
+      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri", pattern: "^https://creator\\.xiaohongshu\\.com/publish/publish/?$", patternSafety: "linear" },
       { id: "target_ref", label: "目标引用", kind: "text", required: true, description: "Harbor 写前目标引用", inputProjection: "owner_ref" },
       { id: "no_submit_guard", label: "不提交保护", kind: "constant", required: true, description: "固定为 active", defaultValue: "active", inputProjection: "safe_summary" },
     ],
@@ -500,7 +500,7 @@ async function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
   const localRef = "local_file_ref_00000000-0000-4000-8000-000000000041";
   const policy = mediaExecutionPolicy(skill);
   const uploadDraft = createSkillInputDraft(submissionSkill);
-  uploadDraft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  uploadDraft.values.url = "https://creator.xiaohongshu.com/publish/publish/";
   uploadDraft.values.action_id = uploadAction.id;
   uploadDraft.values.requested_path = "image_text_upload";
   uploadDraft.values.summary = "一次图文图片上传";
@@ -567,7 +567,7 @@ async function checkXhsFieldAction(baseSkill: LodeCatalogSkill) {
     outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-fields/output@0.1.1",
     outputKind: "xhs_publish_note_image_text_fields",
     inputFields: [
-      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri" },
+      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri", pattern: "^https://creator\\.xiaohongshu\\.com/publish/publish/?$", patternSafety: "linear" },
       { id: "target_ref", label: "目标引用", kind: "text", required: true, description: "Harbor 目标引用", inputProjection: "owner_ref" },
       { id: "action_id", label: "动作", kind: "constant", required: true, description: "语义图文编排动作", inputProjection: "safe_summary", defaultValue: action.id },
       { id: "requested_path", label: "图文路径", kind: "constant", required: true, description: "上传图文路径", inputProjection: "safe_summary", defaultValue: "image_text_upload" },
@@ -580,17 +580,26 @@ async function checkXhsFieldAction(baseSkill: LodeCatalogSkill) {
   let previewRequests = 0;
   window.webenvoyShell = { ...owner!, requestOwnerJson: async () => { previewRequests += 1; throw new Error("field action must defer runtime facts to task admission"); } };
   let compatibility;
+  let invalidCompatibility;
   try {
     compatibility = await fetchSkillIdentityCompatibility("http://core.owner", skill, [identity.identityEnvironmentRef]);
+    invalidCompatibility = await fetchSkillIdentityCompatibility(
+      "http://core.owner",
+      skill,
+      [identity.identityEnvironmentRef],
+      undefined,
+      "https://attacker.example/publish/publish",
+    );
   } finally {
     window.webenvoyShell = owner;
   }
-  if (previewRequests !== 0 || compatibility.status !== "ready" || compatibility.candidates[0]?.reasonCodes[0] !== "runtime_facts_require_task_admission") {
+  if (previewRequests !== 0 || compatibility.status !== "ready" || compatibility.candidates[0]?.reasonCodes[0] !== "runtime_facts_require_task_admission" ||
+    invalidCompatibility.status !== "unavailable" || projectCompatibilityTarget(skill, "https://creator.xiaohongshu.com/publish/publish/").status !== "ready") {
     throw new Error("Field action compatibility did not use the exact task-admission boundary.");
   }
   const submissionSkill = projectTaskSubmissionSkill(skill);
   const draft = createSkillInputDraft(submissionSkill);
-  draft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  draft.values.url = "https://creator.xiaohongshu.com/publish/publish/";
   draft.values.action_id = action.id;
   draft.values.requested_path = "image_text_upload";
   draft.values.title = "WebEnvoy 字段验收";

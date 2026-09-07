@@ -191,6 +191,10 @@ function normalizedCompositionPath(value: XhsWritePrecheckCompositionPath | unde
   return value && writePrecheckCompositionPaths.has(value) ? value : "image_text_upload";
 }
 
+function isCreatorPublishPath(pathname: string | undefined): boolean {
+  return pathname?.replace(/\/$/, "") === "/publish/publish";
+}
+
 export function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
   if (!observed) return false;
   try {
@@ -282,7 +286,7 @@ export function validateXhsWritePrecheckObservation(
   if (observation.login_like) return writePrecheckUnavailable("login_required", "The creator page requires manual login.", true, failure_stage);
   if (
     observation.origin !== input.expected_origin ||
-    observation.pathname !== "/publish/publish" ||
+    !isCreatorPublishPath(observation.pathname) ||
     !sameWritePrecheckUrl(observation.url, input.target_url)
   ) return writePrecheckUnavailable("page_changed", "The current page is not the exact requested creator publish page.", true, failure_stage);
   // A missing semantic root can be selector drift just as easily as a page
@@ -322,7 +326,7 @@ export function validateXhsWritePrecheckObservation(
     composition_path,
     composition_state,
     entrypoint_observations: {
-      route_loaded: observation.pathname === "/publish/publish",
+      route_loaded: isCreatorPublishPath(observation.pathname),
       publish_vue_container_visible: observation.creator_root_count === undefined || observation.creator_root_count > 0,
       upload_image_tab_active: observation.upload_image_tab_active === true,
       upload_image_entry_visible: observation.upload_image_entry_visible === true,
@@ -625,7 +629,7 @@ async function executeXhsMediaAction(
           fieldProbe = await evaluateFieldFill(client, title, body, false);
         }
         after = await evaluateMediaActionObservation(client);
-        const routeObserved = after?.origin === input.expected_origin && after.pathname === "/publish/publish" && sameWritePrecheckUrl(after.url, input.target_url);
+        const routeObserved = after?.origin === input.expected_origin && isCreatorPublishPath(after.pathname) && sameWritePrecheckUrl(after.url, input.target_url);
         const fieldReadback = fieldReadbackFromProbe(fieldProbe);
         const matched = fieldReadback.validation_status === "passed";
         const unknown = fieldReadback.validation_status === "unknown" || !routeObserved;
@@ -672,7 +676,7 @@ async function executeXhsMediaAction(
       await sendMediaActionCdp(client, "Fetch.disable").catch(() => undefined);
     }
     const observed = after ?? await evaluateMediaActionObservation(client);
-    const routeObserved = observed?.origin === input.expected_origin && observed.pathname === "/publish/publish" && sameWritePrecheckUrl(observed.url, input.target_url);
+    const routeObserved = observed?.origin === input.expected_origin && isCreatorPublishPath(observed.pathname) && sameWritePrecheckUrl(observed.url, input.target_url);
     const expectedMediaObserved = input.action_id.endsWith("image_upload")
       ? (observed?.media_count ?? 0) - (before?.media_count ?? 0) >= input.refs.length
       : before?.generated_result_visible !== true && observed?.generated_result_visible === true;
@@ -730,7 +734,7 @@ function mediaPageFailure(observation: MediaPageObservation | undefined, targetU
   if (!observation) return { failure_class: "page_changed", message: "The creator page returned no semantic observation.", retryable: true };
   if (observation.challenge_like) return { failure_class: "safety_challenge", message: "The creator page shows a safety challenge.", retryable: false };
   if (observation.login_like) return { failure_class: "login_required", message: "The creator page requires manual login.", retryable: false };
-  if (observation.origin !== "https://creator.xiaohongshu.com" || observation.pathname !== "/publish/publish" || !sameWritePrecheckUrl(observation.url, targetUrl)) {
+  if (observation.origin !== "https://creator.xiaohongshu.com" || !isCreatorPublishPath(observation.pathname) || !sameWritePrecheckUrl(observation.url, targetUrl)) {
     return { failure_class: "page_changed", message: "The current page is not the requested creator publish page.", retryable: true };
   }
   return null;
@@ -1017,7 +1021,7 @@ function pathPrepareState(
 ): XhsPathPrepareNormalizedState {
   const requestedControl = requestedPath === "image_text_upload" ? "upload_image" : "generate_image";
   const businessState = (observation: WritePrecheckObservation | undefined): XhsPathPrepareNormalizedState["business_state_before"] => ({
-    route_state: observation?.pathname === "/publish/publish" ? "observed" : "mismatch",
+    route_state: isCreatorPublishPath(observation?.pathname) ? "observed" : "mismatch",
     control_owner_state: observation?.creator_app_owned === true ? "observed" : "unknown",
     observed_path: observation?.path_observed === "observed" ? "observed" : observation?.path_observed === "unobserved" ? "mismatch" : "unknown",
     composition_state: observation?.composition_state === "composition_initialized" ? "initialized" : observation?.composition_state === "composition_not_initialized" ? "not_initialized" : "unknown",

@@ -257,6 +257,19 @@ export function projectCompatibilityTarget(skill: LodeCatalogSkill, value?: stri
   if (!skillRequiresExactTarget(skill)) {
     const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
     const origin = action?.supportedOrigins.length === 1 ? publicOrigin(action.supportedOrigins[0]!) : null;
+    if (isPinnedXiaohongshuImageUpload(skill) && value != null && value.trim().length > 0) {
+      const field = skill.inputFields.find((item) => item.id === "url" && item.required && item.format === "uri");
+      try {
+        const url = new URL(value);
+        if (origin !== url.origin || url.username || url.password || url.hash ||
+          field?.pattern == null || field.patternSafety !== "linear" || !new RegExp(field.pattern).test(value)) {
+          return { status: "invalid", summary: "具体目标不符合技能声明的站点与路径。" };
+        }
+        return { status: "ready", targetRef: value };
+      } catch {
+        return { status: "invalid", summary: "具体目标不是合法的创作页网址。" };
+      }
+    }
     return origin == null ? { status: "invalid", summary: "技能缺少可验证的目标来源。" } : { status: "ready", targetRef: `${origin}/` };
   }
   if (value == null || value.trim().length === 0) return { status: "awaiting_input" };

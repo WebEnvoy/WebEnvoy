@@ -392,11 +392,12 @@ function taskTarget(skill: LodeCatalogSkill, identity: Identity, draft: SkillInp
   const identityOrigin = new URL(identity.origin).origin;
   const exactCreatorPrecheck = (isXiaohongshuPublishPrecheckSkill(skill) || isXiaohongshuPathPrepareSkill(skill) || isXiaohongshuMediaSkill(skill) || isXiaohongshuFieldSkill(skill)) &&
     identity.siteId === "xiaohongshu" && identityOrigin === "https://www.xiaohongshu.com" &&
-    url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish";
+    url.origin === "https://creator.xiaohongshu.com" && url.pathname.replace(/\/$/, "") === "/publish/publish";
   if (url.username || url.password || !action.supportedOrigins.includes(url.origin) ||
     (url.origin !== identityOrigin && !exactCreatorPrecheck)) {
     return { ok: false as const, reason: "目标网址与技能或账号身份声明的站点不匹配。" };
   }
+  if (exactCreatorPrecheck) url.pathname = "/publish/publish";
   if (skill.packageRef.includes("/search-notes@")) {
     url = new URL("/search_result", url.origin);
     url.searchParams.set("keyword", stringValue(draft.values.keyword));
