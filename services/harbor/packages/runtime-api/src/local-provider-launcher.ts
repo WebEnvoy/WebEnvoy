@@ -3087,6 +3087,8 @@ async function pageTargets(port: string, signal?: AbortSignal): Promise<CdpPageT
 export function selectPage(pages: CdpPageTarget[], requested_url?: string) {
   if (requested_url) {
     const pageTargets = pages.filter((candidate) => candidate.type === "page");
+    const creatorImageTextPage = pageTargets.find((candidate) => isCreatorImageTextRedirect(candidate.url, requested_url));
+    if (creatorImageTextPage) return creatorImageTextPage;
     return pages.find((candidate) => candidate.type === "page" && candidate.url === requested_url) ??
       pages.find((candidate) => candidate.type === "page" && urlsReferToSamePage(candidate.url, requested_url)) ??
       (pageTargets.length === 1 ? pageTargets[0] : undefined);
@@ -3094,6 +3096,17 @@ export function selectPage(pages: CdpPageTarget[], requested_url?: string) {
   return pages.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl) ??
     pages.find((candidate) => candidate.type === "page") ??
     pages[0];
+}
+
+function isCreatorImageTextRedirect(candidateUrl: string | undefined, requestedUrl: string) {
+  try {
+    const candidate = new URL(candidateUrl ?? "");
+    const requested = new URL(requestedUrl);
+    return requested.origin === "https://creator.xiaohongshu.com" && requested.pathname.replace(/\/$/, "") === "/publish/publish" &&
+      !requested.search && candidate.search === "?from=tab_switch" && sameWritePrecheckUrl(candidateUrl, requestedUrl);
+  } catch {
+    return false;
+  }
 }
 
 function urlsReferToSamePage(candidate_url?: string, requested_url?: string): boolean {

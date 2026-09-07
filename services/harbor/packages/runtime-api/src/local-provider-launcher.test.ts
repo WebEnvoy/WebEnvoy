@@ -150,6 +150,13 @@ test("selectPage accepts only the bounded creator tab-switch redirect with other
   assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=other` }], requestedUrl), undefined);
 });
 
+test("selectPage prefers the bounded creator image-text redirect over stale exact video tabs", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish";
+  const exact = { id: "video", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://video" };
+  const imageText = { id: "image-text", type: "page", url: `${requestedUrl}?from=tab_switch`, webSocketDebuggerUrl: "ws://image-text" };
+  assert.equal(selectPage([exact, imageText], requestedUrl)?.id, "image-text");
+});
+
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?tag=first&tag=second";
   const reordered = { id: "reordered", type: "page", url: "https://www.xiaohongshu.com/search_result?tag=second&tag=first", webSocketDebuggerUrl: "ws://reordered" };
