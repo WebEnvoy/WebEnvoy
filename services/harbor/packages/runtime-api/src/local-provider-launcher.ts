@@ -333,7 +333,10 @@ export function validateXhsWritePrecheckObservation(
     ],
     evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
     classification: "partial_result",
-    precheck_scope: observation.path_observed === "observed" && observation.path_entry_visible === "observed" ? "composition_observation" : "entrypoint_only",
+    precheck_scope: observation.path_observed === "observed" &&
+      (observation.path_entry_visible === "observed" || observation.composition_state === "composition_initialized")
+      ? "composition_observation"
+      : "entrypoint_only",
     composition_path,
     composition_state,
     entrypoint_observations: {
@@ -1193,12 +1196,28 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         ? pathControls.some((el) => pathLabels.some((expected) => label(el) === expected))
         : pathLabels.some((expected) => hasLabel([new RegExp(expected)], false, surfaceControls));
       const activePath = Boolean(selectedRequestedPath && pathControls.includes(selectedRequestedPath));
-      const path_observed = activePath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
+      const imageCompositionSurface = requestedPath === 'image_text_upload' ? creatorSurface?.querySelector('.publish-page-content-media') : undefined;
+      const imageComposition = Boolean(imageCompositionSurface && visible(imageCompositionSurface) &&
+        imageCompositionSurface.querySelectorAll('img').length > 0 && /图片编辑/.test(imageCompositionSurface.textContent || ''));
+      const observedPath = activePath || imageComposition;
+      const path_observed = observedPath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
       const titleControl = findControl([/标题|title/i], false, surfaceControls);
-      const contentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls);
+      const contentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls) ||
+        surfaceControls.find((el) => el.getAttribute('contenteditable') === 'true');
       const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i], false, surfaceControls);
       const saveControl = findControl([/保存草稿|保存|save draft/i], false, surfaceControls);
+      const publishHosts = creatorSurface ? [...creatorSurface.querySelectorAll('xhs-publish-btn')].filter((el) => visible(el, true)) : [];
+      const publishHost = publishHosts.length === 1 ? publishHosts[0] : undefined;
+      const hostControlState = (kind) => {
+        const isPublish = kind === 'publish';
+        const present = publishHost?.getAttribute(isPublish ? 'is-publish' : 'is-save-draft') === 'true';
+        const text = publishHost?.getAttribute(isPublish ? 'submit-text' : 'save-text') || '';
+        const expected = isPublish ? /^发布$|发布笔记|立即发布|publish/i : /暂存|保存草稿|保存|save draft/i;
+        if (!present || !expected.test(text)) return { availability: 'unknown', observation: 'unknown' };
+        const disabled = publishHost?.getAttribute(isPublish ? 'submit-disabled' : 'save-disabled') === 'true';
+        return { availability: disabled ? 'unavailable' : 'available', observation: 'observed', editable: disabled ? 'unobserved' : 'observed', value_state: 'unknown' };
+      };
       const validationControl = [...(creatorSurface?.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error"], [class*="valid"]') || [])]
         .find((el) => visible(el, true));
       const fieldState = (el) => {
@@ -1210,8 +1229,8 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       };
       const title = fieldState(titleControl);
       const content = fieldState(contentControl);
-      const publish = fieldState(publishControl);
-      const save = fieldState(saveControl);
+      const publish = publishControl ? fieldState(publishControl) : hostControlState('publish');
+      const save = saveControl ? fieldState(saveControl) : hostControlState('save');
       const validation = fieldState(validationControl);
       const mediaDefinitions = {
         image_text_upload: [['upload_image', [/上传图片/]]],
@@ -1223,7 +1242,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const mediaControls = {};
       for (const [id, patterns] of mediaDefinitions[requestedPath] || []) {
         const control = findControl(patterns, false, surfaceControls);
-        mediaControls[id] = fieldState(control);
+        mediaControls[id] = control ? fieldState(control) : id === 'upload_image' && imageComposition
+          ? { availability: 'available', observation: 'observed', editable: 'observed', value_state: 'unknown' }
+          : fieldState(control);
       }
       const mediaControl = (mediaDefinitions[requestedPath] || []).map(([, patterns]) => findControl(patterns, false, surfaceControls)).find(Boolean);
       // Merely seeing an upload control is the entrypoint, not an initialized
@@ -1231,7 +1252,8 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       // publication control is present; file selection is intentionally not
       // performed by this read-only probe.
       const editableControl = (el) => Boolean(el && !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true');
-      const composition_initialized = Boolean(activePath && [titleControl, contentControl, publishControl, saveControl].some(editableControl));
+      const composition_initialized = Boolean(observedPath && ([titleControl, contentControl, publishControl, saveControl].some(editableControl) ||
+        publish.observation === 'observed' || save.observation === 'observed'));
       const loginSurface = location.pathname.startsWith('/login') || [...document.querySelectorAll('[class*="login"], [class*="qrcode"], [class*="qr-code"]')]
         .some((el) => visible(el, true) && /扫码登录|手机号登录|登录二维码/.test(el.textContent || ''));
       return {
@@ -1243,15 +1265,15 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         creator_app_owned: Boolean(creatorSurface),
         creator_surface_state: creatorSurface ? 'observed' : 'unknown',
         creator_root_count: roots.length,
-        upload_image_tab_active: Boolean(activePath && requestedPath === 'image_text_upload'),
+        upload_image_tab_active: Boolean(observedPath && requestedPath === 'image_text_upload'),
         upload_image_entry_visible: hasLabel([/上传图片/], false, surfaceControls),
         text_image_entry_visible: hasLabel([/文字配图/], false, surfaceControls),
         composition_path: requestedPath,
         path_observed,
         path_entry_visible,
-        composition_state: activePath ? (composition_initialized ? 'composition_initialized' : 'composition_not_initialized') : 'composition_unknown',
+        composition_state: observedPath ? (composition_initialized ? 'composition_initialized' : 'composition_not_initialized') : 'composition_unknown',
         field_states: { title_input: title, content_editor: content, publish_control: publish },
-        media_state: { availability: mediaControl ? 'available' : 'unknown', observation: mediaControl ? 'observed' : 'unknown', controls: mediaControls },
+        media_state: { availability: mediaControl || imageComposition ? 'available' : 'unknown', observation: mediaControl || imageComposition ? 'observed' : 'unknown', controls: mediaControls },
         validation_state: validation,
         save_draft_control: save,
         publish_control: publish

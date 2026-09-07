@@ -325,6 +325,64 @@ test("#405 path probe does not click a data-testid decoy", async () => {
   assert.equal(clicks, 0);
 });
 
+test("#419 precheck observes the public host contract for closed-shadow draft and publish controls", async () => {
+  const element = (label: string, attributes: Record<string, string> = {}) => ({
+    className: attributes.class ?? "",
+    disabled: false,
+    hidden: false,
+    readOnly: false,
+    textContent: label,
+    contains: () => true,
+    closest: () => null,
+    getAttribute: (name: string) => attributes[name] ?? null,
+    getBoundingClientRect: () => ({ width: 100, height: 40, right: 100, bottom: 100, left: 0, top: 0 }),
+    checkVisibility: () => true
+  });
+  const title = element("", { placeholder: "填写标题" });
+  const body = element("test body", { contenteditable: "true" });
+  const imageComposition = {
+    ...element("图片编辑 1/18"),
+    querySelectorAll: (selector: string) => selector === "img" ? [element("")] : []
+  };
+  const publishHost = element("", {
+    "is-publish": "true",
+    "is-save-draft": "true",
+    "submit-text": "发布",
+    "save-text": "暂存离开",
+    "submit-disabled": "false",
+    "save-disabled": "false"
+  });
+  const controls = [title, body];
+  const app = {
+    ...element(""),
+    querySelector: (selector: string) => selector === ".publish-page-content-media" ? imageComposition : null,
+    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost] : selector.includes("aria-invalid") ? [] : [app]
+  };
+  const document = {
+    body: { innerText: "" },
+    querySelector: () => app,
+    querySelectorAll: (selector: string) => selector.includes("login") ? [] : controls
+  };
+  const evaluate = new Function(
+    "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout",
+    `return ${writePrecheckProbeExpression("image_text_upload")}`
+  );
+  const result = await evaluate(
+    document,
+    { href: "https://creator.xiaohongshu.com/publish/publish?from=tab_switch", origin: "https://creator.xiaohongshu.com", pathname: "/publish/publish" },
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }),
+    1200,
+    800,
+    (resolve: () => void) => resolve()
+  );
+  assert.equal(result.field_states.content_editor.observation, "observed");
+  assert.equal(result.path_observed, "observed");
+  assert.equal(result.media_state.observation, "observed");
+  assert.equal(result.save_draft_control.availability, "available");
+  assert.equal(result.publish_control.availability, "available");
+  assert.equal(result.composition_state, "composition_initialized");
+});
+
 test("#405 path request observation continues requests and leaves external effects unknown", () => {
   const continued: string[] = [];
   const continueRequest = (requestId: string) => { continued.push(requestId); };
