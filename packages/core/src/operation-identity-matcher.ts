@@ -46,7 +46,7 @@ export const opaqueDetailOperationContract = {
 } as const;
 
 const xhsCreatorOperationPins = new Set([
-  "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1|xhs_publish_note_precheck",
+  "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2|xhs_publish_note_precheck",
   "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0|xhs_publish_note_path_prepare"
 ]);
 

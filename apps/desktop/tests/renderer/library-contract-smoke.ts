@@ -321,7 +321,7 @@ function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
     ...baseSkill,
     id: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     packageRef: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
-    lockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+    lockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2",
     name: "小红书发布草稿写前验证",
     summary: "只读确认创作入口；不提交。",
     category: "write-precheck",

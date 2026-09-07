@@ -204,7 +204,7 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     result.resultKind !== "validate_only_write_precheck" ||
     result.outputSchemaId !== "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0" ||
     result.capabilityVersion !== "0.1.0" ||
-    result.capabilityLockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
+    result.capabilityLockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2" ||
     data?.schema_version !== "webenvoy.core-xhs-write-precheck-projection.v0" ||
     data.classification !== "partial_result" ||
     !["entrypoint_only", "composition_observation"].includes(String(data.precheck_scope)) ||
@@ -223,7 +223,7 @@ function xhsWritePrecheckResult(result: CoreRunResult): StandardBusinessResult |
     !validMediaState ||
     prohibited?.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false ||
     typeof data.post_check_ref !== "string" || !/^post_check_[A-Za-z0-9._-]+$/.test(data.post_check_ref) ||
-    pin?.package_ref !== packageRef || pin.lock_ref !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1" ||
+    pin?.package_ref !== packageRef || pin.lock_ref !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2" ||
     pin.output_schema_ref !== result.outputSchemaId || pin.version !== "0.1.0" ||
     pin.operation_id !== "xhs_publish_note_precheck" || pin.operation_mode !== "validate_only" ||
     !publicText(data.consumer_boundary, 500)

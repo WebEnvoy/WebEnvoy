@@ -1006,7 +1006,7 @@ async function completeAcceptedUnknownOutcome(
 }
 
 const xhsWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
 const xhsWritePrecheckInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0";
 const xhsWritePrecheckOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0";
 const xhsWritePrecheckLodeCommit = "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b";
@@ -3383,6 +3383,9 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
   };
 
   return async ({ package_ref }) => {
+    if (package_ref === xhsPathPreparePackageRef) {
+      return failure("capability_contract", "capability_deprecated", "admission", "choose_latest_or_known_good");
+    }
     try {
       const registry = object(JSON.parse(await readFile(options.registryPath, "utf8")));
       const entries = Array.isArray(registry?.entries) ? registry.entries.map(object) : [];

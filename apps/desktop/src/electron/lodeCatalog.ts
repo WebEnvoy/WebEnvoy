@@ -9,6 +9,7 @@ import {
 } from "./lodeAssetAccess.js";
 import {
   resolveLodeAssetBundle,
+  retiredLodePackageRefs,
   supportedLodePackageRefs,
   type LodeAssetBundleState,
 } from "./lodeAssetBundle.js";
@@ -129,7 +130,9 @@ export function readLodeCatalog(bundle = resolveLodeAssetBundle()): LodeCatalogS
     )) {
       if (!isRecord(result)) continue;
       const packageRef = optionalString(result.package_ref);
-      if (packageRef) entries.set(packageRef, { ...packageEntries.get(packageRef), ...entries.get(packageRef), ...result });
+      if (packageRef && !retiredLodePackageRefs.has(packageRef)) {
+        entries.set(packageRef, { ...packageEntries.get(packageRef), ...entries.get(packageRef), ...result });
+      }
       if (entries.size > maxCatalogSkills) throw new Error("Lode catalog exceeds the supported skill count.");
     }
     const skills = [...entries.values()]

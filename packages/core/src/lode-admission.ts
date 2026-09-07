@@ -214,9 +214,8 @@ export function parseLodeRuntimeAdmissionPolicy(
 ): LodeRuntimeAdmissionPolicy | FailureRecord | undefined {
   const sitePackage = /^lode:\/\/site-capability\/(xiaohongshu|boss)\//.test(packageRef);
   if (value === undefined) {
-    // #405's proposed path-prepare package intentionally has no
-    // runtime-consumption admission declaration; Harbor is reached only via
-    // Core's bounded validate-only operation seam.
+    // Historical path-prepare contracts remain readable so persisted Runs can
+    // be projected; the production resolver retires new admission explicitly.
     if (packageRef === "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0") return undefined;
     return sitePackage ? invalidLodeContract("runtime_admission_policy_missing") : undefined;
   }

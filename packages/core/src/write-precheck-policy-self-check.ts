@@ -45,7 +45,7 @@ function contract(): LodePackageAdmissionContract {
   return {
     package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
     source_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
-    lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+    lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2",
     capability_id: "publish-note-precheck",
     operation_id: "xhs_publish_note_precheck",
     operation_mode: "validate_only",
@@ -89,7 +89,7 @@ function taskIntent(): TaskIntentEnvelope {
       ref: "lode:capability/publish-note-precheck",
       version: "0.1.0",
       source_ref: contract().package_ref,
-      lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1"
+      lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2"
     },
     input: { summary: "仅验证，不提交" },
     scope: {

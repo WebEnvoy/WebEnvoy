@@ -742,12 +742,7 @@ if (
   xhsPublishPrecheckSkill.lockRef !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2" ||
   xhsPublishPrecheckSkill.actions[0]?.category !== "prepare" ||
   xhsPublishPrecheckSkill.actions[0]?.operationMode !== "validate_only" ||
-  xhsPathPrepareSkill?.availability !== "available" ||
-  xhsPathPrepareSkill.actions[0]?.id !== "xhs_publish_note_path_prepare" ||
-  xhsPathPrepareSkill.actions[0]?.category !== "prepare" ||
-  xhsPathPrepareSkill.actions[0]?.operationMode !== "validate_only" ||
-  xhsPathPrepareSkill.actions[0]?.externalEffects.length !== 0 ||
-  xhsPathPrepareSkill.inputFields.find((field) => field.id === "requested_path")?.options?.join(",") !== "image_text_upload,image_text_generate" ||
+  xhsPathPrepareSkill !== undefined ||
   xhsMediaSkill?.availability !== "available" ||
   xhsMediaSkill.actions.length !== 2 ||
   xhsMediaSkill.actions.some((action) => action.category !== "commit" || action.operationMode !== "write") ||

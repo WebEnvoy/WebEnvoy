@@ -306,7 +306,7 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
   assert.equal(matchLockedOperationIdentity(formalMultiProfileMatch, identityFacts("identity-compatible"), "identity-compatible"), undefined);
 
   const creatorPrecheckRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-  const creatorPrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+  const creatorPrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
   const creatorPrecheckContract: LodePackageAdmissionContract = {
     ...packageContract(),
     package_ref: creatorPrecheckRef,
@@ -363,8 +363,9 @@ export async function assertIdentityCompatibilityPreview(): Promise<void> {
     lodePackageResolver: async () => pathPreparePackageContract()
   });
   assert(!("category" in pathPreparePreview));
-  assert.equal(pathPreparePreview.candidates[0]?.status, "unknown_until_runtime");
-  assert.deepEqual(pathPreparePreview.candidates[0]?.reason_codes, ["runtime_facts_require_task_admission"]);
+  assert.equal(pathPreparePreview.candidates[0]?.status, "incompatible");
+  assert.deepEqual(pathPreparePreview.candidates[0]?.reason_codes, ["package_retired"]);
+  assert.equal(pathPreparePreview.candidates[0]?.owner_status.harbor, "not_checked");
   assert.equal(pathPreparePreview.target_ref, "https://creator.xiaohongshu.com/");
 
   const neighboringContract = { ...pathPreparePackageContract(), package_ref: `${pathPreparePackageRef}-candidate`, source_ref: `${pathPreparePackageRef}-candidate` };

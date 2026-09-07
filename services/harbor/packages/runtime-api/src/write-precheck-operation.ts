@@ -13,7 +13,7 @@ import type {
 export const HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA = "harbor-validate-only-write-precheck/v0";
 export const XHS_PUBLISH_PRECHECK_PIN = {
   package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
-  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+  lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2",
   input_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0",
   output_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
   version: "0.1.0",
