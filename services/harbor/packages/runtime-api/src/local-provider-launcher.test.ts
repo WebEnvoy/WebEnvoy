@@ -88,11 +88,14 @@ test("creator publish sessions warm the existing Xiaohongshu login before openin
   } as never), "https://example.com/publish/publish");
 });
 
-test("creator publish URL accepts only the bounded tab-switch redirect", () => {
+test("creator publish URL accepts only the two page-proven bounded redirects", () => {
   const target = "https://creator.xiaohongshu.com/publish/publish";
   assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch`, target), true);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=menu_left&target=image`, target), true);
   assert.equal(sameWritePrecheckUrl(`${target}?from=other`, target), false);
   assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch&extra=1`, target), false);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=menu_left&target=video`, target), false);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=menu_left&target=image&extra=1`, target), false);
   assert.equal(sameWritePrecheckUrl(`https://attacker.example/publish/publish?from=tab_switch`, target), false);
 });
 
@@ -164,6 +167,14 @@ test("selectPage keeps a bound creator composition target across follow-up opera
 
   assert.equal(selectPage([empty, composition], requestedUrl, "composition")?.id, "composition");
   assert.equal(selectPage([empty, composition], requestedUrl, "missing")?.id, "empty");
+});
+
+test("selectPage adopts the page-proven image composition route over a bound empty entrypoint", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish";
+  const empty = { id: "bound", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://empty" };
+  const composition = { id: "composition", type: "page", url: `${requestedUrl}?from=menu_left&target=image`, webSocketDebuggerUrl: "ws://composition" };
+
+  assert.equal(selectPage([empty, composition], requestedUrl, "bound")?.id, "composition");
 });
 
 test("selectPage ignores a bound target after it leaves the requested creator page", () => {
