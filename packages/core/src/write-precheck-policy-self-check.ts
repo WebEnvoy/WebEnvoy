@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { createFileRunRecordStore, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
-import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, selectXhsCleanupCreationRef, submitRuntimeTask, validateCompletedXhsMediaAction, type HarborRuntimeClient } from "./runtime-task-chain.js";
+import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, selectXhsCleanupCreationRef, selectXhsCollectorAdmissionFacts, submitRuntimeTask, validateCompletedXhsMediaAction, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
 import {
@@ -1388,6 +1388,18 @@ function assertXhsCommitProjection(): void {
   } as unknown as RunRecord;
   assert.equal(selectXhsCleanupCreationRef([creation], marker, identity), contentRef);
   assert.equal(selectXhsCleanupCreationRef([{ ...creation, status: "unknown_outcome" }], marker, identity), undefined);
+  assert.equal(selectXhsCleanupCreationRef([creation, { ...creation, updated_at: "2026-08-31T08:00:01.000Z" }], marker, identity), undefined);
+  const collectorFacts = selectXhsCollectorAdmissionFacts("xhs_publish_note_image_text_commit.publish", [
+    { fact_key: "runtime.execution_surface.available", owner: "Harbor", required: true },
+    { fact_key: "snapshot.publish_control.available", owner: "Harbor", required: true },
+    { fact_key: "post_check.ref_available", owner: "Harbor", required: true },
+    { fact_key: "safety.challenge.absent", owner: "Harbor", required: true }
+  ]);
+  assert(!("category" in collectorFacts));
+  assert.deepEqual(collectorFacts.map((fact) => fact.fact_key), ["runtime.execution_surface.available", "safety.challenge.absent"]);
+  assert("category" in selectXhsCollectorAdmissionFacts("xhs_publish_note_image_text_commit.publish", [
+    { fact_key: "snapshot.unknown_future_control.available", owner: "Harbor", required: true }
+  ]));
 }
 
 async function assertXhsFieldActionWiring(): Promise<void> {

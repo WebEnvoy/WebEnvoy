@@ -849,7 +849,8 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
       const markerCount = bodyText.split(${markerLiteral}).length - 1;
       let scope = body;
       while (scope && title && !scope.contains(title)) scope = scope.parentElement;
-      const media = scope ? unique([...scope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
+      const compositionBound = Boolean(scope && !roots.includes(scope));
+      const media = compositionBound ? unique([...scope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
         const r = el.getBoundingClientRect();
         return visible(el) && r.width >= 80 && r.height >= 80;
       }).length : 0;
@@ -862,8 +863,8 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
         title_candidate_count: titles.length,
         body_candidate_count: bodies.length,
         marker_count: markerCount,
-        marker_matched: titles.length === 1 && bodies.length === 1 && markerCount === 1,
-        fields_matched: titles.length === 1 && bodies.length === 1 && markerCount === 1 && title.value.length > 0 &&
+        marker_matched: compositionBound && titles.length === 1 && bodies.length === 1 && markerCount === 1,
+        fields_matched: compositionBound && titles.length === 1 && bodies.length === 1 && markerCount === 1 && title.value.length > 0 &&
           (${titleLiteral} === undefined || title.value === ${titleLiteral}),
         media_count: media
       };

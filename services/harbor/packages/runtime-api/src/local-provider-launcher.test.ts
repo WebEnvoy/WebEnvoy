@@ -24,17 +24,27 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
   const title = { value: "WE测试", getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
   const media = { getBoundingClientRect: () => rect };
+  const decoy = { getBoundingClientRect: () => rect };
+  const editor: Record<string, unknown> = {
+    parentElement: null,
+    contains: (value: unknown) => value === title,
+    querySelectorAll: () => [media]
+  };
   const root: Record<string, unknown> = {
     parentElement: null,
     contains: (value: unknown) => value === title,
-    querySelectorAll: (selector: string) => selector === "input" ? [title] : selector.includes("contenteditable") ? [body] : [media]
+    querySelectorAll: (selector: string) => selector === "input" ? [title] : selector.includes("contenteditable") ? [body] : [media, decoy]
   };
-  const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: root, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
+  editor.parentElement = root;
+  const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: editor, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
   const document = { body: { innerText: "" }, querySelectorAll: () => [root] };
   const evaluate = new Function("document", "location", "getComputedStyle", `return ${commitProbeExpression("WE-XHS-E2E-1", "WE测试")}`);
   const result = evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" }));
   assert.equal(result.fields_matched, true);
   assert.equal(result.media_count, 1);
+  body.parentElement = root;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  body.parentElement = editor;
   root.querySelectorAll = (selector: string) => selector === "input" ? [title, { ...title }] : selector.includes("contenteditable") ? [body] : [media];
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
 });

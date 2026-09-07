@@ -121,7 +121,8 @@ const SITE_PROFILES: Record<SiteRuntimeId, SiteResourceProfile> = {
       "snapshot.creator_publish_page.available",
       "refmap.write_target_refs.available",
       "evidence.snapshot_ref.available",
-      "no_submit_guard.active"
+      "no_submit_guard.active",
+      "safety.challenge.absent"
     ]
   },
   boss: {

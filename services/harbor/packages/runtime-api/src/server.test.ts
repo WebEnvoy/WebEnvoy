@@ -206,6 +206,11 @@ test("serves identity, session, and evidence endpoint plumbing", async () => {
     assert.equal(siteFacts.evidence_refs.length > 0, true);
     assert.equal(siteFacts.public_boundary.raw_dom, "not_exposed");
 
+    const commitFacts = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=publish_note_image_text_commit`);
+    assert.equal(commitFacts.resource_facts.find((fact: any) => fact.key === "runtime.execution_surface.available")?.state, "available");
+    assert.equal(commitFacts.resource_facts.find((fact: any) => fact.key === "safety.challenge.absent")?.state, "available");
+    assert.equal(commitFacts.public_boundary.external_write_actions, "not_performed");
+
     const siteEvidence = await getJson(`${running.url}/runtime/evidence/${siteFacts.evidence_refs[0]}`);
     assert.equal(siteEvidence.evidence_ref, siteFacts.evidence_refs[0]);
     assert.equal(siteEvidence.artifact?.raw_bytes ?? "not_exposed", "not_exposed");
@@ -581,6 +586,9 @@ test("serves site resource facts failures without raw browser material", async (
     const commitPrecheck = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=publish_note_image_text_commit`);
     assert.equal(commitPrecheck.task_kind, "publish_note_image_text_commit");
     assert.equal(commitPrecheck.public_boundary.external_write_actions, "not_performed");
+    const commitFacts = new Map(commitPrecheck.resource_facts.map((fact: any) => [fact.key, fact.state]));
+    assert.equal(commitFacts.get("runtime.execution_surface.available"), "available");
+    assert.equal(commitFacts.get("safety.challenge.absent"), "blocked");
 
     const challengeFacts = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=boss&task_kind=job_search`);
     const challenge = challengeFacts.resource_facts.find((fact: any) => fact.key === "safety.challenge.absent");

@@ -1823,7 +1823,7 @@ function mediaActionPublicSummary(operation: JsonObject, provenance?: {
 
 export function selectXhsCleanupCreationRef(records: readonly RunRecord[], marker: string, identityEnvironmentRef: string): string | undefined {
   const markerHash = createHash("sha256").update(marker).digest("hex");
-  return records
+  const matches = records
     .filter((record) => record.status === "succeeded" && record.admission.runtime_session_binding?.identity_environment_ref === identityEnvironmentRef)
     .map((record) => {
       const summary = object(record.public_result_summary);
@@ -1836,10 +1836,12 @@ export function selectXhsCleanupCreationRef(records: readonly RunRecord[], marke
         provenance?.marker_sha256 !== markerHash || provenance.identity_environment_ref !== identityEnvironmentRef || normalized?.action_id !== actionId ||
         readback?.content_ref !== contentRef || !contentRef ||
         !["xhs_publish_note_image_text_commit.save_draft", "xhs_publish_note_image_text_commit.publish"].includes(actionId ?? "")) return undefined;
-      return { contentRef, published: actionId?.endsWith(".publish") === true, updatedAt: record.updated_at };
+      return { contentRef, published: actionId?.endsWith(".publish") === true };
     })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
-    .sort((left, right) => Number(right.published) - Number(left.published) || right.updatedAt.localeCompare(left.updatedAt))[0]?.contentRef;
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  const published = matches.filter((entry) => entry.published);
+  const authoritative = published.length > 0 ? published : matches;
+  return authoritative.length === 1 ? authoritative[0]!.contentRef : undefined;
 }
 
 async function releaseAcceptedMediaSession(
@@ -2091,6 +2093,34 @@ async function completeAcceptedXhsMediaAction(
   return { ok: true, task_intent: result.task_intent, run_record: completed.run_record };
 }
 
+const xhsRequiredFactKeys: Readonly<Record<keyof typeof xhsMediaActionPaths, readonly string[]>> = {
+  "xhs_publish_note_image_text_media.image_upload": ["snapshot.image_upload_control.visible", "business_state.media_readback.available"],
+  "xhs_publish_note_image_text_media.text_to_image_generate": ["snapshot.text_to_image_control.visible", "snapshot.text_to_image_input.available", "business_state.media_readback.available"],
+  "xhs_publish_note_image_text_fields.compose": ["snapshot.image_text_title_input.editable", "snapshot.image_text_body_editor.editable"],
+  "xhs_publish_note_image_text_commit.save_draft": ["snapshot.image_text_composition.initialized", "snapshot.image_text_fields.readback_available", "snapshot.image_text_media.observed", "snapshot.save_draft_control.available"],
+  "xhs_publish_note_image_text_commit.publish": ["snapshot.image_text_composition.initialized", "snapshot.image_text_fields.readback_available", "snapshot.image_text_media.observed", "snapshot.publish_control.available", "snapshot.visibility_control.observed"],
+  "xhs_publish_note_image_text_commit.cleanup": ["snapshot.cleanup_control.available", "business_state.cleanup_marker.unique_match", "business_state.cleanup_target.task_created", "business_state.cleanup_content.matched"]
+};
+const xhsCommonRequiredFactKeys = new Set([
+  "runtime.execution_surface.available", "runtime.site_identity.managed", "snapshot.creator_publish_entrypoint.available",
+  "control_owner.xiaohongshu.managed", "operation_ref.accepted_or_running", "post_check.ref_available", "safety.challenge.absent"
+]);
+
+/**
+ * The legacy HTTP collector can attest only these two Lode facts. Identity,
+ * control ownership, action-specific page state, cleanup provenance and
+ * post-action refs are checked by their existing authoritative boundaries.
+ */
+export function selectXhsCollectorAdmissionFacts(
+  actionId: keyof typeof xhsMediaActionPaths,
+  requiredFacts: readonly LodeRequiredHarborFact[]
+): readonly LodeRequiredHarborFact[] | FailureRecord {
+  const allowed = new Set([...xhsCommonRequiredFactKeys, ...xhsRequiredFactKeys[actionId]]);
+  const unknown = requiredFacts.find((fact) => !allowed.has(fact.fact_key));
+  if (unknown) return failure("capability_contract", `unsupported_required_harbor_fact:${unknown.fact_key}`, "admission", "repair_package_contract");
+  return requiredFacts.filter((fact) => fact.fact_key === "runtime.execution_surface.available" || fact.fact_key === "safety.challenge.absent");
+}
+
 async function dispatchApprovedXhsMediaAction(
   store: FileRunRecordStore,
   result: Extract<TaskSubmissionResult, { ok: true }>,
@@ -2107,6 +2137,17 @@ async function dispatchApprovedXhsMediaAction(
   if (!target || !request.authorization_context || !isXhsMediaActionIntent(result.task_intent, request.package_ref)) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_dispatch_binding_invalid", "admission", "request_new_confirmation"));
   }
+  const actionId = result.task_intent.input.action_id;
+  const requestedPath = result.task_intent.input.requested_path;
+  if (typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId)) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_id_invalid", "admission", "request_new_confirmation"));
+  }
+  const exactActionId = actionId as keyof typeof xhsMediaActionPaths;
+  if (requestedPath !== xhsMediaActionPaths[exactActionId]) {
+    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_path_invalid", "admission", "request_new_confirmation"));
+  }
+  const collectorFacts = selectXhsCollectorAdmissionFacts(exactActionId, requiredHarborFacts);
+  if (isFailure(collectorFacts)) return completeAcceptedMediaAdmissionFailure(store, result, collectorFacts);
   let admission: HarborRuntimeAdmissionResult;
   try {
     admission = await client.collectAdmissionFacts({
@@ -2139,10 +2180,7 @@ async function dispatchApprovedXhsMediaAction(
   if (!runtimeSessionRef) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("resource_admission", "harbor_runtime_session_missing", "runtime_binding", "connect_runtime"));
   }
-  const preActionFacts = requiredHarborFacts.filter((fact) =>
-    fact.fact_key !== "operation_ref.accepted_or_running" && fact.fact_key !== "post_check.ref_available"
-  );
-  const fullAdmission = validateHarborAdmission(admissionValue, "media_action", preActionFacts);
+  const fullAdmission = validateHarborAdmission(admissionValue, "media_action", collectorFacts);
   if (!fullAdmission.ok) {
     return completeAcceptedMediaAdmissionFailure(store, result, fullAdmission.failure, runtimeSessionRef, collectionFailure?.cleanup_failure, client);
   }
@@ -2161,15 +2199,6 @@ async function dispatchApprovedXhsMediaAction(
     await store.bindCoreTaskRuntimeSession(result.run_record.run_id, runtimeBinding.runtime_session_binding, runtimeBinding.runtime_binding_refs);
   } catch {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("persistence_observability", "runtime_binding_persistence_failed", "persistence", "contact_operator"), runtimeSessionRef, undefined, client);
-  }
-  const actionId = result.task_intent.input.action_id;
-  const requestedPath = result.task_intent.input.requested_path;
-  if (typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId)) {
-    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_id_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
-  }
-  const exactActionId = actionId as keyof typeof xhsMediaActionPaths;
-  if (requestedPath !== xhsMediaActionPaths[exactActionId]) {
-    return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_path_invalid", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
   }
   const currentRun = await store.getRunRecord(result.run_record.run_id);
   const decisionRef = currentRun?.policy_binding_snapshot?.decision_ref;
