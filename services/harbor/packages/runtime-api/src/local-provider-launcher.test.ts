@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   blocksXhsMediaActionRequest,
+  draftEditPointExpression,
   fieldFillProbeExpression,
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
@@ -13,6 +14,34 @@ import {
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
+
+test("#419 same-route draft overlay reopens the newest exact-title draft", () => {
+  const rect = (top: number, left = 0, width = 100, height = 20) => ({ top, left, width, height, right: left + width, bottom: top + height });
+  const body = { textContent: "", children: [], parentElement: null };
+  const card = (top: number) => {
+    const edit = { textContent: "编辑", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top + 20, 30, 20, 20) };
+    const remove = { textContent: "删除", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top + 20, 60, 20, 20) };
+    const title = { textContent: "WE测试", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top) };
+    const entry = {
+      textContent: "WE测试 编辑 删除",
+      children: [title, edit, remove],
+      parentElement: body,
+      getBoundingClientRect: () => rect(top, 0, 120, 50),
+      querySelectorAll: () => [edit, remove]
+    };
+    title.parentElement = entry;
+    edit.parentElement = entry;
+    remove.parentElement = entry;
+    return { title, entry };
+  };
+  const latest = card(10);
+  const older = card(100);
+  const evaluate = new Function("document", "getComputedStyle", `return ${draftEditPointExpression("WE测试")}`);
+  assert.deepEqual(evaluate(
+    { body, querySelectorAll: () => [older.title, latest.title] },
+    () => ({ display: "block", visibility: "visible" })
+  ), { status: "matched", x: 40, y: 40 });
+});
 
 test("#412 field fill blocks every outbound mutation while media upload keeps its bounded network path", () => {
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "POST", "https://creator.xiaohongshu.com/api/opaque"), true);
