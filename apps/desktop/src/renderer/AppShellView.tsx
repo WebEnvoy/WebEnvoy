@@ -43,6 +43,7 @@ function AppSidebar({ controller }: { controller: AppController }) {
         sort={navigation.taskSort}
         taskLoadStatus={tasks.effectiveCoreReadState.status}
         tasks={tasks.workbenchTaskThreads}
+        canCreateTask={actions.canCreateTask}
         onCreateTask={actions.createTask}
         onGroupingChange={navigation.setTaskGrouping}
         onOpenSettings={actions.openSettings}

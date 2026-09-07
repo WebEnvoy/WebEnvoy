@@ -123,11 +123,14 @@ function createAppActions(
     skillWorkbench.invalidateRequests();
     skillWorkbench.abandonIdentityRecovery();
     skillWorkbench.abandonSiteSkillRecovery();
-    const skill = task == null ? undefined : findCatalogSkillForTask(task, sources.lodeCatalogState.skills) ??
-      findCurrentCatalogSkillForTaskGroup(task, sources.lodeCatalogState.skills);
+    const skill = task == null ? undefined : findCreatableCatalogSkillForTask(task, sources.lodeCatalogState.skills);
+    if (task != null && skill == null) return;
     skillWorkbench.selectCreateTaskSkill(skill);
     navigation.setWorkMode("create");
     navigation.setActiveView("work");
+  }
+  function canCreateTask(task: TaskProjection) {
+    return findCreatableCatalogSkillForTask(task, sources.lodeCatalogState.skills) != null;
   }
   function openSettings() {
     skillWorkbench.invalidateRequests();
@@ -143,7 +146,7 @@ function createAppActions(
     sources.updateEndpoint(field, value);
   }
   return {
-    acceptCreatedTask, createTask, openResultDetail, openSettings, openTaskById, openView, selectTask, updateEndpoint,
+    acceptCreatedTask, canCreateTask, createTask, openResultDetail, openSettings, openTaskById, openView, selectTask, updateEndpoint,
     onHarborStateChange: (state: typeof sources.harborIdentityState) => {
       skillWorkbench.invalidateRequests();
       sources.setHarborIdentityState(state);
@@ -155,6 +158,10 @@ export function findCatalogSkillForTask(task: TaskProjection, skills: LodeCatalo
   return skills.find((skill) =>
     skill.packageRef === task.packageSource.sourceRef && skill.version === task.packageSource.version,
   );
+}
+
+export function findCreatableCatalogSkillForTask(task: TaskProjection, skills: LodeCatalogSkill[]) {
+  return findCatalogSkillForTask(task, skills) ?? findCurrentCatalogSkillForTaskGroup(task, skills);
 }
 
 function findCurrentCatalogSkillForTaskGroup(task: TaskProjection, skills: LodeCatalogSkill[]) {
