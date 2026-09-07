@@ -133,8 +133,10 @@ import {
   XHS_MEDIA_ACTION_PACKAGE_REF,
   admitXhsMediaAction,
   completeXhsMediaAction,
+  XhsMediaActionObservationStore,
   unavailableXhsMediaAction,
   type AdmittedXhsMediaAction,
+  type XhsMediaActionObservationRecord,
   type XhsMediaActionResult,
   type XhsMediaUnavailableReason
 } from "./xhs-media-action.js";
@@ -359,6 +361,7 @@ export type {
 } from "./runtime-session.js";
 export type {
   AdmittedXhsMediaAction,
+  XhsMediaActionObservationRecord,
   XhsMediaActionResult,
   XhsMediaActionNormalizedResult,
   XhsMediaActionId,
@@ -397,6 +400,7 @@ export class HarborRuntime {
   private readonly pageScenes = new PageSceneStore();
   private readonly readOperationObservations = new ReadOperationObservationStore();
   private readonly writePrecheckObservations = new WritePrecheckObservationStore();
+  private readonly xhsMediaActionObservations = new XhsMediaActionObservationStore();
   private readonly detailReadTargets = new DetailReadTargetStore();
   private readonly viewerControls = new ViewerControlStore();
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
@@ -997,10 +1001,11 @@ export class HarborRuntime {
 
   getPublicEvidence(
     evidence_ref: string
-  ): EvidenceRecord | ReadOperationObservationRecord | WritePrecheckObservationRecord | PageSceneUnavailable {
+  ): EvidenceRecord | ReadOperationObservationRecord | WritePrecheckObservationRecord | XhsMediaActionObservationRecord | PageSceneUnavailable {
     const sceneEvidence = this.getEvidence(evidence_ref);
     if (!("status" in sceneEvidence)) return sceneEvidence;
-    return this.readOperationObservations.get(evidence_ref) ?? this.writePrecheckObservations.get(evidence_ref) ?? sceneEvidence;
+    return this.readOperationObservations.get(evidence_ref) ?? this.writePrecheckObservations.get(evidence_ref) ??
+      this.xhsMediaActionObservations.get(evidence_ref) ?? sceneEvidence;
   }
 
   expireEvidence(evidence_ref: string): EvidenceRecord | PageSceneUnavailable {
@@ -1267,20 +1272,21 @@ export class HarborRuntime {
     runtime_session_ref: string,
     input: unknown
   ): Promise<XhsMediaActionResult> {
+    const finish = (result: XhsMediaActionResult) => this.xhsMediaActionObservations.record(result);
     const admitted = admitXhsMediaAction(input);
-    if (!admitted) return unavailableXhsMediaAction(
+    if (!admitted) return finish(unavailableXhsMediaAction(
       runtime_session_ref,
       invalidMediaInput(input),
       "invalid_contract"
-    );
+    ));
     const before = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
-    if (before) return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(before));
+    if (before) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(before)));
     const session = this.runtimeSessions.getRecord(runtime_session_ref);
-    if (!session) return unavailableXhsMediaAction(runtime_session_ref, admitted, "resource_unavailable");
+    if (!session) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "resource_unavailable"));
     const controlGeneration = session.control_generation;
     const holderRef = session.facts.control_lock.holder_ref;
     const identityRef = session.facts.identity_environment_ref;
-    if (!identityRef) return unavailableXhsMediaAction(runtime_session_ref, admitted, "login_required");
+    if (!identityRef) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "login_required"));
     const result = await this.runtimeSessions.executeMediaAction(runtime_session_ref, {
       target_url: admitted.url,
       expected_origin: "https://creator.xiaohongshu.com",
@@ -1296,14 +1302,14 @@ export class HarborRuntime {
     const current = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!current || current.control_generation !== controlGeneration ||
       current.facts.control_lock.holder_ref !== holderRef || current.facts.identity_environment_ref !== identityRef) {
-      return unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.status === "completed" ? result.operation_ref : undefined);
+      return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.status === "completed" ? result.operation_ref : undefined));
     }
     if (result.status === "unavailable") {
-      return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref);
+      return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref));
     }
     const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
-    if (after) return unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(after), result.operation_ref);
-    return completeXhsMediaAction(runtime_session_ref, admitted, result);
+    if (after) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(after), result.operation_ref));
+    return finish(completeXhsMediaAction(runtime_session_ref, admitted, result));
   }
 
   private async executeXhsPublishPathPrepare(
