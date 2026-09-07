@@ -3673,6 +3673,46 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
     required: boolean,
     pinnedAllowlistBytes?: Buffer
   ): Promise<LodeRuntimeConsumptionEntry | undefined | Error> {
+    if (packageRef === xhsWritePrecheckPackageRef) {
+      const assetPath = "registry/validate-only-runtime-consumption.json";
+      const path = await pathUnderRoot(assetPath).catch(() => undefined);
+      if (!path) return new Error("runtime_consumption_validate_only_truth_missing");
+      const truth = object(JSON.parse(await readFile(path, "utf8")));
+      const expectedSha = options.runtimeAdmissionAssetSha256?.[assetPath] ?? lodeRuntimeAdmissionAssetSemanticSha256[assetPath];
+      if (!truth || createHash("sha256").update(canonicalJson(truth)).digest("hex") !== expectedSha) {
+        return new Error("runtime_consumption_validate_only_truth_pin_mismatch");
+      }
+      const entries = Array.isArray(truth.entries) ? truth.entries.map(object) : [];
+      const entry = entries.find((candidate) => candidate?.package_ref === packageRef);
+      const boundary = object(truth.consumer_boundary);
+      const consumers = Array.isArray(boundary?.allowed_consumers) ? boundary.allowed_consumers.map(object) : [];
+      const consumer = consumers.find((candidate) => candidate?.repository === "WebEnvoy/WebEnvoy");
+      const resource = object(entry?.resource_requirements);
+      const failureTaxonomy = object(entry?.failure_taxonomy);
+      const evidence = object(entry?.evidence_and_post_check);
+      const strings = (value: unknown) => Array.isArray(value) && value.every((item) => string(item)) ? value as string[] : undefined;
+      const requiredRefKinds = strings(evidence?.required_ref_kinds);
+      const requiredFailureClasses = strings(failureTaxonomy?.required_classes);
+      const requiredPostCheckFields = strings(evidence?.required_post_check_fields);
+      if (
+        truth.schema_version !== "lode.validate-only-runtime-consumption.v0" || !string(truth.truth_id) || !string(truth.truth_version) || truth.asset_owner !== "Lode" ||
+        consumer?.purpose !== "admit and record an exact validate-only precheck" ||
+        entry?.lock_ref !== lockRef || entry.version !== version || entry.operation_id !== operationId || entry.operation_mode !== "validate_only" ||
+        !string(entry.site_slug) || !string(entry.lifecycle) || !strings(entry.allowed_origins)?.every((origin) => origin.startsWith("https://")) ||
+        !string(resource?.resource_requirements_id) || !string(failureTaxonomy?.failure_mapping_id) || !requiredFailureClasses?.length ||
+        !requiredRefKinds?.length || !string(evidence?.post_check_id) || !requiredPostCheckFields?.length
+      ) return new Error("runtime_consumption_validate_only_truth_drift");
+      return {
+        allowlist_id: string(truth.truth_id)!, allowlist_version: string(truth.truth_version)!, asset_owner: "Lode",
+        consumer: { repository: string(consumer.repository)!, issue: "#419", purpose: string(consumer.purpose)! },
+        package_ref: packageRef, lock_ref: lockRef, version, site_slug: string(entry.site_slug)!, operation_id: operationId!, operation_mode: "validate_only", lifecycle: string(entry.lifecycle)!,
+        allowed_origins: entry.allowed_origins as string[], resource_requirements_id: string(resource!.resource_requirements_id)!,
+        failure_mapping_id: string(failureTaxonomy!.failure_mapping_id)!, required_failure_classes: requiredFailureClasses,
+        required_source_ref_kinds: requiredRefKinds.filter((kind) => !kind.endsWith("_ref")),
+        required_evidence_ref_kinds: requiredRefKinds.filter((kind) => kind.endsWith("_ref")),
+        post_check_id: string(evidence!.post_check_id)!, required_post_check_fields: requiredPostCheckFields
+      };
+    }
     if (packageRef === xhsDetailPackageRef) {
       const path = await pathUnderRoot("registry/detail-runtime-consumption.json").catch(() => undefined);
       if (!path) return new Error("runtime_consumption_detail_truth_missing");

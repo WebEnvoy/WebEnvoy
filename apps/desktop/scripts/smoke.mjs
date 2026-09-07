@@ -667,6 +667,9 @@ const lodeAssetBundleModule = await import(
 const lodeCatalogModule = await import(
   pathToFileURL(path.resolve("dist-electron/lodeCatalog.js")).href
 );
+const coreRuntimeTaskChainModule = await import(
+  pathToFileURL(path.resolve("../../packages/core/dist/runtime-task-chain.js")).href
+);
 const harborLaunch = runtimeSupervisorModule.resolveRuntimeServiceLaunchConfig(
   "harbor",
   { WEBENVOY_HARBOR_RUNTIME_CWD: "/tmp/harbor-runtime" },
@@ -720,6 +723,19 @@ const coreLodeEnv = lodeAssetBundleModule.coreLodeAssetEnvironment(lodeBundle);
 
 if (!coreLodeEnv.WEBENVOY_LODE_ASSETS_PATH || !coreLodeEnv.WEBENVOY_LODE_REGISTRY_PATH) {
   throw new Error("Lode asset bundle smoke failed: Core env did not include asset paths.");
+}
+
+const resolvedPublishPrecheck = await coreRuntimeTaskChainModule.createLocalLodePackageResolver({
+  rootDir: lodeBundle.rootPath,
+  registryPath: lodeBundle.registryPath,
+})({ package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0", task_intent: {} });
+if (
+  resolvedPublishPrecheck.category ||
+  resolvedPublishPrecheck.runtime_consumption?.lock_ref !== "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2" ||
+  resolvedPublishPrecheck.runtime_consumption.operation_id !== "xhs_publish_note_precheck" ||
+  resolvedPublishPrecheck.runtime_consumption.operation_mode !== "validate_only"
+) {
+  throw new Error(`Packaged Lode publish precheck runtime consumption was not resolved: ${JSON.stringify(resolvedPublishPrecheck)}`);
 }
 
 const lodeCatalog = lodeCatalogModule.readLodeCatalog(lodeBundle);
