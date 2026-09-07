@@ -164,9 +164,15 @@ function isPinnedXiaohongshuImageUpload(skill: LodeCatalogSkill) {
     action?.id === xiaohongshuImageUploadActionId && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
   const fieldFill = skill.packageRef === xiaohongshuFieldPackageRef && skill.lockRef === xiaohongshuFieldLockRef && skill.version === "0.1.1" &&
     action?.id === xiaohongshuFieldActionId && action.resourceRequirementProfileIds[0] === "xhs-image-text-field-fill";
+  const commitProfiles = new Map([
+    ["xhs_publish_note_image_text_commit.save_draft", "xhs-image-text-save-draft"],
+    ["xhs_publish_note_image_text_commit.publish", "xhs-image-text-publish"],
+  ]);
   const commit = skill.packageRef === xiaohongshuCommitPackageRef && skill.lockRef === xiaohongshuCommitLockRef && skill.version === "0.1.0" &&
-    skill.actions.length === 2 && skill.actions.every((item) => item.operationMode === "write" && item.supportedOrigins.length === 1 &&
-      item.supportedOrigins[0] === "https://creator.xiaohongshu.com" && item.resourceRequirementProfileIds.length === 1);
+    skill.actions.length >= 1 && skill.actions.length <= commitProfiles.size && new Set(skill.actions.map((item) => item.id)).size === skill.actions.length &&
+    skill.actions.every((item) => item.operationMode === "write" && item.supportedOrigins.length === 1 &&
+      item.supportedOrigins[0] === "https://creator.xiaohongshu.com" && item.resourceRequirementProfileIds.length === 1 &&
+      item.resourceRequirementProfileIds[0] === commitProfiles.get(item.id));
   if (commit) return skill.siteSlug === "xiaohongshu";
   return (imageUpload || fieldFill) &&
     skill.siteSlug === "xiaohongshu" &&
