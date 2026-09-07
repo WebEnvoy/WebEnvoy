@@ -465,7 +465,6 @@ const XHS_MEDIA_ACTION_CDP_COMMANDS = [
   "Page.enable",
   "Page.bringToFront",
   "DOM.enable",
-  "DOM.requestNode",
   "DOM.setFileInputFiles",
   "Fetch.enable",
   "Fetch.continueRequest",
@@ -587,16 +586,8 @@ async function executeXhsMediaAction(
           image_path_candidate_count: inputProbe.image_path_candidate_count,
           set_file_input_files: "not_called"
         });
-        const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
-        const nodeId = typeof node.nodeId === "number" ? node.nodeId : 0;
-        if (!nodeId) return failure("media_ref_unavailable", "The creator image file input node could not be resolved.", false, page, {
-          failure_stage: "file_input_node_resolution",
-          image_input_candidate_count: 1,
-          image_path_candidate_count: inputProbe.image_path_candidate_count,
-          set_file_input_files: "not_called"
-        });
         try {
-          await sendMediaActionCdp(client, "DOM.setFileInputFiles", { nodeId, files: resolvedFiles });
+          await sendMediaActionCdp(client, "DOM.setFileInputFiles", { objectId, files: resolvedFiles });
         } catch {
           return failure("operation_result_unknown", "The image file-input operation did not return a reliable result.", false, page, {
             failure_stage: "set_file_input_files",

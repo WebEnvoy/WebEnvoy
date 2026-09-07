@@ -304,7 +304,6 @@ export type LocalProviderMediaActionResult =
           | "file_input_missing"
           | "file_input_ambiguous"
           | "file_input_object_resolution"
-          | "file_input_node_resolution"
           | "set_file_input_files";
         image_input_candidate_count?: number;
         image_path_candidate_count?: number;
