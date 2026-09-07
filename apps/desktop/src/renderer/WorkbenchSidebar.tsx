@@ -29,6 +29,7 @@ type WorkbenchSidebarProps = {
   sort: TaskSort;
   taskLoadStatus: "loading" | "ready" | "offline";
   tasks: TaskProjection[];
+  canCreateTask: (task: TaskProjection) => boolean;
   onGroupingChange: (grouping: TaskGrouping) => void;
   onCreateTask: (skill?: TaskProjection) => void;
   onOpenSettings: () => void;
@@ -51,6 +52,7 @@ export function WorkbenchSidebar({
   sort,
   taskLoadStatus,
   tasks,
+  canCreateTask,
   onGroupingChange,
   onCreateTask,
   onOpenSettings,
@@ -94,7 +96,7 @@ export function WorkbenchSidebar({
                 <strong>{group.label}</strong>
                 {grouping === "identity" && group.site ? <small>{group.site}</small> : null}
               </span>
-              {grouping === "skill" ? (
+              {grouping === "skill" && canCreateTask(group.tasks[0]) ? (
                 <button
                   className="task-group-add"
                   type="button"
