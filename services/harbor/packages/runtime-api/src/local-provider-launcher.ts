@@ -212,7 +212,10 @@ export function sameWritePrecheckUrl(observed: string | undefined, expected: str
     const actualParams = [...actual.searchParams].sort(([a], [b]) => a.localeCompare(b));
     const targetParams = [...target.searchParams].sort(([a], [b]) => a.localeCompare(b));
     return JSON.stringify(actualParams) === JSON.stringify(targetParams) ||
-      (targetParams.length === 0 && actualParams.length === 1 && actual.searchParams.get("from") === "tab_switch");
+      (targetParams.length === 0 && (
+        (actualParams.length === 1 && actual.searchParams.get("from") === "tab_switch") ||
+        (actualParams.length === 2 && actual.searchParams.get("from") === "menu_left" && actual.searchParams.get("target") === "image")
+      ));
   } catch {
     return false;
   }
@@ -3108,11 +3111,13 @@ async function pageTargets(port: string, signal?: AbortSignal): Promise<CdpPageT
 export function selectPage(pages: CdpPageTarget[], requested_url?: string, preferredPageId?: string) {
   if (requested_url) {
     const pageTargets = pages.filter((candidate) => candidate.type === "page");
+    const creatorImageTextPages = pageTargets.filter((candidate) => isCreatorImageTextRedirect(candidate.url, requested_url));
+    const preferredImageTextPage = creatorImageTextPages.find((candidate) => candidate.id === preferredPageId);
+    if (preferredImageTextPage) return preferredImageTextPage;
+    if (creatorImageTextPages[0]) return creatorImageTextPages[0];
     const preferred = pageTargets.find((candidate) => candidate.id === preferredPageId &&
       (candidate.url === requested_url || urlsReferToSamePage(candidate.url, requested_url)));
     if (preferred) return preferred;
-    const creatorImageTextPage = pageTargets.find((candidate) => isCreatorImageTextRedirect(candidate.url, requested_url));
-    if (creatorImageTextPage) return creatorImageTextPage;
     return pages.find((candidate) => candidate.type === "page" && candidate.url === requested_url) ??
       pages.find((candidate) => candidate.type === "page" && urlsReferToSamePage(candidate.url, requested_url)) ??
       (pageTargets.length === 1 ? pageTargets[0] : undefined);
@@ -3127,7 +3132,7 @@ function isCreatorImageTextRedirect(candidateUrl: string | undefined, requestedU
     const candidate = new URL(candidateUrl ?? "");
     const requested = new URL(requestedUrl);
     return requested.origin === "https://creator.xiaohongshu.com" && requested.pathname.replace(/\/$/, "") === "/publish/publish" &&
-      !requested.search && candidate.search === "?from=tab_switch" && sameWritePrecheckUrl(candidateUrl, requestedUrl);
+      !requested.search && candidate.search !== "" && sameWritePrecheckUrl(candidateUrl, requestedUrl);
   } catch {
     return false;
   }
