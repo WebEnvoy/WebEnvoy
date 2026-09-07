@@ -220,7 +220,7 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.projection_ref === undefined ? {} : { projection_ref: record.projection_ref }),
     ...(record.public_result_summary === undefined || (record.retention_state !== undefined && record.retention_state !== "active")
       ? {}
-      : { data: record.public_result_summary }),
+      : { data: publicResultSummary(record.public_result_summary) }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
     ...(record.source_refs === undefined ? {} : { source_refs: [...record.source_refs] }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),
@@ -229,6 +229,13 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.post_check === undefined ? {} : { post_check: record.post_check }),
     ...(record.retention_state === undefined ? {} : { retention_state: record.retention_state })
   };
+}
+
+function publicResultSummary(summary: Record<string, unknown>): Record<string, unknown> {
+  if (summary.schema_version !== "webenvoy.core-xhs-media-action-projection.v0" || !Object.hasOwn(summary, "runtime_session_ref")) return summary;
+  const projected = { ...summary };
+  delete projected.runtime_session_ref;
+  return projected;
 }
 
 function failureReasonClass(failure: FailureRecord | undefined): FailureReasonClass {

@@ -1768,7 +1768,7 @@ export function validateCompletedXhsMediaAction(
   };
 }
 
-function mediaActionPublicSummary(operation: JsonObject, runtimeSessionRef: string): Record<string, unknown> {
+function mediaActionPublicSummary(operation: JsonObject): Record<string, unknown> {
   const normalized = object(operation.normalized)!;
   return {
     schema_version: "webenvoy.core-xhs-media-action-projection.v0",
@@ -1778,7 +1778,6 @@ function mediaActionPublicSummary(operation: JsonObject, runtimeSessionRef: stri
     normalized,
     source_refs: operation.source_refs,
     evidence_refs: operation.evidence_refs,
-    runtime_session_ref: runtimeSessionRef,
     submitted: normalized.submitted,
     ...(normalized.save_draft === undefined ? {} : { save_draft: normalized.save_draft }),
     ...(normalized.publish === undefined ? {} : { publish: normalized.publish }),
@@ -1814,8 +1813,7 @@ async function releaseAcceptedMediaSession(
       schema_version: "webenvoy.core-xhs-media-action-projection.v0",
       submitted: false,
       outcome: terminalStatus === "unknown_outcome" ? "unknown" : "cleanup_failed",
-      runtime_session_ref: runtimeSessionRef,
-      consumer_boundary: "Core records only structured media action failure and opaque runtime session ref when cleanup cannot be verified; no browser or media material is stored."
+      consumer_boundary: "Core records only structured media action failure when cleanup cannot be verified; no browser or media material is stored."
     }
   });
   const completed = await completeRunWithFailure(store, result.run_record.run_id, {
@@ -1880,7 +1878,7 @@ async function completeAcceptedXhsMediaAction(
     return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
   }
   const operationObject = validation.operation;
-  const summary = mediaActionPublicSummary(operationObject, runtimeSessionRef);
+  const summary = mediaActionPublicSummary(operationObject);
   const projection = {
     source_refs: validation.source_refs,
     evidence_refs: validation.evidence_refs,
@@ -2145,7 +2143,6 @@ async function dispatchApprovedXhsMediaAction(
         schema_version: "webenvoy.core-xhs-media-action-projection.v0",
         submitted: exactActionId.startsWith("xhs_publish_note_image_text_commit."),
         outcome: "unknown",
-        runtime_session_ref: runtimeSessionRef,
         consumer_boundary: "Core preserves an unknown media action outcome without retrying or exposing private browser material."
       }
     });
@@ -2210,7 +2207,6 @@ async function completeAcceptedMediaAdmissionFailure(
           schema_version: "webenvoy.core-xhs-media-action-projection.v0",
           submitted: false,
           outcome: "unavailable",
-          runtime_session_ref: runtimeSessionRef,
           consumer_boundary: "Core records media action admission and cleanup classification only."
         }
       });

@@ -1295,6 +1295,19 @@ try {
     ok: true,
     result: successResultQuery
   });
+  const legacyMediaProjection = projectRunResult({
+    ...succeeded,
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+      status: "available",
+      runtime_session_ref: "session_fixture_ready"
+    }
+  });
+  assert.deepEqual(legacyMediaProjection.result.result_envelope?.data, {
+    schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+    status: "available"
+  });
+  assert.equal(Object.hasOwn(legacyMediaProjection.result.result_envelope?.data ?? {}, "runtime_session_ref"), false);
   assert.deepEqual(await getRunEvidenceRefs(store, runId), {
     ok: true,
     evidence: {
