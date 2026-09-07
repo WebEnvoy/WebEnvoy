@@ -579,10 +579,10 @@ function isXiaohongshuPathPrepareSkill(skill: LodeCatalogSkill) {
 
 function isXiaohongshuMediaSkill(skill: LodeCatalogSkill) {
   if (skill.packageRef !== xiaohongshuMediaPackageRef || skill.lockRef !== xiaohongshuMediaLockRef ||
-    skill.version !== "0.1.1" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 3) return false;
+    skill.version !== "0.1.1" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 2) return false;
   return Object.entries(xiaohongshuMediaActionContracts).every(([id, contract]) => {
     const action = skill.actions.find((item) => item.id === id);
-    return action?.category === (id.endsWith(".cleanup") ? "destructive" : "commit") && action.operationMode === "write" &&
+    return action?.category === "commit" && action.operationMode === "write" &&
       action.externalEffects.length === 1 && action.externalEffects[0] === contract.effect &&
       action.resourceRequirementRef === "xiaohongshu.publish-note-image-text-media.resources" &&
       action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === contract.profileId &&
@@ -608,7 +608,7 @@ function isXiaohongshuCommitSkill(skill: LodeCatalogSkill) {
     skill.version !== "0.1.1" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 3) return false;
   return Object.entries(xiaohongshuCommitActionContracts).every(([id, contract]) => {
     const action = skill.actions.find((item) => item.id === id);
-    return action?.category === "commit" && action.operationMode === "write" &&
+    return action?.category === (id.endsWith(".cleanup") ? "destructive" : "commit") && action.operationMode === "write" &&
       action.externalEffects.length === 1 && action.externalEffects[0] === contract.effect &&
       action.resourceRequirementRef === "xiaohongshu.publish-note-image-text-commit.resources" &&
       action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === contract.profileId &&

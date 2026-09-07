@@ -563,8 +563,10 @@ async function executeXhsMediaAction(
     return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
   }
   const cleanup = input.action_id === "xhs_publish_note_image_text_commit.cleanup";
-  if (!(cleanup ? isCreatorUpdateUrl(currentUrl) : sameWritePrecheckUrl(currentUrl, input.target_url))) return failure("page_changed", "The managed session is not on the requested creator page for this action.", true);
-  const pageTarget = await activePage(port, input.target_url, AbortSignal.timeout(3000), currentPageTargetId).catch(() => undefined);
+  if (!cleanup && !sameWritePrecheckUrl(currentUrl, input.target_url)) return failure("page_changed", "The managed session is not on the requested creator page for this action.", true);
+  const pageTarget = cleanup
+    ? await pageTargets(port, AbortSignal.timeout(3000)).then(selectCleanupPage).catch(() => undefined)
+    : await activePage(port, input.target_url, AbortSignal.timeout(3000), currentPageTargetId).catch(() => undefined);
   if (!pageTarget?.webSocketDebuggerUrl) return failure("provider_probe_unavailable", "The managed creator page has no controlled target.", true);
   const page = readyPage(input.target_url, "Xiaohongshu creator media action");
   const resolvedFiles: string[] = [];
@@ -829,7 +831,7 @@ async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<C
       const text = document.body?.innerText || '';
       const title = [...document.querySelectorAll('input')].find((el) => /标题/.test(el.getAttribute('placeholder') || ''))?.value || '';
       const body = [...document.querySelectorAll('[contenteditable="true"]')].map((el) => el.textContent || '').join('\n');
-      const media = [...document.querySelectorAll('img')].filter((el) => {
+      const media = [...document.querySelectorAll('#app img.preview, #app img.preivew-image, [data-v-app] img.preview, [data-v-app] img.preivew-image')].filter((el) => {
         const r = el.getBoundingClientRect();
         return r.width >= 80 && r.height >= 80 && r.bottom > 0 && r.right > 0;
       }).length;
@@ -971,15 +973,17 @@ async function evaluatePublishedDetailProbe(client: CdpClient, title: string, ma
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
     expression: String.raw`(() => {
       const text = document.body?.innerText || '';
-      const media = [...document.querySelectorAll('img')].filter((element) => {
+      const titleValue = [...document.querySelectorAll('input')].find((element) => /标题/.test(element.getAttribute('placeholder') || ''))?.value || '';
+      const body = [...document.querySelectorAll('[contenteditable="true"]')].map((element) => element.textContent || '').join('\n');
+      const media = [...document.querySelectorAll('#app img.preview, #app img.preivew-image, [data-v-app] img.preview, [data-v-app] img.preivew-image')].filter((element) => {
         const rect = element.getBoundingClientRect();
         return rect.width >= 80 && rect.height >= 80 && rect.bottom > 0 && rect.right > 0;
       }).length;
       return {
         url: location.href,
         pathname: location.pathname,
-        marker_matched: text.includes(${markerLiteral}),
-        fields_matched: text.includes(${titleLiteral}) && text.includes(${markerLiteral}),
+        marker_matched: body.includes(${markerLiteral}),
+        fields_matched: titleValue === ${titleLiteral} && body.includes(${markerLiteral}),
         media_count: media,
         login_like: /登录|扫码登录/.test(text) && /\/login/.test(location.pathname),
         challenge_like: /验证码|安全验证|异常访问|请完成验证/.test(text)
@@ -990,18 +994,25 @@ async function evaluatePublishedDetailProbe(client: CdpClient, title: string, ma
   return (evaluated.result as { value?: PublishedDetailProbe } | undefined)?.value;
 }
 
-async function deleteDialogMatches(client: CdpClient, title: string): Promise<boolean> {
-  const prefix = JSON.stringify(title.slice(0, 8));
-  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: String.raw`(() => [...document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="dialog"]')].some((el) => {
-      const rect = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      const text = el.innerText || el.textContent || '';
-      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && text.includes('删除笔记') && text.includes(${prefix});
-    }))()`,
-    returnByValue: true
-  });
-  return (evaluated.result as { value?: unknown } | undefined)?.value === true;
+export function cleanupConfirmationPointExpression(title: string): string {
+  const titleLiteral = JSON.stringify(title);
+  return String.raw`(() => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const candidates = [...document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="dialog"]')]
+      .filter((element) => visible(element) && (element.innerText || element.textContent || '').includes('删除笔记') &&
+        (element.innerText || element.textContent || '').includes(${titleLiteral}));
+    const dialogs = candidates.filter((element) => !candidates.some((other) => other !== element && other.contains(element)));
+    if (dialogs.length !== 1) return { status: dialogs.length === 0 ? 'not_found' : 'ambiguous' };
+    const buttons = [...dialogs[0].querySelectorAll('button')]
+      .filter((element) => visible(element) && (element.innerText || element.textContent || '').trim() === '确定' && !element.disabled);
+    if (buttons.length !== 1) return { status: buttons.length === 0 ? 'not_found' : 'ambiguous' };
+    const rect = buttons[0].getBoundingClientRect();
+    return { status: 'matched', x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`;
 }
 
 async function exactVisibleTextCount(client: CdpClient, value: string): Promise<number> {
@@ -1031,12 +1042,34 @@ async function executeCleanupControl(
   if (!manager?.pathname.includes("/new/note-manager")) {
     return { status: "unavailable", failure_class: "page_changed", message: "The exact note manager did not open before cleanup.", retryable: true, submitted: false };
   }
+  if (await clickPublishedEditByTitle(client, before.title_value) !== "matched") {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup target could not be reopened for content verification.", retryable: false, submitted: false };
+  }
+  let verified: PublishedDetailProbe | undefined;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await abortableDelay(250);
+    verified = await evaluatePublishedDetailProbe(client, before.title_value, input.marker!);
+    if (verified?.login_like || verified?.challenge_like || verified?.pathname === "/publish/update" && verified.fields_matched && verified.media_count > 0) break;
+  }
+  if (verified?.pathname !== "/publish/update" || !verified.marker_matched || !verified.fields_matched || verified.media_count < 1) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup target did not match the authorized marker, fields and media.", retryable: false, submitted: false };
+  }
+  await client.send("Page.navigate", { url: managerUrl });
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await abortableDelay(250);
+    manager = await evaluateCommitProbe(client, input.marker!);
+    if (manager?.login_like || manager?.challenge_like || manager?.pathname.includes("/new/note-manager")) break;
+  }
+  if (!manager?.pathname.includes("/new/note-manager")) {
+    return { status: "unavailable", failure_class: "page_changed", message: "The exact note manager did not reopen after content verification.", retryable: true, submitted: false };
+  }
   const deletePoint = await clickPublishedDeleteByTitle(client, before.title_value);
   if (deletePoint !== "matched") {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact marker-matched task content has no unique delete control.", retryable: false, submitted: false };
   }
   await abortableDelay(200);
-  if (!await deleteDialogMatches(client, before.title_value) || !await clickExactAxButton(client, "确定")) {
+  const confirmation = await evaluatePoint(client, cleanupConfirmationPointExpression(before.title_value));
+  if (!confirmation || confirmation.status !== "matched" || !await clickPoint(client, confirmation.x, confirmation.y)) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup confirmation could not be verified.", retryable: false, submitted: false };
   }
   let count = -1;
@@ -3596,6 +3629,11 @@ export function selectPage(pages: CdpPageTarget[], requested_url?: string, prefe
   return pages.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl) ??
     pages.find((candidate) => candidate.type === "page") ??
     pages[0];
+}
+
+export function selectCleanupPage(pages: CdpPageTarget[]) {
+  const candidates = pages.filter((candidate) => candidate.type === "page" && isCreatorUpdateUrl(candidate.url ?? ""));
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function isCreatorImageTextRedirect(candidateUrl: string | undefined, requestedUrl: string) {

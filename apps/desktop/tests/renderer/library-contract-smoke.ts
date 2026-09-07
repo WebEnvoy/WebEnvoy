@@ -48,6 +48,7 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkXhsPublishPrecheck(input.xhsSkill);
   await checkXhsMediaAction(input.xhsSkill);
   await checkXhsFieldAction(input.xhsSkill);
+  checkXhsCleanupAction(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
   await checkBossDeferredHelpers(bossSkill);
@@ -620,6 +621,52 @@ async function checkXhsFieldAction(baseSkill: LodeCatalogSkill) {
   if (JSON.stringify(taskIntent.input) !== JSON.stringify({ action_id: action.id, requested_path: "image_text_upload", refs: [`${ownerRef}/title`, `${ownerRef}/body`], summary: skill.name }) ||
     serialized.includes("WebEnvoy 字段验收") || serialized.includes("WebEnvoy 非生产字段写入验收")) {
     throw new Error("Field action leaked values or lost its ordered owner-ref binding.");
+  }
+}
+
+function checkXhsCleanupAction(baseSkill: LodeCatalogSkill) {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+  const common = {
+    operationMode: "write" as const,
+    targetTypes: ["creator_publish_page"],
+    supportedOrigins: ["https://creator.xiaohongshu.com"],
+    resourceRequirementRef: "xiaohongshu.publish-note-image-text-commit.resources",
+  };
+  const skill: LodeCatalogSkill = {
+    ...baseSkill,
+    id: packageRef,
+    packageRef,
+    lockRef: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1",
+    version: "0.1.1",
+    inputFields: [
+      { id: "url", label: "url", kind: "text", required: true, description: "创作页", inputProjection: "sanitized_url", format: "uri" },
+      { id: "target_ref", label: "target ref", kind: "text", required: true, description: "owner 引用", inputProjection: "owner_ref" },
+      { id: "action_id", label: "action id", kind: "select", required: true, description: "动作", inputProjection: "safe_summary", options: ["xhs_publish_note_image_text_commit.save_draft", "xhs_publish_note_image_text_commit.publish", "xhs_publish_note_image_text_commit.cleanup"] },
+      { id: "requested_path", label: "requested path", kind: "constant", required: true, description: "图文路径", inputProjection: "safe_summary", defaultValue: "image_text_upload" },
+      { id: "marker", label: "marker", kind: "text", required: true, description: "唯一标记", inputProjection: "safe_summary" },
+      { id: "visibility", label: "visibility", kind: "select", required: true, description: "可见性", inputProjection: "safe_summary", options: ["not_applicable", "only_me", "public"] },
+    ],
+    actions: [
+      { ...common, id: "xhs_publish_note_image_text_commit.save_draft", category: "commit", externalEffects: ["create"], resourceRequirementProfileIds: ["xhs-image-text-save-draft"] },
+      { ...common, id: "xhs_publish_note_image_text_commit.publish", category: "commit", externalEffects: ["publish"], resourceRequirementProfileIds: ["xhs-image-text-publish"] },
+      { ...common, id: "xhs_publish_note_image_text_commit.cleanup", category: "destructive", externalEffects: ["delete"], resourceRequirementProfileIds: ["xhs-image-text-cleanup"] },
+    ],
+  };
+  const submissionSkill = projectTaskSubmissionSkill(skill);
+  const draft = createSkillInputDraft(submissionSkill);
+  draft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  draft.values.action_id = "xhs_publish_note_image_text_commit.cleanup";
+  draft.values.requested_path = "image_text_upload";
+  draft.values.marker = "WE-XHS-CLEANUP-TEST";
+  draft.values.visibility = "not_applicable";
+  const prepared = prepareTaskTurnRequest({
+    endpoint: "http://core.owner", skill: submissionSkill, identity, draft,
+    ownerRefs: { fieldOwnerRefs: {}, attachmentRefs: {} },
+    executionPolicy: mediaExecutionPolicy(skill), runtime,
+  });
+  if (submissionSkill.inputFields.some((field) => field.id === "target_ref") || !prepared.ok ||
+    (prepared.request.task_intent as { policy?: { risk?: string } }).policy?.risk !== "destructive") {
+    throw new Error("Cleanup submission exposed target_ref or lost its destructive policy.");
   }
 }
 

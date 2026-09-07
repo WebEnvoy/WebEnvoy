@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   blocksXhsMediaActionRequest,
+  cleanupConfirmationPointExpression,
   draftEditPointExpression,
   fieldFillProbeExpression,
   imageFileInputProbeExpression,
@@ -11,6 +12,7 @@ import {
   publishedActionPointExpression,
   readTargetPageFacts,
   sameWritePrecheckUrl,
+  selectCleanupPage,
   selectPage,
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
@@ -26,6 +28,28 @@ test("#423 published readback and cleanup select only the exact card actions", (
   const deletePoint = new Function("document", `return ${publishedActionPointExpression("WE测试", "delete")}`);
   assert.deepEqual(editPoint({ querySelectorAll: () => [title] }), { status: "matched", x: 40, y: 20 });
   assert.deepEqual(deletePoint({ querySelectorAll: () => [title] }), { status: "matched", x: 70, y: 20 });
+});
+
+test("#423 cleanup binds one update page and one confirmation inside the exact dialog", () => {
+  const update = { id: "task", type: "page", title: "creator", url: "https://creator.xiaohongshu.com/publish/update?id=task" };
+  const manager = { id: "manager", type: "page", title: "creator", url: "https://creator.xiaohongshu.com/new/note-manager" };
+  assert.equal(selectCleanupPage([update, manager] as Parameters<typeof selectCleanupPage>[0])?.id, "task");
+  assert.equal(selectCleanupPage([update, { ...update, id: "other" }] as Parameters<typeof selectCleanupPage>[0]), undefined);
+
+  const rect = { left: 30, top: 10, width: 20, height: 20 };
+  const confirm = { disabled: false, innerText: "确定", textContent: "确定", getBoundingClientRect: () => rect };
+  const exactDialog = {
+    innerText: "删除笔记 WE测试0907-2214",
+    textContent: "删除笔记 WE测试0907-2214",
+    getBoundingClientRect: () => ({ ...rect, width: 200, height: 100 }),
+    querySelectorAll: () => [confirm],
+  };
+  const unrelatedDialog = { ...exactDialog, innerText: "其他确认", textContent: "其他确认" };
+  const evaluate = new Function("document", "getComputedStyle", `return ${cleanupConfirmationPointExpression("WE测试0907-2214")}`);
+  assert.deepEqual(evaluate(
+    { querySelectorAll: () => [unrelatedDialog, exactDialog] },
+    () => ({ display: "block", visibility: "visible" }),
+  ), { status: "matched", x: 40, y: 20 });
 });
 
 test("#419 same-route draft overlay reopens the newest exact-title draft", () => {
