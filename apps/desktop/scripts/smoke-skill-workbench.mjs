@@ -22,8 +22,8 @@ const mediaFields = inputModule.projectInputFields(JSON.parse(mediaSchema), {
 const mediaRefs = mediaFields.find((field) => field.id === "refs");
 const mediaSummary = mediaFields.find((field) => field.id === "summary");
 const commitFields = inputModule.projectInputFields(JSON.parse(commitSchema), {
-  packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0",
-  schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.0",
+  packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1",
+  schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.1",
   operationRef: "lode://operation/xhs_publish_note_image_text_commit",
   operationMode: "write",
 });
@@ -65,8 +65,8 @@ for (const relativePath of (await readdir(inputSchemaRoot, { recursive: true }))
       })
     : relativePath.includes("publish-note-image-text-commit")
       ? inputModule.projectInputFields(schema, {
-          packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0",
-          schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.0",
+          packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1",
+          schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.1",
           operationRef: "lode://operation/xhs_publish_note_image_text_commit",
           operationMode: "write",
         })

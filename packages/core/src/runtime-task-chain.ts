@@ -163,7 +163,7 @@ export type HarborRuntimeClient = {
     holder_ref?: string;
     url: string;
     target_ref: string;
-    action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
+    action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
     requested_path: "image_text_upload" | "image_text_generate";
     refs: readonly string[];
     summary: string;
@@ -171,7 +171,7 @@ export type HarborRuntimeClient = {
     visibility?: "not_applicable" | "only_me" | "public";
     authorization_binding: {
       decision_ref: string;
-      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
+      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate" | "xhs_publish_note_image_text_fields.compose" | "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
       target_ref: string;
       idempotency_key: string;
     };
@@ -1673,10 +1673,11 @@ export function validateCompletedXhsMediaAction(
     ["summary_only", "placeholder_only"].includes(string(entry.redaction) ?? "")
   ) && new Set(evidenceValues).size === evidenceValues.length;
   const fieldAction = expected.action_id === "xhs_publish_note_image_text_fields.compose";
-  const commitAction = expected.action_id === "xhs_publish_note_image_text_commit.save_draft" || expected.action_id === "xhs_publish_note_image_text_commit.publish";
+  const commitAction = expected.action_id.startsWith("xhs_publish_note_image_text_commit.");
   const expectedBusinessEffect = fieldAction ? "modify" : expected.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
     expected.action_id === "xhs_publish_note_image_text_commit.save_draft" ? "save_draft" :
-      expected.action_id === "xhs_publish_note_image_text_commit.publish" ? "publish" : "generate";
+      expected.action_id === "xhs_publish_note_image_text_commit.publish" ? "publish" :
+        expected.action_id === "xhs_publish_note_image_text_commit.cleanup" ? "cleanup" : "generate";
   const expectedResultKind = fieldAction ? "xhs_publish_note_image_text_fields" : commitAction ? "xhs_publish_note_image_text_commit" : "xhs_publish_note_image_text_media";
   const operationStatus = string(lifecycle?.status);
   const operationRef = mediaRef(lifecycle?.operation_ref);
@@ -1705,7 +1706,7 @@ export function validateCompletedXhsMediaAction(
   const contentCanonicalUrl = string(contentReadback?.canonical_url);
   const normalizedCanonicalUrl = string(normalized?.canonical_url);
   const validCommitReadback = exactObjectKeys(contentReadback, ["state", "management_list_state", "detail_state", "fields_state", "media_state", "marker_state", "content_ref", "canonical_url"]) &&
-    ["draft_saved", "published", "not_observed", "unknown"].includes(string(contentReadback?.state) ?? "") &&
+    ["draft_saved", "published", "deleted", "not_observed", "unknown"].includes(string(contentReadback?.state) ?? "") &&
     ["matched", "not_found", "unknown", "not_run"].includes(string(contentReadback?.management_list_state) ?? "") &&
     ["matched", "mismatched", "unknown", "not_run"].includes(string(contentReadback?.detail_state) ?? "") &&
     ["matched", "mismatched", "unknown"].includes(string(contentReadback?.fields_state) ?? "") &&
@@ -2014,7 +2015,7 @@ async function completeAcceptedXhsMediaAction(
     output_schema_id: actionId === "xhs_publish_note_image_text_fields.compose"
       ? "lode://schema/site-capability/xiaohongshu/publish-note-image-text-fields/output@0.1.1"
       : actionId.startsWith("xhs_publish_note_image_text_commit.")
-        ? "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/output@0.1.0"
+        ? "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/output@0.1.1"
       : "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/output@0.1.0",
     data: {
       result_kind: operationObject.result_kind,
@@ -2544,7 +2545,7 @@ export async function continueXhsMediaActionTask(
   }
   if (existing.task_intent_ref !== taskIntent.intent_id || existing.package_ref !== request.package_ref ||
     existing.capability_ref !== taskIntent.capability.ref || existing.scope_target_ref !== taskIntent.scope.target_ref ||
-    taskIntent.policy.risk !== "write" || taskIntent.policy.execution_intent !== "execute_after_approval") {
+    taskIntent.policy.risk !== (taskIntent.input.action_id === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "write") || taskIntent.policy.execution_intent !== "execute_after_approval") {
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
   if (!deps.lodePackageResolver || !deps.executionPolicyConfigStore || !deps.authorizationDecisionStore) {
@@ -3092,7 +3093,7 @@ export async function submitRuntimeTask(
       run_id: request.run_id,
       task_intent: validatedTaskIntent,
       package_ref,
-      admission_mode: validatedTaskIntent.policy.risk === "write" ? "write_precheck" : "read",
+      admission_mode: validatedTaskIntent.policy.risk === "read" ? "read" : "write_precheck",
       harbor: operationHarbor,
       ...(xhsDetailRuntimeSessionRef === undefined ? {} : { runtime_session_ref: xhsDetailRuntimeSessionRef })
     });

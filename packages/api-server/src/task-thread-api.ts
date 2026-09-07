@@ -85,7 +85,7 @@ const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-p
 const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const mediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const fieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
-const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 
 function prunePendingWritePrecheckContinuations(now = Date.now()): void {
   for (const [ref, pending] of pendingWritePrecheckContinuations) {

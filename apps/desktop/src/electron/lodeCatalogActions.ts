@@ -4,13 +4,14 @@ import { hasOnlyKeys, isRecord, optionalString, strictStringArray } from "./lode
 const maxCatalogActions = 50;
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
-const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 const xiaohongshuMediaActionContracts = {
   "xhs_publish_note_image_text_media.image_upload": { effect: "upload", profileId: "xhs-image-upload", requestedPath: "image_text_upload" },
   "xhs_publish_note_image_text_media.text_to_image_generate": { effect: "create", profileId: "xhs-text-to-image-generate", requestedPath: "image_text_generate" },
   "xhs_publish_note_image_text_fields.compose": { effect: "modify", profileId: "xhs-image-text-field-fill", requestedPath: "image_text_upload" },
   "xhs_publish_note_image_text_commit.save_draft": { effect: "create", profileId: "xhs-image-text-save-draft", requestedPath: "image_text_upload" },
   "xhs_publish_note_image_text_commit.publish": { effect: "publish", profileId: "xhs-image-text-publish", requestedPath: "image_text_upload" },
+  "xhs_publish_note_image_text_commit.cleanup": { effect: "delete", profileId: "xhs-image-text-cleanup", requestedPath: "image_text_upload" },
 } as const;
 
 type ActionContext = {
@@ -39,7 +40,7 @@ export function projectActions(context: ActionContext): LodeCatalogAction[] {
     actionDeclaration.schema_ref !== "lode://schema/capability-action-declaration@0.1.0" ||
     !validRequirementContract(context)) return [];
   const value = actionDeclaration.actions;
-  const expectedWriteActions = context.packageRef === xiaohongshuFieldPackageRef ? 1 : 2;
+  const expectedWriteActions = context.packageRef === xiaohongshuFieldPackageRef ? 1 : context.packageRef === xiaohongshuCommitPackageRef ? 3 : 2;
   if (!Array.isArray(value) || value.length === 0 || value.length > maxCatalogActions || mediaWrite && value.length !== expectedWriteActions) return [];
   const projected: LodeCatalogAction[] = [];
   for (const action of value) {
@@ -62,7 +63,7 @@ function projectAction(value: unknown, context: ActionContext, mediaWrite: boole
   const profileIds = actionRequirements == null ? null : strictStringArray(actionRequirements.profile_ids);
   const declaredProfiles = requirementProfiles(requirements);
   const mediaContract = mediaWrite && isRecord(value) ? xiaohongshuMediaActionContracts[value.action_id as keyof typeof xiaohongshuMediaActionContracts] : undefined;
-  const expectedCategory = operationMode === "read" ? "read" : mediaWrite ? "commit" : "prepare";
+  const expectedCategory = operationMode === "read" ? "read" : value.action_id === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : mediaWrite ? "commit" : "prepare";
   if ((!mediaWrite && value.action_id !== operationId) ||
     (mediaWrite && mediaContract == null) || value.category !== expectedCategory ||
     targetScope?.site_slug !== siteSlug || targetTypes?.length !== 1 || targetTypes[0] !== targetType ||

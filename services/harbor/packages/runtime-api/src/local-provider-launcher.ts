@@ -513,6 +513,10 @@ type MediaActionNetwork = {
   forbidden_commit: boolean;
 };
 
+type XhsCommitActionId = "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
+const isCommitActionId = (value: LocalProviderMediaActionInput["action_id"]): value is XhsCommitActionId =>
+  value.startsWith("xhs_publish_note_image_text_commit.");
+
 export function blocksXhsMediaActionRequest(actionId: LocalProviderMediaActionInput["action_id"], method: string, url: string): boolean {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) return false;
   if (actionId.startsWith("xhs_publish_note_image_text_commit.")) return false;
@@ -558,7 +562,8 @@ async function executeXhsMediaAction(
     input.authorization_binding.action_id !== input.action_id || input.authorization_binding.target_ref !== input.target_ref) {
     return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
   }
-  if (!sameWritePrecheckUrl(currentUrl, input.target_url)) return failure("page_changed", "The managed session is not on the requested creator publish page.", true);
+  const cleanup = input.action_id === "xhs_publish_note_image_text_commit.cleanup";
+  if (!(cleanup ? isCreatorUpdateUrl(currentUrl) : sameWritePrecheckUrl(currentUrl, input.target_url))) return failure("page_changed", "The managed session is not on the requested creator page for this action.", true);
   const pageTarget = await activePage(port, input.target_url, AbortSignal.timeout(3000), currentPageTargetId).catch(() => undefined);
   if (!pageTarget?.webSocketDebuggerUrl) return failure("provider_probe_unavailable", "The managed creator page has no controlled target.", true);
   const page = readyPage(input.target_url, "Xiaohongshu creator media action");
@@ -590,7 +595,7 @@ async function executeXhsMediaAction(
     await sendMediaActionCdp(client, "DOM.enable");
     await sendMediaActionCdp(client, "Accessibility.enable");
     const before = await evaluateMediaActionObservation(client);
-    const pageFailure = mediaPageFailure(before, input.target_url);
+    const pageFailure = mediaPageFailure(before, input.target_url, cleanup);
     if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
     const network: MediaActionNetwork = { forbidden_commit: false };
     const stopFetch = client.on("Fetch.requestPaused", (event) => {
@@ -641,7 +646,7 @@ async function executeXhsMediaAction(
       } else if (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate") {
         const generated = await executeTextToImageControl(client, input.summary);
         if (!generated) return failure("generation_unavailable", "The visible text-to-image input or generate control is unavailable.", false, page);
-      } else if (input.action_id === "xhs_publish_note_image_text_commit.save_draft" || input.action_id === "xhs_publish_note_image_text_commit.publish") {
+      } else if (isCommitActionId(input.action_id)) {
         const commit = await executeCommitControl(client, input, operationRef);
         if (commit.status === "unavailable") return failure(commit.failure_class, commit.message, false, page, undefined, commit.submitted);
         return { ...commit, page };
@@ -759,14 +764,23 @@ async function executeXhsMediaAction(
       input.action_id.startsWith("xhs_publish_note_image_text_commit.")));
 }
 
-function mediaPageFailure(observation: MediaPageObservation | undefined, targetUrl: string): { failure_class: "page_changed" | "login_required" | "safety_challenge"; message: string; retryable: boolean } | null {
+function mediaPageFailure(observation: MediaPageObservation | undefined, targetUrl: string, cleanup = false): { failure_class: "page_changed" | "login_required" | "safety_challenge"; message: string; retryable: boolean } | null {
   if (!observation) return { failure_class: "page_changed", message: "The creator page returned no semantic observation.", retryable: true };
   if (observation.challenge_like) return { failure_class: "safety_challenge", message: "The creator page shows a safety challenge.", retryable: false };
   if (observation.login_like) return { failure_class: "login_required", message: "The creator page requires manual login.", retryable: false };
-  if (observation.origin !== "https://creator.xiaohongshu.com" || !isCreatorPublishPath(observation.pathname) || !sameWritePrecheckUrl(observation.url, targetUrl)) {
+  if (observation.origin !== "https://creator.xiaohongshu.com" || !(cleanup ? observation.pathname === "/publish/update" : isCreatorPublishPath(observation.pathname) && sameWritePrecheckUrl(observation.url, targetUrl))) {
     return { failure_class: "page_changed", message: "The current page is not the requested creator publish page.", retryable: true };
   }
   return null;
+}
+
+function isCreatorUpdateUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/update";
+  } catch {
+    return false;
+  }
 }
 
 type AxNode = { role?: { value?: unknown }; name?: { value?: unknown }; backendDOMNodeId?: unknown };
@@ -861,6 +875,23 @@ export function draftEditPointExpression(title: string): string {
   })()`;
 }
 
+export function publishedActionPointExpression(title: string, action: "edit" | "delete"): string {
+  const titleLiteral = JSON.stringify(title);
+  const deleteAction = action === "delete";
+  return String.raw`(() => {
+    const titles = [...document.querySelectorAll('*')]
+      .filter((el) => el.children.length === 0 && (el.textContent || '').trim() === ${titleLiteral} && el.getBoundingClientRect().width > 0);
+    if (titles.length !== 1) return { status: titles.length === 0 ? 'not_found' : 'ambiguous' };
+    const card = titles[0].closest('.note-card');
+    const actions = card ? [...card.querySelectorAll('.note-card__action-btn')] : [];
+    const target = actions.length > 1 && actions.at(-1)?.classList.contains('note-card__action-btn--del') ? actions.at(${deleteAction ? -1 : -2}) : undefined;
+    if (!target || target.classList.contains('note-card__action-btn--disabled')) return { status: 'not_found' };
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return { status: 'not_found' };
+    return { status: 'matched', x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`;
+}
+
 async function evaluatePoint(client: CdpClient, expression: string): Promise<PointProbe | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", { expression, returnByValue: true });
   return (evaluated.result as { value?: PointProbe } | undefined)?.value;
@@ -879,6 +910,18 @@ async function clickPoint(client: CdpClient, x: number, y: number): Promise<bool
 
 async function clickNewestDraftByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
   const point = await evaluatePoint(client, draftEditPointExpression(title));
+  if (!point || point.status !== "matched") return point?.status ?? "not_found";
+  return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+}
+
+async function clickPublishedEditByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
+  const point = await evaluatePoint(client, publishedActionPointExpression(title, "edit"));
+  if (!point || point.status !== "matched") return point?.status ?? "not_found";
+  return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+}
+
+async function clickPublishedDeleteByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
+  const point = await evaluatePoint(client, publishedActionPointExpression(title, "delete"));
   if (!point || point.status !== "matched") return point?.status ?? "not_found";
   return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
 }
@@ -947,17 +990,118 @@ async function evaluatePublishedDetailProbe(client: CdpClient, title: string, ma
   return (evaluated.result as { value?: PublishedDetailProbe } | undefined)?.value;
 }
 
+async function deleteDialogMatches(client: CdpClient, title: string): Promise<boolean> {
+  const prefix = JSON.stringify(title.slice(0, 8));
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: String.raw`(() => [...document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="dialog"]')].some((el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      const text = el.innerText || el.textContent || '';
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && text.includes('删除笔记') && text.includes(${prefix});
+    }))()`,
+    returnByValue: true
+  });
+  return (evaluated.result as { value?: unknown } | undefined)?.value === true;
+}
+
+async function exactVisibleTextCount(client: CdpClient, value: string): Promise<number> {
+  const literal = JSON.stringify(value);
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: String.raw`(() => [...document.querySelectorAll('*')].filter((el) => el.children.length === 0 && (el.textContent || '').trim() === ${literal} && el.getBoundingClientRect().width > 0).length)()`,
+    returnByValue: true
+  });
+  const count = (evaluated.result as { value?: unknown } | undefined)?.value;
+  return Number.isSafeInteger(count) ? count as number : -1;
+}
+
+async function executeCleanupControl(
+  client: CdpClient,
+  input: LocalProviderMediaActionInput,
+  operationRef: string,
+  before: CommitProbe
+): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; content_readback: unknown }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
+  const managerUrl = "https://creator.xiaohongshu.com/new/note-manager?source=official";
+  await client.send("Page.navigate", { url: managerUrl });
+  let manager: CommitProbe | undefined;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await abortableDelay(250);
+    manager = await evaluateCommitProbe(client, input.marker!);
+    if (manager?.login_like || manager?.challenge_like || manager?.pathname.includes("/new/note-manager")) break;
+  }
+  if (!manager?.pathname.includes("/new/note-manager")) {
+    return { status: "unavailable", failure_class: "page_changed", message: "The exact note manager did not open before cleanup.", retryable: true, submitted: false };
+  }
+  const deletePoint = await clickPublishedDeleteByTitle(client, before.title_value);
+  if (deletePoint !== "matched") {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact marker-matched task content has no unique delete control.", retryable: false, submitted: false };
+  }
+  await abortableDelay(200);
+  if (!await deleteDialogMatches(client, before.title_value) || !await clickExactAxButton(client, "确定")) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup confirmation could not be verified.", retryable: false, submitted: false };
+  }
+  let count = -1;
+  let after: CommitProbe | undefined;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await abortableDelay(250);
+    count = await exactVisibleTextCount(client, before.title_value);
+    after = await evaluateCommitProbe(client, input.marker!);
+    if (count === 0 && after?.pathname === "/new/note-manager" && !after.login_like && !after.challenge_like) break;
+  }
+  const observed = count === 0 && after?.pathname === "/new/note-manager" && !after.login_like && !after.challenge_like;
+  return {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_url: managerUrl,
+    page: readyPage(managerUrl, "Xiaohongshu creator cleanup action"),
+    action_id: "xhs_publish_note_image_text_commit.cleanup",
+    requested_path: "image_text_upload",
+    effect_kind: "cleanup",
+    effect_status: observed ? "observed" : "unknown",
+    operation_status: observed ? "terminal" : "unknown_outcome",
+    operation_ref: operationRef,
+    ...(observed ? { terminal_state: "success" as const } : {}),
+    marker_state: "matched",
+    visibility_state: "not_applicable",
+    content_readback: {
+      state: observed ? "deleted" : "unknown",
+      management_list_state: observed ? "not_found" : "unknown",
+      detail_state: "not_run",
+      fields_state: "matched",
+      media_state: "matched",
+      marker_state: "matched",
+      content_ref: null,
+      canonical_url: observed ? managerUrl : null
+    },
+    page_readback: {
+      status: observed ? "observed" : "unknown",
+      page_state_ref: opaqueRef("page_state"),
+      route_state: observed ? "observed" : "unknown"
+    },
+    source_refs: [
+      { kind: "commit_action_summary", ref: opaqueRef("source") },
+      { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
+      { kind: "business_state_summary", ref: opaqueRef("source") }
+    ],
+    evidence_ref_kinds: [
+      { kind: "operation_ref", ref: operationRef },
+      { kind: "snapshot_ref", ref: opaqueRef("evidence") }
+    ],
+    submitted: true
+  };
+}
+
 async function executeCommitControl(
   client: CdpClient,
   input: LocalProviderMediaActionInput,
   operationRef: string
-): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
+): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; content_readback: unknown }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
   const save = input.action_id === "xhs_publish_note_image_text_commit.save_draft";
   const marker = input.marker!;
   const before = await evaluateCommitProbe(client, marker);
   if (!before?.marker_matched || !before.fields_matched || before.media_count < 1) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The current composition does not match the authorized marker, fields and media.", retryable: false, submitted: false };
   }
+  if (input.action_id === "xhs_publish_note_image_text_commit.cleanup") return executeCleanupControl(client, input, operationRef, before);
   if (!save && !await selectCommitVisibility(client, input.visibility as "only_me" | "public")) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The requested visibility could not be selected and verified exactly.", retryable: false, submitted: false };
   }
@@ -996,12 +1140,12 @@ async function executeCommitControl(
       await abortableDelay(250);
       const manager = await evaluateCommitProbe(client, marker);
       if (manager?.login_like || manager?.challenge_like) break;
-      if (manager?.pathname.includes("/new/note-manager") && await scrollExactTextIntoView(client, before.title_value) && await clickExactAxStaticText(client, before.title_value)) {
+      if (manager?.pathname.includes("/new/note-manager") && await scrollExactTextIntoView(client, before.title_value)) {
         listMatched = true;
         break;
       }
     }
-    if (listMatched) {
+    if (listMatched && await clickPublishedEditByTitle(client, before.title_value) === "matched") {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await abortableDelay(250);
         publishedDetail = await evaluatePublishedDetailProbe(client, before.title_value, marker);

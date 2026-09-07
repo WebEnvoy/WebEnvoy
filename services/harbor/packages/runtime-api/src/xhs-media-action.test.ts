@@ -65,6 +65,15 @@ const saveDraft = {
   }
 };
 
+const cleanup = {
+  ...saveDraft,
+  action_id: "xhs_publish_note_image_text_commit.cleanup" as const,
+  authorization_binding: {
+    ...saveDraft.authorization_binding,
+    action_id: "xhs_publish_note_image_text_commit.cleanup" as const
+  }
+};
+
 test("keeps the two media actions independent and exact", () => {
   const admittedUpload = admitXhsMediaAction(upload);
   const admittedGenerate = admitXhsMediaAction(generate);
@@ -93,6 +102,48 @@ test("admits only an exact independently-authorized commit action", () => {
     action_id: "xhs_publish_note_image_text_commit.publish",
     visibility: "only_me"
   }), null);
+});
+
+test("normalizes cleanup only after exact manager absence is observed", () => {
+  const completed = completeXhsMediaAction("session_1", cleanup, {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_url: "https://creator.xiaohongshu.com/new/note-manager?source=official",
+    page: { current_url: cleanup.url, title: "creator", status: "ready", facts: [] },
+    action_id: cleanup.action_id,
+    requested_path: cleanup.requested_path,
+    effect_kind: "cleanup",
+    effect_status: "observed",
+    operation_status: "terminal",
+    operation_ref: "media_operation_cleanup_1",
+    terminal_state: "success",
+    marker_state: "matched",
+    visibility_state: "not_applicable",
+    content_readback: {
+      state: "deleted",
+      management_list_state: "not_found",
+      detail_state: "not_run",
+      fields_state: "matched",
+      media_state: "matched",
+      marker_state: "matched",
+      content_ref: null,
+      canonical_url: "https://creator.xiaohongshu.com/new/note-manager?source=official"
+    },
+    page_readback: { status: "observed", page_state_ref: "page_state_cleanup_1", route_state: "observed" },
+    source_refs: [
+      { kind: "commit_action_summary", ref: "source_cleanup_1" },
+      { kind: "creator_publish_page_summary", ref: "source_cleanup_2" },
+      { kind: "business_state_summary", ref: "source_cleanup_3" }
+    ],
+    evidence_ref_kinds: [{ kind: "operation_ref", ref: "media_operation_cleanup_1" }],
+    submitted: true
+  });
+  assert.equal(completed.status, "available");
+  if (completed.schema_version !== "harbor-xhs-publish-note-image-text-commit/v0") assert.fail("expected cleanup result");
+  assert.equal(completed.normalized.business_effect.kind, "cleanup");
+  assert.equal(completed.normalized.content_readback.state, "deleted");
+  assert.equal(completed.normalized.content_readback.management_list_state, "not_found");
+  assert.equal(completed.normalized.reconciliation.status, "matched");
 });
 
 test("normalizes field fill without exposing protected values", () => {

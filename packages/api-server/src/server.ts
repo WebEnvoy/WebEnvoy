@@ -53,7 +53,7 @@ export type ApiServerOptions = {
 const serviceName = "webenvoy-api-server";
 const xhsMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xhsFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
-const xhsCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xhsCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 
 function sendJson(response: ServerResponse, statusCode: number, body: JsonBody): void {
   response.writeHead(statusCode, {

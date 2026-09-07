@@ -221,9 +221,10 @@ export type XhsMediaActionId =
   | "xhs_publish_note_image_text_media.text_to_image_generate"
   | "xhs_publish_note_image_text_fields.compose"
   | "xhs_publish_note_image_text_commit.save_draft"
-  | "xhs_publish_note_image_text_commit.publish";
+  | "xhs_publish_note_image_text_commit.publish"
+  | "xhs_publish_note_image_text_commit.cleanup";
 export type XhsMediaActionPath = "image_text_upload" | "image_text_generate";
-export type XhsMediaEffectKind = "upload" | "generate" | "modify" | "save_draft" | "publish";
+export type XhsMediaEffectKind = "upload" | "generate" | "modify" | "save_draft" | "publish" | "cleanup";
 export type XhsMediaOperationStatus = "accepted" | "running" | "terminal" | "unknown_outcome";
 
 export interface LocalProviderMediaAuthorizationBinding {
@@ -285,9 +286,9 @@ export type LocalProviderMediaActionResult =
       observed_at: string;
       observed_url: string;
       page: LocalProviderPageFacts;
-      action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
+      action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
       requested_path: "image_text_upload";
-      effect_kind: "save_draft" | "publish";
+      effect_kind: "save_draft" | "publish" | "cleanup";
       effect_status: "observed" | "unknown" | "failed";
       operation_status: XhsMediaOperationStatus;
       operation_ref: string;
@@ -295,7 +296,7 @@ export type LocalProviderMediaActionResult =
       marker_state: "matched" | "mismatched" | "unknown";
       visibility_state: "not_applicable" | "only_me" | "public" | "unknown";
       content_readback: {
-        state: "draft_saved" | "published" | "not_observed" | "unknown";
+        state: "draft_saved" | "published" | "deleted" | "not_observed" | "unknown";
         management_list_state: "matched" | "not_found" | "unknown" | "not_run";
         detail_state: "matched" | "mismatched" | "unknown" | "not_run";
         fields_state: "matched" | "mismatched" | "unknown";

@@ -801,7 +801,7 @@ async function assertMediaActionApiBoundary(): Promise<void> {
     }
   };
   assert.equal(isExactXhsMediaTaskBody(fieldBody), true);
-  const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+  const commitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
   const saveDraftBody = {
     ...body,
     package_ref: commitPackageRef,
@@ -809,9 +809,9 @@ async function assertMediaActionApiBoundary(): Promise<void> {
       ...taskIntent,
       capability: {
         ref: "lode:capability/publish-note-image-text-commit",
-        version: "0.1.0",
+        version: "0.1.1",
         source_ref: commitPackageRef,
-        lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0"
+        lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1"
       },
       input: {
         summary: "save the uniquely marked test draft",
@@ -837,6 +837,25 @@ async function assertMediaActionApiBoundary(): Promise<void> {
   } finally {
     await rm(commitValidationDirectory, { recursive: true, force: true });
   }
+  const cleanupBody = {
+    ...saveDraftBody,
+    task_intent: {
+      ...saveDraftBody.task_intent,
+      input: {
+        ...saveDraftBody.task_intent.input,
+        summary: "delete only the task-created exact test note",
+        action_id: "xhs_publish_note_image_text_commit.cleanup",
+        visibility: "not_applicable"
+      },
+      policy: { risk: "destructive", execution_intent: "execute_after_approval" },
+      resource_requirement_profile_id: "xhs-image-text-cleanup"
+    }
+  };
+  assert.equal(isExactXhsMediaTaskBody(cleanupBody), true, "cleanup must use the exact destructive action contract");
+  assert.equal(isExactXhsMediaTaskBody({
+    ...cleanupBody,
+    task_intent: { ...cleanupBody.task_intent, policy: { risk: "write", execution_intent: "execute_after_approval" } }
+  }), false, "cleanup must not be downgraded to write risk");
   assert.equal(isExactXhsMediaTaskBody({
     ...saveDraftBody,
     task_intent: { ...saveDraftBody.task_intent, input: { ...saveDraftBody.task_intent.input, visibility: "public" } }

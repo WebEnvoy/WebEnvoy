@@ -22,15 +22,16 @@ export const XHS_MEDIA_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/
 export const XHS_MEDIA_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 export const XHS_FIELD_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 export const XHS_FIELD_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
-export const XHS_COMMIT_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
-export const XHS_COMMIT_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+export const XHS_COMMIT_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+export const XHS_COMMIT_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 
 const actionPaths: Readonly<Record<XhsMediaActionId, XhsMediaActionPath>> = {
   "xhs_publish_note_image_text_media.image_upload": "image_text_upload",
   "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate",
   "xhs_publish_note_image_text_fields.compose": "image_text_upload",
   "xhs_publish_note_image_text_commit.save_draft": "image_text_upload",
-  "xhs_publish_note_image_text_commit.publish": "image_text_upload"
+  "xhs_publish_note_image_text_commit.publish": "image_text_upload",
+  "xhs_publish_note_image_text_commit.cleanup": "image_text_upload"
 };
 
 const actionEffects: Readonly<Record<XhsMediaActionId, XhsMediaEffectKind>> = {
@@ -38,7 +39,8 @@ const actionEffects: Readonly<Record<XhsMediaActionId, XhsMediaEffectKind>> = {
   "xhs_publish_note_image_text_media.text_to_image_generate": "generate",
   "xhs_publish_note_image_text_fields.compose": "modify",
   "xhs_publish_note_image_text_commit.save_draft": "save_draft",
-  "xhs_publish_note_image_text_commit.publish": "publish"
+  "xhs_publish_note_image_text_commit.publish": "publish",
+  "xhs_publish_note_image_text_commit.cleanup": "cleanup"
 };
 
 const allowedKeys = new Set([
@@ -48,6 +50,8 @@ const bindingKeys = new Set(["decision_ref", "action_id", "target_ref", "idempot
 const safeText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
 const opaquePublicRef = (value: unknown): value is string => safeText(value, 2_048) && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value);
+const isCommitActionId = (value: unknown): value is XhsCommitActionNormalizedResult["action_id"] =>
+  typeof value === "string" && value.startsWith("xhs_publish_note_image_text_commit.");
 
 export interface AdmittedXhsMediaAction {
   url: string;
@@ -146,15 +150,15 @@ export type XhsFieldActionNormalizedResult = {
 };
 
 export type XhsCommitActionNormalizedResult = {
-  action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish";
+  action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
   requested_path: "image_text_upload";
   canonical_url: string;
   target_ref: string;
   marker_state: "matched" | "mismatched" | "unknown";
   visibility_state: "not_applicable" | "only_me" | "public" | "unknown";
-  business_effect: { kind: "save_draft" | "publish"; status: "observed" | "not_observed" | "unknown" };
+  business_effect: { kind: "save_draft" | "publish" | "cleanup"; status: "observed" | "not_observed" | "unknown" };
   operation: { status: "terminal" | "unknown_outcome"; operation_ref: string; terminal_state?: "success" | "failure" };
-  content_readback: Extract<LocalProviderMediaActionResult, { status: "completed"; action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" }>["content_readback"];
+  content_readback: Extract<LocalProviderMediaActionResult, { status: "completed"; action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup" }>["content_readback"];
   post_check: { status: "passed" | "failed" | "skipped"; ref: string };
   reconciliation: { status: "matched" | "mismatched" | "unknown" | "not_run"; ref: string };
   recovery: { status: "not_required" | "required" | "unknown"; entrypoint: "inspect_operation_ref" | "await_post_check" | "manual_reconciliation" | "none" };
@@ -275,7 +279,7 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   if (Object.keys(input).some((key) => !allowedKeys.has(key))) return null;
   const actionId = input.action_id;
   const requestedPath = input.requested_path;
-  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
+  const commitAction = isCommitActionId(actionId);
   if (!(actionId === "xhs_publish_note_image_text_media.image_upload" || actionId === "xhs_publish_note_image_text_media.text_to_image_generate" ||
       actionId === "xhs_publish_note_image_text_fields.compose" || commitAction) ||
     requestedPath !== actionPaths[actionId]) return null;
@@ -286,7 +290,7 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
     (actionId.endsWith("text_to_image_generate") && input.refs.length !== 0) ||
     (actionId.endsWith(".compose") && (input.refs.length !== 2 || !String(input.refs[0]).endsWith("/title") || !String(input.refs[1]).endsWith("/body"))) ||
     (commitAction && (input.refs.length !== 0 || !safeText(input.marker, 128) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(input.marker) ||
-      (actionId.endsWith(".save_draft") ? input.visibility !== "not_applicable" : input.visibility !== "only_me" && input.visibility !== "public")))) return null;
+      (actionId.endsWith(".publish") ? input.visibility !== "only_me" && input.visibility !== "public" : input.visibility !== "not_applicable")))) return null;
   if (!safeCreatorPublishUrl(input.url, actionId === "xhs_publish_note_image_text_fields.compose")) return null;
   const binding = input.authorization_binding && typeof input.authorization_binding === "object" && !Array.isArray(input.authorization_binding)
     ? input.authorization_binding as Record<string, unknown>
@@ -341,7 +345,7 @@ export function unavailableXhsMediaAction(
     operation_ref: operationRef,
     ...(operationStatus === "terminal" ? { terminal_state: "failure" as const } : {})
   };
-  if (input.action_id === "xhs_publish_note_image_text_commit.save_draft" || input.action_id === "xhs_publish_note_image_text_commit.publish") {
+  if (isCommitActionId(input.action_id)) {
     return {
       schema_version: HARBOR_XHS_COMMIT_ACTION_SCHEMA,
       result_kind: "xhs_publish_note_image_text_commit",
@@ -356,7 +360,7 @@ export function unavailableXhsMediaAction(
         target_ref: input.target_ref,
         marker_state: "unknown",
         visibility_state: input.visibility ?? "unknown",
-        business_effect: { kind: input.action_id.endsWith(".save_draft") ? "save_draft" : "publish", status: operationStatus === "unknown_outcome" ? "unknown" : "not_observed" },
+        business_effect: { kind: input.action_id.endsWith(".save_draft") ? "save_draft" : input.action_id.endsWith(".publish") ? "publish" : "cleanup", status: operationStatus === "unknown_outcome" ? "unknown" : "not_observed" },
         operation: {
           status: operationStatus === "terminal" ? "terminal" : "unknown_outcome",
           operation_ref: operationRef,
@@ -451,10 +455,11 @@ export function completeXhsMediaAction(
   const postCheckRef = opaqueRef("post_check");
   const reconciliationRef = opaqueRef("reconciliation");
   const operationStatus = result.operation_status;
-  if ((input.action_id === "xhs_publish_note_image_text_commit.save_draft" || input.action_id === "xhs_publish_note_image_text_commit.publish") &&
+  if (isCommitActionId(input.action_id) &&
     result.action_id === input.action_id && "content_readback" in result) {
+    const cleanup = input.action_id.endsWith(".cleanup");
     const successful = result.effect_status === "observed" && operationStatus === "terminal" && result.terminal_state === "success" &&
-      result.marker_state === "matched" && result.content_readback.management_list_state === "matched" && result.content_readback.detail_state === "matched" &&
+      result.marker_state === "matched" && result.content_readback.management_list_state === (cleanup ? "not_found" : "matched") && result.content_readback.detail_state === (cleanup ? "not_run" : "matched") &&
       result.content_readback.fields_state === "matched" && result.content_readback.media_state === "matched" && result.content_readback.marker_state === "matched";
     const unknown = operationStatus === "unknown_outcome" || result.effect_status === "unknown" || result.marker_state === "unknown" ||
       Object.values(result.content_readback).includes("unknown");

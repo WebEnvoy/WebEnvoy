@@ -55,7 +55,8 @@ const xhsMediaProfileByAction: Record<XhsMediaActionId, string> = {
   "xhs_publish_note_image_text_media.text_to_image_generate": "xhs-text-to-image-generate",
   "xhs_publish_note_image_text_fields.compose": "xhs-image-text-field-fill",
   "xhs_publish_note_image_text_commit.save_draft": "xhs-image-text-save-draft",
-  "xhs_publish_note_image_text_commit.publish": "xhs-image-text-publish"
+  "xhs_publish_note_image_text_commit.publish": "xhs-image-text-publish",
+  "xhs_publish_note_image_text_commit.cleanup": "xhs-image-text-cleanup"
 };
 const xhsFieldOwnerRefPattern = /^draft:app-protected\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/(?:title|body)$/i;
 const xhsMediaLocalFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -143,7 +144,7 @@ function isCreatorPublishUrl(value: unknown, fieldAction = false): value is stri
 }
 
 /**
- * Structural API gate for the two #307 actions. Core remains the contract
+ * Structural API gate for the exact Xiaohongshu media, field, and commit actions. Core remains the contract
  * and admission owner; this gate only rejects malformed requests before a
  * task thread or pending confirmation is created.
  */
@@ -160,7 +161,8 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
   const profileId = taskIntent?.resource_requirement_profile_id;
   const requirementRefs = taskIntent?.resource_requirement_refs;
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
-  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
+  const commitAction = typeof actionId === "string" && actionId.startsWith("xhs_publish_note_image_text_commit.");
+  const cleanupAction = actionId === "xhs_publish_note_image_text_commit.cleanup";
   const expectedPackageRef = fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef;
   const expectedLockRef = fieldAction ? xhsFieldLockRef : commitAction ? xhsCommitLockRef : xhsMediaLockRef;
   const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : commitAction ? xhsCommitCapabilityId : xhsMediaCapabilityId;
@@ -168,13 +170,13 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
   if (body.package_ref !== expectedPackageRef ||
     !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id", ...(commitAction ? ["marker", "visibility"] : [])].includes(key)) ||
     capability?.ref !== `lode:capability/${expectedCapabilityId}` ||
-    capability.version !== (fieldAction ? "0.1.1" : "0.1.0") || capability.source_ref !== expectedPackageRef || capability.lock_ref !== expectedLockRef ||
+    capability.version !== (fieldAction || commitAction ? "0.1.1" : "0.1.0") || capability.source_ref !== expectedPackageRef || capability.lock_ref !== expectedLockRef ||
     scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref, fieldAction) ||
     typeof harbor?.identity_environment_ref !== "string" || harbor.identity_environment_ref.length === 0 ||
     !isCreatorPublishUrl(harbor?.url, fieldAction) || harbor?.url !== scope.target_ref ||
     typeof actionId !== "string" || !Object.hasOwn(xhsMediaActionPaths, actionId) ||
     requestedPath !== xhsMediaActionPaths[actionId] ||
-    policy?.risk !== "write" || policy.execution_intent !== "execute_after_approval" ||
+    policy?.risk !== (cleanupAction ? "destructive" : "write") || policy.execution_intent !== "execute_after_approval" ||
     profileId !== xhsMediaProfileByAction[actionId] ||
     !Array.isArray(requirementRefs) || requirementRefs.length !== 1 || requirementRefs[0] !== expectedRequirementRef ||
     !Array.isArray(refs) || refs.length > 18 || !refs.every((ref) => typeof ref === "string" && ref.length > 0 && ref.length <= 2_048)) {
@@ -190,7 +192,7 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
     const marker = input.marker;
     const visibility = input.visibility;
     return refs.length === 0 && typeof marker === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) &&
-      (actionId.endsWith(".save_draft") ? visibility === "not_applicable" : visibility === "only_me" || visibility === "public");
+      (actionId.endsWith(".publish") ? visibility === "only_me" || visibility === "public" : visibility === "not_applicable");
   }
   return refs.length === 0;
 }
@@ -234,7 +236,7 @@ async function validateRuntimeTaskSubmissionRequest(
     capability.source_ref === package_ref && scope?.target_type === "creator_publish_page";
   const mediaAction = (package_ref === xhsMediaPackageRef || package_ref === xhsFieldPackageRef || package_ref === xhsCommitPackageRef) &&
     capability?.ref === `lode:capability/${package_ref === xhsFieldPackageRef ? xhsFieldCapabilityId : package_ref === xhsCommitPackageRef ? xhsCommitCapabilityId : xhsMediaCapabilityId}` &&
-    capability.version === (package_ref === xhsFieldPackageRef ? "0.1.1" : "0.1.0") && capability.source_ref === package_ref && capability.lock_ref === (package_ref === xhsFieldPackageRef ? xhsFieldLockRef : package_ref === xhsCommitPackageRef ? xhsCommitLockRef : xhsMediaLockRef) &&
+    capability.version === (package_ref === xhsMediaPackageRef ? "0.1.0" : "0.1.1") && capability.source_ref === package_ref && capability.lock_ref === (package_ref === xhsFieldPackageRef ? xhsFieldLockRef : package_ref === xhsCommitPackageRef ? xhsCommitLockRef : xhsMediaLockRef) &&
     scope?.target_type === "creator_publish_page";
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";

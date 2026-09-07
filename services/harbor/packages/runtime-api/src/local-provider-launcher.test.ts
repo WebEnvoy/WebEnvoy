@@ -8,12 +8,25 @@ import {
   imageUploadPathProbeExpression,
   observeXhsPathPrepareRequest,
   providerConfigurationPageUrl,
+  publishedActionPointExpression,
   readTargetPageFacts,
   sameWritePrecheckUrl,
   selectPage,
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
+
+test("#423 published readback and cleanup select only the exact card actions", () => {
+  const classList = (names: string[]) => ({ contains: (name: string) => names.includes(name) });
+  const remove = { classList: classList(["note-card__action-btn--del"]), getBoundingClientRect: () => ({ left: 60, top: 10, width: 20, height: 20 }) };
+  const edit = { classList: classList([]), getBoundingClientRect: () => ({ left: 30, top: 10, width: 20, height: 20 }) };
+  const card = { querySelectorAll: () => [{ classList: classList([]) }, edit, remove] };
+  const title = { children: [], textContent: "WE测试", getBoundingClientRect: () => ({ width: 100 }), closest: () => card };
+  const editPoint = new Function("document", `return ${publishedActionPointExpression("WE测试", "edit")}`);
+  const deletePoint = new Function("document", `return ${publishedActionPointExpression("WE测试", "delete")}`);
+  assert.deepEqual(editPoint({ querySelectorAll: () => [title] }), { status: "matched", x: 40, y: 20 });
+  assert.deepEqual(deletePoint({ querySelectorAll: () => [title] }), { status: "matched", x: 70, y: 20 });
+});
 
 test("#419 same-route draft overlay reopens the newest exact-title draft", () => {
   const rect = (top: number, left = 0, width = 100, height = 20) => ({ top, left, width, height, right: left + width, bottom: top + height });

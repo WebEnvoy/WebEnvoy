@@ -50,8 +50,8 @@ export const xhsFieldPackageRef = "lode://site-capability/xiaohongshu/publish-no
 export const xhsFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 export const xhsFieldCapabilityId = "publish-note-image-text-fields";
 export const xhsFieldOperationId = "xhs_publish_note_image_text_fields";
-export const xhsCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
-export const xhsCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+export const xhsCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+export const xhsCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 export const xhsCommitCapabilityId = "publish-note-image-text-commit";
 export const xhsCommitOperationId = "xhs_publish_note_image_text_commit";
 const retiredXhsPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
@@ -60,7 +60,8 @@ export const xhsMediaActionPaths = {
   "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate",
   "xhs_publish_note_image_text_fields.compose": "image_text_upload",
   "xhs_publish_note_image_text_commit.save_draft": "image_text_upload",
-  "xhs_publish_note_image_text_commit.publish": "image_text_upload"
+  "xhs_publish_note_image_text_commit.publish": "image_text_upload",
+  "xhs_publish_note_image_text_commit.cleanup": "image_text_upload"
 } as const;
 export type XhsMediaActionId = keyof typeof xhsMediaActionPaths;
 
@@ -290,7 +291,7 @@ function isXhsMediaActionContract(
 ): boolean {
   const actionId = taskIntent.input?.action_id;
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
-  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
+  const commitAction = typeof actionId === "string" && actionId.startsWith("xhs_publish_note_image_text_commit.");
   const expectedPackageRef = fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef;
   const expectedLockRef = fieldAction ? xhsFieldLockRef : commitAction ? xhsCommitLockRef : xhsMediaLockRef;
   const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : commitAction ? xhsCommitCapabilityId : xhsMediaCapabilityId;
@@ -302,10 +303,10 @@ function isXhsMediaActionContract(
     lodePackage.operation_id !== expectedOperationId ||
     operationMode !== "write" ||
     taskIntent.capability.ref !== expectedCapabilityRef(expectedCapabilityId) ||
-    taskIntent.capability.version !== (fieldAction ? "0.1.1" : "0.1.0") ||
+    taskIntent.capability.version !== (fieldAction || commitAction ? "0.1.1" : "0.1.0") ||
     taskIntent.capability.source_ref !== expectedPackageRef ||
     taskIntent.capability.lock_ref !== expectedLockRef ||
-    taskIntent.policy.risk !== "write" ||
+    taskIntent.policy.risk !== (actionId === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "write") ||
     taskIntent.policy.execution_intent !== "execute_after_approval" ||
     typeof actionId !== "string" ||
     !Object.hasOwn(xhsMediaActionPaths, actionId)) return false;
@@ -317,12 +318,12 @@ function isXhsMediaActionContract(
     (commitAction && inputRefs.length !== 0)) return false;
   const declaration = lodePackage.action_declaration as LodeBusinessActionOwnerContract["action_declaration"] | undefined;
   const action = declaration?.actions.find((candidate) => candidate.action_id === actionId);
-  if (!action || action.category !== "commit" ||
+  if (!action || action.category !== (actionId === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "commit") ||
     action.target_scope.site_slug !== "xiaohongshu" ||
     !action.target_scope.target_types.includes("creator_publish_page") ||
     !action.target_scope.supported_origins.includes("https://creator.xiaohongshu.com") ||
     action.resource_requirements.profile_ids.length === 0) return false;
-  const expectedEffect = fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
+  const expectedEffect = actionId === "xhs_publish_note_image_text_commit.cleanup" ? "delete" : fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
     actionId === "xhs_publish_note_image_text_commit.publish" ? "publish" : "create";
   return action.external_effects.length === 1 && action.external_effects[0] === expectedEffect;
 }

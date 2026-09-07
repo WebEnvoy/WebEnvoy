@@ -14,7 +14,7 @@ const maxSchemaMapEntries = 200;
 const maxCompositionEntries = 32;
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
-const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 
 type OutputContract = {
   operationMode: string;

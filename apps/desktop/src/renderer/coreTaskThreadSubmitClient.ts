@@ -35,8 +35,8 @@ const xiaohongshuMediaLockRef = "lode://lock/site-capability/xiaohongshu/publish
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldActionId = "xhs_publish_note_image_text_fields.compose";
-const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
-const xiaohongshuCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+const xiaohongshuCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 const xiaohongshuMediaActionContracts = {
   "xhs_publish_note_image_text_media.image_upload": {
     requestedPath: "image_text_upload",
@@ -52,6 +52,7 @@ const xiaohongshuMediaActionContracts = {
 const xiaohongshuCommitActionContracts = {
   "xhs_publish_note_image_text_commit.save_draft": { effect: "create", profileId: "xhs-image-text-save-draft", visibility: ["not_applicable"] },
   "xhs_publish_note_image_text_commit.publish": { effect: "publish", profileId: "xhs-image-text-publish", visibility: ["only_me", "public"] },
+  "xhs_publish_note_image_text_commit.cleanup": { effect: "delete", profileId: "xhs-image-text-cleanup", visibility: ["not_applicable"] },
 } as const;
 const localFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -239,7 +240,7 @@ export function prepareTaskTurnRequest(options: SubmitOptions, requestedModes?: 
         input: selected.input ?? { summary: options.skill.name, refs: [target.ref], ...(requestedPath === undefined ? {} : { requested_path: requestedPath }) },
         scope: { target_type: target.targetType, target_ref: target.ref },
         policy: {
-          risk: action.category === "read" ? "read" : "write",
+          risk: action.category === "read" ? "read" : action.category === "destructive" ? "destructive" : "write",
           execution_intent: selected.executionIntent,
           timeout_ms: 60_000,
         },
@@ -321,7 +322,7 @@ function selectActionForDraft(
     const visibility = stringValue(draft.values.visibility);
     if (!action || !contract || stringValue(draft.values.requested_path) !== "image_text_upload" ||
       !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) || !(contract.visibility as readonly string[]).includes(visibility)) {
-      return { ok: false, reason: "请选择一个精确保存或发布动作，并提供匹配的唯一标记与可见性。" };
+      return { ok: false, reason: "请选择一个精确保存、发布或清理动作，并提供匹配的唯一标记与可见性。" };
     }
     return {
       ok: true,
@@ -578,10 +579,10 @@ function isXiaohongshuPathPrepareSkill(skill: LodeCatalogSkill) {
 
 function isXiaohongshuMediaSkill(skill: LodeCatalogSkill) {
   if (skill.packageRef !== xiaohongshuMediaPackageRef || skill.lockRef !== xiaohongshuMediaLockRef ||
-    skill.version !== "0.1.0" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 2) return false;
+    skill.version !== "0.1.1" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 3) return false;
   return Object.entries(xiaohongshuMediaActionContracts).every(([id, contract]) => {
     const action = skill.actions.find((item) => item.id === id);
-    return action?.category === "commit" && action.operationMode === "write" &&
+    return action?.category === (id.endsWith(".cleanup") ? "destructive" : "commit") && action.operationMode === "write" &&
       action.externalEffects.length === 1 && action.externalEffects[0] === contract.effect &&
       action.resourceRequirementRef === "xiaohongshu.publish-note-image-text-media.resources" &&
       action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === contract.profileId &&
@@ -604,7 +605,7 @@ function isXiaohongshuFieldSkill(skill: LodeCatalogSkill) {
 
 function isXiaohongshuCommitSkill(skill: LodeCatalogSkill) {
   if (skill.packageRef !== xiaohongshuCommitPackageRef || skill.lockRef !== xiaohongshuCommitLockRef ||
-    skill.version !== "0.1.0" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 2) return false;
+    skill.version !== "0.1.1" || skill.siteSlug !== "xiaohongshu" || skill.actions.length !== 3) return false;
   return Object.entries(xiaohongshuCommitActionContracts).every(([id, contract]) => {
     const action = skill.actions.find((item) => item.id === id);
     return action?.category === "commit" && action.operationMode === "write" &&

@@ -49,8 +49,8 @@ type InputContract = {
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuMediaSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/input@0.1.0";
 const xiaohongshuMediaOperationRef = "lode://operation/xhs_publish_note_image_text_media";
-const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.0";
-const xiaohongshuCommitSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.0";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+const xiaohongshuCommitSchemaId = "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.1";
 const xiaohongshuCommitOperationRef = "lode://operation/xhs_publish_note_image_text_commit";
 
 export function projectInputFields(schema: Record<string, unknown>, contract?: InputContract): LodeCatalogField[] {
@@ -347,11 +347,12 @@ function isXiaohongshuCommitInputContract(contract: InputContract) {
 }
 
 function validXiaohongshuCommitBranches(value: unknown) {
-  if (!Array.isArray(value) || value.length !== 2 || !value.every(isRecord)) return false;
+  if (!Array.isArray(value) || value.length !== 3 || !value.every(isRecord)) return false;
   const branch = (actionId: string) => value.find((item) => isRecord(item.properties) && isRecord(item.properties.action_id) && item.properties.action_id.const === actionId);
   const save = branch("xhs_publish_note_image_text_commit.save_draft");
   const publish = branch("xhs_publish_note_image_text_commit.publish");
-  if (!save || !publish || !hasOnlyAllowedKeys(save, ["properties"]) || !hasOnlyAllowedKeys(publish, ["properties"])) return false;
+  const cleanup = branch("xhs_publish_note_image_text_commit.cleanup");
+  if (!save || !publish || !cleanup || !hasOnlyAllowedKeys(save, ["properties"]) || !hasOnlyAllowedKeys(publish, ["properties"]) || !hasOnlyAllowedKeys(cleanup, ["properties"])) return false;
   const exact = (item: Record<string, unknown>, actionId: string, visibility: unknown) => {
     const properties = item.properties as Record<string, unknown>;
     return hasOnlyAllowedKeys(properties, ["action_id", "visibility"]) && isRecord(properties.action_id) &&
@@ -359,7 +360,8 @@ function validXiaohongshuCommitBranches(value: unknown) {
       isRecord(properties.visibility) && JSON.stringify(properties.visibility) === JSON.stringify(visibility);
   };
   return exact(save, "xhs_publish_note_image_text_commit.save_draft", { const: "not_applicable" }) &&
-    exact(publish, "xhs_publish_note_image_text_commit.publish", { enum: ["only_me", "public"] });
+    exact(publish, "xhs_publish_note_image_text_commit.publish", { enum: ["only_me", "public"] }) &&
+    exact(cleanup, "xhs_publish_note_image_text_commit.cleanup", { const: "not_applicable" });
 }
 
 function validXiaohongshuMediaBranches(value: unknown) {

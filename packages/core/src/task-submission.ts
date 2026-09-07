@@ -130,7 +130,8 @@ export function isXhsMediaActionIntent(taskIntent: TaskIntentEnvelope, packageRe
   const actionId = taskIntent.input.action_id as XhsMediaActionId | undefined;
   const refs = taskIntent.input.refs;
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
-  const commitAction = actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish";
+  const commitAction = typeof actionId === "string" && actionId.startsWith("xhs_publish_note_image_text_commit.");
+  const cleanupAction = actionId === "xhs_publish_note_image_text_commit.cleanup";
   const marker = taskIntent.input.marker;
   const visibility = taskIntent.input.visibility;
   return packageRef === (fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef) && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
@@ -140,8 +141,8 @@ export function isXhsMediaActionIntent(taskIntent: TaskIntentEnvelope, packageRe
       (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && refs.length === 0) ||
       (fieldAction && refs.length === 2) ||
       (commitAction && refs.length === 0 && typeof marker === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) &&
-        (actionId.endsWith(".save_draft") ? visibility === "not_applicable" : visibility === "only_me" || visibility === "public"))) &&
-    taskIntent.policy.risk === "write" && taskIntent.policy.execution_intent === "execute_after_approval";
+        (actionId.endsWith(".publish") ? visibility === "only_me" || visibility === "public" : visibility === "not_applicable"))) &&
+    taskIntent.policy.risk === (cleanupAction ? "destructive" : "write") && taskIntent.policy.execution_intent === "execute_after_approval";
 }
 
 function requestInvalid(code: string, recoveryHint: string): FailureRecord {

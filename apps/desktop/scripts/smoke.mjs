@@ -771,7 +771,9 @@ if (
   xhsMediaSkill.inputFields.find((field) => field.id === "refs")?.maxItems !== 18 ||
   xhsMediaSkill.inputFields.find((field) => field.id === "summary")?.inputProjection !== "safe_summary" ||
   xhsCommitSkill?.availability !== "available" ||
-  xhsCommitSkill.actions.map((action) => action.id).sort().join(",") !== "xhs_publish_note_image_text_commit.publish,xhs_publish_note_image_text_commit.save_draft" ||
+  xhsCommitSkill.actions.map((action) => action.id).sort().join(",") !== "xhs_publish_note_image_text_commit.cleanup,xhs_publish_note_image_text_commit.publish,xhs_publish_note_image_text_commit.save_draft" ||
+  xhsCommitSkill.actions.find((action) => action.id.endsWith(".cleanup"))?.category !== "destructive" ||
+  xhsCommitSkill.actions.find((action) => action.id.endsWith(".cleanup"))?.externalEffects?.[0] !== "delete" ||
   xhsCommitSkill.inputFields.find((field) => field.id === "marker")?.maxLength !== 128 ||
   xhsCommitSkill.inputFields.find((field) => field.id === "visibility")?.options?.join(",") !== "not_applicable,only_me,public" ||
   bossSearchSkill?.availability !== "incompatible" ||
