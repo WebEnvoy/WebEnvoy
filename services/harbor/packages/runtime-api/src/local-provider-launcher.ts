@@ -901,6 +901,7 @@ async function evaluatePoint(client: CdpClient, expression: string): Promise<Poi
 
 async function clickPoint(client: CdpClient, x: number, y: number): Promise<boolean> {
   try {
+    await client.send("Page.bringToFront");
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
