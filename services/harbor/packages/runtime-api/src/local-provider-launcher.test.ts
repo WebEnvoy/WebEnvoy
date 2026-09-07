@@ -177,6 +177,7 @@ test("#409 media upload selects only the unique actionable image-text path befor
   assert.match(probe, /\.header-tabs \.creator-tab/);
   assert.match(probe, /=== '上传图文'/);
   assert.match(probe, /pathEntries\.length === 1/);
+  assert.match(probe, /attempt < 30/);
   assert.match(probe, /document\.elementFromPoint/);
   assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(probe, /image_input_candidate_count/);

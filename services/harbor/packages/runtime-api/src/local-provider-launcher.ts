@@ -747,12 +747,17 @@ export function imageUploadPathProbeExpression(): string {
       // Only image_upload consumes this current-page compatibility branch. It
       // prevents the default video input from being mistaken for an image
       // input; remove it once the formal entrypoint opens image-text directly.
-      const pathEntries = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab')]
-        .filter((el) => (el.textContent || '').replace(/\s+/g, ' ').trim() === '上传图文' && actionable(el));
-      if (pathEntries.length === 1) {
-        pathEntries[0].click();
-        for (let attempt = 0; attempt < 20 && imageInputs().length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+      let pathEntries = [];
+      for (let attempt = 0; attempt < 30 && imageInputs().length === 0; attempt += 1) {
+        pathEntries = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab')]
+          .filter((el) => (el.textContent || '').replace(/\s+/g, ' ').trim() === '上传图文' && actionable(el));
+        if (pathEntries.length === 1) {
+          pathEntries[0].click();
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      for (let attempt = 0; attempt < 30 && imageInputs().length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
       return { image_input_candidate_count: imageInputs().length, image_path_candidate_count: pathEntries.length };
     }
     return { image_input_candidate_count: imageInputs().length, image_path_candidate_count: 0 };
