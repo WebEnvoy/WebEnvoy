@@ -325,7 +325,7 @@ export function completeXhsMediaAction(
     normalized: {
       action_id: input.action_id,
       requested_path: input.requested_path,
-      canonical_url: result.observed_url,
+      canonical_url: input.url,
       target_ref: input.target_ref,
       summary: input.summary,
       source_status: successful ? "located" : "unknown",

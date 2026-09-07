@@ -103,7 +103,7 @@ test("does not promote a terminal effect without page/media readback", () => {
   const result = completeXhsMediaAction("session_1", upload, {
     status: "completed",
     observed_at: new Date().toISOString(),
-    observed_url: upload.url,
+    observed_url: "https://creator.xiaohongshu.com/login",
     page: {
       current_url: upload.url,
       title: "creator",
@@ -141,6 +141,7 @@ test("does not promote a terminal effect without page/media readback", () => {
   });
   assert.equal(result.status, "unavailable");
   assert.equal(result.unavailable_reason, "operation_result_unknown");
+  assert.equal(result.normalized.canonical_url, upload.url);
   assert.equal(result.normalized.reconciliation.status, "unknown");
   assert.equal(result.normalized.submitted, false);
 });
