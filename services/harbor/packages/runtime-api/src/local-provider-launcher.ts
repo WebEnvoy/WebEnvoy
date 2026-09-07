@@ -92,7 +92,9 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     const configurationFacts = providerConfiguration
       ? await applyAndReadbackProviderConfiguration(port, initialPageUrl, providerConfiguration, readbackSignal)
       : [];
-    const page = await readPageFacts(port, initialPageUrl, readbackSignal);
+    const page = isXhsCreatorPublishUrl(input)
+      ? await openProviderUrl(port, input.url, readbackSignal)
+      : await readPageFacts(port, initialPageUrl, readbackSignal);
     let currentUrl = page.current_url ?? initialPageUrl;
     const evidence_ref = opaqueRef("validation");
     return {
@@ -1166,18 +1168,28 @@ export function providerLaunchArguments(
   ];
 }
 
-function providerConfigurationPageUrl(input: LocalProviderLaunchInput): string {
+export function providerConfigurationPageUrl(input: LocalProviderLaunchInput): string {
   try {
     const url = new URL(input.url);
     if (
       input.identity_environment?.site_binding.site_id === "xiaohongshu" &&
-      url.origin === "https://www.xiaohongshu.com" &&
-      ["/search_result", "/search_result/"].includes(url.pathname)
+      ((url.origin === "https://www.xiaohongshu.com" && ["/search_result", "/search_result/"].includes(url.pathname)) ||
+        (url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname)))
     ) return "https://www.xiaohongshu.com/explore";
   } catch {
     // URL validation remains owned by the Runtime Session boundary.
   }
   return input.url;
+}
+
+function isXhsCreatorPublishUrl(input: LocalProviderLaunchInput): boolean {
+  try {
+    const url = new URL(input.url);
+    return input.identity_environment?.site_binding.site_id === "xiaohongshu" &&
+      url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 const SITE_RESOURCE_PROBE_DEADLINE_MS = 3000;

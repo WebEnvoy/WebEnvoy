@@ -4,11 +4,24 @@ import {
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
   observeXhsPathPrepareRequest,
+  providerConfigurationPageUrl,
   readTargetPageFacts,
   selectPage,
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
+
+test("creator publish sessions warm the existing Xiaohongshu login before opening creator", () => {
+  const identity_environment = { site_binding: { site_id: "xiaohongshu" } } as never;
+  assert.equal(providerConfigurationPageUrl({
+    url: "https://creator.xiaohongshu.com/publish/publish",
+    identity_environment
+  } as never), "https://www.xiaohongshu.com/explore");
+  assert.equal(providerConfigurationPageUrl({
+    url: "https://example.com/publish/publish",
+    identity_environment
+  } as never), "https://example.com/publish/publish");
+});
 
 test("selectPage matches equivalent page URLs by structured URL semantics", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?keyword=AI%20%E5%B7%A5%E5%85%B7&source=web#notes";
