@@ -857,6 +857,16 @@ function pathSelectionProbeExpression(): string {
           const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
+          const imageTextEntries = requestedPath.startsWith('image_text_')
+            ? [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
+              .filter((el) => controlVisible(el) && normalizeControlLabel(el) === '上传图文' &&
+                !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'))
+            : [];
+          if (controls.length === 0 && imageTextEntries.length === 1) {
+            imageTextEntries[0].click();
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            continue;
+          }
           if (controls.length !== 1) return { ...ready, selection_status: 'blocked' };
           const control = controls[0];
           control.click();

@@ -138,6 +138,8 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
   assert.match(upload, /controls\.length !== 1/);
+  assert.match(upload, /normalizeControlLabel\(el\) === '上传图文'/);
+  assert.match(upload, /controls\.length === 0 && imageTextEntries\.length === 1/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(upload, /rect\.right > 0.*rect\.left < innerWidth/);
