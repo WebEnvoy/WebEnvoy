@@ -555,6 +555,8 @@ async function executeXhsMediaAction(
     try {
       await sendMediaActionCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
+        const selectedPath = await evaluateWritePrecheck(client, "image_text_upload", true, true);
+        if (selectedPath?.selection_status !== "selected" || selectedPath.path_observed !== "observed") return failure("media_ref_unavailable", "The creator image-upload path could not be selected.", false, page);
         const objectId = await findImageFileInput(client);
         if (!objectId) return failure("media_ref_unavailable", "The creator page has no supported image upload input.", false, page);
         const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
