@@ -97,11 +97,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Resolve Core Lode pin
+        id: lode-pin
+        shell: bash
+        run: echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode.commit)')" >> "$GITHUB_OUTPUT"
       - name: Check out pinned Lode assets
         uses: actions/checkout@v4
         with:
           repository: WebEnvoy/Lode
-          ref: 6238d3f9de0cd09157c9769e27d90174c299406a
+          ref: ${{ steps.lode-pin.outputs.ref }}
           path: .runtime-sources/lode-core
           persist-credentials: false
       - name: Set up Node.js
