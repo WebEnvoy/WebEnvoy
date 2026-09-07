@@ -1004,10 +1004,14 @@ export function cleanupConfirmationPointExpression(title: string): string {
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
     const candidates = [...document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="dialog"]')]
-      .filter((element) => visible(element) && (element.innerText || element.textContent || '').includes('删除笔记') &&
-        (element.innerText || element.textContent || '').includes(${titleLiteral}));
+      .filter((element) => visible(element) && (element.innerText || element.textContent || '').includes('删除笔记'));
     const dialogs = candidates.filter((element) => !candidates.some((other) => other !== element && other.contains(element)));
     if (dialogs.length !== 1) return { status: dialogs.length === 0 ? 'not_found' : 'ambiguous' };
+    const displayedTitle = (dialogs[0].innerText || dialogs[0].textContent || '').match(/确定要删除《([^》]+)》这篇笔记吗/)?.[1];
+    const matchingTitles = displayedTitle ? [...document.querySelectorAll('.note-card .note-card__title')]
+      .filter((element) => visible(element) && (element.textContent || '').trim().startsWith(displayedTitle)) : [];
+    if (!${titleLiteral}.startsWith(displayedTitle || '') || matchingTitles.length !== 1 ||
+        (matchingTitles[0].textContent || '').trim() !== ${titleLiteral}) return { status: 'ambiguous' };
     const buttons = [...dialogs[0].querySelectorAll('button')]
       .filter((element) => visible(element) && (element.innerText || element.textContent || '').trim() === '确定' && !element.disabled);
     if (buttons.length !== 1) return { status: buttons.length === 0 ? 'not_found' : 'ambiguous' };

@@ -39,17 +39,22 @@ test("#423 cleanup binds one update page and one confirmation inside the exact d
   const rect = { left: 30, top: 10, width: 20, height: 20 };
   const confirm = { disabled: false, innerText: "确定", textContent: "确定", getBoundingClientRect: () => rect };
   const exactDialog = {
-    innerText: "删除笔记 WE测试0907-2214",
-    textContent: "删除笔记 WE测试0907-2214",
+    innerText: "删除笔记 删除后将无法恢复，确定要删除《WE测试0907-2》这篇笔记吗",
+    textContent: "删除笔记 删除后将无法恢复，确定要删除《WE测试0907-2》这篇笔记吗",
     getBoundingClientRect: () => ({ ...rect, width: 200, height: 100 }),
     querySelectorAll: () => [confirm],
   };
   const unrelatedDialog = { ...exactDialog, innerText: "其他确认", textContent: "其他确认" };
+  const exactTitle = { textContent: "WE测试0907-2214", getBoundingClientRect: () => ({ ...rect, width: 100 }) };
   const evaluate = new Function("document", "getComputedStyle", `return ${cleanupConfirmationPointExpression("WE测试0907-2214")}`);
   assert.deepEqual(evaluate(
-    { querySelectorAll: () => [unrelatedDialog, exactDialog] },
+    { querySelectorAll: (selector: string) => selector === ".note-card .note-card__title" ? [exactTitle] : [unrelatedDialog, exactDialog] },
     () => ({ display: "block", visibility: "visible" }),
   ), { status: "matched", x: 40, y: 20 });
+  assert.deepEqual(evaluate(
+    { querySelectorAll: (selector: string) => selector === ".note-card .note-card__title" ? [exactTitle, { ...exactTitle, textContent: "WE测试0907-2999" }] : [exactDialog] },
+    () => ({ display: "block", visibility: "visible" }),
+  ), { status: "ambiguous" });
 });
 
 test("#419 same-route draft overlay reopens the newest exact-title draft", () => {
