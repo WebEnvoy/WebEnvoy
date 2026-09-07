@@ -7,6 +7,7 @@ import {
   fieldFillProbeExpression,
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
+  noteManagerNavigationPointExpression,
   observeXhsPathPrepareRequest,
   providerConfigurationPageUrl,
   publishedActionPointExpression,
@@ -35,6 +36,11 @@ test("#423 cleanup binds one update page and one confirmation inside the exact d
   const manager = { id: "manager", type: "page", title: "creator", url: "https://creator.xiaohongshu.com/new/note-manager" };
   assert.equal(selectCleanupPage([update, manager] as Parameters<typeof selectCleanupPage>[0])?.id, "task");
   assert.equal(selectCleanupPage([update, { ...update, id: "other" }] as Parameters<typeof selectCleanupPage>[0]), undefined);
+
+  const managerLink = { textContent: "笔记管理", getBoundingClientRect: () => ({ left: 10, top: 20, width: 40, height: 20 }) };
+  const navigate = new Function("document", `return ${noteManagerNavigationPointExpression()}`);
+  assert.deepEqual(navigate({ querySelectorAll: () => [managerLink] }), { status: "matched", x: 30, y: 30 });
+  assert.deepEqual(navigate({ querySelectorAll: () => [managerLink, managerLink] }), { status: "ambiguous" });
 
   const rect = { left: 30, top: 10, width: 20, height: 20 };
   const confirm = { disabled: false, innerText: "确定", textContent: "确定", getBoundingClientRect: () => rect };

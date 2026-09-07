@@ -894,6 +894,16 @@ export function publishedActionPointExpression(title: string, action: "edit" | "
   })()`;
 }
 
+export function noteManagerNavigationPointExpression(): string {
+  return String.raw`(() => {
+    const links = [...document.querySelectorAll('.d-menu-item .menu-title-wrapper')]
+      .filter((element) => (element.textContent || '').trim() === '笔记管理' && element.getBoundingClientRect().width > 0);
+    if (links.length !== 1) return { status: links.length === 0 ? 'not_found' : 'ambiguous' };
+    const rect = links[0].getBoundingClientRect();
+    return { status: 'matched', x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`;
+}
+
 async function evaluatePoint(client: CdpClient, expression: string): Promise<PointProbe | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", { expression, returnByValue: true });
   return (evaluated.result as { value?: PointProbe } | undefined)?.value;
@@ -927,6 +937,11 @@ async function clickPublishedDeleteByTitle(client: CdpClient, title: string): Pr
   const point = await evaluatePoint(client, publishedActionPointExpression(title, "delete"));
   if (!point || point.status !== "matched") return point?.status ?? "not_found";
   return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+}
+
+async function openNoteManager(client: CdpClient): Promise<boolean> {
+  const point = await evaluatePoint(client, noteManagerNavigationPointExpression());
+  return point?.status === "matched" && clickPoint(client, point.x, point.y);
 }
 
 async function scrollExactTextIntoView(client: CdpClient, name: string): Promise<boolean> {
@@ -1037,7 +1052,9 @@ async function executeCleanupControl(
   before: CommitProbe
 ): Promise<Extract<LocalProviderMediaActionResult, { status: "completed"; content_readback: unknown }> | Extract<LocalProviderMediaActionResult, { status: "unavailable" }>> {
   const managerUrl = "https://creator.xiaohongshu.com/new/note-manager?source=official";
-  await client.send("Page.navigate", { url: managerUrl });
+  if (!await openNoteManager(client)) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact note manager navigation is unavailable before cleanup.", retryable: false, submitted: false };
+  }
   let manager: CommitProbe | undefined;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await abortableDelay(250);
@@ -1059,7 +1076,9 @@ async function executeCleanupControl(
   if (verified?.pathname !== "/publish/update" || !verified.marker_matched || !verified.fields_matched || verified.media_count < 1) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup target did not match the authorized marker, fields and media.", retryable: false, submitted: false };
   }
-  await client.send("Page.navigate", { url: managerUrl });
+  if (!await openNoteManager(client)) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact note manager navigation is unavailable after content verification.", retryable: false, submitted: false };
+  }
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await abortableDelay(250);
     manager = await evaluateCommitProbe(client, input.marker!);
