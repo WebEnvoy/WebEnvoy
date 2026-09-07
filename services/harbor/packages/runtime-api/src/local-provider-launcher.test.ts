@@ -24,12 +24,17 @@ import {
 
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
-  const title = { value: "WE测试", getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
+  let titleDecoy = false;
+  let bodyDecoy = false;
+  let inputDecoy = false;
+  const decoyAncestor = { dataset: { decoy: "" } };
+  const title = { value: "WE测试", closest: (selector: string) => titleDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null, getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
   const media = { closest: () => null, getBoundingClientRect: () => rect };
   const decoy = { closest: (selector: string) => selector.includes("[data-decoy]") ? { dataset: { decoy: "" } } : null, getBoundingClientRect: () => rect };
   const imageInput = {
     parentElement: null as unknown,
     matches: () => false,
+    closest: (selector: string) => inputDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null,
     getAttribute: () => "",
     getBoundingClientRect: () => ({ ...rect, width: 0, height: 0 })
   };
@@ -50,12 +55,21 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   editor.parentElement = root;
   mediaArea.parentElement = editor;
   imageInput.parentElement = mediaArea;
-  const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: editor, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
+  const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: editor, closest: (selector: string) => bodyDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
   const document = { body: { innerText: "" }, querySelectorAll: () => [root] };
   const evaluate = new Function("document", "location", "getComputedStyle", `return ${commitProbeExpression("WE-XHS-E2E-1", "WE测试")}`);
   const result = evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" }));
   assert.equal(result.fields_matched, true);
   assert.equal(result.media_count, 1);
+  titleDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  titleDecoy = false;
+  bodyDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).marker_matched, false);
+  bodyDecoy = false;
+  inputDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
+  inputDecoy = false;
   title.value = "已被改名";
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
   title.value = "WE测试";

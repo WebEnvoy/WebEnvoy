@@ -841,11 +841,11 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
       const roots = [...document.querySelectorAll('#app, [data-v-app]')];
       const unique = (values) => [...new Set(values)];
       const titles = unique(roots.flatMap((root) => [...root.querySelectorAll('input')]))
-        .filter((el) => visible(el) && /标题/.test(el.getAttribute('placeholder') || ''));
+        .filter((el) => !el.closest('[data-decoy], [data-testid*="decoy"], .decoy') && visible(el) && /标题/.test(el.getAttribute('placeholder') || ''));
       const bodies = unique(roots.flatMap((root) => [...root.querySelectorAll('[contenteditable="true"]')]))
-        .filter((el) => visible(el) && (el.textContent || '').includes(${markerLiteral}));
+        .filter((el) => !el.closest('[data-decoy], [data-testid*="decoy"], .decoy') && visible(el) && (el.textContent || '').includes(${markerLiteral}));
       const imageInputs = unique(roots.flatMap((root) => [...root.querySelectorAll('input[type="file"][accept*="image"]')]))
-        .filter((el) => !el.matches(':disabled'));
+        .filter((el) => !el.matches(':disabled') && !el.closest('[data-decoy], [data-testid*="decoy"], .decoy'));
       const title = titles.length === 1 ? titles[0] : undefined;
       const body = bodies.length === 1 ? bodies[0] : undefined;
       const bodyText = body?.textContent || '';
