@@ -114,6 +114,7 @@ export interface XhsMediaActionObservationRecord {
   business_effect_status: XhsMediaActionNormalizedResult["business_effect"]["status"];
   unavailable_reason?: XhsMediaUnavailableReason;
   reconciliation: XhsMediaActionNormalizedResult["reconciliation"];
+  diagnostics?: NonNullable<Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]>;
   submitted: false;
   redaction_state: "summary_only";
   retention_state: "ephemeral";
@@ -129,7 +130,10 @@ export interface XhsMediaActionObservationRecord {
 export class XhsMediaActionObservationStore {
   private readonly records = new Map<string, XhsMediaActionObservationRecord>();
 
-  record(result: XhsMediaActionResult): XhsMediaActionResult {
+  record(
+    result: XhsMediaActionResult,
+    diagnostics?: NonNullable<Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]>
+  ): XhsMediaActionResult {
     const ref = result.normalized.operation.operation_ref;
     this.records.set(ref, {
       schema_version: "harbor-xhs-media-action-observation/v0",
@@ -144,6 +148,7 @@ export class XhsMediaActionObservationStore {
       business_effect_status: result.normalized.business_effect.status,
       ...(result.unavailable_reason === undefined ? {} : { unavailable_reason: result.unavailable_reason }),
       reconciliation: structuredClone(result.normalized.reconciliation),
+      ...(diagnostics === undefined ? {} : { diagnostics: structuredClone(diagnostics) }),
       submitted: false,
       redaction_state: "summary_only",
       retention_state: "ephemeral",
@@ -320,7 +325,7 @@ export function completeXhsMediaAction(
     normalized: {
       action_id: input.action_id,
       requested_path: input.requested_path,
-      canonical_url: result.observed_url,
+      canonical_url: input.url,
       target_ref: input.target_ref,
       summary: input.summary,
       source_status: successful ? "located" : "unknown",

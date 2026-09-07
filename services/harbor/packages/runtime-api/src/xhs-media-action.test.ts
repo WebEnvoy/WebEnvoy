@@ -70,7 +70,12 @@ test("preserves unknown upload outcome and never retries", () => {
 
 test("operation refs resolve to the same public media action observation", () => {
   const store = new XhsMediaActionObservationStore();
-  const result = store.record(unavailableXhsMediaAction("session_1", upload, "media_ref_unavailable"));
+  const result = store.record(unavailableXhsMediaAction("session_1", upload, "media_ref_unavailable"), {
+    failure_stage: "file_input_missing",
+    image_input_candidate_count: 0,
+    image_path_candidate_count: 1,
+    set_file_input_files: "not_called"
+  });
   const operationRef = result.normalized.operation.operation_ref;
   const observation = store.get(operationRef);
   assert.equal(observation?.evidence_ref, operationRef);
@@ -81,6 +86,12 @@ test("operation refs resolve to the same public media action observation", () =>
   assert.equal(observation?.unavailable_reason, "media_ref_unavailable");
   assert.equal(observation?.retention_state, "ephemeral");
   assert.equal(observation?.storage_scope, "process_memory");
+  assert.deepEqual(observation?.diagnostics, {
+    failure_stage: "file_input_missing",
+    image_input_candidate_count: 0,
+    image_path_candidate_count: 1,
+    set_file_input_files: "not_called"
+  });
   assert.equal(JSON.stringify(observation).includes(upload.summary), false);
   assert.equal(JSON.stringify(observation).includes(upload.url), false);
   assert.notEqual(store.get(operationRef), observation);
@@ -92,7 +103,7 @@ test("does not promote a terminal effect without page/media readback", () => {
   const result = completeXhsMediaAction("session_1", upload, {
     status: "completed",
     observed_at: new Date().toISOString(),
-    observed_url: upload.url,
+    observed_url: "https://creator.xiaohongshu.com/login",
     page: {
       current_url: upload.url,
       title: "creator",
@@ -130,6 +141,7 @@ test("does not promote a terminal effect without page/media readback", () => {
   });
   assert.equal(result.status, "unavailable");
   assert.equal(result.unavailable_reason, "operation_result_unknown");
+  assert.equal(result.normalized.canonical_url, upload.url);
   assert.equal(result.normalized.reconciliation.status, "unknown");
   assert.equal(result.normalized.submitted, false);
 });

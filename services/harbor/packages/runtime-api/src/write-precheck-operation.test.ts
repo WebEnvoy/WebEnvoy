@@ -458,7 +458,7 @@ test("fails closed when session control changes during the trusted probe", async
       transport: "local_window",
       input_capabilities: ["keyboard_mouse"]
     },
-    page: { current_url: launch.url, title: "Creator publish", status: "ready", facts: [] },
+    page: { current_url: `${launch.url}?from=tab_switch`, title: "Creator publish", status: "ready", facts: [] },
     facts: [],
     openUrl: async (url) => ({ current_url: url, title: "Creator publish", status: "ready", facts: [] }),
     probeWritePrecheck: trustLocalProviderWritePrecheckProbe(async () => {

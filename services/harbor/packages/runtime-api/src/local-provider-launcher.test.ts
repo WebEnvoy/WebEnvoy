@@ -1,12 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  imageFileInputProbeExpression,
+  imageUploadPathProbeExpression,
   observeXhsPathPrepareRequest,
+  providerConfigurationPageUrl,
   readTargetPageFacts,
+  sameWritePrecheckUrl,
   selectPage,
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
+
+test("creator publish sessions warm the existing Xiaohongshu login before opening creator", () => {
+  const identity_environment = { site_binding: { site_id: "xiaohongshu" } } as never;
+  assert.equal(providerConfigurationPageUrl({
+    url: "https://creator.xiaohongshu.com/publish/publish",
+    identity_environment
+  } as never), "https://www.xiaohongshu.com/explore");
+  assert.equal(providerConfigurationPageUrl({
+    url: "https://example.com/publish/publish",
+    identity_environment
+  } as never), "https://example.com/publish/publish");
+});
+
+test("creator publish URL accepts only the bounded tab-switch redirect", () => {
+  const target = "https://creator.xiaohongshu.com/publish/publish";
+  assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch`, target), true);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=other`, target), false);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch&extra=1`, target), false);
+  assert.equal(sameWritePrecheckUrl(`https://attacker.example/publish/publish?from=tab_switch`, target), false);
+});
 
 test("selectPage matches equivalent page URLs by structured URL semantics", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?keyword=AI%20%E5%B7%A5%E5%85%B7&source=web#notes";
@@ -49,6 +73,17 @@ test("selectPage accepts the bounded Xiaohongshu search type redirect", () => {
       { ...redirected, url: `${requestedUrl}&${suffix}` }
     ], requestedUrl), undefined);
   }
+});
+
+test("selectPage accepts only the bounded creator tab-switch redirect with other tabs present", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish";
+  const explore = { id: "explore", type: "page", url: "https://www.xiaohongshu.com/explore", webSocketDebuggerUrl: "ws://explore" };
+  const creator = { id: "creator", type: "page", url: `${requestedUrl}?from=tab_switch`, webSocketDebuggerUrl: "ws://creator" };
+
+  assert.equal(selectPage([explore, creator], requestedUrl)?.id, "creator");
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=tab_switch` }], requestedUrl)?.id, "creator");
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}?from=other` }], requestedUrl), undefined);
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=other` }], requestedUrl), undefined);
 });
 
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
@@ -127,15 +162,16 @@ test("reads binary CDP messages without waiting for the command timeout", async 
 test("#405 path probe maps only the requested exact visible label and keeps file selection out", () => {
   const upload = writePrecheckProbeExpression("image_text_upload", true);
   const generate = writePrecheckProbeExpression("image_text_generate", true);
-  assert.match(upload, /上传图片/);
+  assert.match(upload, /上传图文/);
   assert.match(generate, /文字配图/);
   assert.match(upload, /selectPath = true/);
   assert.match(upload, /strictPath = true/);
-  assert.match(upload, /pathLabels = \["上传图片"\]/);
+  assert.match(upload, /pathLabels = \["上传图文"\]/);
   assert.match(upload, /input\[type=["']file["']\]/);
   assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
+  assert.match(upload, /\.header-tabs \.creator-tab/);
   assert.match(upload, /controls\.length !== 1/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
@@ -145,6 +181,49 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /strictPath \? controls\.filter\(\(el\) => visible\(el, false\)\) : controls/);
   assert.doesNotMatch(upload, /querySelectorAll\('button, \[role="button"\], \[role="tab"\]'\)/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
+});
+
+test("#405 path probe does not click a data-testid decoy", async () => {
+  let clicks = 0;
+  const app = {
+    hidden: false,
+    contains: () => true,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 100, height: 100, right: 100, bottom: 100, left: 0, top: 0 }),
+    checkVisibility: () => true,
+    querySelectorAll: () => []
+  };
+  const decoy = {
+    disabled: false,
+    hidden: false,
+    textContent: "上传图文",
+    getAttribute: () => null,
+    closest: (selector: string) => selector.includes('[data-testid*="decoy"]') ? {} : null,
+    getBoundingClientRect: () => ({ width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
+    checkVisibility: () => true,
+    querySelector: () => null,
+    click: () => { clicks += 1; }
+  };
+  const document = {
+    body: { innerText: "" },
+    querySelector: () => app,
+    querySelectorAll: (selector: string) => selector.includes("login") ? [] : [decoy]
+  };
+  const evaluate = new Function(
+    "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "HTMLInputElement", "setTimeout",
+    `return ${writePrecheckProbeExpression("image_text_upload", true)}`
+  );
+  const result = await evaluate(
+    document,
+    { href: "https://creator.xiaohongshu.com/publish/publish", origin: "https://creator.xiaohongshu.com", pathname: "/publish/publish" },
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }),
+    100,
+    100,
+    class {},
+    (resolve: () => void) => resolve()
+  );
+  assert.equal(result.selection_status, "unknown");
+  assert.equal(clicks, 0);
 });
 
 test("#405 path request observation continues requests and leaves external effects unknown", () => {
@@ -158,6 +237,63 @@ test("#405 path request observation continues requests and leaves external effec
   assert.equal(observeXhsPathPrepareRequest({ requestId: "missing-method", resourceType: "XHR", request: {} }, continueRequest), false);
   assert.equal(observeXhsPathPrepareRequest({ resourceType: "XHR", request: { method: "POST" } }, continueRequest), false);
   assert.deepEqual(continued, ["get", "head", "options", "post", "script-post", "missing-method"]);
+});
+
+test("#409 media upload targets one app-owned image input without depending on a CSS class", () => {
+  const probe = imageFileInputProbeExpression();
+  assert.match(probe, /#app input\[type=\"file\"\], \[data-v-app\] input\[type=\"file\"\]/);
+  assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
+  assert.match(probe, /matches\(':disabled'\)/);
+  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /candidates\.length === 1/);
+  assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
+});
+
+test("#409 media upload selects only the unique actionable image-text path before resolving the file input", () => {
+  const probe = imageUploadPathProbeExpression();
+  assert.match(probe, /\.header-tabs \.creator-tab/);
+  assert.match(probe, /=== '上传图文'/);
+  assert.match(probe, /pathEntries\.length === 1/);
+  assert.match(probe, /attempt < 30/);
+  assert.match(probe, /document\.elementFromPoint/);
+  assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
+  assert.match(probe, /!el\.hidden && !el\.matches\(':disabled'\) && el\.getAttribute\('aria-disabled'\) !== 'true'/);
+  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /!el\.querySelector\('input\[type="file"\]'\)/);
+  assert.match(probe, /el\.checkVisibility\(\{ checkOpacity: true, checkVisibilityCSS: true \}\)/);
+  assert.match(probe, /image_input_candidate_count/);
+  assert.doesNotMatch(probe, /上传视频|文字配图|保存草稿|发布笔记/);
+});
+
+test("#409 media upload does not click disabled, decoy, or file-input path entries", async () => {
+  let clicks = 0;
+  const entry = (blockedBy: "disabled" | "decoy" | "file-input") => ({
+    hidden: false,
+    textContent: "上传图文",
+    matches: () => blockedBy === "disabled",
+    getAttribute: (name: string) => name === "aria-disabled" && blockedBy === "disabled" ? "true" : null,
+    closest: () => blockedBy === "decoy" ? {} : null,
+    querySelector: () => blockedBy === "file-input" ? {} : null,
+    getBoundingClientRect: () => ({ x: 1, y: 1, width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
+    contains: () => false,
+    checkVisibility: () => true,
+    click: () => { clicks += 1; }
+  });
+  const entries = [entry("disabled"), entry("decoy"), entry("file-input")];
+  const document = {
+    querySelectorAll: (selector: string) => selector.includes("input[type=\"file\"]") ? [] : entries,
+    elementFromPoint: () => entries[0]
+  };
+  const evaluate = new Function("document", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout", `return ${imageUploadPathProbeExpression()}`);
+  const result = await evaluate(
+    document,
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1" }),
+    100,
+    100,
+    (resolve: () => void) => resolve()
+  );
+  assert.deepEqual(result, { image_input_candidate_count: 0, image_path_candidate_count: 0 });
+  assert.equal(clicks, 0);
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {

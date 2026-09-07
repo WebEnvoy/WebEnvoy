@@ -4,6 +4,7 @@ import {
   compatibilityTargetFieldId,
   createActionPendingCompatibility,
   createSkillIdentityCompatibilityRequest,
+  fetchSkillIdentityCompatibility,
   isCandidateUsable,
   parseSkillIdentityCompatibilityResponse,
   projectCompatibilityTarget,
@@ -45,7 +46,7 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkTurnInputProjection(input.xhsSkill);
   checkXhsSearchTarget(input.xhsSkill);
   checkXhsPublishPrecheck(input.xhsSkill);
-  checkXhsMediaAction(input.xhsSkill);
+  await checkXhsMediaAction(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
   await checkBossDeferredHelpers(bossSkill);
@@ -420,7 +421,7 @@ function checkXhsPublishPrecheck(baseSkill: LodeCatalogSkill) {
   }
 }
 
-function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
+async function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
   const packageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
   const lockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
   const uploadAction = {
@@ -460,6 +461,37 @@ function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
     ],
     actions: [uploadAction, generateAction],
   };
+  const owner = window.webenvoyShell;
+  let previewRequests = 0;
+  window.webenvoyShell = {
+    ...owner!,
+    requestOwnerJson: async () => {
+      previewRequests += 1;
+      throw new Error("Image upload must not use the identity compatibility preview.");
+    },
+  };
+  let uploadCompatibility: Awaited<ReturnType<typeof fetchSkillIdentityCompatibility>>;
+  let generateCompatibility: Awaited<ReturnType<typeof fetchSkillIdentityCompatibility>>;
+  try {
+    uploadCompatibility = await fetchSkillIdentityCompatibility(
+      "http://core.owner",
+      { ...skill, actions: [uploadAction] },
+      [identity.identityEnvironmentRef],
+    );
+    generateCompatibility = await fetchSkillIdentityCompatibility(
+      "http://core.owner",
+      { ...skill, actions: [generateAction] },
+      [identity.identityEnvironmentRef],
+    );
+  } finally {
+    window.webenvoyShell = owner;
+  }
+  const uploadCandidate = uploadCompatibility.candidates[0];
+  if (previewRequests !== 1 || uploadCompatibility.status !== "ready" || uploadCandidate?.status !== "unknown_until_runtime" ||
+    uploadCandidate.reasonCodes[0] !== "runtime_facts_require_task_admission" || uploadCandidate.recoveryAction !== "retry_at_task_submission" ||
+    !isCandidateUsable(uploadCandidate) || generateCompatibility.status !== "unavailable") {
+    throw new Error("Image upload compatibility remained blocked on the side-effect-free owner preview.");
+  }
   const submissionSkill = projectTaskSubmissionSkill(skill);
   if (submissionSkill.inputFields.some((field) => field.id === "target_ref")) throw new Error("Media target_ref was exposed in the composer.");
   const ownerRef = "draft:app-protected/00000000-0000-4000-8000-000000000040";

@@ -92,7 +92,9 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     const configurationFacts = providerConfiguration
       ? await applyAndReadbackProviderConfiguration(port, initialPageUrl, providerConfiguration, readbackSignal)
       : [];
-    const page = await readPageFacts(port, initialPageUrl, readbackSignal);
+    const page = isXhsCreatorPublishUrl(input)
+      ? await openProviderUrl(port, input.url, readbackSignal)
+      : await readPageFacts(port, initialPageUrl, readbackSignal);
     let currentUrl = page.current_url ?? initialPageUrl;
     const evidence_ref = opaqueRef("validation");
     return {
@@ -189,7 +191,7 @@ function normalizedCompositionPath(value: XhsWritePrecheckCompositionPath | unde
   return value && writePrecheckCompositionPaths.has(value) ? value : "image_text_upload";
 }
 
-function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
+export function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
   if (!observed) return false;
   try {
     const actual = new URL(observed);
@@ -197,7 +199,8 @@ function sameWritePrecheckUrl(observed: string | undefined, expected: string): b
     if (actual.origin !== target.origin || actual.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "") || actual.hash || target.hash) return false;
     const actualParams = [...actual.searchParams].sort(([a], [b]) => a.localeCompare(b));
     const targetParams = [...target.searchParams].sort(([a], [b]) => a.localeCompare(b));
-    return JSON.stringify(actualParams) === JSON.stringify(targetParams);
+    return JSON.stringify(actualParams) === JSON.stringify(targetParams) ||
+      (targetParams.length === 0 && actualParams.length === 1 && actual.searchParams.get("from") === "tab_switch");
   } catch {
     return false;
   }
@@ -465,7 +468,6 @@ const XHS_MEDIA_ACTION_CDP_COMMANDS = [
   "Page.enable",
   "Page.bringToFront",
   "DOM.enable",
-  "DOM.requestNode",
   "DOM.setFileInputFiles",
   "Fetch.enable",
   "Fetch.continueRequest",
@@ -500,15 +502,25 @@ async function executeXhsMediaAction(
   input: LocalProviderMediaActionInput
 ): Promise<LocalProviderMediaActionResult> {
   const operationRef = opaqueRef("media_operation");
-  const failure = (failure_class: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["failure_class"], message: string, retryable = false, page?: LocalProviderPageFacts): LocalProviderMediaActionResult => ({
-    status: "unavailable",
-    failure_class,
-    message,
-    retryable,
-    operation_ref: operationRef,
-    ...(page === undefined ? {} : { page }),
-    submitted: false as const
-  });
+  const failure = (
+    failure_class: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["failure_class"],
+    message: string,
+    retryable = false,
+    page?: LocalProviderPageFacts,
+    diagnostics?: Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]
+  ): LocalProviderMediaActionResult => {
+    if (diagnostics) console.warn(JSON.stringify({ event: "xhs_media_action_unavailable", operation_ref: operationRef, failure_class, ...diagnostics }));
+    return {
+      status: "unavailable",
+      failure_class,
+      message,
+      retryable,
+      operation_ref: operationRef,
+      ...(page === undefined ? {} : { page }),
+      ...(diagnostics === undefined ? {} : { diagnostics }),
+      submitted: false as const
+    };
+  };
   if (input.expected_origin !== "https://creator.xiaohongshu.com" || input.no_submit_guard !== "active" ||
     (input.action_id === "xhs_publish_note_image_text_media.image_upload" && input.requested_path !== "image_text_upload") ||
     (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate" && input.requested_path !== "image_text_generate") ||
@@ -525,13 +537,17 @@ async function executeXhsMediaAction(
       try {
         resolvedFiles.push(await resolveLocalMediaRef(ref));
       } catch {
-        return failure("resource_unavailable", "An authorized local image reference could not be resolved.", false, page);
+        return failure("resource_unavailable", "An authorized local image reference could not be resolved.", false, page, {
+          failure_stage: "media_ref_resolution",
+          set_file_input_files: "not_called"
+        });
       }
     }
   }
   return withCdp(pageTarget.webSocketDebuggerUrl, async (client) => {
     await sendMediaActionCdp(client, "Runtime.enable");
     await sendMediaActionCdp(client, "Page.enable");
+    await sendMediaActionCdp(client, "DOM.enable");
     const before = await evaluateMediaActionObservation(client);
     const pageFailure = mediaPageFailure(before, input.target_url);
     if (pageFailure) return failure(pageFailure.failure_class, pageFailure.message, pageFailure.retryable, page);
@@ -555,12 +571,34 @@ async function executeXhsMediaAction(
     try {
       await sendMediaActionCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
+        const inputProbe = await ensureImageUploadPath(client);
+        if (inputProbe.image_input_candidate_count !== 1) {
+          return failure("media_ref_unavailable", inputProbe.image_input_candidate_count === 0
+            ? "The creator page has no supported image upload input after selecting the image-text path."
+            : "The creator page has multiple supported image upload inputs.", false, page, {
+            failure_stage: inputProbe.image_input_candidate_count === 0 ? "file_input_missing" : "file_input_ambiguous",
+            image_input_candidate_count: inputProbe.image_input_candidate_count,
+            image_path_candidate_count: inputProbe.image_path_candidate_count,
+            set_file_input_files: "not_called"
+          });
+        }
         const objectId = await findImageFileInput(client);
-        if (!objectId) return failure("media_ref_unavailable", "The creator page has no supported image upload input.", false, page);
-        const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
-        const nodeId = typeof node.nodeId === "number" ? node.nodeId : 0;
-        if (!nodeId) return failure("media_ref_unavailable", "The creator image file input could not be controlled.", false, page);
-        await sendMediaActionCdp(client, "DOM.setFileInputFiles", { nodeId, files: resolvedFiles });
+        if (!objectId) return failure("media_ref_unavailable", "The creator image file input object could not be resolved.", false, page, {
+          failure_stage: "file_input_object_resolution",
+          image_input_candidate_count: 1,
+          image_path_candidate_count: inputProbe.image_path_candidate_count,
+          set_file_input_files: "not_called"
+        });
+        try {
+          await sendMediaActionCdp(client, "DOM.setFileInputFiles", { objectId, files: resolvedFiles });
+        } catch {
+          return failure("operation_result_unknown", "The image file-input operation did not return a reliable result.", false, page, {
+            failure_stage: "set_file_input_files",
+            image_input_candidate_count: 1,
+            image_path_candidate_count: inputProbe.image_path_candidate_count,
+            set_file_input_files: "unknown"
+          });
+        }
       } else {
         const generated = await executeTextToImageControl(client, input.summary);
         if (!generated) return failure("generation_unavailable", "The visible text-to-image input or generate control is unavailable.", false, page);
@@ -660,17 +698,78 @@ async function resolveLocalMediaRef(localFileRef: string): Promise<string> {
 
 async function findImageFileInput(client: CdpClient): Promise<string | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: String.raw`(() => {
-      const input = [...document.querySelectorAll('input.upload-input[type="file"]')]
-        .find((el) => /image\/(?:jpeg|png|webp)/i.test(el.accept));
-      return input || null;
-    })()`,
+    expression: imageFileInputProbeExpression(),
     returnByValue: false,
     awaitPromise: true
   });
   return typeof (evaluated.result as { objectId?: unknown } | undefined)?.objectId === "string"
     ? (evaluated.result as { objectId: string }).objectId
     : undefined;
+}
+
+type ImageUploadPathProbe = {
+  image_input_candidate_count: number;
+  image_path_candidate_count: number;
+};
+
+async function ensureImageUploadPath(client: CdpClient): Promise<ImageUploadPathProbe> {
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: imageUploadPathProbeExpression(),
+    returnByValue: true,
+    awaitPromise: true
+  });
+  const value = (evaluated.result as { value?: Partial<ImageUploadPathProbe> } | undefined)?.value;
+  return {
+    image_input_candidate_count: typeof value?.image_input_candidate_count === "number" ? value.image_input_candidate_count : 0,
+    image_path_candidate_count: typeof value?.image_path_candidate_count === "number" ? value.image_path_candidate_count : 0
+  };
+}
+
+export function imageUploadPathProbeExpression(): string {
+  return String.raw`(async () => {
+    const supportedInput = (el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
+      !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy="true"], [data-testid*="decoy"], .decoy');
+    const imageInputs = () => [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')].filter(supportedInput);
+    if (imageInputs().length === 0) {
+      const actionable = (el) => {
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return !el.hidden && !el.matches(':disabled') && el.getAttribute('aria-disabled') !== 'true' &&
+          !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+          !el.querySelector('input[type="file"]') &&
+          style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
+          rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
+          (hit === el || el.contains(hit)) &&
+          (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+      };
+      // Only image_upload consumes this current-page compatibility branch. It
+      // prevents the default video input from being mistaken for an image
+      // input; remove it once the formal entrypoint opens image-text directly.
+      let pathEntries = [];
+      for (let attempt = 0; attempt < 30 && imageInputs().length === 0; attempt += 1) {
+        pathEntries = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab')]
+          .filter((el) => (el.textContent || '').replace(/\s+/g, ' ').trim() === '上传图文' && actionable(el));
+        if (pathEntries.length === 1) {
+          pathEntries[0].click();
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      for (let attempt = 0; attempt < 30 && imageInputs().length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+      return { image_input_candidate_count: imageInputs().length, image_path_candidate_count: pathEntries.length };
+    }
+    return { image_input_candidate_count: imageInputs().length, image_path_candidate_count: 0 };
+  })()`;
+}
+
+export function imageFileInputProbeExpression(): string {
+  return String.raw`(() => {
+    const candidates = [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')]
+      .filter((el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
+        !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy="true"], [data-testid*="decoy"], .decoy'));
+    return candidates.length === 1 ? candidates[0] : null;
+  })()`;
 }
 
 async function executeTextToImageControl(client: CdpClient, summary: string): Promise<boolean> {
@@ -844,10 +943,10 @@ function pathSelectionProbeExpression(): string {
               style.zIndex !== '-1' && Number(style.opacity) >= 0.01 &&
               rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
               !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
-              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]') &&
+              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
               (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
           };
-          const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
+          const controls = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab, [role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
           if (controls.length !== 1) return { ...ready, selection_status: 'blocked' };
@@ -865,7 +964,7 @@ function pathSelectionProbeExpression(): string {
 export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath, selectPath = false, exactPath = false): string {
   const requestedPath = normalizedCompositionPath(compositionPath);
   const labels = (selectPath || exactPath) && (requestedPath === "image_text_upload" || requestedPath === "image_text_generate")
-    ? [requestedPath === "image_text_upload" ? "上传图片" : "文字配图"]
+    ? [requestedPath === "image_text_upload" ? "上传图文" : "文字配图"]
     : compositionPathLabels[requestedPath];
   return `(async () => {
     const requestedPath = ${JSON.stringify(requestedPath)};
@@ -1070,18 +1169,28 @@ export function providerLaunchArguments(
   ];
 }
 
-function providerConfigurationPageUrl(input: LocalProviderLaunchInput): string {
+export function providerConfigurationPageUrl(input: LocalProviderLaunchInput): string {
   try {
     const url = new URL(input.url);
     if (
       input.identity_environment?.site_binding.site_id === "xiaohongshu" &&
-      url.origin === "https://www.xiaohongshu.com" &&
-      ["/search_result", "/search_result/"].includes(url.pathname)
+      ((url.origin === "https://www.xiaohongshu.com" && ["/search_result", "/search_result/"].includes(url.pathname)) ||
+        (url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname)))
     ) return "https://www.xiaohongshu.com/explore";
   } catch {
     // URL validation remains owned by the Runtime Session boundary.
   }
   return input.url;
+}
+
+function isXhsCreatorPublishUrl(input: LocalProviderLaunchInput): boolean {
+  try {
+    const url = new URL(input.url);
+    return input.identity_environment?.site_binding.site_id === "xiaohongshu" &&
+      url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 const SITE_RESOURCE_PROBE_DEADLINE_MS = 3000;
@@ -2830,11 +2939,13 @@ function urlsReferToSamePage(candidate_url?: string, requested_url?: string): bo
     const candidate = new URL(candidate_url);
     const requested = new URL(requested_url);
     if (!["http:", "https:"].includes(candidate.protocol) || !["http:", "https:"].includes(requested.protocol)) return false;
-    return candidate.origin === requested.origin &&
-      candidate.pathname === requested.pathname &&
-      candidate.hash === requested.hash &&
-      (normalizedQuery(candidate) === normalizedQuery(requested) ||
-        isBoundedXiaohongshuSearchRedirect(candidate, requested));
+    return candidate.origin === requested.origin && candidate.hash === requested.hash && (
+      (candidate.pathname === requested.pathname &&
+        (normalizedQuery(candidate) === normalizedQuery(requested) || isBoundedXiaohongshuSearchRedirect(candidate, requested))) ||
+      (candidate.origin === "https://creator.xiaohongshu.com" &&
+        ["/publish/publish", "/publish/publish/"].includes(candidate.pathname) &&
+        sameWritePrecheckUrl(candidate_url, requested_url))
+    );
   } catch {
     return candidate_url === requested_url;
   }

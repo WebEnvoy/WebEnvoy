@@ -84,6 +84,9 @@ const recoveryActions = new Set([
 ]);
 const consumerBoundary =
   "Core returns bounded compatibility reasons and public freshness only; no task, thread, run, session, browser action, credential, cookie, token, profile storage, evidence body, or raw owner response is created or exposed.";
+const xiaohongshuImageUploadPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuImageUploadLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuImageUploadActionId = "xhs_publish_note_image_text_media.image_upload";
 export function loadingSkillIdentityCompatibility(): SkillIdentityCompatibilityState {
   return { status: "loading", summary: "正在检查账号身份兼容性。", candidates: [] };
 }
@@ -113,6 +116,9 @@ export async function fetchSkillIdentityCompatibility(
     };
   }
   if (target.status === "invalid") return unavailableSkillIdentityCompatibility(target.summary);
+  if (isPinnedXiaohongshuImageUpload(skill)) {
+    return createActionPendingCompatibility(refs, "runtime_facts_require_task_admission");
+  }
   const candidates: IdentityCompatibilityCandidate[] = [];
   for (let index = 0; index < refs.length; index += 32) {
     const request = createSkillIdentityCompatibilityRequest(skill, refs.slice(index, index + 32), target.targetRef);
@@ -147,6 +153,16 @@ export async function fetchSkillIdentityCompatibility(
   };
 }
 
+function isPinnedXiaohongshuImageUpload(skill: LodeCatalogSkill) {
+  const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
+  return skill.packageRef === xiaohongshuImageUploadPackageRef &&
+    skill.lockRef === xiaohongshuImageUploadLockRef &&
+    skill.version === "0.1.0" && skill.siteSlug === "xiaohongshu" &&
+    action?.id === xiaohongshuImageUploadActionId && action.operationMode === "write" &&
+    action.supportedOrigins.length === 1 && action.supportedOrigins[0] === "https://creator.xiaohongshu.com" &&
+    action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
+}
+
 export function isCandidateUsable(candidate: IdentityCompatibilityCandidate | undefined) {
   return candidate?.status === "compatible" || candidate?.status === "unknown_until_runtime" || candidate?.status === "awaiting_target";
 }
@@ -165,15 +181,20 @@ export function createAwaitingTargetCompatibility(identityEnvironmentRefs: strin
   };
 }
 
-export function createActionPendingCompatibility(identityEnvironmentRefs: string[]): SkillIdentityCompatibilityState {
+export function createActionPendingCompatibility(
+  identityEnvironmentRefs: string[],
+  reasonCode: "action_required" | "runtime_facts_require_task_admission" = "action_required",
+): SkillIdentityCompatibilityState {
   const refs = [...new Set(identityEnvironmentRefs.filter((value) => value.length > 0))];
   return {
     status: "ready",
-    summary: refs.length > 0 ? "选择具体动作后在提交时检查账号身份。" : "当前站点没有账号身份候选。",
+    summary: refs.length > 0
+      ? reasonCode === "action_required" ? "选择具体动作后在提交时检查账号身份。" : "提交任务时检查运行时账号事实。"
+      : "当前站点没有账号身份候选。",
     candidates: refs.map((identityEnvironmentRef) => ({
       identityEnvironmentRef,
       status: "unknown_until_runtime",
-      reasonCodes: ["action_required"],
+      reasonCodes: [reasonCode],
       recoveryAction: "retry_at_task_submission",
     })),
   };
