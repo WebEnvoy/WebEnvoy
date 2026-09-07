@@ -90,6 +90,8 @@ const xiaohongshuImageUploadActionId = "xhs_publish_note_image_text_media.image_
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuFieldActionId = "xhs_publish_note_image_text_fields.compose";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
+const xiaohongshuCommitLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 export function loadingSkillIdentityCompatibility(): SkillIdentityCompatibilityState {
   return { status: "loading", summary: "正在检查账号身份兼容性。", candidates: [] };
 }
@@ -162,6 +164,17 @@ function isPinnedXiaohongshuImageUpload(skill: LodeCatalogSkill) {
     action?.id === xiaohongshuImageUploadActionId && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
   const fieldFill = skill.packageRef === xiaohongshuFieldPackageRef && skill.lockRef === xiaohongshuFieldLockRef && skill.version === "0.1.1" &&
     action?.id === xiaohongshuFieldActionId && action.resourceRequirementProfileIds[0] === "xhs-image-text-field-fill";
+  const commitProfiles = new Map([
+    ["xhs_publish_note_image_text_commit.save_draft", "xhs-image-text-save-draft"],
+    ["xhs_publish_note_image_text_commit.publish", "xhs-image-text-publish"],
+    ["xhs_publish_note_image_text_commit.cleanup", "xhs-image-text-cleanup"],
+  ]);
+  const commit = skill.packageRef === xiaohongshuCommitPackageRef && skill.lockRef === xiaohongshuCommitLockRef && skill.version === "0.1.1" &&
+    skill.actions.length >= 1 && skill.actions.length <= commitProfiles.size && new Set(skill.actions.map((item) => item.id)).size === skill.actions.length &&
+    skill.actions.every((item) => item.operationMode === "write" && item.supportedOrigins.length === 1 &&
+      item.supportedOrigins[0] === "https://creator.xiaohongshu.com" && item.resourceRequirementProfileIds.length === 1 &&
+      item.resourceRequirementProfileIds[0] === commitProfiles.get(item.id));
+  if (commit) return skill.siteSlug === "xiaohongshu";
   return (imageUpload || fieldFill) &&
     skill.siteSlug === "xiaohongshu" &&
     action?.operationMode === "write" &&

@@ -219,9 +219,12 @@ export type XhsPathPrepareCompositionState = "initialized" | "not_initialized" |
 export type XhsMediaActionId =
   | "xhs_publish_note_image_text_media.image_upload"
   | "xhs_publish_note_image_text_media.text_to_image_generate"
-  | "xhs_publish_note_image_text_fields.compose";
+  | "xhs_publish_note_image_text_fields.compose"
+  | "xhs_publish_note_image_text_commit.save_draft"
+  | "xhs_publish_note_image_text_commit.publish"
+  | "xhs_publish_note_image_text_commit.cleanup";
 export type XhsMediaActionPath = "image_text_upload" | "image_text_generate";
-export type XhsMediaEffectKind = "upload" | "generate" | "modify";
+export type XhsMediaEffectKind = "upload" | "generate" | "modify" | "save_draft" | "publish" | "cleanup";
 export type XhsMediaOperationStatus = "accepted" | "running" | "terminal" | "unknown_outcome";
 
 export interface LocalProviderMediaAuthorizationBinding {
@@ -241,6 +244,8 @@ export interface LocalProviderMediaActionInput {
   requested_path: XhsMediaActionPath;
   refs: readonly string[];
   summary: string;
+  marker?: string;
+  visibility?: "not_applicable" | "only_me" | "public";
   holder_ref?: string;
   no_submit_guard: "active";
   /** Transient Core binding checked before the first external effect. */
@@ -275,6 +280,39 @@ export type LocalProviderMediaActionResult =
       source_refs: LocalProviderReadProbeRef[];
       evidence_ref_kinds: LocalProviderReadProbeRef[];
       submitted: false;
+    })
+  | ({
+      status: "completed";
+      observed_at: string;
+      observed_url: string;
+      page: LocalProviderPageFacts;
+      action_id: "xhs_publish_note_image_text_commit.save_draft" | "xhs_publish_note_image_text_commit.publish" | "xhs_publish_note_image_text_commit.cleanup";
+      requested_path: "image_text_upload";
+      effect_kind: "save_draft" | "publish" | "cleanup";
+      effect_status: "observed" | "unknown" | "failed";
+      operation_status: XhsMediaOperationStatus;
+      operation_ref: string;
+      terminal_state?: "success" | "failure";
+      marker_state: "matched" | "mismatched" | "unknown";
+      visibility_state: "not_applicable" | "only_me" | "public" | "unknown";
+      content_readback: {
+        state: "draft_saved" | "published" | "deleted" | "not_observed" | "unknown";
+        management_list_state: "matched" | "not_found" | "unknown" | "not_run";
+        detail_state: "matched" | "mismatched" | "unknown" | "not_run";
+        fields_state: "matched" | "mismatched" | "unknown";
+        media_state: "matched" | "mismatched" | "unknown";
+        marker_state: "matched" | "mismatched" | "unknown";
+        content_ref: string | null;
+        canonical_url: string | null;
+      };
+      page_readback: {
+        status: "observed" | "unknown" | "mismatch";
+        page_state_ref: string;
+        route_state: "observed" | "unknown" | "mismatch";
+      };
+      source_refs: LocalProviderReadProbeRef[];
+      evidence_ref_kinds: LocalProviderReadProbeRef[];
+      submitted: true;
     })
   | ({
       status: "completed";
@@ -316,6 +354,7 @@ export type LocalProviderMediaActionResult =
         | "generation_unavailable"
         | "field_unavailable"
         | "validation_failed"
+        | "commit_control_unavailable"
         | "operation_result_unknown"
         | "post_check_failed"
         | "reconciliation_unknown"
@@ -339,7 +378,7 @@ export type LocalProviderMediaActionResult =
         image_path_candidate_count?: number;
         set_file_input_files: "not_called" | "unknown";
       };
-      submitted: false;
+      submitted: boolean;
     };
 
 export interface XhsPathPrepareBusinessState {

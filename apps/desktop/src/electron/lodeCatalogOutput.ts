@@ -3,7 +3,7 @@ import { isSafeCatalogPattern } from "./safeCatalogPattern.js";
 
 const schemaKeys = [
   "$defs", "$id", "$ref", "$schema", "additionalProperties", "allOf", "const", "default", "description",
-  "enum", "examples", "format", "if", "items", "maximum", "maxLength", "minimum", "minItems", "minLength", "oneOf", "pattern",
+  "contains", "enum", "examples", "format", "if", "items", "maximum", "maxLength", "minContains", "minimum", "minItems", "minLength", "oneOf", "pattern",
   "not", "properties", "required", "then", "title", "type", "uniqueItems", "x-lode",
 ];
 const resultKindKeys = ["const", "title", "description"];
@@ -14,6 +14,7 @@ const maxSchemaMapEntries = 200;
 const maxCompositionEntries = 32;
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xiaohongshuCommitPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1";
 
 type OutputContract = {
   operationMode: string;
@@ -25,7 +26,7 @@ type OutputContract = {
 
 export function projectOutputKind(schema: Record<string, unknown>, contract: OutputContract) {
   if (schema.$schema !== "https://json-schema.org/draft/2020-12/schema" || schema.$id !== contract.schemaId ||
-    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema, [xiaohongshuMediaPackageRef, xiaohongshuFieldPackageRef].includes(contract.packageRef))) return undefined;
+    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema, [xiaohongshuMediaPackageRef, xiaohongshuFieldPackageRef, xiaohongshuCommitPackageRef].includes(contract.packageRef))) return undefined;
   const properties = isRecord(schema.properties) ? schema.properties : null;
   const required = strictStringArray(schema.required);
   const resultKind = properties != null && isRecord(properties.result_kind) ? properties.result_kind : null;
@@ -59,7 +60,7 @@ function validateSchemaNode(
   if (!validOptionalText(node.title, 512) || !validOptionalText(node.description, 8_192) ||
     !validOptionalText(node.format, 128) || !validOptionalText(node.pattern, 512) || !validType(node.type, allowMediaNot) ||
     !validOptionalBoolean(node.additionalProperties) || !validOptionalBoolean(node.uniqueItems) ||
-    !validOptionalInteger(node.minLength) || !validOptionalInteger(node.maxLength) || !validOptionalInteger(node.minItems) ||
+    !validOptionalInteger(node.minLength) || !validOptionalInteger(node.maxLength) || !validOptionalInteger(node.minItems) || !validOptionalInteger(node.minContains) ||
     !allowMediaNot && (node.minimum !== undefined || node.maximum !== undefined) ||
     allowMediaNot && (!validOptionalNumber(node.minimum) || !validOptionalNumber(node.maximum) ||
       typeof node.minimum === "number" && typeof node.maximum === "number" && node.minimum > node.maximum) ||
@@ -69,6 +70,7 @@ function validateSchemaNode(
   if (!validateSchemaMap(node.properties, definitions, budget, depth, allowMediaNot) ||
     !validateSchemaMap(node.$defs, definitions, budget, depth, allowMediaNot) ||
     !validateSchemaChild(node.items, definitions, budget, depth, allowMediaNot) ||
+    !validateSchemaChild(node.contains, definitions, budget, depth, allowMediaNot) ||
     !validateSchemaList(node.allOf, definitions, budget, depth, allowMediaNot) ||
     !validateSchemaList(node.oneOf, definitions, budget, depth, allowMediaNot) ||
     node.not !== undefined && (!allowMediaNot || !validateSchemaChild(node.not, definitions, budget, depth, allowMediaNot))) return false;

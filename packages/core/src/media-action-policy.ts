@@ -11,6 +11,10 @@ import {
   type SingleActionDecision
 } from "./execution-policy.js";
 import {
+  xhsCommitCapabilityId,
+  xhsCommitLockRef,
+  xhsCommitOperationId,
+  xhsCommitPackageRef,
   xhsFieldCapabilityId,
   xhsFieldLockRef,
   xhsFieldOperationId,
@@ -46,13 +50,15 @@ const confirmationTtlMs = 10 * 60 * 1_000;
 
 function actionIdentity(actionId: XhsMediaActionId) {
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  const commitAction = actionId.startsWith("xhs_publish_note_image_text_commit.");
   return {
-    package_ref: fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef,
-    lock_ref: fieldAction ? xhsFieldLockRef : xhsMediaLockRef,
-    capability_id: fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId,
-    operation_id: fieldAction ? xhsFieldOperationId : xhsMediaOperationId,
-    version: fieldAction ? "0.1.1" : "0.1.0",
-    effect: fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create"
+    package_ref: fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef,
+    lock_ref: fieldAction ? xhsFieldLockRef : commitAction ? xhsCommitLockRef : xhsMediaLockRef,
+    capability_id: fieldAction ? xhsFieldCapabilityId : commitAction ? xhsCommitCapabilityId : xhsMediaCapabilityId,
+    operation_id: fieldAction ? xhsFieldOperationId : commitAction ? xhsCommitOperationId : xhsMediaOperationId,
+    version: fieldAction || commitAction ? "0.1.1" : "0.1.0",
+    effect: actionId === "xhs_publish_note_image_text_commit.cleanup" ? "delete" : fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" :
+      actionId === "xhs_publish_note_image_text_commit.publish" ? "publish" : "create"
   } as const;
 }
 
@@ -88,9 +94,10 @@ function exactMediaAction(
   if (!Array.isArray(inputRefs)) return undefined;
   if ((actionId === "xhs_publish_note_image_text_media.image_upload" && inputRefs.length === 0) ||
     (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0) ||
-    (actionId === "xhs_publish_note_image_text_fields.compose" && inputRefs.length !== 2)) return undefined;
+    (actionId === "xhs_publish_note_image_text_fields.compose" && inputRefs.length !== 2) ||
+    (actionId.startsWith("xhs_publish_note_image_text_commit.") && inputRefs.length !== 0)) return undefined;
   const action = contract.action_declaration?.actions.find((candidate) => candidate.action_id === actionId);
-  if (!action || action.category !== "commit" ||
+  if (!action || action.category !== (actionId === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "commit") ||
     action.target_scope.site_slug !== "xiaohongshu" ||
     !action.target_scope.target_types.includes("creator_publish_page") ||
     !action.target_scope.supported_origins.includes("https://creator.xiaohongshu.com") ||
@@ -123,6 +130,8 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
   const identity = actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId)
     ? actionIdentity(actionId as XhsMediaActionId)
     : undefined;
+  const commitAction = actionId?.startsWith("xhs_publish_note_image_text_commit.") === true;
+  const expectedRisk = actionId === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "write";
   return run?.status === "requires_user_action" &&
     identity !== undefined &&
     run.package_ref === identity.package_ref &&
@@ -130,7 +139,7 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
     run.capability_version === identity.version &&
     run.capability_source_ref === identity.package_ref &&
     run.capability_lock_ref === identity.lock_ref &&
-    run.admission.action_risk === "write" &&
+    run.admission.action_risk === expectedRisk &&
     action?.task_intent_ref === run.task_intent_ref &&
     action.capability_ref === run.capability_ref &&
     action.capability_version === run.capability_version &&
@@ -140,9 +149,9 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
     action.operation_mode === "execute_after_approval" &&
     typeof actionId === "string" && Object.hasOwn(xhsMediaActionPaths, actionId) &&
     requestedPath !== undefined &&
-    risk?.risk === "write" &&
+    risk?.risk === expectedRisk &&
     risk.execution_intent === "execute_after_approval" &&
-    risk.true_write_requested === false &&
+    risk.true_write_requested === commitAction &&
     guard?.status === "active" &&
     guard.enforced_by === "core" &&
     ["draft", "submit", "destructive", "reconcile_status", "request_cancel"].every((intent) => guard.blocked_execution_intents.includes(intent)) &&
@@ -226,7 +235,7 @@ export async function evaluateXhsMediaActionPolicy(input: {
   });
   if (!ownerProof) return failure("execution_policy_owner_declaration_invalid", "repair_package_contract");
   const ownerFields = readBusinessActionOwnerProof(ownerProof);
-  if (!ownerFields || ownerFields.category !== "commit" ||
+  if (!ownerFields || ownerFields.category !== (variant.action_id === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "commit") ||
     ownerFields.target_scope.site_slug !== "xiaohongshu" ||
     !ownerFields.target_scope.target_types.includes("creator_publish_page") ||
     !ownerFields.target_scope.supported_origins?.includes("https://creator.xiaohongshu.com")) {
@@ -334,4 +343,4 @@ export async function persistXhsMediaActionPolicyDecision(input: {
   }
 }
 
-export { xhsFieldPackageRef, xhsFieldLockRef, xhsFieldCapabilityId, xhsFieldOperationId, xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };
+export { xhsCommitPackageRef, xhsCommitLockRef, xhsCommitCapabilityId, xhsCommitOperationId, xhsFieldPackageRef, xhsFieldLockRef, xhsFieldCapabilityId, xhsFieldOperationId, xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };

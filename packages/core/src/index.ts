@@ -181,6 +181,10 @@ export {
   type RuntimeSessionUse
 } from "./harbor-admission.js";
 export {
+  xhsCommitCapabilityId,
+  xhsCommitLockRef,
+  xhsCommitOperationId,
+  xhsCommitPackageRef,
   xhsFieldCapabilityId,
   xhsFieldLockRef,
   xhsFieldOperationId,

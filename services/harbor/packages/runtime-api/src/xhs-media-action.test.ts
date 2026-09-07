@@ -53,6 +53,28 @@ const fieldFill = {
   }
 };
 
+const saveDraft = {
+  ...upload,
+  action_id: "xhs_publish_note_image_text_commit.save_draft" as const,
+  refs: [],
+  marker: "0907-2214",
+  visibility: "not_applicable" as const,
+  authorization_binding: {
+    ...upload.authorization_binding,
+    action_id: "xhs_publish_note_image_text_commit.save_draft" as const
+  }
+};
+
+const cleanup = {
+  ...saveDraft,
+  action_id: "xhs_publish_note_image_text_commit.cleanup" as const,
+  refs: ["xhs_content_11111111-1111-4111-8111-111111111111"],
+  authorization_binding: {
+    ...saveDraft.authorization_binding,
+    action_id: "xhs_publish_note_image_text_commit.cleanup" as const
+  }
+};
+
 test("keeps the two media actions independent and exact", () => {
   const admittedUpload = admitXhsMediaAction(upload);
   const admittedGenerate = admitXhsMediaAction(generate);
@@ -69,6 +91,73 @@ test("keeps the two media actions independent and exact", () => {
   assert.equal(admitXhsMediaAction({ ...fieldFill, url: `${fieldFill.url}?from=menu_left&target=image` }), null);
   assert.equal(xhsMediaActionEffect(fieldFill.action_id), "modify");
   assert.equal(admitXhsMediaAction({ ...fieldFill, refs: [...fieldFill.refs].reverse() }), null);
+});
+
+test("admits only an exact independently-authorized commit action", () => {
+  assert.equal(admitXhsMediaAction(saveDraft)?.marker, "0907-2214");
+  assert.equal(xhsMediaActionEffect(saveDraft.action_id), "save_draft");
+  assert.equal(admitXhsMediaAction({ ...saveDraft, visibility: "public" }), null);
+  assert.equal(admitXhsMediaAction({ ...saveDraft, refs: upload.refs }), null);
+  assert.equal(admitXhsMediaAction(cleanup)?.refs[0], cleanup.refs[0]);
+  assert.equal(admitXhsMediaAction({ ...cleanup, refs: [] }), null);
+  assert.equal(admitXhsMediaAction({
+    ...saveDraft,
+    action_id: "xhs_publish_note_image_text_commit.publish",
+    visibility: "only_me"
+  }), null);
+});
+
+test("normalizes cleanup only after exact manager absence is observed", () => {
+  const localResult: import("./runtime-session-types.js").LocalProviderMediaActionResult = {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_url: "https://creator.xiaohongshu.com/new/note-manager?source=official",
+    page: { current_url: cleanup.url, title: "creator", status: "ready", facts: [] },
+    action_id: cleanup.action_id,
+    requested_path: cleanup.requested_path,
+    effect_kind: "cleanup",
+    effect_status: "observed",
+    operation_status: "terminal",
+    operation_ref: "media_operation_cleanup_1",
+    terminal_state: "success",
+    marker_state: "matched",
+    visibility_state: "not_applicable",
+    content_readback: {
+      state: "deleted",
+      management_list_state: "not_found",
+      detail_state: "not_run",
+      fields_state: "matched",
+      media_state: "matched",
+      marker_state: "matched",
+      content_ref: cleanup.refs[0],
+      canonical_url: "https://creator.xiaohongshu.com/new/note-manager?source=official"
+    },
+    page_readback: { status: "observed", page_state_ref: "page_state_cleanup_1", route_state: "observed" },
+    source_refs: [
+      { kind: "commit_action_summary", ref: "source_cleanup_1" },
+      { kind: "creator_publish_page_summary", ref: "source_cleanup_2" },
+      { kind: "business_state_summary", ref: "source_cleanup_3" }
+    ],
+    evidence_ref_kinds: [{ kind: "operation_ref", ref: "media_operation_cleanup_1" }],
+    submitted: true
+  };
+  const completed = completeXhsMediaAction("session_1", cleanup, localResult);
+  assert.equal(completed.status, "available");
+  if (completed.schema_version !== "harbor-xhs-publish-note-image-text-commit/v0") assert.fail("expected cleanup result");
+  assert.equal(completed.normalized.business_effect.kind, "cleanup");
+  assert.equal(completed.normalized.content_readback.state, "deleted");
+  assert.equal(completed.normalized.content_readback.management_list_state, "not_found");
+  assert.equal(completed.normalized.reconciliation.status, "matched");
+  const crossed = completeXhsMediaAction("session_1", cleanup, {
+    ...localResult,
+    content_readback: { ...localResult.content_readback, state: "draft_saved" as const, management_list_state: "matched" as const, detail_state: "matched" as const }
+  });
+  assert.equal(crossed.status, "unavailable");
+  assert.equal(crossed.classification, "partial_result");
+  assert.equal(completeXhsMediaAction("session_1", cleanup, {
+    ...localResult,
+    content_readback: { ...localResult.content_readback, content_ref: "xhs_content_other" }
+  }).status, "unavailable");
 });
 
 test("normalizes field fill without exposing protected values", () => {
@@ -125,8 +214,8 @@ test("preserves unknown upload outcome and never retries", () => {
   assert.equal(result.normalized.operation.status, "unknown_outcome");
   assert.equal(result.normalized.recovery.entrypoint, "manual_reconciliation");
   assert.equal(result.normalized.submitted, false);
-  assert.equal(result.normalized.save_draft, "not_in_scope");
-  assert.equal(result.normalized.publish, "not_in_scope");
+  assert.equal("save_draft" in result.normalized && result.normalized.save_draft, "not_in_scope");
+  assert.equal("publish" in result.normalized && result.normalized.publish, "not_in_scope");
   const resolverFailure = unavailableXhsMediaAction("session_1", upload, "media_ref_unavailable");
   assert.equal(resolverFailure.normalized.business_effect.status, "failed");
   assert.equal(resolverFailure.normalized.operation.status, "terminal");

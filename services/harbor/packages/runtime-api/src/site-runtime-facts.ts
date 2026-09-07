@@ -100,7 +100,7 @@ const SITE_PROFILES: Record<SiteRuntimeId, SiteResourceProfile> = {
   xiaohongshu: {
     site_id: "xiaohongshu",
     read_task_kinds: new Set(["read", "read_notes", "search_notes", "read_note_detail", "xhs_search_notes", "xhs_read_note_detail"]),
-    write_precheck_task_kinds: new Set(["write_precheck", "publish_note_precheck", "xhs_publish_note_precheck"]),
+    write_precheck_task_kinds: new Set(["write_precheck", "publish_note_precheck", "xhs_publish_note_precheck", "publish_note_image_text_commit"]),
     read_origin_fact_key: "runtime.origin.www_xiaohongshu_com.available",
     read_allowed_origin: "https://www.xiaohongshu.com",
     allowed_write_origins: new Set(["https://www.xiaohongshu.com", "https://creator.xiaohongshu.com"]),
@@ -121,7 +121,8 @@ const SITE_PROFILES: Record<SiteRuntimeId, SiteResourceProfile> = {
       "snapshot.creator_publish_page.available",
       "refmap.write_target_refs.available",
       "evidence.snapshot_ref.available",
-      "no_submit_guard.active"
+      "no_submit_guard.active",
+      "safety.challenge.absent"
     ]
   },
   boss: {

@@ -2,23 +2,185 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   blocksXhsMediaActionRequest,
+  clickPoint,
+  cleanupConfirmationPointExpression,
+  commitProbeExpression,
+  draftEditPointExpression,
   fieldFillProbeExpression,
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
+  noteManagerNavigationPointExpression,
   observeXhsPathPrepareRequest,
   providerConfigurationPageUrl,
+  publishedActionPointExpression,
   readTargetPageFacts,
   sameWritePrecheckUrl,
+  selectCleanupPage,
   selectPage,
   validateXhsWritePrecheckObservation,
-  writePrecheckProbeExpression
+  writePrecheckProbeExpression,
+  xhsContentRef
 } from "./local-provider-launcher.js";
+
+test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
+  const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
+  let titleDecoy = false;
+  let bodyDecoy = false;
+  let inputDecoy = false;
+  const decoyAncestor = { dataset: { decoy: "" } };
+  const title = { value: "WE测试", closest: (selector: string) => titleDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null, getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
+  const media = { closest: () => null, getBoundingClientRect: () => rect };
+  const decoy = { closest: (selector: string) => selector.includes("[data-decoy]") ? { dataset: { decoy: "" } } : null, getBoundingClientRect: () => rect };
+  const imageInput = {
+    parentElement: null as unknown,
+    matches: () => false,
+    closest: (selector: string) => inputDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null,
+    getAttribute: () => "",
+    getBoundingClientRect: () => ({ ...rect, width: 0, height: 0 })
+  };
+  const mediaArea = {
+    parentElement: null as unknown,
+    querySelectorAll: () => [media, decoy]
+  };
+  const editor: Record<string, unknown> = {
+    parentElement: null,
+    contains: (value: unknown) => value === title || value === mediaArea,
+    querySelectorAll: (selector: string) => selector === "input" ? [title, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media, decoy]
+  };
+  const root: Record<string, unknown> = {
+    parentElement: null,
+    contains: (value: unknown) => value === title,
+    querySelectorAll: (selector: string) => selector === "input" ? [title, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media, decoy]
+  };
+  editor.parentElement = root;
+  mediaArea.parentElement = editor;
+  imageInput.parentElement = mediaArea;
+  const body = { textContent: "正文 WE-XHS-E2E-1", parentElement: editor, closest: (selector: string) => bodyDecoy && selector.includes("[data-decoy]") ? decoyAncestor : null, contains: () => false, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
+  const document = { body: { innerText: "" }, querySelectorAll: () => [root] };
+  const evaluate = new Function("document", "location", "getComputedStyle", `return ${commitProbeExpression("WE-XHS-E2E-1", "WE测试")}`);
+  const result = evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" }));
+  assert.equal(result.fields_matched, true);
+  assert.equal(result.media_count, 1);
+  titleDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  titleDecoy = false;
+  bodyDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).marker_matched, false);
+  bodyDecoy = false;
+  inputDecoy = true;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
+  inputDecoy = false;
+  title.value = "已被改名";
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  title.value = "WE测试";
+  mediaArea.querySelectorAll = () => [];
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
+  mediaArea.querySelectorAll = () => [media, decoy];
+  body.parentElement = root;
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  body.parentElement = editor;
+  root.querySelectorAll = (selector: string) => selector === "input" ? [title, { ...title }, imageInput] : selector.includes("contenteditable") ? [body] : selector.includes('input[type="file"]') ? [imageInput] : [media];
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+});
+
+test("#423 cleanup content ref is derived from the marker-bound page identity", () => {
+  assert.equal(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "WE测试"));
+  assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-2", "WE测试"));
+  assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "其他标题"));
+});
+
+test("#419 click response loss after mouse release dispatch remains unknown", async () => {
+  const client = (failure: "before" | "release" | "none") => ({
+    send: async (method: string, params: Record<string, unknown> = {}) => {
+      if (failure === "before" && method === "Page.bringToFront") throw new Error("not sent");
+      if (failure === "release" && method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") throw new Error("response lost");
+      return {};
+    }
+  });
+  assert.equal(await clickPoint(client("before") as never, 10, 20), "not_dispatched");
+  assert.equal(await clickPoint(client("release") as never, 10, 20), "unknown");
+  assert.equal(await clickPoint(client("none") as never, 10, 20), "dispatched");
+});
+
+test("#423 published readback and cleanup select only the exact card actions", () => {
+  const classList = (names: string[]) => ({ contains: (name: string) => names.includes(name) });
+  const remove = { classList: classList(["note-card__action-btn--del"]), getBoundingClientRect: () => ({ left: 60, top: 10, width: 20, height: 20 }) };
+  const edit = { classList: classList([]), getBoundingClientRect: () => ({ left: 30, top: 10, width: 20, height: 20 }) };
+  const card = { querySelectorAll: () => [{ classList: classList([]) }, edit, remove] };
+  const title = { children: [], textContent: "WE测试", getBoundingClientRect: () => ({ width: 100 }), closest: () => card };
+  const editPoint = new Function("document", `return ${publishedActionPointExpression("WE测试", "edit")}`);
+  const deletePoint = new Function("document", `return ${publishedActionPointExpression("WE测试", "delete")}`);
+  assert.deepEqual(editPoint({ querySelectorAll: () => [title] }), { status: "matched", x: 40, y: 20 });
+  assert.deepEqual(deletePoint({ querySelectorAll: () => [title] }), { status: "matched", x: 70, y: 20 });
+});
+
+test("#423 cleanup binds one update page and one confirmation inside the exact dialog", () => {
+  const update = { id: "task", type: "page", title: "creator", url: "https://creator.xiaohongshu.com/publish/update?id=task" };
+  const manager = { id: "manager", type: "page", title: "creator", url: "https://creator.xiaohongshu.com/new/note-manager" };
+  assert.equal(selectCleanupPage([update, manager] as Parameters<typeof selectCleanupPage>[0])?.id, "task");
+  assert.equal(selectCleanupPage([update, { ...update, id: "other" }] as Parameters<typeof selectCleanupPage>[0]), undefined);
+
+  const managerLink = { textContent: "笔记管理", getBoundingClientRect: () => ({ left: 10, top: 20, width: 40, height: 20 }) };
+  const navigate = new Function("document", `return ${noteManagerNavigationPointExpression()}`);
+  assert.deepEqual(navigate({ querySelectorAll: () => [managerLink] }), { status: "matched", x: 30, y: 30 });
+  assert.deepEqual(navigate({ querySelectorAll: () => [managerLink, managerLink] }), { status: "ambiguous" });
+
+  const rect = { left: 30, top: 10, width: 20, height: 20 };
+  const confirm = { disabled: false, innerText: "确定", textContent: "确定", getBoundingClientRect: () => rect };
+  const exactDialog = {
+    innerText: "删除笔记 删除后将无法恢复，确定要删除《WE测试0907-2》这篇笔记吗",
+    textContent: "删除笔记 删除后将无法恢复，确定要删除《WE测试0907-2》这篇笔记吗",
+    getBoundingClientRect: () => ({ ...rect, width: 200, height: 100 }),
+    querySelectorAll: () => [confirm],
+  };
+  const unrelatedDialog = { ...exactDialog, innerText: "其他确认", textContent: "其他确认" };
+  const exactTitle = { textContent: "WE测试0907-2214", getBoundingClientRect: () => ({ ...rect, width: 100 }) };
+  const evaluate = new Function("document", "getComputedStyle", `return ${cleanupConfirmationPointExpression("WE测试0907-2214")}`);
+  assert.deepEqual(evaluate(
+    { querySelectorAll: (selector: string) => selector === ".note-card .note-card__title" ? [exactTitle] : [unrelatedDialog, exactDialog] },
+    () => ({ display: "block", visibility: "visible" }),
+  ), { status: "matched", x: 40, y: 20 });
+  assert.deepEqual(evaluate(
+    { querySelectorAll: (selector: string) => selector === ".note-card .note-card__title" ? [exactTitle, { ...exactTitle, textContent: "WE测试0907-2999" }] : [exactDialog] },
+    () => ({ display: "block", visibility: "visible" }),
+  ), { status: "ambiguous" });
+});
+
+test("#419 same-route draft overlay reopens the newest exact-title draft", () => {
+  const rect = (top: number, left = 0, width = 100, height = 20) => ({ top, left, width, height, right: left + width, bottom: top + height });
+  const body = { textContent: "", children: [], parentElement: null };
+  const card = (top: number) => {
+    const edit = { textContent: "编辑", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top + 20, 30, 20, 20) };
+    const remove = { textContent: "删除", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top + 20, 60, 20, 20) };
+    const title = { textContent: "WE测试", children: [], parentElement: null as unknown, getBoundingClientRect: () => rect(top) };
+    const entry = {
+      textContent: "WE测试 编辑 删除",
+      children: [title, edit, remove],
+      parentElement: body,
+      getBoundingClientRect: () => rect(top, 0, 120, 50),
+      querySelectorAll: () => [edit, remove]
+    };
+    title.parentElement = entry;
+    edit.parentElement = entry;
+    remove.parentElement = entry;
+    return { title, entry };
+  };
+  const latest = card(10);
+  const older = card(100);
+  const evaluate = new Function("document", "getComputedStyle", `return ${draftEditPointExpression("WE测试")}`);
+  assert.deepEqual(evaluate(
+    { body, querySelectorAll: () => [older.title, latest.title] },
+    () => ({ display: "block", visibility: "visible" })
+  ), { status: "matched", x: 40, y: 40 });
+});
 
 test("#412 field fill blocks every outbound mutation while media upload keeps its bounded network path", () => {
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "POST", "https://creator.xiaohongshu.com/api/opaque"), true);
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "GET", "https://creator.xiaohongshu.com/api/opaque"), false);
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/upload"), false);
   assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/publish"), true);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_commit.save_draft", "POST", "https://creator.xiaohongshu.com/api/save"), false);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_commit.publish", "POST", "https://creator.xiaohongshu.com/api/publish"), false);
 });
 
 test("#412 field fill writes only one visible app-owned title and body and returns match states", () => {
@@ -414,7 +576,7 @@ test("#409 media upload targets one app-owned image input without depending on a
   assert.match(probe, /#app input\[type=\"file\"\], \[data-v-app\] input\[type=\"file\"\]/);
   assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
   assert.match(probe, /matches\(':disabled'\)/);
-  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /candidates\.length === 1/);
   assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
 });
@@ -428,7 +590,7 @@ test("#409 media upload selects only the unique actionable image-text path befor
   assert.match(probe, /document\.elementFromPoint/);
   assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(probe, /!el\.hidden && !el\.matches\(':disabled'\) && el\.getAttribute\('aria-disabled'\) !== 'true'/);
-  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /!el\.querySelector\('input\[type="file"\]'\)/);
   assert.match(probe, /el\.checkVisibility\(\{ checkOpacity: true, checkVisibilityCSS: true \}\)/);
   assert.match(probe, /image_input_candidate_count/);

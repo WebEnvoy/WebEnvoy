@@ -3,10 +3,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const inputModule = await import(pathToFileURL(path.resolve("dist-electron/lodeCatalogInput.js")).href);
-const [xhsSchema, bossSchema, mediaSchema] = await Promise.all([
+const [xhsSchema, bossSchema, mediaSchema, commitSchema] = await Promise.all([
   readFile("dist-electron/lode/sites/xiaohongshu/search-notes/schemas/input.schema.json", "utf8"),
   readFile("dist-electron/lode/sites/boss/job-search/schemas/input.schema.json", "utf8"),
   readFile("dist-electron/lode/sites/xiaohongshu/publish-note-image-text-media/schemas/input.schema.json", "utf8"),
+  readFile("dist-electron/lode/sites/xiaohongshu/publish-note-image-text-commit/schemas/input.schema.json", "utf8"),
 ]);
 const xhsUrl = inputModule.projectInputFields(JSON.parse(xhsSchema)).find((field) => field.id === "url");
 const xhsKeyword = inputModule.projectInputFields(JSON.parse(xhsSchema)).find((field) => field.id === "keyword");
@@ -20,6 +21,14 @@ const mediaFields = inputModule.projectInputFields(JSON.parse(mediaSchema), {
 });
 const mediaRefs = mediaFields.find((field) => field.id === "refs");
 const mediaSummary = mediaFields.find((field) => field.id === "summary");
+const commitFields = inputModule.projectInputFields(JSON.parse(commitSchema), {
+  packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1",
+  schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.1",
+  operationRef: "lode://operation/xhs_publish_note_image_text_commit",
+  operationMode: "write",
+});
+const commitMarker = commitFields.find((field) => field.id === "marker");
+const commitVisibility = commitFields.find((field) => field.id === "visibility");
 const fields = inputModule.projectInputFields({
   type: "object",
   additionalProperties: false,
@@ -54,6 +63,13 @@ for (const relativePath of (await readdir(inputSchemaRoot, { recursive: true }))
         operationRef: "lode://operation/xhs_publish_note_image_text_media",
         operationMode: "write",
       })
+    : relativePath.includes("publish-note-image-text-commit")
+      ? inputModule.projectInputFields(schema, {
+          packageRef: "lode://site-capability/xiaohongshu/publish-note-image-text-commit@0.1.1",
+          schemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-commit/input@0.1.1",
+          operationRef: "lode://operation/xhs_publish_note_image_text_commit",
+          operationMode: "write",
+        })
     : inputModule.projectInputFields(schema);
   for (const [id, declaration] of Object.entries(schema.properties ?? {})) {
     if (declaration?.pattern != null && projected.find((field) => field.id === id)?.kind === "unknown") {
@@ -67,10 +83,11 @@ if (xhsUrl?.pattern !== "^https://www\\.xiaohongshu\\.com/(?:explore|search_resu
   bossLimit?.inputProjection !== "safe_summary" ||
   mediaRefs?.kind !== "file" || mediaRefs.inputProjection !== "owner_ref" || mediaRefs.maxItems !== 18 ||
   mediaSummary?.inputProjection !== "safe_summary" || mediaSummary.maxLength !== 512 ||
+  commitMarker?.inputProjection !== "safe_summary" || commitMarker.maxLength !== 128 || commitVisibility?.options?.length !== 3 ||
   fields[0]?.pattern !== "^https://example\\.test/allowed$" || fields[0]?.patternSafety !== "linear" ||
   fields[1]?.minItems !== 1 || fields[1]?.maxItems !== 2 || fields[1]?.uniqueItems !== true ||
   rejected.some((field) => field?.kind !== "unknown") || files[0]?.kind !== "file" || files[1]?.kind !== "unknown" || authoritativePatternFailures.length > 0) {
   throw new Error("Skill workbench schema smoke failed: safe constraints were lost or unsafe constraints were accepted.");
 }
 
-process.stdout.write(`${JSON.stringify({ lodeAssets: true, safePatterns: true, inputProjection: true, mediaInput: true })}\n`);
+process.stdout.write(`${JSON.stringify({ lodeAssets: true, safePatterns: true, inputProjection: true, mediaInput: true, commitInput: true })}\n`);

@@ -1309,6 +1309,8 @@ export class HarborRuntime {
       requested_path: admitted.requested_path,
       refs: admitted.refs,
       summary: admitted.summary,
+      ...(admitted.marker === undefined ? {} : { marker: admitted.marker }),
+      ...(admitted.visibility === undefined ? {} : { visibility: admitted.visibility }),
       ...(admitted.holder_ref === undefined ? {} : { holder_ref: admitted.holder_ref }),
       no_submit_guard: "active",
       authorization_binding: admitted.authorization_binding
@@ -1316,15 +1318,17 @@ export class HarborRuntime {
     const current = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!current || current.control_generation !== controlGeneration ||
       current.facts.control_lock.holder_ref !== holderRef || current.facts.identity_environment_ref !== identityRef) {
-      return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.status === "completed" ? result.operation_ref : undefined));
+      return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.operation_ref, result.submitted));
     }
     if (result.status === "unavailable") {
       return finish(
-        unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref),
+        unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref, result.submitted),
         result.diagnostics
       );
     }
-    const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
+    const after = admitted.action_id.startsWith("xhs_publish_note_image_text_commit.")
+      ? undefined
+      : this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
     if (after) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(after), result.operation_ref));
     return finish(completeXhsMediaAction(runtime_session_ref, admitted, result));
   }
@@ -1609,6 +1613,7 @@ function mediaFailureReason(
     case "generation_unavailable": return "generation_unavailable";
     case "field_unavailable": return "field_unavailable";
     case "validation_failed": return "validation_failed";
+    case "commit_control_unavailable": return "commit_control_unavailable";
     case "operation_result_unknown": return "operation_result_unknown";
     case "post_check_failed": return "post_check_failed";
     case "reconciliation_unknown": return "reconciliation_unknown";

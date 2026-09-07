@@ -2,6 +2,7 @@ import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRec
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import {
   validateLodePackageAdmission,
+  xhsCommitPackageRef,
   xhsFieldPackageRef,
   xhsMediaActionPaths,
   xhsMediaPackageRef,
@@ -36,6 +37,8 @@ export type TaskIntentEnvelope = {
     refs?: string[];
     requested_path?: string;
     action_id?: string;
+    marker?: string;
+    visibility?: "not_applicable" | "only_me" | "public";
   };
   scope: {
     target_type: string;
@@ -127,13 +130,19 @@ export function isXhsMediaActionIntent(taskIntent: TaskIntentEnvelope, packageRe
   const actionId = taskIntent.input.action_id as XhsMediaActionId | undefined;
   const refs = taskIntent.input.refs;
   const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
-  return packageRef === (fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef) && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
+  const commitAction = typeof actionId === "string" && actionId.startsWith("xhs_publish_note_image_text_commit.");
+  const cleanupAction = actionId === "xhs_publish_note_image_text_commit.cleanup";
+  const marker = taskIntent.input.marker;
+  const visibility = taskIntent.input.visibility;
+  return packageRef === (fieldAction ? xhsFieldPackageRef : commitAction ? xhsCommitPackageRef : xhsMediaPackageRef) && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
     Array.isArray(refs) &&
     taskIntent.input.requested_path === xhsMediaActionPaths[actionId] &&
     ((actionId === "xhs_publish_note_image_text_media.image_upload" && refs.length > 0) ||
       (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && refs.length === 0) ||
-      (fieldAction && refs.length === 2)) &&
-    taskIntent.policy.risk === "write" && taskIntent.policy.execution_intent === "execute_after_approval";
+      (fieldAction && refs.length === 2) ||
+      (commitAction && refs.length === 0 && typeof marker === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker) &&
+        (actionId.endsWith(".publish") ? visibility === "only_me" || visibility === "public" : visibility === "not_applicable"))) &&
+    taskIntent.policy.risk === (cleanupAction ? "destructive" : "write") && taskIntent.policy.execution_intent === "execute_after_approval";
 }
 
 function requestInvalid(code: string, recoveryHint: string): FailureRecord {
@@ -292,6 +301,8 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   const actionId = fields.input.action_id === undefined
     ? undefined
     : asNonEmptyString(fields.input.action_id, "input_action_id_invalid");
+  const marker = fields.input.marker === undefined ? undefined : asNonEmptyString(fields.input.marker, "input_marker_invalid");
+  const visibility = fields.input.visibility === undefined ? undefined : asNonEmptyString(fields.input.visibility, "input_visibility_invalid");
   const scopeTargetType = asNonEmptyString(fields.scope.target_type, "scope_target_type_required");
   const rawScopeTargetRef = asNonEmptyString(fields.scope.target_ref, "scope_target_ref_required");
   if (isFailure(userIntentSummary)) return userIntentSummary;
@@ -302,6 +313,10 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
   if (isFailure(inputSummary)) return inputSummary;
   if (isFailure(requestedPath)) return requestedPath;
   if (isFailure(actionId)) return actionId;
+  if (isFailure(marker)) return marker;
+  if (isFailure(visibility)) return visibility;
+  if (marker !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(marker)) return requestInvalid("input_marker_invalid", "fix_input");
+  if (visibility !== undefined && !["not_applicable", "only_me", "public"].includes(visibility)) return requestInvalid("input_visibility_invalid", "fix_input");
   if (isFailure(scopeTargetType)) return scopeTargetType;
   if (isFailure(rawScopeTargetRef)) return rawScopeTargetRef;
   const scopeTargetRef = normalizeStoredTargetRef(rawScopeTargetRef);
@@ -327,7 +342,9 @@ function buildTaskIntent(fields: ParsedTaskIntentFields): TaskIntentEnvelope | F
       summary: inputSummary,
       ...(normalizedInputRefs === undefined ? {} : { refs: normalizedInputRefs as string[] }),
       ...(requestedPath === undefined ? {} : { requested_path: requestedPath }),
-      ...(actionId === undefined ? {} : { action_id: actionId })
+      ...(actionId === undefined ? {} : { action_id: actionId }),
+      ...(marker === undefined ? {} : { marker }),
+      ...(visibility === undefined ? {} : { visibility: visibility as "not_applicable" | "only_me" | "public" })
     },
     scope: {
       target_type: scopeTargetType,
@@ -405,6 +422,7 @@ function buildActionRequest(
 ): ActionRequest {
   const blocked = refs.blocked === true;
   const mediaAction = isXhsMediaActionIntent(taskIntent, refs.package_ref ?? input.package_ref);
+  const commitAction = taskIntent.input.action_id?.startsWith("xhs_publish_note_image_text_commit.") === true;
   const requestOperationMode = mediaAction ? "execute_after_approval" : writePrecheckOperationMode(taskIntent.policy.execution_intent);
   const sourceRefs = [
     taskIntent.capability.source_ref,
@@ -429,8 +447,9 @@ function buildActionRequest(
       risk: taskIntent.policy.risk,
       execution_intent: taskIntent.policy.execution_intent,
       level: blocked ? "blocked" : mediaAction ? "high" : taskIntent.policy.execution_intent === "validate_only" ? "low" : "medium",
-      true_write_requested: blocked,
-      reasons: blocked ? ["true_write_execution_intent_blocked"] : mediaAction ? ["media_action_requires_exact_confirmation", "save_draft_and_publish_not_in_scope"] : ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
+      true_write_requested: blocked || commitAction,
+      reasons: blocked ? ["true_write_execution_intent_blocked"] : commitAction ? ["commit_action_requires_exact_confirmation", "only_named_action_is_in_scope"] :
+        mediaAction ? ["media_action_requires_exact_confirmation", "save_draft_and_publish_not_in_scope"] : ["write_precheck_validate_only_boundary", "no_submit_guard_required"]
     },
     no_submit_guard: {
       status: "active",
