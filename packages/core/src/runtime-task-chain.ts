@@ -1145,7 +1145,8 @@ function validateCompletedWritePrecheck(
     !Object.values(fields).every(validFieldState) || !validMediaState(operation.media_state) ||
     !validFieldState(operation.validation_state) || !validFieldState(operation.save_draft_control) ||
     !validFieldState(operation.publish_control) || !prohibited || Object.keys(prohibited).length === 0 ||
-    (operation.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" || observations.path_entry_visible !== "observed")) ||
+    (operation.precheck_scope === "composition_observation" && (observations.path_observed !== "observed" ||
+      (observations.path_entry_visible !== "observed" && operation.composition_state !== "composition_initialized"))) ||
     prohibited.upload !== false || prohibited.generate !== false || prohibited.save !== false || prohibited.publish !== false) {
     return { ok: false, failure: writePrecheckFailure("write_precheck_observation_invalid", "result_projection") };
   }

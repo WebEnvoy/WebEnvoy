@@ -515,7 +515,8 @@ export function validCompletedWritePrecheckProbe(
     [observations.upload_image_tab_active, observations.upload_image_entry_visible, observations.text_image_entry_visible].every((value) => typeof value === "boolean") &&
     (observations.path_observed === undefined || ["observed", "unobserved", "unknown"].includes(observations.path_observed)) &&
     (observations.path_entry_visible === undefined || ["observed", "unobserved", "unknown"].includes(observations.path_entry_visible)) &&
-    (probe.precheck_scope === "entrypoint_only" || (observations.path_observed === "observed" && observations.path_entry_visible === "observed")) &&
+    (probe.precheck_scope === "entrypoint_only" || (observations.path_observed === "observed" &&
+      (observations.path_entry_visible === "observed" || probe.composition_state === "composition_initialized"))) &&
     fieldKeys.sort().join(",") === "content_editor,publish_control,title_input" &&
     Object.values(probe.field_states).every(validFieldState) &&
     validMediaState(probe.media_state, probe.composition_path) &&
