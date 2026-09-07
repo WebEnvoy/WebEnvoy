@@ -792,6 +792,9 @@ type CommitProbe = {
   login_like: boolean;
   challenge_like: boolean;
   title_value: string;
+  title_candidate_count: number;
+  body_candidate_count: number;
+  marker_count: number;
   marker_matched: boolean;
   fields_matched: boolean;
   media_count: number;
@@ -824,28 +827,52 @@ async function clickExactAxButton(client: CdpClient, name: string): Promise<bool
   return ids.length === 1 && clickBackendNode(client, ids[0]!);
 }
 
-async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<CommitProbe | undefined> {
+export function commitProbeExpression(marker: string, expectedTitle?: string): string {
   const markerLiteral = JSON.stringify(marker);
-  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: String.raw`(() => {
-      const text = document.body?.innerText || '';
-      const title = [...document.querySelectorAll('input')].find((el) => /标题/.test(el.getAttribute('placeholder') || ''))?.value || '';
-      const body = [...document.querySelectorAll('[contenteditable="true"]')].map((el) => el.textContent || '').join('\n');
-      const media = [...document.querySelectorAll('#app img.preview, #app img.preivew-image, [data-v-app] img.preview, [data-v-app] img.preivew-image')].filter((el) => {
+  const titleLiteral = expectedTitle === undefined ? "undefined" : JSON.stringify(expectedTitle);
+  return String.raw`(() => {
+      const visible = (el) => {
         const r = el.getBoundingClientRect();
-        return r.width >= 80 && r.height >= 80 && r.bottom > 0 && r.right > 0;
-      }).length;
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+      };
+      const text = document.body?.innerText || '';
+      const roots = [...document.querySelectorAll('#app, [data-v-app]')];
+      const unique = (values) => [...new Set(values)];
+      const titles = unique(roots.flatMap((root) => [...root.querySelectorAll('input')]))
+        .filter((el) => visible(el) && /标题/.test(el.getAttribute('placeholder') || ''));
+      const bodies = unique(roots.flatMap((root) => [...root.querySelectorAll('[contenteditable="true"]')]))
+        .filter((el) => visible(el) && (el.textContent || '').includes(${markerLiteral}));
+      const title = titles.length === 1 ? titles[0] : undefined;
+      const body = bodies.length === 1 ? bodies[0] : undefined;
+      const bodyText = body?.textContent || '';
+      const markerCount = bodyText.split(${markerLiteral}).length - 1;
+      let scope = body;
+      while (scope && title && !scope.contains(title)) scope = scope.parentElement;
+      const media = scope ? unique([...scope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
+        const r = el.getBoundingClientRect();
+        return visible(el) && r.width >= 80 && r.height >= 80;
+      }).length : 0;
       return {
         url: location.href,
         pathname: location.pathname,
         login_like: /登录|扫码登录/.test(text) && /\/login/.test(location.pathname),
         challenge_like: /验证码|安全验证|异常访问|请完成验证/.test(text),
-        title_value: title,
-        marker_matched: text.includes(${markerLiteral}) || title.includes(${markerLiteral}) || body.includes(${markerLiteral}),
-        fields_matched: title.length > 0 && body.includes(${markerLiteral}),
+        title_value: title?.value || '',
+        title_candidate_count: titles.length,
+        body_candidate_count: bodies.length,
+        marker_count: markerCount,
+        marker_matched: titles.length === 1 && bodies.length === 1 && markerCount === 1,
+        fields_matched: titles.length === 1 && bodies.length === 1 && markerCount === 1 && title.value.length > 0 &&
+          (${titleLiteral} === undefined || title.value === ${titleLiteral}),
         media_count: media
       };
-    })()`,
+    })()`;
+}
+
+async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<CommitProbe | undefined> {
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: commitProbeExpression(marker),
     returnByValue: true
   });
   return (evaluated.result as { value?: CommitProbe } | undefined)?.value;
@@ -984,27 +1011,8 @@ async function selectCommitVisibility(client: CdpClient, visibility: "only_me" |
 }
 
 async function evaluatePublishedDetailProbe(client: CdpClient, title: string, marker: string): Promise<PublishedDetailProbe | undefined> {
-  const titleLiteral = JSON.stringify(title);
-  const markerLiteral = JSON.stringify(marker);
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: String.raw`(() => {
-      const text = document.body?.innerText || '';
-      const titleValue = [...document.querySelectorAll('input')].find((element) => /标题/.test(element.getAttribute('placeholder') || ''))?.value || '';
-      const body = [...document.querySelectorAll('[contenteditable="true"]')].map((element) => element.textContent || '').join('\n');
-      const media = [...document.querySelectorAll('#app img.preview, #app img.preivew-image, [data-v-app] img.preview, [data-v-app] img.preivew-image')].filter((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.width >= 80 && rect.height >= 80 && rect.bottom > 0 && rect.right > 0;
-      }).length;
-      return {
-        url: location.href,
-        pathname: location.pathname,
-        marker_matched: body.includes(${markerLiteral}),
-        fields_matched: titleValue === ${titleLiteral} && body.includes(${markerLiteral}),
-        media_count: media,
-        login_like: /登录|扫码登录/.test(text) && /\/login/.test(location.pathname),
-        challenge_like: /验证码|安全验证|异常访问|请完成验证/.test(text)
-      };
-    })()`,
+    expression: commitProbeExpression(marker, title),
     returnByValue: true
   });
   return (evaluated.result as { value?: PublishedDetailProbe } | undefined)?.value;
@@ -1071,9 +1079,9 @@ async function executeCleanupControl(
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await abortableDelay(250);
     verified = await evaluatePublishedDetailProbe(client, before.title_value, input.marker!);
-    if (verified?.login_like || verified?.challenge_like || verified?.pathname === "/publish/update" && verified.fields_matched && verified.media_count > 0) break;
+    if (verified?.login_like || verified?.challenge_like || verified?.pathname === "/publish/update" && verified.fields_matched && verified.media_count === before.media_count) break;
   }
-  if (verified?.pathname !== "/publish/update" || !verified.marker_matched || !verified.fields_matched || verified.media_count < 1) {
+  if (verified?.pathname !== "/publish/update" || !verified.marker_matched || !verified.fields_matched || verified.media_count !== before.media_count) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup target did not match the authorized marker, fields and media.", retryable: false, submitted: false };
   }
   if (!await openNoteManager(client)) {
@@ -1130,7 +1138,7 @@ async function executeCleanupControl(
       fields_state: "matched",
       media_state: "matched",
       marker_state: "matched",
-      content_ref: null,
+      content_ref: input.refs[0] ?? null,
       canonical_url: observed ? managerUrl : null
     },
     page_readback: {
@@ -1183,7 +1191,7 @@ async function executeCommitControl(
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await abortableDelay(250);
         probe = await evaluateCommitProbe(client, marker);
-        if (isCreatorPublishPath(probe?.pathname) && probe?.marker_matched && probe.fields_matched && probe.media_count > 0) break;
+        if (isCreatorPublishPath(probe?.pathname) && probe?.marker_matched && probe.fields_matched && probe.media_count === before.media_count) break;
       }
     }
   } else {
@@ -1193,7 +1201,7 @@ async function executeCommitControl(
       if (probe?.pathname.includes("/publish/success") || probe?.login_like || probe?.challenge_like) break;
     }
   }
-  const detailMatched = save && listMatched && isCreatorPublishPath(probe?.pathname) && probe?.marker_matched === true && probe.fields_matched && probe.media_count > 0;
+  const detailMatched = save && listMatched && isCreatorPublishPath(probe?.pathname) && probe?.marker_matched === true && probe.fields_matched && probe.media_count === before.media_count;
   const publishObserved = !save && probe?.pathname.includes("/publish/success") === true;
   let publishedDetail: PublishedDetailProbe | undefined;
   if (publishObserved && await clickExactAxStaticText(client, "笔记管理")) {
@@ -1210,11 +1218,11 @@ async function executeCommitControl(
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await abortableDelay(250);
         publishedDetail = await evaluatePublishedDetailProbe(client, before.title_value, marker);
-        if (publishedDetail?.login_like || publishedDetail?.challenge_like || publishedDetail?.fields_matched && publishedDetail.media_count > 0) break;
+        if (publishedDetail?.login_like || publishedDetail?.challenge_like || publishedDetail?.fields_matched && publishedDetail.media_count === before.media_count) break;
       }
     }
   }
-  const publishedDetailMatched = publishObserved && listMatched && publishedDetail?.marker_matched === true && publishedDetail.fields_matched && publishedDetail.media_count > 0;
+  const publishedDetailMatched = publishObserved && listMatched && publishedDetail?.marker_matched === true && publishedDetail.fields_matched && publishedDetail.media_count === before.media_count;
   const observed = detailMatched || publishedDetailMatched;
   const contentRef = observed ? opaqueRef("xhs_content") : null;
   return {

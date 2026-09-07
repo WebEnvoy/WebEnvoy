@@ -13,6 +13,7 @@ import type {
 } from "./harbor-admission.js";
 import {
   projectHarborPublicIdentityEnvironmentRecord,
+  validateHarborAdmission,
   validateHarborIdentityEnvironmentFacts,
   validateHarborIdentityProviderStatus,
   validateHarborRuntimeBinding
@@ -22,6 +23,7 @@ import {
   parseLodeRuntimeAdmissionPolicy,
   validateLodePackageAdmission,
   type LodePackageAdmissionContract,
+  type LodeRequiredHarborFact,
   type LodeRuntimeAdmissionPolicy,
   type LodeRuntimeConsumptionEntry
 } from "./lode-admission.js";
@@ -1639,6 +1641,7 @@ export function validateCompletedXhsMediaAction(
     requested_path: (typeof xhsMediaActionPaths)[keyof typeof xhsMediaActionPaths];
     canonical_url: string;
     target_ref: string;
+    cleanup_provenance_ref?: string;
   }
 ): XhsMediaActionValidation {
   const operation = object(value);
@@ -1725,6 +1728,20 @@ export function validateCompletedXhsMediaAction(
   const validRecovery = exactObjectKeys(recovery, ["status", "entrypoint"]) &&
     ["not_required", "required", "unknown"].includes(string(recovery.status) ?? "") &&
     ["inspect_operation_ref", "await_post_check", "manual_reconciliation", "none"].includes(string(recovery.entrypoint) ?? "");
+  const expectedCommitState = expected.action_id === "xhs_publish_note_image_text_commit.save_draft"
+    ? ["draft_saved", "matched", "matched", "not_applicable"]
+    : expected.action_id === "xhs_publish_note_image_text_commit.publish"
+      ? ["published", "matched", "matched", string(normalized?.visibility_state)]
+      : ["deleted", "not_found", "not_run", "not_applicable"];
+  const validCommitSuccess = !commitAction || classification !== "success_result" || (
+    contentReadback?.state === expectedCommitState[0] && contentReadback?.management_list_state === expectedCommitState[1] &&
+    contentReadback?.detail_state === expectedCommitState[2] && normalized?.visibility_state === expectedCommitState[3] &&
+    (expected.action_id !== "xhs_publish_note_image_text_commit.publish" || ["only_me", "public"].includes(string(normalized?.visibility_state) ?? "")) &&
+    normalized?.marker_state === "matched" && businessEffect?.status === "observed" && operationStatus === "terminal" && lifecycle?.terminal_state === "success" &&
+    contentReadback?.fields_state === "matched" && contentReadback?.media_state === "matched" && contentReadback?.marker_state === "matched" &&
+    (expected.cleanup_provenance_ref === undefined || contentReadback?.content_ref === expected.cleanup_provenance_ref) &&
+    postCheck?.status === "passed" && reconciliation?.status === "matched" && recovery?.status === "not_required" && recovery?.entrypoint === "none" && normalized?.submitted === true
+  );
   const normalizedKeys = fieldAction
     ? ["action_id", "requested_path", "canonical_url", "target_ref", "source_status", "business_effect", "operation", "field_readback", "page_readback", "post_check", "reconciliation", "recovery", "save_draft", "publish", "submitted"]
     : commitAction
@@ -1741,7 +1758,7 @@ export function validateCompletedXhsMediaAction(
     !exactObjectKeys(normalized, normalizedKeys) ||
     !exactObjectKeys(businessEffect, ["kind", "status"]) || businessEffect?.kind !== expectedBusinessEffect ||
     !(commitAction ? ["observed", "not_observed", "unknown"] : ["requested", "observed", "unknown", "failed"]).includes(string(businessEffect?.status) ?? "") ||
-    !validOperation || (fieldAction ? !validFieldReadback : commitAction ? !validCommitReadback : !validMediaReadback) || (!commitAction && !validPageReadback) || !validPostCheck || !validReconciliation || !validRecovery ||
+    !validOperation || (fieldAction ? !validFieldReadback : commitAction ? !validCommitReadback : !validMediaReadback) || !validCommitSuccess || (!commitAction && !validPageReadback) || !validPostCheck || !validReconciliation || !validRecovery ||
     (commitAction ? typeof normalized.submitted !== "boolean" || topStatus === "available" && normalized.submitted !== true : normalized.save_draft !== "not_in_scope" || normalized.publish !== "not_in_scope" || normalized.submitted !== false) ||
     !sourceValid || !evidenceValid || resultRef === undefined ||
     (topStatus === "available" && (!(classification === "success_result" || classification === "partial_result") || sourceRefs.length === 0 || evidenceRefs.length === 0)) ||
@@ -1768,8 +1785,23 @@ export function validateCompletedXhsMediaAction(
   };
 }
 
-function mediaActionPublicSummary(operation: JsonObject): Record<string, unknown> {
+function mediaActionPublicSummary(operation: JsonObject, provenance?: {
+  marker: string;
+  identity_environment_ref: string;
+  cleanup_content_ref?: string;
+}): Record<string, unknown> {
   const normalized = object(operation.normalized)!;
+  const actionId = string(normalized.action_id);
+  const contentRef = mediaRef(object(normalized.content_readback)?.content_ref);
+  const creationProvenance = operation.status === "available" && operation.classification === "success_result" &&
+    (actionId === "xhs_publish_note_image_text_commit.save_draft" || actionId === "xhs_publish_note_image_text_commit.publish") && contentRef && provenance
+    ? {
+        action_id: actionId,
+        content_ref: contentRef,
+        marker_sha256: createHash("sha256").update(provenance.marker).digest("hex"),
+        identity_environment_ref: provenance.identity_environment_ref
+      }
+    : undefined;
   return {
     schema_version: "webenvoy.core-xhs-media-action-projection.v0",
     result_kind: operation.result_kind,
@@ -1781,8 +1813,33 @@ function mediaActionPublicSummary(operation: JsonObject): Record<string, unknown
     submitted: normalized.submitted,
     ...(normalized.save_draft === undefined ? {} : { save_draft: normalized.save_draft }),
     ...(normalized.publish === undefined ? {} : { publish: normalized.publish }),
+    ...(creationProvenance === undefined ? {} : { creation_provenance: creationProvenance }),
+    ...(actionId !== "xhs_publish_note_image_text_commit.cleanup" || provenance?.cleanup_content_ref === undefined
+      ? {}
+      : { cleanup_provenance_ref: provenance.cleanup_content_ref }),
     consumer_boundary: "Core stores structured action refs, lifecycle and redacted readback summaries only; no media bytes or browser material is stored."
   };
+}
+
+export function selectXhsCleanupCreationRef(records: readonly RunRecord[], marker: string, identityEnvironmentRef: string): string | undefined {
+  const markerHash = createHash("sha256").update(marker).digest("hex");
+  return records
+    .filter((record) => record.status === "succeeded" && record.admission.runtime_session_binding?.identity_environment_ref === identityEnvironmentRef)
+    .map((record) => {
+      const summary = object(record.public_result_summary);
+      const normalized = object(summary?.normalized);
+      const readback = object(normalized?.content_readback);
+      const provenance = object(summary?.creation_provenance);
+      const actionId = string(provenance?.action_id);
+      const contentRef = mediaRef(provenance?.content_ref);
+      if (summary?.schema_version !== "webenvoy.core-xhs-media-action-projection.v0" || summary.status !== "available" || summary.classification !== "success_result" ||
+        provenance?.marker_sha256 !== markerHash || provenance.identity_environment_ref !== identityEnvironmentRef || normalized?.action_id !== actionId ||
+        readback?.content_ref !== contentRef || !contentRef ||
+        !["xhs_publish_note_image_text_commit.save_draft", "xhs_publish_note_image_text_commit.publish"].includes(actionId ?? "")) return undefined;
+      return { contentRef, published: actionId?.endsWith(".publish") === true, updatedAt: record.updated_at };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
+    .sort((left, right) => Number(right.published) - Number(left.published) || right.updatedAt.localeCompare(left.updatedAt))[0]?.contentRef;
 }
 
 async function releaseAcceptedMediaSession(
@@ -1848,14 +1905,16 @@ async function completeAcceptedXhsMediaAction(
   actionId: keyof typeof xhsMediaActionPaths,
   requestedPath: (typeof xhsMediaActionPaths)[keyof typeof xhsMediaActionPaths],
   canonicalUrl: string,
-  client: HarborRuntimeClient
+  client: HarborRuntimeClient,
+  provenance?: { marker: string; identity_environment_ref: string; cleanup_content_ref?: string }
 ): Promise<TaskSubmissionResult> {
   const validation = validateCompletedXhsMediaAction(operationValue, {
     runtime_session_ref: runtimeSessionRef,
     action_id: actionId,
     requested_path: requestedPath,
     canonical_url: canonicalUrl,
-    target_ref: targetRef
+    target_ref: targetRef,
+    ...(provenance?.cleanup_content_ref === undefined ? {} : { cleanup_provenance_ref: provenance.cleanup_content_ref })
   });
   if (!validation.ok) {
     const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, validation.failure);
@@ -1878,7 +1937,7 @@ async function completeAcceptedXhsMediaAction(
     return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
   }
   const operationObject = validation.operation;
-  const summary = mediaActionPublicSummary(operationObject);
+  const summary = mediaActionPublicSummary(operationObject, provenance);
   const projection = {
     source_refs: validation.source_refs,
     evidence_refs: validation.evidence_refs,
@@ -2037,7 +2096,8 @@ async function dispatchApprovedXhsMediaAction(
   result: Extract<TaskSubmissionResult, { ok: true }>,
   request: RuntimeTaskSubmissionRequest,
   deps: RuntimeTaskSubmissionDependencies,
-  policy: EvaluatedXhsMediaActionPolicy
+  policy: EvaluatedXhsMediaActionPolicy,
+  requiredHarborFacts: readonly LodeRequiredHarborFact[]
 ): Promise<TaskSubmissionResult> {
   const client = deps.harborRuntimeClient;
   if (!client?.executeMediaAction) {
@@ -2079,6 +2139,13 @@ async function dispatchApprovedXhsMediaAction(
   if (!runtimeSessionRef) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("resource_admission", "harbor_runtime_session_missing", "runtime_binding", "connect_runtime"));
   }
+  const preActionFacts = requiredHarborFacts.filter((fact) =>
+    fact.fact_key !== "operation_ref.accepted_or_running" && fact.fact_key !== "post_check.ref_available"
+  );
+  const fullAdmission = validateHarborAdmission(admissionValue, "media_action", preActionFacts);
+  if (!fullAdmission.ok) {
+    return completeAcceptedMediaAdmissionFailure(store, result, fullAdmission.failure, runtimeSessionRef, collectionFailure?.cleanup_failure, client);
+  }
   const runtimeBinding = validateHarborRuntimeBinding(admissionValue);
   if (!runtimeBinding.ok || runtimeBinding.runtime_session_binding.runtime_session_ref !== runtimeSessionRef) {
     return completeAcceptedMediaAdmissionFailure(
@@ -2109,6 +2176,15 @@ async function dispatchApprovedXhsMediaAction(
   if (!decisionRef || !request.authorization_context) {
     return completeAcceptedMediaAdmissionFailure(store, result, failure("action_risk", "media_action_authorization_binding_missing", "admission", "request_new_confirmation"), runtimeSessionRef, undefined, client);
   }
+  const marker = typeof result.task_intent.input.marker === "string" ? result.task_intent.input.marker : undefined;
+  const cleanupContentRef = exactActionId === "xhs_publish_note_image_text_commit.cleanup" && marker
+    ? selectXhsCleanupCreationRef(await store.listRunRecords(), marker, runtimeBinding.runtime_session_binding.identity_environment_ref)
+    : undefined;
+  if (exactActionId === "xhs_publish_note_image_text_commit.cleanup" && cleanupContentRef === undefined) {
+    return completeAcceptedMediaAdmissionFailure(store, result,
+      failure("action_risk", "cleanup_task_creation_provenance_missing", "admission", "select_task_created_content"),
+      runtimeSessionRef, undefined, client);
+  }
   let operation: unknown;
   try {
     operation = await client.executeMediaAction({
@@ -2118,7 +2194,7 @@ async function dispatchApprovedXhsMediaAction(
       target_ref: target.target_ref,
       action_id: exactActionId,
       requested_path: requestedPath,
-      refs: result.task_intent.input.refs ?? [],
+      refs: cleanupContentRef === undefined ? result.task_intent.input.refs ?? [] : [cleanupContentRef],
       summary: result.task_intent.input.summary,
       ...(result.task_intent.input.marker === undefined ? {} : { marker: result.task_intent.input.marker }),
       ...(result.task_intent.input.visibility === undefined ? {} : { visibility: result.task_intent.input.visibility }),
@@ -2179,7 +2255,12 @@ async function dispatchApprovedXhsMediaAction(
     exactActionId,
     requestedPath,
     canonical.target_ref,
-    client
+    client,
+    marker === undefined ? undefined : {
+      marker,
+      identity_environment_ref: runtimeBinding.runtime_session_binding.identity_environment_ref,
+      ...(cleanupContentRef === undefined ? {} : { cleanup_content_ref: cleanupContentRef })
+    }
   );
 }
 
@@ -2557,6 +2638,11 @@ export async function continueXhsMediaActionTask(
   if (!isExactXhsMediaActionTask(taskIntent, contract)) {
     return { ok: false, failure: failure("capability_contract", "media_action_binding_invalid", "admission", "repair_package_contract"), run_record: existing };
   }
+  const lodeAdmission = validateLodePackageAdmission(taskIntent, {
+    package_ref: request.package_ref,
+    lode_package_contract: contract
+  });
+  if (!lodeAdmission.ok) return { ok: false, failure: lodeAdmission.failure, run_record: existing };
   const policy = await evaluateXhsMediaActionPolicy({
     run_id: request.run_id,
     task_intent: taskIntent,
@@ -2600,7 +2686,7 @@ export async function continueXhsMediaActionTask(
     package_ref: request.package_ref,
     ...(request.harbor === undefined ? {} : { harbor: request.harbor }),
     authorization_context: request.authorization_context
-  }, deps, policy);
+  }, deps, policy, lodeAdmission.required_harbor_facts);
 }
 
 async function releaseAcceptedCoreTaskSession(

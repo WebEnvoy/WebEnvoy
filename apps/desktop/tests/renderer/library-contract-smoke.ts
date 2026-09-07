@@ -450,6 +450,7 @@ async function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
     name: "小红书图文媒体动作",
     summary: "准备一次受控图文媒体动作。",
     category: "media",
+    version: "0.1.0",
     inputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/input@0.1.0",
     outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-media/output@0.1.0",
     outputKind: "xhs_publish_note_image_text_media",

@@ -289,7 +289,8 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   if ((actionId.endsWith("image_upload") && input.refs.length < 1) ||
     (actionId.endsWith("text_to_image_generate") && input.refs.length !== 0) ||
     (actionId.endsWith(".compose") && (input.refs.length !== 2 || !String(input.refs[0]).endsWith("/title") || !String(input.refs[1]).endsWith("/body"))) ||
-    (commitAction && (input.refs.length !== 0 || !safeText(input.marker, 128) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(input.marker) ||
+    (commitAction && ((actionId.endsWith(".cleanup") ? input.refs.length !== 1 || !String(input.refs[0]).startsWith("xhs_content_") : input.refs.length !== 0) ||
+      !safeText(input.marker, 128) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(input.marker) ||
       (actionId.endsWith(".publish") ? input.visibility !== "only_me" && input.visibility !== "public" : input.visibility !== "not_applicable")))) return null;
   if (!safeCreatorPublishUrl(input.url, actionId === "xhs_publish_note_image_text_fields.compose")) return null;
   const binding = input.authorization_binding && typeof input.authorization_binding === "object" && !Array.isArray(input.authorization_binding)
@@ -449,7 +450,7 @@ export function unavailableXhsMediaAction(
 
 export function completeXhsMediaAction(
   runtimeSessionRef: string,
-  input: Pick<AdmittedXhsMediaAction, "url" | "target_ref" | "action_id" | "requested_path" | "summary" | "visibility">,
+  input: Pick<AdmittedXhsMediaAction, "url" | "target_ref" | "action_id" | "requested_path" | "refs" | "summary" | "visibility">,
   result: Extract<LocalProviderMediaActionResult, { status: "completed" }>
 ): XhsMediaActionResult {
   const postCheckRef = opaqueRef("post_check");
@@ -458,7 +459,10 @@ export function completeXhsMediaAction(
   if (isCommitActionId(input.action_id) &&
     result.action_id === input.action_id && "content_readback" in result) {
     const cleanup = input.action_id.endsWith(".cleanup");
+    const expectedState = cleanup ? "deleted" : input.action_id.endsWith(".save_draft") ? "draft_saved" : "published";
     const successful = result.effect_status === "observed" && operationStatus === "terminal" && result.terminal_state === "success" &&
+      result.content_readback.state === expectedState && result.visibility_state === (input.action_id.endsWith(".publish") ? input.visibility : "not_applicable") &&
+      (!cleanup || input.refs.length === 1 && result.content_readback.content_ref === input.refs[0]) &&
       result.marker_state === "matched" && result.content_readback.management_list_state === (cleanup ? "not_found" : "matched") && result.content_readback.detail_state === (cleanup ? "not_run" : "matched") &&
       result.content_readback.fields_state === "matched" && result.content_readback.media_state === "matched" && result.content_readback.marker_state === "matched";
     const unknown = operationStatus === "unknown_outcome" || result.effect_status === "unknown" || result.marker_state === "unknown" ||

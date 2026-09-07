@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
-import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-store.js";
-import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, validateCompletedXhsMediaAction, type HarborRuntimeClient } from "./runtime-task-chain.js";
+import { createFileRunRecordStore, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
+import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, selectXhsCleanupCreationRef, submitRuntimeTask, validateCompletedXhsMediaAction, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
 import {
@@ -456,6 +457,17 @@ function runtimeBindingFacts(runtimeSessionRef: string, identityRef = "identity-
       control: { owner: "core_task", handoff_reason: null, takeover: { available: false, unavailable_reason: "viewer_unavailable" }, updated_at: evaluatedAt },
       current_error: null,
       fact_refs: { session: runtimeSessionRef, viewer: viewerRef },
+      unavailable: null
+    },
+    harbor_scene_ref: {
+      schema_version: "harbor-page-scene-refs/v0",
+      runtime_session_ref: runtimeSessionRef,
+      snapshot_ref: `${runtimeSessionRef}:snapshot`,
+      refmap_ref: `${runtimeSessionRef}:refmap`,
+      evidence_refs: [`${runtimeSessionRef}:evidence`],
+      source_trace_ref: `${runtimeSessionRef}:source`,
+      captured_at: evaluatedAt,
+      page_summary: { title: "Xiaohongshu creator", url: "https://creator.xiaohongshu.com/publish/publish", summary: "Managed creator page." },
       unavailable: null
     }
   } as unknown as HarborAdmissionInput;
@@ -1290,7 +1302,7 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
 
 function assertXhsCommitProjection(): void {
   const operationRef = "media_operation_commit_unknown";
-  const result = validateCompletedXhsMediaAction({
+  const payload = {
     result_kind: "xhs_publish_note_image_text_commit",
     status: "unavailable",
     classification: "not_normalizable",
@@ -1332,14 +1344,50 @@ function assertXhsCommitProjection(): void {
       { ref_id: "post_check_commit_unknown", evidence_kind: "post_check_ref", producer: "harbor", redaction: "placeholder_only" },
       { ref_id: "reconciliation_commit_unknown", evidence_kind: "reconciliation_ref", producer: "harbor", redaction: "placeholder_only" }
     ]
-  }, {
+  };
+  const expected = {
     runtime_session_ref: "session_commit_projection",
     action_id: "xhs_publish_note_image_text_commit.save_draft",
     requested_path: "image_text_upload",
     canonical_url: "https://creator.xiaohongshu.com/publish/publish",
     target_ref: "target_commit_projection"
-  });
+  } as const;
+  const result = validateCompletedXhsMediaAction(payload, expected);
   assert.equal(result.ok, true, "unknown commit outcomes must retain the same operation for reconciliation");
+  const crossedCleanup = {
+    ...payload,
+    status: "available",
+    classification: "success_result",
+    normalized: {
+      ...payload.normalized,
+      action_id: "xhs_publish_note_image_text_commit.cleanup",
+      business_effect: { kind: "cleanup", status: "observed" },
+      operation: { status: "terminal", operation_ref: operationRef, terminal_state: "success" },
+      content_readback: { ...payload.normalized.content_readback, state: "draft_saved", management_list_state: "matched", detail_state: "matched", fields_state: "matched", media_state: "matched" },
+      post_check: { status: "passed", ref: "post_check_commit_unknown" },
+      reconciliation: { status: "matched", ref: "reconciliation_commit_unknown" },
+      recovery: { status: "not_required", entrypoint: "none" }
+    }
+  };
+  assert.equal(validateCompletedXhsMediaAction(crossedCleanup, { ...expected, action_id: "xhs_publish_note_image_text_commit.cleanup" }).ok, false,
+    "cleanup success must not accept save-draft readback");
+  const marker = "WE-XHS-E2E-1";
+  const identity = "identity-env_xhs-policy";
+  const contentRef = "xhs_content_11111111-1111-4111-8111-111111111111";
+  const creation = {
+    status: "succeeded",
+    updated_at: evaluatedAt,
+    admission: { runtime_session_binding: { identity_environment_ref: identity } },
+    public_result_summary: {
+      schema_version: "webenvoy.core-xhs-media-action-projection.v0",
+      status: "available",
+      classification: "success_result",
+      normalized: { action_id: "xhs_publish_note_image_text_commit.publish", content_readback: { content_ref: contentRef } },
+      creation_provenance: { action_id: "xhs_publish_note_image_text_commit.publish", content_ref: contentRef, marker_sha256: createHash("sha256").update(marker).digest("hex"), identity_environment_ref: identity }
+    }
+  } as unknown as RunRecord;
+  assert.equal(selectXhsCleanupCreationRef([creation], marker, identity), contentRef);
+  assert.equal(selectXhsCleanupCreationRef([{ ...creation, status: "unknown_outcome" }], marker, identity), undefined);
 }
 
 async function assertXhsFieldActionWiring(): Promise<void> {
@@ -1470,6 +1518,7 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
   }
 
   for (const testCase of [
+    { name: "admission-missing-scene", producer: "harbor" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "available" as const, admissionMissingScene: true },
     { name: "fixture", producer: "fixture" as const, operation_status: "terminal" as const, expectedStatus: "failed" as const, result_status: "available" as const },
     { name: "accepted", producer: "harbor" as const, operation_status: "accepted" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
     { name: "running", producer: "harbor" as const, operation_status: "running" as const, expectedStatus: "unknown_outcome" as const, result_status: "available" as const },
@@ -1518,7 +1567,9 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
       const singleActionDecision = mediaDecisionFromConfirmation(confirmation);
       const runtimeSessionRef = `session_xhs_media_${testCase.name}`;
       const harbor = {
-        collectAdmissionFacts: async () => runtimeBindingFacts(runtimeSessionRef),
+        collectAdmissionFacts: async () => testCase.admissionMissingScene
+          ? { ...runtimeBindingFacts(runtimeSessionRef), harbor_scene_ref: undefined }
+          : runtimeBindingFacts(runtimeSessionRef),
         executeMediaAction: async (input: Parameters<NonNullable<HarborRuntimeClient["executeMediaAction"]>>[0]) => {
           harborCalls += 1;
           assert.equal(input.authorization_binding.action_id, input.action_id, testCase.name);
@@ -1562,7 +1613,7 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
         authorizationDecisionStore: authorizationStore,
         clock: () => new Date(evaluatedAt)
       });
-      assert.equal(harborCalls, 1, testCase.name);
+      assert.equal(harborCalls, testCase.admissionMissingScene ? 0 : 1, testCase.name);
       assert.equal(releaseCalls, 1, testCase.name);
       assert.equal(continued.ok, false, testCase.name);
       assert.equal(continued.run_record?.status, testCase.expectedStatus, testCase.name);

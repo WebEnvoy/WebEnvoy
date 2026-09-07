@@ -68,6 +68,7 @@ const saveDraft = {
 const cleanup = {
   ...saveDraft,
   action_id: "xhs_publish_note_image_text_commit.cleanup" as const,
+  refs: ["xhs_content_11111111-1111-4111-8111-111111111111"],
   authorization_binding: {
     ...saveDraft.authorization_binding,
     action_id: "xhs_publish_note_image_text_commit.cleanup" as const
@@ -97,6 +98,8 @@ test("admits only an exact independently-authorized commit action", () => {
   assert.equal(xhsMediaActionEffect(saveDraft.action_id), "save_draft");
   assert.equal(admitXhsMediaAction({ ...saveDraft, visibility: "public" }), null);
   assert.equal(admitXhsMediaAction({ ...saveDraft, refs: upload.refs }), null);
+  assert.equal(admitXhsMediaAction(cleanup)?.refs[0], cleanup.refs[0]);
+  assert.equal(admitXhsMediaAction({ ...cleanup, refs: [] }), null);
   assert.equal(admitXhsMediaAction({
     ...saveDraft,
     action_id: "xhs_publish_note_image_text_commit.publish",
@@ -105,7 +108,7 @@ test("admits only an exact independently-authorized commit action", () => {
 });
 
 test("normalizes cleanup only after exact manager absence is observed", () => {
-  const completed = completeXhsMediaAction("session_1", cleanup, {
+  const localResult: import("./runtime-session-types.js").LocalProviderMediaActionResult = {
     status: "completed",
     observed_at: new Date().toISOString(),
     observed_url: "https://creator.xiaohongshu.com/new/note-manager?source=official",
@@ -126,7 +129,7 @@ test("normalizes cleanup only after exact manager absence is observed", () => {
       fields_state: "matched",
       media_state: "matched",
       marker_state: "matched",
-      content_ref: null,
+      content_ref: cleanup.refs[0],
       canonical_url: "https://creator.xiaohongshu.com/new/note-manager?source=official"
     },
     page_readback: { status: "observed", page_state_ref: "page_state_cleanup_1", route_state: "observed" },
@@ -137,13 +140,24 @@ test("normalizes cleanup only after exact manager absence is observed", () => {
     ],
     evidence_ref_kinds: [{ kind: "operation_ref", ref: "media_operation_cleanup_1" }],
     submitted: true
-  });
+  };
+  const completed = completeXhsMediaAction("session_1", cleanup, localResult);
   assert.equal(completed.status, "available");
   if (completed.schema_version !== "harbor-xhs-publish-note-image-text-commit/v0") assert.fail("expected cleanup result");
   assert.equal(completed.normalized.business_effect.kind, "cleanup");
   assert.equal(completed.normalized.content_readback.state, "deleted");
   assert.equal(completed.normalized.content_readback.management_list_state, "not_found");
   assert.equal(completed.normalized.reconciliation.status, "matched");
+  const crossed = completeXhsMediaAction("session_1", cleanup, {
+    ...localResult,
+    content_readback: { ...localResult.content_readback, state: "draft_saved" as const, management_list_state: "matched" as const, detail_state: "matched" as const }
+  });
+  assert.equal(crossed.status, "unavailable");
+  assert.equal(crossed.classification, "partial_result");
+  assert.equal(completeXhsMediaAction("session_1", cleanup, {
+    ...localResult,
+    content_readback: { ...localResult.content_readback, content_ref: "xhs_content_other" }
+  }).status, "unavailable");
 });
 
 test("normalizes field fill without exposing protected values", () => {
