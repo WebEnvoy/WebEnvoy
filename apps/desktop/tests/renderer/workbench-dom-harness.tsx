@@ -27,6 +27,7 @@ import { projectBusinessResultMessage, projectStandardBusinessResult } from "../
 import { TaskThreadRightPanel } from "../../src/renderer/TaskThreadRightPanel";
 import type { ThreadNavigationItem } from "../../src/renderer/ThreadNavigationRail";
 import type { TaskPreviewSelection } from "../../src/renderer/useAppTasks";
+import { findCreatableCatalogSkillForTask } from "../../src/renderer/useAppController";
 import { WorkbenchSidebar } from "../../src/renderer/WorkbenchSidebar";
 import { taskThreadFixtures } from "../../src/renderer/taskThreadFixtures";
 import { bossProductionDeferredReason } from "../../src/renderer/productionTaskPolicy";
@@ -192,7 +193,7 @@ const ownerPayload = {
     {
       schema_version: "webenvoy.task-thread.v0",
       thread_id: emptyTaskId,
-      capability_ref: "lode:capability/custom-owner-skill",
+      capability_ref: "lode:capability/publish-note-path-prepare",
       identity_environment_ref: "identity-env:empty-owner",
       created_at: "2026-07-20T06:00:00Z",
       updated_at: "2026-07-20T06:00:00Z",
@@ -496,6 +497,7 @@ function WorkbenchDomHarness() {
             sort="recent"
             taskLoadStatus={retainedState.status}
             tasks={tasks}
+            canCreateTask={(task) => findCreatableCatalogSkillForTask(task, resultSkills) != null}
             onGroupingChange={() => {}}
             onCreateTask={(task) => { createTaskSelection = task; }}
             onOpenSettings={() => {}}
@@ -846,7 +848,10 @@ async function runDesktopChecks() {
   assert(menuActions && getComputedStyle(menuActions).transitionDuration === "0s", "Reduced-motion CSS did not disable transitions.");
   document.querySelector<HTMLButtonElement>("[aria-label='新建任务']")?.click();
   assert(createTaskSelection === undefined, "Global create-task entry leaked its click event into the task selection contract.");
-  document.querySelector<HTMLButtonElement>(".task-group-add")?.click();
+  const retiredGroup = document.querySelector<HTMLElement>(".task-thread-group[aria-label='图文子路径准备']");
+  assert(retiredGroup && !retiredGroup.querySelector(".task-group-add"), "Retired historical skill still exposed a create-task entry.");
+  document.querySelector<HTMLElement>(".task-thread-group[aria-label='搜索并读取笔记']")
+    ?.querySelector<HTMLButtonElement>(".task-group-add")?.click();
   assert(createTaskSelection?.id === taskAId, "Skill-group create-task entry did not preserve its task selection.");
   await waitFor(() => document.body.textContent?.includes("允许这一次") === true && document.body.textContent?.includes("拒绝这一次") === true,
     "Active Core confirmation did not render both single-action choices.");
@@ -929,6 +934,8 @@ async function runDesktopChecks() {
     rightPanelFocusAndRestore: true,
     corruptPreferenceFallback: true,
     reducedMotion: true,
+    retiredSkillCreateHidden: true,
+    currentSkillCreateVisible: true,
     singleActionDecision: true,
   };
 }

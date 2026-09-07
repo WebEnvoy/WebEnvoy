@@ -494,7 +494,8 @@ if (
   !workbenchSidebarSource.includes("onCreateTask") ||
   !workbenchSidebarSource.includes("canCreateTask(group.tasks[0])") ||
   !appShellViewSource.includes("canCreateTask={actions.canCreateTask}") ||
-  !appControllerSource.includes("if (task != null && skill == null) return;")
+  !appControllerSource.includes("if (task != null && skill == null) return;") ||
+  !appControllerSource.includes("findCreatableCatalogSkillForTask")
 ) {
   throw new Error("Workbench shell smoke failed: approved domains or task-list organization controls are missing.");
 }
