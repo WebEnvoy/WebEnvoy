@@ -732,9 +732,13 @@ export function imageUploadPathProbeExpression(): string {
         const style = getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-        return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
+        return !el.hidden && !el.matches(':disabled') && el.getAttribute('aria-disabled') !== 'true' &&
+          !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+          !el.querySelector('input[type="file"]') &&
+          style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
           rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
-          (hit === el || el.contains(hit));
+          (hit === el || el.contains(hit)) &&
+          (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
       };
       // Only image_upload consumes this current-page compatibility branch. It
       // prevents the default video input from being mistaken for an image

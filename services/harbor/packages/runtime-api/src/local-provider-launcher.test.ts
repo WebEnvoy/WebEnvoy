@@ -180,8 +180,43 @@ test("#409 media upload selects only the unique actionable image-text path befor
   assert.match(probe, /attempt < 30/);
   assert.match(probe, /document\.elementFromPoint/);
   assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
+  assert.match(probe, /!el\.hidden && !el\.matches\(':disabled'\) && el\.getAttribute\('aria-disabled'\) !== 'true'/);
+  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /!el\.querySelector\('input\[type="file"\]'\)/);
+  assert.match(probe, /el\.checkVisibility\(\{ checkOpacity: true, checkVisibilityCSS: true \}\)/);
   assert.match(probe, /image_input_candidate_count/);
   assert.doesNotMatch(probe, /上传视频|文字配图|保存草稿|发布笔记/);
+});
+
+test("#409 media upload does not click disabled, decoy, or file-input path entries", async () => {
+  let clicks = 0;
+  const entry = (blockedBy: "disabled" | "decoy" | "file-input") => ({
+    hidden: false,
+    textContent: "上传图文",
+    matches: () => blockedBy === "disabled",
+    getAttribute: (name: string) => name === "aria-disabled" && blockedBy === "disabled" ? "true" : null,
+    closest: () => blockedBy === "decoy" ? {} : null,
+    querySelector: () => blockedBy === "file-input" ? {} : null,
+    getBoundingClientRect: () => ({ x: 1, y: 1, width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
+    contains: () => false,
+    checkVisibility: () => true,
+    click: () => { clicks += 1; }
+  });
+  const entries = [entry("disabled"), entry("decoy"), entry("file-input")];
+  const document = {
+    querySelectorAll: (selector: string) => selector.includes("input[type=\"file\"]") ? [] : entries,
+    elementFromPoint: () => entries[0]
+  };
+  const evaluate = new Function("document", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout", `return ${imageUploadPathProbeExpression()}`);
+  const result = await evaluate(
+    document,
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1" }),
+    100,
+    100,
+    (resolve: () => void) => resolve()
+  );
+  assert.deepEqual(result, { image_input_candidate_count: 0, image_path_candidate_count: 0 });
+  assert.equal(clicks, 0);
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {
