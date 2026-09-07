@@ -3383,9 +3383,6 @@ export function createLocalLodePackageResolver(options: LocalLodePackageResolver
   };
 
   return async ({ package_ref }) => {
-    if (package_ref === xhsPathPreparePackageRef) {
-      return failure("capability_contract", "capability_deprecated", "admission", "choose_latest_or_known_good");
-    }
     try {
       const registry = object(JSON.parse(await readFile(options.registryPath, "utf8")));
       const entries = Array.isArray(registry?.entries) ? registry.entries.map(object) : [];
