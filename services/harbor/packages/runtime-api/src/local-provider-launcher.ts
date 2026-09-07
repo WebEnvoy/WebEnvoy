@@ -1091,8 +1091,12 @@ async function executeCleanupControl(
   if (deletePoint !== "matched") {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact marker-matched task content has no unique delete control.", retryable: false, submitted: false };
   }
-  await abortableDelay(200);
-  const confirmation = await evaluatePoint(client, cleanupConfirmationPointExpression(before.title_value));
+  let confirmation: PointProbe | undefined;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await abortableDelay(100);
+    confirmation = await evaluatePoint(client, cleanupConfirmationPointExpression(before.title_value));
+    if (confirmation?.status === "matched") break;
+  }
   if (!confirmation || confirmation.status !== "matched" || !await clickPoint(client, confirmation.x, confirmation.y)) {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup confirmation could not be verified.", retryable: false, submitted: false };
   }
