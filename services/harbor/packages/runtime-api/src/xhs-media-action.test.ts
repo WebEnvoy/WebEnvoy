@@ -37,6 +37,21 @@ const generate = {
   }
 };
 
+const fieldFill = {
+  ...upload,
+  action_id: "xhs_publish_note_image_text_fields.compose" as const,
+  requested_path: "image_text_upload" as const,
+  refs: [
+    "draft:app-protected/11111111-1111-4111-8111-111111111111/title",
+    "draft:app-protected/11111111-1111-4111-8111-111111111111/body"
+  ],
+  summary: "bounded title and body intent",
+  authorization_binding: {
+    ...upload.authorization_binding,
+    action_id: "xhs_publish_note_image_text_fields.compose" as const
+  }
+};
+
 test("keeps the two media actions independent and exact", () => {
   const admittedUpload = admitXhsMediaAction(upload);
   const admittedGenerate = admitXhsMediaAction(generate);
@@ -48,6 +63,56 @@ test("keeps the two media actions independent and exact", () => {
   assert.equal(xhsMediaActionPath(generate.action_id), "image_text_generate");
   assert.equal(admitXhsMediaAction({ ...generate, refs: ["local_file_ref_11111111-1111-4111-8111-111111111111"] }), null);
   assert.equal(admitXhsMediaAction({ ...upload, requested_path: "image_text_generate" }), null);
+  assert.equal(admitXhsMediaAction(fieldFill)?.refs.length, 2);
+  assert.equal(xhsMediaActionEffect(fieldFill.action_id), "modify");
+  assert.equal(admitXhsMediaAction({ ...fieldFill, refs: [...fieldFill.refs].reverse() }), null);
+});
+
+test("normalizes field fill without exposing protected values", () => {
+  const completed = completeXhsMediaAction("session_1", fieldFill, {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_url: fieldFill.url,
+    page: { current_url: fieldFill.url, title: "creator", status: "ready", facts: [] },
+    action_id: fieldFill.action_id,
+    requested_path: fieldFill.requested_path,
+    effect_kind: "modify",
+    effect_status: "observed",
+    operation_status: "terminal",
+    operation_ref: "media_operation_field_1",
+    terminal_state: "success",
+    field_readback: {
+      status: "observed",
+      title: { status: "observed", value_state: "matched" },
+      body: { status: "observed", value_state: "matched" },
+      validation_status: "passed"
+    },
+    page_readback: { status: "observed", page_state_ref: "page_state_field_1", route_state: "observed" },
+    source_refs: [
+      { kind: "field_action_summary", ref: "source_field_1" },
+      { kind: "creator_publish_page_summary", ref: "source_field_2" },
+      { kind: "business_state_summary", ref: "source_field_3" }
+    ],
+    evidence_ref_kinds: [{ kind: "operation_ref", ref: "media_operation_field_1" }],
+    submitted: false
+  });
+  assert.equal(completed.schema_version, "harbor-xhs-publish-note-image-text-fields/v0");
+  assert.equal("result_kind" in completed && completed.result_kind, "xhs_publish_note_image_text_fields");
+  assert.equal(completed.status, "available");
+  assert.equal(completed.normalized.business_effect.kind, "modify");
+  assert.equal("field_readback" in completed.normalized && completed.normalized.field_readback.validation_status, "passed");
+  assert.equal("summary" in completed.normalized, false);
+  assert.equal("media_readback" in completed.normalized, false);
+  assert.equal(JSON.stringify(completed).includes(fieldFill.summary), false);
+  const observation = new XhsMediaActionObservationStore();
+  observation.record(completed);
+  assert.equal(observation.get(completed.normalized.operation.operation_ref)?.operation_status, "terminal");
+
+  const unknown = unavailableXhsMediaAction("session_1", fieldFill, "operation_result_unknown");
+  assert.equal(unknown.schema_version, "harbor-xhs-publish-note-image-text-fields/v0");
+  assert.equal(unknown.normalized.operation.status, "unknown_outcome");
+  assert.equal(unknown.normalized.recovery.entrypoint, "manual_reconciliation");
+  assert.equal(unknown.normalized.submitted, false);
 });
 
 test("preserves unknown upload outcome and never retries", () => {

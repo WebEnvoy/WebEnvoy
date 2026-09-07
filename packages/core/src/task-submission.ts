@@ -2,6 +2,7 @@ import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRec
 import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
 import {
   validateLodePackageAdmission,
+  xhsFieldPackageRef,
   xhsMediaActionPaths,
   xhsMediaPackageRef,
   type LodePackageAdmissionContract,
@@ -125,11 +126,13 @@ export function isXhsMediaActionIntent(taskIntent: TaskIntentEnvelope, packageRe
 } {
   const actionId = taskIntent.input.action_id as XhsMediaActionId | undefined;
   const refs = taskIntent.input.refs;
-  return packageRef === xhsMediaPackageRef && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
+  const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  return packageRef === (fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef) && actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId) &&
     Array.isArray(refs) &&
     taskIntent.input.requested_path === xhsMediaActionPaths[actionId] &&
     ((actionId === "xhs_publish_note_image_text_media.image_upload" && refs.length > 0) ||
-      (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && refs.length === 0)) &&
+      (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && refs.length === 0) ||
+      (fieldAction && refs.length === 2)) &&
     taskIntent.policy.risk === "write" && taskIntent.policy.execution_intent === "execute_after_approval";
 }
 

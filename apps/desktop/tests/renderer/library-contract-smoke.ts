@@ -47,6 +47,7 @@ export async function runLibraryContractSmoke(input: SmokeInput) {
   checkXhsSearchTarget(input.xhsSkill);
   checkXhsPublishPrecheck(input.xhsSkill);
   await checkXhsMediaAction(input.xhsSkill);
+  await checkXhsFieldAction(input.xhsSkill);
   checkResultDetailTurn(input.detailSkill);
   checkExecutionPolicyMutation();
   await checkBossDeferredHelpers(bossSkill);
@@ -538,6 +539,78 @@ async function checkXhsMediaAction(baseSkill: LodeCatalogSkill) {
   const invalidRef = { ...uploadDraft, files: { ...uploadDraft.files, refs: [{ ...uploadDraft.files.refs[0]!, localRef: "/tmp/private.png" }] } };
   if (prepareTaskTurnRequest({ endpoint: "http://core.owner", skill: submissionSkill, identity, draft: invalidRef, ownerRefs: refs, executionPolicy: policy, runtime }).ok) {
     throw new Error("Media upload accepted a raw local path instead of a protected local_file_ref.");
+  }
+}
+
+async function checkXhsFieldAction(baseSkill: LodeCatalogSkill) {
+  const packageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+  const action = {
+    id: "xhs_publish_note_image_text_fields.compose",
+    category: "commit" as const,
+    operationMode: "write" as const,
+    targetTypes: ["creator_publish_page"],
+    supportedOrigins: ["https://creator.xiaohongshu.com"],
+    externalEffects: ["modify"],
+    resourceRequirementRef: "xiaohongshu.publish-note-image-text-fields.resources",
+    resourceRequirementProfileIds: ["xhs-image-text-field-fill"],
+  };
+  const skill: LodeCatalogSkill = {
+    ...baseSkill,
+    id: packageRef,
+    packageRef,
+    lockRef: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1",
+    name: "小红书图文必要字段写入合同",
+    summary: "写入标题和正文但不保存或发布。",
+    category: "field-action",
+    version: "0.1.1",
+    inputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-fields/input@0.1.1",
+    outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-image-text-fields/output@0.1.1",
+    outputKind: "xhs_publish_note_image_text_fields",
+    inputFields: [
+      { id: "url", label: "目标网址", kind: "text", required: true, description: "小红书创作入口", inputProjection: "sanitized_url", format: "uri" },
+      { id: "target_ref", label: "目标引用", kind: "text", required: true, description: "Harbor 目标引用", inputProjection: "owner_ref" },
+      { id: "action_id", label: "动作", kind: "constant", required: true, description: "语义图文编排动作", inputProjection: "safe_summary", defaultValue: action.id },
+      { id: "requested_path", label: "图文路径", kind: "constant", required: true, description: "上传图文路径", inputProjection: "safe_summary", defaultValue: "image_text_upload" },
+      { id: "title", label: "标题", kind: "text", required: true, description: "受保护标题", inputProjection: "owner_ref", minLength: 1, maxLength: 20 },
+      { id: "body", label: "正文", kind: "text", required: true, description: "受保护正文", inputProjection: "owner_ref", minLength: 1, maxLength: 1000 },
+    ],
+    actions: [action],
+  };
+  const owner = window.webenvoyShell;
+  let previewRequests = 0;
+  window.webenvoyShell = { ...owner!, requestOwnerJson: async () => { previewRequests += 1; throw new Error("field action must defer runtime facts to task admission"); } };
+  let compatibility;
+  try {
+    compatibility = await fetchSkillIdentityCompatibility("http://core.owner", skill, [identity.identityEnvironmentRef]);
+  } finally {
+    window.webenvoyShell = owner;
+  }
+  if (previewRequests !== 0 || compatibility.status !== "ready" || compatibility.candidates[0]?.reasonCodes[0] !== "runtime_facts_require_task_admission") {
+    throw new Error("Field action compatibility did not use the exact task-admission boundary.");
+  }
+  const submissionSkill = projectTaskSubmissionSkill(skill);
+  const draft = createSkillInputDraft(submissionSkill);
+  draft.values.url = "https://creator.xiaohongshu.com/publish/publish";
+  draft.values.action_id = action.id;
+  draft.values.requested_path = "image_text_upload";
+  draft.values.title = "WebEnvoy 字段验收";
+  draft.values.body = "WebEnvoy 非生产字段写入验收。";
+  const ownerRef = "draft:app-protected/00000000-0000-4000-8000-000000000071";
+  const prepared = prepareTaskTurnRequest({
+    endpoint: "http://core.owner",
+    skill: submissionSkill,
+    identity,
+    draft,
+    ownerRefs: { fieldOwnerRefs: { title: `${ownerRef}/title`, body: `${ownerRef}/body` }, attachmentRefs: {} },
+    executionPolicy: mediaExecutionPolicy(skill),
+    runtime,
+  });
+  if (!prepared.ok) throw new Error(`Field action was rejected: ${prepared.reason}`);
+  const taskIntent = prepared.request.task_intent as { input?: Record<string, unknown> };
+  const serialized = JSON.stringify(prepared.request);
+  if (JSON.stringify(taskIntent.input) !== JSON.stringify({ action_id: action.id, requested_path: "image_text_upload", refs: [`${ownerRef}/title`, `${ownerRef}/body`], summary: skill.name }) ||
+    serialized.includes("WebEnvoy 字段验收") || serialized.includes("WebEnvoy 非生产字段写入验收")) {
+    throw new Error("Field action leaked values or lost its ordered owner-ref binding.");
   }
 }
 

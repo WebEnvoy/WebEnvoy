@@ -13,6 +13,7 @@ const maxSchemaNodes = 2_000;
 const maxSchemaMapEntries = 200;
 const maxCompositionEntries = 32;
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 
 type OutputContract = {
   operationMode: string;
@@ -24,7 +25,7 @@ type OutputContract = {
 
 export function projectOutputKind(schema: Record<string, unknown>, contract: OutputContract) {
   if (schema.$schema !== "https://json-schema.org/draft/2020-12/schema" || schema.$id !== contract.schemaId ||
-    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema, contract.packageRef === xiaohongshuMediaPackageRef)) return undefined;
+    schema.type !== "object" || schema.additionalProperties !== false || !validateOutputSchema(schema, [xiaohongshuMediaPackageRef, xiaohongshuFieldPackageRef].includes(contract.packageRef))) return undefined;
   const properties = isRecord(schema.properties) ? schema.properties : null;
   const required = strictStringArray(schema.required);
   const resultKind = properties != null && isRecord(properties.result_kind) ? properties.result_kind : null;

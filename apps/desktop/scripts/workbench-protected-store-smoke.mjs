@@ -122,7 +122,7 @@ try {
   if (sealedLocalRef == null) throw new Error("Sealed input file was not registered.");
   const sealedDraft = {
     context: sealedContext,
-    values: { keyword: "sealed business input" },
+    values: { keyword: "sealed business input", title: "受保护标题", body: "受保护正文" },
     attachments: { attachments: [{ id: "sealed-attachment", localRef: sealedLocalRef, name: "sealed.txt", size: 16, type: "text/plain", lastModified: Date.now() }] },
     omittedFieldIds: [],
   };
@@ -132,6 +132,26 @@ try {
     !sealedRefs.fieldOwnerRefs.attachments?.startsWith(`${sealedRefs.ownerRef}/`) ||
     sealedRefs.attachmentRefs.attachments?.length !== 1) {
     throw new Error("Sealed input owner refs were not created for values and attachment fields.");
+  }
+  const fieldResolver = createProtectedMediaRefResolver(first, "smoke-field-resolver-token");
+  try {
+    const { endpoint } = await fieldResolver.start();
+    const resolved = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer smoke-field-resolver-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ field_owner_ref: sealedRefs.fieldOwnerRefs.title }),
+    });
+    const resolvedBody = await resolved.json();
+    const missing = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer smoke-field-resolver-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ field_owner_ref: `${sealedRefs.ownerRef}/missing` }),
+    });
+    if (resolved.status !== 200 || JSON.stringify(resolvedBody) !== JSON.stringify({ value: "受保护标题" }) || missing.status !== 404) {
+      throw new Error("Protected field owner refs were not resolved exactly.");
+    }
+  } finally {
+    await fieldResolver.stop();
   }
   if (!await first.deleteDraft(sealedContext) || !(await first.checkLocalRef(sealedLocalRef)).readable) {
     throw new Error("Deleting a submitted draft removed a sealed-input-owned local ref.");
@@ -153,6 +173,7 @@ try {
   }
   if (await first.releaseSealedInputs(["draft:app-protected/not-a-valid-ref"]) ||
     !await first.releaseSealedInputs([sealedRefs.ownerRef]) ||
+    first.resolveFieldOwnerRef(sealedRefs.fieldOwnerRefs.title) !== null ||
     (await first.checkLocalRef(sealedLocalRef)).reason !== "invalid_reference") {
     throw new Error("Sealed input release accepted an invalid ref or retained its attachment.");
   }

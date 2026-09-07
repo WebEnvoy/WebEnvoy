@@ -181,6 +181,10 @@ export {
   type RuntimeSessionUse
 } from "./harbor-admission.js";
 export {
+  xhsFieldCapabilityId,
+  xhsFieldLockRef,
+  xhsFieldOperationId,
+  xhsFieldPackageRef,
   xhsMediaActionPaths,
   xhsMediaCapabilityId,
   xhsMediaLockRef,

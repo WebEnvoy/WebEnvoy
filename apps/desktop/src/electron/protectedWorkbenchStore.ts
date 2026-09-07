@@ -57,6 +57,7 @@ const maxDrafts = 64;
 const maxSealedInputs = 32;
 const localRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const sealedInputRefPattern = /^draft:app-protected\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const fieldOwnerRefPattern = /^(draft:app-protected\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/([A-Za-z][A-Za-z0-9._-]{0,127})$/i;
 
 export class ProtectedWorkbenchStore {
   private state = emptyState();
@@ -108,6 +109,15 @@ export class ProtectedWorkbenchStore {
     } catch {
       return { readable: false, reason: "unreadable" as const };
     }
+  }
+
+  resolveFieldOwnerRef(value: unknown) {
+    if (!this.available || typeof value !== "string") return null;
+    const match = value.match(fieldOwnerRefPattern);
+    if (!match) return null;
+    const input = this.state.sealedInputs[match[1]!];
+    const fieldValue = input?.values[match[2]!];
+    return typeof fieldValue === "string" ? fieldValue : null;
   }
 
   async releaseLocalRefs(value: unknown) {

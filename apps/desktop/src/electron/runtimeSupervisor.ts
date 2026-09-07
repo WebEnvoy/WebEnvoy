@@ -17,7 +17,7 @@ export type RuntimeEndpointConfig = {
 
 export type RuntimeSupervisorOptions = {
   dataDir?: string;
-  protectedWorkbenchStore?: Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef">;
+  protectedWorkbenchStore?: Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef" | "resolveFieldOwnerRef">;
 };
 
 export type ProtectedMediaResolverConfig = {
@@ -25,7 +25,7 @@ export type ProtectedMediaResolverConfig = {
   token: string;
 };
 
-type ProtectedMediaResolverStore = Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef">;
+type ProtectedMediaResolverStore = Pick<ProtectedWorkbenchStore, "checkLocalRef" | "resolveLocalRef" | "resolveFieldOwnerRef">;
 
 export type RuntimeServiceLaunchConfig = {
   command: string;
@@ -459,7 +459,24 @@ async function handleProtectedMediaRefRequest(
     response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
     return;
   }
-  if (!isRecord(input) || Object.keys(input).length !== 1 || typeof input.local_file_ref !== "string") {
+  if (!isRecord(input) || Object.keys(input).length !== 1) {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
+    return;
+  }
+
+  if (typeof input.field_owner_ref === "string") {
+    const value = store.resolveFieldOwnerRef(input.field_owner_ref);
+    if (value == null) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: "media_ref_unavailable" }));
+      return;
+    }
+    response.statusCode = 200;
+    response.end(JSON.stringify({ value }));
+    return;
+  }
+  if (typeof input.local_file_ref !== "string") {
     response.statusCode = 400;
     response.end(JSON.stringify({ error: "media_ref_request_invalid" }));
     return;

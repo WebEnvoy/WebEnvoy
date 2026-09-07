@@ -775,6 +775,36 @@ async function assertMediaActionApiBoundary(): Promise<void> {
     harbor: { identity_environment_ref: "identity-env_111111111111111111111111", url: targetRef, requested_path: "image_text_upload" }
   };
   assert.equal(isExactXhsMediaTaskBody(body), true);
+  const fieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+  const fieldBody = {
+    ...body,
+    package_ref: fieldPackageRef,
+    task_intent: {
+      ...taskIntent,
+      capability: {
+        ref: "lode:capability/publish-note-image-text-fields",
+        version: "0.1.1",
+        source_ref: fieldPackageRef,
+        lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1"
+      },
+      input: {
+        summary: "compose required image-text fields",
+        refs: [
+          "draft:app-protected/00000000-0000-4000-8000-000000000071/title",
+          "draft:app-protected/00000000-0000-4000-8000-000000000071/body"
+        ],
+        requested_path: "image_text_upload",
+        action_id: "xhs_publish_note_image_text_fields.compose"
+      },
+      resource_requirement_refs: ["xiaohongshu.publish-note-image-text-fields.resources"],
+      resource_requirement_profile_id: "xhs-image-text-field-fill"
+    }
+  };
+  assert.equal(isExactXhsMediaTaskBody(fieldBody), true);
+  assert.equal(isExactXhsMediaTaskBody({
+    ...fieldBody,
+    task_intent: { ...fieldBody.task_intent, input: { ...fieldBody.task_intent.input, refs: [...fieldBody.task_intent.input.refs].reverse() } }
+  }), false, "field owner refs must preserve title/body order");
   assert.equal(isExactXhsMediaTaskBody({
     ...body,
     task_intent: { ...taskIntent, input: { ...taskIntent.input, action_id: "xhs_publish_note_image_text_media.text_to_image_generate" } }

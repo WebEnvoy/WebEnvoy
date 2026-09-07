@@ -11,6 +11,10 @@ import {
   type SingleActionDecision
 } from "./execution-policy.js";
 import {
+  xhsFieldCapabilityId,
+  xhsFieldLockRef,
+  xhsFieldOperationId,
+  xhsFieldPackageRef,
   xhsMediaActionPaths,
   xhsMediaCapabilityId,
   xhsMediaLockRef,
@@ -40,6 +44,18 @@ export type EvaluatedXhsMediaActionPolicy = {
 
 const confirmationTtlMs = 10 * 60 * 1_000;
 
+function actionIdentity(actionId: XhsMediaActionId) {
+  const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  return {
+    package_ref: fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef,
+    lock_ref: fieldAction ? xhsFieldLockRef : xhsMediaLockRef,
+    capability_id: fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId,
+    operation_id: fieldAction ? xhsFieldOperationId : xhsMediaOperationId,
+    version: fieldAction ? "0.1.1" : "0.1.0",
+    effect: fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create"
+  } as const;
+}
+
 function failure(code: string, recovery_hint: string): FailureRecord {
   return { category: "action_risk", code, phase: "admission", recovery_hint };
 }
@@ -52,25 +68,27 @@ function exactMediaAction(
   taskIntent: TaskIntentEnvelope,
   contract: LodePackageAdmissionContract
 ): { action_id: XhsMediaActionId; requested_path: (typeof xhsMediaActionPaths)[XhsMediaActionId]; action: NonNullable<NonNullable<LodePackageAdmissionContract["action_declaration"]>["actions"][number]>; resource_profile: NonNullable<LodePackageAdmissionContract["resource_requirements"]["resource_requirement_profiles"]>[number] } | undefined {
-  if (!isXhsMediaActionIntent(taskIntent, contract.package_ref) ||
-    contract.package_ref !== xhsMediaPackageRef ||
-    contract.source_ref !== xhsMediaPackageRef ||
-    contract.lock_ref !== xhsMediaLockRef ||
-    contract.capability_id !== xhsMediaCapabilityId ||
-    contract.operation_id !== xhsMediaOperationId ||
-    contract.operation_mode !== "write" ||
-    contract.version !== "0.1.0" ||
-    taskIntent.capability.ref !== `lode:capability/${xhsMediaCapabilityId}` ||
-    taskIntent.capability.version !== "0.1.0" ||
-    taskIntent.capability.source_ref !== xhsMediaPackageRef ||
-    taskIntent.capability.lock_ref !== xhsMediaLockRef ||
-    taskIntent.scope.target_type !== "creator_publish_page") return undefined;
+  if (!isXhsMediaActionIntent(taskIntent, contract.package_ref)) return undefined;
   const actionId = taskIntent.input.action_id as XhsMediaActionId;
+  const identity = actionIdentity(actionId);
+  if (contract.package_ref !== identity.package_ref ||
+    contract.source_ref !== identity.package_ref ||
+    contract.lock_ref !== identity.lock_ref ||
+    contract.capability_id !== identity.capability_id ||
+    contract.operation_id !== identity.operation_id ||
+    contract.operation_mode !== "write" ||
+    contract.version !== identity.version ||
+    taskIntent.capability.ref !== `lode:capability/${identity.capability_id}` ||
+    taskIntent.capability.version !== identity.version ||
+    taskIntent.capability.source_ref !== identity.package_ref ||
+    taskIntent.capability.lock_ref !== identity.lock_ref ||
+    taskIntent.scope.target_type !== "creator_publish_page") return undefined;
   const requestedPath = xhsMediaActionPaths[actionId];
   const inputRefs = taskIntent.input.refs;
   if (!Array.isArray(inputRefs)) return undefined;
   if ((actionId === "xhs_publish_note_image_text_media.image_upload" && inputRefs.length === 0) ||
-    (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0)) return undefined;
+    (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0) ||
+    (actionId === "xhs_publish_note_image_text_fields.compose" && inputRefs.length !== 2)) return undefined;
   const action = contract.action_declaration?.actions.find((candidate) => candidate.action_id === actionId);
   if (!action || action.category !== "commit" ||
     action.target_scope.site_slug !== "xiaohongshu" ||
@@ -82,8 +100,7 @@ function exactMediaAction(
   const resourceProfile = contract.resource_requirements.resource_requirement_profiles.find((candidate) =>
     candidate.requirement_profile_id === taskIntent.resource_requirement_profile_id
   );
-  const expectedEffect = actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create";
-  if (!resourceProfile || action.external_effects.length !== 1 || action.external_effects[0] !== expectedEffect) return undefined;
+  if (!resourceProfile || action.external_effects.length !== 1 || action.external_effects[0] !== identity.effect) return undefined;
   return { action_id: actionId, requested_path: requestedPath, action, resource_profile: resourceProfile };
 }
 
@@ -103,12 +120,16 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
   const snapshot = run?.policy_binding_snapshot;
   const actionId = action?.action_id;
   const requestedPath = actionId === undefined ? undefined : xhsMediaActionPaths[actionId as XhsMediaActionId];
+  const identity = actionId !== undefined && Object.hasOwn(xhsMediaActionPaths, actionId)
+    ? actionIdentity(actionId as XhsMediaActionId)
+    : undefined;
   return run?.status === "requires_user_action" &&
-    run.package_ref === xhsMediaPackageRef &&
-    run.capability_ref === `lode:capability/${xhsMediaCapabilityId}` &&
-    run.capability_version === "0.1.0" &&
-    run.capability_source_ref === xhsMediaPackageRef &&
-    run.capability_lock_ref === xhsMediaLockRef &&
+    identity !== undefined &&
+    run.package_ref === identity.package_ref &&
+    run.capability_ref === `lode:capability/${identity.capability_id}` &&
+    run.capability_version === identity.version &&
+    run.capability_source_ref === identity.package_ref &&
+    run.capability_lock_ref === identity.lock_ref &&
     run.admission.action_risk === "write" &&
     action?.task_intent_ref === run.task_intent_ref &&
     action.capability_ref === run.capability_ref &&
@@ -125,8 +146,8 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
     guard?.status === "active" &&
     guard.enforced_by === "core" &&
     ["draft", "submit", "destructive", "reconcile_status", "request_cancel"].every((intent) => guard.blocked_execution_intents.includes(intent)) &&
-    guard.source_refs.includes(xhsMediaPackageRef) &&
-    guard.source_refs.includes(xhsMediaLockRef) &&
+    guard.source_refs.includes(identity.package_ref) &&
+    guard.source_refs.includes(identity.lock_ref) &&
     action.target_refs?.scope_target_ref === run.scope_target_ref &&
     snapshot?.schema_version === "webenvoy.policy-binding-snapshot.v0" &&
     (confirmationDecisionRef === undefined || snapshot.decision_ref === confirmationDecisionRef) &&
@@ -313,4 +334,4 @@ export async function persistXhsMediaActionPolicyDecision(input: {
   }
 }
 
-export { xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };
+export { xhsFieldPackageRef, xhsFieldLockRef, xhsFieldCapabilityId, xhsFieldOperationId, xhsMediaPackageRef, xhsMediaLockRef, xhsMediaCapabilityId, xhsMediaOperationId, xhsMediaActionPaths };

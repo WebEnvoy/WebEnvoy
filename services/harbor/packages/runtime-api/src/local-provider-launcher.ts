@@ -491,10 +491,14 @@ type MediaActionNetwork = {
   forbidden_commit: boolean;
 };
 
+export function blocksXhsMediaActionRequest(actionId: LocalProviderMediaActionInput["action_id"], method: string, url: string): boolean {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) return false;
+  return actionId === "xhs_publish_note_image_text_fields.compose" || /(?:^|[/?_-])(save|draft|submit|publish)(?:[/?_-]|$)/i.test(url);
+}
+
 /**
- * Bounded #307 adapter.  It deliberately has two branches rather than a
- * generic browser/media runner: one branch sets the named file input, the
- * other fills the visible text-to-image input and clicks its generate control.
+ * Bounded Xiaohongshu adapter. It keeps explicit upload, generation, and
+ * title/body branches rather than introducing a generic browser-action DSL.
  */
 async function executeXhsMediaAction(
   port: string,
@@ -524,6 +528,7 @@ async function executeXhsMediaAction(
   if (input.expected_origin !== "https://creator.xiaohongshu.com" || input.no_submit_guard !== "active" ||
     (input.action_id === "xhs_publish_note_image_text_media.image_upload" && input.requested_path !== "image_text_upload") ||
     (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate" && input.requested_path !== "image_text_generate") ||
+    (input.action_id === "xhs_publish_note_image_text_fields.compose" && input.requested_path !== "image_text_upload") ||
     input.authorization_binding.action_id !== input.action_id || input.authorization_binding.target_ref !== input.target_ref) {
     return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
   }
@@ -532,6 +537,7 @@ async function executeXhsMediaAction(
   if (!pageTarget?.webSocketDebuggerUrl) return failure("provider_probe_unavailable", "The managed creator page has no controlled target.", true);
   const page = readyPage(input.target_url, "Xiaohongshu creator media action");
   const resolvedFiles: string[] = [];
+  let resolvedFields: readonly [string, string] | undefined;
   if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
     for (const ref of input.refs) {
       try {
@@ -542,6 +548,14 @@ async function executeXhsMediaAction(
           set_file_input_files: "not_called"
         });
       }
+    }
+  } else if (input.action_id === "xhs_publish_note_image_text_fields.compose") {
+    try {
+      const title = await resolveProtectedFieldRef(input.refs[0]!, "title", 20);
+      const body = await resolveProtectedFieldRef(input.refs[1]!, "body", 1000);
+      resolvedFields = [title, body];
+    } catch {
+      return failure("resource_unavailable", "An authorized field owner reference could not be resolved.", false, page);
     }
   }
   return withCdp(pageTarget.webSocketDebuggerUrl, async (client) => {
@@ -558,12 +572,10 @@ async function executeXhsMediaAction(
       const method = typeof request.method === "string" ? request.method.toUpperCase() : "";
       const url = typeof request.url === "string" ? request.url : "";
       if (!requestId) return;
-      if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-        if (/(?:^|[/?_-])(save|draft|submit|publish)(?:[/?_-]|$)/i.test(url)) {
-          network.forbidden_commit = true;
-          void sendMediaActionCdp(client, "Fetch.failRequest", { requestId, errorReason: "Aborted" }).catch(() => undefined);
-          return;
-        }
+      if (blocksXhsMediaActionRequest(input.action_id, method, url)) {
+        network.forbidden_commit = true;
+        void sendMediaActionCdp(client, "Fetch.failRequest", { requestId, errorReason: "Aborted" }).catch(() => undefined);
+        return;
       }
       void sendMediaActionCdp(client, "Fetch.continueRequest", { requestId }).catch(() => undefined);
     });
@@ -599,9 +611,55 @@ async function executeXhsMediaAction(
             set_file_input_files: "unknown"
           });
         }
-      } else {
+      } else if (input.action_id === "xhs_publish_note_image_text_media.text_to_image_generate") {
         const generated = await executeTextToImageControl(client, input.summary);
         if (!generated) return failure("generation_unavailable", "The visible text-to-image input or generate control is unavailable.", false, page);
+      } else {
+        const [title, body] = resolvedFields!;
+        let fieldProbe = await evaluateFieldFill(client, title, body, true);
+        if (fieldProbe?.title_candidate_count !== 1 || fieldProbe?.body_candidate_count !== 1) {
+          return failure("field_unavailable", "The creator page does not expose one exact editable title and body control.", false, page);
+        }
+        for (let attempt = 0; attempt < 20 && (fieldProbe?.title_matched !== true || fieldProbe?.body_matched !== true); attempt += 1) {
+          await abortableDelay(250);
+          fieldProbe = await evaluateFieldFill(client, title, body, false);
+        }
+        after = await evaluateMediaActionObservation(client);
+        const routeObserved = after?.origin === input.expected_origin && after.pathname === "/publish/publish" && sameWritePrecheckUrl(after.url, input.target_url);
+        const fieldReadback = fieldReadbackFromProbe(fieldProbe);
+        const matched = fieldReadback.validation_status === "passed";
+        const unknown = fieldReadback.validation_status === "unknown" || !routeObserved;
+        const effectStatus = unknown ? "unknown" as const : matched && !network.forbidden_commit ? "observed" as const : "failed" as const;
+        const operationStatus = unknown ? "unknown_outcome" as const : "terminal" as const;
+        return {
+          status: "completed" as const,
+          observed_at: new Date().toISOString(),
+          observed_url: after?.url ?? input.target_url,
+          page,
+          action_id: input.action_id,
+          requested_path: "image_text_upload" as const,
+          effect_kind: "modify" as const,
+          effect_status: effectStatus,
+          operation_status: operationStatus,
+          operation_ref: operationRef,
+          ...(operationStatus === "terminal" ? { terminal_state: effectStatus === "observed" ? "success" as const : "failure" as const } : {}),
+          field_readback: fieldReadback,
+          page_readback: {
+            status: routeObserved ? "observed" as const : "unknown" as const,
+            page_state_ref: opaqueRef("page_state"),
+            route_state: routeObserved ? "observed" as const : "unknown" as const
+          },
+          source_refs: [
+            { kind: "field_action_summary", ref: opaqueRef("source") },
+            { kind: "creator_publish_page_summary", ref: opaqueRef("source") },
+            { kind: "business_state_summary", ref: opaqueRef("source") }
+          ],
+          evidence_ref_kinds: [
+            { kind: "operation_ref", ref: operationRef },
+            { kind: "snapshot_ref", ref: opaqueRef("evidence") }
+          ],
+          submitted: false as const
+        };
       }
       for (let attempt = 0; attempt < 20; attempt += 1) {
         after = await evaluateMediaActionObservation(client);
@@ -694,6 +752,111 @@ async function resolveLocalMediaRef(localFileRef: string): Promise<string> {
   const value = await response.json() as { path?: unknown };
   if (typeof value.path !== "string" || !isAbsolute(value.path)) throw new Error("media_ref_unavailable");
   return value.path;
+}
+
+async function resolveProtectedFieldRef(fieldOwnerRef: string, fieldId: "title" | "body", maxLength: number): Promise<string> {
+  if (!new RegExp(`^draft:app-protected/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/${fieldId}$`, "i").test(fieldOwnerRef)) {
+    throw new Error("field_ref_unavailable");
+  }
+  const resolverUrl = process.env.HARBOR_MEDIA_REF_RESOLVER_URL ?? "";
+  const token = process.env.HARBOR_MEDIA_REF_RESOLVER_TOKEN ?? "";
+  if (!resolverUrl || !token) throw new Error("field_ref_unavailable");
+  const response = await fetch(resolverUrl, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ field_owner_ref: fieldOwnerRef }),
+    signal: AbortSignal.timeout(5_000)
+  });
+  if (!response.ok) throw new Error("field_ref_unavailable");
+  const value = await response.json() as { value?: unknown };
+  if (typeof value.value !== "string" || value.value.length < 1 || value.value.length > maxLength || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value.value)) {
+    throw new Error("field_ref_unavailable");
+  }
+  return value.value;
+}
+
+type FieldFillProbe = {
+  title_candidate_count: number;
+  body_candidate_count: number;
+  title_matched: boolean;
+  body_matched: boolean;
+};
+
+async function evaluateFieldFill(client: CdpClient, title: string, body: string, write: boolean): Promise<FieldFillProbe | undefined> {
+  const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
+    expression: fieldFillProbeExpression(title, body, write),
+    returnByValue: true,
+    awaitPromise: true
+  });
+  return (evaluated.result as { value?: FieldFillProbe } | undefined)?.value;
+}
+
+function fieldReadbackFromProbe(probe: FieldFillProbe | undefined): Extract<LocalProviderMediaActionResult, { status: "completed"; action_id: "xhs_publish_note_image_text_fields.compose" }>["field_readback"] {
+  if (!probe || probe.title_candidate_count !== 1 || probe.body_candidate_count !== 1) {
+    return {
+      status: "unknown",
+      title: { status: "unknown", value_state: "unknown" },
+      body: { status: "unknown", value_state: "unknown" },
+      validation_status: "unknown"
+    };
+  }
+  const title = probe.title_matched
+    ? { status: "observed" as const, value_state: "matched" as const }
+    : { status: "mismatch" as const, value_state: "mismatch" as const };
+  const body = probe.body_matched
+    ? { status: "observed" as const, value_state: "matched" as const }
+    : { status: "mismatch" as const, value_state: "mismatch" as const };
+  return {
+    status: probe.title_matched && probe.body_matched ? "observed" : "mismatch",
+    title,
+    body,
+    validation_status: probe.title_matched && probe.body_matched ? "passed" : "failed"
+  };
+}
+
+export function fieldFillProbeExpression(title: string, body: string, write: boolean): string {
+  const titleLiteral = JSON.stringify(title);
+  const bodyLiteral = JSON.stringify(body);
+  return String.raw`(() => {
+    const roots = [...new Set(document.querySelectorAll('#app, [data-v-app]'))];
+    const visible = (el) => {
+      const style = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return !el.hidden && !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+        style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
+        rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
+        (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    };
+    const unique = (selector, predicate) => [...new Set(roots.flatMap((root) => [...root.querySelectorAll(selector)]))].filter((el) => visible(el) && predicate(el));
+    const titles = unique('input', (el) => !el.disabled && !el.readOnly && /标题/.test(el.getAttribute('placeholder') || ''));
+    const bodies = unique('[contenteditable="true"]', (el) => el.getAttribute('aria-disabled') !== 'true');
+    const titleValue = ${titleLiteral};
+    const bodyValue = ${bodyLiteral};
+    if (${write ? "true" : "false"} && titles.length === 1 && bodies.length === 1) {
+      const titleInput = titles[0];
+      const bodyInput = bodies[0];
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) throw new Error('title_setter_unavailable');
+      setter.call(titleInput, titleValue);
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      titleInput.dispatchEvent(new Event('change', { bubbles: true }));
+      bodyInput.focus();
+      const selection = getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(bodyInput);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      if (!document.execCommand('insertText', false, bodyValue)) bodyInput.textContent = bodyValue;
+      bodyInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: null }));
+      bodyInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return {
+      title_candidate_count: titles.length,
+      body_candidate_count: bodies.length,
+      title_matched: titles.length === 1 && titles[0].value === titleValue,
+      body_matched: bodies.length === 1 && (bodies[0].innerText || bodies[0].textContent || '') === bodyValue
+    };
+  })()`;
 }
 
 async function findImageFileInput(client: CdpClient): Promise<string | undefined> {

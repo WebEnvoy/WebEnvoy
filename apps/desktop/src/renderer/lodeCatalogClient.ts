@@ -1,9 +1,11 @@
 export type LodeCatalogSkill = WebEnvoyLodeCatalogSkill;
 
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuMediaActionContracts = {
   "xhs_publish_note_image_text_media.image_upload": { effect: "upload", profileId: "xhs-image-upload" },
   "xhs_publish_note_image_text_media.text_to_image_generate": { effect: "create", profileId: "xhs-text-to-image-generate" },
+  "xhs_publish_note_image_text_fields.compose": { effect: "modify", profileId: "xhs-image-text-field-fill" },
 } as const;
 
 export type LodeCatalogLoadState = {
@@ -306,7 +308,7 @@ function validCachedString(field: Record<string, unknown>, value: string) {
 }
 
 function isAction(value: unknown, packageRef: string): value is WebEnvoyLodeCatalogAction {
-  const mediaWrite = packageRef === xiaohongshuMediaPackageRef && isRecord(value) && value.operationMode === "write";
+  const mediaWrite = [xiaohongshuMediaPackageRef, xiaohongshuFieldPackageRef].includes(packageRef) && isRecord(value) && value.operationMode === "write";
   const mediaContract = mediaWrite && isRecord(value)
     ? xiaohongshuMediaActionContracts[value.id as keyof typeof xiaohongshuMediaActionContracts]
     : undefined;

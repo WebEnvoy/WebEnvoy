@@ -215,12 +215,13 @@ export type XhsPathPrepareRequestedPath = "image_text_upload" | "image_text_gene
 export type XhsPathPrepareObservedPath = "observed" | "unknown" | "mismatch";
 export type XhsPathPrepareCompositionState = "initialized" | "not_initialized" | "unknown";
 
-/** The two Lode #307 media actions.  This is intentionally not a mode enum. */
+/** Exact Lode image-text actions admitted by the current consumer. */
 export type XhsMediaActionId =
   | "xhs_publish_note_image_text_media.image_upload"
-  | "xhs_publish_note_image_text_media.text_to_image_generate";
+  | "xhs_publish_note_image_text_media.text_to_image_generate"
+  | "xhs_publish_note_image_text_fields.compose";
 export type XhsMediaActionPath = "image_text_upload" | "image_text_generate";
-export type XhsMediaEffectKind = "upload" | "generate";
+export type XhsMediaEffectKind = "upload" | "generate" | "modify";
 export type XhsMediaOperationStatus = "accepted" | "running" | "terminal" | "unknown_outcome";
 
 export interface LocalProviderMediaAuthorizationBinding {
@@ -247,14 +248,14 @@ export interface LocalProviderMediaActionInput {
 }
 
 export type LocalProviderMediaActionResult =
-  | {
+  | ({
       status: "completed";
       observed_at: string;
       observed_url: string;
       page: LocalProviderPageFacts;
-      action_id: XhsMediaActionId;
+      action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate";
       requested_path: XhsMediaActionPath;
-      effect_kind: XhsMediaEffectKind;
+      effect_kind: "upload" | "generate";
       effect_status: "requested" | "observed" | "unknown" | "failed";
       operation_status: XhsMediaOperationStatus;
       operation_ref: string;
@@ -274,7 +275,34 @@ export type LocalProviderMediaActionResult =
       source_refs: LocalProviderReadProbeRef[];
       evidence_ref_kinds: LocalProviderReadProbeRef[];
       submitted: false;
-    }
+    })
+  | ({
+      status: "completed";
+      observed_at: string;
+      observed_url: string;
+      page: LocalProviderPageFacts;
+      action_id: "xhs_publish_note_image_text_fields.compose";
+      requested_path: "image_text_upload";
+      effect_kind: "modify";
+      effect_status: "requested" | "observed" | "unknown" | "failed";
+      operation_status: XhsMediaOperationStatus;
+      operation_ref: string;
+      terminal_state?: "success" | "failure";
+      field_readback: {
+        status: "observed" | "unknown" | "mismatch";
+        title: { status: "observed" | "unknown" | "mismatch"; value_state: "matched" | "mismatch" | "unknown" };
+        body: { status: "observed" | "unknown" | "mismatch"; value_state: "matched" | "mismatch" | "unknown" };
+        validation_status: "passed" | "failed" | "unknown";
+      };
+      page_readback: {
+        status: "observed" | "unknown" | "mismatch";
+        page_state_ref: string;
+        route_state: "observed" | "unknown" | "mismatch";
+      };
+      source_refs: LocalProviderReadProbeRef[];
+      evidence_ref_kinds: LocalProviderReadProbeRef[];
+      submitted: false;
+    })
   | {
       status: "unavailable";
       failure_class:
@@ -286,6 +314,8 @@ export type LocalProviderMediaActionResult =
         | "resource_unavailable"
         | "media_ref_unavailable"
         | "generation_unavailable"
+        | "field_unavailable"
+        | "validation_failed"
         | "operation_result_unknown"
         | "post_check_failed"
         | "reconciliation_unknown"

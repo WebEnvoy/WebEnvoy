@@ -12,6 +12,9 @@ import {
   type XhsWritePrecheckCompositionPath,
   type XhsPathPrepareRequestedPath,
   xhsMediaActionPaths,
+  xhsFieldCapabilityId,
+  xhsFieldLockRef,
+  xhsFieldPackageRef,
   xhsMediaCapabilityId,
   xhsMediaLockRef,
   xhsMediaPackageRef,
@@ -46,8 +49,10 @@ const xhsPathPreparePaths = new Set<XhsPathPrepareRequestedPath>(["image_text_up
 const xhsMediaResourceRequirementRef = "xiaohongshu.publish-note-image-text-media.resources";
 const xhsMediaProfileByAction: Record<XhsMediaActionId, string> = {
   "xhs_publish_note_image_text_media.image_upload": "xhs-image-upload",
-  "xhs_publish_note_image_text_media.text_to_image_generate": "xhs-text-to-image-generate"
+  "xhs_publish_note_image_text_media.text_to_image_generate": "xhs-text-to-image-generate",
+  "xhs_publish_note_image_text_fields.compose": "xhs-image-text-field-fill"
 };
+const xhsFieldOwnerRefPattern = /^draft:app-protected\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/(?:title|body)$/i;
 const xhsMediaLocalFileRefPattern = /^local_file_ref_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const privateHarborInputFieldNames = new Set([
   "raw_payload", "dom", "har", "screenshot", "video", "cookie", "cookies", "token", "tokens",
@@ -149,10 +154,15 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
   const refs = input?.refs;
   const profileId = taskIntent?.resource_requirement_profile_id;
   const requirementRefs = taskIntent?.resource_requirement_refs;
-  if (body.package_ref !== xhsMediaPackageRef ||
+  const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  const expectedPackageRef = fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef;
+  const expectedLockRef = fieldAction ? xhsFieldLockRef : xhsMediaLockRef;
+  const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId;
+  const expectedRequirementRef = fieldAction ? "xiaohongshu.publish-note-image-text-fields.resources" : xhsMediaResourceRequirementRef;
+  if (body.package_ref !== expectedPackageRef ||
     !input || Object.keys(input).some((key) => !["summary", "refs", "requested_path", "action_id"].includes(key)) ||
-    capability?.ref !== `lode:capability/${xhsMediaCapabilityId}` ||
-    capability.version !== "0.1.0" || capability.source_ref !== xhsMediaPackageRef || capability.lock_ref !== xhsMediaLockRef ||
+    capability?.ref !== `lode:capability/${expectedCapabilityId}` ||
+    capability.version !== (fieldAction ? "0.1.1" : "0.1.0") || capability.source_ref !== expectedPackageRef || capability.lock_ref !== expectedLockRef ||
     scope?.target_type !== "creator_publish_page" || !isCreatorPublishUrl(scope?.target_ref) ||
     typeof harbor?.identity_environment_ref !== "string" || harbor.identity_environment_ref.length === 0 ||
     !isCreatorPublishUrl(harbor?.url) || harbor?.url !== scope.target_ref ||
@@ -160,7 +170,7 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
     requestedPath !== xhsMediaActionPaths[actionId] ||
     policy?.risk !== "write" || policy.execution_intent !== "execute_after_approval" ||
     profileId !== xhsMediaProfileByAction[actionId] ||
-    !Array.isArray(requirementRefs) || requirementRefs.length !== 1 || requirementRefs[0] !== xhsMediaResourceRequirementRef ||
+    !Array.isArray(requirementRefs) || requirementRefs.length !== 1 || requirementRefs[0] !== expectedRequirementRef ||
     !Array.isArray(refs) || refs.length > 18 || !refs.every((ref) => typeof ref === "string" && ref.length > 0 && ref.length <= 2_048)) {
     return false;
   }
@@ -169,6 +179,7 @@ export function isExactXhsMediaTaskBody(body: JsonBody): boolean {
   if (actionId === "xhs_publish_note_image_text_media.image_upload") {
     return refs.length >= 1 && refs.every((ref) => xhsMediaLocalFileRefPattern.test(ref));
   }
+  if (fieldAction) return refs.length === 2 && refs[0]?.endsWith("/title") && refs[1]?.endsWith("/body") && refs.every((ref) => xhsFieldOwnerRefPattern.test(ref));
   return refs.length === 0;
 }
 
@@ -209,9 +220,9 @@ async function validateRuntimeTaskSubmissionRequest(
   const taskInput = jsonObject(task_intent.input);
   const pathPrepare = package_ref === xhsPathPreparePackageRef && capability?.ref === "lode:capability/publish-note-path-prepare" &&
     capability.source_ref === package_ref && scope?.target_type === "creator_publish_page";
-  const mediaAction = package_ref === xhsMediaPackageRef &&
-    capability?.ref === `lode:capability/${xhsMediaCapabilityId}` &&
-    capability.version === "0.1.0" && capability.source_ref === package_ref && capability.lock_ref === xhsMediaLockRef &&
+  const mediaAction = (package_ref === xhsMediaPackageRef || package_ref === xhsFieldPackageRef) &&
+    capability?.ref === `lode:capability/${package_ref === xhsFieldPackageRef ? xhsFieldCapabilityId : xhsMediaCapabilityId}` &&
+    capability.version === (package_ref === xhsFieldPackageRef ? "0.1.1" : "0.1.0") && capability.source_ref === package_ref && capability.lock_ref === (package_ref === xhsFieldPackageRef ? xhsFieldLockRef : xhsMediaLockRef) &&
     scope?.target_type === "creator_publish_page";
   const bossJobSearch = package_ref === "lode://site-capability/boss/job-search@0.1.0" &&
     capability?.ref === "lode:capability/job-search" && capability.source_ref === package_ref && scope?.target_type === "boss_job_search";

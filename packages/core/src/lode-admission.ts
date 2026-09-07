@@ -46,9 +46,14 @@ export const xhsMediaPackageRef = "lode://site-capability/xiaohongshu/publish-no
 export const xhsMediaLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 export const xhsMediaCapabilityId = "publish-note-image-text-media";
 export const xhsMediaOperationId = "xhs_publish_note_image_text_media";
+export const xhsFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+export const xhsFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+export const xhsFieldCapabilityId = "publish-note-image-text-fields";
+export const xhsFieldOperationId = "xhs_publish_note_image_text_fields";
 export const xhsMediaActionPaths = {
   "xhs_publish_note_image_text_media.image_upload": "image_text_upload",
-  "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate"
+  "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate",
+  "xhs_publish_note_image_text_fields.compose": "image_text_upload"
 } as const;
 export type XhsMediaActionId = keyof typeof xhsMediaActionPaths;
 
@@ -278,16 +283,21 @@ function isXhsMediaActionContract(
   operationMode: string
 ): boolean {
   const actionId = taskIntent.input?.action_id;
-  if (packageRef !== xhsMediaPackageRef ||
-    lodePackage.source_ref !== xhsMediaPackageRef ||
-    lodePackage.lock_ref !== xhsMediaLockRef ||
-    capabilityId !== xhsMediaCapabilityId ||
-    lodePackage.operation_id !== xhsMediaOperationId ||
+  const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  const expectedPackageRef = fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef;
+  const expectedLockRef = fieldAction ? xhsFieldLockRef : xhsMediaLockRef;
+  const expectedCapabilityId = fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId;
+  const expectedOperationId = fieldAction ? xhsFieldOperationId : xhsMediaOperationId;
+  if (packageRef !== expectedPackageRef ||
+    lodePackage.source_ref !== expectedPackageRef ||
+    lodePackage.lock_ref !== expectedLockRef ||
+    capabilityId !== expectedCapabilityId ||
+    lodePackage.operation_id !== expectedOperationId ||
     operationMode !== "write" ||
-    taskIntent.capability.ref !== expectedCapabilityRef(xhsMediaCapabilityId) ||
-    taskIntent.capability.version !== "0.1.0" ||
-    taskIntent.capability.source_ref !== xhsMediaPackageRef ||
-    taskIntent.capability.lock_ref !== xhsMediaLockRef ||
+    taskIntent.capability.ref !== expectedCapabilityRef(expectedCapabilityId) ||
+    taskIntent.capability.version !== (fieldAction ? "0.1.1" : "0.1.0") ||
+    taskIntent.capability.source_ref !== expectedPackageRef ||
+    taskIntent.capability.lock_ref !== expectedLockRef ||
     taskIntent.policy.risk !== "write" ||
     taskIntent.policy.execution_intent !== "execute_after_approval" ||
     typeof actionId !== "string" ||
@@ -295,7 +305,8 @@ function isXhsMediaActionContract(
   const inputRefs = taskIntent.input?.refs;
   if (!Array.isArray(inputRefs)) return false;
   if ((actionId === "xhs_publish_note_image_text_media.image_upload" && inputRefs.length === 0) ||
-    (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0)) return false;
+    (actionId === "xhs_publish_note_image_text_media.text_to_image_generate" && inputRefs.length !== 0) ||
+    (fieldAction && inputRefs.length !== 2)) return false;
   const declaration = lodePackage.action_declaration as LodeBusinessActionOwnerContract["action_declaration"] | undefined;
   const action = declaration?.actions.find((candidate) => candidate.action_id === actionId);
   if (!action || action.category !== "commit" ||
@@ -303,7 +314,7 @@ function isXhsMediaActionContract(
     !action.target_scope.target_types.includes("creator_publish_page") ||
     !action.target_scope.supported_origins.includes("https://creator.xiaohongshu.com") ||
     action.resource_requirements.profile_ids.length === 0) return false;
-  const expectedEffect = actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create";
+  const expectedEffect = fieldAction ? "modify" : actionId === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "create";
   return action.external_effects.length === 1 && action.external_effects[0] === expectedEffect;
 }
 

@@ -87,6 +87,9 @@ const consumerBoundary =
 const xiaohongshuImageUploadPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuImageUploadLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuImageUploadActionId = "xhs_publish_note_image_text_media.image_upload";
+const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xiaohongshuFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xiaohongshuFieldActionId = "xhs_publish_note_image_text_fields.compose";
 export function loadingSkillIdentityCompatibility(): SkillIdentityCompatibilityState {
   return { status: "loading", summary: "正在检查账号身份兼容性。", candidates: [] };
 }
@@ -155,12 +158,15 @@ export async function fetchSkillIdentityCompatibility(
 
 function isPinnedXiaohongshuImageUpload(skill: LodeCatalogSkill) {
   const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
-  return skill.packageRef === xiaohongshuImageUploadPackageRef &&
-    skill.lockRef === xiaohongshuImageUploadLockRef &&
-    skill.version === "0.1.0" && skill.siteSlug === "xiaohongshu" &&
-    action?.id === xiaohongshuImageUploadActionId && action.operationMode === "write" &&
+  const imageUpload = skill.packageRef === xiaohongshuImageUploadPackageRef && skill.lockRef === xiaohongshuImageUploadLockRef && skill.version === "0.1.0" &&
+    action?.id === xiaohongshuImageUploadActionId && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
+  const fieldFill = skill.packageRef === xiaohongshuFieldPackageRef && skill.lockRef === xiaohongshuFieldLockRef && skill.version === "0.1.1" &&
+    action?.id === xiaohongshuFieldActionId && action.resourceRequirementProfileIds[0] === "xhs-image-text-field-fill";
+  return (imageUpload || fieldFill) &&
+    skill.siteSlug === "xiaohongshu" &&
+    action?.operationMode === "write" &&
     action.supportedOrigins.length === 1 && action.supportedOrigins[0] === "https://creator.xiaohongshu.com" &&
-    action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
+    action.resourceRequirementProfileIds.length === 1;
 }
 
 export function isCandidateUsable(candidate: IdentityCompatibilityCandidate | undefined) {

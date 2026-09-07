@@ -3,9 +3,11 @@ import { hasOnlyKeys, isRecord, optionalString, strictStringArray } from "./lode
 
 const maxCatalogActions = 50;
 const xiaohongshuMediaPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 const xiaohongshuMediaActionContracts = {
   "xhs_publish_note_image_text_media.image_upload": { effect: "upload", profileId: "xhs-image-upload", requestedPath: "image_text_upload" },
   "xhs_publish_note_image_text_media.text_to_image_generate": { effect: "create", profileId: "xhs-text-to-image-generate", requestedPath: "image_text_generate" },
+  "xhs_publish_note_image_text_fields.compose": { effect: "modify", profileId: "xhs-image-text-field-fill", requestedPath: "image_text_upload" },
 } as const;
 
 type ActionContext = {
@@ -27,14 +29,15 @@ type ActionContext = {
 
 export function projectActions(context: ActionContext): LodeCatalogAction[] {
   const { actionDeclaration, operationMode } = context;
-  const mediaWrite = context.packageRef === xiaohongshuMediaPackageRef && operationMode === "write";
+  const mediaWrite = [xiaohongshuMediaPackageRef, xiaohongshuFieldPackageRef].includes(context.packageRef) && operationMode === "write";
   if ((!mediaWrite && !["read", "validate_only", "draft", "preview"].includes(operationMode)) ||
     !hasOnlyKeys(actionDeclaration, ["schema_version", "schema_ref", "actions"]) ||
     actionDeclaration.schema_version !== "lode.capability-action-declaration.v0" ||
     actionDeclaration.schema_ref !== "lode://schema/capability-action-declaration@0.1.0" ||
     !validRequirementContract(context)) return [];
   const value = actionDeclaration.actions;
-  if (!Array.isArray(value) || value.length === 0 || value.length > maxCatalogActions || mediaWrite && value.length !== 2) return [];
+  const expectedWriteActions = context.packageRef === xiaohongshuFieldPackageRef ? 1 : 2;
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxCatalogActions || mediaWrite && value.length !== expectedWriteActions) return [];
   const projected: LodeCatalogAction[] = [];
   for (const action of value) {
     const item = projectAction(action, context, mediaWrite);
