@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   blocksXhsMediaActionRequest,
+  clickPoint,
   cleanupConfirmationPointExpression,
   commitProbeExpression,
   draftEditPointExpression,
@@ -25,7 +26,7 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
   const title = { value: "WE测试", getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
   const media = { closest: () => null, getBoundingClientRect: () => rect };
-  const decoy = { closest: () => ({ dataset: { decoy: "true" } }), getBoundingClientRect: () => rect };
+  const decoy = { closest: (selector: string) => selector.includes("[data-decoy]") ? { dataset: { decoy: "" } } : null, getBoundingClientRect: () => rect };
   const imageInput = {
     parentElement: null as unknown,
     matches: () => false,
@@ -55,6 +56,9 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   const result = evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" }));
   assert.equal(result.fields_matched, true);
   assert.equal(result.media_count, 1);
+  title.value = "已被改名";
+  assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
+  title.value = "WE测试";
   mediaArea.querySelectorAll = () => [];
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
   mediaArea.querySelectorAll = () => [media, decoy];
@@ -69,6 +73,19 @@ test("#423 cleanup content ref is derived from the marker-bound page identity", 
   assert.equal(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "WE测试"));
   assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-2", "WE测试"));
   assert.notEqual(xhsContentRef("WE-XHS-E2E-1", "WE测试"), xhsContentRef("WE-XHS-E2E-1", "其他标题"));
+});
+
+test("#419 click response loss after mouse release dispatch remains unknown", async () => {
+  const client = (failure: "before" | "release" | "none") => ({
+    send: async (method: string, params: Record<string, unknown> = {}) => {
+      if (failure === "before" && method === "Page.bringToFront") throw new Error("not sent");
+      if (failure === "release" && method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") throw new Error("response lost");
+      return {};
+    }
+  });
+  assert.equal(await clickPoint(client("before") as never, 10, 20), "not_dispatched");
+  assert.equal(await clickPoint(client("release") as never, 10, 20), "unknown");
+  assert.equal(await clickPoint(client("none") as never, 10, 20), "dispatched");
 });
 
 test("#423 published readback and cleanup select only the exact card actions", () => {
@@ -545,7 +562,7 @@ test("#409 media upload targets one app-owned image input without depending on a
   assert.match(probe, /#app input\[type=\"file\"\], \[data-v-app\] input\[type=\"file\"\]/);
   assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
   assert.match(probe, /matches\(':disabled'\)/);
-  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /candidates\.length === 1/);
   assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
 });
@@ -559,7 +576,7 @@ test("#409 media upload selects only the unique actionable image-text path befor
   assert.match(probe, /document\.elementFromPoint/);
   assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(probe, /!el\.hidden && !el\.matches\(':disabled'\) && el\.getAttribute\('aria-disabled'\) !== 'true'/);
-  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
+  assert.match(probe, /\[aria-hidden=\\?"true\\?"\].*\[hidden\].*\[data-decoy\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /!el\.querySelector\('input\[type="file"\]'\)/);
   assert.match(probe, /el\.checkVisibility\(\{ checkOpacity: true, checkVisibilityCSS: true \}\)/);
   assert.match(probe, /image_input_candidate_count/);

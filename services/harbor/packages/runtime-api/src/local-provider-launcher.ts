@@ -799,32 +799,33 @@ type CommitProbe = {
   fields_matched: boolean;
   media_count: number;
 };
+type ClickOutcome = "dispatched" | "not_dispatched" | "unknown";
 
 async function accessibilityNodes(client: CdpClient): Promise<AxNode[]> {
   const tree = await sendMediaActionCdp(client, "Accessibility.getFullAXTree", { depth: 30 });
   return Array.isArray(tree.nodes) ? tree.nodes as AxNode[] : [];
 }
 
-async function clickBackendNode(client: CdpClient, backendNodeId: number): Promise<boolean> {
+async function clickBackendNode(client: CdpClient, backendNodeId: number): Promise<ClickOutcome> {
   try {
     const response = await sendMediaActionCdp(client, "DOM.getBoxModel", { backendNodeId });
     const quad = (response.model as { content?: unknown } | undefined)?.content;
-    if (!Array.isArray(quad) || quad.length !== 8 || !quad.every((value) => typeof value === "number" && Number.isFinite(value))) return false;
+    if (!Array.isArray(quad) || quad.length !== 8 || !quad.every((value) => typeof value === "number" && Number.isFinite(value))) return "not_dispatched";
     const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
     const y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
     return clickPoint(client, x, y);
   } catch {
-    return false;
+    return "not_dispatched";
   }
 }
 
-async function clickExactAxButton(client: CdpClient, name: string): Promise<boolean> {
+async function clickExactAxButton(client: CdpClient, name: string): Promise<ClickOutcome> {
   const ids = [...new Set((await accessibilityNodes(client)).flatMap((node) =>
     node.role?.value === "button" && node.name?.value === name && typeof node.backendDOMNodeId === "number"
       ? [node.backendDOMNodeId]
       : []
   ))];
-  return ids.length === 1 && clickBackendNode(client, ids[0]!);
+  return ids.length === 1 ? clickBackendNode(client, ids[0]!) : "not_dispatched";
 }
 
 export function commitProbeExpression(marker: string, expectedTitle?: string): string {
@@ -857,7 +858,7 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
       const mediaBound = Boolean(compositionBound && mediaScope && mediaScope !== scope && scope.contains(mediaScope));
       const media = mediaBound ? unique([...mediaScope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
         const r = el.getBoundingClientRect();
-        return !el.closest('[data-decoy="true"], [data-testid*="decoy"], .decoy') && visible(el) && r.width >= 80 && r.height >= 80;
+        return !el.closest('[data-decoy], [data-testid*="decoy"], .decoy') && visible(el) && r.width >= 80 && r.height >= 80;
       }).length : 0;
       return {
         url: location.href,
@@ -880,9 +881,9 @@ export function xhsContentRef(marker: string, title: string): string {
   return `xhs_content_${createHash("sha256").update(`${marker}\0${title}`).digest("hex").slice(0, 32)}`;
 }
 
-async function evaluateCommitProbe(client: CdpClient, marker: string): Promise<CommitProbe | undefined> {
+async function evaluateCommitProbe(client: CdpClient, marker: string, expectedTitle?: string): Promise<CommitProbe | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: commitProbeExpression(marker),
+    expression: commitProbeExpression(marker, expectedTitle),
     returnByValue: true
   });
   return (evaluated.result as { value?: CommitProbe } | undefined)?.value;
@@ -946,39 +947,41 @@ async function evaluatePoint(client: CdpClient, expression: string): Promise<Poi
   return (evaluated.result as { value?: PointProbe } | undefined)?.value;
 }
 
-async function clickPoint(client: CdpClient, x: number, y: number): Promise<boolean> {
+export async function clickPoint(client: CdpClient, x: number, y: number): Promise<ClickOutcome> {
+  let releaseAttempted = false;
   try {
     await client.send("Page.bringToFront");
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    releaseAttempted = true;
     await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-    return true;
+    return "dispatched";
   } catch {
-    return false;
+    return releaseAttempted ? "unknown" : "not_dispatched";
   }
 }
 
 async function clickNewestDraftByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
   const point = await evaluatePoint(client, draftEditPointExpression(title));
   if (!point || point.status !== "matched") return point?.status ?? "not_found";
-  return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+  return await clickPoint(client, point.x, point.y) === "not_dispatched" ? "not_found" : "matched";
 }
 
 async function clickPublishedEditByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
   const point = await evaluatePoint(client, publishedActionPointExpression(title, "edit"));
   if (!point || point.status !== "matched") return point?.status ?? "not_found";
-  return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+  return await clickPoint(client, point.x, point.y) === "not_dispatched" ? "not_found" : "matched";
 }
 
 async function clickPublishedDeleteByTitle(client: CdpClient, title: string): Promise<"matched" | "not_found" | "ambiguous"> {
   const point = await evaluatePoint(client, publishedActionPointExpression(title, "delete"));
   if (!point || point.status !== "matched") return point?.status ?? "not_found";
-  return await clickPoint(client, point.x, point.y) ? "matched" : "not_found";
+  return await clickPoint(client, point.x, point.y) === "not_dispatched" ? "not_found" : "matched";
 }
 
 async function openNoteManager(client: CdpClient): Promise<boolean> {
   const point = await evaluatePoint(client, noteManagerNavigationPointExpression());
-  return point?.status === "matched" && clickPoint(client, point.x, point.y);
+  return point?.status === "matched" && await clickPoint(client, point.x, point.y) !== "not_dispatched";
 }
 
 async function scrollExactTextIntoView(client: CdpClient, name: string): Promise<boolean> {
@@ -1001,7 +1004,7 @@ async function clickExactAxStaticText(client: CdpClient, name: string): Promise<
       ? [node.backendDOMNodeId]
       : []
   ))];
-  return ids.length === 1 && clickBackendNode(client, ids[0]!);
+  return ids.length === 1 && await clickBackendNode(client, ids[0]!) !== "not_dispatched";
 }
 
 async function selectCommitVisibility(client: CdpClient, visibility: "only_me" | "public"): Promise<boolean> {
@@ -1119,9 +1122,12 @@ async function executeCleanupControl(
     confirmation = await evaluatePoint(client, cleanupConfirmationPointExpression(before.title_value));
     if (confirmation?.status === "matched") break;
   }
-  if (!confirmation || confirmation.status !== "matched" || !await clickPoint(client, confirmation.x, confirmation.y)) {
+  if (!confirmation || confirmation.status !== "matched") {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup confirmation could not be verified.", retryable: false, submitted: false };
   }
+  const confirmationClick = await clickPoint(client, confirmation.x, confirmation.y);
+  if (confirmationClick === "not_dispatched") return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact cleanup confirmation could not be dispatched.", retryable: false, submitted: false };
+  if (confirmationClick === "unknown") return { status: "unavailable", failure_class: "operation_result_unknown", message: "The cleanup confirmation was dispatched without a reliable response.", retryable: false, submitted: true };
   let count = -1;
   let after: CommitProbe | undefined;
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -1189,7 +1195,8 @@ async function executeCommitControl(
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The requested visibility could not be selected and verified exactly.", retryable: false, submitted: false };
   }
   const clicked = await clickExactAxButton(client, save ? "暂存离开" : "发布");
-  if (!clicked) return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact commit control is unavailable or ambiguous.", retryable: false, submitted: false };
+  if (clicked === "not_dispatched") return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact commit control is unavailable or ambiguous.", retryable: false, submitted: false };
+  if (clicked === "unknown") return { status: "unavailable", failure_class: "operation_result_unknown", message: "The exact commit control was dispatched without a reliable response.", retryable: false, submitted: true };
   let probe: CommitProbe | undefined;
   let listMatched = false;
   if (save) {
@@ -1204,7 +1211,7 @@ async function executeCommitControl(
     if (listMatched) {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await abortableDelay(250);
-        probe = await evaluateCommitProbe(client, marker);
+        probe = await evaluateCommitProbe(client, marker, before.title_value);
         if (isCreatorPublishPath(probe?.pathname) && probe?.marker_matched && probe.fields_matched && probe.media_count === before.media_count) break;
       }
     }
@@ -1367,7 +1374,7 @@ export function fieldFillProbeExpression(title: string, body: string, write: boo
     const visible = (el) => {
       const style = getComputedStyle(el);
       const rect = el.getBoundingClientRect();
-      return !el.hidden && !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+      return !el.hidden && !el.closest('[aria-hidden="true"], [hidden], [data-decoy], [data-testid*="decoy"], .decoy') &&
         style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
         rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
         (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
@@ -1436,7 +1443,7 @@ async function ensureImageUploadPath(client: CdpClient): Promise<ImageUploadPath
 export function imageUploadPathProbeExpression(): string {
   return String.raw`(async () => {
     const supportedInput = (el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
-      !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy="true"], [data-testid*="decoy"], .decoy');
+      !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy], [data-testid*="decoy"], .decoy');
     const imageInputs = () => [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')].filter(supportedInput);
     if (imageInputs().length === 0) {
       const actionable = (el) => {
@@ -1444,7 +1451,7 @@ export function imageUploadPathProbeExpression(): string {
         const rect = el.getBoundingClientRect();
         const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
         return !el.hidden && !el.matches(':disabled') && el.getAttribute('aria-disabled') !== 'true' &&
-          !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+          !el.closest('[aria-hidden="true"], [hidden], [data-decoy], [data-testid*="decoy"], .decoy') &&
           !el.querySelector('input[type="file"]') &&
           style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && Number(style.opacity) >= 0.01 &&
           rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
@@ -1475,7 +1482,7 @@ export function imageFileInputProbeExpression(): string {
   return String.raw`(() => {
     const candidates = [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')]
       .filter((el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
-        !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy="true"], [data-testid*="decoy"], .decoy'));
+        !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy], [data-testid*="decoy"], .decoy'));
     return candidates.length === 1 ? candidates[0] : null;
   })()`;
 }
@@ -1651,7 +1658,7 @@ function pathSelectionProbeExpression(): string {
               style.zIndex !== '-1' && Number(style.opacity) >= 0.01 &&
               rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
               !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
-              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+              !el.closest('[aria-hidden="true"], [hidden], [data-decoy], [data-testid*="decoy"], .decoy') &&
               (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
           };
           const controls = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab, [role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
@@ -1685,7 +1692,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         const s = el ? getComputedStyle(el) : null;
         const r = el?.getBoundingClientRect();
         return Boolean(el && !el.hidden && (allowDisabled || (!el.disabled && el.getAttribute('aria-disabled') !== 'true')) &&
-          !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
+          !el.closest('[aria-hidden="true"], [hidden], [data-decoy], [data-testid*="decoy"], .decoy') &&
           s && s.visibility !== 'hidden' && s.display !== 'none' && s.pointerEvents !== 'none' &&
           s.zIndex !== '-1' && Number(s.opacity) >= 0.01 && r && r.width > 0 && r.height > 0 &&
           r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight &&
