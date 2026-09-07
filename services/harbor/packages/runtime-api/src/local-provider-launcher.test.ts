@@ -151,15 +151,16 @@ test("reads binary CDP messages without waiting for the command timeout", async 
 test("#405 path probe maps only the requested exact visible label and keeps file selection out", () => {
   const upload = writePrecheckProbeExpression("image_text_upload", true);
   const generate = writePrecheckProbeExpression("image_text_generate", true);
-  assert.match(upload, /上传图片/);
+  assert.match(upload, /上传图文/);
   assert.match(generate, /文字配图/);
   assert.match(upload, /selectPath = true/);
   assert.match(upload, /strictPath = true/);
-  assert.match(upload, /pathLabels = \["上传图片"\]/);
+  assert.match(upload, /pathLabels = \["上传图文"\]/);
   assert.match(upload, /input\[type=["']file["']\]/);
   assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
+  assert.match(upload, /\.header-tabs \.creator-tab/);
   assert.match(upload, /controls\.length !== 1/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);

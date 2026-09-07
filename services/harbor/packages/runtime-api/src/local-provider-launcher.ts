@@ -946,7 +946,7 @@ function pathSelectionProbeExpression(): string {
               !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]') &&
               (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
           };
-          const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
+          const controls = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab, [role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
           if (controls.length !== 1) return { ...ready, selection_status: 'blocked' };
@@ -964,7 +964,7 @@ function pathSelectionProbeExpression(): string {
 export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath, selectPath = false, exactPath = false): string {
   const requestedPath = normalizedCompositionPath(compositionPath);
   const labels = (selectPath || exactPath) && (requestedPath === "image_text_upload" || requestedPath === "image_text_generate")
-    ? [requestedPath === "image_text_upload" ? "上传图片" : "文字配图"]
+    ? [requestedPath === "image_text_upload" ? "上传图文" : "文字配图"]
     : compositionPathLabels[requestedPath];
   return `(async () => {
     const requestedPath = ${JSON.stringify(requestedPath)};
