@@ -660,17 +660,22 @@ async function resolveLocalMediaRef(localFileRef: string): Promise<string> {
 
 async function findImageFileInput(client: CdpClient): Promise<string | undefined> {
   const evaluated = await sendMediaActionCdp(client, "Runtime.evaluate", {
-    expression: String.raw`(() => {
-      const input = [...document.querySelectorAll('input.upload-input[type="file"]')]
-        .find((el) => /image\/(?:jpeg|png|webp)/i.test(el.accept));
-      return input || null;
-    })()`,
+    expression: imageFileInputProbeExpression(),
     returnByValue: false,
     awaitPromise: true
   });
   return typeof (evaluated.result as { objectId?: unknown } | undefined)?.objectId === "string"
     ? (evaluated.result as { objectId: string }).objectId
     : undefined;
+}
+
+export function imageFileInputProbeExpression(): string {
+  return String.raw`(() => {
+    const candidates = [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')]
+      .filter((el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
+        !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.closest('[data-decoy="true"]'));
+    return candidates.length === 1 ? candidates[0] : null;
+  })()`;
 }
 
 async function executeTextToImageControl(client: CdpClient, summary: string): Promise<boolean> {

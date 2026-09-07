@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  imageFileInputProbeExpression,
   observeXhsPathPrepareRequest,
   readTargetPageFacts,
   selectPage,
@@ -158,6 +159,14 @@ test("#405 path request observation continues requests and leaves external effec
   assert.equal(observeXhsPathPrepareRequest({ requestId: "missing-method", resourceType: "XHR", request: {} }, continueRequest), false);
   assert.equal(observeXhsPathPrepareRequest({ resourceType: "XHR", request: { method: "POST" } }, continueRequest), false);
   assert.deepEqual(continued, ["get", "head", "options", "post", "script-post", "missing-method"]);
+});
+
+test("#409 media upload targets one app-owned image input without depending on a CSS class", () => {
+  const probe = imageFileInputProbeExpression();
+  assert.match(probe, /#app input\[type=\"file\"\], \[data-v-app\] input\[type=\"file\"\]/);
+  assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
+  assert.match(probe, /candidates\.length === 1/);
+  assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {
