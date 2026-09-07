@@ -20,6 +20,7 @@ import {
 import {
   lodeRuntimeAdmissionFailure,
   parseLodeRuntimeAdmissionPolicy,
+  validateLodePackageAdmission,
   type LodePackageAdmissionContract,
   type LodeRuntimeAdmissionPolicy,
   type LodeRuntimeConsumptionEntry
@@ -1006,7 +1007,7 @@ async function completeAcceptedUnknownOutcome(
 }
 
 const xhsWritePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const xhsWritePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
 const xhsWritePrecheckInputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/input@0.1.0";
 const xhsWritePrecheckOutputSchemaRef = "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0";
 const xhsWritePrecheckLodeCommit = "6bff1afd059a30571f8ed219d1dcd25e6fb20c6b";
@@ -2403,12 +2404,13 @@ export async function continueWritePrecheckTask(
   if (!existing || existing.status !== "requires_user_action") {
     return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(existing ? { run_record: existing } : {}) };
   }
-  if (!isExactWritePrecheckRun(existing, request.single_action_decision.confirmation_decision_ref)) {
-    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
-  }
   const taskIntent = validateTaskIntent(request.task_intent);
   if (isFailure(taskIntent) || !request.package_ref) {
     return { ok: false, failure: isFailure(taskIntent) ? taskIntent : failure("request_invalid", "package_ref_required", "pre_admission", "fix_input"), run_record: existing };
+  }
+  const retirementAdmission = validateLodePackageAdmission(taskIntent, { package_ref: request.package_ref });
+  if (!retirementAdmission.ok && retirementAdmission.failure.code === "capability_deprecated") {
+    return { ok: false, failure: retirementAdmission.failure, run_record: existing };
   }
   const pathPrepare = request.package_ref === xhsPathPreparePackageRef;
   const requestedPath = taskIntent.input.requested_path;
@@ -2419,6 +2421,9 @@ export async function continueWritePrecheckTask(
     (pathPrepare && request.harbor?.requested_path !== requestedPath) ||
     (pathPrepare && request.harbor?.composition_path !== undefined) ||
     taskIntent.policy.risk !== "write" || taskIntent.policy.execution_intent !== "validate_only") {
+    return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
+  }
+  if (!isExactWritePrecheckRun(existing, request.single_action_decision.confirmation_decision_ref)) {
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
   if (!deps.lodePackageResolver || !deps.executionPolicyConfigStore || !deps.authorizationDecisionStore) {

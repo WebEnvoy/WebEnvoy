@@ -50,6 +50,7 @@ export const xhsFieldPackageRef = "lode://site-capability/xiaohongshu/publish-no
 export const xhsFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 export const xhsFieldCapabilityId = "publish-note-image-text-fields";
 export const xhsFieldOperationId = "xhs_publish_note_image_text_fields";
+const retiredXhsPathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 export const xhsMediaActionPaths = {
   "xhs_publish_note_image_text_media.image_upload": "image_text_upload",
   "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate",
@@ -214,10 +215,9 @@ export function parseLodeRuntimeAdmissionPolicy(
 ): LodeRuntimeAdmissionPolicy | FailureRecord | undefined {
   const sitePackage = /^lode:\/\/site-capability\/(xiaohongshu|boss)\//.test(packageRef);
   if (value === undefined) {
-    // #405's proposed path-prepare package intentionally has no
-    // runtime-consumption admission declaration; Harbor is reached only via
-    // Core's bounded validate-only operation seam.
-    if (packageRef === "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0") return undefined;
+    // Historical path-prepare contracts remain readable so persisted Runs can
+    // be projected; validateLodePackageAdmission retires new admission.
+    if (packageRef === retiredXhsPathPreparePackageRef) return undefined;
     return sitePackage ? invalidLodeContract("runtime_admission_policy_missing") : undefined;
   }
   const policy = contractObject(value);
@@ -384,6 +384,13 @@ export function validateLodePackageAdmission(taskIntent: LodeAdmissionTaskIntent
   const requestedPackageRef = input.package_ref;
   if (!requestedPackageRef) {
     return { ok: false, failure: invalidLodeContract("package_ref_required") };
+  }
+  if (requestedPackageRef === retiredXhsPathPreparePackageRef) {
+    return {
+      ok: false,
+      failure: admissionFailure("capability_contract", "capability_deprecated", "admission", "choose_latest_or_known_good"),
+      package_ref: requestedPackageRef
+    };
   }
   const lodePackage = contractObject(input.lode_package_contract);
   if (!lodePackage) {

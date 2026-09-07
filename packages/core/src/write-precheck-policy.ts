@@ -29,7 +29,7 @@ export type EvaluatedWritePrecheckPolicy = {
 };
 
 const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
 const writePrecheckActionId = "xhs_publish_note_precheck";
 const pathPreparePackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
 const pathPrepareLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";

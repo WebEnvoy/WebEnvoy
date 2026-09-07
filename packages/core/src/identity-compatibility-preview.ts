@@ -209,6 +209,9 @@ function packageOwnerStatus(code: string): IdentityCompatibilityOwnerStatus {
 }
 
 function packageReason(code: string): { reason: string; recovery: IdentityCompatibilityRecoveryAction; owner: IdentityCompatibilityOwnerStatus } {
+  if (code === "capability_deprecated") {
+    return { reason: "package_retired", recovery: "select_supported_package_version", owner: "available" };
+  }
   if (code === "package_lock_mismatch" || code === "package_lock_missing") {
     return { reason: "package_lock_mismatch", recovery: "select_supported_package_version", owner: "available" };
   }
@@ -501,6 +504,9 @@ export async function previewIdentityCompatibility(
   const maxFactAgeMs = dependencies.maxFactAgeMs ?? defaultMaxFactAgeMs;
   if (!Number.isFinite(now.getTime()) || !Number.isInteger(maxFactAgeMs) || maxFactAgeMs <= 0) return failure("identity_compatibility_configuration_invalid", "contact_operator");
   const generatedAt = now.toISOString();
+  if (request.package_ref === xhsPathPrepareContract.package_ref) {
+    return packageFailureCandidates(request, generatedAt, "capability_deprecated");
+  }
   let resolved: Awaited<ReturnType<LodePackageResolver>>;
   try {
     resolved = await dependencies.lodePackageResolver({ package_ref: request.package_ref, task_intent: request });

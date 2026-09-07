@@ -483,7 +483,7 @@ async function assertExactWritePrecheckCancellation(): Promise<void> {
     session?: Record<string, unknown>;
   };
   const precheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-  const precheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+  const precheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
   const pathPackageRef = "lode://site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
   const pathLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-path-prepare@0.1.0";
   const variant = (value: Omit<Variant, "packageRef" | "lockRef" | "capabilityRef"> & { pathPrepare?: boolean }): Variant => value.pathPrepare

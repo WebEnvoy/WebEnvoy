@@ -41,7 +41,7 @@ async function request(
 
 const skillRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
 const writePrecheckPackageRef = "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0";
-const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1";
+const writePrecheckLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2";
 const environmentAuthorizationSubject = { scope: "environment", operation_ref: "harbor-operation:policy-api/1" } as const;
 
 function authorizationEvaluationInput(input: {

@@ -630,7 +630,7 @@ async function runDesktopChecks() {
       outputSchemaId: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
       packageRef: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
       capabilityVersion: "0.1.0",
-      capabilityLockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+      capabilityLockRef: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2",
       data: {
         schema_version: "webenvoy.core-xhs-write-precheck-projection.v0",
         classification: "partial_result",
@@ -662,7 +662,7 @@ async function runDesktopChecks() {
         post_check_ref: "post_check_00000000-0000-0000-0000-000000000361",
         lode_pin: {
           package_ref: "lode://site-capability/xiaohongshu/publish-note-precheck@0.1.0",
-          lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.1",
+          lock_ref: "lode://lock/site-capability/xiaohongshu/publish-note-precheck@0.1.2",
           output_schema_ref: "lode://schema/site-capability/xiaohongshu/publish-note-precheck/output@0.1.0",
           version: "0.1.0",
           operation_id: "xhs_publish_note_precheck",
