@@ -390,7 +390,10 @@ async function probeProviderWritePrecheck(
             return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false, failureStage);
           }
           if (!selected || selected.selection_status !== "selected") {
-            return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.", true, failureStage);
+            const failureClass = pathSelectionFailureClass(input.requested_path, selected);
+            return writePrecheckUnavailable(failureClass, failureClass === "evidence_unavailable"
+              ? "The requested path entry is visible but has no uniquely controllable structure."
+              : "The requested visible path control could not be selected.", true, failureStage);
           }
           const selectedValidation = validateXhsWritePrecheckObservation(input, selected, failureStage);
           if (selectedValidation.status === "unavailable") return selectedValidation;
@@ -837,6 +840,15 @@ function writePrecheckUnavailable(
   };
 }
 
+export function pathSelectionFailureClass(
+  requestedPath: "image_text_upload" | "image_text_generate",
+  observation: Pick<WritePrecheckObservation, "upload_image_entry_visible" | "text_image_entry_visible"> | undefined
+): "evidence_unavailable" | "page_changed" {
+  return (requestedPath === "image_text_upload" ? observation?.upload_image_entry_visible : observation?.text_image_entry_visible) === true
+    ? "evidence_unavailable"
+    : "page_changed";
+}
+
 function pathSelectionProbeExpression(): string {
   return String.raw`    if (selectPath) {
       for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -857,16 +869,6 @@ function pathSelectionProbeExpression(): string {
           const controls = [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
             .filter((el) => controlVisible(el) && pathLabels.some((expected) => normalizeControlLabel(el) === expected) &&
               !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'));
-          const imageTextEntries = requestedPath.startsWith('image_text_')
-            ? [...document.querySelectorAll('[role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
-              .filter((el) => controlVisible(el) && normalizeControlLabel(el) === '上传图文' &&
-                !(el instanceof HTMLInputElement) && !el.querySelector('input[type="file"]'))
-            : [];
-          if (controls.length === 0 && imageTextEntries.length === 1) {
-            imageTextEntries[0].click();
-            await new Promise((resolve) => setTimeout(resolve, 120));
-            continue;
-          }
           if (controls.length !== 1) return { ...ready, selection_status: 'blocked' };
           const control = controls[0];
           control.click();
@@ -882,7 +884,7 @@ function pathSelectionProbeExpression(): string {
 export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath, selectPath = false, exactPath = false): string {
   const requestedPath = normalizedCompositionPath(compositionPath);
   const labels = (selectPath || exactPath) && (requestedPath === "image_text_upload" || requestedPath === "image_text_generate")
-    ? [requestedPath === "image_text_upload" ? "上传图片" : "文字配图"]
+    ? requestedPath === "image_text_upload" ? ["上传图片", "上传图文"] : ["文字配图"]
     : compositionPathLabels[requestedPath];
   return `(async () => {
     const requestedPath = ${JSON.stringify(requestedPath)};
