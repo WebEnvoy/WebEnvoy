@@ -857,7 +857,7 @@ export function commitProbeExpression(marker: string, expectedTitle?: string): s
       const mediaBound = Boolean(compositionBound && mediaScope && mediaScope !== scope && scope.contains(mediaScope));
       const media = mediaBound ? unique([...mediaScope.querySelectorAll('img.preview, img.preivew-image')]).filter((el) => {
         const r = el.getBoundingClientRect();
-        return visible(el) && r.width >= 80 && r.height >= 80;
+        return !el.closest('[data-decoy="true"], [data-testid*="decoy"], .decoy') && visible(el) && r.width >= 80 && r.height >= 80;
       }).length : 0;
       return {
         url: location.href,

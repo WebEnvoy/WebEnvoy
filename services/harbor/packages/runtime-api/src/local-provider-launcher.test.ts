@@ -24,8 +24,8 @@ import {
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
   const title = { value: "WE测试", getAttribute: () => "填写标题", getBoundingClientRect: () => rect };
-  const media = { getBoundingClientRect: () => rect };
-  const decoy = { getBoundingClientRect: () => rect };
+  const media = { closest: () => null, getBoundingClientRect: () => rect };
+  const decoy = { closest: () => ({ dataset: { decoy: "true" } }), getBoundingClientRect: () => rect };
   const imageInput = {
     parentElement: null as unknown,
     matches: () => false,
@@ -34,7 +34,7 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   };
   const mediaArea = {
     parentElement: null as unknown,
-    querySelectorAll: () => [media]
+    querySelectorAll: () => [media, decoy]
   };
   const editor: Record<string, unknown> = {
     parentElement: null,
@@ -57,7 +57,7 @@ test("#419 commit readback rejects decoy fields and scopes media to the unique c
   assert.equal(result.media_count, 1);
   mediaArea.querySelectorAll = () => [];
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).media_count, 0);
-  mediaArea.querySelectorAll = () => [media];
+  mediaArea.querySelectorAll = () => [media, decoy];
   body.parentElement = root;
   assert.equal(evaluate(document, { href: "https://creator.xiaohongshu.com/publish/update", pathname: "/publish/update" }, () => ({ display: "block", visibility: "visible" })).fields_matched, false);
   body.parentElement = editor;
