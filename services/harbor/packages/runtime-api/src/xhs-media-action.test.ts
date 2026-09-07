@@ -4,6 +4,7 @@ import {
   admitXhsMediaAction,
   completeXhsMediaAction,
   unavailableXhsMediaAction,
+  XhsMediaActionObservationStore,
   xhsMediaActionEffect,
   xhsMediaActionPath
 } from "./xhs-media-action.js";
@@ -65,6 +66,26 @@ test("preserves unknown upload outcome and never retries", () => {
   assert.equal(resolverFailure.normalized.recovery.entrypoint, "inspect_operation_ref");
   assert.equal(resolverFailure.normalized.submitted, false);
   assert.equal(unavailableXhsMediaAction("session_1", upload, "resource_unavailable").unavailable_reason, "resource_unavailable");
+});
+
+test("operation refs resolve to the same public media action observation", () => {
+  const store = new XhsMediaActionObservationStore();
+  const result = store.record(unavailableXhsMediaAction("session_1", upload, "media_ref_unavailable"));
+  const operationRef = result.normalized.operation.operation_ref;
+  const observation = store.get(operationRef);
+  assert.equal(observation?.evidence_ref, operationRef);
+  assert.equal(observation?.access_state, "available");
+  assert.equal(observation?.operation_status, "terminal");
+  assert.equal(observation?.terminal_state, "failure");
+  assert.equal(observation?.business_effect_status, "failed");
+  assert.equal(observation?.unavailable_reason, "media_ref_unavailable");
+  assert.equal(observation?.retention_state, "ephemeral");
+  assert.equal(observation?.storage_scope, "process_memory");
+  assert.equal(JSON.stringify(observation).includes(upload.summary), false);
+  assert.equal(JSON.stringify(observation).includes(upload.url), false);
+  assert.notEqual(store.get(operationRef), observation);
+  assert.equal(store.get(result.normalized.post_check.ref), undefined);
+  assert.equal(store.get("media_operation_missing"), undefined);
 });
 
 test("does not promote a terminal effect without page/media readback", () => {

@@ -101,6 +101,70 @@ export interface XhsMediaEvidenceRef {
   redaction: "refs_only";
 }
 
+export interface XhsMediaActionObservationRecord {
+  schema_version: "harbor-xhs-media-action-observation/v0";
+  ref: string;
+  evidence_ref: string;
+  access_state: "available";
+  kind: "operation";
+  runtime_session_ref: string;
+  observed_at: string;
+  operation_status: XhsMediaActionNormalizedResult["operation"]["status"];
+  terminal_state?: NonNullable<XhsMediaActionNormalizedResult["operation"]["terminal_state"]>;
+  business_effect_status: XhsMediaActionNormalizedResult["business_effect"]["status"];
+  unavailable_reason?: XhsMediaUnavailableReason;
+  reconciliation: XhsMediaActionNormalizedResult["reconciliation"];
+  submitted: false;
+  redaction_state: "summary_only";
+  retention_state: "ephemeral";
+  storage_scope: "process_memory";
+  public_boundary: {
+    raw_dom: "not_exposed";
+    screenshot_body: "not_exposed";
+    credentials: "not_exposed";
+    request_summary: "not_exposed";
+  };
+}
+
+export class XhsMediaActionObservationStore {
+  private readonly records = new Map<string, XhsMediaActionObservationRecord>();
+
+  record(result: XhsMediaActionResult): XhsMediaActionResult {
+    const ref = result.normalized.operation.operation_ref;
+    this.records.set(ref, {
+      schema_version: "harbor-xhs-media-action-observation/v0",
+      ref,
+      evidence_ref: ref,
+      access_state: "available",
+      kind: "operation",
+      runtime_session_ref: result.runtime_session_ref,
+      observed_at: new Date().toISOString(),
+      operation_status: result.normalized.operation.status,
+      ...(result.normalized.operation.terminal_state === undefined ? {} : { terminal_state: result.normalized.operation.terminal_state }),
+      business_effect_status: result.normalized.business_effect.status,
+      ...(result.unavailable_reason === undefined ? {} : { unavailable_reason: result.unavailable_reason }),
+      reconciliation: structuredClone(result.normalized.reconciliation),
+      submitted: false,
+      redaction_state: "summary_only",
+      retention_state: "ephemeral",
+      storage_scope: "process_memory",
+      public_boundary: {
+        raw_dom: "not_exposed",
+        screenshot_body: "not_exposed",
+        credentials: "not_exposed",
+        request_summary: "not_exposed"
+      }
+    });
+    while (this.records.size > 256) this.records.delete(this.records.keys().next().value!);
+    return result;
+  }
+
+  get(ref: string): XhsMediaActionObservationRecord | undefined {
+    const record = this.records.get(ref);
+    return record ? structuredClone(record) : undefined;
+  }
+}
+
 export type XhsMediaUnavailableReason =
   | "invalid_contract"
   | "resource_unavailable"
