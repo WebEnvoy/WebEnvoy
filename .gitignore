@@ -24,6 +24,7 @@ build/
 coverage/
 .nyc_output/
 .cache/
+.playwright-cli/
 .tmp/
 tmp/
 .temp/
