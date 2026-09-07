@@ -6,6 +6,7 @@ import {
   observeXhsPathPrepareRequest,
   providerConfigurationPageUrl,
   readTargetPageFacts,
+  sameWritePrecheckUrl,
   selectPage,
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
@@ -21,6 +22,14 @@ test("creator publish sessions warm the existing Xiaohongshu login before openin
     url: "https://example.com/publish/publish",
     identity_environment
   } as never), "https://example.com/publish/publish");
+});
+
+test("creator publish URL accepts only the bounded tab-switch redirect", () => {
+  const target = "https://creator.xiaohongshu.com/publish/publish";
+  assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch`, target), true);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=other`, target), false);
+  assert.equal(sameWritePrecheckUrl(`${target}?from=tab_switch&extra=1`, target), false);
+  assert.equal(sameWritePrecheckUrl(`https://attacker.example/publish/publish?from=tab_switch`, target), false);
 });
 
 test("selectPage matches equivalent page URLs by structured URL semantics", () => {

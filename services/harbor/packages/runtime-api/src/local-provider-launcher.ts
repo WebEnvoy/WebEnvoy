@@ -191,7 +191,7 @@ function normalizedCompositionPath(value: XhsWritePrecheckCompositionPath | unde
   return value && writePrecheckCompositionPaths.has(value) ? value : "image_text_upload";
 }
 
-function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
+export function sameWritePrecheckUrl(observed: string | undefined, expected: string): boolean {
   if (!observed) return false;
   try {
     const actual = new URL(observed);
@@ -199,7 +199,8 @@ function sameWritePrecheckUrl(observed: string | undefined, expected: string): b
     if (actual.origin !== target.origin || actual.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "") || actual.hash || target.hash) return false;
     const actualParams = [...actual.searchParams].sort(([a], [b]) => a.localeCompare(b));
     const targetParams = [...target.searchParams].sort(([a], [b]) => a.localeCompare(b));
-    return JSON.stringify(actualParams) === JSON.stringify(targetParams);
+    return JSON.stringify(actualParams) === JSON.stringify(targetParams) ||
+      (targetParams.length === 0 && actualParams.length === 1 && actual.searchParams.get("from") === "tab_switch");
   } catch {
     return false;
   }
