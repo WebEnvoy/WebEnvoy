@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
-import { createFileRunRecordStore } from "./run-record-store.js";
+import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-store.js";
 import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
@@ -618,6 +618,34 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.failure.code, "capability_deprecated");
     assert.equal(result.run_record?.status, "failed");
+    assert.equal(harborCalls, 0);
+
+    const continuation = await continueWritePrecheckTask({
+      getRunRecord: async () => ({
+        status: "requires_user_action",
+        task_intent_ref: pathTask.intent_id,
+        package_ref: pathContract.package_ref,
+        capability_ref: pathTask.capability.ref,
+        scope_target_ref: pathTask.scope.target_ref
+      })
+    } as unknown as FileRunRecordStore, {
+      run_id: "app-xhs-path-prepare-historical-confirmation",
+      task_intent: pathTask,
+      package_ref: pathContract.package_ref,
+      authorization_context: context,
+      single_action_decision: singleActionDecision(await evaluate("confirm"))
+    }, {
+      lodePackageResolver: async () => pathContract,
+      harborRuntimeClient: {
+        collectAdmissionFacts: async () => { harborCalls += 1; throw new Error("retired package must stop before Harbor"); },
+        validateOnlyWritePrecheck: async () => { harborCalls += 1; throw new Error("retired package must stop before Harbor"); },
+        executeReadOperation: async () => { harborCalls += 1; throw new Error("retired package must stop before Harbor"); },
+        releaseCoreTaskSession: async () => { harborCalls += 1; throw new Error("retired package must stop before Harbor"); }
+      } as HarborRuntimeClient,
+      clock: () => new Date(evaluatedAt)
+    });
+    assert.equal(continuation.ok, false);
+    if (!continuation.ok) assert.equal(continuation.failure.code, "capability_deprecated");
     assert.equal(harborCalls, 0);
   } finally {
     await rm(pathDirectory, { recursive: true, force: true });
