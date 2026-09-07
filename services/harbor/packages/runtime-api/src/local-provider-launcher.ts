@@ -2939,14 +2939,13 @@ function urlsReferToSamePage(candidate_url?: string, requested_url?: string): bo
     const candidate = new URL(candidate_url);
     const requested = new URL(requested_url);
     if (!["http:", "https:"].includes(candidate.protocol) || !["http:", "https:"].includes(requested.protocol)) return false;
-    return candidate.origin === requested.origin &&
-      candidate.pathname === requested.pathname &&
-      candidate.hash === requested.hash &&
-      (normalizedQuery(candidate) === normalizedQuery(requested) ||
-        (candidate.origin === "https://creator.xiaohongshu.com" &&
-          ["/publish/publish", "/publish/publish/"].includes(candidate.pathname) &&
-          sameWritePrecheckUrl(candidate_url, requested_url)) ||
-        isBoundedXiaohongshuSearchRedirect(candidate, requested));
+    return candidate.origin === requested.origin && candidate.hash === requested.hash && (
+      (candidate.pathname === requested.pathname &&
+        (normalizedQuery(candidate) === normalizedQuery(requested) || isBoundedXiaohongshuSearchRedirect(candidate, requested))) ||
+      (candidate.origin === "https://creator.xiaohongshu.com" &&
+        ["/publish/publish", "/publish/publish/"].includes(candidate.pathname) &&
+        sameWritePrecheckUrl(candidate_url, requested_url))
+    );
   } catch {
     return candidate_url === requested_url;
   }

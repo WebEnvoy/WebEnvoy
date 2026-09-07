@@ -81,7 +81,9 @@ test("selectPage accepts only the bounded creator tab-switch redirect with other
   const creator = { id: "creator", type: "page", url: `${requestedUrl}?from=tab_switch`, webSocketDebuggerUrl: "ws://creator" };
 
   assert.equal(selectPage([explore, creator], requestedUrl)?.id, "creator");
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=tab_switch` }], requestedUrl)?.id, "creator");
   assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}?from=other` }], requestedUrl), undefined);
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=other` }], requestedUrl), undefined);
 });
 
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
