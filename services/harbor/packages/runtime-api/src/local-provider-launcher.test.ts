@@ -75,6 +75,15 @@ test("selectPage accepts the bounded Xiaohongshu search type redirect", () => {
   }
 });
 
+test("selectPage accepts only the bounded creator tab-switch redirect with other tabs present", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish";
+  const explore = { id: "explore", type: "page", url: "https://www.xiaohongshu.com/explore", webSocketDebuggerUrl: "ws://explore" };
+  const creator = { id: "creator", type: "page", url: `${requestedUrl}?from=tab_switch`, webSocketDebuggerUrl: "ws://creator" };
+
+  assert.equal(selectPage([explore, creator], requestedUrl)?.id, "creator");
+  assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}?from=other` }], requestedUrl), undefined);
+});
+
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?tag=first&tag=second";
   const reordered = { id: "reordered", type: "page", url: "https://www.xiaohongshu.com/search_result?tag=second&tag=first", webSocketDebuggerUrl: "ws://reordered" };
@@ -170,6 +179,49 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /strictPath \? controls\.filter\(\(el\) => visible\(el, false\)\) : controls/);
   assert.doesNotMatch(upload, /querySelectorAll\('button, \[role="button"\], \[role="tab"\]'\)/);
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
+});
+
+test("#405 path probe does not click a data-testid decoy", async () => {
+  let clicks = 0;
+  const app = {
+    hidden: false,
+    contains: () => true,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 100, height: 100, right: 100, bottom: 100, left: 0, top: 0 }),
+    checkVisibility: () => true,
+    querySelectorAll: () => []
+  };
+  const decoy = {
+    disabled: false,
+    hidden: false,
+    textContent: "上传图文",
+    getAttribute: () => null,
+    closest: (selector: string) => selector.includes('[data-testid*="decoy"]') ? {} : null,
+    getBoundingClientRect: () => ({ width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
+    checkVisibility: () => true,
+    querySelector: () => null,
+    click: () => { clicks += 1; }
+  };
+  const document = {
+    body: { innerText: "" },
+    querySelector: () => app,
+    querySelectorAll: (selector: string) => selector.includes("login") ? [] : [decoy]
+  };
+  const evaluate = new Function(
+    "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "HTMLInputElement", "setTimeout",
+    `return ${writePrecheckProbeExpression("image_text_upload", true)}`
+  );
+  const result = await evaluate(
+    document,
+    { href: "https://creator.xiaohongshu.com/publish/publish", origin: "https://creator.xiaohongshu.com", pathname: "/publish/publish" },
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }),
+    100,
+    100,
+    class {},
+    (resolve: () => void) => resolve()
+  );
+  assert.equal(result.selection_status, "unknown");
+  assert.equal(clicks, 0);
 });
 
 test("#405 path request observation continues requests and leaves external effects unknown", () => {

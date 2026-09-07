@@ -943,7 +943,7 @@ function pathSelectionProbeExpression(): string {
               style.zIndex !== '-1' && Number(style.opacity) >= 0.01 &&
               rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
               !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
-              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"]') &&
+              !el.closest('[aria-hidden="true"], [hidden], [data-decoy="true"], [data-testid*="decoy"], .decoy') &&
               (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
           };
           const controls = [...document.querySelectorAll('#app .header-tabs .creator-tab, [data-v-app] .header-tabs .creator-tab, [role="tab"], [role="tablist"] button, [role="tablist"] [role="button"], button[aria-controls], button[aria-selected], [role="button"][aria-controls], [role="button"][aria-selected]')]
@@ -2943,6 +2943,9 @@ function urlsReferToSamePage(candidate_url?: string, requested_url?: string): bo
       candidate.pathname === requested.pathname &&
       candidate.hash === requested.hash &&
       (normalizedQuery(candidate) === normalizedQuery(requested) ||
+        (candidate.origin === "https://creator.xiaohongshu.com" &&
+          ["/publish/publish", "/publish/publish/"].includes(candidate.pathname) &&
+          sameWritePrecheckUrl(candidate_url, requested_url)) ||
         isBoundedXiaohongshuSearchRedirect(candidate, requested));
   } catch {
     return candidate_url === requested_url;

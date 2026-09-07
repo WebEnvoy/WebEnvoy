@@ -46,7 +46,7 @@ import {
   consumeManualAuthenticationAuthorizationGrant,
   type ManualAuthenticationAuthorizationGrant
 } from "./manual-authentication-authorization.js";
-import { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
+import { createFixtureLauncher, launchLocalDedicatedProvider, sameWritePrecheckUrl } from "./local-provider-launcher.js";
 import {
   admitAllowlistedReadOperation,
   ReadOperationObservationStore,
@@ -1370,7 +1370,7 @@ export class HarborRuntime {
   ): WritePrecheckFailureClass | null {
     const session = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!session) return "session_missing";
-    if (session.facts.current_page.current_url !== url || session.facts.current_page.status !== "ready") return "page_changed";
+    if (!sameWritePrecheckUrl(session.facts.current_page.current_url ?? undefined, url) || session.facts.current_page.status !== "ready") return "page_changed";
     const identityRef = session.facts.identity_environment_ref;
     const identity = identityRef ? this.identityEnvironments.getFacts(identityRef) : null;
     if (
