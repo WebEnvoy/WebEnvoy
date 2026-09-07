@@ -1272,7 +1272,10 @@ export class HarborRuntime {
     runtime_session_ref: string,
     input: unknown
   ): Promise<XhsMediaActionResult> {
-    const finish = (result: XhsMediaActionResult) => this.xhsMediaActionObservations.record(result);
+    const finish = (
+      result: XhsMediaActionResult,
+      diagnostics?: NonNullable<Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]>
+    ) => this.xhsMediaActionObservations.record(result, diagnostics);
     const admitted = admitXhsMediaAction(input);
     if (!admitted) return finish(unavailableXhsMediaAction(
       runtime_session_ref,
@@ -1305,7 +1308,10 @@ export class HarborRuntime {
       return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, "operation_result_unknown", result.status === "completed" ? result.operation_ref : undefined));
     }
     if (result.status === "unavailable") {
-      return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref));
+      return finish(
+        unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(result.failure_class), result.operation_ref),
+        result.diagnostics
+      );
     }
     const after = this.writePrecheckSessionFailure(runtime_session_ref, admitted.url, admitted.holder_ref);
     if (after) return finish(unavailableXhsMediaAction(runtime_session_ref, admitted, mediaFailureReason(after), result.operation_ref));
