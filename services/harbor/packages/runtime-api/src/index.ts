@@ -1579,6 +1579,7 @@ function mediaFailureReason(
     case "session_user_controlled": return "permission_insufficient";
     case "page_changed": return "page_changed";
     case "safety_challenge": return "safety_challenge";
+    case "resource_unavailable": return "resource_unavailable";
     case "media_ref_unavailable": return "media_ref_unavailable";
     case "generation_unavailable": return "generation_unavailable";
     case "operation_result_unknown": return "operation_result_unknown";

@@ -283,6 +283,7 @@ export type LocalProviderMediaActionResult =
         | "permission_insufficient"
         | "page_changed"
         | "safety_challenge"
+        | "resource_unavailable"
         | "media_ref_unavailable"
         | "generation_unavailable"
         | "operation_result_unknown"

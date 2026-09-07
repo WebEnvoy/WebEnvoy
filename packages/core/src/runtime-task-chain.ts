@@ -1570,6 +1570,10 @@ type XhsMediaActionValidation =
   | { ok: true; operation: JsonObject; source_refs: string[]; evidence_refs: string[]; result_ref: string; result_status: "available" | "empty" | "unavailable" }
   | { ok: false; failure: FailureRecord };
 
+type XhsMediaActionProjection = Pick<Extract<XhsMediaActionValidation, { ok: true }>, "source_refs" | "evidence_refs"> & {
+  public_result_summary: Record<string, unknown>;
+};
+
 /**
  * Harbor owns its transport envelope; Core projects that envelope to the
  * Lode output shape before any result validation or persistence.  Keeping the
@@ -1640,7 +1644,6 @@ function validateCompletedXhsMediaAction(
   const sourceValues = sourceRefs.map((entry) => mediaRef(entry?.ref_id));
   const evidenceValues = evidenceRefs.map((entry) => mediaRef(entry?.ref_id));
   const sourceKinds = sourceRefs.map((entry) => string(entry?.source_kind));
-  const evidenceKinds = evidenceRefs.map((entry) => string(entry?.evidence_kind));
   const sourceValid = sourceRefs.every((entry) =>
     exactObjectKeys(entry, ["ref_id", "source_kind", "producer", "redaction", "schema_hint"]) &&
     mediaRef(entry.ref_id) !== undefined &&
@@ -1705,7 +1708,7 @@ function validateCompletedXhsMediaAction(
     return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_invalid") };
   }
   if ((topStatus === "available" && !sourceKinds.includes("media_action_summary")) ||
-    (topStatus === "available" && !evidenceKinds.includes("operation_ref")) ||
+    !evidenceRefs.some((entry) => entry?.evidence_kind === "operation_ref" && mediaRef(entry.ref_id) === operationRef) ||
     (operationStatus === "unknown_outcome" && recovery?.status !== "unknown" && recovery?.status !== "required")) {
     return { ok: false, failure: mediaActionFailure("harbor_xhs_media_output_refs_invalid") };
   }
@@ -1743,7 +1746,8 @@ async function releaseAcceptedMediaSession(
   client: HarborRuntimeClient,
   runtimeSessionRef: string,
   primaryFailure?: FailureRecord,
-  terminalStatus: "failed" | "unknown_outcome" = "failed"
+  terminalStatus: "failed" | "unknown_outcome" = "failed",
+  projection?: XhsMediaActionProjection
 ): Promise<TaskSubmissionResult | undefined> {
   let cleanupFailure: FailureRecord | undefined;
   try {
@@ -1756,7 +1760,11 @@ async function releaseAcceptedMediaSession(
   await store.updateRunRecord(result.run_record.run_id, {
     status: "running",
     runtime_binding_refs: [runtimeSessionRef],
-    public_result_summary: {
+    ...(projection === undefined ? {} : {
+      source_refs: projection.source_refs,
+      evidence_refs: projection.evidence_refs,
+    }),
+    public_result_summary: projection?.public_result_summary ?? {
       schema_version: "webenvoy.core-xhs-media-action-projection.v0",
       submitted: false,
       outcome: terminalStatus === "unknown_outcome" ? "unknown" : "cleanup_failed",
@@ -1767,6 +1775,7 @@ async function releaseAcceptedMediaSession(
   const completed = await completeRunWithFailure(store, result.run_record.run_id, {
     status: terminalStatus,
     failure: terminalFailure,
+    ...(projection === undefined ? {} : { evidence_refs: projection.evidence_refs }),
     retention_state: "active",
     post_check: {
       schema_version: "webenvoy.post-check-result.v0",
@@ -1778,7 +1787,8 @@ async function releaseAcceptedMediaSession(
       code: cleanupFailure.code,
       attribution: "runtime",
       recovery_hint: cleanupFailure.recovery_hint,
-      source_refs: [runtimeSessionRef],
+      source_refs: [...new Set([runtimeSessionRef, ...(projection?.source_refs ?? [])])],
+      ...(projection === undefined ? {} : { evidence_refs: projection.evidence_refs }),
       consumer_boundary: "Core exposes only structured media action failure, cleanup classification and opaque runtime session ref."
     }
   });
@@ -1825,6 +1835,11 @@ async function completeAcceptedXhsMediaAction(
   }
   const operationObject = validation.operation;
   const summary = mediaActionPublicSummary(operationObject, runtimeSessionRef);
+  const projection = {
+    source_refs: validation.source_refs,
+    evidence_refs: validation.evidence_refs,
+    public_result_summary: summary,
+  };
   const normalized = object(operationObject.normalized)!;
   const lifecycle = object(normalized.operation)!;
   const postCheck = object(normalized.post_check)!;
@@ -1850,7 +1865,7 @@ async function completeAcceptedXhsMediaAction(
         consumer_boundary: "Core preserves the operation ref and manual reconciliation entrypoint; it does not claim asynchronous recheck support."
       }
     });
-    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome");
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome", projection);
     if (cleanup) return cleanup;
     const completed = await completeRunWithFailure(store, result.run_record.run_id, {
       status: "unknown_outcome",
@@ -1881,7 +1896,7 @@ async function completeAcceptedXhsMediaAction(
       evidence_refs: validation.evidence_refs,
       public_result_summary: summary
     });
-    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome");
+    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unknownFailure, "unknown_outcome", projection);
     if (cleanup) return cleanup;
     const completed = await completeRunWithFailure(store, result.run_record.run_id, {
       status: "unknown_outcome",
@@ -1903,25 +1918,41 @@ async function completeAcceptedXhsMediaAction(
     });
     return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
   }
-  const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef);
+  const unavailableReason = operationObject.status === "unavailable" ? string(operationObject.unavailable_reason) : undefined;
+  const unavailableFailure = unavailableReason === undefined
+    ? undefined
+    : failure("runtime_execution", `harbor_media_action_${unavailableReason}`, "execution", "repair_browser_environment");
+  if (unavailableReason !== undefined) {
+    await store.updateRunRecord(result.run_record.run_id, {
+      status: "running",
+      runtime_binding_refs: [runtimeSessionRef],
+      source_refs: validation.source_refs,
+      evidence_refs: validation.evidence_refs,
+      public_result_summary: summary,
+    });
+  }
+  const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unavailableFailure, "failed", projection);
   if (cleanup) return cleanup;
   const corePostCheck = {
     schema_version: "webenvoy.post-check-result.v0" as const,
-    status: postCheck.status === "passed" ? "passed" as const : postCheck.status === "failed" ? "failed" as const : "not_run" as const,
-    summary: postCheck.status === "passed" ? "Harbor verified media readback and page state after the media action." : "Harbor media action post-check did not pass.",
+    status: unavailableReason !== undefined ? "blocked" as const : postCheck.status === "passed" ? "passed" as const : postCheck.status === "failed" ? "failed" as const : "not_run" as const,
+    summary: unavailableReason !== undefined
+      ? "Harbor could not execute the bounded media action; no draft or publish action was attempted."
+      : postCheck.status === "passed" ? "Harbor verified media readback and page state after the media action." : "Harbor media action post-check did not pass.",
     checked_at: new Date().toISOString(),
-    attribution: postCheck.status === "passed" ? "runtime" as const : "unknown" as const,
-    recovery_hint: postCheck.status === "passed" ? "none" : "reconcile_status",
-    evidence_refs: [postCheck.ref as string],
+    attribution: unavailableReason !== undefined || postCheck.status === "passed" ? "runtime" as const : "unknown" as const,
+    recovery_hint: unavailableReason !== undefined ? "repair_browser_environment" : postCheck.status === "passed" ? "none" : "reconcile_status",
+    evidence_refs: unavailableReason !== undefined ? validation.evidence_refs : [postCheck.ref as string],
     source_refs: validation.source_refs,
     consumer_boundary: "Core persists only redacted media action refs, page/media readback and post-check state; save draft and publish remain out of scope.",
-    ...(postCheck.status === "passed" ? {} : { code: "media_action_post_check_failed" })
+    ...(unavailableReason !== undefined
+      ? { code: `harbor_media_action_${unavailableReason}` }
+      : postCheck.status === "passed" ? {} : { code: "media_action_post_check_failed" })
   };
   if (operationObject.status !== "available" || lifecycle.terminal_state !== "success" || postCheck.status !== "passed") {
-    const terminalFailure = mediaActionFailure(
-      postCheck.status === "passed" ? `media_action_${operationObject.status}` : "media_action_post_check_failed",
-      "runtime_execution"
-    );
+    const terminalFailure = unavailableFailure !== undefined
+      ? unavailableFailure
+      : mediaActionFailure(postCheck.status === "passed" ? `media_action_${operationObject.status}` : "media_action_post_check_failed", "runtime_execution");
     const completed = await completeRunWithFailure(store, result.run_record.run_id, {
       failure: terminalFailure,
       evidence_refs: validation.evidence_refs,
@@ -2079,56 +2110,6 @@ async function dispatchApprovedXhsMediaAction(
         recovery_hint: "reconcile_status",
         source_refs: [runtimeSessionRef],
         consumer_boundary: "Core records unknown outcome and opaque runtime binding only."
-      }
-    });
-    return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
-  }
-  const operationObject = object(operation);
-  const unavailableReason = string(operationObject?.unavailable_reason);
-  if (operationObject?.status === "unavailable" &&
-    (unavailableReason === "operation_result_unknown" || unavailableReason === "reconciliation_unknown")) {
-    const canonical = normalizePublicHttpTarget(result.task_intent.scope.target_ref);
-    if (!canonical.ok) {
-      return completeAcceptedMediaAdmissionFailure(store, result, failure("capability_contract", "media_action_target_invalid", "admission", "fix_input"), runtimeSessionRef, undefined, client);
-    }
-    // Harbor's synchronous adapter reports an unresolved operation as an
-    // unavailable envelope (not an async accepted/running response). Reuse
-    // the strict result validator so Core persists its operation ref and
-    // exposes manual reconciliation without claiming a recheck endpoint.
-    return completeAcceptedXhsMediaAction(
-      store,
-      result,
-      operation,
-      runtimeSessionRef,
-      target.target_ref,
-      actionId,
-      requestedPath,
-      canonical.target_ref,
-      client
-    );
-  }
-  if (operationObject?.status === "unavailable") {
-    const unavailableFailure = failure(
-      "runtime_execution",
-      `harbor_media_action_${unavailableReason ?? "unavailable"}`,
-      "execution",
-      operationObject.retryable === true ? "retry_after_refresh" : "repair_browser_environment"
-    );
-    const cleanup = await releaseAcceptedMediaSession(store, result, client, runtimeSessionRef, unavailableFailure);
-    if (cleanup) return cleanup;
-    const completed = await completeRunWithFailure(store, result.run_record.run_id, {
-      failure: unavailableFailure,
-      retention_state: "active",
-      post_check: {
-        schema_version: "webenvoy.post-check-result.v0",
-        status: "blocked",
-        summary: "Harbor could not execute the bounded media action; no draft or publish action was attempted.",
-        checked_at: new Date().toISOString(),
-        code: unavailableFailure.code,
-        attribution: "runtime",
-        recovery_hint: unavailableFailure.recovery_hint,
-        source_refs: [runtimeSessionRef],
-        consumer_boundary: "Core stores only structured media action availability and opaque runtime refs."
       }
     });
     return { ok: false, failure: completed.run_record.failure!, run_record: completed.run_record };
