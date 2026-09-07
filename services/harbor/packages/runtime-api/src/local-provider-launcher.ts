@@ -673,7 +673,7 @@ export function imageFileInputProbeExpression(): string {
   return String.raw`(() => {
     const candidates = [...document.querySelectorAll('#app input[type="file"], [data-v-app] input[type="file"]')]
       .filter((el) => (el.accept || '').split(',').some((value) => /^(?:image\/(?:\*|jpeg|png|webp)|\.jpe?g|\.png|\.webp)$/i.test(value.trim())) &&
-        !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.closest('[data-decoy="true"]'));
+        !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [data-decoy="true"], [data-testid*="decoy"], .decoy'));
     return candidates.length === 1 ? candidates[0] : null;
   })()`;
 }

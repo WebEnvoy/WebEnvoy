@@ -165,6 +165,8 @@ test("#409 media upload targets one app-owned image input without depending on a
   const probe = imageFileInputProbeExpression();
   assert.match(probe, /#app input\[type=\"file\"\], \[data-v-app\] input\[type=\"file\"\]/);
   assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
+  assert.match(probe, /matches\(':disabled'\)/);
+  assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /candidates\.length === 1/);
   assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
 });
