@@ -298,6 +298,18 @@ export type LocalProviderMediaActionResult =
       retryable: boolean;
       operation_ref?: string;
       page?: LocalProviderPageFacts;
+      diagnostics?: {
+        failure_stage:
+          | "media_ref_resolution"
+          | "file_input_missing"
+          | "file_input_ambiguous"
+          | "file_input_object_resolution"
+          | "file_input_node_resolution"
+          | "set_file_input_files";
+        image_input_candidate_count?: number;
+        image_path_candidate_count?: number;
+        set_file_input_files: "not_called" | "unknown";
+      };
       submitted: false;
     };
 

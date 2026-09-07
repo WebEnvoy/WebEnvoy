@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   imageFileInputProbeExpression,
+  imageUploadPathProbeExpression,
   observeXhsPathPrepareRequest,
   readTargetPageFacts,
   selectPage,
@@ -169,6 +170,17 @@ test("#409 media upload targets one app-owned image input without depending on a
   assert.match(probe, /\[aria-disabled=\\?"true\\?"\].*\[data-decoy=\\?"true\\?"\].*\[data-testid\*=\\?"decoy\\?"\].*\.decoy/);
   assert.match(probe, /candidates\.length === 1/);
   assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
+});
+
+test("#409 media upload selects only the unique actionable image-text path before resolving the file input", () => {
+  const probe = imageUploadPathProbeExpression();
+  assert.match(probe, /\.header-tabs \.creator-tab/);
+  assert.match(probe, /=== '上传图文'/);
+  assert.match(probe, /pathEntries\.length === 1/);
+  assert.match(probe, /document\.elementFromPoint/);
+  assert.match(probe, /Number\(style\.opacity\) >= 0\.01/);
+  assert.match(probe, /image_input_candidate_count/);
+  assert.doesNotMatch(probe, /上传视频|文字配图|保存草稿|发布笔记/);
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {
