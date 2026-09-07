@@ -483,15 +483,14 @@ async function probeProviderWritePrecheck(
 const XHS_MEDIA_ACTION_CDP_COMMANDS = [
   "Runtime.enable",
   "Runtime.evaluate",
-  "Runtime.callFunctionOn",
-  "Runtime.releaseObject",
   "Accessibility.enable",
   "Accessibility.getFullAXTree",
   "Page.enable",
   "Page.bringToFront",
   "DOM.enable",
-  "DOM.resolveNode",
+  "DOM.getBoxModel",
   "DOM.setFileInputFiles",
+  "Input.dispatchMouseEvent",
   "Fetch.enable",
   "Fetch.continueRequest",
   "Fetch.failRequest",
@@ -787,18 +786,18 @@ async function accessibilityNodes(client: CdpClient): Promise<AxNode[]> {
 }
 
 async function clickBackendNode(client: CdpClient, backendNodeId: number): Promise<boolean> {
-  const resolved = await sendMediaActionCdp(client, "DOM.resolveNode", { backendNodeId });
-  const objectId = (resolved.object as { objectId?: unknown } | undefined)?.objectId;
-  if (typeof objectId !== "string") return false;
   try {
-    const clicked = await sendMediaActionCdp(client, "Runtime.callFunctionOn", {
-      objectId,
-      functionDeclaration: "function(){const target=this.closest?.('button,a,[role=button],[role=link]')||this;if(target.disabled||target.getAttribute?.('aria-disabled')==='true')return false;target.click();return true;}",
-      returnByValue: true
-    });
-    return (clicked.result as { value?: unknown } | undefined)?.value === true;
-  } finally {
-    await sendMediaActionCdp(client, "Runtime.releaseObject", { objectId }).catch(() => undefined);
+    const response = await sendMediaActionCdp(client, "DOM.getBoxModel", { backendNodeId });
+    const quad = (response.model as { content?: unknown } | undefined)?.content;
+    if (!Array.isArray(quad) || quad.length !== 8 || !quad.every((value) => typeof value === "number" && Number.isFinite(value))) return false;
+    const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
+    const y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
+    await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await sendMediaActionCdp(client, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -862,6 +861,10 @@ async function executeCommitControl(
   const marker = input.marker!;
   if (!save && input.visibility !== "public") {
     return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The requested non-public visibility has not been selected exactly.", retryable: false, submitted: false };
+  }
+  const before = await evaluateCommitProbe(client, marker);
+  if (!before?.marker_matched || !before.fields_matched || before.media_count < 1) {
+    return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The current composition does not match the authorized marker, fields and media.", retryable: false, submitted: false };
   }
   const clicked = await clickExactAxButton(client, save ? "暂存离开" : "发布");
   if (!clicked) return { status: "unavailable", failure_class: "commit_control_unavailable", message: "The exact commit control is unavailable or ambiguous.", retryable: false, submitted: false };

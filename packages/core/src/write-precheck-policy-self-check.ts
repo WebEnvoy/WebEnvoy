@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createFileAuthorizationDecisionStore, type FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { createFileRunRecordStore, type FileRunRecordStore } from "./run-record-store.js";
-import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, type HarborRuntimeClient } from "./runtime-task-chain.js";
+import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterruptedCoreTaskSessions, submitRuntimeTask, validateCompletedXhsMediaAction, type HarborRuntimeClient } from "./runtime-task-chain.js";
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
 import {
@@ -1285,6 +1285,61 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
 
   await assertXhsMediaActionP1Wiring();
   await assertXhsFieldActionWiring();
+  assertXhsCommitProjection();
+}
+
+function assertXhsCommitProjection(): void {
+  const operationRef = "media_operation_commit_unknown";
+  const result = validateCompletedXhsMediaAction({
+    result_kind: "xhs_publish_note_image_text_commit",
+    status: "unavailable",
+    classification: "not_normalizable",
+    unavailable_reason: "operation_result_unknown",
+    normalized: {
+      action_id: "xhs_publish_note_image_text_commit.save_draft",
+      requested_path: "image_text_upload",
+      canonical_url: "https://creator.xiaohongshu.com/publish/publish?from=tab_switch",
+      target_ref: "target_commit_projection",
+      marker_state: "matched",
+      visibility_state: "not_applicable",
+      business_effect: { kind: "save_draft", status: "unknown" },
+      operation: { status: "unknown_outcome", operation_ref: operationRef },
+      content_readback: {
+        state: "unknown",
+        management_list_state: "unknown",
+        detail_state: "not_run",
+        fields_state: "unknown",
+        media_state: "unknown",
+        marker_state: "matched",
+        content_ref: null,
+        canonical_url: null
+      },
+      post_check: { status: "skipped", ref: "post_check_commit_unknown" },
+      reconciliation: { status: "unknown", ref: "reconciliation_commit_unknown" },
+      recovery: { status: "required", entrypoint: "manual_reconciliation" },
+      submitted: true
+    },
+    source_refs: ["commit", "page", "business"].map((kind) => ({
+      ref_id: `source_commit_${kind}`,
+      source_kind: kind === "commit" ? "commit_action_summary" : kind === "page" ? "creator_publish_page_summary" : "business_state_summary",
+      producer: "harbor",
+      redaction: "summary_only",
+      schema_hint: "harbor-xhs-commit-action-summary.v0"
+    })),
+    evidence_refs: [
+      { ref_id: operationRef, evidence_kind: "operation_ref", producer: "harbor", redaction: "placeholder_only" },
+      { ref_id: "snapshot_commit_unknown", evidence_kind: "snapshot_ref", producer: "harbor", redaction: "placeholder_only" },
+      { ref_id: "post_check_commit_unknown", evidence_kind: "post_check_ref", producer: "harbor", redaction: "placeholder_only" },
+      { ref_id: "reconciliation_commit_unknown", evidence_kind: "reconciliation_ref", producer: "harbor", redaction: "placeholder_only" }
+    ]
+  }, {
+    runtime_session_ref: "session_commit_projection",
+    action_id: "xhs_publish_note_image_text_commit.save_draft",
+    requested_path: "image_text_upload",
+    canonical_url: "https://creator.xiaohongshu.com/publish/publish",
+    target_ref: "target_commit_projection"
+  });
+  assert.equal(result.ok, true, "unknown commit outcomes must retain the same operation for reconciliation");
 }
 
 async function assertXhsFieldActionWiring(): Promise<void> {

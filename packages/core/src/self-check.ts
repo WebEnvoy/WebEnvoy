@@ -206,6 +206,50 @@ async function assertDetailRequestOmitsRawUrl(): Promise<void> {
   }
 }
 
+async function assertCommitRequestCarriesReconciliationKeys(): Promise<void> {
+  let body = "";
+  const previousToken = process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+  process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = "core-commit-self-check-token";
+  const server = createServer((request, response) => {
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "unavailable" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const client = createHttpHarborRuntimeClient({ baseUrl: `http://127.0.0.1:${address.port}` });
+    await client.executeMediaAction!({
+      runtime_session_ref: "session-commit",
+      url: "https://creator.xiaohongshu.com/publish/publish",
+      target_ref: "target-commit",
+      action_id: "xhs_publish_note_image_text_commit.save_draft",
+      requested_path: "image_text_upload",
+      refs: [],
+      summary: "save marked test draft",
+      marker: "WE-XHS-E2E-20260907-2214",
+      visibility: "not_applicable",
+      authorization_binding: {
+        decision_ref: "decision-commit",
+        action_id: "xhs_publish_note_image_text_commit.save_draft",
+        target_ref: "target-commit",
+        idempotency_key: "commit-request-self-check"
+      }
+    });
+    const request = JSON.parse(body);
+    assert.equal(request.marker, "WE-XHS-E2E-20260907-2214");
+    assert.equal(request.visibility, "not_applicable");
+  } finally {
+    if (previousToken === undefined) delete process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN;
+    else process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN = previousToken;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
 function nextInstant(): Date {
   const instant = new Date(Date.UTC(2026, 6, 1, 0, 0, tick));
   tick += 1;
@@ -1517,6 +1561,7 @@ console.log("Validated read-only task submission admission.");
 await assertDetailTargetStore();
 console.log("Validated bound, expiring, single-use detail targets.");
 await assertDetailRequestOmitsRawUrl();
+await assertCommitRequestCarriesReconciliationKeys();
 console.log("Validated detail dispatch omits caller-provided Harbor URL.");
 assertHarborFailureRecoveryClassification();
 console.log("Validated Harbor browser-environment recovery classification and failed-session cleanup proof.");

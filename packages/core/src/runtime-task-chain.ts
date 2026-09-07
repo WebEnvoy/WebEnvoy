@@ -1631,7 +1631,7 @@ function exactObjectKeys(value: unknown, required: readonly string[], optional: 
   return required.every((key) => Object.hasOwn(entry, key)) && Object.keys(entry).every((key) => allowed.has(key));
 }
 
-function validateCompletedXhsMediaAction(
+export function validateCompletedXhsMediaAction(
   value: unknown,
   expected: {
     runtime_session_ref: string;
@@ -4149,6 +4149,8 @@ export function createHttpHarborRuntimeClient(options: HttpHarborRuntimeClientOp
             requested_path: input.requested_path,
             refs: input.refs,
             summary: input.summary,
+            ...(input.marker === undefined ? {} : { marker: input.marker }),
+            ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
             no_submit_guard: "active",
             ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref }),
             authorization_binding: input.authorization_binding
