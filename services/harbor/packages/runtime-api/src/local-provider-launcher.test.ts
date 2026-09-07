@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   imageFileInputProbeExpression,
   observeXhsPathPrepareRequest,
-  pathSelectionFailureClass,
   readTargetPageFacts,
   selectPage,
   validateXhsWritePrecheckObservation,
@@ -133,13 +132,12 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(generate, /文字配图/);
   assert.match(upload, /selectPath = true/);
   assert.match(upload, /strictPath = true/);
-  assert.match(upload, /pathLabels = \["上传图片","上传图文"\]/);
+  assert.match(upload, /pathLabels = \["上传图片"\]/);
   assert.match(upload, /input\[type=["']file["']\]/);
   assert.doesNotMatch(upload, /normalizeControlLabel\(el\)\.includes/);
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
   assert.match(upload, /controls\.length !== 1/);
-  assert.match(upload, /upload_image_entry_visible/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
   assert.match(upload, /rect\.right > 0.*rect\.left < innerWidth/);
@@ -169,12 +167,6 @@ test("#409 media upload targets one app-owned image input without depending on a
   assert.match(probe, /image\\\/\(\?:\\\*\|jpeg\|png\|webp\)/);
   assert.match(probe, /candidates\.length === 1/);
   assert.doesNotMatch(probe, /input\.upload-input\[type=\"file\"\]/);
-});
-
-test("#409 path selection distinguishes visible selector drift from a missing entry", () => {
-  assert.equal(pathSelectionFailureClass("image_text_upload", { upload_image_entry_visible: true }), "evidence_unavailable");
-  assert.equal(pathSelectionFailureClass("image_text_generate", { text_image_entry_visible: true }), "evidence_unavailable");
-  assert.equal(pathSelectionFailureClass("image_text_upload", undefined), "page_changed");
 });
 
 test("#405 observation preserves path state for the bounded path branch", () => {

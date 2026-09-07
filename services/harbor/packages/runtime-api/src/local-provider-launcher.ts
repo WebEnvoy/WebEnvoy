@@ -390,10 +390,7 @@ async function probeProviderWritePrecheck(
             return writePrecheckUnavailable("evidence_unavailable", "The requested control triggered an unclassified external-effect candidate; external-effect outcome remains unknown.", false, failureStage);
           }
           if (!selected || selected.selection_status !== "selected") {
-            const failureClass = pathSelectionFailureClass(input.requested_path, selected);
-            return writePrecheckUnavailable(failureClass, failureClass === "evidence_unavailable"
-              ? "The requested path entry is visible but has no uniquely controllable structure."
-              : "The requested visible path control could not be selected.", true, failureStage);
+            return writePrecheckUnavailable("page_changed", "The requested visible path control could not be selected.", true, failureStage);
           }
           const selectedValidation = validateXhsWritePrecheckObservation(input, selected, failureStage);
           if (selectedValidation.status === "unavailable") return selectedValidation;
@@ -558,8 +555,6 @@ async function executeXhsMediaAction(
     try {
       await sendMediaActionCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       if (input.action_id === "xhs_publish_note_image_text_media.image_upload") {
-        const selectedPath = await evaluateWritePrecheck(client, "image_text_upload", true, true);
-        if (selectedPath?.selection_status !== "selected" || selectedPath.path_observed !== "observed") return failure("media_ref_unavailable", "The creator image-upload path could not be selected.", false, page);
         const objectId = await findImageFileInput(client);
         if (!objectId) return failure("media_ref_unavailable", "The creator page has no supported image upload input.", false, page);
         const node = await sendMediaActionCdp(client, "DOM.requestNode", { objectId });
@@ -840,15 +835,6 @@ function writePrecheckUnavailable(
   };
 }
 
-export function pathSelectionFailureClass(
-  requestedPath: "image_text_upload" | "image_text_generate",
-  observation: Pick<WritePrecheckObservation, "upload_image_entry_visible" | "text_image_entry_visible"> | undefined
-): "evidence_unavailable" | "page_changed" {
-  return (requestedPath === "image_text_upload" ? observation?.upload_image_entry_visible : observation?.text_image_entry_visible) === true
-    ? "evidence_unavailable"
-    : "page_changed";
-}
-
 function pathSelectionProbeExpression(): string {
   return String.raw`    if (selectPath) {
       for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -884,7 +870,7 @@ function pathSelectionProbeExpression(): string {
 export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckCompositionPath, selectPath = false, exactPath = false): string {
   const requestedPath = normalizedCompositionPath(compositionPath);
   const labels = (selectPath || exactPath) && (requestedPath === "image_text_upload" || requestedPath === "image_text_generate")
-    ? requestedPath === "image_text_upload" ? ["上传图片", "上传图文"] : ["文字配图"]
+    ? [requestedPath === "image_text_upload" ? "上传图片" : "文字配图"]
     : compositionPathLabels[requestedPath];
   return `(async () => {
     const requestedPath = ${JSON.stringify(requestedPath)};
