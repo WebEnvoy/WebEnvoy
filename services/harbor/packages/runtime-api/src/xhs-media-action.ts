@@ -16,17 +16,22 @@ export type {
 } from "./runtime-session-types.js";
 
 export const HARBOR_XHS_MEDIA_ACTION_SCHEMA = "harbor-xhs-publish-note-image-text-media/v0";
+export const HARBOR_XHS_FIELD_ACTION_SCHEMA = "harbor-xhs-publish-note-image-text-fields/v0";
 export const XHS_MEDIA_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 export const XHS_MEDIA_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
+export const XHS_FIELD_ACTION_PACKAGE_REF = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+export const XHS_FIELD_ACTION_LOCK_REF = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
 
 const actionPaths: Readonly<Record<XhsMediaActionId, XhsMediaActionPath>> = {
   "xhs_publish_note_image_text_media.image_upload": "image_text_upload",
-  "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate"
+  "xhs_publish_note_image_text_media.text_to_image_generate": "image_text_generate",
+  "xhs_publish_note_image_text_fields.compose": "image_text_upload"
 };
 
 const actionEffects: Readonly<Record<XhsMediaActionId, XhsMediaEffectKind>> = {
   "xhs_publish_note_image_text_media.image_upload": "upload",
-  "xhs_publish_note_image_text_media.text_to_image_generate": "generate"
+  "xhs_publish_note_image_text_media.text_to_image_generate": "generate",
+  "xhs_publish_note_image_text_fields.compose": "modify"
 };
 
 const allowedKeys = new Set([
@@ -59,10 +64,21 @@ export type XhsMediaActionResult =
       source_refs: readonly XhsMediaSourceRef[];
       evidence_refs: readonly XhsMediaEvidenceRef[];
       unavailable_reason?: XhsMediaUnavailableReason;
+    }
+  | {
+      schema_version: typeof HARBOR_XHS_FIELD_ACTION_SCHEMA;
+      result_kind: "xhs_publish_note_image_text_fields";
+      status: "available" | "unavailable";
+      classification: "success_result" | "partial_result" | "not_normalizable";
+      runtime_session_ref: string;
+      normalized: XhsFieldActionNormalizedResult;
+      source_refs: readonly XhsMediaSourceRef[];
+      evidence_refs: readonly XhsMediaEvidenceRef[];
+      unavailable_reason?: XhsMediaUnavailableReason;
     };
 
 export type XhsMediaActionNormalizedResult = {
-  action_id: XhsMediaActionId;
+  action_id: "xhs_publish_note_image_text_media.image_upload" | "xhs_publish_note_image_text_media.text_to_image_generate";
   requested_path: XhsMediaActionPath;
   canonical_url: string;
   target_ref: string;
@@ -86,9 +102,32 @@ export type XhsMediaActionNormalizedResult = {
   submitted: false;
 };
 
+export type XhsFieldActionNormalizedResult = {
+  action_id: "xhs_publish_note_image_text_fields.compose";
+  requested_path: "image_text_upload";
+  canonical_url: string;
+  target_ref: string;
+  source_status: "located" | "partially_located" | "unknown";
+  business_effect: { kind: "modify"; status: "requested" | "observed" | "unknown" | "failed" };
+  operation: { status: "accepted" | "running" | "terminal" | "unknown_outcome"; operation_ref: string; terminal_state?: "success" | "failure" };
+  field_readback: {
+    status: "observed" | "unknown" | "mismatch";
+    title: { status: "observed" | "unknown" | "mismatch"; value_state: "matched" | "mismatch" | "unknown" };
+    body: { status: "observed" | "unknown" | "mismatch"; value_state: "matched" | "mismatch" | "unknown" };
+    validation_status: "passed" | "failed" | "unknown";
+  };
+  page_readback: { status: "observed" | "unknown" | "mismatch"; page_state_ref: string; route_state: "observed" | "unknown" | "mismatch" };
+  post_check: { status: "passed" | "failed" | "skipped"; ref: string };
+  reconciliation: { status: "matched" | "mismatched" | "unknown" | "not_run"; ref: string };
+  recovery: { status: "not_required" | "required" | "unknown"; entrypoint: "inspect_operation_ref" | "await_post_check" | "manual_reconciliation" | "none" };
+  save_draft: "not_in_scope";
+  publish: "not_in_scope";
+  submitted: false;
+};
+
 export interface XhsMediaSourceRef {
   ref_id: string;
-  source_kind: "media_action_summary" | "creator_publish_page_summary" | "business_state_summary";
+  source_kind: "media_action_summary" | "field_action_summary" | "creator_publish_page_summary" | "business_state_summary";
   producer: "harbor";
   redaction: "summary_only";
   schema_hint: string;
@@ -109,9 +148,9 @@ export interface XhsMediaActionObservationRecord {
   kind: "operation";
   runtime_session_ref: string;
   observed_at: string;
-  operation_status: XhsMediaActionNormalizedResult["operation"]["status"];
-  terminal_state?: NonNullable<XhsMediaActionNormalizedResult["operation"]["terminal_state"]>;
-  business_effect_status: XhsMediaActionNormalizedResult["business_effect"]["status"];
+  operation_status: XhsMediaActionResult["normalized"]["operation"]["status"];
+  terminal_state?: NonNullable<XhsMediaActionResult["normalized"]["operation"]["terminal_state"]>;
+  business_effect_status: XhsMediaActionResult["normalized"]["business_effect"]["status"];
   unavailable_reason?: XhsMediaUnavailableReason;
   reconciliation: XhsMediaActionNormalizedResult["reconciliation"];
   diagnostics?: NonNullable<Extract<LocalProviderMediaActionResult, { status: "unavailable" }>["diagnostics"]>;
@@ -179,6 +218,8 @@ export type XhsMediaUnavailableReason =
   | "page_changed"
   | "media_ref_unavailable"
   | "generation_unavailable"
+  | "field_unavailable"
+  | "validation_failed"
   | "operation_result_unknown"
   | "post_check_failed"
   | "reconciliation_unknown";
@@ -197,13 +238,16 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   if (Object.keys(input).some((key) => !allowedKeys.has(key))) return null;
   const actionId = input.action_id;
   const requestedPath = input.requested_path;
-  if (!(actionId === "xhs_publish_note_image_text_media.image_upload" || actionId === "xhs_publish_note_image_text_media.text_to_image_generate") ||
+  if (!(actionId === "xhs_publish_note_image_text_media.image_upload" || actionId === "xhs_publish_note_image_text_media.text_to_image_generate" ||
+      actionId === "xhs_publish_note_image_text_fields.compose") ||
     requestedPath !== actionPaths[actionId]) return null;
   if (input.no_submit_guard !== "active" || !opaquePublicRef(input.target_ref) || !safeText(input.summary, 512)) return null;
   if (input.holder_ref !== undefined && !opaquePublicRef(input.holder_ref)) return null;
   if (!Array.isArray(input.refs) || input.refs.length > 18 || !input.refs.every(opaquePublicRef)) return null;
-  if (actionId.endsWith("image_upload") ? input.refs.length < 1 : input.refs.length !== 0) return null;
-  if (!safeCreatorPublishUrl(input.url)) return null;
+  if ((actionId.endsWith("image_upload") && input.refs.length < 1) ||
+    (actionId.endsWith("text_to_image_generate") && input.refs.length !== 0) ||
+    (actionId.endsWith(".compose") && (input.refs.length !== 2 || !String(input.refs[0]).endsWith("/title") || !String(input.refs[1]).endsWith("/body")))) return null;
+  if (!safeCreatorPublishUrl(input.url, actionId === "xhs_publish_note_image_text_fields.compose")) return null;
   const binding = input.authorization_binding && typeof input.authorization_binding === "object" && !Array.isArray(input.authorization_binding)
     ? input.authorization_binding as Record<string, unknown>
     : undefined;
@@ -230,12 +274,13 @@ export function admitXhsMediaAction(value: unknown): AdmittedXhsMediaAction | nu
   };
 }
 
-function safeCreatorPublishUrl(value: unknown): value is string {
+function safeCreatorPublishUrl(value: unknown, fieldAction = false): value is string {
   if (!safeText(value, 2_048)) return false;
   try {
     const url = new URL(value);
-    return url.origin === "https://creator.xiaohongshu.com" && url.pathname === "/publish/publish" &&
+    return url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname) &&
       !url.username && !url.password && !url.hash &&
+      (!fieldAction || !url.search) &&
       [...url.searchParams].every(([key, item]) => safeText(key, 200) && (item === "" || safeText(item, 500)));
   } catch {
     return false;
@@ -249,11 +294,40 @@ export function unavailableXhsMediaAction(
   operationRef = opaqueRef("media_operation")
 ): XhsMediaActionResult {
   const operationStatus = reason === "operation_result_unknown" || reason === "reconciliation_unknown" ? "unknown_outcome" : "terminal";
-  const operation: XhsMediaActionNormalizedResult["operation"] = {
+  const operation: XhsFieldActionNormalizedResult["operation"] = {
     status: operationStatus,
     operation_ref: operationRef,
     ...(operationStatus === "terminal" ? { terminal_state: "failure" as const } : {})
   };
+  if (input.action_id === "xhs_publish_note_image_text_fields.compose") {
+    return {
+      schema_version: HARBOR_XHS_FIELD_ACTION_SCHEMA,
+      result_kind: "xhs_publish_note_image_text_fields",
+      status: "unavailable",
+      classification: "not_normalizable",
+      runtime_session_ref: runtimeSessionRef,
+      unavailable_reason: reason,
+      normalized: {
+        action_id: input.action_id,
+        requested_path: "image_text_upload",
+        canonical_url: input.url,
+        target_ref: input.target_ref,
+        source_status: "unknown",
+        business_effect: { kind: "modify", status: operationStatus === "unknown_outcome" ? "unknown" : "failed" },
+        operation,
+        field_readback: unknownFieldReadback(),
+        page_readback: { status: "unknown", page_state_ref: opaqueRef("page_state"), route_state: "unknown" },
+        post_check: { status: "skipped", ref: opaqueRef("post_check") },
+        reconciliation: { status: "unknown", ref: opaqueRef("reconciliation") },
+        recovery: { status: "required", entrypoint: operationStatus === "unknown_outcome" ? "manual_reconciliation" : "inspect_operation_ref" },
+        save_draft: "not_in_scope",
+        publish: "not_in_scope",
+        submitted: false
+      },
+      source_refs: [],
+      evidence_refs: [{ ref_id: operationRef, evidence_kind: "operation_ref", producer: "harbor", redaction: "refs_only" }]
+    };
+  }
   return {
     schema_version: HARBOR_XHS_MEDIA_ACTION_SCHEMA,
     status: "unavailable",
@@ -304,6 +378,46 @@ export function completeXhsMediaAction(
   const postCheckRef = opaqueRef("post_check");
   const reconciliationRef = opaqueRef("reconciliation");
   const operationStatus = result.operation_status;
+  if (input.action_id === "xhs_publish_note_image_text_fields.compose" && result.action_id === input.action_id) {
+    const successful = result.effect_status === "observed" && operationStatus === "terminal" && result.terminal_state === "success" &&
+      result.page_readback.status === "observed" && result.field_readback.status === "observed" && result.field_readback.validation_status === "passed";
+    const unknown = operationStatus === "unknown_outcome" || result.effect_status === "unknown" || result.page_readback.status === "unknown" ||
+      result.field_readback.status === "unknown" || result.field_readback.validation_status === "unknown";
+    return {
+      schema_version: HARBOR_XHS_FIELD_ACTION_SCHEMA,
+      result_kind: "xhs_publish_note_image_text_fields",
+      status: unknown ? "unavailable" : "available",
+      classification: successful ? "success_result" : unknown ? "not_normalizable" : "partial_result",
+      runtime_session_ref: runtimeSessionRef,
+      ...(unknown ? { unavailable_reason: "operation_result_unknown" as const } : {}),
+      normalized: {
+        action_id: input.action_id,
+        requested_path: "image_text_upload",
+        canonical_url: input.url,
+        target_ref: input.target_ref,
+        source_status: successful ? "located" : unknown ? "unknown" : "partially_located",
+        business_effect: { kind: "modify", status: result.effect_status },
+        operation: {
+          status: operationStatus,
+          operation_ref: result.operation_ref,
+          ...(result.terminal_state === undefined ? {} : { terminal_state: result.terminal_state })
+        },
+        field_readback: result.field_readback,
+        page_readback: result.page_readback,
+        post_check: { status: successful ? "passed" : unknown ? "skipped" : "failed", ref: postCheckRef },
+        reconciliation: { status: successful ? "matched" : unknown ? "unknown" : "mismatched", ref: reconciliationRef },
+        recovery: { status: successful ? "not_required" : "required", entrypoint: successful ? "none" : unknown ? "manual_reconciliation" : "inspect_operation_ref" },
+        save_draft: "not_in_scope",
+        publish: "not_in_scope",
+        submitted: false
+      },
+      source_refs: mediaSourceRefs(result.source_refs, true),
+      evidence_refs: mediaEvidenceRefs(result, postCheckRef, reconciliationRef)
+    };
+  }
+  if (input.action_id === "xhs_publish_note_image_text_fields.compose" || result.action_id === "xhs_publish_note_image_text_fields.compose") {
+    return unavailableXhsMediaAction(runtimeSessionRef, input, "invalid_contract", result.operation_ref);
+  }
   const successful = result.effect_status === "observed" && operationStatus === "terminal" && result.terminal_state === "success" &&
     result.page_readback.status === "observed" && result.media_readback.status === "observed";
   const unknown = operationStatus === "unknown_outcome" || result.effect_status === "unknown" || result.page_readback.status === "unknown" || result.media_readback.status === "unknown";
@@ -343,19 +457,28 @@ export function completeXhsMediaAction(
       publish: "not_in_scope",
       submitted: false
     },
-    source_refs: mediaSourceRefs(result.source_refs),
+    source_refs: mediaSourceRefs(result.source_refs, false),
     evidence_refs: mediaEvidenceRefs(result, postCheckRef, reconciliationRef)
   };
 }
 
-function mediaSourceRefs(refs: readonly LocalProviderReadProbeRef[]): XhsMediaSourceRef[] {
-  const kinds: XhsMediaSourceRef["source_kind"][] = ["media_action_summary", "creator_publish_page_summary", "business_state_summary"];
+function unknownFieldReadback(): XhsFieldActionNormalizedResult["field_readback"] {
+  return {
+    status: "unknown",
+    title: { status: "unknown", value_state: "unknown" },
+    body: { status: "unknown", value_state: "unknown" },
+    validation_status: "unknown"
+  };
+}
+
+function mediaSourceRefs(refs: readonly LocalProviderReadProbeRef[], fieldAction: boolean): XhsMediaSourceRef[] {
+  const kinds: XhsMediaSourceRef["source_kind"][] = [fieldAction ? "field_action_summary" : "media_action_summary", "creator_publish_page_summary", "business_state_summary"];
   return refs.slice(0, 3).map((entry, index) => ({
     ref_id: entry.ref,
     source_kind: kinds[index] ?? "business_state_summary",
     producer: "harbor",
     redaction: "summary_only",
-    schema_hint: "harbor-xhs-media-action-summary.v0"
+    schema_hint: fieldAction ? "harbor-xhs-field-action-summary.v0" : "harbor-xhs-media-action-summary.v0"
   }));
 }
 

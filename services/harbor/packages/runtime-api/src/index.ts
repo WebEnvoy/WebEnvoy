@@ -128,7 +128,10 @@ import {
   type WritePrecheckObservationRecord
 } from "./write-precheck-operation.js";
 import {
+  HARBOR_XHS_FIELD_ACTION_SCHEMA,
   HARBOR_XHS_MEDIA_ACTION_SCHEMA,
+  XHS_FIELD_ACTION_LOCK_REF,
+  XHS_FIELD_ACTION_PACKAGE_REF,
   XHS_MEDIA_ACTION_LOCK_REF,
   XHS_MEDIA_ACTION_PACKAGE_REF,
   admitXhsMediaAction,
@@ -153,7 +156,14 @@ export { HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, LocalIdentityEnvironmen
 export { HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA } from "./identity-environment-mutation-types.js";
 export { HARBOR_MANAGED_PROVIDER_LIFECYCLE_SCHEMA, ManagedProviderLifecycle } from "./managed-provider-lifecycle.js";
 export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, HARBOR_XHS_PATH_PREPARE_SCHEMA, XHS_PUBLISH_PRECHECK_PIN, XHS_PUBLISH_PATH_PREPARE_PIN } from "./write-precheck-operation.js";
-export { HARBOR_XHS_MEDIA_ACTION_SCHEMA, XHS_MEDIA_ACTION_LOCK_REF, XHS_MEDIA_ACTION_PACKAGE_REF } from "./xhs-media-action.js";
+export {
+  HARBOR_XHS_FIELD_ACTION_SCHEMA,
+  HARBOR_XHS_MEDIA_ACTION_SCHEMA,
+  XHS_FIELD_ACTION_LOCK_REF,
+  XHS_FIELD_ACTION_PACKAGE_REF,
+  XHS_MEDIA_ACTION_LOCK_REF,
+  XHS_MEDIA_ACTION_PACKAGE_REF
+} from "./xhs-media-action.js";
 export {
   bindIdentityEnvironmentDefaultProvider,
   detectBrowserProviders,
@@ -364,6 +374,7 @@ export type {
   XhsMediaActionObservationRecord,
   XhsMediaActionResult,
   XhsMediaActionNormalizedResult,
+  XhsFieldActionNormalizedResult,
   XhsMediaActionId,
   XhsMediaActionPath,
   XhsMediaEffectKind,
@@ -1267,7 +1278,7 @@ export class HarborRuntime {
     return completed;
   }
 
-  /** Execute exactly one Lode #307 image-text media action after Core confirmation. */
+  /** Execute exactly one admitted Xiaohongshu image-text action after Core confirmation. */
   async executeXhsMediaAction(
     runtime_session_ref: string,
     input: unknown
@@ -1573,12 +1584,14 @@ function requestIdentity(input: { site_id: string; operation_id: string }): { si
 
 function invalidMediaInput(input: unknown): Pick<AdmittedXhsMediaAction, "url" | "target_ref" | "action_id" | "requested_path" | "summary"> {
   // Never echo malformed or potentially sensitive input into a public failure.
+  const fieldAction = typeof input === "object" && input !== null && !Array.isArray(input) &&
+    (input as { action_id?: unknown }).action_id === "xhs_publish_note_image_text_fields.compose";
   return {
     url: "https://creator.xiaohongshu.com/publish/publish",
     target_ref: "invalid-target-ref",
-    action_id: "xhs_publish_note_image_text_media.image_upload",
+    action_id: fieldAction ? "xhs_publish_note_image_text_fields.compose" : "xhs_publish_note_image_text_media.image_upload",
     requested_path: "image_text_upload",
-    summary: "invalid media action request"
+    summary: "invalid image-text action request"
   };
 }
 
@@ -1594,6 +1607,8 @@ function mediaFailureReason(
     case "resource_unavailable": return "resource_unavailable";
     case "media_ref_unavailable": return "media_ref_unavailable";
     case "generation_unavailable": return "generation_unavailable";
+    case "field_unavailable": return "field_unavailable";
+    case "validation_failed": return "validation_failed";
     case "operation_result_unknown": return "operation_result_unknown";
     case "post_check_failed": return "post_check_failed";
     case "reconciliation_unknown": return "reconciliation_unknown";

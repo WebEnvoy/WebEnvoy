@@ -11,6 +11,10 @@ import { continueWritePrecheckTask, continueXhsMediaActionTask, recoverInterrupt
 import type { HarborAdmissionInput } from "./harbor-admission.js";
 import type { ExecutionPolicyMode, SingleActionDecision } from "./execution-policy.js";
 import {
+  xhsFieldCapabilityId,
+  xhsFieldLockRef,
+  xhsFieldOperationId,
+  xhsFieldPackageRef,
   xhsMediaActionPaths,
   xhsMediaCapabilityId,
   xhsMediaLockRef,
@@ -215,25 +219,68 @@ function mediaContract(): LodePackageAdmissionContract {
   };
 }
 
+function fieldContract(): LodePackageAdmissionContract {
+  return {
+    package_ref: xhsFieldPackageRef,
+    source_ref: xhsFieldPackageRef,
+    lock_ref: xhsFieldLockRef,
+    capability_id: xhsFieldCapabilityId,
+    operation_id: xhsFieldOperationId,
+    operation_mode: "write",
+    version: "0.1.1",
+    lifecycle: "proposed",
+    runtime_admission: { enabled: true, status: "controlled_evidence", recheck_condition: "formal_live_evidence_required" },
+    action_declaration: {
+      schema_version: "lode.capability-action-declaration.v0",
+      schema_ref: "lode://schema/capability-action-declaration@0.1.0",
+      actions: [{
+        action_id: "xhs_publish_note_image_text_fields.compose",
+        category: "commit",
+        target_scope: {
+          site_slug: "xiaohongshu",
+          target_types: ["creator_publish_page"],
+          supported_origins: ["https://creator.xiaohongshu.com"]
+        },
+        resource_requirements: {
+          path: "resource-requirements.json",
+          id: "xiaohongshu.publish-note-image-text-fields.resources",
+          profile_ids: ["xhs-image-text-field-fill"]
+        },
+        external_effects: ["modify"]
+      }]
+    },
+    resource_requirements: {
+      schema_version: "lode.resource-requirements.v0",
+      resource_requirements_id: "xiaohongshu.publish-note-image-text-fields.resources",
+      package_ref: xhsFieldPackageRef,
+      operation_mode: "write",
+      resource_requirement_profiles: [{ requirement_profile_id: "xhs-image-text-field-fill" }]
+    }
+  };
+}
+
 function mediaTaskIntent(
   actionId: XhsMediaActionId = "xhs_publish_note_image_text_media.image_upload",
   intentId = "intent_xhs_media_action",
   refs = ["attachment:fixture/image-1"]
 ): TaskIntentEnvelope {
   const requestedPath = xhsMediaActionPaths[actionId];
-  const profileId = actionId === "xhs_publish_note_image_text_media.image_upload"
-    ? "xhs-image-upload"
-    : "xhs-text-to-image-generate";
+  const fieldAction = actionId === "xhs_publish_note_image_text_fields.compose";
+  const profileId = fieldAction ? "xhs-image-text-field-fill" : actionId === "xhs_publish_note_image_text_media.image_upload"
+    ? "xhs-image-upload" : "xhs-text-to-image-generate";
+  const packageRef = fieldAction ? xhsFieldPackageRef : xhsMediaPackageRef;
+  const lockRef = fieldAction ? xhsFieldLockRef : xhsMediaLockRef;
+  const capabilityId = fieldAction ? xhsFieldCapabilityId : xhsMediaCapabilityId;
   return {
     schema_version: "webenvoy.task-intent.v0",
     intent_id: intentId,
     entrypoint: "app",
     user_intent: { summary: "准备小红书图文媒体" },
     capability: {
-      ref: `lode:capability/${xhsMediaCapabilityId}`,
-      version: "0.1.0",
-      source_ref: xhsMediaPackageRef,
-      lock_ref: xhsMediaLockRef
+      ref: `lode:capability/${capabilityId}`,
+      version: fieldAction ? "0.1.1" : "0.1.0",
+      source_ref: packageRef,
+      lock_ref: lockRef
     },
     input: { summary: "准备一条图文媒体动作", action_id: actionId, requested_path: requestedPath, refs },
     scope: {
@@ -241,7 +288,7 @@ function mediaTaskIntent(
       target_ref: "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image"
     },
     policy: { risk: "write", execution_intent: "execute_after_approval" },
-    resource_requirement_refs: ["xiaohongshu.publish-note-image-text-media.resources"],
+    resource_requirement_refs: [fieldAction ? "xiaohongshu.publish-note-image-text-fields.resources" : "xiaohongshu.publish-note-image-text-media.resources"],
     resource_requirement_profile_id: profileId,
     evidence_policy_ref: "policy:no-raw-evidence"
   };
@@ -265,6 +312,7 @@ function mediaOutput(input: {
   const resultStatus = input.result_status ?? "available";
   const unavailable = resultStatus === "unavailable";
   const unknown = operationStatus === "unknown_outcome";
+  const fieldAction = input.action_id === "xhs_publish_note_image_text_fields.compose";
   const operationRef = `operation_media_${input.suffix}`;
   const postCheckRef = `postcheck_media_${input.suffix}`;
   const reconciliationRef = `reconcile_media_${input.suffix}`;
@@ -282,7 +330,7 @@ function mediaOutput(input: {
     redaction: "placeholder_only"
   }];
   return {
-    result_kind: "xhs_publish_note_image_text_media",
+    result_kind: fieldAction ? "xhs_publish_note_image_text_fields" : "xhs_publish_note_image_text_media",
     status: resultStatus,
     classification: resultStatus === "available" ? "success_result" : "not_normalizable",
     ...(input.unavailable_reason === undefined ? {} : { unavailable_reason: input.unavailable_reason }),
@@ -291,10 +339,10 @@ function mediaOutput(input: {
       requested_path: input.requested_path,
       canonical_url: input.canonical_url,
       target_ref: input.target_ref,
-      summary: "Harbor returned bounded media action evidence.",
+      ...(fieldAction ? {} : { summary: "Harbor returned bounded media action evidence." }),
       source_status: unavailable ? "unknown" : "located",
       business_effect: {
-        kind: input.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate",
+        kind: fieldAction ? "modify" : input.action_id === "xhs_publish_note_image_text_media.image_upload" ? "upload" : "generate",
         status: unavailable ? unknown ? "unknown" : "failed" : operationStatus === "terminal" ? "observed" : "unknown"
       },
       operation: {
@@ -302,13 +350,18 @@ function mediaOutput(input: {
         operation_ref: operationRef,
         ...(operationStatus === "terminal" ? { terminal_state: unavailable ? "failure" : "success" } : {})
       },
-      media_readback: {
+      ...(fieldAction ? { field_readback: {
+        status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
+        title: { status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown", value_state: !unavailable && operationStatus === "terminal" ? "matched" : "unknown" },
+        body: { status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown", value_state: !unavailable && operationStatus === "terminal" ? "matched" : "unknown" },
+        validation_status: !unavailable && operationStatus === "terminal" ? "passed" : "unknown"
+      }} : { media_readback: {
         status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
         media_count: !unavailable && operationStatus === "terminal" ? 1 : null,
         order_status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
         generation_result_ref: null,
         ordered_item_refs: !unavailable && operationStatus === "terminal" ? [mediaRefId] : []
-      },
+      }}),
       page_readback: {
         status: !unavailable && operationStatus === "terminal" ? "observed" : "unknown",
         page_state_ref: pageRef,
@@ -322,7 +375,7 @@ function mediaOutput(input: {
       submitted: false
     },
     source_refs: unavailable ? [] : [
-      { ref_id: `source_media_${input.suffix}`, source_kind: "media_action_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" },
+      { ref_id: `source_media_${input.suffix}`, source_kind: fieldAction ? "field_action_summary" : "media_action_summary", producer, redaction: "summary_only", schema_hint: fieldAction ? "harbor-xhs-publish-note-image-text-fields/v0" : "harbor-xhs-publish-note-image-text-media/v0" },
       { ref_id: pageRef, source_kind: "creator_publish_page_summary", producer, redaction: "summary_only", schema_hint: "harbor-xhs-publish-note-image-text-media/v0" }
     ],
     evidence_refs: unavailable ? operationEvidence : [
@@ -1407,6 +1460,84 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
   }
 
   await assertXhsMediaActionP1Wiring();
+  await assertXhsFieldActionWiring();
+}
+
+async function assertXhsFieldActionWiring(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-xhs-field-action-"));
+  try {
+    const runId = "app-xhs-field-action";
+    const contract = fieldContract();
+    const intent = {
+      ...mediaTaskIntent("xhs_publish_note_image_text_fields.compose", "intent_xhs_field_action", [
+        "draft:app-protected/00000000-0000-4000-8000-000000000071/title",
+        "draft:app-protected/00000000-0000-4000-8000-000000000071/body"
+      ]),
+      scope: { target_type: "creator_publish_page", target_ref: "https://creator.xiaohongshu.com/publish/publish?from=tab_switch" }
+    };
+    const authorizationContext = { ...context, idempotency_key: "xhs-field-action" };
+    const runStore = createFileRunRecordStore({ directory: join(directory, "runs"), clock: () => new Date(evaluatedAt) });
+    const authorizationStore = createFileAuthorizationDecisionStore({
+      directory: join(directory, "decisions"),
+      runRecordStore: runStore,
+      taskThreadStore: { getTaskThread: async () => ({ thread_id: context.thread_id, turns: [{ turn_id: context.turn_id, run_id: runId }] }) },
+      clock: () => new Date(evaluatedAt)
+    });
+    const initial = await submitRuntimeTask(runStore, {
+      run_id: runId,
+      task_intent: intent,
+      package_ref: contract.package_ref,
+      authorization_context: authorizationContext
+    }, {
+      lodePackageResolver: async () => contract,
+      executionPolicyConfigStore: mediaConfigStore("auto"),
+      authorizationDecisionStore: authorizationStore,
+      clock: () => new Date(evaluatedAt)
+    });
+    assert.equal(initial.run_record?.status, "requires_user_action");
+    const confirmationRef = initial.run_record?.authorization_decision_refs?.[0];
+    assert(confirmationRef);
+    const confirmation = await authorizationStore.getAuthorizationDecision(confirmationRef);
+    assert(confirmation);
+    let executeCalls = 0;
+    const continued = await continueXhsMediaActionTask(runStore, {
+      run_id: runId,
+      task_intent: intent,
+      package_ref: contract.package_ref,
+      authorization_context: authorizationContext,
+      single_action_decision: mediaDecisionFromConfirmation(confirmation)
+    }, {
+      lodePackageResolver: async () => contract,
+      executionPolicyConfigStore: mediaConfigStore("auto"),
+      authorizationDecisionStore: authorizationStore,
+      harborRuntimeClient: {
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_xhs_field_action"),
+        executeMediaAction: async (input) => {
+          executeCalls += 1;
+          assert.deepEqual(input.refs, intent.input.refs);
+          return mediaOutput({
+            action_id: input.action_id,
+            requested_path: input.requested_path,
+            canonical_url: input.url,
+            target_ref: input.target_ref,
+            runtime_session_ref: "session_xhs_field_action",
+            suffix: "field"
+          });
+        },
+        executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+        validateOnlyWritePrecheck: async () => { throw new Error("unexpected precheck dispatch"); },
+        releaseCoreTaskSession: async () => undefined
+      },
+      clock: () => new Date(evaluatedAt)
+    });
+    assert.equal(executeCalls, 1);
+    assert.equal(continued.ok, true);
+    assert.equal(continued.run_record?.status, "succeeded");
+    assert.equal(continued.run_record?.result_kind, "xhs_publish_note_image_text_fields");
+    assert.equal((continued.run_record?.public_result_summary as Record<string, unknown> | undefined)?.submitted, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 async function assertXhsMediaActionP1Wiring(): Promise<void> {

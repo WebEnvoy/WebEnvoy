@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  blocksXhsMediaActionRequest,
+  fieldFillProbeExpression,
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
   observeXhsPathPrepareRequest,
@@ -11,6 +13,68 @@ import {
   validateXhsWritePrecheckObservation,
   writePrecheckProbeExpression
 } from "./local-provider-launcher.js";
+
+test("#412 field fill blocks every outbound mutation while media upload keeps its bounded network path", () => {
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "POST", "https://creator.xiaohongshu.com/api/opaque"), true);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_fields.compose", "GET", "https://creator.xiaohongshu.com/api/opaque"), false);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/upload"), false);
+  assert.equal(blocksXhsMediaActionRequest("xhs_publish_note_image_text_media.image_upload", "POST", "https://creator.xiaohongshu.com/api/publish"), true);
+});
+
+test("#412 field fill writes only one visible app-owned title and body and returns match states", () => {
+  class TestInput {
+    hidden = false;
+    disabled = false;
+    readOnly = false;
+    private currentValue = "";
+    get value() { return this.currentValue; }
+    set value(value: string) { this.currentValue = value; }
+    getAttribute(name: string) { return name === "placeholder" ? "填写标题" : null; }
+    closest() { return null; }
+    getBoundingClientRect() { return { width: 100, height: 20, right: 100, bottom: 20, left: 0, top: 0 }; }
+    checkVisibility() { return true; }
+    dispatchEvent() { return true; }
+  }
+  class TestBody {
+    hidden = false;
+    textContent = "";
+    get innerText() { return this.textContent; }
+    getAttribute() { return null; }
+    closest() { return null; }
+    getBoundingClientRect() { return { width: 100, height: 100, right: 100, bottom: 100, left: 0, top: 0 }; }
+    checkVisibility() { return true; }
+    focus() {}
+    dispatchEvent() { return true; }
+  }
+  const title = new TestInput();
+  const body = new TestBody();
+  const root = { querySelectorAll: (selector: string) => selector === "input" ? [title] : [body] };
+  const document = {
+    querySelectorAll: () => [root],
+    createRange: () => ({ selectNodeContents() {} }),
+    execCommand: () => false
+  };
+  const evaluate = new Function(
+    "document", "getComputedStyle", "innerWidth", "innerHeight", "HTMLInputElement", "Event", "InputEvent", "getSelection",
+    `return ${fieldFillProbeExpression("测试标题", "测试正文", true)}`
+  );
+  const result = evaluate(
+    document,
+    () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1" }),
+    200,
+    200,
+    TestInput,
+    class { constructor(_name: string, _options: unknown) {} },
+    class { constructor(_name: string, _options: unknown) {} },
+    () => ({ removeAllRanges() {}, addRange() {} })
+  );
+  assert.deepEqual(result, { title_candidate_count: 1, body_candidate_count: 1, title_matched: true, body_matched: true });
+  assert.equal(title.value, "测试标题");
+  assert.equal(body.textContent, "测试正文");
+  const expression = fieldFillProbeExpression("x", "y", false);
+  assert.match(expression, /#app, \[data-v-app\]/);
+  assert.doesNotMatch(expression, /保存草稿|发布笔记|click\(\)/);
+});
 
 test("creator publish sessions warm the existing Xiaohongshu login before opening creator", () => {
   const identity_environment = { site_binding: { site_id: "xiaohongshu" } } as never;
@@ -84,6 +148,13 @@ test("selectPage accepts only the bounded creator tab-switch redirect with other
   assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=tab_switch` }], requestedUrl)?.id, "creator");
   assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}?from=other` }], requestedUrl), undefined);
   assert.equal(selectPage([explore, { ...creator, url: `${requestedUrl}/?from=other` }], requestedUrl), undefined);
+});
+
+test("selectPage prefers the bounded creator image-text redirect over stale exact video tabs", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish";
+  const exact = { id: "video", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://video" };
+  const imageText = { id: "image-text", type: "page", url: `${requestedUrl}?from=tab_switch`, webSocketDebuggerUrl: "ws://image-text" };
+  assert.equal(selectPage([exact, imageText], requestedUrl)?.id, "image-text");
 });
 
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
@@ -322,4 +393,8 @@ test("#405 observation preserves path state for the bounded path branch", () => 
   };
   assert.equal(validateXhsWritePrecheckObservation(input, { ...base, path_observed: "unobserved" }).status, "completed");
   assert.equal(validateXhsWritePrecheckObservation(input, base).status, "completed");
+  assert.equal(validateXhsWritePrecheckObservation(
+    { ...input, target_url: `${input.target_url}/` },
+    { ...base, url: `${base.url}/`, pathname: "/publish/publish/" }
+  ).status, "completed");
 });

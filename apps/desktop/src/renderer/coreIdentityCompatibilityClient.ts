@@ -87,6 +87,9 @@ const consumerBoundary =
 const xiaohongshuImageUploadPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuImageUploadLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-media@0.1.0";
 const xiaohongshuImageUploadActionId = "xhs_publish_note_image_text_media.image_upload";
+const xiaohongshuFieldPackageRef = "lode://site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xiaohongshuFieldLockRef = "lode://lock/site-capability/xiaohongshu/publish-note-image-text-fields@0.1.1";
+const xiaohongshuFieldActionId = "xhs_publish_note_image_text_fields.compose";
 export function loadingSkillIdentityCompatibility(): SkillIdentityCompatibilityState {
   return { status: "loading", summary: "正在检查账号身份兼容性。", candidates: [] };
 }
@@ -155,12 +158,15 @@ export async function fetchSkillIdentityCompatibility(
 
 function isPinnedXiaohongshuImageUpload(skill: LodeCatalogSkill) {
   const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
-  return skill.packageRef === xiaohongshuImageUploadPackageRef &&
-    skill.lockRef === xiaohongshuImageUploadLockRef &&
-    skill.version === "0.1.0" && skill.siteSlug === "xiaohongshu" &&
-    action?.id === xiaohongshuImageUploadActionId && action.operationMode === "write" &&
+  const imageUpload = skill.packageRef === xiaohongshuImageUploadPackageRef && skill.lockRef === xiaohongshuImageUploadLockRef && skill.version === "0.1.0" &&
+    action?.id === xiaohongshuImageUploadActionId && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
+  const fieldFill = skill.packageRef === xiaohongshuFieldPackageRef && skill.lockRef === xiaohongshuFieldLockRef && skill.version === "0.1.1" &&
+    action?.id === xiaohongshuFieldActionId && action.resourceRequirementProfileIds[0] === "xhs-image-text-field-fill";
+  return (imageUpload || fieldFill) &&
+    skill.siteSlug === "xiaohongshu" &&
+    action?.operationMode === "write" &&
     action.supportedOrigins.length === 1 && action.supportedOrigins[0] === "https://creator.xiaohongshu.com" &&
-    action.resourceRequirementProfileIds.length === 1 && action.resourceRequirementProfileIds[0] === "xhs-image-upload";
+    action.resourceRequirementProfileIds.length === 1;
 }
 
 export function isCandidateUsable(candidate: IdentityCompatibilityCandidate | undefined) {
@@ -251,6 +257,19 @@ export function projectCompatibilityTarget(skill: LodeCatalogSkill, value?: stri
   if (!skillRequiresExactTarget(skill)) {
     const action = skill.actions.length === 1 ? skill.actions[0] : undefined;
     const origin = action?.supportedOrigins.length === 1 ? publicOrigin(action.supportedOrigins[0]!) : null;
+    if (isPinnedXiaohongshuImageUpload(skill) && value != null && value.trim().length > 0) {
+      const field = skill.inputFields.find((item) => item.id === "url" && item.required && item.format === "uri");
+      try {
+        const url = new URL(value);
+        if (origin !== url.origin || url.username || url.password || url.hash ||
+          field?.pattern == null || field.patternSafety !== "linear" || !new RegExp(field.pattern).test(value)) {
+          return { status: "invalid", summary: "具体目标不符合技能声明的站点与路径。" };
+        }
+        return { status: "ready", targetRef: value };
+      } catch {
+        return { status: "invalid", summary: "具体目标不是合法的创作页网址。" };
+      }
+    }
     return origin == null ? { status: "invalid", summary: "技能缺少可验证的目标来源。" } : { status: "ready", targetRef: `${origin}/` };
   }
   if (value == null || value.trim().length === 0) return { status: "awaiting_input" };
