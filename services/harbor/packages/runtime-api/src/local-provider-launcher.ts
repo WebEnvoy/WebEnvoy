@@ -92,8 +92,9 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     const configurationFacts = providerConfiguration
       ? await applyAndReadbackProviderConfiguration(port, initialPageUrl, providerConfiguration, readbackSignal)
       : [];
+    let currentPageTargetId: string | undefined;
     const page = isXhsCreatorPublishUrl(input)
-      ? await openProviderUrl(port, input.url, readbackSignal)
+      ? await openProviderUrl(port, input.url, readbackSignal, (target) => { currentPageTargetId = target.id; })
       : await readPageFacts(port, initialPageUrl, readbackSignal);
     let currentUrl = page.current_url ?? initialPageUrl;
     const evidence_ref = opaqueRef("validation");
@@ -112,7 +113,14 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
         ...page.facts
       ],
       openUrl: async (url) => {
-        const nextPage = await openProviderUrl(port, url, AbortSignal.timeout(Math.max(1, input.timeout_ms)));
+        const signal = AbortSignal.timeout(Math.max(1, input.timeout_ms));
+        const existing = isXhsCreatorPublishUrl(input)
+          ? await pageTargets(port, signal).then((pages) => selectPage(pages, url, currentPageTargetId)).catch(() => undefined)
+          : undefined;
+        const nextPage = existing
+          ? await readTargetPageFacts(existing, url, signal)
+          : await openProviderUrl(port, url, signal, (target) => { currentPageTargetId = target.id; });
+        if (existing?.id) currentPageTargetId = existing.id;
         currentUrl = nextPage.current_url ?? url;
         return nextPage;
       },
@@ -123,10 +131,10 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
         return result;
       }),
       probeWritePrecheck: trustLocalProviderWritePrecheckProbe((probe) =>
-        probeProviderWritePrecheck(port, currentUrl, probe)
+        probeProviderWritePrecheck(port, currentUrl, probe, currentPageTargetId)
       ),
       executeMediaAction: trustLocalProviderMediaActionProbe((action) =>
-        executeXhsMediaAction(port, currentUrl, action)
+        executeXhsMediaAction(port, currentUrl, action, currentPageTargetId)
       ),
       captureScreenshot: () => captureProviderScreenshot(port, currentUrl),
       close: () => closeBrowser(child, profileStorage.profileDir, !profileStorage.persistent)
@@ -347,7 +355,8 @@ export function validateXhsWritePrecheckObservation(
 async function probeProviderWritePrecheck(
   port: string,
   currentUrl: string,
-  input: LocalProviderWritePrecheckProbeInput
+  input: LocalProviderWritePrecheckProbeInput,
+  currentPageTargetId?: string
 ): Promise<LocalProviderWritePrecheckProbeResult> {
   let failureStage: XhsPathPrepareFailureStage | undefined = input.requested_path === undefined
     ? undefined
@@ -356,7 +365,7 @@ async function probeProviderWritePrecheck(
     if (!sameWritePrecheckUrl(currentUrl, input.target_url)) {
       return writePrecheckUnavailable("page_changed", "The managed session is not on the requested creator publish page.", true, failureStage);
     }
-    const page = await activePage(port, currentUrl, AbortSignal.timeout(3000));
+    const page = await activePage(port, currentUrl, AbortSignal.timeout(3000), currentPageTargetId);
     if (!page.webSocketDebuggerUrl) {
       return writePrecheckUnavailable("provider_probe_unavailable", "The creator page has no controlled CDP target.", true, failureStage);
     }
@@ -507,7 +516,8 @@ export function blocksXhsMediaActionRequest(actionId: LocalProviderMediaActionIn
 async function executeXhsMediaAction(
   port: string,
   currentUrl: string,
-  input: LocalProviderMediaActionInput
+  input: LocalProviderMediaActionInput,
+  currentPageTargetId?: string
 ): Promise<LocalProviderMediaActionResult> {
   const operationRef = opaqueRef("media_operation");
   const failure = (
@@ -537,7 +547,7 @@ async function executeXhsMediaAction(
     return failure("invalid_contract", "The media action identity or authorization binding is not exact.", false);
   }
   if (!sameWritePrecheckUrl(currentUrl, input.target_url)) return failure("page_changed", "The managed session is not on the requested creator publish page.", true);
-  const pageTarget = await activePage(port, input.target_url, AbortSignal.timeout(3000)).catch(() => undefined);
+  const pageTarget = await activePage(port, input.target_url, AbortSignal.timeout(3000), currentPageTargetId).catch(() => undefined);
   if (!pageTarget?.webSocketDebuggerUrl) return failure("provider_probe_unavailable", "The managed creator page has no controlled target.", true);
   const page = readyPage(input.target_url, "Xiaohongshu creator media action");
   const resolvedFiles: string[] = [];
@@ -1772,9 +1782,16 @@ function compatibleBrowserVersion(observed: string, target: string): boolean {
   return observed === target || observedParts.slice(0, 4).join(".") === targetParts.slice(0, 4).join(".");
 }
 
-async function openProviderUrl(port: string, url: string, signal?: AbortSignal): Promise<LocalProviderPageFacts> {
+async function openProviderUrl(
+  port: string,
+  url: string,
+  signal?: AbortSignal,
+  onTarget?: (target: CdpPageTarget) => void
+): Promise<LocalProviderPageFacts> {
   try {
-    return readTargetPageFacts(await createProviderPage(port, url, signal), url, signal);
+    const target = await createProviderPage(port, url, signal);
+    onTarget?.(target);
+    return readTargetPageFacts(target, url, signal);
   } catch (cause) {
     return unavailablePageFacts("url_unreachable", url, cause);
   }
@@ -3072,11 +3089,11 @@ async function captureProviderScreenshot(port: string, requested_url: string): P
   }
 }
 
-async function activePage(port: string, requested_url: string, signal?: AbortSignal): Promise<CdpPageTarget> {
+async function activePage(port: string, requested_url: string, signal?: AbortSignal, preferredPageId?: string): Promise<CdpPageTarget> {
   const readinessSignal = signal ?? AbortSignal.timeout(1000);
   while (true) {
     readinessSignal.throwIfAborted();
-    const page = selectPage(await pageTargets(port, readinessSignal), requested_url);
+    const page = selectPage(await pageTargets(port, readinessSignal), requested_url, preferredPageId);
     if (page && (requested_url === "about:blank" || (page.url && page.url !== "about:blank"))) return page;
     await abortableDelay(25, readinessSignal);
   }
@@ -3088,9 +3105,12 @@ async function pageTargets(port: string, signal?: AbortSignal): Promise<CdpPageT
   return (await response.json()) as CdpPageTarget[];
 }
 
-export function selectPage(pages: CdpPageTarget[], requested_url?: string) {
+export function selectPage(pages: CdpPageTarget[], requested_url?: string, preferredPageId?: string) {
   if (requested_url) {
     const pageTargets = pages.filter((candidate) => candidate.type === "page");
+    const preferred = pageTargets.find((candidate) => candidate.id === preferredPageId &&
+      (candidate.url === requested_url || urlsReferToSamePage(candidate.url, requested_url)));
+    if (preferred) return preferred;
     const creatorImageTextPage = pageTargets.find((candidate) => isCreatorImageTextRedirect(candidate.url, requested_url));
     if (creatorImageTextPage) return creatorImageTextPage;
     return pages.find((candidate) => candidate.type === "page" && candidate.url === requested_url) ??

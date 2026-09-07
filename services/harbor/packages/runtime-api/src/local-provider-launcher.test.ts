@@ -157,6 +157,23 @@ test("selectPage prefers the bounded creator image-text redirect over stale exac
   assert.equal(selectPage([exact, imageText], requestedUrl)?.id, "image-text");
 });
 
+test("selectPage keeps a bound creator composition target across follow-up operations", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+  const empty = { id: "empty", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://empty" };
+  const composition = { id: "composition", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://composition" };
+
+  assert.equal(selectPage([empty, composition], requestedUrl, "composition")?.id, "composition");
+  assert.equal(selectPage([empty, composition], requestedUrl, "missing")?.id, "empty");
+});
+
+test("selectPage ignores a bound target after it leaves the requested creator page", () => {
+  const requestedUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu_left&target=image";
+  const matching = { id: "matching", type: "page", url: requestedUrl, webSocketDebuggerUrl: "ws://matching" };
+  const drifted = { id: "bound", type: "page", url: "https://www.xiaohongshu.com/explore", webSocketDebuggerUrl: "ws://bound" };
+
+  assert.equal(selectPage([drifted, matching], requestedUrl, "bound")?.id, "matching");
+});
+
 test("selectPage prefers an exact URL and preserves repeated query parameter order", () => {
   const requestedUrl = "https://www.xiaohongshu.com/search_result?tag=first&tag=second";
   const reordered = { id: "reordered", type: "page", url: "https://www.xiaohongshu.com/search_result?tag=second&tag=first", webSocketDebuggerUrl: "ws://reordered" };
