@@ -63,6 +63,7 @@ class CamoufoxDriverProcess {
   constructor(pythonPath: string, helperPath: string) {
     this.child = spawn(pythonPath, [helperPath], {
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
       env: { ...process.env, PYTHONUNBUFFERED: "1" }
     });
     this.child.stdout?.setEncoding("utf8");
@@ -71,10 +72,15 @@ class CamoufoxDriverProcess {
     this.child.on("error", (cause) => this.failPending(cause));
     this.child.on("close", (code, signal) => {
       this.terminated = true;
+      this.killGroup();
       this.failPending(new CamoufoxDriverProtocolError(
         `Camoufox Driver exited before completing the command (${code ?? "signal"}${signal ? `:${signal}` : ""}).`
       ));
     });
+  }
+
+  get running(): boolean {
+    return !this.terminated && Boolean(this.child.stdin && !this.child.stdin.destroyed);
   }
 
   async request(op: string, payload: Record<string, unknown>, timeoutMs = DRIVER_COMMAND_TIMEOUT_MS): Promise<Record<string, unknown>> {
@@ -88,8 +94,8 @@ class CamoufoxDriverProcess {
     }
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new CamoufoxDriverProtocolError(`Camoufox Driver command timed out: ${op}.`));
+        this.failPending(new CamoufoxDriverProtocolError(`Camoufox Driver command timed out: ${op}.`));
+        void this.terminate();
       }, Math.max(1, timeoutMs));
       this.pending.set(id, { resolve, reject, timer });
       try {
@@ -109,7 +115,7 @@ class CamoufoxDriverProcess {
     }).then((response) => {
       if (response.status === "error") {
         const message = typeof response.message === "string" ? response.message : "Camoufox Driver rejected the command.";
-        throw new CamoufoxDriverProtocolError(message);
+        throw new CamoufoxDriverProtocolError(safePublicText(message));
       }
       return response;
     });
@@ -130,10 +136,17 @@ class CamoufoxDriverProcess {
       this.child.once("close", onClose);
       if (this.child.stdin && !this.child.stdin.destroyed) this.child.stdin.end();
       timer = setTimeout(() => {
-        if (!exited) this.child.kill("SIGKILL");
+        if (!exited) this.killGroup();
         resolve();
       }, 2_000);
     });
+  }
+
+  private killGroup(): void {
+    try {
+      if (process.platform !== "win32" && this.child.pid) process.kill(-this.child.pid, "SIGKILL");
+      else this.child.kill("SIGKILL");
+    } catch { /* The process group already exited. */ }
   }
 
   private readStdout(chunk: string): void {
@@ -273,7 +286,7 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
         if (closed) return;
         closed = true;
         try {
-          await driver.request("close", {}, DRIVER_COMMAND_TIMEOUT_MS);
+          if (driver.running) await driver.request("close", {}, DRIVER_COMMAND_TIMEOUT_MS);
         } finally {
           await driver.terminate();
           if (!profileStorage.persistent) await rm(profileStorage.profileDir, { recursive: true, force: true });
@@ -314,66 +327,62 @@ async function probeCamoufoxReadOperation(
       retryable: false
     };
   }
-  try {
-    const response = await driver.request("read_operation_probe", {
-      site_id: input.site_id,
-      operation_id: input.operation_id,
-      target_url: input.target_url,
-      expected_origin: input.expected_origin,
-      query: input.query,
-      limit: input.limit ?? 15
-    }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 15_000));
-    const page = pageFacts(parseDriverPage(response));
-    const observation = response.observation;
-    if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
-      return readUnavailable("provider_probe_unavailable", "Camoufox Driver returned no bounded read observation.", false, page);
-    }
-    const value = observation as Record<string, unknown>;
-    if (value.status === "unavailable") {
-      const failureClass = value.failure_class;
-      return readUnavailable(
-        isReadFailureClass(failureClass) ? failureClass : "provider_probe_unavailable",
-        stringField(value, "message") ?? "Camoufox Driver could not complete the bounded read observation.",
-        value.retryable === true,
-        page
-      );
-    }
-    if (value.status !== "completed" || value.observed_origin !== input.expected_origin) {
-      return readUnavailable("origin_drift", "Camoufox Driver read observation did not match the expected origin.", false, page);
-    }
-    const responseStatus = value.response_status;
-    const detailUrls = stringArray(value.detail_urls, 15);
-    const searchItems = searchItemArray(value.search_items, 15);
-    if (typeof responseStatus !== "number" || responseStatus < 200 || responseStatus >= 300 ||
-      detailUrls.length === 0 || detailUrls.length !== searchItems.length) {
-      return readUnavailable("site_changed", "Camoufox Driver returned an invalid bounded Xiaohongshu search summary.", false, page);
-    }
-    const sourceRefs = ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]
-      .map((kind) => ({ kind, ref: opaqueRef("source") }));
-    return {
-      status: "completed",
-      observed_at: new Date().toISOString(),
-      observed_origin: input.expected_origin,
-      page,
-      source_refs: sourceRefs,
-      evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("snapshot") }],
-      public_summary_source_ref: sourceRefs[1]!.ref,
-      public_summary: {
-        schema_version: "harbor-read-operation-public-summary/v0",
-        operation_id: "xhs_search_notes",
-        result_kind: "xiaohongshu_search_notes_surface",
-        surface: "search_result",
-        result_state: "operation_read_response_observed",
-        response_status: responseStatus,
-        result_count: detailUrls.length,
-        source_signals: ["pinia_store", "xhs_search_read_network"]
-      },
-      detail_targets: detailUrls.map((canonical_url) => ({ canonical_url })),
-      search_items: searchItems
-    };
-  } catch (cause) {
-    return readUnavailable("network_resource_unavailable", safeErrorMessage(cause), true);
+  const response = await driver.request("read_operation_probe", {
+    site_id: input.site_id,
+    operation_id: input.operation_id,
+    target_url: input.target_url,
+    expected_origin: input.expected_origin,
+    query: input.query,
+    limit: input.limit ?? 15
+  }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 15_000));
+  const page = pageFacts(parseDriverPage(response));
+  const observation = response.observation;
+  if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+    return readUnavailable("provider_probe_unavailable", "Camoufox Driver returned no bounded read observation.", false, page);
   }
+  const value = observation as Record<string, unknown>;
+  if (value.status === "unavailable") {
+    const failureClass = value.failure_class;
+    return readUnavailable(
+      isReadFailureClass(failureClass) ? failureClass : "provider_probe_unavailable",
+      stringField(value, "message") ?? "Camoufox Driver could not complete the bounded read observation.",
+      value.retryable === true,
+      page
+    );
+  }
+  if (value.status !== "completed" || value.observed_origin !== input.expected_origin) {
+    return readUnavailable("origin_drift", "Camoufox Driver read observation did not match the expected origin.", false, page);
+  }
+  const responseStatus = value.response_status;
+  const detailUrls = stringArray(value.detail_urls, 15);
+  const searchItems = searchItemArray(value.search_items, 15);
+  if (typeof responseStatus !== "number" || responseStatus < 200 || responseStatus >= 300 ||
+    detailUrls.length === 0 || detailUrls.length !== searchItems.length) {
+    return readUnavailable("site_changed", "Camoufox Driver returned an invalid bounded Xiaohongshu search summary.", false, page);
+  }
+  const sourceRefs = ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]
+    .map((kind) => ({ kind, ref: opaqueRef("source") }));
+  return {
+    status: "completed",
+    observed_at: new Date().toISOString(),
+    observed_origin: input.expected_origin,
+    page,
+    source_refs: sourceRefs,
+    evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("snapshot") }],
+    public_summary_source_ref: sourceRefs[1]!.ref,
+    public_summary: {
+      schema_version: "harbor-read-operation-public-summary/v0",
+      operation_id: "xhs_search_notes",
+      result_kind: "xiaohongshu_search_notes_surface",
+      surface: "search_result",
+      result_state: "operation_read_response_observed",
+      response_status: responseStatus,
+      result_count: detailUrls.length,
+      source_signals: ["pinia_store", "xhs_search_read_network"]
+    },
+    detail_targets: detailUrls.map((canonical_url) => ({ canonical_url })),
+    search_items: searchItems
+  };
 }
 
 function readUnavailable(
@@ -416,6 +425,11 @@ function searchItemArray(value: unknown, max: number): Array<{ title: string; au
 }
 
 function parseDriverReady(response: Record<string, unknown>): DriverReady {
+  if (!/^3\.12\.\d+$/.test(String(response.python_version)) || response.camoufox_version !== "0.5.6" ||
+    response.playwright_version !== "1.60.0" || response.browser_version !== "152.0.4-beta.30" ||
+    !["adjacent", "resources_copy"].includes(String(response.properties_source))) {
+    throw new CamoufoxDriverProtocolError("Camoufox Driver returned unqualified runtime or browser versions.");
+  }
   const page = parseDriverPage(response);
   return {
     page,
@@ -434,8 +448,8 @@ function parseDriverPage(response: Record<string, unknown>): DriverPage {
   const value = page as Record<string, unknown>;
   const status: RuntimePageStatus = value.status === "ready" ? "ready" : value.status === "unavailable" ? "unavailable" : "unknown";
   return {
-    current_url: typeof value.current_url === "string" ? value.current_url : null,
-    title: typeof value.title === "string" ? value.title : null,
+    current_url: typeof value.current_url === "string" ? safePublicText(value.current_url) : null,
+    title: typeof value.title === "string" ? safePublicText(value.title) : null,
     status
   };
 }
@@ -466,9 +480,7 @@ async function probeCamoufoxSiteResource(
   if (input.site_id === "xiaohongshu") {
     if (origin !== "https://www.xiaohongshu.com") return { status: "unavailable", failure_class: "page_not_ready", message: "The active page is not on the canonical Xiaohongshu origin.", verified_fact_keys: [] };
     if (input.task_kind === "authentication_recovery") {
-      return value.ready === true
-        ? { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: [] }
-        : { status: "unavailable", failure_class: "page_not_ready", message: "The canonical Xiaohongshu page is not ready.", verified_fact_keys: [] };
+      return { status: "unknown", failure_class: "page_not_ready", message: "The canonical Xiaohongshu page has no verified bound account identity.", verified_fact_keys: [] };
     }
     const verified = [
       ...(value.vue_ready === true ? ["page.vue_app.ready" as const] : []),
@@ -506,9 +518,9 @@ function configurationFacts(configuration: ResolvedIdentityEnvironmentLaunchConf
     { key: "identity_environment.provider_id", source: "validation_evidence", value: configuration.provider_id, evidence_ref: evidenceRef }
   ];
   if (configuration.proxy_server) facts.push({ key: "identity_environment.proxy", source: "configured", value: "provider_argument_applied", evidence_ref: evidenceRef });
-  if (configuration.language) facts.push({ key: "identity_environment.language", source: "observed", value: configuration.language, evidence_ref: evidenceRef });
-  if (configuration.timezone) facts.push({ key: "identity_environment.timezone", source: "observed", value: configuration.timezone, evidence_ref: evidenceRef });
-  if (configuration.viewport) facts.push({ key: "identity_environment.viewport", source: "observed", value: `${configuration.viewport.width}x${configuration.viewport.height}`, evidence_ref: evidenceRef });
+  if (configuration.language) facts.push({ key: "identity_environment.language", source: "configured", value: configuration.language, evidence_ref: evidenceRef });
+  if (configuration.timezone) facts.push({ key: "identity_environment.timezone", source: "configured", value: configuration.timezone, evidence_ref: evidenceRef });
+  if (configuration.viewport) facts.push({ key: "identity_environment.viewport", source: "configured", value: `${configuration.viewport.width}x${configuration.viewport.height}`, evidence_ref: evidenceRef });
   return facts;
 }
 
@@ -551,9 +563,13 @@ function stringField(value: Record<string, unknown>, key: string): string | unde
   return typeof value[key] === "string" && value[key] ? value[key] as string : undefined;
 }
 
+function safePublicText(value: string): string {
+  return value.replace(/([?&][^=\s&]+)=([^\s&#]*)/g, "$1=<redacted>");
+}
+
 function safeErrorMessage(cause: unknown): string {
   if (!(cause instanceof Error)) return "unknown error";
-  return cause.message.replace(/\s+/g, " ").slice(0, 240);
+  return safePublicText(cause.message).replace(/\s+/g, " ").slice(0, 240);
 }
 
 function unavailable(code: RuntimeErrorCode, message: string, facts: RuntimeFact[] = []): LocalProviderLaunchResult {

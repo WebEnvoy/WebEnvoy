@@ -66,9 +66,20 @@ class ProviderOriginDriftError extends Error {}
 export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const explicitBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
   const camoufoxOverride = resolveCamoufoxOverride(process.env);
-  const providerBinding = explicitBrowserPath && input.identity_environment?.provider_binding.selected_provider_id !== "camoufox"
-    ? null
-    : resolveRuntimeProviderBinding(input.identity_environment);
+  const persistedBinding = input.identity_environment?.provider_binding;
+  const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
+  if (persistedBinding && (
+    !persistedBinding.selected_provider_id || !persistedBinding.selected_provider ||
+    persistedBinding.selected_provider.provider_id !== persistedBinding.selected_provider_id ||
+    (input.profile_ref !== input.identity_environment?.profile_ref) ||
+    (input.provider_id && input.provider_id !== persistedBinding.selected_provider_id) ||
+    (explicitBrowserPath && explicitBrowserPath !== persistedBinding.selected_provider.install.path) ||
+    (input.profile_storage_ref !== input.identity_environment?.browser_storage.profile_storage_ref)
+  )) {
+    return unavailable("identity_environment_unavailable", "Requested provider or Profile does not match the managed identity binding.", [
+      { key: "provider.binding", source: "observed", value: "provider_mismatch" }
+    ]);
+  }
   const configuredProvider = process.env.HARBOR_BROWSER_PROVIDER;
   const providerId = selectLocalProviderId(
     input.provider_id,
@@ -77,7 +88,7 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     Boolean(camoufoxOverride && !explicitBrowserPath)
   );
   if (providerId === "camoufox") {
-    const camoufoxPath = input.browser_path || camoufoxOverride ||
+    const camoufoxPath = (persistedBinding ? persistedBinding.selected_provider?.install.path : input.browser_path || camoufoxOverride) ||
       (providerBinding?.selected_provider_id === "camoufox" ? providerBinding.selected_provider?.install.path : "") ||
       detectBrowserProviders().providers.find((provider) => provider.provider_id === "camoufox")?.install.path || "";
     return launchCamoufoxProvider({

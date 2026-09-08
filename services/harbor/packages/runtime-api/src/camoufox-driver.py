@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import configparser
 import importlib.metadata
+import hashlib
 import json
 import os
 import platform
@@ -38,9 +39,13 @@ def send(message_id: int, status: str, **payload: Any) -> None:
     sys.stdout.flush()
 
 
+def safe_text(value: str) -> str:
+    return re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", value)
+
+
 def safe_error(error: BaseException) -> str:
     message = str(error).replace(PROFILE_DIR, "<profile>").replace(EXECUTABLE_PATH, "<browser>")
-    message = " ".join(message.split())[:240]
+    message = safe_text(" ".join(message.split()))[:240]
     return f"{type(error).__name__}: {message}" if message else type(error).__name__
 
 
@@ -49,9 +54,8 @@ def prepare_properties(executable_path: str) -> tuple[str, str]:
 
     Camoufox 0.5.6 resolves properties.json beside the executable it receives,
     while the official macOS bundle keeps that public file in Contents/Resources.
-    When those paths differ, stage only symlinks and the public properties file in
-    a Driver-owned temporary layout. The binary and Resources remain read-only at
-    their original install path.
+    When those paths differ, independently copy the bundle into a Driver-owned
+    temporary layout. Never share writable inodes with the external install.
     """
     executable = Path(executable_path).absolute()
     adjacent = executable.parent / "properties.json"
@@ -68,17 +72,13 @@ def prepare_properties(executable_path: str) -> tuple[str, str]:
             source_app = executable.parent.parent.parent
             staged_app = layout / source_app.name
 
-            def link_or_copy(source: str, destination: str) -> str:
-                try:
-                    os.link(source, destination)
-                    return destination
-                except OSError:
-                    return shutil.copy2(source, destination)
-
-            # Juggler content processes require a real macOS bundle layout. A
-            # symlinked launcher or Resources directory makes those processes
-            # crash, so clone the directory tree with hardlinks where possible.
-            shutil.copytree(source_app, staged_app, copy_function=link_or_copy, symlinks=True)
+            # Materialize only contained links; every staged byte is independently
+            # owned so browser writes cannot modify the external installation.
+            source_root = source_app.resolve(strict=True)
+            for entry in source_app.rglob("*"):
+                if entry.is_symlink() and not entry.resolve(strict=True).is_relative_to(source_root):
+                    raise ValueError("Camoufox bundle contains an external symlink.")
+            shutil.copytree(source_app, staged_app, symlinks=False)
             staged_macos = staged_app / "Contents" / "MacOS"
             staged_executable = staged_macos / executable.name
             # Copy only the public upstream metadata that Camoufox's public
@@ -126,11 +126,11 @@ def facts_for_page(page: Any) -> dict[str, Any]:
         return {"current_url": None, "title": None, "status": "unavailable"}
     current_url: str | None
     try:
-        current_url = str(page.url) if page.url else None
+        current_url = safe_text(str(page.url)) if page.url else None
     except Exception:
         current_url = None
     try:
-        title = str(page.title())[:512]
+        title = safe_text(str(page.title()))[:512]
     except Exception:
         title = None
     return {"current_url": current_url, "title": title, "status": "ready" if current_url is not None else "unknown"}
@@ -192,6 +192,15 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
     EXECUTABLE_PATH = str(request.get("executable_path", ""))
     if not PROFILE_DIR or not EXECUTABLE_PATH:
         raise ValueError("Camoufox Driver launch requires an executable and managed profile.")
+    if sys.version_info[:2] != (3, 12) or importlib.metadata.version("camoufox") != "0.5.6" or importlib.metadata.version("playwright") != "1.60.0":
+        raise ValueError("Camoufox Driver runtime does not match the qualified Python/package pins.")
+    parser = configparser.ConfigParser()
+    parser.read(Path(EXECUTABLE_PATH).parent.parent / "Resources" / "application.ini")
+    if parser.get("App", "Version", fallback="") != "152.0.4-beta.30":
+        raise ValueError("Camoufox browser does not match the qualified version pin.")
+    properties = Path(EXECUTABLE_PATH).parent.parent / "Resources" / "properties.json"
+    if hashlib.sha256(properties.read_bytes()).hexdigest() != "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4":
+        raise ValueError("Camoufox properties.json does not match the qualified browser schema pin.")
     LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE = prepare_properties(EXECUTABLE_PATH)
     from camoufox import NewBrowser, launch_options
     from playwright.sync_api import sync_playwright
@@ -246,6 +255,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         "page": page_facts(),
         "python_version": platform.python_version(),
         "camoufox_version": camoufox_version,
+        "playwright_version": importlib.metadata.version("playwright"),
         "browser_version": browser_version,
         "properties_source": PROPERTIES_SOURCE,
     }

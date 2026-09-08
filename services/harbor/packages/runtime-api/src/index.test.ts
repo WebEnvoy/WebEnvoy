@@ -1302,10 +1302,15 @@ test("bootstraps XHS reads through the canonical explore page without waiting fo
   process.env.HARBOR_FAKE_BROWSER_NEW_URL_MARKER = newUrlMarker;
   globalThis.WebSocket = DelayedNavigationAckCdpWebSocket as unknown as typeof WebSocket;
   try {
+    const browserPath = writeFakeBrowserExecutable(dir);
     const identityEnvironment = createLocalIdentityEnvironmentFacts({
+      ...providerFixture({ [browserPath]: { executable: true } }),
+      env: { HARBOR_CHROME_PATH: browserPath },
+      requested_provider_id: "chrome_official",
       identity_environment_ref: "identity-env_delayed-navigation-ack",
       execution_identity_ref: "execution-identity_delayed-navigation-ack",
       profile_ref: "profile_delayed-navigation-ack",
+      profile_storage_ref: "profile-storage_delayed-navigation-ack",
       site: {
         site_id: "xiaohongshu",
         origin: "https://www.xiaohongshu.com",
@@ -1315,12 +1320,12 @@ test("bootstraps XHS reads through the canonical explore page without waiting fo
       storage_state: "present"
     });
     const provider = await launchLocalDedicatedProvider({
-      browser_path: writeFakeBrowserExecutable(dir),
+      browser_path: browserPath,
       headless: true,
       timeout_ms: 5000,
       url: "https://www.xiaohongshu.com/search_result?keyword=AI&source=web_search_result_notes",
       profile_ref: "profile_delayed-navigation-ack",
-      profile_storage_ref: "profile-storage_delayed-navigation-ack",
+      profile_storage_ref: identityEnvironment.browser_storage.profile_storage_ref,
       provider_ref: "provider_fake",
       identity_environment: identityEnvironment
     });

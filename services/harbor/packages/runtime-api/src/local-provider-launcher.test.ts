@@ -659,3 +659,36 @@ test("#405 observation preserves path state for the bounded path branch", () => 
     { ...base, url: `${base.url}/`, pathname: "/publish/publish/" }
   ).status, "completed");
 });
+
+test("managed launch rejects mixed provider, installation and Profile before launching", async () => {
+  const { createLocalIdentityEnvironmentFacts } = await import("./identity-environment.js");
+  const { launchLocalDedicatedProvider } = await import("./local-provider-launcher.js");
+  const path = "/fixture/chrome";
+  const identity = createLocalIdentityEnvironmentFacts({
+    identity_environment_ref: "identity-binding-regression",
+    requested_provider_id: "chrome_official",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+    env: { HARBOR_CHROME_PATH: path }, platform: "darwin", arch: "arm64",
+    path_exists: (candidate) => candidate === path,
+    is_executable: (candidate) => candidate === path,
+    read_text: () => null, list_dir: () => []
+  });
+  assert.equal(identity.provider_binding.selected_provider_id, "chrome_official");
+  const input = {
+    browser_path: path, headless: true, timeout_ms: 1, url: "about:blank",
+    profile_ref: identity.profile_ref, provider_ref: "provider-binding-regression",
+    profile_storage_ref: identity.browser_storage.profile_storage_ref,
+    identity_environment: identity
+  };
+  for (const mismatch of [
+    { provider_id: "camoufox" as const },
+    { browser_path: "/fixture/camoufox" },
+    { profile_storage_ref: "other-profile" }
+  ]) {
+    const result = await launchLocalDedicatedProvider({ ...input, ...mismatch });
+    assert.equal(result.status, "unavailable");
+    if (result.status !== "unavailable") throw new Error("Unexpected launch");
+    assert.equal(result.error.code, "identity_environment_unavailable");
+    assert.equal(result.facts.some((fact) => fact.value === "provider_mismatch"), true);
+  }
+});

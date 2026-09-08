@@ -356,6 +356,9 @@ export class RuntimeSessionStore {
       identityEnvironment.identity_environment_ref,
       identityEnvironment.execution_identity_ref
     );
+    if (existing?.facts.current_error?.code === "session_lost") {
+      return unavailableSession("session_missing", existing.facts.current_error!);
+    }
     if (
       existing?.facts.lifecycle_state === "disconnected" ||
       existing?.facts.current_error?.code === "session_cleanup_failed"
@@ -367,7 +370,14 @@ export class RuntimeSessionStore {
     )) {
       const conflict = this.acquireControl(existing, owner, holder);
       if (conflict) return conflict;
-      if (existing.openUrl) this.applyPageFacts(existing, input.url, await existing.openUrl(input.url));
+      try {
+        if (existing.openUrl) this.applyPageFacts(existing, input.url, await existing.openUrl(input.url));
+      } catch {
+        this.markDriverLost(existing);
+      }
+      if ((existing.facts.current_error as RuntimeErrorFact | null)?.code === "session_lost") {
+        return unavailableSession("session_missing", existing.facts.current_error!);
+      }
       return snapshot(existing.facts);
     }
 
@@ -665,9 +675,14 @@ export class RuntimeSessionStore {
         retryable: false
       };
     }
-    const result = await probeReadOperation(input);
-    if (result.page) this.applyPageFacts(record, result.page.current_url ?? input.target_url, result.page);
-    return result;
+    try {
+      const result = await probeReadOperation(input);
+      if (result.page) this.applyPageFacts(record, result.page.current_url ?? input.target_url, result.page);
+      return result;
+    } catch {
+      this.markDriverLost(record);
+      return { status: "unavailable", failure_class: "provider_probe_unavailable", message: "Runtime Session driver was lost. Close the session before reopening.", retryable: false };
+    }
   }
 
   async probeSiteResource(
@@ -687,6 +702,7 @@ export class RuntimeSessionStore {
     try {
       return await probe(input);
     } catch {
+      this.markDriverLost(record);
       return {
         status: "unknown",
         failure_class: "provider_probe_unavailable",
@@ -726,9 +742,14 @@ export class RuntimeSessionStore {
         retryable: false
       };
     }
-    const result = await probe(input);
-    if (result.page) this.applyPageFacts(record, input.target_url, result.page);
-    return result;
+    try {
+      const result = await probe(input);
+      if (result.page) this.applyPageFacts(record, input.target_url, result.page);
+      return result;
+    } catch {
+      this.markDriverLost(record);
+      return { status: "unavailable", failure_class: "provider_probe_unavailable", message: "Runtime Session driver was lost. Close the session before reopening.", retryable: false };
+    }
   }
 
   async executeMediaAction(
@@ -769,6 +790,7 @@ export class RuntimeSessionStore {
       if (result.page) this.applyPageFacts(record, input.target_url, result.page);
       return result;
     } catch {
+      this.markDriverLost(record);
       return {
         status: "unavailable",
         failure_class: "operation_result_unknown",
@@ -832,12 +854,33 @@ export class RuntimeSessionStore {
     return null;
   }
 
+  private markDriverLost(record: RuntimeSessionRecord): void {
+    const now = new Date().toISOString();
+    record.control_generation += 1;
+    // Keep ownership until explicit close proves that provider resources are gone.
+    record.facts.lifecycle_state = "disconnected";
+    record.facts.last_seen_at = now;
+    record.facts.current_error = error("session_lost", "Runtime Session driver was lost. Close the session before reopening.", false);
+    record.facts.availability = { ...record.facts.availability, cdp: "unavailable", driver: "unavailable", viewer: "unavailable", snapshot: "unavailable" };
+    record.facts.control_owner = "none";
+    record.facts.control_lock = { owner: "none", state: "released", holder_ref: null, updated_at: now, conflict_error: null };
+    delete record.openUrl;
+    delete record.probeReadOperation;
+    delete record.probeSiteResource;
+    delete record.probeWritePrecheck;
+    delete record.executeMediaAction;
+    delete record.captureScreenshot;
+    this.viewerControls.markClosed(record.facts.runtime_session_ref, now);
+  }
+
   private applyPageFacts(record: RuntimeSessionRecord, requested_url: string, page: LocalProviderPageFacts): void {
+    if (record.facts.current_error?.code === "session_lost") return;
     const now = new Date().toISOString();
     record.facts.current_page = pageFacts(requested_url, page, now);
     record.facts.last_seen_at = now;
     record.facts.current_error = page.error ?? null;
-    if (page.error) record.facts.lifecycle_state = "failed";
+    if (page.error?.code === "session_lost") this.markDriverLost(record);
+    else if (page.error) record.facts.lifecycle_state = "failed";
     record.facts.facts.push(
       ...page.facts,
       { key: "page.requested_url", source: "configured", value: requested_url },

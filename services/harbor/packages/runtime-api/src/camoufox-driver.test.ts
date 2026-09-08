@@ -30,13 +30,15 @@ for await (const line of rl) {
   const request = JSON.parse(line);
   if (request.op === "launch") {
     page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
-    output({ id: request.id, status: "ready", page, python_version: "3.12.1", camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
+    output({ id: request.id, status: "ready", page, python_version: "3.12.1", camoufox_version: "0.5.6", playwright_version: "1.60.0", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
   } else if (request.op === "open_url") {
+    if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
     page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
   } else if (request.op === "site_resource_probe") {
     output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: request.task_kind !== "authentication_recovery", pinia_ready: request.task_kind !== "authentication_recovery" } });
   } else if (request.op === "read_operation_probe") {
+    if (request.query === "driver-exit") process.exit(9);
     output({ id: request.id, status: "ok", page: { current_url: request.target_url, title: "Search", status: "ready" }, observation: {
       status: "completed", observed_origin: request.expected_origin, response_status: 200,
       detail_urls: ["https://www.xiaohongshu.com/explore/0123456789abcdef01234567"],
@@ -90,6 +92,8 @@ with TemporaryDirectory(prefix="harbor-camoufox-properties-test-") as root:
     staged_path = Path(staged)
     assert not staged_path.is_symlink()
     assert staged_path.read_bytes() == executable.read_bytes()
+    staged_path.write_text("staged modification")
+    assert executable.read_text() == "fixture executable"
     assert not (staged_path.parent / library.name).is_symlink()
     assert (staged_path.parent / library.name).read_bytes() == library.read_bytes()
     assert (staged_path.parent / "properties.json").read_bytes() == properties.read_bytes()
@@ -99,6 +103,17 @@ with TemporaryDirectory(prefix="harbor-camoufox-properties-test-") as root:
     assert module.firefox_major(str(executable)) == 152
     module.cleanup_launch_layout()
     assert not layout_path.exists()
+    outside = root / "outside"
+    outside.write_text("external")
+    (resources / "external-link").symlink_to(outside)
+    try:
+        module.prepare_properties(str(executable))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("external bundle symlink was accepted")
+    (resources / "external-link").unlink()
+    assert outside.read_text() == "external"
     adjacent = executable.parent / "properties.json"
     adjacent.write_text("mismatched\\n")
     try:
@@ -108,6 +123,21 @@ with TemporaryDirectory(prefix="harbor-camoufox-properties-test-") as root:
     else:
         raise AssertionError("mismatched bundle metadata was accepted")
     assert adjacent.read_text() == "mismatched\\n"
+    module.sys.version_info = (3, 12)
+    module.importlib.metadata.version = lambda name: {"camoufox": "0.5.6", "playwright": "1.60.0"}[name]
+    try:
+        module.launch({"profile_dir": str(root / "profile"), "executable_path": str(executable)})
+    except ValueError as error:
+        assert "schema pin" in str(error)
+    else:
+        raise AssertionError("unqualified properties accepted")
+    module.importlib.metadata.version = lambda name: "0.0.0"
+    try:
+        module.launch({"profile_dir": str(root / "profile"), "executable_path": str(executable)})
+    except ValueError as error:
+        assert "pins" in str(error)
+    else:
+        raise AssertionError("unqualified package accepted")
 print("properties layout passed")
 `;
   const output = execFileSync(pythonPath, ["-c", script, helperPath], {
@@ -162,12 +192,12 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
   assert.equal(launched.facts.find((fact) => fact.key === "camoufox.properties.source")?.value, "resources_copy");
 
   const opened = await launched.openUrl("https://www.xiaohongshu.com/search_result?keyword=%E4%B8%AD%E6%96%87");
-  assert.equal(opened.current_url, "https://www.xiaohongshu.com/search_result?keyword=%E4%B8%AD%E6%96%87");
+  assert.equal(opened.current_url, "https://www.xiaohongshu.com/search_result?keyword=<redacted>");
   const probe = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "search_notes" });
   assert.equal(probe.status, "available");
   const authentication = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "authentication_recovery" });
-  assert.equal(authentication.status, "available");
-  if (authentication.status === "available") assert.deepEqual(authentication.verified_fact_keys, []);
+  assert.equal(authentication.status, "unknown");
+  assert.deepEqual(authentication.verified_fact_keys, []);
   const read = await launched.probeReadOperation!({
     site_id: "xiaohongshu",
     operation_id: "xhs_search_notes",
@@ -262,4 +292,30 @@ test("keeps the existing Harbor lifecycle around a Camoufox driver", async () =>
   assert.notEqual(reopened.driver_ref, initialDriver);
   assert.equal(reopened.driver_kind, "firefox_juggler");
   await runtime.closeSession(reopened.runtime_session_ref);
+}));
+
+
+test("redacts query secrets and poisons a timed-out driver", async () => withCamoufoxEnv(async () => {
+  const launched = await launchCamoufoxProvider(input());
+  assert.equal(launched.status, "ready");
+  if (launched.status !== "ready") return;
+  const page = await launched.openUrl("https://www.xiaohongshu.com/explore?xsec_token=private-value");
+  assert.equal(JSON.stringify(page).includes("private-value"), false);
+  await assert.rejects(launched.openUrl("https://www.xiaohongshu.com/timeout-test"), /timed out/);
+  await assert.rejects(launched.openUrl("https://www.xiaohongshu.com/explore"), /not running/);
+  await launched.close();
+}));
+
+test("propagates a dead Driver from a read probe", async () => withCamoufoxEnv(async () => {
+  const launched = await launchCamoufoxProvider(input());
+  assert.equal(launched.status, "ready");
+  if (launched.status !== "ready") return;
+  await assert.rejects(launched.probeReadOperation!({
+    site_id: "xiaohongshu",
+    operation_id: "xhs_search_notes",
+    query: "driver-exit",
+    target_url: "https://www.xiaohongshu.com/search_result?keyword=driver-exit",
+    expected_origin: "https://www.xiaohongshu.com"
+  }), /exited/);
+  await launched.close();
 }));
