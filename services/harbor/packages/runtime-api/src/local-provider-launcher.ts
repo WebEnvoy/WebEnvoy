@@ -45,6 +45,11 @@ import type {
   XhsWritePrecheckFieldState,
   XhsWritePrecheckMediaState,
   XhsWritePrecheckObservationStatus,
+  XhsPublicObservation,
+  XhsPublicObservationExpected,
+  XhsPublicObservationExpectedMatch,
+  XhsPublicObservationFieldSummary,
+  XhsPublicObservationPendingIssueCode,
   XhsPathPrepareFailureStage,
   XhsPathPrepareNormalizedState,
   RuntimeErrorCode,
@@ -173,7 +178,25 @@ type WritePrecheckObservation = {
   validation_state?: XhsWritePrecheckFieldState;
   save_draft_control?: XhsWritePrecheckFieldState;
   publish_control?: XhsWritePrecheckFieldState;
+  public_observation?: {
+    account_candidates?: readonly { label?: unknown; ref?: unknown }[];
+    business_target_candidates?: readonly { label?: unknown; ref?: unknown }[];
+    image_count?: unknown;
+    ordered_item_refs?: readonly unknown[];
+    title_summary?: { state?: unknown; length?: unknown; fingerprint?: unknown };
+    body_summary?: { state?: unknown; length?: unknown; fingerprint?: unknown };
+    title_expected_match?: XhsPublicObservationExpectedMatch;
+    body_expected_match?: XhsPublicObservationExpectedMatch;
+    page_fingerprint?: unknown;
+    page_diff?: "unchanged" | "changed" | "unknown";
+  };
   selection_status?: "selected" | "not_performed" | "blocked" | "unknown";
+};
+
+type PublicFieldSummaryRaw = {
+  state?: unknown;
+  length?: unknown;
+  fingerprint?: unknown;
 };
 
 const writePrecheckCompositionPaths = new Set<XhsWritePrecheckCompositionPath>([
@@ -255,6 +278,181 @@ function safeMediaState(observation: WritePrecheckObservation, compositionPath: 
       .filter((id) => controls[id] !== undefined)
       .map((id) => [id, safeFieldState(controls[id])]))
   };
+}
+
+const publicObservationIssueCodes = new Set<XhsPublicObservationPendingIssueCode>([
+  "account_unknown", "account_mismatch", "business_target_unknown", "business_target_mismatch",
+  "image_count_unknown", "image_order_unknown", "image_order_mismatch", "title_unknown", "title_mismatch",
+  "body_unknown", "body_mismatch", "page_fingerprint_unknown", "page_changed", "page_diff_unknown"
+]);
+
+const publicObservationSensitive = /cookie|token|password|secret|credential|authorization|apikey|accesskey|session|profile|storage|raw.?dom|raw.?har|screenshot|network|cdp|验证码|校验码|安全验证/i;
+
+function boundedPublicObservationLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 && normalized.length <= 96 && !/[\u0000-\u001f\u007f]/.test(normalized) &&
+    !publicObservationSensitive.test(normalized) ? normalized : null;
+}
+
+function boundedPublicObservationRef(value: unknown): string | null {
+  const label = boundedPublicObservationLabel(value);
+  return label && /^[A-Za-z][A-Za-z0-9._:/-]{0,199}$/.test(label) ? label : null;
+}
+
+function expectedMatch(value: unknown): XhsPublicObservationExpectedMatch {
+  return value === "matched" || value === "mismatched" || value === "unknown" ? value : "unknown";
+}
+
+function publicFieldSummary(
+  value: PublicFieldSummaryRaw | undefined,
+  match: unknown
+): XhsPublicObservationFieldSummary {
+  const state = value?.state === "empty" || value?.state === "present" ? value.state : "unknown";
+  const length = typeof value?.length === "number" && Number.isInteger(value.length) && value.length >= 0 && value.length <= 2_000
+    ? value.length
+    : null;
+  const fingerprint = typeof value?.fingerprint === "string" && /^fnv1a:[0-9a-f]{8}$/.test(value.fingerprint)
+    ? value.fingerprint
+    : null;
+  const normalizedMatch = expectedMatch(match);
+  const status = normalizedMatch === "mismatched" ? "mismatch" : state === "unknown" || length === null || fingerprint === null ? "unknown" : "observed";
+  return {
+    status,
+    summary: status === "unknown"
+      ? { state: "unknown", length: null, fingerprint: null }
+      : { state, length, fingerprint },
+    expected_match: normalizedMatch
+  };
+}
+
+function publicLabelRef(
+  candidates: readonly { label?: unknown; ref?: unknown }[] | undefined,
+  expectedRef: string | undefined
+): XhsPublicObservation["account"] {
+  if (!candidates || candidates.length !== 1) {
+    return { status: "unknown", label: null, ref: null, expected_match: "unknown" };
+  }
+  const candidate = candidates[0]!;
+  const label = boundedPublicObservationLabel(candidate.label);
+  const ref = boundedPublicObservationRef(candidate.ref);
+  if (!label && !ref) return { status: "unknown", label: null, ref: null, expected_match: "unknown" };
+  return {
+    status: "observed",
+    label,
+    ref,
+    expected_match: expectedRef === undefined ? "unknown" : ref === null ? "unknown" : ref === expectedRef ? "matched" : "mismatched"
+  };
+}
+
+function publicObservationFromObservation(
+  observation: WritePrecheckObservation,
+  expected: XhsPublicObservationExpected | undefined
+): XhsPublicObservation {
+  const raw = observation.public_observation;
+  const account = publicLabelRef(raw?.account_candidates, expected?.account_ref);
+  const business_target = publicLabelRef(raw?.business_target_candidates, expected?.business_target_ref);
+  const imageCount = typeof raw?.image_count === "number" && Number.isInteger(raw.image_count) && raw.image_count >= 0 && raw.image_count <= 100
+    ? raw.image_count
+    : null;
+  const refs = Array.isArray(raw?.ordered_item_refs) ? raw.ordered_item_refs.map(boundedPublicObservationRef) : [];
+  const safeRefs = refs.every((ref): ref is string => ref !== null) && new Set(refs).size === refs.length ? refs : [];
+  const order_status: XhsPublicObservation["media"]["order_status"] = imageCount === 0 || (imageCount !== null && safeRefs.length === imageCount) ? "observed" : "unknown";
+  const expectedMediaRefs = expected?.media_refs;
+  const mediaExpectedMatch = expectedMediaRefs === undefined
+    ? "unknown"
+    : imageCount === null || order_status !== "observed"
+      ? "unknown"
+      : imageCount !== expectedMediaRefs.length || safeRefs.some((ref, index) => ref !== expectedMediaRefs[index])
+        ? "mismatched"
+        : "matched";
+  const media: XhsPublicObservation["media"] = {
+    image_count: imageCount,
+    order_status,
+    ordered_item_refs: order_status === "observed" ? safeRefs : [],
+    expected_match: mediaExpectedMatch
+  };
+  const fields = {
+    title: publicFieldSummary(raw?.title_summary, raw?.title_expected_match),
+    body: publicFieldSummary(raw?.body_summary, raw?.body_expected_match)
+  };
+  const fingerprint = typeof raw?.page_fingerprint === "string" && /^fnv1a:[0-9a-f]{8}$/.test(raw.page_fingerprint)
+    ? raw.page_fingerprint
+    : null;
+  const diff = raw?.page_diff === "unchanged" || raw?.page_diff === "changed" ? raw.page_diff : "unknown";
+  const pendingCandidates: (XhsPublicObservationPendingIssueCode | null)[] = [
+    account.status === "unknown" || expected?.account_ref !== undefined && account.expected_match === "unknown"
+      ? "account_unknown" : account.expected_match === "mismatched" ? "account_mismatch" : null,
+    business_target.status === "unknown" || expected?.business_target_ref !== undefined && business_target.expected_match === "unknown"
+      ? "business_target_unknown" : business_target.expected_match === "mismatched" ? "business_target_mismatch" : null,
+    imageCount === null ? "image_count_unknown" : order_status === "unknown" ? "image_order_unknown" : media.expected_match === "mismatched" ? "image_order_mismatch" : null,
+    fields.title.status === "unknown" || expected?.title !== undefined && fields.title.expected_match === "unknown"
+      ? "title_unknown" : fields.title.status === "mismatch" ? "title_mismatch" : null,
+    fields.body.status === "unknown" || expected?.body !== undefined && fields.body.expected_match === "unknown"
+      ? "body_unknown" : fields.body.status === "mismatch" ? "body_mismatch" : null,
+    fingerprint === null ? "page_fingerprint_unknown" : diff === "changed" ? "page_changed" : diff === "unknown" ? "page_diff_unknown" : null
+  ];
+  const pending_issue_codes = pendingCandidates.filter((code): code is XhsPublicObservationPendingIssueCode => code !== null && publicObservationIssueCodes.has(code)).slice(0, 8);
+  return {
+    schema_version: "harbor-xhs-public-observation/v0",
+    status: pending_issue_codes.length === 0 ? "observed" : "unknown",
+    account,
+    business_target,
+    media,
+    fields,
+    page: { fingerprint, diff },
+    pending_issue_codes,
+    submitted: false
+  };
+}
+
+export function validXhsPublicObservation(value: unknown): value is XhsPublicObservation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const observation = value as Record<string, unknown>;
+  const record = (candidate: unknown) => candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as Record<string, unknown>
+    : undefined;
+  const exact = (candidate: Record<string, unknown> | undefined, keys: string) => candidate !== undefined && Object.keys(candidate).sort().join(",") === keys;
+  const match = (candidate: unknown) => candidate === "matched" || candidate === "mismatched" || candidate === "unknown";
+  const labelRef = (candidate: unknown) => {
+    const item = record(candidate);
+    if (!item) return false;
+    return exact(item, "expected_match,label,ref,status") && (item.status === "observed" || item.status === "unknown") &&
+      (item.label === null || boundedPublicObservationLabel(item.label) !== null) &&
+      (item.ref === null || boundedPublicObservationRef(item.ref) !== null) &&
+      (item.status === "observed" ? item.label !== null || item.ref !== null : item.label === null && item.ref === null) &&
+      match(item.expected_match);
+  };
+  const field = (candidate: unknown) => {
+    const item = record(candidate);
+    const summary = record(item?.summary);
+    if (!item || !summary) return false;
+    return exact(item, "expected_match,status,summary") && exact(summary, "fingerprint,length,state") &&
+      ["observed", "unknown", "mismatch"].includes(String(item.status)) &&
+      ["empty", "present", "unknown"].includes(String(summary.state)) &&
+      (summary.length === null || typeof summary.length === "number" && Number.isInteger(summary.length) && summary.length >= 0 && summary.length <= 2_000) &&
+      (summary.fingerprint === null || typeof summary.fingerprint === "string" && /^fnv1a:[0-9a-f]{8}$/.test(summary.fingerprint)) && match(item.expected_match);
+  };
+  const media = record(observation.media);
+  if (!media) return false;
+  const refs = Array.isArray(media?.ordered_item_refs) ? media.ordered_item_refs : [];
+  const imageCount = media?.image_count;
+  const mediaValid = exact(media, "expected_match,image_count,order_status,ordered_item_refs") && match(media.expected_match) &&
+    (imageCount === null || typeof imageCount === "number" && Number.isInteger(imageCount) && imageCount >= 0 && imageCount <= 100) &&
+    (media.order_status === "observed" || media.order_status === "unknown") && refs.every((ref) => boundedPublicObservationRef(ref) !== null) &&
+    new Set(refs).size === refs.length && (media.order_status === "unknown" ? refs.length === 0 : typeof imageCount === "number" && refs.length === imageCount);
+  const fields = record(observation.fields);
+  if (!fields) return false;
+  const page = record(observation.page);
+  if (!page) return false;
+  const pending = observation.pending_issue_codes;
+  if (!Array.isArray(pending)) return false;
+  const pendingValid = pending.length <= 8 && new Set(pending).size === pending.length && pending.every((code) => publicObservationIssueCodes.has(code));
+  return exact(observation, "account,business_target,fields,media,page,pending_issue_codes,schema_version,status,submitted") &&
+    observation.schema_version === "harbor-xhs-public-observation/v0" && (observation.status === "observed" || observation.status === "unknown") &&
+    labelRef(observation.account) && labelRef(observation.business_target) && mediaValid && exact(fields, "body,title") && field(fields.title) && field(fields.body) &&
+    exact(page, "diff,fingerprint") && (page.fingerprint === null || typeof page.fingerprint === "string" && /^fnv1a:[0-9a-f]{8}$/.test(page.fingerprint)) &&
+    ["unchanged", "changed", "unknown"].includes(String(page.diff)) && pendingValid && observation.status === (pending.length === 0 ? "observed" : "unknown") && observation.submitted === false;
 }
 
 export const XHS_WRITE_PRECHECK_CDP_COMMANDS = [
@@ -354,7 +552,8 @@ export function validateXhsWritePrecheckObservation(
     save_draft_control,
     publish_control,
     prohibited_actions_observed: { upload: false, generate: false, save: false, publish: false },
-    target_ref: input.target_ref
+    target_ref: input.target_ref,
+    public_observation: publicObservationFromObservation(observation, input.expected)
   };
 }
 
@@ -380,7 +579,7 @@ async function probeProviderWritePrecheck(
       const observedAt = Date.now();
       await sendWritePrecheckCdp(client, "Runtime.enable");
       const path = input.requested_path ?? input.composition_path;
-      const observation = await evaluateWritePrecheck(client, path);
+      const observation = await evaluateWritePrecheck(client, path, false, false, input.expected);
       const validation = validateXhsWritePrecheckObservation(input, observation, failureStage);
       if (validation.status === "unavailable") return validation;
       if (input.requested_path !== undefined) {
@@ -404,7 +603,7 @@ async function probeProviderWritePrecheck(
         try {
           await sendWritePrecheckCdp(client, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
           await sendWritePrecheckCdp(client, "Page.setInterceptFileChooserDialog", { enabled: true });
-          selected = await evaluateWritePrecheck(client, input.requested_path, true);
+          selected = await evaluateWritePrecheck(client, input.requested_path, true, false, input.expected);
           if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted to open a file chooser and was blocked.", false, failureStage);
           }
@@ -420,11 +619,13 @@ async function probeProviderWritePrecheck(
             return writePrecheckUnavailable("page_changed", "The requested path did not become active after exact control selection.", false, failureStage);
           }
           failureStage = "provider_readback_freshness";
-          const screenshot = await captureWritePrecheckScreenshot(client);
-          if (!screenshot) {
-            return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.", true, failureStage);
+          if (input.capture_screenshot !== false) {
+            const screenshot = await captureWritePrecheckScreenshot(client);
+            if (!screenshot) {
+              return writePrecheckUnavailable("evidence_unavailable", "The refs-only path-preparation snapshot evidence could not be captured.", true, failureStage);
+            }
           }
-          const after = await evaluateWritePrecheck(client, input.requested_path, false, true);
+          const after = await evaluateWritePrecheck(client, input.requested_path, false, true, input.expected);
           if (fileChooserOpened) {
             return writePrecheckUnavailable("evidence_unavailable", "The requested control attempted a prohibited external interaction and was blocked.", false, failureStage);
           }
@@ -440,7 +641,7 @@ async function probeProviderWritePrecheck(
           completedPathPrepare = {
             ...selectedValidation,
             observed_at: new Date(observedAt).toISOString(),
-            evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }],
+            evidence_ref_kinds: [{ kind: input.capture_screenshot === false ? "public_observation_ref" : "snapshot_ref", ref: opaqueRef("evidence") }],
             path_prepare: pathPrepareState(input.requested_path, observation, selected, after)
           };
         } finally {
@@ -461,18 +662,32 @@ async function probeProviderWritePrecheck(
         }
         return completedPathPrepare;
       }
-      const screenshot = await captureWritePrecheckScreenshot(client);
-      if (!screenshot) {
-        return writePrecheckUnavailable("evidence_unavailable", "The refs-only precheck snapshot evidence could not be captured.");
+      if (input.capture_screenshot !== false) {
+        const screenshot = await captureWritePrecheckScreenshot(client);
+        if (!screenshot) {
+          return writePrecheckUnavailable("evidence_unavailable", "The refs-only precheck snapshot evidence could not be captured.");
+        }
       }
-      const after = await evaluateWritePrecheck(client, input.composition_path);
+      const after = await evaluateWritePrecheck(client, input.composition_path, false, false, input.expected);
       if (!validWritePrecheckFreshness(input, observation, after, observedAt, Date.now())) {
         return writePrecheckUnavailable("page_changed", "The creator page changed while snapshot evidence was captured.");
       }
+      const afterFingerprint = after?.public_observation?.page_fingerprint;
+      const beforeFingerprint = observation?.public_observation?.page_fingerprint;
+      const public_observation = {
+        ...validation.public_observation,
+        page: {
+          ...validation.public_observation.page,
+          diff: beforeFingerprint && afterFingerprint
+            ? beforeFingerprint === afterFingerprint ? "unchanged" as const : "changed" as const
+            : "unknown" as const
+        }
+      };
       return {
         ...validation,
         observed_at: new Date(observedAt).toISOString(),
-        evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("evidence") }]
+        evidence_ref_kinds: [{ kind: input.capture_screenshot === false ? "public_observation_ref" : "snapshot_ref", ref: opaqueRef("evidence") }],
+        public_observation
       };
     }, AbortSignal.timeout(3000));
   } catch {
@@ -1551,14 +1766,35 @@ async function evaluateWritePrecheck(
   client: CdpClient,
   compositionPath?: XhsWritePrecheckCompositionPath,
   selectPath = false,
-  exactPath = false
+  exactPath = false,
+  expected?: XhsPublicObservationExpected
 ): Promise<WritePrecheckObservation | undefined> {
   const evaluated = await sendWritePrecheckCdp(client, "Runtime.evaluate", {
     expression: writePrecheckProbeExpression(compositionPath, selectPath, exactPath),
     returnByValue: true,
     awaitPromise: true
   });
-  return (evaluated.result as { value?: WritePrecheckObservation } | undefined)?.value;
+  const observation = (evaluated.result as { value?: WritePrecheckObservation } | undefined)?.value;
+  if (!observation || (expected?.title === undefined && expected?.body === undefined)) return observation;
+  const fieldProbe = await evaluateFieldFill(client, expected.title ?? "", expected.body ?? "", false);
+  const titleExpectedMatch = expected.title === undefined
+    ? "unknown" as const
+    : fieldProbe?.title_candidate_count === 1
+      ? fieldProbe.title_matched ? "matched" as const : "mismatched" as const
+      : "unknown" as const;
+  const bodyExpectedMatch = expected.body === undefined
+    ? "unknown" as const
+    : fieldProbe?.body_candidate_count === 1
+      ? fieldProbe.body_matched ? "matched" as const : "mismatched" as const
+      : "unknown" as const;
+  return {
+    ...observation,
+    public_observation: {
+      ...observation.public_observation,
+      title_expected_match: titleExpectedMatch,
+      body_expected_match: bodyExpectedMatch
+    }
+  };
 }
 
 function pathPrepareState(
@@ -1701,6 +1937,14 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
       const label = (el) => normalize(el?.getAttribute('aria-label') || el?.getAttribute('name') ||
         el?.getAttribute('placeholder') || el?.textContent || '');
+      const fingerprint = (value) => {
+        let hash = 2166136261;
+        for (let index = 0; index < value.length; index += 1) {
+          hash ^= value.charCodeAt(index);
+          hash = Math.imul(hash, 16777619);
+        }
+        return 'fnv1a:' + (hash >>> 0).toString(16).padStart(8, '0');
+      };
       const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], input, textarea, [contenteditable="true"], [role="textbox"]')];
       const app = document.querySelector('#app, [data-v-app]');
       const appVisible = visible(app);
@@ -1786,6 +2030,37 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
           : fieldState(control);
       }
       const mediaControl = (mediaDefinitions[requestedPath] || []).map(([, patterns]) => findControl(patterns, false, surfaceControls)).find(Boolean);
+      const titleValue = titleControl?.value || '';
+      const bodyValue = contentControl ? (contentControl.innerText || contentControl.textContent || '') : '';
+      const fieldSummary = (available, value) => {
+        if (!available) return { state: 'unknown', length: null, fingerprint: null };
+        const bounded = String(value).slice(0, 2000);
+        return { state: bounded.length === 0 ? 'empty' : 'present', length: bounded.length, fingerprint: fingerprint(bounded) };
+      };
+      // Harbor has no pinned XHS page source for the current account or
+      // BusinessTarget. Keep these empty until a versioned site contract is
+      // supplied; generic labels and page text are not identity evidence.
+      const accountCandidates = [];
+      const businessTargetCandidates = [];
+      const imageElements = imageCompositionSurface
+        ? [...imageCompositionSurface.querySelectorAll('img')].filter((el) => visible(el) && (el.naturalWidth > 24 || el.getBoundingClientRect().width >= 24))
+        : [];
+      // The current XHS page exposes no pinned opaque media-ref source. Keep
+      // order unknown instead of treating DOM position or an invented attr as a ref.
+      const imageRefs = imageElements.map(() => null);
+      const pageFingerprint = fingerprint([
+        location.origin,
+        location.pathname,
+        requestedPath,
+        String(roots.length),
+        JSON.stringify(accountCandidates),
+        JSON.stringify(businessTargetCandidates),
+        JSON.stringify(imageRefs),
+        JSON.stringify(fieldSummary(Boolean(titleControl), titleValue)),
+        JSON.stringify(fieldSummary(Boolean(contentControl), bodyValue)),
+        String(publishControl ? 1 : 0),
+        String(saveControl ? 1 : 0)
+      ].join('|'));
       // Merely seeing an upload control is the entrypoint, not an initialized
       // composition. Initialization is observable only once an editing or
       // publication control is present; file selection is intentionally not
@@ -1815,7 +2090,16 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         media_state: { availability: mediaControl || imageComposition ? 'available' : 'unknown', observation: mediaControl || imageComposition ? 'observed' : 'unknown', controls: mediaControls },
         validation_state: validation,
         save_draft_control: save,
-        publish_control: publish
+        publish_control: publish,
+        public_observation: {
+          account_candidates: accountCandidates,
+          business_target_candidates: businessTargetCandidates,
+          image_count: imageCompositionSurface ? imageElements.length : null,
+          ordered_item_refs: imageRefs,
+          title_summary: fieldSummary(Boolean(titleControl), titleValue),
+          body_summary: fieldSummary(Boolean(contentControl), bodyValue),
+          page_fingerprint: pageFingerprint
+        }
       };
     };
     ${selectPath ? pathSelectionProbeExpression() : ""}

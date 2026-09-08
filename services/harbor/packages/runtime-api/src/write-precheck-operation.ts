@@ -1,4 +1,5 @@
 import { opaqueRef } from "./refs.js";
+import { validXhsPublicObservation } from "./local-provider-launcher.js";
 import type {
   LocalProviderWritePrecheckProbeResult,
   XhsWritePrecheckCompositionPath,
@@ -7,7 +8,9 @@ import type {
   XhsWritePrecheckMediaState,
   XhsPathPrepareFailureStage,
   XhsPathPrepareNormalizedState,
-  XhsPathPrepareRequestedPath
+  XhsPathPrepareRequestedPath,
+  XhsPublicObservation,
+  XhsPublicObservationExpected
 } from "./runtime-session-types.js";
 
 export const HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA = "harbor-validate-only-write-precheck/v0";
@@ -65,6 +68,7 @@ export interface AdmittedWritePrecheck {
   target_ref: string;
   holder_ref?: string;
   composition_path?: XhsWritePrecheckCompositionPath;
+  expected?: XhsPublicObservationExpected;
   requested_fields?: readonly ("title" | "summary" | "canonical_url" | "source_status")[];
   include_source_refs?: boolean;
   proposed_input_summary?: string;
@@ -159,6 +163,7 @@ export type ValidateOnlyWritePrecheckResult =
       save_draft_control: XhsWritePrecheckFieldState;
       publish_control: XhsWritePrecheckFieldState;
       prohibited_actions_observed: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }>["prohibited_actions_observed"];
+      public_observation: XhsPublicObservation;
       no_submit_guard: "active";
       post_check: {
         status: "passed";
@@ -303,6 +308,7 @@ const safePublic = (value: unknown, max: number): value is string =>
 const opaquePublicRef = (value: unknown): value is string =>
   safePublic(value, 200) && /^[A-Za-z][A-Za-z0-9._:/-]*$/.test(value);
 const requestedFieldSet = new Set(["title", "summary", "canonical_url", "source_status"]);
+const expectedObservationKeys = new Set(["account_ref", "business_target_ref", "title", "body", "media_refs"]);
 const compositionPathSet = new Set<XhsWritePrecheckCompositionPath>([
   "image_text_upload", "image_text_generate", "video", "long_article", "podcast"
 ]);
@@ -315,6 +321,28 @@ const mediaControlIds: Record<XhsWritePrecheckCompositionPath, readonly string[]
   long_article: ["add_media"],
   podcast: ["upload_audio", "add_rss_subscription"]
 };
+
+function admittedExpectedObservation(value: unknown): XhsPublicObservationExpected | null {
+  const input = object(value);
+  if (!input || Object.keys(input).some((key) => !expectedObservationKeys.has(key))) return null;
+  if (input.account_ref !== undefined && !opaquePublicRef(input.account_ref)) return null;
+  if (input.business_target_ref !== undefined && !opaquePublicRef(input.business_target_ref)) return null;
+  if (input.title !== undefined && !safePublic(input.title, 200)) return null;
+  if (input.body !== undefined && !safePublic(input.body, 2_000)) return null;
+  if (input.media_refs !== undefined && (
+    !Array.isArray(input.media_refs) ||
+    input.media_refs.length > 24 ||
+    new Set(input.media_refs).size !== input.media_refs.length ||
+    !input.media_refs.every(opaquePublicRef)
+  )) return null;
+  return {
+    ...(input.account_ref === undefined ? {} : { account_ref: input.account_ref }),
+    ...(input.business_target_ref === undefined ? {} : { business_target_ref: input.business_target_ref }),
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.body === undefined ? {} : { body: input.body }),
+    ...(input.media_refs === undefined ? {} : { media_refs: [...input.media_refs] })
+  };
+}
 
 function validFieldState(field: unknown): field is XhsWritePrecheckFieldState {
   if (!field || typeof field !== "object" || Array.isArray(field)) return false;
@@ -344,13 +372,15 @@ function validMediaState(media: unknown, compositionPath: XhsWritePrecheckCompos
 export function admitXhsPublishPrecheck(value: unknown): AdmittedWritePrecheck | null {
   const input = object(value);
   if (!input || Object.keys(input).some((key) =>
-    !["url", "target_ref", "holder_ref", "no_submit_guard", "composition_path", "requested_fields", "include_source_refs", "proposed_input_summary"].includes(key)
+    !["url", "target_ref", "holder_ref", "no_submit_guard", "composition_path", "expected", "requested_fields", "include_source_refs", "proposed_input_summary"].includes(key)
   )) return null;
   if (!opaquePublicRef(input.target_ref) || input.no_submit_guard !== "active") return null;
   if (input.holder_ref !== undefined && !safePublic(input.holder_ref, 200)) return null;
   if (input.composition_path !== undefined && (
     typeof input.composition_path !== "string" || !compositionPathSet.has(input.composition_path as XhsWritePrecheckCompositionPath)
   )) return null;
+  const expected = input.expected === undefined ? undefined : admittedExpectedObservation(input.expected);
+  if (expected === null) return null;
   const requestedFields = input.requested_fields;
   if (requestedFields !== undefined && (
     !Array.isArray(requestedFields) ||
@@ -389,6 +419,7 @@ export function admitXhsPublishPrecheck(value: unknown): AdmittedWritePrecheck |
       target_ref: input.target_ref,
       ...(input.holder_ref === undefined ? {} : { holder_ref: input.holder_ref as string }),
       ...(input.composition_path === undefined ? {} : { composition_path: input.composition_path as XhsWritePrecheckCompositionPath }),
+      ...(expected === undefined ? {} : { expected }),
       ...(requestedFields === undefined ? {} : { requested_fields: requestedFields as AdmittedWritePrecheck["requested_fields"] }),
       ...(input.include_source_refs === undefined ? {} : { include_source_refs: input.include_source_refs }),
       ...(input.proposed_input_summary === undefined ? {} : { proposed_input_summary: input.proposed_input_summary as string })
@@ -445,7 +476,7 @@ export function completeWritePrecheck(
   probe: Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }>
 ): Extract<ValidateOnlyWritePrecheckResult, { status: "completed" }> {
   const postCheckRef = opaqueRef("post_check");
-  const postCheckEvidence = probe.evidence_ref_kinds.filter((entry) => entry.kind === "snapshot_ref");
+  const postCheckEvidence = probe.evidence_ref_kinds.filter((entry) => entry.kind === "snapshot_ref" || entry.kind === "public_observation_ref");
   return {
     schema_version: HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA,
     status: "completed",
@@ -472,6 +503,7 @@ export function completeWritePrecheck(
     save_draft_control: probe.save_draft_control,
     publish_control: probe.publish_control,
     prohibited_actions_observed: probe.prohibited_actions_observed,
+    public_observation: probe.public_observation,
     no_submit_guard: "active",
     post_check: {
       status: "passed",
@@ -505,7 +537,7 @@ export function validCompletedWritePrecheckProbe(
     sourceKinds.join(",") === "creator_publish_page_summary,dom_snapshot_summary" &&
     new Set(sourceRefs).size === 2 &&
     probe.evidence_ref_kinds.length === 1 &&
-    probe.evidence_ref_kinds[0]?.kind === "snapshot_ref" &&
+    (probe.evidence_ref_kinds[0]?.kind === "snapshot_ref" || probe.evidence_ref_kinds[0]?.kind === "public_observation_ref") &&
     probe.classification === "partial_result" &&
     ["entrypoint_only", "composition_observation"].includes(probe.precheck_scope) &&
     compositionPathSet.has(probe.composition_path) &&
@@ -523,6 +555,7 @@ export function validCompletedWritePrecheckProbe(
     validFieldState(probe.validation_state) &&
     validFieldState(probe.save_draft_control) &&
     validFieldState(probe.publish_control) &&
+    validXhsPublicObservation(probe.public_observation) &&
     Object.keys(probe.prohibited_actions_observed).sort().join(",") === "generate,publish,save,upload" &&
     Object.values(probe.prohibited_actions_observed).every((observed) => observed === false) &&
     bounded(probe.target_ref, 200);

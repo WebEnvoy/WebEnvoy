@@ -354,6 +354,12 @@ export type {
   XhsWritePrecheckFieldState,
   XhsWritePrecheckMediaState,
   XhsWritePrecheckObservationStatus,
+  XhsPublicObservation,
+  XhsPublicObservationExpected,
+  XhsPublicObservationExpectedMatch,
+  XhsPublicObservationFieldSummary,
+  XhsPublicObservationLabelRef,
+  XhsPublicObservationPendingIssueCode,
   OpenIdentityEnvironmentSessionInput,
   ProviderMode,
   RuntimeControlLockFacts,
@@ -1256,6 +1262,8 @@ export class HarborRuntime {
       target_url: admitted.url,
       expected_origin: XHS_PUBLISH_PRECHECK_PIN.origin,
       target_ref: admitted.target_ref,
+      capture_screenshot: false,
+      ...(admitted.expected === undefined ? {} : { expected: admitted.expected }),
       ...(admitted.composition_path === undefined ? {} : { composition_path: admitted.composition_path })
     });
     if (probe.status === "unavailable") {
