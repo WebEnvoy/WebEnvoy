@@ -110,6 +110,7 @@ export type {
 export interface RuntimeSessionRecord {
   facts: RuntimeSessionFacts;
   control_generation: number;
+  active_provider_interactions: number;
   closing?: Promise<RuntimeSessionFacts>;
   headless: boolean;
   identity_binding: {
@@ -265,6 +266,7 @@ export class RuntimeSessionStore {
     this.records.set(runtime_session_ref, {
       facts,
       control_generation: 0,
+      active_provider_interactions: 0,
       headless,
       identity_binding: {
         profile_storage_ref: input.profile_storage_ref ?? null
@@ -397,7 +399,7 @@ export class RuntimeSessionStore {
       const conflict = this.acquireControl(existing, owner, holder);
       if (conflict) return conflict;
       try {
-        if (existing.openUrl) this.applyPageFacts(existing, input.url, await existing.openUrl(input.url));
+        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!)));
       } catch {
         this.markDriverLost(existing);
       }
@@ -462,6 +464,7 @@ export class RuntimeSessionStore {
     if (record.facts.lifecycle_state !== "active" && record.facts.lifecycle_state !== "locked") {
       return unavailableSession("session_cleanup_failed", error("session_cleanup_failed", "Runtime Session is not releasable.", true));
     }
+    if (record.active_provider_interactions > 0) return unavailableSession("session_locked", error("session_locked", "Provider interaction is still in progress.", true));
     const owner = input.control_owner;
     if (owner && record.facts.control_lock.owner !== owner && record.facts.control_lock.state === "held") return lockConflict(record, owner);
 
@@ -671,6 +674,15 @@ export class RuntimeSessionStore {
     return session ? isRuntimeSessionReadable(session) : false;
   }
 
+  private async withProviderInteraction<T>(record: RuntimeSessionRecord, operation: () => Promise<T>): Promise<T> {
+    record.active_provider_interactions += 1;
+    try {
+      return await operation();
+    } finally {
+      record.active_provider_interactions -= 1;
+    }
+  }
+
   async probeReadOperation(
     runtime_session_ref: string,
     input: LocalProviderReadProbeInput
@@ -702,7 +714,7 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      const result = await probeReadOperation(input);
+      const result = await this.withProviderInteraction(record, () => probeReadOperation(input));
       if (result.page) this.applyPageFacts(record, result.page.current_url ?? input.target_url, result.page);
       return result;
     } catch {
@@ -726,7 +738,7 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      return await probe(input);
+      return await this.withProviderInteraction(record, () => probe(input));
     } catch {
       this.markDriverLost(record);
       return {
@@ -769,7 +781,7 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      const result = await probe(input);
+      const result = await this.withProviderInteraction(record, () => probe(input));
       if (result.page) this.applyPageFacts(record, input.target_url, result.page);
       return result;
     } catch {
@@ -812,7 +824,7 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      const result = await probe(input);
+      const result = await this.withProviderInteraction(record, () => probe(input));
       if (result.page) this.applyPageFacts(record, input.target_url, result.page);
       return result;
     } catch {
@@ -849,6 +861,7 @@ export class RuntimeSessionStore {
   }
 
   private acquireControl(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): RuntimeSessionUnavailable | null {
+    if (record.active_provider_interactions > 0) return unavailableSession("session_locked", error("session_locked", "Provider interaction is still in progress.", true));
     if (
       record.facts.lifecycle_state !== "active" &&
       record.facts.lifecycle_state !== "idle" &&

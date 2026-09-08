@@ -1140,6 +1140,9 @@ export class HarborRuntime {
   }
 
   recordHandoff(runtime_session_ref: string, input: RecordHandoffInput): ViewerControlFacts | ViewerControlUnavailable {
+    if ((this.runtimeSessions.getRecord(runtime_session_ref)?.active_provider_interactions ?? 0) > 0) {
+      return { status: "unavailable", failure_class: "session_locked", message: "Provider interaction is still in progress; control has not changed.", retryable: true };
+    }
     const result = this.viewerControls.recordHandoff(runtime_session_ref, input);
     if (!("status" in result)) {
       this.runtimeSessions.applyHandoff(runtime_session_ref, result.control);

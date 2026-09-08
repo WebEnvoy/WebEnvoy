@@ -726,8 +726,10 @@ test("fails closed when session control changes during the trusted probe", async
     openUrl: async (url) => ({ current_url: url, title: "Creator publish", status: "ready", facts: [] }),
     probeWritePrecheck: trustLocalProviderWritePrecheckProbe(async () => {
       if (changeControl) {
-        runtime.releaseSession(sessionRef, { control_owner: "core_task" });
-        runtime.lockSession(sessionRef, { control_owner: "core_task", holder_ref: "write_run" });
+        // Simulate an out-of-band generation invalidation: public control changes
+        // are rejected while this probe is pending (control-interaction.test.ts).
+        const record = (runtime as unknown as { runtimeSessions: { getRecord(ref: string): { control_generation: number } } }).runtimeSessions.getRecord(sessionRef);
+        record.control_generation += 1;
       }
       return completedProbe();
     }),
