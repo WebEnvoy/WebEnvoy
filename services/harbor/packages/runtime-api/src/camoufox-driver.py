@@ -352,7 +352,7 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
         return {"page": page_facts(), "observation": unavailable_read("site_changed", "Read operation binding is invalid.", False)}
     parsed = urlparse(target_url)
     params = parse_qs(parsed.query, keep_blank_values=True)
-    if parsed.scheme != "https" or parsed.netloc != "www.xiaohongshu.com" or parsed.path not in ("/search_result", "/search_result/") or params != {"keyword": [query]}:
+    if parsed.scheme != "https" or parsed.netloc != "www.xiaohongshu.com" or parsed.path not in ("/search_result", "/search_result/") or params != {"keyword": [query], "source": ["web_search_result_notes"]}:
         return {"page": page_facts(), "observation": unavailable_read("origin_drift", "Read target is outside the pinned Xiaohongshu search route.", False)}
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 15:
         limit = 15

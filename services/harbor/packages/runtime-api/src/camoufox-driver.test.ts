@@ -173,7 +173,7 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
     operation_id: "xhs_search_notes",
     query: "WebEnvoy",
     limit: 1,
-    target_url: "https://www.xiaohongshu.com/search_result?keyword=WebEnvoy",
+    target_url: "https://www.xiaohongshu.com/search_result?keyword=WebEnvoy&source=web_search_result_notes",
     expected_origin: "https://www.xiaohongshu.com"
   });
   assert.equal(read.status, "completed", JSON.stringify(read));
