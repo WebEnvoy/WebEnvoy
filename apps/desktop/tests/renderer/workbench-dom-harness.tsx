@@ -944,6 +944,7 @@ async function runDesktopChecks() {
   await waitFor(() => Boolean(previewButton()), "Task A did not restore after the empty thread check.");
   await checkBossFixtureResultDeferred();
   await checkRunInstanceControls();
+  await checkXhsCommitConfirmationContext();
 
   return {
     emptyThreadOpenState: true,
@@ -957,6 +958,7 @@ async function runDesktopChecks() {
     currentSkillCreateVisible: true,
     singleActionDecision: true,
     runInstanceControls: true,
+    xhsConfirmationContext: true,
   };
 }
 
@@ -1034,6 +1036,109 @@ async function checkBossLiveConfirmationDeferred() {
     "BOSS Core live waiting-for-user run fetched or submitted an authorization decision.");
   root.unmount();
   container.remove();
+}
+
+async function checkXhsCommitConfirmationContext() {
+  const original = window.webenvoyShell?.requestOwnerJson;
+  const sourceRun = tasks.find((task) => task.id === taskAId)?.runs[0];
+  assert(original && sourceRun, "XHS confirmation context check requires owner bridge and a source Run.");
+  const decisionRef = `authorization-decision:${"c".repeat(32)}:${"d".repeat(32)}`;
+  const run = {
+    ...sourceRun,
+    id: "run-xhs-commit-confirmation",
+    turnId: `turn_${"c".repeat(32)}`,
+    turnStatus: "waiting_for_user" as const,
+    authorizationDecisionRefs: [decisionRef],
+  };
+  let ready = true;
+  window.webenvoyShell!.requestOwnerJson = async (request) => request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}`
+    ? { ok: true, body: { ok: true, authorization_decision: xhsCommitDecision(decisionRef, run.id, run.turnId), confirmation_context: xhsConfirmationContext(ready) } }
+    : original(request);
+  try {
+    const render = () => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(<SingleActionConfirmation endpoint={coreEndpoint} identityLabel="创作者账号" run={run} threadRef={taskAId} />);
+      return { container, root };
+    };
+    let mounted = render();
+    await waitFor(() => mounted.container.textContent?.includes("2 张图片，顺序已核对") === true, "Ready XHS confirmation did not show the current content summary.");
+    assert(mounted.container.textContent?.includes("已核验 · 创作者账号") && mounted.container.textContent?.includes("发布笔记") &&
+      mounted.container.textContent?.includes("示例标题") && mounted.container.textContent?.includes("未变化") &&
+      mounted.container.textContent?.includes("允许这一次"), "Ready XHS confirmation omitted facts or the allow action.");
+    mounted.root.unmount();
+    mounted.container.remove();
+    ready = false;
+    mounted = render();
+    await waitFor(() => mounted.container.textContent?.includes("账号状态未知") === true, "Blocked XHS confirmation did not show the owner reason.");
+    assert(!mounted.container.textContent?.includes("允许这一次") && mounted.container.textContent?.includes("拒绝这一次") &&
+      mounted.container.textContent?.includes("重新检查"), "Blocked XHS confirmation exposed commit or omitted recovery.");
+    mounted.root.unmount();
+    mounted.container.remove();
+  } finally {
+    window.webenvoyShell!.requestOwnerJson = original;
+  }
+}
+
+function xhsCommitDecision(decisionRef: string, runId: string, turnId: string) {
+  return {
+    schema_version: "webenvoy.authorization-decision.v0",
+    decision_ref: decisionRef,
+    business_action: {
+      action_instance_ref: "action-instance:xhs-publish",
+      action_id: "xhs_publish_note_image_text_commit.publish",
+      category: "commit",
+      target: { target_ref: "target:xhs-publish", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
+    },
+    owner_declaration: {
+      matcher: "lode_action_declaration",
+      declaration_ref: "lode://site-capability/xiaohongshu/publish-note@0.1.0#publish",
+      declaration_version: "0.1.0",
+      resource_match_ref: "resource-match:xhs-publish",
+      resource_match_version: "sha256:xhs-publish",
+    },
+    effective_policy: { mode: "confirm", source: "installed_skill_user_version", source_version: "1" },
+    applicability: { scope: "task", run_id: runId, thread_id: taskAId, turn_id: turnId, config_refs: ["execution-policy:skill/xhs"] },
+    outcome: "confirm",
+    risk_marker: null,
+    decided_at: "2026-09-08T08:00:00Z",
+    expires_at: "2099-09-08T08:05:00Z",
+    state: "active",
+    invalidated_at: null,
+    invalidation_reason: null,
+    consumer_boundary: "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded.",
+  };
+}
+
+function xhsConfirmationContext(ready: boolean) {
+  const fingerprint = `sha256:${"a".repeat(64)}`;
+  return {
+    schema_version: "webenvoy.xhs-confirmation-context/v0",
+    status: ready ? "ready" : "blocked",
+    runtime_binding: {
+      runtime_session_ref: "runtime-session:xhs-confirmation",
+      identity_environment_ref: "identity-environment:xhs-confirmation",
+      profile_ref: "profile:xhs-confirmation",
+      provider_ref: "provider:chrome-official",
+      control_owner: "core_task",
+      observation_generation: "fnv1a:1a2b3c4d",
+      observation_ref: "operation:xhs-confirmation",
+    },
+    account: { status: ready ? "verified" : "unknown", account_ref: ready ? "account:xhs-creator" : null, label: ready ? "创作者账号" : null },
+    business_target: { status: "verified", target_ref: "target:xhs-publish", label: "发布笔记" },
+    page: { status: "verified", url: "https://creator.xiaohongshu.com/publish/publish", fingerprint: "fnv1a:1a2b3c4d", diff: "unchanged" },
+    media: { status: "verified", image_count: 2, ordered_item_refs: ["media:1", "media:2"], summary: "2 张图片，顺序已核对" },
+    fields: {
+      status: "verified",
+      title: { state: "present", length: 4, summary: "示例标题" },
+      body: { state: "present", length: 6, summary: "示例正文摘要" },
+    },
+    pending_issues: ready ? [] : ["账号状态未知"],
+    observed_at: "2026-09-08T08:00:00Z",
+    fingerprint,
+    fail_closed: true,
+  };
 }
 
 function resultModel(run: (typeof tasks)[number]["runs"][number], expected: string, data: Record<string, unknown>, resultKind: string) {
