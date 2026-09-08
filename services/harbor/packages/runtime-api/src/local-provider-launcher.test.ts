@@ -523,6 +523,7 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   const controls = [title, body];
   const app = {
     ...element(""),
+    __vue_app__: { config: { globalProperties: { $store: { state: { Auth: { userInfo: { userId: "user-123", userName: "Marchen" } } } } } } },
     querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost]
       : selector === ".publish-page-content-media" ? imageCompositions
       : selector === ".user-info" ? [accountRoot]
@@ -552,8 +553,8 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.save_draft_control.availability, "available");
   assert.equal(result.publish_control.availability, "available");
   assert.equal(result.composition_state, "composition_initialized");
-  assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_header.user_info/v1");
-  assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen" }]);
+  assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_auth_store.user_info/v1");
+  assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen", stable_id: "user-123" }]);
   assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page.image_text_upload/v1");
 
   delete hostAttributes["submit-disabled"];

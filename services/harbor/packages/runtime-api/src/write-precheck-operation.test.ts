@@ -122,8 +122,8 @@ test("maps only the versioned creator account and observed image-text surface to
     composition_state: "composition_initialized",
     public_observation: {
       ...publicObservationRaw,
-      account_source_kind: "xiaohongshu.creator_header.user_info/v1",
-      account_candidates: [{ label: "Marchen" }],
+      account_source_kind: "xiaohongshu.creator_auth_store.user_info/v1",
+      account_candidates: [{ label: "Marchen", stable_id: "user-123" }],
       business_target_candidates: [],
       business_target_kind: "xiaohongshu.creator_publish_page.image_text_upload/v1"
     }
@@ -133,7 +133,7 @@ test("maps only the versioned creator account and observed image-text surface to
     assert.deepEqual(result.public_observation.account, {
       status: "observed",
       label: "Marchen",
-      ref: "account:sha256:1af42b2312f39e5b2ee9dd6d3431344063e1b5ff6b297d1e3b24d1f635fa2316",
+      ref: "account:sha256:f8b45ea6c64ef23783ab82151a03fdc659dcdcb71e918f1760c2519d1efa7803",
       expected_match: "unknown"
     });
     assert.deepEqual(result.public_observation.business_target, {
@@ -144,16 +144,21 @@ test("maps only the versioned creator account and observed image-text surface to
     });
   }
 
-  const ambiguous = validateXhsWritePrecheckObservation(input, {
+  const sameLabelDifferentAccount = validateXhsWritePrecheckObservation({
+    ...input,
+    expected: { account_ref: "account:sha256:f8b45ea6c64ef23783ab82151a03fdc659dcdcb71e918f1760c2519d1efa7803" }
+  }, {
     ...observation,
     public_observation: {
       ...publicObservationRaw,
-      account_source_kind: "xiaohongshu.creator_header.user_info/v1",
-      account_candidates: [{ label: "Marchen" }, { label: "另一个账号" }]
+      account_source_kind: "xiaohongshu.creator_auth_store.user_info/v1",
+      account_candidates: [{ label: "Marchen", stable_id: "user-456" }]
     }
   });
-  assert.equal(ambiguous.status, "completed");
-  if (ambiguous.status === "completed") assert.equal(ambiguous.public_observation.account.status, "unknown");
+  assert.equal(sameLabelDifferentAccount.status, "completed");
+  if (sameLabelDifferentAccount.status === "completed") {
+    assert.equal(sameLabelDifferentAccount.public_observation.account.expected_match, "mismatched");
+  }
 });
 
 test("pins and admits only the public Lode validate-only contract", () => {

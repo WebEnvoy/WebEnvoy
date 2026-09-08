@@ -180,7 +180,7 @@ type WritePrecheckObservation = {
   publish_control?: XhsWritePrecheckFieldState;
   public_observation?: {
     account_source_kind?: unknown;
-    account_candidates?: readonly { label?: unknown; ref?: unknown }[];
+    account_candidates?: readonly { label?: unknown; ref?: unknown; stable_id?: unknown }[];
     business_target_candidates?: readonly { label?: unknown; ref?: unknown }[];
     business_target_kind?: unknown;
     image_count?: unknown;
@@ -352,14 +352,17 @@ function publicObservationFromObservation(
   expected: XhsPublicObservationExpected | undefined
 ): XhsPublicObservation {
   const raw = observation.public_observation;
-  const observedAccountLabel = raw?.account_source_kind === "xiaohongshu.creator_header.user_info/v1" &&
-    raw.account_candidates?.length === 1
-    ? boundedPublicObservationLabel(raw.account_candidates[0]?.label)
+  const observedAccountCandidate = raw?.account_source_kind === "xiaohongshu.creator_auth_store.user_info/v1" &&
+    raw.account_candidates?.length === 1 ? raw.account_candidates[0] : undefined;
+  const observedAccountLabel = boundedPublicObservationLabel(observedAccountCandidate?.label);
+  const observedAccountId = typeof observedAccountCandidate?.stable_id === "string" &&
+    /^[A-Za-z0-9_-]{1,100}$/.test(observedAccountCandidate.stable_id)
+    ? observedAccountCandidate.stable_id
     : null;
-  const observedAccount = observedAccountLabel
+  const observedAccount = observedAccountLabel && observedAccountId
     ? [{
         label: observedAccountLabel,
-        ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", label: observedAccountLabel })).digest("hex")}`
+        ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", stable_id: observedAccountId })).digest("hex")}`
       }]
     : raw?.account_candidates;
   const account = publicLabelRef(observedAccount, expected?.account_ref);
@@ -2069,10 +2072,15 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         : [];
       const uniqueAccountLabels = [...new Set(accountLabels)];
       const accountLabel = uniqueAccountLabels.length === 1 && uniqueAccountLabels[0].length <= 96 ? uniqueAccountLabels[0] : null;
-      const accountCandidates = accountLabel
-        ? [{ label: accountLabel }]
+      const authStoreUser = app?.__vue_app__?.config?.globalProperties?.$store?.state?.Auth?.userInfo;
+      const authStoreUserId = typeof authStoreUser?.userId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(authStoreUser.userId)
+        ? authStoreUser.userId
+        : null;
+      const authStoreUserName = typeof authStoreUser?.userName === 'string' ? authStoreUser.userName.trim() : null;
+      const accountCandidates = accountLabel && authStoreUserId && authStoreUserName === accountLabel
+        ? [{ label: accountLabel, stable_id: authStoreUserId }]
         : [];
-      const accountSourceKind = accountLabel ? 'xiaohongshu.creator_header.user_info/v1' : null;
+      const accountSourceKind = accountCandidates.length === 1 ? 'xiaohongshu.creator_auth_store.user_info/v1' : null;
       const businessTargetCandidates = [];
       const businessTargetKind = requestedPath === 'image_text_upload' && observedPath
         ? 'xiaohongshu.creator_publish_page.image_text_upload/v1'
