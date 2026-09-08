@@ -7,6 +7,8 @@ import {
   bindIdentityEnvironmentDefaultProvider,
   classifyLaunchFailure,
   diagnoseBrowserProviderFailure,
+  detectBrowserProviders,
+  resolveCamoufoxOverride,
   type BrowserProviderDetectionInput,
   type IdentityEnvironmentProviderBinding
 } from "./provider-management.js";
@@ -15,6 +17,7 @@ import {
   resolveIdentityEnvironmentLaunchConfiguration,
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
+import { launchCamoufoxProvider } from "./camoufox-driver.js";
 import { prepareProfileStorage } from "./profile-storage.js";
 import {
   trustLocalProviderReadProbe,
@@ -62,9 +65,38 @@ class ProviderOriginDriftError extends Error {}
 
 export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const explicitBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
-  const providerBinding = explicitBrowserPath
-    ? null
-    : resolveRuntimeProviderBinding(input.identity_environment);
+  const camoufoxOverride = resolveCamoufoxOverride(process.env);
+  const persistedBinding = input.identity_environment?.provider_binding;
+  const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
+  if (persistedBinding && (
+    !persistedBinding.selected_provider_id || !persistedBinding.selected_provider ||
+    persistedBinding.selected_provider.provider_id !== persistedBinding.selected_provider_id ||
+    (input.profile_ref !== input.identity_environment?.profile_ref) ||
+    (input.provider_id && input.provider_id !== persistedBinding.selected_provider_id) ||
+    (explicitBrowserPath && explicitBrowserPath !== persistedBinding.selected_provider.install.path) ||
+    (input.profile_storage_ref !== input.identity_environment?.browser_storage.profile_storage_ref)
+  )) {
+    return unavailable("identity_environment_unavailable", "Requested provider or Profile does not match the managed identity binding.", [
+      { key: "provider.binding", source: "observed", value: "provider_mismatch" }
+    ]);
+  }
+  const configuredProvider = process.env.HARBOR_BROWSER_PROVIDER;
+  const providerId = selectLocalProviderId(
+    input.provider_id,
+    providerBinding?.selected_provider_id,
+    configuredProvider,
+    Boolean(camoufoxOverride && !explicitBrowserPath)
+  );
+  if (providerId === "camoufox") {
+    const camoufoxPath = (persistedBinding ? persistedBinding.selected_provider?.install.path : input.browser_path || camoufoxOverride) ||
+      (providerBinding?.selected_provider_id === "camoufox" ? providerBinding.selected_provider?.install.path : "") ||
+      detectBrowserProviders().providers.find((provider) => provider.provider_id === "camoufox")?.install.path || "";
+    return launchCamoufoxProvider({
+      ...input,
+      browser_path: camoufoxPath,
+      provider_id: "camoufox"
+    });
+  }
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
   if (!browserPath) {
     const diagnostic = providerBinding?.diagnostics[0] ?? diagnoseBrowserProviderFailure({ provider_id: "cloakbrowser", failure_class: "not_installed" });
@@ -101,6 +133,8 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     return {
       status: "ready",
       execution_surface: "local_provider",
+      driver_ref: opaqueRef("driver"),
+      driver_kind: "chromium_cdp",
       cdp_ref: opaqueRef("cdp"),
       viewer_entry: viewerEntry(input.headless),
       page,
@@ -149,6 +183,15 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     });
     return unavailable("launch_failed", diagnostic.app_summary, [...providerBindingFacts(providerBinding), ...profileStorage.facts]);
   }
+}
+
+export function selectLocalProviderId(
+  requested: string | undefined,
+  bound: string | null | undefined,
+  configured: string | undefined,
+  camoufoxAvailable: boolean
+): string | undefined {
+  return requested ?? bound ?? (configured === "camoufox" ? "camoufox" : undefined) ?? (camoufoxAvailable ? "camoufox" : undefined);
 }
 
 type WritePrecheckObservation = {
@@ -1945,6 +1988,7 @@ export async function probeProviderSiteResource(
   if (
     (input.site_id === "boss" && input.task_kind !== "job_search" && input.task_kind !== "boss_job_search") ||
     (input.site_id === "xiaohongshu" &&
+      input.task_kind !== "authentication_recovery" &&
       input.task_kind !== "search_notes" &&
       input.task_kind !== "xhs_search_notes" &&
       input.task_kind !== "read_note_detail" &&
@@ -1971,11 +2015,21 @@ export async function probeProviderSiteResource(
         return (evaluated.result as { value?: ReadProbeObservation } | undefined)?.value;
       };
       if (input.site_id === "boss") return validateBossSpaResourceProbe(await observe());
+      if (input.task_kind === "authentication_recovery") return validateXiaohongshuAuthenticationProbe(await observe());
       return waitForXiaohongshuSiteResourceReadiness(observe, signal);
     }, signal);
   } catch {
     return siteResourceProbeUnavailable("unknown", "provider_probe_unavailable", "The site readiness surface could not be verified through the controlled CDP probe.");
   }
+}
+
+function validateXiaohongshuAuthenticationProbe(observation: ReadProbeObservation | undefined): LocalProviderSiteResourceProbeResult {
+  if (!observation || observation.origin !== "https://www.xiaohongshu.com" || !observation.ready) {
+    return siteResourceProbeUnavailable("unavailable", "page_not_ready", "The active page is not a ready canonical Xiaohongshu surface.");
+  }
+  if (observation.challenge_like) return siteResourceProbeUnavailable("blocked", "safety_challenge", "The Xiaohongshu page shows a verification or safety challenge.");
+  if (observation.login_like) return siteResourceProbeUnavailable("blocked", "not_logged_in", "The Xiaohongshu page requires manual login.");
+  return { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: [] };
 }
 
 export function validateBossSpaResourceProbe(observation: ReadProbeObservation | undefined): LocalProviderSiteResourceProbeResult {
@@ -2104,6 +2158,8 @@ export function createFixtureLauncher(status: "ready" | "unavailable" | "profile
     return {
       status: "ready",
       execution_surface: "fixture",
+      driver_ref: opaqueRef("driver"),
+      driver_kind: "chromium_cdp",
       cdp_ref: opaqueRef("cdp"),
       viewer_entry: viewerEntry(input.headless),
       page,
@@ -2148,7 +2204,7 @@ function readyPage(current_url: string, title: string | null): LocalProviderPage
 
 function providerBindingFacts(binding: IdentityEnvironmentProviderBinding | null): RuntimeFact[] {
   const facts: RuntimeFact[] = [
-    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official" },
+    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official,camoufox" },
     { key: "provider.default", source: "configured", value: "cloakbrowser" },
     { key: "provider.excluded.chromium", source: "configured", value: "not_user_selectable" },
     { key: "provider.reference.donut_browser", source: "configured", value: "mechanism_reference_only" }

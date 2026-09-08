@@ -5,10 +5,10 @@ import type {
   IdentityEnvironmentMutationOptions
 } from "./identity-environment-mutation-types.js";
 import type { ManagedLocalIdentityEnvironmentInput } from "./identity-environment-manager.js";
-import { bindIdentityEnvironmentDefaultProvider, type BrowserProviderCapabilityKey } from "./provider-management.js";
+import { bindIdentityEnvironmentDefaultProvider, type BrowserProviderCapabilityKey, type BrowserProviderId } from "./provider-management.js";
 
 export interface ResolvedIdentityEnvironmentLaunchConfiguration {
-  provider_id: "cloakbrowser" | "chrome_official";
+  provider_id: BrowserProviderId;
   proxy_server: string | null;
   language: string | null;
   timezone: string | null;
