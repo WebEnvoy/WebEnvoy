@@ -1,3 +1,4 @@
+import type { ProviderId } from "./harborIdentityTypes";
 import { fixtureOrDemoPayloadReason } from "./ownerPayloadGuards";
 import { requestOwnerJson } from "./ownerApiClient";
 
@@ -8,7 +9,7 @@ export type IdentityEnvironmentBusinessInput = {
     display_name: string;
     account_identifier?: string;
   };
-  requested_provider_id?: "cloakbrowser" | "chrome_official";
+  requested_provider_id?: ProviderId;
   proxy_ref?: string;
   proxy_label?: string;
   geoip_mode?: "proxy" | "system" | "disabled";

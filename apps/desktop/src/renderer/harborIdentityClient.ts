@@ -362,7 +362,7 @@ function fingerprintStrategyValue(value: unknown) {
 }
 
 function providerIdValue(value: unknown) {
-  return value === "cloakbrowser" || value === "chrome_official" ? value : null;
+  return value === "cloakbrowser" || value === "chrome_official" || value === "camoufox" ? value : null;
 }
 
 function loginStateValue(value: unknown): HarborIdentityFacts["login_state"]["state"] {
