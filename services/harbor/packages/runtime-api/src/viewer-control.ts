@@ -47,6 +47,8 @@ export interface ViewerControlSessionFacts {
     unavailable_reason?: TakeoverUnavailableReason;
   };
   availability: {
+    /** Generic provider Driver readiness; CDP remains a Chromium compatibility field. */
+    driver?: string;
     cdp: string;
     viewer: string;
     snapshot: string;

@@ -44,7 +44,7 @@ test("serves readiness and provider facts as JSON", async () => {
 
     const providers = await getJson(`${running.url}/runtime/browser-providers`);
     assert.equal(providers.schema_version, "harbor-browser-provider-status/v0");
-    assert.equal(providers.providers.length, 2);
+    assert.equal(providers.providers.length, 3);
 
     const alias = await getJson(`${running.url}/runtime/browser-provider-status`);
     assert.deepEqual(alias, providers);

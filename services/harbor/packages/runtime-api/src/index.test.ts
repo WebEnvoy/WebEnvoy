@@ -240,7 +240,7 @@ test("reports provider unavailability as structured runtime facts", async () => 
   assert.equal(session.availability.cdp, "unavailable");
 });
 
-test("detects only CloakBrowser and official Chrome provider status", () => {
+test("detects registered provider status without promoting Camoufox to the default", () => {
   const catalog = detectBrowserProviders(providerFixture({
     [cloakPath]: { executable: true },
     [chromePath]: { executable: true },
@@ -250,13 +250,14 @@ test("detects only CloakBrowser and official Chrome provider status", () => {
     "/Applications/Chromium.app/Contents/MacOS/Chromium": { executable: true }
   }));
 
-  assert.deepEqual(catalog.providers.map((provider) => provider.provider_id), ["cloakbrowser", "chrome_official"]);
+  assert.deepEqual(catalog.providers.map((provider) => provider.provider_id), ["cloakbrowser", "chrome_official", "camoufox"]);
   assert.equal(catalog.providers.some((provider) => provider.display_name === "Chromium"), false);
   assert.equal(catalog.excluded_providers.some((provider) => provider.provider === "chromium"), true);
   assert.equal(catalog.excluded_providers.some((provider) => provider.provider === "donut_browser"), true);
 
   const cloak = catalog.providers[0]!;
   const chrome = catalog.providers[1]!;
+  const camoufox = catalog.providers[2]!;
   assert.equal(cloak.role, "primary");
   assert.equal(cloak.default_for_identity_environment, true);
   assert.equal(cloak.install.status, "installed");
@@ -264,6 +265,10 @@ test("detects only CloakBrowser and official Chrome provider status", () => {
   assert.equal(chrome.role, "restricted_fallback");
   assert.equal(chrome.install.version, "125.0.1");
   assert.equal(chrome.capabilities.find((capability) => capability.key === "native_fingerprint_control")?.state, "unsupported");
+  assert.equal(camoufox.role, "qualification");
+  assert.equal(camoufox.default_for_identity_environment, false);
+  assert.equal(camoufox.install.status, "missing");
+  assert.equal(camoufox.capabilities.find((capability) => capability.key === "cdp")?.state, "unsupported");
 });
 
 test("binds identity environments to CloakBrowser by default and warns on Chrome fallback", () => {
@@ -289,6 +294,16 @@ test("binds identity environments to CloakBrowser by default and warns on Chrome
   });
   assert.equal(unavailableRequested.selected_provider_id, null);
   assert.equal(unavailableRequested.selection_reason, "requested_provider_unavailable");
+
+  const camoufoxPath = "/private/tmp/camoufox.app/Contents/MacOS/camoufox";
+  const camoufox = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    requested_provider_id: "camoufox"
+  });
+  assert.equal(camoufox.selected_provider_id, "camoufox");
+  assert.equal(camoufox.selection_reason, "requested_provider_available");
+  assert.equal(camoufox.selected_provider?.role, "qualification");
 });
 
 test("explains provider install and launch failure diagnostics", () => {
@@ -544,6 +559,38 @@ test("manages local xhs and boss identity environments with redacted public outp
     assert.equal(publicJson.includes("raw_profile_data"), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rejects a mismatched managed provider before launch without changing identity state", async () => {
+  const launches: LocalProviderLaunchInput[] = [];
+  const runtime = new HarborRuntime(capturingLauncher(launches));
+  const camoufoxPath = "/private/tmp/camoufox.app/Contents/MacOS/camoufox";
+  const record = runtime.createLocalIdentityEnvironment({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    requested_provider_id: "camoufox",
+    identity_environment_ref: "identity-env_provider-mismatch",
+    profile_ref: "profile_provider-mismatch",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" }
+  });
+  for (const [mismatch, reason] of [
+    [{ provider_id: "chrome_official" as const }, "provider_mismatch"],
+    [{ profile_ref: "profile_other" }, "profile_mismatch"],
+    [{ profile_storage_ref: "profile_storage_other" }, "profile_mismatch"],
+    [{ execution_identity_ref: "execution-identity_other" }, "identity_mismatch"]
+  ] as const) {
+    for (const url of [undefined, "https://www.xiaohongshu.com/explore"]) {
+      const input = { identity_environment_ref: record.identity_environment_ref, ...mismatch, control_owner: "user" as const };
+      const result = url
+        ? await runtime.openManagedIdentityEnvironmentSession({ ...input, url })
+        : await runtime.openManagedDefaultSiteSession(input);
+      assert.ok("status" in result);
+      assert.equal(result.failure_class, "identity_environment_unavailable");
+      assert.match(result.message, new RegExp(reason));
+      assert.equal(launches.length, 0);
+      assert.deepEqual(runtime.listLocalIdentityEnvironments(), [record]);
+    }
   }
 });
 
@@ -1287,10 +1334,15 @@ test("bootstraps XHS reads through the canonical explore page without waiting fo
   process.env.HARBOR_FAKE_BROWSER_NEW_URL_MARKER = newUrlMarker;
   globalThis.WebSocket = DelayedNavigationAckCdpWebSocket as unknown as typeof WebSocket;
   try {
+    const browserPath = writeFakeBrowserExecutable(dir);
     const identityEnvironment = createLocalIdentityEnvironmentFacts({
+      ...providerFixture({ [browserPath]: { executable: true } }),
+      env: { HARBOR_CHROME_PATH: browserPath },
+      requested_provider_id: "chrome_official",
       identity_environment_ref: "identity-env_delayed-navigation-ack",
       execution_identity_ref: "execution-identity_delayed-navigation-ack",
       profile_ref: "profile_delayed-navigation-ack",
+      profile_storage_ref: "profile-storage_delayed-navigation-ack",
       site: {
         site_id: "xiaohongshu",
         origin: "https://www.xiaohongshu.com",
@@ -1300,12 +1352,12 @@ test("bootstraps XHS reads through the canonical explore page without waiting fo
       storage_state: "present"
     });
     const provider = await launchLocalDedicatedProvider({
-      browser_path: writeFakeBrowserExecutable(dir),
+      browser_path: browserPath,
       headless: true,
       timeout_ms: 5000,
       url: "https://www.xiaohongshu.com/search_result?keyword=AI&source=web_search_result_notes",
       profile_ref: "profile_delayed-navigation-ack",
-      profile_storage_ref: "profile-storage_delayed-navigation-ack",
+      profile_storage_ref: identityEnvironment.browser_storage.profile_storage_ref,
       provider_ref: "provider_fake",
       identity_environment: identityEnvironment
     });

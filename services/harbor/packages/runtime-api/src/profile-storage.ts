@@ -18,7 +18,7 @@ import {
   unlinkSync,
   writeFileSync
 } from "node:fs";
-import { chmod, mkdir, mkdtemp } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { RuntimeFact } from "./runtime-session-types.js";
@@ -43,6 +43,7 @@ export interface ProfileStorageOwnershipLock {
 
 const LOCK_RETRY_INTERVAL_MS = 10;
 const INVALID_LOCK_STALE_MS = 30_000;
+const DARWIN_O_EXLOCK = 0x20;
 
 export async function prepareProfileStorage(profileStorageRef: string | undefined): Promise<{
   profileDir: string;
@@ -58,8 +59,8 @@ export async function prepareProfileStorage(profileStorageRef: string | undefine
   }
 
   const profileDir = profileStoragePath(profileStorageRef);
-  await mkdir(profileDir, { recursive: true, mode: 0o700 });
-  await chmod(profileDir, 0o700);
+  secureDirectory(dirname(profileDir));
+  secureDirectory(profileDir);
   return {
     profileDir,
     persistent: true,
@@ -77,8 +78,14 @@ export function profileStoragePath(profileStorageRef: string): string {
 
 export function profileStorageHasExternalLock(profileStorageRef: string): boolean {
   const path = profileStoragePath(profileStorageRef);
-  const browserLock = join(path, "SingletonLock");
-  if (entryExists(browserLock) && !removeDemonstrablyStaleBrowserResidue(path, browserLock)) return true;
+  assertRealDirectoryIfPresent(dirname(path));
+  assertRealDirectoryIfPresent(path);
+  for (const browserLock of ["SingletonLock", ".parentlock", "parent.lock", "lock"]) {
+    const lockPath = join(path, browserLock);
+    if (entryExists(lockPath) &&
+      !(browserLock === ".parentlock" && removeUnlockedDarwinParentLock(path, lockPath)) &&
+      !removeDemonstrablyStaleBrowserResidue(path, lockPath)) return true;
+  }
   return entryExists(join(path, ".harbor-profile-lock"));
 }
 
@@ -160,7 +167,13 @@ export function stageProfileStorageCopy(
   try {
     secureDirectory(dirname(staging));
     mkdirSync(staging, { mode: 0o700 });
-    if (mode === "full") cpSync(source, staging, { recursive: true });
+    if (mode === "full") cpSync(source, staging, {
+      recursive: true,
+      filter: (path) => {
+        if (lstatSync(path).isSymbolicLink()) throw new ProfileStorageMutationError("mutation_failed");
+        return true;
+      }
+    });
     clearRuntimeResidue(staging);
   } catch {
     rmSync(staging, { recursive: true, force: true });
@@ -212,7 +225,7 @@ export function stageProfileStorageDelete(profileStorageRef: string): StagedProf
 }
 
 function clearRuntimeResidue(path: string): void {
-  for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", ".harbor-profile-lock"]) {
+  for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", ".parentlock", "parent.lock", "lock", ".harbor-profile-lock"]) {
     rmSync(join(path, name), { recursive: true, force: true });
   }
 }
@@ -228,12 +241,34 @@ function removeDemonstrablyStaleBrowserResidue(profilePath: string, lockPath: st
     const unchanged = current.dev === entry.dev && current.ino === entry.ino && current.mtimeMs === entry.mtimeMs &&
       current.isSymbolicLink() && readlinkSync(lockPath) === original;
     if (!unchanged) return false;
-    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", ".parentlock", "parent.lock", "lock"]) {
       rmSync(join(profilePath, name), { recursive: true, force: true });
     }
     return !entryExists(lockPath);
   } catch {
     return false;
+  }
+}
+
+function removeUnlockedDarwinParentLock(profilePath: string, lockPath: string): boolean {
+  if (process.platform !== "darwin") return false;
+  let fd: number | undefined;
+  try {
+    const entry = lstatSync(lockPath);
+    if (!entry.isFile()) return false;
+    fd = openSync(lockPath, constants.O_RDONLY | constants.O_NONBLOCK | DARWIN_O_EXLOCK);
+    const held = fstatSync(fd);
+    const current = lstatSync(lockPath);
+    if (held.dev !== entry.dev || held.ino !== entry.ino || current.dev !== entry.dev || current.ino !== entry.ino) return false;
+    unlinkSync(lockPath);
+    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", "parent.lock", "lock"]) {
+      rmSync(join(profilePath, name), { recursive: true, force: true });
+    }
+    return !entryExists(lockPath);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -316,7 +351,12 @@ function isRealDirectory(path: string): boolean {
   }
 }
 
+function assertRealDirectoryIfPresent(path: string): void {
+  if (entryExists(path) && !isRealDirectory(path)) throw new ProfileStorageMutationError("mutation_failed");
+}
+
 function secureDirectory(path: string): void {
+  assertRealDirectoryIfPresent(path);
   mkdirSync(path, { recursive: true, mode: 0o700 });
   chmodSync(path, 0o700);
 }
@@ -332,6 +372,7 @@ function noOpMutation(): StagedProfileStorageMutation {
 function residualPaths(profileStorageRef: string): string[] {
   const path = profileStoragePath(profileStorageRef);
   const parent = dirname(path);
+  assertRealDirectoryIfPresent(parent);
   if (!existsSync(parent)) return [];
   const prefix = path.slice(parent.length + 1);
   return readdirSync(parent)

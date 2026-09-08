@@ -10,6 +10,9 @@ import {
   chromeCapabilities,
   chromeDownloadGuide,
   chromeLimitations,
+  camoufoxCapabilities,
+  camoufoxDownloadGuide,
+  camoufoxLimitations,
   cloakCapabilities,
   cloakDownloadGuide,
   cloakLimitations
@@ -18,8 +21,8 @@ import {
 export const HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA = "harbor-browser-provider-status/v0";
 export const HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA = "harbor-identity-provider-binding/v0";
 
-export type BrowserProviderId = "cloakbrowser" | "chrome_official";
-export type BrowserProviderRole = "primary" | "restricted_fallback";
+export type BrowserProviderId = "cloakbrowser" | "chrome_official" | "camoufox";
+export type BrowserProviderRole = "primary" | "restricted_fallback" | "qualification";
 export type BrowserProviderInstallStatus = "installed" | "missing" | "path_invalid";
 export type BrowserProviderLaunchability = "launchable" | "not_executable" | "not_checked";
 export type BrowserProviderCapabilityState = "supported" | "limited" | "unsupported" | "provider_claim" | "requires_validation";
@@ -33,6 +36,7 @@ export type BrowserProviderFailureClass =
   | "profile_dir_unavailable"
   | "proxy_unavailable"
   | "cdp_unavailable"
+  | "driver_unavailable"
   | "launch_timeout"
   | "permission_denied"
   | "unknown";
@@ -170,7 +174,8 @@ export function detectBrowserProviders(input: BrowserProviderDetectionInput = {}
     schema_version: HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
     providers: [
       providerStatus("cloakbrowser", "CloakBrowser", "primary", detectCloakBrowser(ctx), cloakExternal ? "external" : "managed"),
-      providerStatus("chrome_official", "Google Chrome", "restricted_fallback", detectChrome(ctx), "system")
+      providerStatus("chrome_official", "Google Chrome", "restricted_fallback", detectChrome(ctx), "system"),
+      providerStatus("camoufox", "Camoufox", "qualification", detectCamoufox(ctx), "external")
     ],
     excluded_providers: [
       { provider: "chromium", reason: "Chromium 仅保留为开发/测试内部实现，不进入用户可选 provider 管理。" },
@@ -181,6 +186,11 @@ export function detectBrowserProviders(input: BrowserProviderDetectionInput = {}
 
 export function resolveCloakBrowserOverride(env: Record<string, string | undefined>): string | undefined {
   return [env.HARBOR_CLOAKBROWSER_PATH, env.CLOAKBROWSER_BINARY_PATH]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+export function resolveCamoufoxOverride(env: Record<string, string | undefined>): string | undefined {
+  return [env.HARBOR_CAMOUFOX_PATH, env.CAMOUFOX_BINARY_PATH, env.CAMOUFOX_EXECUTABLE]
     .find((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
@@ -218,7 +228,7 @@ export function diagnoseBrowserProviderFailure(input: {
   path?: string | null;
   message?: string;
 }): BrowserProviderDiagnostic {
-  const name = input.provider_id === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome";
+  const name = input.provider_id === "cloakbrowser" ? "CloakBrowser" : input.provider_id === "camoufox" ? "Camoufox" : "官方 Chrome";
   const pathText = input.path ? ` (${input.path})` : "";
   const table: Record<BrowserProviderFailureClass, [string, string, boolean]> = {
     not_installed: [`未检测到 ${name}${pathText}。`, "请从官方来源安装该 provider，然后重新检测。", true],
@@ -229,6 +239,7 @@ export function diagnoseBrowserProviderFailure(input: {
     profile_dir_unavailable: [`${name} 无法使用 profile 目录。`, "请检查 profile 目录权限并清理残留锁。", true],
     proxy_unavailable: [`${name} 无法使用已配置代理。`, "请检查代理可达性和凭据后重试。", true],
     cdp_unavailable: [`${name} 未暴露 CDP ready 状态。`, "请关闭残留浏览器进程，或增加 timeout 后重试。", true],
+    driver_unavailable: [`${name} 的 Harbor Driver 未就绪。`, "请检查固定版本、Python/Playwright runtime 和 Driver 兼容性后重试。", true],
     launch_timeout: [`${name} 启动超时。`, "请检查本机 CPU、权限和浏览器启动提示后重试。", true],
     permission_denied: [`${name} 因权限不足无法执行${pathText}。`, "请授予执行权限，或重新安装该 provider。", true],
     unknown: [`${name} 启动失败。`, "请查看本机 Harbor 日志和 provider 诊断。", true]
@@ -253,6 +264,7 @@ export function classifyLaunchFailure(error: unknown): BrowserProviderFailureCla
   if (message.includes("proxy")) return "proxy_unavailable";
   if (message.includes("argument") || message.includes("flag")) return "launch_args_incompatible";
   if (message.includes("cdp") || message.includes("devtools") || message.includes("fetch failed")) return "cdp_unavailable";
+  if (message.includes("driver") || message.includes("juggler") || message.includes("playwright") || message.includes("properties.json")) return "driver_unavailable";
   return "unknown";
 }
 
@@ -272,13 +284,13 @@ function providerStatus(
     default_for_identity_environment: defaultForIdentity,
     management_mode: managementMode,
     install,
-    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : chromeCapabilities(),
-    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : chromeLimitations(),
+    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities() : chromeCapabilities(),
+    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations() : chromeLimitations(),
     download_guide: provider_id === "cloakbrowser"
       ? managementMode === "external"
         ? { ...cloakDownloadGuide(), action: "external_management", install_hint: "该覆盖路径由外部管理；请在外部更新或移除覆盖后重新检查。" }
         : cloakDownloadGuide()
-      : chromeDownloadGuide(),
+      : provider_id === "camoufox" ? camoufoxDownloadGuide() : chromeDownloadGuide(),
     diagnostics: diagnosticsFor(provider_id, install)
   };
 }
@@ -289,6 +301,10 @@ function detectCloakBrowser(ctx: DetectionContext): BrowserProviderInstallFacts 
 
 function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
   return detectPath(ctx, chromeCandidates(ctx), "未在已知系统位置检测到官方 Chrome，且未配置覆盖路径。");
+}
+
+function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
+  return detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");
 }
 
 function detectPath(ctx: DetectionContext, candidates: ProviderPathCandidate[], missingReason: string): BrowserProviderInstallFacts {
@@ -366,6 +382,18 @@ function chromeCandidates(ctx: DetectionContext): ProviderPathCandidate[] {
   ];
 }
 
+function camoufoxCandidates(ctx: DetectionContext): ProviderPathCandidate[] {
+  const override = resolveCamoufoxOverride(ctx.env);
+  if (override) return [{ path: override, version: camoufoxVersionFromPath(override), explicit: true }];
+  if (ctx.platform === "darwin") {
+    return [{ path: "/Applications/Camoufox.app/Contents/MacOS/camoufox", version: null, explicit: false }];
+  }
+  if (ctx.platform === "win32") {
+    return [{ path: "C:\\Program Files\\Camoufox\\camoufox.exe", version: null, explicit: false }];
+  }
+  return [{ path: "/opt/camoufox/camoufox", version: null, explicit: false }];
+}
+
 function diagnosticsFor(provider_id: BrowserProviderId, install: BrowserProviderInstallFacts): BrowserProviderDiagnostic[] {
   if (install.status === "missing") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "not_installed", path: install.path })];
   if (install.status === "path_invalid") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "path_invalid", path: install.path })];
@@ -394,7 +422,7 @@ function binding(
     selected_provider: selected,
     warnings,
     diagnostics,
-    unavailable_reason: selected ? null : "当前没有可启动的 CloakBrowser 或官方 Chrome provider。"
+    unavailable_reason: selected ? null : "当前没有可启动的 CloakBrowser、官方 Chrome 或 Camoufox provider。"
   };
 }
 
@@ -450,6 +478,10 @@ function readVersionMarker(ctx: DetectionContext, path: string): string[] {
 
 function cloakVersionFromPath(path: string): string | null {
   return path.match(/chromium-([0-9]+(?:\.[0-9]+){3,4})(?:-pro)?[\\/]/)?.[1] ?? null;
+}
+
+function camoufoxVersionFromPath(path: string): string | null {
+  return path.match(/camoufox[-_v]?([0-9]+(?:\.[0-9]+)+(?:-[A-Za-z0-9.]+)?)/i)?.[1] ?? null;
 }
 
 function readChromeBundleVersion(ctx: DetectionContext, executablePath: string): string | null {

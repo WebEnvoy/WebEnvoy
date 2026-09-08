@@ -202,7 +202,8 @@ export class LocalIdentityEnvironmentManager {
     const record = this.updateRecord(identity_environment_ref, {
       login_state: "logged_in",
       manual_authentication_state: "completed",
-      login_state_reason: USER_CONFIRMED_MANAGED_SESSION_REASON
+      login_state_reason: USER_CONFIRMED_MANAGED_SESSION_REASON,
+      storage_state: "present"
     }, runtime_session_ref);
     if (record) this.currentProcessConfirmedSessionRefs.add(runtime_session_ref);
     return record;

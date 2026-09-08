@@ -32,6 +32,7 @@ import {
   detectBrowserProviders,
   diagnoseBrowserProviderFailure,
   getDefaultBrowserProviderExecutable,
+  resolveCamoufoxOverride,
   HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA,
   type BrowserProviderCatalog,
@@ -85,7 +86,7 @@ import {
   type RuntimeSessionUnavailable,
   type ValidationRuntimeFacts
 } from "./runtime-session.js";
-import { isRuntimeSessionReadable } from "./runtime-session-types.js";
+import { isRuntimeDriverAvailable, isRuntimeSessionReadable } from "./runtime-session-types.js";
 import {
   appRuntimeStatusFixture,
   coreRuntimeFacts,
@@ -173,6 +174,7 @@ export {
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA
 } from "./provider-management.js";
 export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
+export { launchCamoufoxProvider } from "./camoufox-driver.js";
 /** @deprecated Use `legacyReadOperation` only for the bounded pre-cutover adapter. */
 export * as legacyReadOperation from "./read-operation.js";
 /** @deprecated Use `legacySiteRuntimeFacts` only for the bounded pre-cutover adapter. */
@@ -326,6 +328,7 @@ export type {
   LocalProviderLauncher,
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderDriverKind,
   LocalProviderMediaActionInput,
   LocalProviderMediaActionResult,
   LocalProviderPageFacts,
@@ -797,6 +800,8 @@ export class HarborRuntime {
     if (probe.status !== "available") {
       if (probe.status === "blocked" &&
         (probe.failure_class === "not_logged_in" || probe.failure_class === "safety_challenge")) return null;
+      if (persistedAuthenticationRecovery && probe.failure_class === "page_not_ready" &&
+        sameOrigin(record.facts.current_page.current_url, identity_environment.site_binding.origin)) return null;
       return this.failClosedPersistedAuthentication(
         identity_environment.identity_environment_ref,
         session.runtime_session_ref
@@ -989,7 +994,7 @@ export class HarborRuntime {
     ) return "target_origin_not_allowed";
     if (
       !isRuntimeSessionReadable(session.facts) ||
-      session.facts.availability.cdp !== "available" ||
+      !isRuntimeDriverAvailable(session.facts) ||
       session.facts.current_error
     ) return "session_not_ready";
     if (
@@ -1524,7 +1529,7 @@ function sameManagedIdentity(session: RuntimeSessionRecord, identity: LocalIdent
 }
 
 function persistedAuthenticationProbeInput(siteId: string) {
-  if (siteId === "xiaohongshu") return { site_id: "xiaohongshu", task_kind: "search_notes" } as const;
+  if (siteId === "xiaohongshu") return { site_id: "xiaohongshu", task_kind: "authentication_recovery" } as const;
   if (siteId === "boss") return { site_id: "boss", task_kind: "job_search" } as const;
   return null;
 }
@@ -1566,6 +1571,14 @@ function managedIdentityInputMatches(
     (!input.execution_identity_ref || input.execution_identity_ref === managed.execution_identity_ref) &&
     (!input.profile_ref || input.profile_ref === managed.profile_ref) &&
     (!profileStorageRef || profileStorageRef === managed.browser_storage.profile_storage_ref);
+}
+
+function sameOrigin(url: string | null, expectedOrigin: string): boolean {
+  try {
+    return url !== null && new URL(url).origin === expectedOrigin;
+  } catch {
+    return false;
+  }
 }
 
 function managedIdentityCompatibilityUnavailable(): RuntimeSessionUnavailable {

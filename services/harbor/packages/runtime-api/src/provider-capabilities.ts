@@ -46,6 +46,26 @@ export function chromeCapabilities(): BrowserProviderCapabilityFact[] {
   ];
 }
 
+export function camoufoxCapabilities(): BrowserProviderCapabilityFact[] {
+  return [
+    capability("persistent_profile", "supported", "configured", "Camoufox 通过 Playwright persistent context 使用专用持久化 profile。"),
+    capability("independent_user_data_dir", "supported", "configured", "每个 Harbor Profile 使用独立的 Firefox/Camoufox profile 目录。"),
+    capability("proxy", "limited", "configured", "Driver 只把已解析的代理配置交给 Camoufox；连接结果仍需运行时观察。"),
+    capability("timezone", "limited", "configured", "Driver 将配置时区交给 Camoufox，并以运行时事实回读；完整指纹一致性不在此切片。"),
+    capability("locale", "limited", "configured", "Driver 将语言交给 Camoufox，并以运行时页面事实回读。"),
+    capability("viewport", "limited", "configured", "Driver 将窗口/视口交给 Camoufox；窗口 readback 由页面事实和 provider 诊断覆盖。"),
+    capability("extensions", "unsupported", "configured", "本切片不配置或管理扩展。"),
+    capability("cookie_persistence", "supported", "configured", "Playwright persistent context 将会话存储在同一 managed Profile。"),
+    capability("cdp", "unsupported", "configured", "Camoufox 使用 Firefox/Juggler pipe；Harbor 不等待 DevToolsActivePort。"),
+    capability("viewer", "limited", "configured", "有头 Driver 暴露本地窗口给既有 ViewerControl；Harbor 不暴露 Juggler pipe。"),
+    capability("snapshot_refs", "limited", "configured", "snapshot ref 继续依赖存活 Runtime Session 和既有受控页面边界。"),
+    capability("evidence_refs", "limited", "configured", "evidence ref 继续依赖 Harbor 策略和存活 Runtime Session。"),
+    capability("native_fingerprint_control", "provider_claim", "provider_claim", "Camoufox 原生指纹能力只作为 provider claim，未在此切片承诺任务成功率。"),
+    capability("anti_detection_binary_patches", "provider_claim", "provider_claim", "Camoufox 二进制反检测能力只作为 provider claim。"),
+    capability("automation_exposure_reduction", "provider_claim", "provider_claim", "Camoufox automation exposure 降低只作为 provider claim。")
+  ];
+}
+
 export function cloakLimitations(): string[] {
   return [
     "provider claim 必须有 Harbor 验证证据后，Core 才能当作 observed fact 使用。",
@@ -59,6 +79,15 @@ export function chromeLimitations(): string[] {
     "仅在 CloakBrowser 缺失或不可用时作为受限后备。",
     "没有原生指纹控制或反检测二进制补丁。",
     "必须展示为身份环境一致性受限，不能静默作为默认 provider。"
+  ];
+}
+
+export function camoufoxLimitations(): string[] {
+  return [
+    "Camoufox 仅通过固定外部安装和 Harbor Driver 选择；不加入 provider 插件平台。",
+    "当前 Driver 只承诺持久 Profile、受控页面导航、生命周期和低风险页面 readiness probe；不承诺通用 CDP/DSL。",
+    "原生指纹、反检测和目标站点通过率保留为 provider claim，必须由独立验证证据升级。",
+    "Camoufox Python 0.5.6、兼容的 Playwright 和 Camoufox 二进制必须由同一固定安装提供，版本或 properties.json 不兼容时相关启动动作拒绝。"
   ];
 }
 
@@ -84,6 +113,19 @@ export function chromeDownloadGuide(): BrowserProviderDownloadGuide {
     missing_impacts: [
       "如果 CloakBrowser 也缺失，将没有受限后备 provider。",
       "本地 smoke 不能把官方 Chrome 用作备用 runtime。"
+    ]
+  };
+}
+
+export function camoufoxDownloadGuide(): BrowserProviderDownloadGuide {
+  return {
+    action: "external_management",
+    primary_url: "https://github.com/daijro/camoufox/releases",
+    install_hint: "请安装并固定受支持的官方 Camoufox archive、Python camoufox 0.5.6 与兼容的 Playwright runtime，然后设置 HARBOR_CAMOUFOX_PATH。",
+    missing_impacts: [
+      "Camoufox 不能作为身份环境 provider 启动。",
+      "没有 Juggler Driver 就不能把 Camoufox 当作 Chromium/CDP 使用。",
+      "properties.json bundle 路径不兼容时，Driver 会拒绝启动并返回诊断。"
     ]
   };
 }

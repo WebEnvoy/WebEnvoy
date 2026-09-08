@@ -1,5 +1,6 @@
 import type { SnapshotCaptureResult } from "./page-scene.js";
 import {
+  isRuntimeDriverAvailable,
   isRuntimeSessionReadable,
   type LocalProviderSiteResourceProbeResult,
   type RuntimeSessionFacts
@@ -424,7 +425,7 @@ function inferDefaultTaskKind(site_id?: string | null): string {
 }
 
 function isRuntimeReady(session: RuntimeSessionFacts): boolean {
-  return isRuntimeSessionReadable(session) && session.availability.cdp === "available";
+  return isRuntimeSessionReadable(session) && isRuntimeDriverAvailable(session);
 }
 
 function safeOrigin(url?: string | null): string | null {
