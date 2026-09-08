@@ -85,10 +85,17 @@ export async function refreshPendingAuthorizationDecision(endpoint: string, expe
     const record = asRecord(envelope?.body) ?? envelope;
     const context = parseConfirmationContext(record?.confirmation_context);
     const decision = parsePendingDecision(record?.authorization_decision);
-    return decision != null && decision.decisionRef === expected.decisionRef && decision.runId === expected.runId &&
+    if (decision != null && decision.decisionRef === expected.decisionRef && decision.runId === expected.runId &&
       decision.threadId === expected.threadId && decision.turnId === expected.turnId
-      ? { ok: true as const, decision: { ...decision, ...(context ? { confirmationContext: context } : {}) } }
-      : { ok: false as const, reason: ownerError(record, "Core 未能重新观察当前 Instance。") };
+    ) return { ok: true as const, decision: { ...decision, ...(context ? { confirmationContext: context } : {}) } };
+
+    const error = asRecord(asRecord(envelope?.body)?.error);
+    if (envelope?.status === 409 && error?.category === "action_risk" && typeof error.code === "string") {
+      const refreshed = await fetchPendingAuthorizationDecision(endpoint, expected);
+      if (refreshed.ok && refreshed.decision.confirmationContext?.status === "blocked" &&
+        refreshed.decision.confirmationContext.pendingIssues.includes(error.code)) return refreshed;
+    }
+    return { ok: false as const, reason: ownerError(record, "Core 未能重新观察当前 Instance。") };
   } catch (error) {
     return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
   }

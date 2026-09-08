@@ -350,7 +350,7 @@ function blockedContext(
     },
     business_target: {
       status: target?.expected_match === "mismatched" ? "mismatch" : target?.status === "observed" && target.ref && target.expected_match === "matched" ? "verified" : "unknown",
-      target_ref: target?.ref ?? expected?.business_target_ref ?? null,
+      target_ref: target?.ref ?? null,
       label: target?.label ?? null
     },
     page: {

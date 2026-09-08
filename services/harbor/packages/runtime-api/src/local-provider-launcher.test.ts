@@ -433,6 +433,7 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
   assert.match(upload, /\.header-tabs \.creator-tab/);
+  assert.match(upload, /button, \[role="button"\], \[role="tab"\], \.header-tabs \.creator-tab/);
   assert.match(upload, /controls\.length !== 1/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
@@ -498,7 +499,8 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     closest: () => null,
     getAttribute: (name: string) => attributes[name] ?? null,
     getBoundingClientRect: () => ({ width: 100, height: 40, right: 100, bottom: 100, left: 0, top: 0 }),
-    checkVisibility: () => true
+    checkVisibility: () => true,
+    querySelectorAll: () => []
   });
   const title = element("", { placeholder: "填写标题" });
   const body = element("test body", { contenteditable: "true" });
@@ -515,12 +517,15 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     "save-disabled": "false"
   };
   const publishHost = element("", hostAttributes);
+  const accountName = element("Marchen");
+  const accountRoot = { ...element("Marchen"), querySelectorAll: (selector: string) => selector === ".name-box" ? [accountName] : [] };
   const imageCompositions = [imageComposition];
   const controls = [title, body];
   const app = {
     ...element(""),
     querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost]
       : selector === ".publish-page-content-media" ? imageCompositions
+      : selector === ".user-info" ? [accountRoot]
       : selector.includes("aria-invalid") ? [] : [app]
   };
   const document = {
@@ -547,6 +552,9 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.save_draft_control.availability, "available");
   assert.equal(result.publish_control.availability, "available");
   assert.equal(result.composition_state, "composition_initialized");
+  assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_header.user_info/v1");
+  assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen" }]);
+  assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page.image_text_upload/v1");
 
   delete hostAttributes["submit-disabled"];
   const missingDisabled = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());

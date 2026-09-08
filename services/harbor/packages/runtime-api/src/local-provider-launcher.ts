@@ -179,8 +179,10 @@ type WritePrecheckObservation = {
   save_draft_control?: XhsWritePrecheckFieldState;
   publish_control?: XhsWritePrecheckFieldState;
   public_observation?: {
+    account_source_kind?: unknown;
     account_candidates?: readonly { label?: unknown; ref?: unknown }[];
     business_target_candidates?: readonly { label?: unknown; ref?: unknown }[];
+    business_target_kind?: unknown;
     image_count?: unknown;
     ordered_item_refs?: readonly unknown[];
     title_summary?: { state?: unknown; length?: unknown; fingerprint?: unknown };
@@ -350,8 +352,32 @@ function publicObservationFromObservation(
   expected: XhsPublicObservationExpected | undefined
 ): XhsPublicObservation {
   const raw = observation.public_observation;
-  const account = publicLabelRef(raw?.account_candidates, expected?.account_ref);
-  const business_target = publicLabelRef(raw?.business_target_candidates, expected?.business_target_ref);
+  const observedAccountLabel = raw?.account_source_kind === "xiaohongshu.creator_header.user_info/v1" &&
+    raw.account_candidates?.length === 1
+    ? boundedPublicObservationLabel(raw.account_candidates[0]?.label)
+    : null;
+  const observedAccount = observedAccountLabel
+    ? [{
+        label: observedAccountLabel,
+        ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", label: observedAccountLabel })).digest("hex")}`
+      }]
+    : raw?.account_candidates;
+  const account = publicLabelRef(observedAccount, expected?.account_ref);
+  // The page proves the concrete creator surface; Harbor independently
+  // derives the same canonical BusinessTarget ref used by Core policy.
+  const observedBusinessTarget = raw?.business_target_kind === "xiaohongshu.creator_publish_page.image_text_upload/v1"
+    ? [{
+        label: "小红书图文创作页",
+        ref: `target:sha256:${createHash("sha256").update(JSON.stringify({
+          target_ref: "https://creator.xiaohongshu.com/publish/publish",
+          target_type: "creator_publish_page"
+        })).digest("hex")}`
+      }]
+    : undefined;
+  const business_target = publicLabelRef(
+    raw?.business_target_candidates?.length ? raw.business_target_candidates : observedBusinessTarget,
+    expected?.business_target_ref
+  );
   const imageCount = typeof raw?.image_count === "number" && Number.isInteger(raw.image_count) && raw.image_count >= 0 && raw.image_count <= 100
     ? raw.image_count
     : null;
@@ -1945,7 +1971,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         }
         return 'fnv1a:' + (hash >>> 0).toString(16).padStart(8, '0');
       };
-      const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], input, textarea, [contenteditable="true"], [role="textbox"]')];
+      const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], .header-tabs .creator-tab, input, textarea, [contenteditable="true"], [role="textbox"]')];
       const app = document.querySelector('#app, [data-v-app]');
       const appVisible = visible(app);
       const controls = interactive.filter((el) => appVisible && app.contains(el) && visible(el));
@@ -1964,7 +1990,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
         .filter((el) => visible(el)) : [];
       const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
-      const creatorSurface = semanticRootSurface || (appVisible && selectedRequestedPath ? app : undefined);
+      const creatorSurface = appVisible && selectedRequestedPath ? app : semanticRootSurface;
       const roots = creatorSurface ? [creatorSurface] : [];
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
       const pathControls = strictPath ? surfaceControls.filter((el) => visible(el, false)) : surfaceControls;
@@ -2037,11 +2063,20 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         const bounded = String(value).slice(0, 2000);
         return { state: bounded.length === 0 ? 'empty' : 'present', length: bounded.length, fingerprint: fingerprint(bounded) };
       };
-      // Harbor has no pinned XHS page source for the current account or
-      // BusinessTarget. Keep these empty until a versioned site contract is
-      // supplied; generic labels and page text are not identity evidence.
-      const accountCandidates = [];
+      const accountRoots = appVisible ? [...app.querySelectorAll('.user-info')].filter((el) => visible(el, true)) : [];
+      const accountLabels = accountRoots.length === 1
+        ? [...accountRoots[0].querySelectorAll('.name-box')].filter((el) => visible(el, true)).map((el) => label(el)).filter(Boolean)
+        : [];
+      const uniqueAccountLabels = [...new Set(accountLabels)];
+      const accountLabel = uniqueAccountLabels.length === 1 && uniqueAccountLabels[0].length <= 96 ? uniqueAccountLabels[0] : null;
+      const accountCandidates = accountLabel
+        ? [{ label: accountLabel }]
+        : [];
+      const accountSourceKind = accountLabel ? 'xiaohongshu.creator_header.user_info/v1' : null;
       const businessTargetCandidates = [];
+      const businessTargetKind = requestedPath === 'image_text_upload' && observedPath
+        ? 'xiaohongshu.creator_publish_page.image_text_upload/v1'
+        : null;
       const imageElements = imageCompositionSurface
         ? [...imageCompositionSurface.querySelectorAll('img')].filter((el) => visible(el) && (el.naturalWidth > 24 || el.getBoundingClientRect().width >= 24))
         : [];
@@ -2092,8 +2127,10 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         save_draft_control: save,
         publish_control: publish,
         public_observation: {
+          account_source_kind: accountSourceKind,
           account_candidates: accountCandidates,
           business_target_candidates: businessTargetCandidates,
+          business_target_kind: businessTargetKind,
           image_count: imageCompositionSurface ? imageElements.length : null,
           ordered_item_refs: imageRefs,
           title_summary: fieldSummary(Boolean(titleControl), titleValue),

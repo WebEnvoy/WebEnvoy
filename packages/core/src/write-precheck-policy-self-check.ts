@@ -1564,7 +1564,8 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
               ...observation,
               status: "unknown",
               account: { status: "unknown", label: null, ref: null, expected_match: "unknown" },
-              pending_issue_codes: ["account_unknown"]
+              business_target: { status: "unknown", label: null, ref: null, expected_match: "unknown" },
+              pending_issue_codes: ["account_unknown", "business_target_unknown"]
             }
           };
         },
@@ -1581,6 +1582,7 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
     assert.equal(result.run_record?.status, "requires_user_action");
     assert.equal(result.run_record?.public_result_summary?.confirmation_context &&
       (result.run_record.public_result_summary.confirmation_context as Record<string, unknown>).status, "blocked");
+    assert.equal(((result.run_record?.public_result_summary?.confirmation_context as Record<string, unknown> | undefined)?.business_target as Record<string, unknown> | undefined)?.target_ref, null);
     const confirmationRef = result.run_record?.authorization_decision_refs?.[0];
     assert(confirmationRef);
     assert.equal((await authorizationStore.getAuthorizationDecision(confirmationRef))?.state, "active");

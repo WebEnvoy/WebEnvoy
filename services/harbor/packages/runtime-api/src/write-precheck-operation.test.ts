@@ -74,6 +74,8 @@ const publicObservationRaw = {
   page_diff: "unchanged" as const
 };
 
+const creatorPublishBusinessTargetRef = "target:sha256:c9c53848257e15f50166830b48c959fd83f9f72824cf0a5b6d783b19f6405f3c";
+
 function publicCompletedProbe(probeInput: LocalProviderWritePrecheckProbeInput): Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> {
   const result = validateXhsWritePrecheckObservation(probeInput, {
     ...observation,
@@ -107,6 +109,52 @@ function completedProbe(): Extract<LocalProviderWritePrecheckProbeResult, { stat
   if (result.status !== "completed") throw new Error("expected a completed semantic observation");
   return result;
 }
+
+test("maps only the versioned creator account and observed image-text surface to opaque refs", () => {
+  const result = validateXhsWritePrecheckObservation({
+    ...input,
+    expected: { business_target_ref: creatorPublishBusinessTargetRef }
+  }, {
+    ...observation,
+    composition_path: "image_text_upload",
+    path_observed: "observed",
+    path_entry_visible: "observed",
+    composition_state: "composition_initialized",
+    public_observation: {
+      ...publicObservationRaw,
+      account_source_kind: "xiaohongshu.creator_header.user_info/v1",
+      account_candidates: [{ label: "Marchen" }],
+      business_target_candidates: [],
+      business_target_kind: "xiaohongshu.creator_publish_page.image_text_upload/v1"
+    }
+  });
+  assert.equal(result.status, "completed");
+  if (result.status === "completed") {
+    assert.deepEqual(result.public_observation.account, {
+      status: "observed",
+      label: "Marchen",
+      ref: "account:sha256:1af42b2312f39e5b2ee9dd6d3431344063e1b5ff6b297d1e3b24d1f635fa2316",
+      expected_match: "unknown"
+    });
+    assert.deepEqual(result.public_observation.business_target, {
+      status: "observed",
+      label: "小红书图文创作页",
+      ref: creatorPublishBusinessTargetRef,
+      expected_match: "matched"
+    });
+  }
+
+  const ambiguous = validateXhsWritePrecheckObservation(input, {
+    ...observation,
+    public_observation: {
+      ...publicObservationRaw,
+      account_source_kind: "xiaohongshu.creator_header.user_info/v1",
+      account_candidates: [{ label: "Marchen" }, { label: "另一个账号" }]
+    }
+  });
+  assert.equal(ambiguous.status, "completed");
+  if (ambiguous.status === "completed") assert.equal(ambiguous.public_observation.account.status, "unknown");
+});
 
 test("pins and admits only the public Lode validate-only contract", () => {
   assert.equal(XHS_PUBLISH_PRECHECK_PIN.repository, "WebEnvoy/Lode");
