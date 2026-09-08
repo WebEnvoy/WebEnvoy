@@ -111,7 +111,7 @@ function completedProbe(): Extract<LocalProviderWritePrecheckProbeResult, { stat
   return result;
 }
 
-test("maps only the versioned creator account and observed image-text surface to opaque refs", () => {
+test("maps the versioned creator account and independent creator surface to opaque refs", () => {
   const result = validateXhsWritePrecheckObservation({
     ...input,
     expected: { business_target_ref: creatorPublishBusinessTargetRef }
@@ -126,7 +126,7 @@ test("maps only the versioned creator account and observed image-text surface to
       account_source_kind: "xiaohongshu.creator_auth_store.user_info/v1",
       account_candidates: [{ label: "Marchen", stable_id: "user-123" }],
       business_target_candidates: [],
-      business_target_kind: "xiaohongshu.creator_publish_page.image_text_upload/v1"
+      business_target_kind: "xiaohongshu.creator_publish_page/v1"
     }
   });
   assert.equal(result.status, "completed");
@@ -139,7 +139,7 @@ test("maps only the versioned creator account and observed image-text surface to
     });
     assert.deepEqual(result.public_observation.business_target, {
       status: "observed",
-      label: "小红书图文创作页",
+      label: "小红书创作页",
       ref: creatorPublishBusinessTargetRef,
       expected_match: "matched"
     });

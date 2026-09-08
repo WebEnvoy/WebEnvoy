@@ -469,7 +469,7 @@ for (const isDecoy of [false, true]) test(`#405 path probe ${isDecoy ? "rejects 
   const document = {
     body: { innerText: "" },
     querySelector: () => app,
-    querySelectorAll: (selector: string) => selector.includes("login") ? [] : [decoy]
+    querySelectorAll: (selector: string) => selector === "#app, [data-v-app]" ? [app] : selector.includes("login") ? [] : [decoy]
   };
   const evaluate = new Function(
     "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "HTMLInputElement", "setTimeout",
@@ -527,18 +527,22 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   const accountRoot = { ...element("Marchen"), querySelectorAll: (selector: string) => selector === ".name-box" ? [accountName] : [] };
   const imageCompositions = [imageComposition];
   const controls = [title, body];
+  let showPublishHost = true;
+  let extraCreatorRoot: object | undefined;
+  let missingCreatorRoot = false;
   const app = {
     ...element(""),
     __vue_app__: { config: { globalProperties: { $store: { state: { Auth: { userInfo: { userId: "user-123", userName: "Marchen" } } } } } } },
-    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost]
+    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? (showPublishHost ? [publishHost] : [])
       : selector === ".publish-page-content-media" ? imageCompositions
       : selector === ".user-info" ? [accountRoot]
-      : selector.includes("aria-invalid") ? [] : [app]
+      : selector.includes("aria-invalid") || missingCreatorRoot ? [] : extraCreatorRoot ? [app, extraCreatorRoot] : [app]
   };
+  const appRoots = [app];
   const document = {
     body: { innerText: "" },
     querySelector: () => app,
-    querySelectorAll: (selector: string) => selector.includes("login") ? [] : controls
+    querySelectorAll: (selector: string) => selector === "#app, [data-v-app]" ? appRoots : selector.includes("login") ? [] : controls
   };
   const evaluate = new Function(
     "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout",
@@ -561,7 +565,7 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.composition_state, "composition_initialized");
   assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_auth_store.user_info/v1");
   assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen", stable_id: "user-123" }]);
-  assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page.image_text_upload/v1");
+  assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
   assert.equal(result.public_observation.media_source_kind, "xiaohongshu.creator_publish_page.preview_image_source/v1");
   assert.equal(result.public_observation.ordered_item_refs.length, 2);
   assert.equal(new Set(result.public_observation.ordered_item_refs).size, 2);
@@ -580,6 +584,61 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   controls.push(element("other body", { contenteditable: "true" }));
   const ambiguousBody = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
   assert.equal(ambiguousBody.field_states.content_editor.observation, "unknown");
+  // A default video tab is still the same authenticated creator-page target.
+  // It does not prove that image composition, media or fields are ready.
+  const videoAttributes = { "aria-selected": "true" };
+  const imageAttributes = { "aria-selected": "false" };
+  const videoTab = element("上传视频", videoAttributes);
+  const imageTab = element("上传图文", imageAttributes);
+  controls.splice(0, controls.length, videoTab, imageTab);
+  imageCompositions.length = 0;
+  showPublishHost = false;
+  const read = () => evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  const video = await read();
+  assert.equal(video.public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
+  assert.equal(video.path_observed, "unobserved");
+  assert.equal(video.composition_state, "composition_unknown");
+  assert.equal(video.public_observation.image_count, null);
+  assert.equal(video.field_states.title_input.observation, "unknown");
+  const target = validateXhsWritePrecheckObservation({ target_url: location.href, expected_origin: "https://creator.xiaohongshu.com", target_ref: "target_test", expected: { business_target_ref: "target:sha256:c9c53848257e15f50166830b48c959fd83f9f72824cf0a5b6d783b19f6405f3c" } }, video);
+  assert.equal(target.status, "completed");
+  if (target.status === "completed") {
+    assert.equal(target.public_observation.business_target.status, "observed");
+    assert.equal(target.public_observation.business_target.expected_match, "matched");
+  }
+  videoAttributes["aria-selected"] = "false";
+  imageAttributes["aria-selected"] = "true";
+  const image = await read();
+  assert.notEqual(image.public_observation.page_fingerprint, video.public_observation.page_fingerprint);
+  assert.equal(image.public_observation.business_target_kind, video.public_observation.business_target_kind);
+  controls.push(title);
+  assert.notEqual((await read()).public_observation.page_fingerprint, image.public_observation.page_fingerprint);
+  controls.pop();
+  accountName.textContent = "Different account";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  accountName.textContent = "Marchen";
+  location.origin = "https://example.test";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  location.origin = "https://creator.xiaohongshu.com";
+  location.pathname = "/other";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  location.pathname = "/publish/publish";
+  missingCreatorRoot = true;
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  missingCreatorRoot = false;
+  appRoots.push({ ...app });
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  appRoots.pop();
+  // Distinct candidate surfaces must not be collapsed to the first match.
+  const previousContains = app.contains;
+  extraCreatorRoot = { ...element(""), contains: (node: unknown) => controls.includes(node as typeof title) };
+  app.contains = (node?: unknown) => node !== extraCreatorRoot;
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  extraCreatorRoot = undefined;
+  app.contains = previousContains;
+  app.closest = () => ({} as never);
+  assert.equal((await read()).public_observation.business_target_kind, null);
+
 });
 
 test("#405 path request observation continues requests and leaves external effects unknown", () => {

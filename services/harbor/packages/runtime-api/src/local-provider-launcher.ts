@@ -412,9 +412,11 @@ function publicObservationFromObservation(
   const account = publicLabelRef(observedAccount, expected?.account_ref);
   // The page proves the concrete creator surface; Harbor independently
   // derives the same canonical BusinessTarget ref used by Core policy.
-  const observedBusinessTarget = raw?.business_target_kind === "xiaohongshu.creator_publish_page.image_text_upload/v1"
+  const observedBusinessTarget = raw?.business_target_kind === "xiaohongshu.creator_publish_page/v1" &&
+    raw.account_source_kind === "xiaohongshu.creator_auth_store.user_info/v1" && observedAccountId && observedAccountLabel &&
+    observation.creator_root_count === 1
     ? [{
-        label: "小红书图文创作页",
+        label: "小红书创作页",
         ref: `target:sha256:${createHash("sha256").update(JSON.stringify({
           target_ref: "https://creator.xiaohongshu.com/publish/publish",
           target_type: "creator_publish_page"
@@ -2021,8 +2023,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         return 'fnv1a:' + (hash >>> 0).toString(16).padStart(8, '0');
       };
       const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], .header-tabs .creator-tab, input, textarea, [contenteditable="true"], [role="textbox"]')];
-      const app = document.querySelector('#app, [data-v-app]');
-      const appVisible = visible(app);
+      const apps = [...document.querySelectorAll('#app, [data-v-app]')].filter((el) => visible(el));
+      const app = apps.length === 1 ? apps[0] : undefined;
+      const appVisible = Boolean(app);
       const controls = interactive.filter((el) => appVisible && app.contains(el) && visible(el));
       const allControls = interactive.filter((el) => appVisible && app.contains(el) && visible(el, true));
       const hasLabel = (patterns, includeDisabled = false, scopedControls = includeDisabled ? allControls : controls) => scopedControls
@@ -2038,9 +2041,10 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const selectedRequestedPath = requestedPathControls.find((el) => isSelected(el) && isRequestedPath(el));
       const semanticRoots = appVisible ? [...app.querySelectorAll('[id*="publish"], [class*="publish"], [data-page*="publish"], [data-component*="creator"], [class*="creator"]')]
         .filter((el) => visible(el)) : [];
-      const semanticRootSurface = semanticRoots.find((root) => creatorControls.some((control) => root.contains(control)));
-      const creatorSurface = appVisible && selectedRequestedPath ? app : semanticRootSurface;
-      const roots = creatorSurface ? [creatorSurface] : [];
+      const creatorRoots = semanticRoots.filter((root) => creatorControls.some((control) => root.contains(control)));
+      // Nested containers describe one surface; disjoint creator roots are ambiguous.
+      const roots = creatorRoots.filter((root) => !creatorRoots.some((other) => other !== root && other.contains(root)));
+      const creatorSurface = roots.length === 1 ? roots[0] : undefined;
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
       const pathControls = strictPath ? surfaceControls.filter((el) => visible(el, false)) : surfaceControls;
       const pathEntryVisible = strictPath
@@ -2128,8 +2132,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         : [];
       const accountSourceKind = accountCandidates.length === 1 ? 'xiaohongshu.creator_auth_store.user_info/v1' : null;
       const businessTargetCandidates = [];
-      const businessTargetKind = requestedPath === 'image_text_upload' && observedPath
-        ? 'xiaohongshu.creator_publish_page.image_text_upload/v1'
+      const businessTargetKind = location.origin === 'https://creator.xiaohongshu.com' &&
+        location.pathname === '/publish/publish' && creatorSurface && accountCandidates.length === 1
+        ? 'xiaohongshu.creator_publish_page/v1'
         : null;
       const imageElements = imageCompositionSurface
         ? [...imageCompositionSurface.querySelectorAll('img')].filter((el) => visible(el) && (el.naturalWidth > 24 || el.getBoundingClientRect().width >= 24))
@@ -2151,10 +2156,21 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       // A source digest gives each visible app-owned preview an identity while
       // keeping its URL in the page. DOM position only orders those identities.
       const imageRefs = await Promise.all(imageElements.map(imageRef));
+      // Merely seeing an upload control is the entrypoint, not an initialized
+      // composition. Initialization is observable only once an editing or
+      // publication control is present; file selection is intentionally not
+      // performed by this read-only probe.
+      const editableControl = (el) => Boolean(el && !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true');
+      const composition_initialized = Boolean(observedPath && ([titleControl, contentControl, publishControl, saveControl].some(editableControl) ||
+        publish.observation === 'observed' || save.observation === 'observed'));
+      const selectedPathLabels = surfaceControls.filter((el) => isSelected(el) && ${JSON.stringify(Object.values(compositionPathLabels).flat())}.includes(label(el))).map(label).sort();
       const pageFingerprint = fingerprint([
         location.origin,
         location.pathname,
         requestedPath,
+        JSON.stringify(selectedPathLabels),
+        path_observed,
+        String(composition_initialized),
         String(roots.length),
         JSON.stringify(accountCandidates),
         JSON.stringify(businessTargetCandidates),
@@ -2164,13 +2180,6 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         String(publishControl ? 1 : 0),
         String(saveControl ? 1 : 0)
       ].join('|'));
-      // Merely seeing an upload control is the entrypoint, not an initialized
-      // composition. Initialization is observable only once an editing or
-      // publication control is present; file selection is intentionally not
-      // performed by this read-only probe.
-      const editableControl = (el) => Boolean(el && !el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true');
-      const composition_initialized = Boolean(observedPath && ([titleControl, contentControl, publishControl, saveControl].some(editableControl) ||
-        publish.observation === 'observed' || save.observation === 'observed'));
       const loginSurface = location.pathname.startsWith('/login') || [...document.querySelectorAll('[class*="login"], [class*="qrcode"], [class*="qr-code"]')]
         .some((el) => visible(el, true) && /扫码登录|手机号登录|登录二维码/.test(el.textContent || ''));
       return {
