@@ -158,8 +158,8 @@ function exactWritePrecheckTaskBody(body: JsonBody, packageRef: string, run: Run
     isExactWritePrecheckRun(run, confirmationDecisionRef);
 }
 
-function exactMediaActionTaskBody(body: JsonBody, run: RunRecord | undefined, confirmationDecisionRef: string): boolean {
-  return isExactXhsMediaTaskBody(body) && isExactXhsMediaActionRun(run, confirmationDecisionRef);
+function exactMediaActionTaskBody(body: JsonBody, run: RunRecord | undefined, confirmationDecisionRef: string, expectedRunId: string): boolean {
+  return isExactXhsMediaTaskBody(body) && isExactXhsMediaActionRun(run, confirmationDecisionRef, expectedRunId);
 }
 
 function publicContinuationHarbor(value: unknown): JsonBody | undefined {
@@ -219,7 +219,7 @@ async function registerPendingWritePrecheckContinuation(input: {
     } catch {
       return;
     }
-    if (!exactWritePrecheckTaskBody(input.body, packageRef, run, ref) && !exactMediaActionTaskBody(input.body, run, ref)) return;
+    if (!exactWritePrecheckTaskBody(input.body, packageRef, run, ref) && !exactMediaActionTaskBody(input.body, run, ref, input.run_id)) return;
     const harbor = publicContinuationHarbor(input.body.harbor);
     pendingWritePrecheckContinuations.set(ref, {
       run_id: input.run_id,
@@ -578,9 +578,9 @@ export async function handleTaskThreadApi(input: TaskThreadApiInput): Promise<Ta
           : undefined;
         const terminalWritePrecheckOverride = run?.status === "unknown_outcome" || run?.status === "manual_recovery_required";
         const exactTerminalWritePrecheck = run !== undefined &&
-          (isExactWritePrecheckRun(run) || isExactXhsMediaActionRun(run) ||
+          (isExactWritePrecheckRun(run) || isExactXhsMediaActionRun(run, undefined, turn.run_id) ||
             (terminalWritePrecheckOverride && (isExactWritePrecheckRun({ ...run, status: "requires_user_action" }) ||
-              isExactXhsMediaActionRun({ ...run, status: "requires_user_action" }))));
+              isExactXhsMediaActionRun({ ...run, status: "requires_user_action" }, undefined, turn.run_id))));
         if (run && exactTerminalWritePrecheck) {
           await cancelAuthorizationDecisions(input.authorizationDecisionStore, turn);
           clearPendingWritePrecheckContinuations(turn.run_id);

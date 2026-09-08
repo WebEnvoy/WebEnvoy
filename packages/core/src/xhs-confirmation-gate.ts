@@ -618,7 +618,7 @@ export async function preflightXhsMediaActionConfirmation(
   if (!existing || existing.status !== "requires_user_action") {
     return { ok: false, failure: failure("authorization_confirmation_inactive", "request_new_confirmation"), ...(existing ? { run_record: existing } : {}) };
   }
-  if (!isExactXhsMediaActionRun(existing, request.confirmation_decision_ref)) {
+  if (!isExactXhsMediaActionRun(existing, request.confirmation_decision_ref, request.run_id)) {
     return { ok: false, failure: failure("single_action_confirmation_binding_mismatch", "request_new_confirmation"), run_record: existing };
   }
   const taskIntent = validateTaskIntent(request.task_intent);

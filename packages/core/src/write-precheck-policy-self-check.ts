@@ -25,6 +25,7 @@ import {
 } from "./lode-admission.js";
 import type { AuthorizationDecisionSummary } from "./authorization-decision.js";
 import type { TaskIntentEnvelope } from "./task-submission.js";
+import { isExactXhsMediaActionRun } from "./media-action-policy.js";
 import {
   evaluateWritePrecheckTaskPolicy,
   isUnifiedWritePrecheckTask,
@@ -1585,6 +1586,8 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
     assert.equal((await authorizationStore.getAuthorizationDecision(confirmationRef))?.state, "active");
     assert.equal(result.run_record?.action_request?.action_id, mediaIntent.input.action_id);
     assert.deepEqual(result.run_record?.action_request?.target_refs, { scope_target_ref: mediaIntent.scope.target_ref });
+    assert.equal(isExactXhsMediaActionRun(result.run_record, confirmationRef, "app-xhs-media-auto-confirm"), true);
+    assert.equal(isExactXhsMediaActionRun(result.run_record, confirmationRef, "app-xhs-media-wrong-run"), false);
     assert.equal(harborCalls, 1);
   } finally {
     await rm(autoDirectory, { recursive: true, force: true });

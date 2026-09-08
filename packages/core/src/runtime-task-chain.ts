@@ -2724,7 +2724,7 @@ export async function continueXhsMediaActionTask(
   if (!existing || existing.status !== "requires_user_action") {
     return { ok: false, failure: failure("action_risk", "authorization_confirmation_inactive", "admission", "request_new_confirmation"), ...(existing ? { run_record: existing } : {}) };
   }
-  if (!isExactXhsMediaActionRun(existing, request.single_action_decision.confirmation_decision_ref)) {
+  if (!isExactXhsMediaActionRun(existing, request.single_action_decision.confirmation_decision_ref, request.run_id)) {
     return { ok: false, failure: failure("action_risk", "single_action_confirmation_binding_mismatch", "admission", "request_new_confirmation"), run_record: existing };
   }
   const taskIntent = validateTaskIntent(request.task_intent);

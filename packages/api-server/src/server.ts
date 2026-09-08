@@ -274,7 +274,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     });
     if (!runRecordStore) return xhsMediaDecision ? invalidXhsRun("authorization_run_store_unavailable") : undefined;
     const run = await runRecordStore.getRunRecord(confirmation.applicability.run_id).catch(() => undefined);
-    if (!isExactXhsMediaActionRun(run, confirmationDecisionRef)) {
+    if (!isExactXhsMediaActionRun(run, confirmationDecisionRef, confirmation.applicability.run_id)) {
       return xhsMediaDecision ? invalidXhsRun("authorization_run_record_invalid") : undefined;
     }
     const pending = peekPendingWritePrecheckContinuation(confirmationDecisionRef);
@@ -350,7 +350,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
           ? await options.runRecordStore.getRunRecord(applicability.run_id)
           : undefined;
         if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
-          !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return;
+          !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref, applicability.run_id)) return;
         try {
           await authorizationStore.invalidateAuthorizationDecision(confirmation.decision_ref, "cancelled");
         } catch (error) {
@@ -388,7 +388,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
                 ? await options.runRecordStore.getRunRecord(confirmation.applicability.run_id)
                 : undefined;
               if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
-                !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return undefined;
+                !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref, confirmation.applicability.run_id)) return undefined;
             }
           } catch {
             // A missing/failed lookup keeps the generic single-action response;

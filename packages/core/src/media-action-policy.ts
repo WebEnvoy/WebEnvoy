@@ -120,7 +120,7 @@ export function isExactXhsMediaActionTask(
 }
 
 /** Continuation accepts only the persisted media action request awaiting one confirmation. */
-export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmationDecisionRef?: string): boolean {
+export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmationDecisionRef?: string, expectedRunId?: string): boolean {
   const action = run?.action_request;
   const risk = action?.risk_classification;
   const guard = action?.no_submit_guard;
@@ -133,6 +133,7 @@ export function isExactXhsMediaActionRun(run: RunRecord | undefined, confirmatio
   const commitAction = actionId?.startsWith("xhs_publish_note_image_text_commit.") === true;
   const expectedRisk = actionId === "xhs_publish_note_image_text_commit.cleanup" ? "destructive" : "write";
   return run?.status === "requires_user_action" &&
+    (expectedRunId === undefined || run.run_id === expectedRunId) &&
     identity !== undefined &&
     run.package_ref === identity.package_ref &&
     run.capability_ref === `lode:capability/${identity.capability_id}` &&
