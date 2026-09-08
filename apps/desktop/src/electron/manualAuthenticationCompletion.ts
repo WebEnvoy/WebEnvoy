@@ -8,14 +8,17 @@ const sensitivePublicReferenceFragment =
   /(token|cookie|secret|password|credential|authorization|bearer)|raw[\s_-]*evidence/i;
 const publicReferencePatterns = {
   identity_environment_ref: [
+    /^identity-env_[a-f0-9]{24}$/,
     /^harbor:\/\/identity-environment\/[A-Za-z0-9._/-]{1,240}$/,
     /^identity-env-[A-Za-z0-9._-]{1,499}$/,
   ],
   execution_identity_ref: [
+    /^execution-identity_[a-f0-9]{24}$/,
     /^harbor:\/\/execution-identity\/[A-Za-z0-9._/-]{1,240}$/,
     /^identity-env-[A-Za-z0-9._-]{1,489}:execution$/,
   ],
   profile_ref: [
+    /^profile_[a-f0-9]{24}$/,
     /^harbor:\/\/profile\/[A-Za-z0-9._/-]{1,240}$/,
     /^profile-[A-Za-z0-9._-]{1,503}$/,
   ],
