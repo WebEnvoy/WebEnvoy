@@ -794,7 +794,8 @@ export class HarborRuntime {
     if (probe.status !== "available") {
       if (probe.status === "blocked" &&
         (probe.failure_class === "not_logged_in" || probe.failure_class === "safety_challenge")) return null;
-      if (persistedAuthenticationRecovery && probe.status === "unknown" && probe.failure_class === "page_not_ready") return null;
+      if (persistedAuthenticationRecovery && probe.failure_class === "page_not_ready" &&
+        sameOrigin(record.facts.current_page.current_url, identity_environment.site_binding.origin)) return null;
       return this.failClosedPersistedAuthentication(
         identity_environment.identity_environment_ref,
         session.runtime_session_ref
@@ -1562,6 +1563,14 @@ function managedIdentityInputMatches(
     (!input.execution_identity_ref || input.execution_identity_ref === managed.execution_identity_ref) &&
     (!input.profile_ref || input.profile_ref === managed.profile_ref) &&
     (!profileStorageRef || profileStorageRef === managed.browser_storage.profile_storage_ref);
+}
+
+function sameOrigin(url: string | null, expectedOrigin: string): boolean {
+  try {
+    return url !== null && new URL(url).origin === expectedOrigin;
+  } catch {
+    return false;
+  }
 }
 
 function managedIdentityCompatibilityUnavailable(): RuntimeSessionUnavailable {
