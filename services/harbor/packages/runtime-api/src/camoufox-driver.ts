@@ -465,6 +465,11 @@ async function probeCamoufoxSiteResource(
   if (loginLike) return { status: "blocked", failure_class: "not_logged_in", message: "The site page requires manual login.", verified_fact_keys: [] };
   if (input.site_id === "xiaohongshu") {
     if (origin !== "https://www.xiaohongshu.com") return { status: "unavailable", failure_class: "page_not_ready", message: "The active page is not on the canonical Xiaohongshu origin.", verified_fact_keys: [] };
+    if (input.task_kind === "authentication_recovery") {
+      return value.ready === true
+        ? { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: [] }
+        : { status: "unavailable", failure_class: "page_not_ready", message: "The canonical Xiaohongshu page is not ready.", verified_fact_keys: [] };
+    }
     const verified = [
       ...(value.vue_ready === true ? ["page.vue_app.ready" as const] : []),
       ...(value.pinia_ready === true ? ["page.pinia_store.ready" as const] : [])

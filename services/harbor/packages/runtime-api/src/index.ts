@@ -1519,7 +1519,7 @@ function sameManagedIdentity(session: RuntimeSessionRecord, identity: LocalIdent
 }
 
 function persistedAuthenticationProbeInput(siteId: string) {
-  if (siteId === "xiaohongshu") return { site_id: "xiaohongshu", task_kind: "search_notes" } as const;
+  if (siteId === "xiaohongshu") return { site_id: "xiaohongshu", task_kind: "authentication_recovery" } as const;
   if (siteId === "boss") return { site_id: "boss", task_kind: "job_search" } as const;
   return null;
 }

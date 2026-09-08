@@ -529,7 +529,7 @@ export type LocalProviderSiteResourceProbeInput =
     }
   | {
       site_id: "xiaohongshu";
-      task_kind: "search_notes" | "xhs_search_notes" | "read_note_detail" | "xhs_read_note_detail";
+      task_kind: "authentication_recovery" | "search_notes" | "xhs_search_notes" | "read_note_detail" | "xhs_read_note_detail";
       signal?: AbortSignal;
     };
 

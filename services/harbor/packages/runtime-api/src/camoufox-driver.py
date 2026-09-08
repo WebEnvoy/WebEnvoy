@@ -292,6 +292,10 @@ def public_metric(value: Any) -> str:
     return text if 0 < len(text) <= 40 and re.fullmatch(r"[0-9０-９.,+\-\s万千百wWkKmM]+", text) else ""
 
 
+def first_present(mapping: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    return next((mapping[key] for key in keys if mapping.get(key) is not None), None)
+
+
 def unavailable_read(failure_class: str, message: str, retryable: bool) -> dict[str, Any]:
     return {"status": "unavailable", "failure_class": failure_class, "message": message, "retryable": retryable}
 
@@ -323,9 +327,9 @@ def summarize_xhs_network(payload: Any) -> dict[str, dict[str, Any]] | dict[str,
         interactions = interactions if isinstance(interactions, dict) else {}
         author = public_text(user.get("nickname") or user.get("display_name") or user.get("displayName") or user.get("name"), 100)
         metrics = {
-            "likes": public_metric(interactions.get("liked_count") or interactions.get("likedCount") or interactions.get("likes")),
-            "comments": public_metric(interactions.get("comment_count") or interactions.get("commentCount") or interactions.get("comments")),
-            "collects": public_metric(interactions.get("collected_count") or interactions.get("collectedCount") or interactions.get("collects")),
+            "likes": public_metric(first_present(interactions, ("liked_count", "likedCount", "likes"))),
+            "comments": public_metric(first_present(interactions, ("comment_count", "commentCount", "comments"))),
+            "collects": public_metric(first_present(interactions, ("collected_count", "collectedCount", "collects"))),
         }
         result[note_ids[0]] = {
             "title": title,
@@ -357,7 +361,7 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
     try:
         with contextlib.redirect_stdout(sys.stderr):
             with read_page.expect_response(
-                lambda response: response.url == "https://so.xiaohongshu.com/api/sns/web/v2/search/notes" and response.request.method == "POST",
+                lambda response: urlparse(response.url).scheme == "https" and urlparse(response.url).netloc == "so.xiaohongshu.com" and urlparse(response.url).path == "/api/sns/web/v2/search/notes" and response.request.method == "POST",
                 timeout=12_000,
             ) as response_info:
                 read_page.goto(target_url, wait_until="domcontentloaded", timeout=12_000)

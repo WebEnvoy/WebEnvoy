@@ -35,7 +35,7 @@ for await (const line of rl) {
     page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
   } else if (request.op === "site_resource_probe") {
-    output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: true, pinia_ready: true } });
+    output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: request.task_kind !== "authentication_recovery", pinia_ready: request.task_kind !== "authentication_recovery" } });
   } else if (request.op === "read_operation_probe") {
     output({ id: request.id, status: "ok", page: { current_url: request.target_url, title: "Search", status: "ready" }, observation: {
       status: "completed", observed_origin: request.expected_origin, response_status: 200,
@@ -165,6 +165,9 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
   assert.equal(opened.current_url, "https://www.xiaohongshu.com/search_result?keyword=%E4%B8%AD%E6%96%87");
   const probe = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "search_notes" });
   assert.equal(probe.status, "available");
+  const authentication = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "authentication_recovery" });
+  assert.equal(authentication.status, "available");
+  if (authentication.status === "available") assert.deepEqual(authentication.verified_fact_keys, []);
   const read = await launched.probeReadOperation!({
     site_id: "xiaohongshu",
     operation_id: "xhs_search_notes",

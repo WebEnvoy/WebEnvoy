@@ -1977,6 +1977,7 @@ export async function probeProviderSiteResource(
   if (
     (input.site_id === "boss" && input.task_kind !== "job_search" && input.task_kind !== "boss_job_search") ||
     (input.site_id === "xiaohongshu" &&
+      input.task_kind !== "authentication_recovery" &&
       input.task_kind !== "search_notes" &&
       input.task_kind !== "xhs_search_notes" &&
       input.task_kind !== "read_note_detail" &&
@@ -2003,11 +2004,21 @@ export async function probeProviderSiteResource(
         return (evaluated.result as { value?: ReadProbeObservation } | undefined)?.value;
       };
       if (input.site_id === "boss") return validateBossSpaResourceProbe(await observe());
+      if (input.task_kind === "authentication_recovery") return validateXiaohongshuAuthenticationProbe(await observe());
       return waitForXiaohongshuSiteResourceReadiness(observe, signal);
     }, signal);
   } catch {
     return siteResourceProbeUnavailable("unknown", "provider_probe_unavailable", "The site readiness surface could not be verified through the controlled CDP probe.");
   }
+}
+
+function validateXiaohongshuAuthenticationProbe(observation: ReadProbeObservation | undefined): LocalProviderSiteResourceProbeResult {
+  if (!observation || observation.origin !== "https://www.xiaohongshu.com" || !observation.ready) {
+    return siteResourceProbeUnavailable("unavailable", "page_not_ready", "The active page is not a ready canonical Xiaohongshu surface.");
+  }
+  if (observation.challenge_like) return siteResourceProbeUnavailable("blocked", "safety_challenge", "The Xiaohongshu page shows a verification or safety challenge.");
+  if (observation.login_like) return siteResourceProbeUnavailable("blocked", "not_logged_in", "The Xiaohongshu page requires manual login.");
+  return { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: [] };
 }
 
 export function validateBossSpaResourceProbe(observation: ReadProbeObservation | undefined): LocalProviderSiteResourceProbeResult {
