@@ -455,6 +455,8 @@ test("propagates expected refs through the trusted local provider launcher", asy
     runtime.recordHandoff(headed.runtime_session_ref, { control_owner: "core_task", handoff_reason: "user_requested" });
     runtime.releaseSession(headed.runtime_session_ref, { control_owner: "core_task" });
     runtime.lockSession(headed.runtime_session_ref, { control_owner: "core_task", holder_ref: "observation-run" });
+    runtime.lockSession(headed.runtime_session_ref, { control_owner: "core_task", holder_ref: "observation-run" });
+    runtime.lockSession(headed.runtime_session_ref, { control_owner: "core_task", holder_ref: "observation-run" });
     const result = await runtime.executeXhsPublishPrecheck(headed.runtime_session_ref, {
       url: input.target_url,
       target_ref: input.target_ref,

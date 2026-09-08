@@ -808,6 +808,9 @@ export class RuntimeSessionStore {
     ) return unavailableSession("session_cleanup_failed", error("session_cleanup_failed", "Runtime Session is not reusable.", true));
     if (hasControlConflict(record, owner, holder_ref)) return lockConflict(record, owner);
     if (record.read_operation_user_release_pending && owner !== "core_task") return lockConflict(record, owner);
+    const preserveReadOperationHandoff = record.read_operation_user_handoff &&
+      record.facts.control_owner === "core_task" && owner === "core_task" &&
+      record.facts.control_lock.state === "held" && record.facts.control_lock.holder_ref === holder_ref;
     const now = new Date().toISOString();
     record.facts.lifecycle_state = "active";
     record.facts.last_seen_at = now;
@@ -821,7 +824,8 @@ export class RuntimeSessionStore {
     };
     record.control_generation += 1;
     record.user_held_session = false;
-    record.read_operation_user_handoff = record.read_operation_user_release_pending && owner === "core_task";
+    record.read_operation_user_handoff = preserveReadOperationHandoff ||
+      record.read_operation_user_release_pending && owner === "core_task";
     record.read_operation_user_release_pending = false;
     this.viewerControls.recordHandoff(record.facts.runtime_session_ref, { control_owner: owner });
     record.facts.facts.push(
