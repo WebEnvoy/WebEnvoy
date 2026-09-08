@@ -19,7 +19,38 @@ export type PendingAuthorizationDecision = {
   runId: string;
   threadId: string;
   turnId: string;
+  confirmationContext?: XhsConfirmationContext;
 };
+
+type ConfirmationStatus = "verified" | "unknown" | "mismatch";
+
+export type XhsConfirmationContext = {
+  status: "ready" | "blocked";
+  runtimeBinding: {
+    runtimeSessionRef: string;
+    identityEnvironmentRef: string;
+    profileRef: string;
+    providerRef: string;
+    controlOwner: "core_task";
+    observationGeneration: string;
+    observationRef: string;
+  };
+  account: { status: ConfirmationStatus; accountRef: string | null; label: string | null };
+  businessTarget: { status: ConfirmationStatus; targetRef: string | null; label: string | null };
+  page: { status: "verified" | "unknown" | "stale"; url: string; fingerprint: string | null; diff: "unchanged" | "changed" | "unknown" };
+  media: { status: ConfirmationStatus; imageCount: number | null; orderedItemRefs: string[]; summary: string | null };
+  fields: {
+    status: ConfirmationStatus;
+    title: ConfirmationField;
+    body: ConfirmationField;
+  };
+  pendingIssues: string[];
+  observedAt: string;
+  fingerprint: string;
+  failClosed: true;
+};
+
+type ConfirmationField = { state: "empty" | "present" | "unknown"; length: number | null; summary: string | null };
 
 export type PendingAuthorizationBinding = {
   decisionRef: string;
@@ -32,14 +63,31 @@ export async function fetchPendingAuthorizationDecision(endpoint: string, expect
   try {
     const response = await requestOwnerJson(endpoint, `/authorization-decisions/${encodeURIComponent(expected.decisionRef)}`, { timeoutMs: 3500 });
     const record = asRecord(response);
+    const context = parseConfirmationContext(record?.confirmation_context);
     const decision = parsePendingDecision(record?.authorization_decision);
     return record?.ok === true && decision != null && decision.decisionRef === expected.decisionRef &&
       decision.runId === expected.runId && decision.threadId === expected.threadId && decision.turnId === expected.turnId
-      ? { ok: true as const, decision }
+      ? { ok: true as const, decision: { ...decision, ...(context ? { confirmationContext: context } : {}) } }
       : { ok: false as const, reason: "当前动作确认与本回合不匹配或已失效。" };
   } catch (error) {
     return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+export function requiresXhsConfirmationContext(decision: PendingAuthorizationDecision) {
+  return decision.siteSlug === "xiaohongshu" && decision.actionId.startsWith("xhs_publish_note_image_text_");
+}
+
+export function canAllowPendingDecision(decision: PendingAuthorizationDecision) {
+  if (!requiresXhsConfirmationContext(decision)) return true;
+  const context = decision.confirmationContext;
+  if (!(context?.status === "ready" && context.failClosed && context.runtimeBinding.controlOwner === "core_task" &&
+    context.account.status === "verified" && context.businessTarget.status === "verified" &&
+    context.page.status === "verified" && context.page.diff === "unchanged" &&
+    context.pendingIssues.length === 0)) return false;
+  const commit = decision.actionId.endsWith(".save_draft") || decision.actionId.endsWith(".publish");
+  return (!commit || context.media.status === "verified") &&
+    (!(commit || decision.actionId === "xhs_publish_note_image_text_fields.compose") || context.fields.status === "verified");
 }
 
 export async function decideSingleAction(
@@ -107,6 +155,91 @@ function parsePendingDecision(value: unknown): PendingAuthorizationDecision | nu
     threadId: applicability.threadId,
     turnId: applicability.turnId,
   };
+}
+
+function parseConfirmationContext(value: unknown): XhsConfirmationContext | null {
+  const record = asRecord(value);
+  if (record == null) return null;
+  const binding = asRecord(record.runtime_binding);
+  const account = parseNamedFact(record.account, "account_ref");
+  const businessTarget = parseNamedFact(record.business_target, "target_ref");
+  const page = asRecord(record.page);
+  const media = asRecord(record.media);
+  const fields = asRecord(record.fields);
+  const title = parseConfirmationField(fields?.title);
+  const body = parseConfirmationField(fields?.body);
+  if (!hasExactKeys(record, ["schema_version", "status", "runtime_binding", "account", "business_target", "page", "media", "fields", "pending_issues", "observed_at", "fingerprint", "fail_closed"]) ||
+    record.schema_version !== "webenvoy.xhs-confirmation-context/v0" || (record.status !== "ready" && record.status !== "blocked") || record.fail_closed !== true ||
+    binding == null || !hasExactKeys(binding, ["runtime_session_ref", "identity_environment_ref", "profile_ref", "provider_ref", "control_owner", "observation_generation", "observation_ref"]) ||
+    ![binding.runtime_session_ref, binding.identity_environment_ref, binding.profile_ref, binding.provider_ref, binding.observation_ref].every(validRef) ||
+    binding.control_owner !== "core_task" || typeof binding.observation_generation !== "string" || !/^fnv1a:[a-f0-9]{8}$/.test(binding.observation_generation) ||
+    account == null || businessTarget == null || page == null || !hasExactKeys(page, ["status", "url", "fingerprint", "diff"]) ||
+    (page.status !== "verified" && page.status !== "unknown" && page.status !== "stale") || typeof page.url !== "string" || !validHttpsUrl(page.url) ||
+    (page.fingerprint !== null && (typeof page.fingerprint !== "string" || !/^fnv1a:[a-f0-9]{8}$/.test(page.fingerprint))) ||
+    (page.diff !== "unchanged" && page.diff !== "changed" && page.diff !== "unknown") ||
+    media == null || !hasExactKeys(media, ["status", "image_count", "ordered_item_refs", "summary"]) || !isConfirmationStatus(media.status) ||
+    (media.image_count !== null && (!Number.isSafeInteger(media.image_count) || Number(media.image_count) < 0)) ||
+    !Array.isArray(media.ordered_item_refs) || media.ordered_item_refs.length > 32 || !media.ordered_item_refs.every(validRef) || !validSummary(media.summary) ||
+    fields == null || !hasExactKeys(fields, ["status", "title", "body"]) || !isConfirmationStatus(fields.status) || title == null || body == null ||
+    !Array.isArray(record.pending_issues) || record.pending_issues.length > 24 || !record.pending_issues.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160) ||
+    !validTime(record.observed_at) || typeof record.fingerprint !== "string" || !/^sha256:[a-f0-9]{64}$/.test(record.fingerprint)) return null;
+  return {
+    status: record.status,
+    runtimeBinding: {
+      runtimeSessionRef: binding.runtime_session_ref as string,
+      identityEnvironmentRef: binding.identity_environment_ref as string,
+      profileRef: binding.profile_ref as string,
+      providerRef: binding.provider_ref as string,
+      controlOwner: "core_task",
+      observationGeneration: binding.observation_generation,
+      observationRef: binding.observation_ref as string,
+    },
+    account: { status: account.status, accountRef: account.ref, label: account.label },
+    businessTarget: { status: businessTarget.status, targetRef: businessTarget.ref, label: businessTarget.label },
+    page: { status: page.status, url: page.url, fingerprint: page.fingerprint as string | null, diff: page.diff },
+    media: { status: media.status, imageCount: media.image_count as number | null, orderedItemRefs: media.ordered_item_refs as string[], summary: media.summary as string | null },
+    fields: { status: fields.status, title, body },
+    pendingIssues: record.pending_issues as string[],
+    observedAt: record.observed_at as string,
+    fingerprint: record.fingerprint,
+    failClosed: true,
+  };
+}
+
+function parseNamedFact(value: unknown, refKey: "account_ref" | "target_ref") {
+  const record = asRecord(value);
+  if (record == null || !hasExactKeys(record, ["status", refKey, "label"]) || !isConfirmationStatus(record.status) ||
+    (record[refKey] !== null && !validRef(record[refKey])) || !validSummary(record.label)) return null;
+  return { status: record.status, ref: record[refKey] as string | null, label: record.label as string | null };
+}
+
+function parseConfirmationField(value: unknown): ConfirmationField | null {
+  const record = asRecord(value);
+  if (record == null || !hasExactKeys(record, ["state", "length", "summary"]) ||
+    (record.state !== "empty" && record.state !== "present" && record.state !== "unknown") ||
+    (record.length !== null && (!Number.isSafeInteger(record.length) || Number(record.length) < 0)) || !validSummary(record.summary)) return null;
+  return { state: record.state, length: record.length as number | null, summary: record.summary as string | null };
+}
+
+function isConfirmationStatus(value: unknown): value is ConfirmationStatus {
+  return value === "verified" || value === "unknown" || value === "mismatch";
+}
+
+function validRef(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 512 && !value.includes("://");
+}
+
+function validSummary(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && value.length <= 280);
+}
+
+function validHttpsUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 
 function validFutureTime(value: unknown): value is string {
