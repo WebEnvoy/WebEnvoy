@@ -574,16 +574,23 @@ test("rejects a mismatched managed provider before launch without changing ident
     profile_ref: "profile_provider-mismatch",
     site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" }
   });
-  for (const url of [undefined, "https://www.xiaohongshu.com/explore"]) {
-    const input = { identity_environment_ref: record.identity_environment_ref, provider_id: "chrome_official" as const, control_owner: "user" as const };
-    const result = url
-      ? await runtime.openManagedIdentityEnvironmentSession({ ...input, url })
-      : await runtime.openManagedDefaultSiteSession(input);
-    assert.ok("status" in result);
-    assert.equal(result.failure_class, "identity_environment_unavailable");
-    assert.match(result.message, /provider_mismatch/);
-    assert.equal(launches.length, 0);
-    assert.deepEqual(runtime.listLocalIdentityEnvironments(), [record]);
+  for (const [mismatch, reason] of [
+    [{ provider_id: "chrome_official" as const }, "provider_mismatch"],
+    [{ profile_ref: "profile_other" }, "profile_mismatch"],
+    [{ profile_storage_ref: "profile_storage_other" }, "profile_mismatch"],
+    [{ execution_identity_ref: "execution-identity_other" }, "identity_mismatch"]
+  ] as const) {
+    for (const url of [undefined, "https://www.xiaohongshu.com/explore"]) {
+      const input = { identity_environment_ref: record.identity_environment_ref, ...mismatch, control_owner: "user" as const };
+      const result = url
+        ? await runtime.openManagedIdentityEnvironmentSession({ ...input, url })
+        : await runtime.openManagedDefaultSiteSession(input);
+      assert.ok("status" in result);
+      assert.equal(result.failure_class, "identity_environment_unavailable");
+      assert.match(result.message, new RegExp(reason));
+      assert.equal(launches.length, 0);
+      assert.deepEqual(runtime.listLocalIdentityEnvironments(), [record]);
+    }
   }
 });
 

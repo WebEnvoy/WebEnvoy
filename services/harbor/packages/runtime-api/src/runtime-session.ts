@@ -347,6 +347,19 @@ export class RuntimeSessionStore {
         "provider_mismatch: Requested provider does not match the managed identity binding."
       ));
     }
+    if ((input.profile_ref && input.profile_ref !== identityEnvironment.profile_ref) ||
+      (input.profile_storage_ref && input.profile_storage_ref !== identityEnvironment.browser_storage.profile_storage_ref)) {
+      return unavailableSession("identity_environment_unavailable", error(
+        "identity_environment_unavailable",
+        "profile_mismatch: Requested Profile does not match the managed identity binding."
+      ));
+    }
+    if (input.execution_identity_ref && input.execution_identity_ref !== identityEnvironment.execution_identity_ref) {
+      return unavailableSession("identity_environment_unavailable", error(
+        "identity_environment_unavailable",
+        "identity_mismatch: Requested execution identity does not match the managed identity binding."
+      ));
+    }
     const identityError = identityEnvironmentUnavailable(identityEnvironment);
     if (identityError) return unavailableSession("identity_environment_unavailable", identityError);
     if (this.mutatingIdentityEnvironmentRefs.has(identityEnvironment.identity_environment_ref) ||
