@@ -1621,12 +1621,17 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
       });
       const authorizationContext = { ...context, idempotency_key: `xhs-media-${testCase.name}` };
       const runtimeSessionRef = `session_xhs_media_${testCase.name}`;
+      let admissionCalls = 0;
       let precheckCalls = 0;
       let executeCalls = 0;
       const harbor = {
-        collectAdmissionFacts: async () => testCase.admissionMissingScene
-          ? { ...runtimeBindingFacts(runtimeSessionRef), harbor_scene_ref: undefined }
-          : runtimeBindingFacts(runtimeSessionRef),
+        collectAdmissionFacts: async () => {
+          const facts = runtimeBindingFacts(runtimeSessionRef);
+          const runtimeFacts = facts.harbor_runtime_facts;
+          assert(runtimeFacts && "lifecycle_state" in runtimeFacts);
+          facts.harbor_runtime_facts = { ...runtimeFacts, lifecycle_state: admissionCalls++ === 0 ? "active" : "locked" };
+          return testCase.admissionMissingScene ? { ...facts, harbor_scene_ref: undefined } : facts;
+        },
         validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
           precheckCalls += 1;
           return completedWritePrecheckOperation({

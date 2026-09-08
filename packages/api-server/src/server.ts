@@ -11,6 +11,7 @@ import {
   preflightXhsMediaActionConfirmation,
   isExactWritePrecheckRun,
   isExactXhsMediaActionRun,
+  xhsMediaActionPaths,
   previewIdentityCompatibility,
   type FailureRecord,
   type FileAuthorizationDecisionStore,
@@ -258,11 +259,24 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const preflightSingleAction = async (confirmationDecisionRef: string) => {
     const authorizationStore = options.authorizationDecisionStore;
     const runRecordStore = options.runRecordStore;
-    if (!authorizationStore || !runRecordStore) return undefined;
+    if (!authorizationStore) return undefined;
     const confirmation = await authorizationStore.getAuthorizationDecision(confirmationDecisionRef);
     if (!confirmation || confirmation.applicability.scope !== "task" || confirmation.state !== "active") return undefined;
-    const run = await runRecordStore.getRunRecord(confirmation.applicability.run_id);
-    if (!isExactXhsMediaActionRun(run, confirmationDecisionRef)) return undefined;
+    const actionId = confirmation.business_action?.action_id;
+    const xhsMediaDecision = typeof actionId === "string" && Object.hasOwn(xhsMediaActionPaths, actionId);
+    const invalidXhsRun = (code: "authorization_run_store_unavailable" | "authorization_run_record_invalid") => ({
+      ok: false as const,
+      status: 503,
+      body: {
+        ok: false,
+        error: { category: "persistence_observability", code, phase: "admission", recovery_hint: "contact_operator" }
+      }
+    });
+    if (!runRecordStore) return xhsMediaDecision ? invalidXhsRun("authorization_run_store_unavailable") : undefined;
+    const run = await runRecordStore.getRunRecord(confirmation.applicability.run_id).catch(() => undefined);
+    if (!isExactXhsMediaActionRun(run, confirmationDecisionRef)) {
+      return xhsMediaDecision ? invalidXhsRun("authorization_run_record_invalid") : undefined;
+    }
     const pending = peekPendingWritePrecheckContinuation(confirmationDecisionRef);
     if (!pending || pending.run_id !== confirmation.applicability.run_id || pending.confirmation_decision_ref !== confirmationDecisionRef) {
       return {

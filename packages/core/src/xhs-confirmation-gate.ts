@@ -278,6 +278,8 @@ function hash(value: unknown): string {
 }
 
 function runtimeBindingMatches(actual: RuntimeSessionBindingFacts, expected: RuntimeSessionBindingFacts): boolean {
+  const sameLiveLifecycle = [actual.lifecycle_state, expected.lifecycle_state]
+    .every((state) => state === "active" || state === "locked");
   return actual.schema_version === expected.schema_version &&
     actual.identity_environment_ref === expected.identity_environment_ref &&
     actual.execution_identity_ref === expected.execution_identity_ref &&
@@ -285,7 +287,7 @@ function runtimeBindingMatches(actual: RuntimeSessionBindingFacts, expected: Run
     actual.profile_ref === expected.profile_ref &&
     actual.provider_ref === expected.provider_ref &&
     actual.provider_mode === expected.provider_mode &&
-    actual.lifecycle_state === expected.lifecycle_state &&
+    (actual.lifecycle_state === expected.lifecycle_state || sameLiveLifecycle) &&
     actual.control_owner === expected.control_owner &&
     actual.session_use === expected.session_use &&
     actual.core_task_run === true && expected.core_task_run === true;
