@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -33,10 +33,19 @@ test("managed storage refuses root, Profile and cloned child symlinks without to
     copy.commit();
     assert.equal(readFileSync(join(profileStoragePath("target"), "data"), "utf8"), "persisted");
     writeFileSync(join(source.profileDir, ".parentlock"), "");
-    assert.equal(profileStorageHasExternalLock("source"), true);
-    assert.throws(() => stageProfileStorageCopy("source", "blocked", "full"), /profile_locked/);
-    rmSync(join(source.profileDir, ".parentlock"));
-    assert.equal(profileStorageHasExternalLock("source"), false);
+    if (process.platform === "darwin") {
+      const fd = openSync(join(source.profileDir, ".parentlock"), constants.O_RDONLY | constants.O_NONBLOCK | 0x20);
+      try {
+        assert.equal(profileStorageHasExternalLock("source"), true);
+        assert.throws(() => stageProfileStorageCopy("source", "blocked", "full"), /profile_locked/);
+      } finally {
+        closeSync(fd);
+      }
+      assert.equal(profileStorageHasExternalLock("source"), false);
+    } else {
+      assert.equal(profileStorageHasExternalLock("source"), true);
+      rmSync(join(source.profileDir, ".parentlock"));
+    }
   } finally {
     if (previous === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
     else process.env.HARBOR_PROFILE_STORAGE_ROOT = previous;

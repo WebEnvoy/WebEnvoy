@@ -43,6 +43,7 @@ export interface ProfileStorageOwnershipLock {
 
 const LOCK_RETRY_INTERVAL_MS = 10;
 const INVALID_LOCK_STALE_MS = 30_000;
+const DARWIN_O_EXLOCK = 0x20;
 
 export async function prepareProfileStorage(profileStorageRef: string | undefined): Promise<{
   profileDir: string;
@@ -81,7 +82,9 @@ export function profileStorageHasExternalLock(profileStorageRef: string): boolea
   assertRealDirectoryIfPresent(path);
   for (const browserLock of ["SingletonLock", ".parentlock", "parent.lock", "lock"]) {
     const lockPath = join(path, browserLock);
-    if (entryExists(lockPath) && !removeDemonstrablyStaleBrowserResidue(path, lockPath)) return true;
+    if (entryExists(lockPath) &&
+      !(browserLock === ".parentlock" && removeUnlockedDarwinParentLock(path, lockPath)) &&
+      !removeDemonstrablyStaleBrowserResidue(path, lockPath)) return true;
   }
   return entryExists(join(path, ".harbor-profile-lock"));
 }
@@ -244,6 +247,28 @@ function removeDemonstrablyStaleBrowserResidue(profilePath: string, lockPath: st
     return !entryExists(lockPath);
   } catch {
     return false;
+  }
+}
+
+function removeUnlockedDarwinParentLock(profilePath: string, lockPath: string): boolean {
+  if (process.platform !== "darwin") return false;
+  let fd: number | undefined;
+  try {
+    const entry = lstatSync(lockPath);
+    if (!entry.isFile()) return false;
+    fd = openSync(lockPath, constants.O_RDONLY | constants.O_NONBLOCK | DARWIN_O_EXLOCK);
+    const held = fstatSync(fd);
+    const current = lstatSync(lockPath);
+    if (held.dev !== entry.dev || held.ino !== entry.ino || current.dev !== entry.dev || current.ino !== entry.ino) return false;
+    unlinkSync(lockPath);
+    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", "parent.lock", "lock"]) {
+      rmSync(join(profilePath, name), { recursive: true, force: true });
+    }
+    return !entryExists(lockPath);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
