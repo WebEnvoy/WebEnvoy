@@ -445,7 +445,7 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });
 
-test("#405 path probe does not click a data-testid decoy", async () => {
+for (const isDecoy of [false, true]) test(`#405 path probe ${isDecoy ? "rejects a decoy" : "awaits observation and selects one visible path"}`, async () => {
   let clicks = 0;
   const app = {
     hidden: false,
@@ -453,14 +453,14 @@ test("#405 path probe does not click a data-testid decoy", async () => {
     closest: () => null,
     getBoundingClientRect: () => ({ width: 100, height: 100, right: 100, bottom: 100, left: 0, top: 0 }),
     checkVisibility: () => true,
-    querySelectorAll: () => []
+    querySelectorAll: (selector: string): object[] => selector.startsWith('[id*="publish"]') ? [app] : []
   };
   const decoy = {
     disabled: false,
     hidden: false,
     textContent: "上传图文",
     getAttribute: () => null,
-    closest: (selector: string) => selector.includes('[data-testid*="decoy"]') ? {} : null,
+    closest: (selector: string) => isDecoy && selector.includes('[data-testid*="decoy"]') ? {} : null,
     getBoundingClientRect: () => ({ width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
     checkVisibility: () => true,
     querySelector: () => null,
@@ -484,8 +484,8 @@ test("#405 path probe does not click a data-testid decoy", async () => {
     class {},
     (resolve: () => void) => resolve()
   );
-  assert.equal(result.selection_status, "unknown");
-  assert.equal(clicks, 0);
+  assert.equal(clicks, isDecoy ? 0 : 1);
+  assert.equal(result.selection_status, isDecoy ? "unknown" : "selected");
 });
 
 test("#419 precheck observes the public host contract for closed-shadow draft and publish controls", async () => {

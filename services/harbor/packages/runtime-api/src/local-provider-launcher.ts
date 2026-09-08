@@ -1958,7 +1958,7 @@ function writePrecheckUnavailable(
 function pathSelectionProbeExpression(): string {
   return String.raw`    if (selectPath) {
       for (let attempt = 0; attempt < 20; attempt += 1) {
-        const ready = observe();
+        const ready = await observe();
         if (ready.creator_app_owned) {
           const normalizeControlLabel = (el) => (el?.getAttribute('aria-label') || el?.getAttribute('name') || el?.textContent || '').replace(/\s+/g, ' ').trim();
           const controlVisible = (el) => {
