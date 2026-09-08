@@ -1,3 +1,4 @@
+import { checkRunInstanceControls } from "./run-instance-controls-smoke";
 import { BriefcaseBusiness } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -555,6 +556,7 @@ function WorkbenchDomHarness() {
       right={previewRun && previewSelection ? (
         <RightPanel>
           <TaskThreadRightPanel
+            harborEndpoint="http://harbor.owner"
             coreEndpoint={coreEndpoint}
             coreReadState={retainedState}
             coreSubmitState={initialCoreTaskSubmitState}
@@ -941,6 +943,7 @@ async function runDesktopChecks() {
   taskButton(taskAId)?.click();
   await waitFor(() => Boolean(previewButton()), "Task A did not restore after the empty thread check.");
   await checkBossFixtureResultDeferred();
+  await checkRunInstanceControls();
 
   return {
     emptyThreadOpenState: true,
@@ -953,6 +956,7 @@ async function runDesktopChecks() {
     retiredSkillCreateHidden: true,
     currentSkillCreateVisible: true,
     singleActionDecision: true,
+    runInstanceControls: true,
   };
 }
 
@@ -975,6 +979,7 @@ async function checkBossFixtureResultDeferred() {
         onOpenPreview={() => { throw new Error("BOSS fixture result exposed preview"); }}
       />
       <TaskThreadRightPanel
+        harborEndpoint="http://harbor.owner"
         coreEndpoint={coreEndpoint}
         coreReadState={retainedState}
         coreSubmitState={initialCoreTaskSubmitState}
@@ -987,7 +992,7 @@ async function checkBossFixtureResultDeferred() {
       />
     </>,
   );
-  await nextFrame();
+  await waitFor(() => container.querySelector(".thread-body") != null, "BOSS fixture thread did not render.");
   assert(container.textContent?.includes(bossProductionDeferredReason), "BOSS fixture result did not render the deferred state.");
   assert(container.querySelector("[data-workbench-open-right]") == null && !container.textContent?.includes("正在执行") && !container.textContent?.includes("已处理"),
     "BOSS fixture/fallback result was presented as live or previewable.");
@@ -1020,7 +1025,7 @@ async function checkBossLiveConfirmationDeferred() {
       onOpenPreview={() => { throw new Error("BOSS deferred confirmation exposed preview"); }}
     />,
   );
-  await nextFrame();
+  await waitFor(() => container.querySelector(".thread-body") != null, "BOSS deferred thread did not render.");
   assert(container.querySelector(".single-action-confirmation") == null && !container.textContent?.includes("允许这一次"),
     "BOSS Core live waiting-for-user run exposed a single-action decision.");
   assert(container.textContent?.includes("功能延期") && !container.textContent?.includes("等待本次决定") && !container.textContent?.includes("已处理"),

@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { RunInstancePanel } from "./RunInstancePanel";
+import { runRuntimeSessionRef } from "./instanceReceipt";
 import { fetchCoreRunResult, type CoreRunResultState } from "./coreRunResultClient";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
 import { TaskBusinessResult } from "./TaskBusinessResult";
@@ -51,6 +53,7 @@ function statusLabel(status: SourceHealth["status"]) {
 
 export function TaskThreadRightPanel({
   coreEndpoint,
+  harborEndpoint,
   coreReadState,
   coreSubmitState,
   runtimeSupervisorState,
@@ -62,6 +65,7 @@ export function TaskThreadRightPanel({
   shellDiagnostics,
 }: {
   coreEndpoint: string;
+  harborEndpoint: string;
   coreReadState: CoreReadTaskLoadState;
   coreSubmitState: CoreTaskSubmitState;
   runtimeSupervisorState: RuntimeSupervisorState;
@@ -92,7 +96,7 @@ export function TaskThreadRightPanel({
             ) : tab.id === "evidence" ? (
               <EvidenceTab selectedRun={selectedRun} />
             ) : tab.id === "session" ? (
-              <SessionTab selectedRun={selectedRun} selectedTask={selectedTask} />
+              <SessionTab coreEndpoint={coreEndpoint} harborEndpoint={harborEndpoint} selectedRun={selectedRun} selectedTask={selectedTask} />
             ) : tab.id === "identity" ? (
               <ContextPanel
                 icon={<ShieldCheck size={18} />}
@@ -252,26 +256,29 @@ function EvidenceTab({ selectedRun }: { selectedRun: RunProjection }) {
 }
 
 function SessionTab({
+  coreEndpoint,
+  harborEndpoint,
   selectedRun,
   selectedTask,
 }: {
   selectedRun: RunProjection;
   selectedTask: TaskProjection;
+  coreEndpoint: string;
+  harborEndpoint: string;
 }) {
   const { runtimeSessionRef, viewerRef } = sessionRefsForRun(selectedRun);
-  const status = runtimeSessionRef == null ? "unavailable" : "ready";
 
   return (
     <div className="context-copy">
       <div className="card-title">
         <Globe2 size={18} />
-        <h3>执行现场</h3>
-        <span className={`status-pill status-${status}`}>{status}</span>
+        <h3>历史现场绑定</h3>
+        <span className="badge">{runtimeSessionRef == null ? "未记录" : "已记录"}</span>
       </div>
       <p>
         {runtimeSessionRef == null
           ? "当前 Run 没有暴露可打开的 Harbor runtime session ref；App 不使用无关本机浏览器现场代替任务现场。"
-          : "执行现场来自当前 Run 的 Core/Harbor owner refs；App 只展示引用，不读取 profile、Cookie、token、CDP 或 raw evidence。"}
+          : "以下是当前 Run 保留的历史绑定，不代表实例当前可用；实时状态见下方当前 Instance。"}
       </p>
       <dl className="context-facts">
         <SourceField label="Task" value={selectedTask.title} source={selectedTask.source} />
@@ -287,6 +294,7 @@ function SessionTab({
           source={selectedRun.source}
         />
       </dl>
+      {selectedRun.source === "Core live" ? <RunInstancePanel key={`${coreEndpoint}:${harborEndpoint}:${selectedRun.id}`} coreEndpoint={coreEndpoint} harborEndpoint={harborEndpoint} runId={selectedRun.id} /> : null}
       <p className="boundary-copy">
         Execution-site facts must be selected-run owner refs; App does not store browser profile
         storage or raw runtime material.
@@ -304,7 +312,7 @@ function sessionRefsForRun(run: RunProjection) {
     .map((card) => /harbor:runtime-session\/[^;.)\s]+/.exec(card.summary)?.[0])
     .find((ref): ref is string => Boolean(ref));
   const runtimeSessionRef =
-    rowRefs.find((ref) => ref.startsWith("harbor:runtime-session/")) ?? fieldRef ?? evidenceRuntimeRef;
+    runRuntimeSessionRef(run) ?? fieldRef ?? evidenceRuntimeRef;
   const viewerRef = rowRefs.find((ref) => ref.startsWith("viewer://"));
   return { runtimeSessionRef, viewerRef };
 }

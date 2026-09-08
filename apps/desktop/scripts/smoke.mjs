@@ -1,3 +1,5 @@
+import "./instance-receipt-smoke.mjs";
+import "./run-instance-smoke.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";

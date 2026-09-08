@@ -357,6 +357,7 @@ export class RuntimeSessionStore {
     ) return cleanupFailed();
     if (input.reuse_existing !== false && existing && (
       existing.headless === headless ||
+      (owner === "agent" && input.headless === undefined && !existing.headless) ||
       (owner === "core_task" && !existing.headless &&
         (existing.read_operation_user_release_pending || existing.read_operation_user_confirmed))
     )) {

@@ -1,6 +1,7 @@
 import { ArrowUpRight, FileText, Image, Music2, Search, Video } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { instanceReceiptFields } from "./instanceReceipt";
 import type { CoreRunResult, CoreRunResultState } from "./coreRunResultClient";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
 import { isOpaqueDetailRef } from "./resultDetailHandoff";
@@ -56,6 +57,8 @@ export function projectStandardBusinessResult(
   skills: readonly ResultSkill[] = [],
 ): StandardBusinessResult {
   const result = state.status === "ready" ? state.result : undefined;
+  const receipt = result == null ? undefined : instanceReceiptFields(result, run);
+  if (receipt != null) return { kind: "object", fields: receipt };
   const xhsPathPrepare = result == null ? undefined : xhsPathPrepareResult(result);
   if (xhsPathPrepare != null) return xhsPathPrepare;
   const xhsWritePrecheck = result == null ? undefined : xhsWritePrecheckResult(result);
