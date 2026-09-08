@@ -71,18 +71,19 @@ export async function openHarborIdentitySession(
       retryable: true,
     };
   }
-  return postHarborSession(harborEndpoint, [
-    "/runtime/identity-environment-sessions",
-    "/runtime/sessions/identity-environment",
-    "/identity-environment-sessions",
-  ], {
+  const result = await requestJson<HarborRuntimeSession>(harborEndpoint, "/runtime/identity-environment-sessions", {
+    method: "POST",
+    body: JSON.stringify({
     identity_environment_ref: identity.identityEnvironmentRef,
     url: target.defaultUrl,
     headless: false,
     control_owner: "user",
     holder_ref: "app-browser-page",
     reuse_existing: true,
-  });
+    timeout_ms: 60_000,
+    }),
+  }, 65_000);
+  return result.ok ? result.value : { status: "unavailable" as const, message: result.error, retryable: false };
 }
 
 export async function lockHarborSession(harborEndpoint: string, sessionRef: string) {
@@ -186,12 +187,12 @@ async function postFirstJson<T>(
   return { ok: false as const, error: fallbackError };
 }
 
-async function requestJson<T>(base: string, path: string, init: RequestInit) {
+async function requestJson<T>(base: string, path: string, init: RequestInit, timeoutMs = 2500) {
   try {
     const payload = await requestOwnerJson(base, path, {
       method: init.method === "POST" || init.method === "PATCH" || init.method === "DELETE" ? init.method : "GET",
       body: typeof init.body === "string" ? parseJson(init.body) : undefined,
-      timeoutMs: 2500,
+      timeoutMs,
       signal: init.signal ?? undefined,
     });
     if (isOkFailure(payload)) return { ok: false as const, error: payload.error };

@@ -28,7 +28,7 @@ async function moduleUrl(name) {
   urls.set(name, url);
   return url;
 }
-const { identityFactsFromPublicRecord } = await import(await moduleUrl("harborIdentityClient.ts"));
+const { identityFactsFromPublicRecord, openHarborIdentitySession } = await import(await moduleUrl("harborIdentityClient.ts"));
 const { projectHarborIdentity } = await import(await moduleUrl("harborIdentityProjection.ts"));
 const { IdentityEnvironmentManagementPanel } = await import(await moduleUrl("IdentityEnvironmentManagementPanel.tsx"));
 const provider = { provider_id: "camoufox", display_name: "Camoufox", role: "qualification", install: { status: "installed", launchability: "launchable" }, capabilities: [] };
@@ -43,6 +43,15 @@ assert.equal(identity.provider.role, "验证 Provider");
 assert.equal(identity.browser.defaultProvider, "Camoufox");
 assert.equal(identity.browser.session.provider, "Camoufox");
 assert.equal(identity.browser.providers[0].name, "Camoufox");
+const requests = [];
+globalThis.window = { webenvoyShell: { requestOwnerJson: async request => {
+  requests.push(request);
+  return { ok: false, error: "launch outcome unknown" };
+} } };
+const opened = await openHarborIdentitySession("http://127.0.0.1:8788", { ...identity, source: "Harbor live" }, { defaultUrl: "https://www.xiaohongshu.com/explore" });
+assert.equal(requests.length, 1, "an unknown launch must not replay through route aliases");
+assert.equal(requests[0].body.timeout_ms, 60000, "cold Provider startup gets a bounded launch budget");
+assert.equal(opened.retryable, false);
 assert.equal(identityFactsFromPublicRecord({ ...record, environment_summary: { provider_id: "unknown" } }, catalog).provider_binding.selected_provider_id, null);
 function findSelect(node) {
   if (!node || typeof node !== "object") return null;
