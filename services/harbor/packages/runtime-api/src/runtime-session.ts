@@ -954,7 +954,7 @@ function lockConflict(record: RuntimeSessionRecord, requestedOwner: ControlOwner
     `Runtime Session is controlled by ${record.facts.control_lock.owner}; ${requestedOwner} cannot take it without release.`,
     true
   );
-  record.facts.current_error = current_error;
+  // A rejected control request is not a driver or page health failure.
   record.facts.control_lock.conflict_error = current_error;
   return unavailableSession("session_locked", current_error);
 }
