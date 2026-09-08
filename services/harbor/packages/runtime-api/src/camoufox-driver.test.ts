@@ -124,6 +124,26 @@ with TemporaryDirectory(prefix="harbor-camoufox-properties-test-") as root:
     })
     assert timed_out["observation"]["failure_class"] == "network_resource_unavailable"
     assert timed_out["observation"]["retryable"] is True
+    class FakeResponse:
+        url = "https://so.xiaohongshu.com/api/sns/web/v2/search/notes"
+        status = 200
+        request = type("Request", (), {"method": "POST"})()
+        def body(self): return b"{"
+    class FakeResponseInfo:
+        value = FakeResponse()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    class FakeInvalidJsonPage(FakePage):
+        def expect_response(self, *args, **kwargs): return FakeResponseInfo()
+        def goto(self, *args, **kwargs): pass
+    module.CONTEXT = type("Context", (), {"new_page": lambda self: FakeInvalidJsonPage()})()
+    invalid_json = module.read_operation_probe({
+        "site_id": "xiaohongshu", "operation_id": "xhs_search_notes",
+        "target_url": FakePage.url, "expected_origin": "https://www.xiaohongshu.com",
+        "query": "WebEnvoy", "limit": 1,
+    })
+    assert invalid_json["observation"]["failure_class"] == "site_changed"
+    assert invalid_json["observation"]["retryable"] is False
     outside = root / "outside"
     outside.write_text("external")
     (resources / "external-link").symlink_to(outside)

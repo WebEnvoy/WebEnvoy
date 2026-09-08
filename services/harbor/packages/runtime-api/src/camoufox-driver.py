@@ -452,12 +452,12 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
                     "search_items": [item for _, item in correlated],
                 }
         return {"page": facts_for_page(read_page), "observation": observation}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"page": facts_for_page(read_page), "observation": unavailable_read("site_changed", "Xiaohongshu search response is not valid bounded JSON.", False)}
     except Exception as error:
         if PLAYWRIGHT_TIMEOUT_ERROR is None or not isinstance(error, PLAYWRIGHT_TIMEOUT_ERROR):
             raise
         return {"page": facts_for_page(read_page), "observation": unavailable_read("network_resource_unavailable", "Xiaohongshu search response was not observed in time.", True)}
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {"page": facts_for_page(read_page), "observation": unavailable_read("site_changed", "Xiaohongshu search response is not valid bounded JSON.", False)}
     finally:
         with contextlib.suppress(Exception), contextlib.redirect_stdout(sys.stderr):
             read_page.close()
