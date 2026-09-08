@@ -13,11 +13,13 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
 PLAYWRIGHT: Any = None
@@ -116,15 +118,19 @@ def firefox_major(executable_path: str) -> int:
 
 
 def page_facts() -> dict[str, Any]:
-    if PAGE is None:
+    return facts_for_page(PAGE)
+
+
+def facts_for_page(page: Any) -> dict[str, Any]:
+    if page is None:
         return {"current_url": None, "title": None, "status": "unavailable"}
     current_url: str | None
     try:
-        current_url = str(PAGE.url) if PAGE.url else None
+        current_url = str(page.url) if page.url else None
     except Exception:
         current_url = None
     try:
-        title = str(PAGE.title())[:512]
+        title = str(page.title())[:512]
     except Exception:
         title = None
     return {"current_url": current_url, "title": title, "status": "ready" if current_url is not None else "unknown"}
@@ -270,6 +276,173 @@ def site_resource_probe(request: dict[str, Any]) -> dict[str, Any]:
     return {"observation": observation}
 
 
+def public_text(value: Any, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if not text or len(text) > limit or any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return ""
+    if re.search(r"(?:token|cookie|authorization|password|secret|credential)\s*[=:]\s*\S+", text, re.I):
+        return ""
+    return text
+
+
+def public_metric(value: Any) -> str:
+    text = str(value).strip() if isinstance(value, (str, int, float)) and not isinstance(value, bool) else ""
+    return text if 0 < len(text) <= 40 and re.fullmatch(r"[0-9０-９.,+\-\s万千百wWkKmM]+", text) else ""
+
+
+def unavailable_read(failure_class: str, message: str, retryable: bool) -> dict[str, Any]:
+    return {"status": "unavailable", "failure_class": failure_class, "message": message, "retryable": retryable}
+
+
+def summarize_xhs_network(payload: Any) -> dict[str, dict[str, Any]] | dict[str, Any]:
+    if not isinstance(payload, dict) or payload.get("success") is not True or payload.get("code") != 0:
+        return unavailable_read("permission_denied", "Xiaohongshu rejected the bounded search read.", False)
+    data = payload.get("data")
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return unavailable_read("site_changed", "Xiaohongshu search response has no bounded item list.", False)
+    if not items:
+        return unavailable_read("empty_result", "Xiaohongshu search returned no notes.", False)
+    result: dict[str, dict[str, Any]] = {}
+    for item in items[:60]:
+        if not isinstance(item, dict):
+            continue
+        card = item.get("note_card") if isinstance(item.get("note_card"), dict) else item.get("noteCard")
+        card = card if isinstance(card, dict) else {}
+        note_ids = [item.get("id"), item.get("note_id"), item.get("noteId"), card.get("id"), card.get("note_id"), card.get("noteId")]
+        note_ids = [value.lower() for value in note_ids if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{24}", value, re.I)]
+        if not note_ids or len(set(note_ids)) != 1:
+            continue
+        title = public_text(card.get("display_title") or card.get("displayTitle") or card.get("title"), 200)
+        if not title:
+            continue
+        user = card.get("user") if isinstance(card.get("user"), dict) else {}
+        interactions = card.get("interact_info") if isinstance(card.get("interact_info"), dict) else card.get("interactInfo")
+        interactions = interactions if isinstance(interactions, dict) else {}
+        author = public_text(user.get("nickname") or user.get("display_name") or user.get("displayName") or user.get("name"), 100)
+        metrics = {
+            "likes": public_metric(interactions.get("liked_count") or interactions.get("likedCount") or interactions.get("likes")),
+            "comments": public_metric(interactions.get("comment_count") or interactions.get("commentCount") or interactions.get("comments")),
+            "collects": public_metric(interactions.get("collected_count") or interactions.get("collectedCount") or interactions.get("collects")),
+        }
+        result[note_ids[0]] = {
+            "title": title,
+            **({"author_display_name": author} if author else {}),
+            **({"interaction_metrics": {key: value for key, value in metrics.items() if value}} if any(metrics.values()) else {}),
+        }
+    return result if result else unavailable_read("field_missing", "Xiaohongshu search items have no bounded public title.", False)
+
+
+def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
+    if CONTEXT is None:
+        raise RuntimeError("Camoufox Driver has no active context.")
+    if request.get("site_id") != "xiaohongshu" or request.get("operation_id") != "xhs_search_notes":
+        return {"page": page_facts(), "observation": unavailable_read("provider_probe_unavailable", "Read operation is not supported by this Driver.", False)}
+    target_url = request.get("target_url")
+    expected_origin = request.get("expected_origin")
+    query = request.get("query")
+    limit = request.get("limit", 15)
+    if not isinstance(target_url, str) or expected_origin != "https://www.xiaohongshu.com" or not isinstance(query, str) or not 1 <= len(query) <= 200:
+        return {"page": page_facts(), "observation": unavailable_read("site_changed", "Read operation binding is invalid.", False)}
+    parsed = urlparse(target_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    if parsed.scheme != "https" or parsed.netloc != "www.xiaohongshu.com" or parsed.path not in ("/search_result", "/search_result/") or params != {"keyword": [query]}:
+        return {"page": page_facts(), "observation": unavailable_read("origin_drift", "Read target is outside the pinned Xiaohongshu search route.", False)}
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 15:
+        limit = 15
+
+    read_page = CONTEXT.new_page()
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            with read_page.expect_response(
+                lambda response: response.url == "https://so.xiaohongshu.com/api/sns/web/v2/search/notes" and response.request.method == "POST",
+                timeout=12_000,
+            ) as response_info:
+                read_page.goto(target_url, wait_until="domcontentloaded", timeout=12_000)
+            response = response_info.value
+            body = response.body()
+            if not body or len(body) > 512 * 1024:
+                observation = unavailable_read("network_resource_unavailable", "Xiaohongshu search response exceeds the bounded read limit.", True)
+                return {"page": facts_for_page(read_page), "observation": observation}
+            network = summarize_xhs_network(json.loads(body.decode("utf-8")))
+            if "status" in network:
+                return {"page": facts_for_page(read_page), "observation": network}
+            read_page.wait_for_timeout(500)
+            rendered = read_page.evaluate(r"""(expectedQuery) => {
+              const pinia = window.__PINIA__ || window.__pinia || document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
+              const store = pinia?._s instanceof Map ? pinia._s.get('search') : undefined;
+              const unwrap = (value) => value && typeof value === 'object' && 'value' in value ? value.value : value;
+              const clean = (value, max) => {
+                if (typeof value !== 'string') return '';
+                const text = value.replace(/\s+/g, ' ').trim();
+                return text && text.length <= max && !/[\u0000-\u001f\u007f]/.test(text) ? text : '';
+              };
+              const metric = (...values) => {
+                const value = values.find((entry) => typeof entry === 'number' || typeof entry === 'string');
+                const text = value === undefined ? '' : String(value).trim();
+                return text.length <= 40 && /^[0-9０-９.,+\-\s万千百wWkKmM]+$/u.test(text) ? text : '';
+              };
+              const feeds = unwrap(store?.feeds);
+              const items = Array.isArray(feeds) ? feeds.slice(0, 60).flatMap((feed) => {
+                const card = unwrap(feed?.noteCard) || unwrap(feed?.note_card) || {};
+                const ids = [unwrap(feed?.id), unwrap(feed?.noteId), unwrap(feed?.note_id), unwrap(card?.id), unwrap(card?.noteId), unwrap(card?.note_id)]
+                  .filter((value) => typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value)).map((value) => value.toLowerCase());
+                if (!ids.length || new Set(ids).size !== 1) return [];
+                const title = clean(unwrap(card?.displayTitle) || unwrap(card?.display_title) || unwrap(card?.title), 200);
+                if (!title) return [];
+                const user = unwrap(card?.user) || {};
+                const interactions = unwrap(card?.interactInfo) || unwrap(card?.interact_info) || {};
+                const author = clean(unwrap(user?.nickname) || unwrap(user?.displayName) || unwrap(user?.display_name) || unwrap(user?.name), 100);
+                const metrics = { likes: metric(unwrap(interactions?.likedCount), unwrap(interactions?.liked_count), unwrap(interactions?.likes)), comments: metric(unwrap(interactions?.commentCount), unwrap(interactions?.comment_count), unwrap(interactions?.comments)), collects: metric(unwrap(interactions?.collectedCount), unwrap(interactions?.collected_count), unwrap(interactions?.collects)) };
+                return [{ id: ids[0], title, ...(author ? { author_display_name: author } : {}), ...(Object.values(metrics).some(Boolean) ? { interaction_metrics: Object.fromEntries(Object.entries(metrics).filter(([, value]) => value)) } : {}) }];
+              }) : [];
+              const linked = new Set(Array.from(document.querySelectorAll('a[href*="/explore/"]')).flatMap((anchor) => {
+                try { const match = /^\/explore\/([a-f0-9]{24})$/i.exec(new URL(anchor.getAttribute('href') || anchor.href, location.origin).pathname); return match ? [match[1].toLowerCase()] : []; } catch { return []; }
+              }));
+              const text = document.body?.innerText || '';
+              return { origin: location.origin, pathname: location.pathname, pinia_ready: unwrap(store?.searchValue) === expectedQuery && Array.isArray(feeds), login_like: /登录后|扫码登录|手机号登录/.test(text) || location.pathname.startsWith('/login'), challenge_like: /验证码|安全验证|访问异常|captcha|challenge required|verification challenge/i.test(text), items: items.filter((item) => linked.has(item.id)) };
+            }""", query)
+
+        if not isinstance(rendered, dict) or rendered.get("origin") != expected_origin:
+            observation = unavailable_read("origin_drift", "Xiaohongshu search page changed origin.", False)
+        elif rendered.get("challenge_like") is True:
+            observation = unavailable_read("safety_challenge", "Xiaohongshu search shows a safety challenge.", False)
+        elif rendered.get("login_like") is True:
+            observation = unavailable_read("not_logged_in", "Xiaohongshu search requires manual login.", False)
+        elif rendered.get("pinia_ready") is not True or not isinstance(rendered.get("items"), list):
+            observation = unavailable_read("page_not_ready", "Xiaohongshu search Pinia surface is not ready.", True)
+        else:
+            correlated = []
+            for item in rendered["items"]:
+                if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                    continue
+                network_item = network.get(item["id"])
+                public_item = {key: value for key, value in item.items() if key != "id"}
+                if network_item == public_item:
+                    correlated.append((item["id"], public_item))
+            correlated = correlated[:limit]
+            if not correlated:
+                observation = unavailable_read("site_changed", "Xiaohongshu network and rendered search summaries do not match.", False)
+            else:
+                observation = {
+                    "status": "completed",
+                    "observed_origin": expected_origin,
+                    "response_status": response.status,
+                    "detail_urls": [f"https://www.xiaohongshu.com/explore/{note_id}" for note_id, _ in correlated],
+                    "search_items": [item for _, item in correlated],
+                }
+        return {"page": facts_for_page(read_page), "observation": observation}
+    except TimeoutError:
+        return {"page": facts_for_page(read_page), "observation": unavailable_read("network_resource_unavailable", "Xiaohongshu search response was not observed in time.", True)}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"page": facts_for_page(read_page), "observation": unavailable_read("site_changed", "Xiaohongshu search response is not valid bounded JSON.", False)}
+    finally:
+        with contextlib.suppress(Exception), contextlib.redirect_stdout(sys.stderr):
+            read_page.close()
+
+
 def close() -> None:
     global PLAYWRIGHT, CONTEXT, PAGE
     try:
@@ -307,6 +480,8 @@ def main() -> None:
                 send(message_id, "ok", **open_url(request))
             elif op == "site_resource_probe":
                 send(message_id, "ok", **site_resource_probe(request))
+            elif op == "read_operation_probe":
+                send(message_id, "ok", **read_operation_probe(request))
             elif op == "close":
                 close()
                 send(message_id, "ok")

@@ -12,11 +12,13 @@ import {
 } from "./identity-environment-configuration.js";
 import { opaqueRef } from "./refs.js";
 import { prepareProfileStorage, profileStorageHasExternalLock } from "./profile-storage.js";
-import { trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
+import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
 import type {
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
   LocalProviderPageFacts,
+  LocalProviderReadProbeInput,
+  LocalProviderReadProbeResult,
   LocalProviderSiteResourceProbeInput,
   LocalProviderSiteResourceProbeResult,
   RuntimeErrorCode,
@@ -259,6 +261,9 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       probeSiteResource: trustLocalProviderSiteResourceProbe((probe) =>
         probeCamoufoxSiteResource(driver, currentUrl, probe)
       ),
+      probeReadOperation: trustLocalProviderReadProbe((probe) =>
+        probeCamoufoxReadOperation(driver, probe)
+      ),
       captureScreenshot: async () => ({
         code: "unsupported",
         message: "Camoufox Driver screenshot capture is outside this vertical slice.",
@@ -295,6 +300,119 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       [...profileStorage.facts]
     );
   }
+}
+
+async function probeCamoufoxReadOperation(
+  driver: CamoufoxDriverProcess,
+  input: LocalProviderReadProbeInput
+): Promise<LocalProviderReadProbeResult> {
+  if (input.site_id !== "xiaohongshu" || input.operation_id !== "xhs_search_notes") {
+    return {
+      status: "unavailable",
+      failure_class: "provider_probe_unavailable",
+      message: "This Camoufox qualification Driver exposes only the Xiaohongshu search read adapter.",
+      retryable: false
+    };
+  }
+  try {
+    const response = await driver.request("read_operation_probe", {
+      site_id: input.site_id,
+      operation_id: input.operation_id,
+      target_url: input.target_url,
+      expected_origin: input.expected_origin,
+      query: input.query,
+      limit: input.limit ?? 15
+    }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 15_000));
+    const page = pageFacts(parseDriverPage(response));
+    const observation = response.observation;
+    if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+      return readUnavailable("provider_probe_unavailable", "Camoufox Driver returned no bounded read observation.", false, page);
+    }
+    const value = observation as Record<string, unknown>;
+    if (value.status === "unavailable") {
+      const failureClass = value.failure_class;
+      return readUnavailable(
+        isReadFailureClass(failureClass) ? failureClass : "provider_probe_unavailable",
+        stringField(value, "message") ?? "Camoufox Driver could not complete the bounded read observation.",
+        value.retryable === true,
+        page
+      );
+    }
+    if (value.status !== "completed" || value.observed_origin !== input.expected_origin) {
+      return readUnavailable("origin_drift", "Camoufox Driver read observation did not match the expected origin.", false, page);
+    }
+    const responseStatus = value.response_status;
+    const detailUrls = stringArray(value.detail_urls, 15);
+    const searchItems = searchItemArray(value.search_items, 15);
+    if (typeof responseStatus !== "number" || responseStatus < 200 || responseStatus >= 300 ||
+      detailUrls.length === 0 || detailUrls.length !== searchItems.length) {
+      return readUnavailable("site_changed", "Camoufox Driver returned an invalid bounded Xiaohongshu search summary.", false, page);
+    }
+    const sourceRefs = ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]
+      .map((kind) => ({ kind, ref: opaqueRef("source") }));
+    return {
+      status: "completed",
+      observed_at: new Date().toISOString(),
+      observed_origin: input.expected_origin,
+      page,
+      source_refs: sourceRefs,
+      evidence_ref_kinds: [{ kind: "snapshot_ref", ref: opaqueRef("snapshot") }],
+      public_summary_source_ref: sourceRefs[1]!.ref,
+      public_summary: {
+        schema_version: "harbor-read-operation-public-summary/v0",
+        operation_id: "xhs_search_notes",
+        result_kind: "xiaohongshu_search_notes_surface",
+        surface: "search_result",
+        result_state: "operation_read_response_observed",
+        response_status: responseStatus,
+        result_count: detailUrls.length,
+        source_signals: ["pinia_store", "xhs_search_read_network"]
+      },
+      detail_targets: detailUrls.map((canonical_url) => ({ canonical_url })),
+      search_items: searchItems
+    };
+  } catch (cause) {
+    return readUnavailable("network_resource_unavailable", safeErrorMessage(cause), true);
+  }
+}
+
+function readUnavailable(
+  failure_class: Extract<LocalProviderReadProbeResult, { status: "unavailable" }>["failure_class"],
+  message: string,
+  retryable: boolean,
+  page?: LocalProviderPageFacts
+): LocalProviderReadProbeResult {
+  return { status: "unavailable", failure_class, message, retryable, page };
+}
+
+function isReadFailureClass(value: unknown): value is Extract<LocalProviderReadProbeResult, { status: "unavailable" }>["failure_class"] {
+  return typeof value === "string" && [
+    "origin_drift", "not_logged_in", "safety_challenge", "page_not_ready", "network_resource_unavailable",
+    "evidence_refs_missing", "fixture_runtime", "provider_probe_unavailable", "permission_denied", "city_unresolved",
+    "empty_result", "field_missing", "site_changed"
+  ].includes(value);
+}
+
+function stringArray(value: unknown, max: number): string[] {
+  return Array.isArray(value) && value.length <= max && value.every((entry) => typeof entry === "string") ? value : [];
+}
+
+function searchItemArray(value: unknown, max: number): Array<{ title: string; author_display_name?: string; interaction_metrics?: { likes?: string; comments?: string; collects?: string } }> {
+  if (!Array.isArray(value) || value.length > max) return [];
+  const items = value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry));
+  if (items.length !== value.length) return [];
+  return items.map((entry) => {
+    const metrics = entry.interaction_metrics;
+    return {
+      title: typeof entry.title === "string" ? entry.title : "",
+      ...(typeof entry.author_display_name === "string" ? { author_display_name: entry.author_display_name } : {}),
+      ...(metrics && typeof metrics === "object" && !Array.isArray(metrics) ? { interaction_metrics: {
+        ...(typeof (metrics as Record<string, unknown>).likes === "string" ? { likes: (metrics as Record<string, string>).likes } : {}),
+        ...(typeof (metrics as Record<string, unknown>).comments === "string" ? { comments: (metrics as Record<string, string>).comments } : {}),
+        ...(typeof (metrics as Record<string, unknown>).collects === "string" ? { collects: (metrics as Record<string, string>).collects } : {})
+      } } : {})
+    };
+  });
 }
 
 function parseDriverReady(response: Record<string, unknown>): DriverReady {

@@ -36,6 +36,12 @@ for await (const line of rl) {
     output({ id: request.id, status: "ok", page });
   } else if (request.op === "site_resource_probe") {
     output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: true, pinia_ready: true } });
+  } else if (request.op === "read_operation_probe") {
+    output({ id: request.id, status: "ok", page: { current_url: request.target_url, title: "Search", status: "ready" }, observation: {
+      status: "completed", observed_origin: request.expected_origin, response_status: 200,
+      detail_urls: ["https://www.xiaohongshu.com/explore/0123456789abcdef01234567"],
+      search_items: [{ title: "WebEnvoy 公开结果", author_display_name: "非生产账号" }]
+    } });
   } else if (request.op === "close") {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     output({ id: request.id, status: "ok" });
@@ -159,6 +165,20 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
   assert.equal(opened.current_url, "https://www.xiaohongshu.com/search_result?keyword=%E4%B8%AD%E6%96%87");
   const probe = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "search_notes" });
   assert.equal(probe.status, "available");
+  const read = await launched.probeReadOperation!({
+    site_id: "xiaohongshu",
+    operation_id: "xhs_search_notes",
+    query: "WebEnvoy",
+    limit: 1,
+    target_url: "https://www.xiaohongshu.com/search_result?keyword=WebEnvoy",
+    expected_origin: "https://www.xiaohongshu.com"
+  });
+  assert.equal(read.status, "completed", JSON.stringify(read));
+  if (read.status === "completed") {
+    assert.equal(read.public_summary.result_count, 1);
+    assert.deepEqual(read.source_refs.map((ref) => ref.kind), ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]);
+    assert.deepEqual(read.evidence_ref_kinds.map((ref) => ref.kind), ["snapshot_ref"]);
+  }
   await launched.close();
   assert.equal(existsSync(profileStoragePath(profileStorageRef)), true);
 }));
@@ -200,7 +220,6 @@ test("keeps the existing Harbor lifecycle around a Camoufox driver", async () =>
   assert.equal("status" in siteFacts, false);
   if ("status" in siteFacts) return;
   assert.equal(siteFacts.resource_facts.some((fact) => fact.key === "page.vue_app.ready" && fact.state === "available"), true);
-
   const user = runtime.recordHandoff(first.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested", takeover_available: true });
   assert.equal("status" in user, false);
   const released = runtime.releaseSession(first.runtime_session_ref, { control_owner: "user" });
