@@ -230,6 +230,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
             config=config,
             proxy=proxy,
             enable_cache=True,
+            main_world_eval=True,
             i_know_what_im_doing=True,
         )
         PLAYWRIGHT = sync_playwright().start()
@@ -282,7 +283,8 @@ def site_resource_probe(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Camoufox Driver site probe is not allowlisted.")
     expression = xhs_probe_expression() if site_id == "xiaohongshu" else boss_probe_expression()
     with contextlib.redirect_stdout(sys.stderr):
-        observation = PAGE.evaluate(expression)
+        # Site-owned Vue/Pinia objects are invisible in Camoufox's default sandbox.
+        observation = PAGE.evaluate("mw:" + expression)
     if not isinstance(observation, dict):
         raise RuntimeError("Camoufox Driver returned no public site observation.")
     return {"observation": observation}
@@ -386,7 +388,7 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
             if "status" in network:
                 return {"page": facts_for_page(read_page), "observation": network}
             read_page.wait_for_timeout(500)
-            rendered = read_page.evaluate(r"""(expectedQuery) => {
+            rendered = read_page.evaluate(r"""mw:(expectedQuery) => {
               const pinia = window.__PINIA__ || window.__pinia || document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
               const store = pinia?._s instanceof Map ? pinia._s.get('search') : undefined;
               const unwrap = (value) => value && typeof value === 'object' && 'value' in value ? value.value : value;
