@@ -209,6 +209,7 @@ function readinessBody(): object {
       "/runtime/identity-environment-sessions",
       "/runtime/sessions/{runtime_session_ref}",
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
+      "/runtime/sessions/{runtime_session_ref}/handoff",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",
       "/runtime/sessions/{runtime_session_ref}/site-resource-facts",
@@ -396,8 +397,30 @@ async function routeSession(
     return;
   }
   if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
-  const body = await readJson<RuntimeSessionControlInput>(request, {});
-  if (action === "lock") writeJson(response, 200, runtime.lockSession(runtimeSessionRef, body));
+  const body = await readJson<RuntimeSessionControlInput & Record<string, unknown>>(request, {});
+  if (action === "handoff") {
+    if (Object.keys(body).sort().join(",") !== "control_owner,expected_control_owner,handoff_reason" ||
+      body.control_owner !== "user" || body.expected_control_owner !== "core_task" || body.handoff_reason !== "user_requested") {
+      throw new BadRequest("Invalid Runtime Session handoff request.");
+    }
+    const current = runtime.getSession(runtimeSessionRef);
+    if (!current) {
+      writeJson(response, 404, sessionReadUnavailable(runtimeSessionRef, undefined));
+      return;
+    }
+    if (current.control_owner !== body.expected_control_owner || current.control_lock.state !== "held") {
+      writeJson(response, 409, { status: "unavailable", failure_class: "session_locked", message: "Runtime Session control owner changed before handoff.", retryable: true });
+      return;
+    }
+    if (current.availability.viewer !== "available") {
+      writeJson(response, 409, { status: "unavailable", failure_class: "viewer_unavailable", message: "Runtime Session has no interactive local viewer.", retryable: false });
+      return;
+    }
+    const handoff = runtime.recordHandoff(runtimeSessionRef, { control_owner: "user", handoff_reason: "user_requested" });
+    const transferred = runtime.getSession(runtimeSessionRef);
+    writeJson(response, "status" in handoff || !transferred ? 409 : 200, "status" in handoff ? handoff : transferred);
+  }
+  else if (action === "lock") writeJson(response, 200, runtime.lockSession(runtimeSessionRef, body));
   else if (action === "release") writeJson(response, 200, runtime.releaseSession(runtimeSessionRef, body));
   else if (action === "stop") writeJson(response, 200, await runtime.stopSession(runtimeSessionRef, body));
   else if (action === "snapshot") writeJson(response, 201, await runtime.captureLiveSnapshot(runtimeSessionRef));

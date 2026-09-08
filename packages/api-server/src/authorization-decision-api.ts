@@ -29,7 +29,6 @@ const persistenceCodes = new Set([
   "authorization_run_store_unavailable",
   "authorization_run_record_invalid",
   "authorization_confirmation_context_invalid",
-  "authorization_confirmation_context_missing",
   "authorization_preflight_unavailable",
   "authorization_decision_refs_invalid"
 ]);
@@ -135,7 +134,6 @@ async function detailBody(
   if (context !== undefined && !isXhsConfirmationContext(context)) {
     throw new Error("authorization_confirmation_context_invalid");
   }
-  if (context === undefined) throw new Error("authorization_confirmation_context_missing");
   return {
     ok: true,
     authorization_decision: decision,

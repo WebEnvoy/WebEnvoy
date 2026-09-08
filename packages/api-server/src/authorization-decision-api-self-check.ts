@@ -113,6 +113,18 @@ export async function assertAuthorizationDecisionApi(): Promise<void> {
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.body.confirmation_context, confirmationContext);
 
+  const missingContext = await handleAuthorizationDecisionApi({
+    method: "GET",
+    url: new URL(`http://localhost/authorization-decisions/${encodeURIComponent(decisionRef)}`),
+    store: decisionStore,
+    runRecordStore: {
+      getRunRecord: async (ref: string) => ref === runId ? { ...run, public_result_summary: undefined } : undefined
+    } as unknown as FileRunRecordStore
+  });
+  assert(missingContext.handled);
+  assert.equal(missingContext.status, 200);
+  assert.equal(missingContext.body.confirmation_context, undefined, "missing live context must keep deny and recheck reachable");
+
   let runLockCalls = 0;
   let preflightCalls = 0;
   const blockedPreflight = {

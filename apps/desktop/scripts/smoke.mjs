@@ -220,6 +220,7 @@ for (const path of [
   "/runtime/sessions/identity-environment",
   "/identity-environment-sessions",
   "/runtime/sessions/session_opaque/lock",
+  "/runtime/sessions/session_opaque/handoff",
   "/runtime/sessions/session_opaque/release",
   "/runtime/sessions/session_opaque/stop",
   "/runtime/sessions/session_opaque/read-operations",

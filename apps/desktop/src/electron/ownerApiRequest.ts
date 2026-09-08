@@ -121,7 +121,7 @@ export function isHarborSupervisorProtectedRequest(request: Extract<ParsedOwnerA
   ].includes(pathname)) {
     return true;
   }
-  return /^\/(?:runtime\/)?sessions\/[^/]+\/(?:lock|release|stop|read-operations|snapshot)$/.test(pathname);
+  return /^\/(?:runtime\/)?sessions\/[^/]+\/(?:handoff|lock|release|stop|read-operations|snapshot)$/.test(pathname);
 }
 
 export function harborSupervisorAuthorizationHeader(

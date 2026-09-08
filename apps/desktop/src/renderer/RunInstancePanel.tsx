@@ -26,9 +26,12 @@ export function RunInstancePanel({ coreEndpoint, harborEndpoint, runId }: { core
       return;
     }
     try {
-      const result = await requestOwnerJson(harborEndpoint, `/runtime/sessions/${encodeURIComponent(expected)}/${action === "takeover" ? "lock" : "release"}`, {
+      const handoff = action === "takeover" && current.instance.controlOwner === "core_task";
+      const result = await requestOwnerJson(harborEndpoint, `/runtime/sessions/${encodeURIComponent(expected)}/${action === "takeover" ? handoff ? "handoff" : "lock" : "release"}`, {
         method: "POST",
-        body: { control_owner: "user", ...(action === "takeover" ? { holder_ref: "app-browser-page" } : {}) },
+        body: handoff
+          ? { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested" }
+          : { control_owner: "user", ...(action === "takeover" ? { holder_ref: "app-browser-page" } : {}) },
       });
       const confirmed = projectRunInstance({ runtime_session_ref: expected, profile_ref: current.instance.profileRef, identity_environment_ref: current.instance.identityEnvironmentRef }, result);
       const transferred = confirmed.status === "ready" && (action === "takeover" ? confirmed.instance.controlOwner === "user" && confirmed.instance.controlState === "held" : confirmed.instance.controlOwner === "none" && confirmed.instance.controlState === "released");

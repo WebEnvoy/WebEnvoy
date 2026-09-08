@@ -26,10 +26,15 @@ export async function checkRunInstanceControls() {
     if (request.path === "/runs/run-control-regression/session-refs") return { ok: true, body: { ok: true, session_refs: { schema_version: "webenvoy.session-refs-query.v0", run_id: "run-control-regression", session_refs: refs } } };
     if (request.method === "POST") {
       commands.push(request);
-      const body = request.body as { control_owner?: string };
+      const body = request.body as { control_owner?: string; expected_control_owner?: string; handoff_reason?: string };
       assert(body.control_owner === "user", "Control must use the existing user lease intent.");
-      if (session.control_owner === "core_task") return { ok: true, body: { status: "unavailable", failure_class: "session_locked", message: "Core lease held.", retryable: true } };
-      if (request.path.endsWith("/lock")) session = { ...session, lifecycle_state: "locked", control_owner: "user", control_lock: { state: "held" } };
+      if (request.path.endsWith("/handoff")) {
+        assert(session.control_owner === "core_task" && body.expected_control_owner === "core_task" && body.handoff_reason === "user_requested", "Core takeover must use the exact Harbor handoff contract.");
+        session = { ...session, lifecycle_state: "locked", control_owner: "user", control_lock: { state: "held" } };
+      } else if (request.path.endsWith("/lock")) {
+        if (session.control_owner !== "none") return { ok: true, body: { status: "unavailable", failure_class: "session_locked", message: "Another lease is held.", retryable: true } };
+        session = { ...session, lifecycle_state: "locked", control_owner: "user", control_lock: { state: "held" } };
+      }
       else if (request.path.endsWith("/release")) session = { ...session, lifecycle_state: "idle", control_owner: "none", control_lock: { state: "released" } };
       else throw new Error(`Unexpected mutation: ${request.path}`);
       if (loseControlResponse) throw new Error("Control response lost after owner applied the command.");
@@ -51,8 +56,16 @@ export async function checkRunInstanceControls() {
     button("刷新现场状态")!.click();
     await waitFor(() => container.textContent?.includes("core_task / held") === true && Boolean(button("接管同一实例")), "Core owner was not refreshed.");
     button("接管同一实例")!.click();
-    await waitFor(() => container.textContent?.includes("控制权操作未确认") === true && Boolean(button("接管同一实例")), "Owner lock refusal did not restore the panel.");
-    assert(session.control_owner === "core_task" && commands.length === 3 && commands[2]?.path.endsWith("/lock"), "App stole Core control or issued a second mutation after refusal.");
+    await waitFor(() => Boolean(button("交还控制")), "Core-owned Instance did not transfer through the Harbor handoff contract.");
+    assert(session.control_owner === "user" && commands.length === 3 && commands[2]?.path.endsWith("/handoff"), "App did not transfer the exact Core-owned Instance.");
+    button("交还控制")!.click();
+    await waitFor(() => Boolean(button("接管同一实例")), "Transferred Instance did not release back to idle.");
+    session = { ...session, lifecycle_state: "active", control_owner: "agent", control_lock: { state: "held" } };
+    button("刷新现场状态")!.click();
+    await waitFor(() => container.textContent?.includes("agent / held") === true, "Conflicting owner was not refreshed.");
+    button("接管同一实例")!.click();
+    await waitFor(() => container.textContent?.includes("控制权操作未确认") === true && Boolean(button("接管同一实例")), "Conflicting owner refusal did not restore the panel.");
+    assert(session.control_owner === "agent" && commands.length === 5 && commands[4]?.path.endsWith("/lock"), "App stole conflicting control or issued a second mutation after refusal.");
     unavailable = true;
     button("刷新现场状态")!.click();
     await waitFor(() => container.textContent?.includes("不匹配或已不可用") === true, "Missing session did not fail closed.");

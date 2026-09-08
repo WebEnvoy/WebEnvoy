@@ -868,6 +868,40 @@ test("keeps a confirmed headed session trusted across separately released Core r
   }
 });
 
+test("transfers a held Core session to the user only through the exact handoff endpoint", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const session = await runtime.createSession({ headless: false, control_owner: "core_task", holder_ref: "run-confirmation" });
+    const directLock = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/lock`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ control_owner: "user", holder_ref: "app-browser-page" })
+    });
+    assert.equal((await directLock.json()).failure_class, "session_locked");
+
+    const transferred = await postJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/handoff`, {
+      control_owner: "user",
+      expected_control_owner: "core_task",
+      handoff_reason: "user_requested"
+    });
+    assert.equal(transferred.runtime_session_ref, session.runtime_session_ref);
+    assert.equal(transferred.control_owner, "user");
+    assert.equal(transferred.control_lock.state, "held");
+    assert.equal(transferred.control_lock.holder_ref, "harbor_mediated_user");
+
+    const stale = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/handoff`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested" })
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).failure_class, "session_locked");
+  } finally {
+    await running.close();
+  }
+});
+
 test("never reuses a released headless user-action session for manual visibility but preserves headed Core handoff", async () => {
   const launches: LocalProviderLaunchInput[] = [];
   const closes: string[] = [];
