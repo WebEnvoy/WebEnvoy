@@ -415,8 +415,10 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
             observation = unavailable_read("safety_challenge", "Xiaohongshu search shows a safety challenge.", False)
         elif rendered.get("login_like") is True:
             observation = unavailable_read("not_logged_in", "Xiaohongshu search requires manual login.", False)
-        elif rendered.get("pinia_ready") is not True or not isinstance(rendered.get("items"), list):
-            observation = unavailable_read("page_not_ready", "Xiaohongshu search Pinia surface is not ready.", True)
+        elif rendered.get("pinia_ready") is not True:
+            observation = unavailable_read("site_changed", "Xiaohongshu search no longer exposes the pinned Pinia surface.", False)
+        elif not isinstance(rendered.get("items"), list):
+            observation = unavailable_read("page_not_ready", "Xiaohongshu rendered search surface is not ready.", True)
         else:
             correlated = []
             for item in rendered["items"]:
