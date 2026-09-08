@@ -264,7 +264,7 @@ export function identityFactsFromPublicRecord(value: unknown, catalog: HarborPro
   const storageState = storageStateValue(status?.browser_storage_state);
   const manualAuthenticationState = manualAuthStateValue(status?.manual_authentication_state, loginState);
   const recoveryReasons = boundedRecoveryReasonCodes(status?.blocking_reasons, status?.repair_reasons);
-  const environmentRecoveryReasons = recoveryReasons.filter((reason) => !isAuthenticationRecoveryReason(reason));
+  const environmentRecoveryReasons = status?.readiness === "ready" ? [] : recoveryReasons.filter((reason) => !isAuthenticationRecoveryReason(reason));
   const recoveryRequired = status?.recovery_required === true;
   const manualAuthenticationRequired = requiresManualAuthentication(loginState, manualAuthenticationState) ||
     recoveryReasons.some(isAuthenticationRecoveryReason);
