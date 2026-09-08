@@ -10,6 +10,7 @@ import { createApiServer } from "./server.js";
 import { assertRuntimeTaskSubmitApi } from "./runtime-task-submit-self-check.js";
 import { assertTaskThreadApiRaces } from "./task-thread-api-self-check.js";
 import { assertExecutionPolicyApi } from "./execution-policy-api-self-check.js";
+import { assertAuthorizationDecisionApi } from "./authorization-decision-api-self-check.js";
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -783,6 +784,7 @@ async function main(): Promise<void> {
     await assertRuntimeTaskSubmitApi();
     await assertTaskThreadApiRaces();
     await assertExecutionPolicyApi();
+    await assertAuthorizationDecisionApi();
   } finally {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => {

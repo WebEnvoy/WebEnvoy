@@ -554,6 +554,20 @@ function completedWritePrecheckOperation(input: {
       { kind: "dom_snapshot_summary", ref: domSourceRef }
     ],
     evidence_ref_kinds: [{ kind: "snapshot_ref", ref: snapshotRef }, { kind: "post_check_ref", ref: postCheckRef }],
+    public_observation: {
+      schema_version: "harbor-xhs-public-observation/v0",
+      status: "observed",
+      account: { status: "observed", label: "creator", ref: "account_xhs", expected_match: "matched" },
+      business_target: { status: "observed", label: "publish", ref: input.target_ref, expected_match: "matched" },
+      media: { image_count: 1, order_status: "observed", ordered_item_refs: ["media_xhs_1"], expected_match: "matched" },
+      fields: {
+        title: { status: "observed", summary: { state: "present", length: 8, fingerprint: "fnv1a:11111111" }, expected_match: "matched" },
+        body: { status: "observed", summary: { state: "present", length: 16, fingerprint: "fnv1a:22222222" }, expected_match: "matched" }
+      },
+      page: { fingerprint: "fnv1a:1234abcd", diff: "unchanged" },
+      pending_issue_codes: [],
+      submitted: false
+    },
     post_check: {
       status: "passed",
       reason: "validated_creator_entrypoint_without_submission",
@@ -1439,6 +1453,17 @@ async function assertXhsFieldActionWiring(): Promise<void> {
       authorization_context: authorizationContext
     }, {
       lodePackageResolver: async () => contract,
+      harborRuntimeClient: {
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_xhs_field_action"),
+        validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => completedWritePrecheckOperation({
+          runtime_session_ref: input.runtime_session_ref,
+          target_ref: input.target_ref,
+          suffix: "field-initial"
+        }),
+        executeMediaAction: async () => { throw new Error("unexpected execution before confirmation"); },
+        executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
+        releaseCoreTaskSession: async () => undefined
+      },
       executionPolicyConfigStore: mediaConfigStore("auto"),
       authorizationDecisionStore: authorizationStore,
       clock: () => new Date(evaluatedAt)
@@ -1461,6 +1486,11 @@ async function assertXhsFieldActionWiring(): Promise<void> {
       authorizationDecisionStore: authorizationStore,
       harborRuntimeClient: {
         collectAdmissionFacts: async () => runtimeBindingFacts("session_xhs_field_action"),
+        validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => completedWritePrecheckOperation({
+          runtime_session_ref: input.runtime_session_ref,
+          target_ref: input.target_ref,
+          suffix: "field-continuation"
+        }),
         executeMediaAction: async (input) => {
           executeCalls += 1;
           assert.deepEqual(input.refs, intent.input.refs);
@@ -1474,7 +1504,6 @@ async function assertXhsFieldActionWiring(): Promise<void> {
           });
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
-        validateOnlyWritePrecheck: async () => { throw new Error("unexpected precheck dispatch"); },
         releaseCoreTaskSession: async () => undefined
       },
       clock: () => new Date(evaluatedAt)
@@ -1493,9 +1522,9 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
   const mediaPackage = mediaContract();
   const mediaIntent = mediaTaskIntent();
 
-  // Initial submission always creates a user-action checkpoint, even when
-  // the global policy says auto. Harbor must not receive a dispatch before
-  // the persisted single-action decision is supplied to continuation.
+  // Initial submission observes the exact instance before presenting a
+  // user-action checkpoint. An incomplete observation remains blocked while
+  // its confirmation decision stays available for a refresh.
   const autoDirectory = await mkdtemp(join(tmpdir(), "webenvoy-xhs-media-auto-confirm-"));
   try {
     let harborCalls = 0;
@@ -1519,10 +1548,27 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
     }, {
       lodePackageResolver: async () => mediaPackage,
       harborRuntimeClient: {
-        collectAdmissionFacts: async () => { harborCalls += 1; throw new Error("auto media action must wait for confirmation"); },
-        executeMediaAction: async () => { harborCalls += 1; throw new Error("auto media action must wait for confirmation"); },
+        collectAdmissionFacts: async () => runtimeBindingFacts("session_xhs_media_auto_confirm"),
+        validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
+          harborCalls += 1;
+          const operation = completedWritePrecheckOperation({
+            runtime_session_ref: input.runtime_session_ref,
+            target_ref: input.target_ref,
+            suffix: "auto-confirm"
+          });
+          const observation = operation.public_observation as Record<string, unknown>;
+          return {
+            ...operation,
+            public_observation: {
+              ...observation,
+              status: "unknown",
+              account: { status: "unknown", label: null, ref: null, expected_match: "unknown" },
+              pending_issue_codes: ["account_unknown"]
+            }
+          };
+        },
+        executeMediaAction: async () => { harborCalls += 1; throw new Error("blocked observation must not execute"); },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
-        validateOnlyWritePrecheck: async () => { throw new Error("unexpected write-precheck dispatch"); },
         releaseCoreTaskSession: async () => undefined
       } as HarborRuntimeClient,
       executionPolicyConfigStore: mediaConfigStore("auto"),
@@ -1532,9 +1578,14 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.failure.code, "authorization_confirmation_required");
     assert.equal(result.run_record?.status, "requires_user_action");
+    assert.equal(result.run_record?.public_result_summary?.confirmation_context &&
+      (result.run_record.public_result_summary.confirmation_context as Record<string, unknown>).status, "blocked");
+    const confirmationRef = result.run_record?.authorization_decision_refs?.[0];
+    assert(confirmationRef);
+    assert.equal((await authorizationStore.getAuthorizationDecision(confirmationRef))?.state, "active");
     assert.equal(result.run_record?.action_request?.action_id, mediaIntent.input.action_id);
     assert.deepEqual(result.run_record?.action_request?.target_refs, { scope_target_ref: mediaIntent.scope.target_ref });
-    assert.equal(harborCalls, 0);
+    assert.equal(harborCalls, 1);
   } finally {
     await rm(autoDirectory, { recursive: true, force: true });
   }
@@ -1569,31 +1620,23 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
         clock: () => new Date(evaluatedAt)
       });
       const authorizationContext = { ...context, idempotency_key: `xhs-media-${testCase.name}` };
-      const initial = await submitRuntimeTask(runStore, {
-        run_id: runId,
-        task_intent: { ...mediaIntent, intent_id: `${mediaIntent.intent_id}_${testCase.name}` },
-        package_ref: mediaPackage.package_ref,
-        authorization_context: authorizationContext
-      }, {
-        lodePackageResolver: async () => mediaPackage,
-        executionPolicyConfigStore: mediaConfigStore("auto"),
-        authorizationDecisionStore: authorizationStore,
-        clock: () => new Date(evaluatedAt)
-      });
-      assert.equal(initial.ok, false, testCase.name);
-      assert.equal(initial.run_record?.status, "requires_user_action", testCase.name);
-      const confirmationRef = initial.run_record?.authorization_decision_refs?.[0];
-      assert(confirmationRef, testCase.name);
-      const confirmation = await authorizationStore.getAuthorizationDecision(confirmationRef);
-      assert(confirmation, testCase.name);
-      const singleActionDecision = mediaDecisionFromConfirmation(confirmation);
       const runtimeSessionRef = `session_xhs_media_${testCase.name}`;
+      let precheckCalls = 0;
+      let executeCalls = 0;
       const harbor = {
         collectAdmissionFacts: async () => testCase.admissionMissingScene
           ? { ...runtimeBindingFacts(runtimeSessionRef), harbor_scene_ref: undefined }
           : runtimeBindingFacts(runtimeSessionRef),
+        validateOnlyWritePrecheck: async (input: { runtime_session_ref: string; target_ref: string }) => {
+          precheckCalls += 1;
+          return completedWritePrecheckOperation({
+            runtime_session_ref: input.runtime_session_ref,
+            target_ref: input.target_ref,
+            suffix: `${testCase.name}-${precheckCalls}`
+          });
+        },
         executeMediaAction: async (input: Parameters<NonNullable<HarborRuntimeClient["executeMediaAction"]>>[0]) => {
-          harborCalls += 1;
+          executeCalls += 1;
           assert.equal(input.authorization_binding.action_id, input.action_id, testCase.name);
           assert.equal(input.authorization_binding.target_ref, input.target_ref, testCase.name);
           assert.equal(input.authorization_binding.idempotency_key, authorizationContext.idempotency_key, testCase.name);
@@ -1611,7 +1654,6 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
           });
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
-        validateOnlyWritePrecheck: async () => { throw new Error("unexpected write-precheck dispatch"); },
         releaseCoreTaskSession: async () => {
           releaseCalls += 1;
           return testCase.cleanupFailure
@@ -1619,6 +1661,25 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
             : undefined;
         }
       } as HarborRuntimeClient;
+      const initial = await submitRuntimeTask(runStore, {
+        run_id: runId,
+        task_intent: { ...mediaIntent, intent_id: `${mediaIntent.intent_id}_${testCase.name}` },
+        package_ref: mediaPackage.package_ref,
+        authorization_context: authorizationContext
+      }, {
+        lodePackageResolver: async () => mediaPackage,
+        harborRuntimeClient: harbor,
+        executionPolicyConfigStore: mediaConfigStore("auto"),
+        authorizationDecisionStore: authorizationStore,
+        clock: () => new Date(evaluatedAt)
+      });
+      assert.equal(initial.ok, false, testCase.name);
+      assert.equal(initial.run_record?.status, "requires_user_action", testCase.name);
+      const confirmationRef = initial.run_record?.authorization_decision_refs?.[0];
+      assert(confirmationRef, testCase.name);
+      const confirmation = await authorizationStore.getAuthorizationDecision(confirmationRef);
+      assert(confirmation, testCase.name);
+      const singleActionDecision = mediaDecisionFromConfirmation(confirmation);
       const continued = await continueXhsMediaActionTask(runStore, {
         run_id: runId,
         task_intent: { ...mediaIntent, intent_id: `${mediaIntent.intent_id}_${testCase.name}` },
@@ -1635,10 +1696,18 @@ async function assertXhsMediaActionP1Wiring(): Promise<void> {
         authorizationDecisionStore: authorizationStore,
         clock: () => new Date(evaluatedAt)
       });
-      assert.equal(harborCalls, testCase.admissionMissingScene ? 0 : 1, testCase.name);
-      assert.equal(releaseCalls, 1, testCase.name);
+      assert.equal(precheckCalls, testCase.admissionMissingScene ? 0 : 3, testCase.name);
+      assert.equal(executeCalls, testCase.admissionMissingScene ? 0 : 1, testCase.name);
+      assert.equal(releaseCalls, testCase.admissionMissingScene ? 0 : 1, testCase.name);
       assert.equal(continued.ok, false, testCase.name);
-      assert.equal(continued.run_record?.status, testCase.expectedStatus, testCase.name);
+      assert.equal(continued.run_record?.status, testCase.admissionMissingScene ? "requires_user_action" : testCase.expectedStatus, testCase.name);
+      if (testCase.admissionMissingScene) {
+        assert.equal(continued.failure.code, "snapshot_missing", testCase.name);
+        const blockedContext = continued.run_record?.public_result_summary?.confirmation_context as Record<string, unknown> | undefined;
+        assert.equal(blockedContext?.status, "blocked", testCase.name);
+        assert.equal((await authorizationStore.getAuthorizationDecision(confirmationRef))?.state, "active", testCase.name);
+        continue;
+      }
       if (!continued.ok && testCase.name === "fixture") {
         assert.equal(continued.failure.code, "harbor_xhs_media_output_invalid");
       }

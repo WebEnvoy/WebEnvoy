@@ -302,6 +302,19 @@ export {
   type RuntimeTaskSubmissionRequest
 } from "./runtime-task-chain.js";
 export {
+  collectXhsConfirmationObservation,
+  expectedXhsObservationForTask,
+  isXhsConfirmationContext,
+  preflightXhsMediaActionConfirmation,
+  type CollectXhsConfirmationObservationRequest,
+  type XhsConfirmationContext,
+  type XhsConfirmationObservationFailure,
+  type XhsConfirmationObservationSuccess,
+  type XhsMediaActionConfirmationPreflightRequest,
+  type XhsMediaActionConfirmationPreflightResult,
+  type XhsPublicObservationExpected
+} from "./xhs-confirmation-gate.js";
+export {
   evaluateXhsMediaActionPolicy,
   isExactXhsMediaActionRun,
   isExactXhsMediaActionTask,
