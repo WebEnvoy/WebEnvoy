@@ -103,6 +103,27 @@ with TemporaryDirectory(prefix="harbor-camoufox-properties-test-") as root:
     assert module.firefox_major(str(executable)) == 152
     module.cleanup_launch_layout()
     assert not layout_path.exists()
+    class FakePlaywrightTimeout(Exception):
+        pass
+    class FakePage:
+        url = "https://www.xiaohongshu.com/search_result?keyword=WebEnvoy&source=web_search_result_notes"
+        def title(self): return "Search"
+        def expect_response(self, *args, **kwargs): raise FakePlaywrightTimeout("timed out")
+        def close(self): pass
+    class FakeContext:
+        def new_page(self): return FakePage()
+    module.PLAYWRIGHT_TIMEOUT_ERROR = FakePlaywrightTimeout
+    module.CONTEXT = FakeContext()
+    timed_out = module.read_operation_probe({
+        "site_id": "xiaohongshu",
+        "operation_id": "xhs_search_notes",
+        "target_url": FakePage.url,
+        "expected_origin": "https://www.xiaohongshu.com",
+        "query": "WebEnvoy",
+        "limit": 1,
+    })
+    assert timed_out["observation"]["failure_class"] == "network_resource_unavailable"
+    assert timed_out["observation"]["retryable"] is True
     outside = root / "outside"
     outside.write_text("external")
     (resources / "external-link").symlink_to(outside)

@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 PLAYWRIGHT: Any = None
+PLAYWRIGHT_TIMEOUT_ERROR: type[BaseException] | None = None
 CONTEXT: Any = None
 PAGE: Any = None
 PROFILE_DIR = ""
@@ -187,7 +188,7 @@ def boss_probe_expression() -> str:
 
 
 def launch(request: dict[str, Any]) -> dict[str, Any]:
-    global PLAYWRIGHT, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE
+    global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE
     PROFILE_DIR = str(request.get("profile_dir", ""))
     EXECUTABLE_PATH = str(request.get("executable_path", ""))
     if not PROFILE_DIR or not EXECUTABLE_PATH:
@@ -203,7 +204,8 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Camoufox properties.json does not match the qualified browser schema pin.")
     LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE = prepare_properties(EXECUTABLE_PATH)
     from camoufox import NewBrowser, launch_options
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+    PLAYWRIGHT_TIMEOUT_ERROR = PlaywrightTimeoutError
 
     locale = request.get("locale")
     timezone = request.get("timezone")
@@ -450,7 +452,9 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
                     "search_items": [item for _, item in correlated],
                 }
         return {"page": facts_for_page(read_page), "observation": observation}
-    except TimeoutError:
+    except Exception as error:
+        if PLAYWRIGHT_TIMEOUT_ERROR is None or not isinstance(error, PLAYWRIGHT_TIMEOUT_ERROR):
+            raise
         return {"page": facts_for_page(read_page), "observation": unavailable_read("network_resource_unavailable", "Xiaohongshu search response was not observed in time.", True)}
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {"page": facts_for_page(read_page), "observation": unavailable_read("site_changed", "Xiaohongshu search response is not valid bounded JSON.", False)}
