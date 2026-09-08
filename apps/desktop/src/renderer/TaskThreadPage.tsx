@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, PanelRightOpen, ShieldAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { canAllowPendingDecision, decideSingleAction, fetchPendingAuthorizationDecision, requiresXhsConfirmationContext, type PendingAuthorizationDecision, type XhsConfirmationContext } from "./authorizationDecisionClient";
+import { canAllowPendingDecision, decideSingleAction, fetchPendingAuthorizationDecision, refreshPendingAuthorizationDecision, requiresXhsConfirmationContext, type PendingAuthorizationDecision, type XhsConfirmationContext } from "./authorizationDecisionClient";
 import { fetchCoreRunResult, type CoreRunResultState } from "./coreRunResultClient";
 import { policySourceLabel } from "./executionPolicyClient";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
@@ -261,6 +261,20 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
     window.requestAnimationFrame(() => statusRef.current?.focus());
   }
 
+  async function refreshDecision(decision: PendingAuthorizationDecision) {
+    setState({ status: "submitting", decision });
+    const result = await refreshPendingAuthorizationDecision(endpoint, {
+      decisionRef: decision.decisionRef,
+      runId: run.id,
+      threadId: threadRef,
+      turnId: run.turnId!,
+    });
+    setState(result.ok
+      ? { status: "ready", decision: result.decision }
+      : { status: "failed", summary: result.reason, retry: "fetch" });
+    window.requestAnimationFrame(() => statusRef.current?.focus());
+  }
+
   function retryFailure() {
     if (state.status !== "failed") return;
     if (state.retry === "fetch") {
@@ -301,7 +315,7 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
         <button type="button" disabled={busy} onClick={() => void submitDecision(decision, "deny_once")}><X size={14} />拒绝这一次</button>
         {canAllow
           ? <button className="primary" type="button" disabled={busy} onClick={() => void submitDecision(decision, "allow_once")}><Check size={14} />{busy ? "处理中" : "允许这一次"}</button>
-          : <button type="button" disabled={busy} onClick={() => setReloadKey((current) => current + 1)}>重新检查</button>}
+          : <button type="button" disabled={busy} onClick={() => void refreshDecision(decision)}>{busy ? "检查中" : "重新检查"}</button>}
       </div>
     </section>
   );

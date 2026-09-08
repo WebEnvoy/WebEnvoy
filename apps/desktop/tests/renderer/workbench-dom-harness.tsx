@@ -1051,9 +1051,12 @@ async function checkXhsCommitConfirmationContext() {
     authorizationDecisionRefs: [decisionRef],
   };
   let ready = true;
-  window.webenvoyShell!.requestOwnerJson = async (request) => request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}`
-    ? { ok: true, body: { ok: true, authorization_decision: xhsCommitDecision(decisionRef, run.id, run.turnId), confirmation_context: xhsConfirmationContext(ready) } }
-    : original(request);
+  window.webenvoyShell!.requestOwnerJson = async (request) => {
+    if (request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}/preflight`) ready = true;
+    return request.path.startsWith(`/authorization-decisions/${encodeURIComponent(decisionRef)}`)
+      ? { ok: true, body: { ok: true, authorization_decision: xhsCommitDecision(decisionRef, run.id, run.turnId), confirmation_context: xhsConfirmationContext(ready) } }
+      : original(request);
+  };
   try {
     const render = () => {
       const container = document.createElement("div");
@@ -1074,6 +1077,8 @@ async function checkXhsCommitConfirmationContext() {
     await waitFor(() => mounted.container.textContent?.includes("账号状态未知") === true, "Blocked XHS confirmation did not show the owner reason.");
     assert(!mounted.container.textContent?.includes("允许这一次") && mounted.container.textContent?.includes("拒绝这一次") &&
       mounted.container.textContent?.includes("重新检查"), "Blocked XHS confirmation exposed commit or omitted recovery.");
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "XHS confirmation did not recover after a fresh same-instance observation.");
     mounted.root.unmount();
     mounted.container.remove();
   } finally {

@@ -74,6 +74,26 @@ export async function fetchPendingAuthorizationDecision(endpoint: string, expect
   }
 }
 
+export async function refreshPendingAuthorizationDecision(endpoint: string, expected: PendingAuthorizationBinding) {
+  try {
+    const response = await requestOwnerJson(endpoint, `/authorization-decisions/${encodeURIComponent(expected.decisionRef)}/preflight`, {
+      method: "POST",
+      timeoutMs: 15_000,
+      includeErrorBody: true,
+    });
+    const envelope = asRecord(response);
+    const record = asRecord(envelope?.body) ?? envelope;
+    const context = parseConfirmationContext(record?.confirmation_context);
+    const decision = parsePendingDecision(record?.authorization_decision);
+    return decision != null && decision.decisionRef === expected.decisionRef && decision.runId === expected.runId &&
+      decision.threadId === expected.threadId && decision.turnId === expected.turnId
+      ? { ok: true as const, decision: { ...decision, ...(context ? { confirmationContext: context } : {}) } }
+      : { ok: false as const, reason: ownerError(record, "Core 未能重新观察当前 Instance。") };
+  } catch (error) {
+    return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function requiresXhsConfirmationContext(decision: PendingAuthorizationDecision) {
   return decision.siteSlug === "xiaohongshu" && decision.actionId.startsWith("xhs_publish_note_image_text_");
 }
