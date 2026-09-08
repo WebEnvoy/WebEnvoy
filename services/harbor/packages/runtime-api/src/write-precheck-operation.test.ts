@@ -23,6 +23,8 @@ import type {
 } from "./runtime-session-types.js";
 import { trustLocalProviderWritePrecheckProbe } from "./read-operation-probe-trust.js";
 
+const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
 const input: LocalProviderWritePrecheckProbeInput = {
   target_url: "https://creator.xiaohongshu.com/publish/publish",
   expected_origin: "https://creator.xiaohongshu.com",
@@ -50,6 +52,55 @@ const observation = {
   upload_image_entry_visible: true,
   text_image_entry_visible: true
 };
+
+const publicObservationExpected = {
+  account_ref: "account:fixture",
+  business_target_ref: "business-target:fixture",
+  title: "早餐",
+  body: "正文摘要",
+  media_refs: ["media:1", "media:2"]
+} as const;
+
+const publicObservationRaw = {
+  account_candidates: [{ label: "示例账号", ref: publicObservationExpected.account_ref }],
+  business_target_candidates: [{ label: "图片草稿", ref: publicObservationExpected.business_target_ref }],
+  image_count: 2,
+  ordered_item_refs: [...publicObservationExpected.media_refs],
+  title_summary: { state: "present", length: publicObservationExpected.title.length, fingerprint: "fnv1a:12345678" },
+  body_summary: { state: "present", length: publicObservationExpected.body.length, fingerprint: "fnv1a:abcdef01" },
+  title_expected_match: "matched" as const,
+  body_expected_match: "matched" as const,
+  page_fingerprint: "fnv1a:0badcafe",
+  page_diff: "unchanged" as const
+};
+
+function publicCompletedProbe(probeInput: LocalProviderWritePrecheckProbeInput): Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> {
+  const result = validateXhsWritePrecheckObservation(probeInput, {
+    ...observation,
+    composition_path: "image_text_upload",
+    path_observed: "observed",
+    path_entry_visible: "observed",
+    composition_state: "composition_initialized",
+    field_states: {
+      title_input: { availability: "available", observation: "observed", editable: "observed", value_state: "present" },
+      content_editor: { availability: "available", observation: "observed", editable: "observed", value_state: "present" },
+      publish_control: { availability: "available", observation: "observed", editable: "observed" }
+    },
+    media_state: {
+      availability: "available",
+      observation: "observed",
+      controls: { upload_image: { availability: "available", observation: "observed", editable: "observed" } }
+    },
+    validation_state: { availability: "unknown", observation: "unknown" },
+    save_draft_control: { availability: "available", observation: "observed", editable: "observed" },
+    publish_control: { availability: "available", observation: "observed", editable: "observed" },
+    public_observation: publicObservationRaw
+  });
+  if (result.status !== "completed") throw new Error("expected a completed public observation probe");
+  return probeInput.capture_screenshot === false
+    ? { ...result, evidence_ref_kinds: [{ kind: "public_observation_ref", ref: "public_observation_evidence" }] }
+    : result;
+}
 
 function completedProbe(): Extract<LocalProviderWritePrecheckProbeResult, { status: "completed" }> {
   const result = validateXhsWritePrecheckObservation(input, observation);
@@ -264,11 +315,167 @@ test("keeps the browser probe read-only and freshness-bound", () => {
   assert.equal(expression.includes("semanticText"), false);
   assert.equal(expression.includes("bodyText.includes('创作者')"), false);
   assert.equal(expression.includes("creatorControls.length >= 2"), false);
+  assert.equal(expression.includes("data-harbor-account"), false);
+  assert.equal(expression.includes("data-business-target"), false);
+  assert.equal(expression.includes("data-media-ref"), false);
   assert.match(expression, /selectedRequestedPath/);
   assert.match(expression, /findControl = \(patterns, includeDisabled = false/);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 2_999), true);
   assert.equal(validWritePrecheckFreshness(input, observation, { ...observation, login_like: true }, 1_000, 2_000), false);
   assert.equal(validWritePrecheckFreshness(input, observation, observation, 1_000, 3_001), false);
+});
+
+test("returns bounded public observation and keeps ambiguous page sources unknown", () => {
+  const result = publicCompletedProbe({ ...input, expected: publicObservationExpected });
+  assert.equal(result.public_observation.status, "observed");
+  assert.deepEqual(result.public_observation.account, {
+    status: "observed",
+    label: "示例账号",
+    ref: publicObservationExpected.account_ref,
+    expected_match: "matched"
+  });
+  assert.deepEqual(result.public_observation.business_target, {
+    status: "observed",
+    label: "图片草稿",
+    ref: publicObservationExpected.business_target_ref,
+    expected_match: "matched"
+  });
+  assert.deepEqual(result.public_observation.media, {
+    image_count: 2,
+    order_status: "observed",
+    ordered_item_refs: publicObservationExpected.media_refs,
+    expected_match: "matched"
+  });
+  assert.equal(result.public_observation.fields.title.status, "observed");
+  assert.equal(result.public_observation.fields.title.expected_match, "matched");
+  assert.equal(result.public_observation.fields.body.status, "observed");
+  assert.equal(result.public_observation.fields.body.expected_match, "matched");
+  assert.deepEqual(result.public_observation.page, { fingerprint: "fnv1a:0badcafe", diff: "unchanged" });
+  assert.deepEqual(result.public_observation.pending_issue_codes, []);
+  assert.equal(result.public_observation.submitted, false);
+  assert.equal(JSON.stringify(result.public_observation).includes(publicObservationExpected.title), false);
+  assert.equal(JSON.stringify(result.public_observation).includes(publicObservationExpected.body), false);
+
+  const ambiguousObservation = validateXhsWritePrecheckObservation(
+    { ...input, expected: publicObservationExpected },
+    {
+      ...observation,
+      public_observation: {
+        ...publicObservationRaw,
+        account_candidates: [
+          ...publicObservationRaw.account_candidates,
+          { label: "另一个账号", ref: "account:other" }
+        ],
+        business_target_candidates: []
+      }
+    }
+  );
+  assert.equal(ambiguousObservation.status, "completed");
+  if (ambiguousObservation.status === "completed") {
+    assert.equal(ambiguousObservation.public_observation.status, "unknown");
+    assert.deepEqual(ambiguousObservation.public_observation.account, {
+      status: "unknown",
+      label: null,
+      ref: null,
+      expected_match: "unknown"
+    });
+    assert.deepEqual(ambiguousObservation.public_observation.business_target, {
+      status: "unknown",
+      label: null,
+      ref: null,
+      expected_match: "unknown"
+    });
+    assert.equal(ambiguousObservation.public_observation.pending_issue_codes.includes("account_unknown"), true);
+    assert.equal(ambiguousObservation.public_observation.pending_issue_codes.includes("business_target_unknown"), true);
+  }
+});
+
+test("propagates expected refs through the trusted local provider launcher", async () => {
+  let receivedExpected: LocalProviderWritePrecheckProbeInput["expected"];
+  let screenshotsCaptured = 0;
+  const launcher: LocalProviderLauncher = async (launch) => ({
+    status: "ready",
+    execution_surface: "local_provider",
+    cdp_ref: "cdp_public_observation",
+    viewer_entry: {
+      availability: "available",
+      access_mode: "interactive",
+      transport: "local_window",
+      input_capabilities: ["keyboard_mouse"]
+    },
+    page: { current_url: launch.url, title: "Creator publish", status: "ready", facts: [] },
+    facts: [],
+    openUrl: async (url) => ({ current_url: url, title: "Creator publish", status: "ready", facts: [] }),
+    probeWritePrecheck: trustLocalProviderWritePrecheckProbe(async (probeInput) => {
+      receivedExpected = probeInput.expected;
+      assert.equal(probeInput.capture_screenshot, false);
+      return publicCompletedProbe(probeInput);
+    }),
+    captureScreenshot: async () => {
+      screenshotsCaptured += 1;
+      return {
+        screenshot_ref: "screenshot_public_observation",
+        mime_type: "image/png",
+        byte_length: 1,
+        sha256: "00",
+        captured_at: new Date().toISOString(),
+        facts: []
+      };
+    },
+    close: async () => undefined
+  });
+  const runtime = new HarborRuntime(launcher);
+  try {
+    runtime.createLocalIdentityEnvironment({
+      platform: "darwin",
+      arch: "arm64",
+      home_dir: "/Users/test",
+      env: {},
+      path_exists: (path) => path === chromePath,
+      is_executable: (path) => path === chromePath,
+      read_text: () => null,
+      identity_environment_ref: "identity-env_public-observation",
+      execution_identity_ref: "execution-identity_public-observation",
+      profile_ref: "profile_public-observation",
+      profile_storage_ref: "profile-storage_public-observation",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      login_state: "manual_auth_required",
+      storage_state: "present"
+    });
+    const headed = await runtime.openManagedIdentityEnvironmentSession({
+      identity_environment_ref: "identity-env_public-observation",
+      url: input.target_url,
+      control_owner: "user",
+      headless: false
+    });
+    if ("status" in headed) throw new Error(`public observation session should open: ${JSON.stringify(headed)}`);
+    runtime.recordHandoff(headed.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
+    const authenticated = runtime.completeManualAuthentication(headed.runtime_session_ref);
+    if (authenticated.status === "unavailable") throw new Error(`public observation session should authenticate: ${JSON.stringify(authenticated)}`);
+    runtime.recordHandoff(headed.runtime_session_ref, { control_owner: "core_task", handoff_reason: "user_requested" });
+    runtime.releaseSession(headed.runtime_session_ref, { control_owner: "core_task" });
+    runtime.lockSession(headed.runtime_session_ref, { control_owner: "core_task", holder_ref: "observation-run" });
+    const result = await runtime.executeXhsPublishPrecheck(headed.runtime_session_ref, {
+      url: input.target_url,
+      target_ref: input.target_ref,
+      holder_ref: "observation-run",
+      no_submit_guard: "active",
+      expected: publicObservationExpected
+    });
+    assert.equal(result.status, "completed");
+    if (result.status === "completed" && result.schema_version === "harbor-validate-only-write-precheck/v0") {
+      assert.equal(result.public_observation.status, "observed");
+      assert.equal(result.public_observation.media.expected_match, "matched");
+      assert.deepEqual(result.public_observation.pending_issue_codes, []);
+      assert.equal(result.evidence_ref_kinds[0]?.kind, "public_observation_ref");
+      assert.equal(result.post_check.evidence_refs[0]?.kind, "public_observation_ref");
+      assert.equal(result.submitted, false);
+    }
+    assert.deepEqual(receivedExpected, publicObservationExpected);
+    assert.equal(screenshotsCaptured, 0);
+  } finally {
+    await runtime.close();
+  }
 });
 
 test("accepts dynamic composition observations without mistaking selector drift for a non-writable target", () => {
