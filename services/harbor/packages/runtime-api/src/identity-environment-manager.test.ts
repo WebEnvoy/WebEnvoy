@@ -35,7 +35,7 @@ test("user confirmation clears only the authentication gate for a restricted Chr
     },
     login_state: "manual_auth_required",
     manual_authentication_state: "required",
-    storage_state: "present",
+    storage_state: "unknown",
     proxy_ref: "proxy-shanghai",
     region: "CN-SH",
     language: "zh-CN",
@@ -49,6 +49,7 @@ test("user confirmation clears only the authentication gate for a restricted Chr
   assert.equal(completed.status.readiness, "ready");
   assert.equal(completed.status.login_state, "logged_in");
   assert.equal(completed.status.authentication_provenance, "user_confirmed_managed_session");
+  assert.equal(completed.status.browser_storage_state, "present");
   assert.equal(completed.status.manual_authentication_state, "completed");
   assert.equal(completed.status.recovery_required, false);
   assert.equal(completed.status.blocking_reasons.includes("provider_conflict"), false);
