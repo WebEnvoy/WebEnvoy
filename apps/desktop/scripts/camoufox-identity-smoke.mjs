@@ -43,6 +43,11 @@ assert.equal(identity.provider.role, "验证 Provider");
 assert.equal(identity.browser.defaultProvider, "Camoufox");
 assert.equal(identity.browser.session.provider, "Camoufox");
 assert.equal(identity.browser.providers[0].name, "Camoufox");
+const ownerReady = { ...record, status: { ...record.status, readiness: "ready", blocking_reasons: ["proxy_missing", "fingerprint_missing"] } };
+const readyFacts = identityFactsFromPublicRecord(ownerReady, catalog);
+assert.equal(projectHarborIdentity(readyFacts, catalog, "now").readiness.state, "ready");
+assert.ok(readyFacts.diagnostics.includes("proxy_missing"), "keep optional configuration diagnostics visible");
+assert.equal(projectHarborIdentity(identityFactsFromPublicRecord({ ...ownerReady, status: { ...ownerReady.status, readiness: "blocked" } }, catalog), catalog, "now").readiness.state, "blocked");
 const requests = [];
 globalThis.window = { webenvoyShell: { requestOwnerJson: async request => {
   requests.push(request);
