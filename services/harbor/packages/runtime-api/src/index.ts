@@ -32,6 +32,7 @@ import {
   detectBrowserProviders,
   diagnoseBrowserProviderFailure,
   getDefaultBrowserProviderExecutable,
+  resolveCamoufoxOverride,
   HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA,
   type BrowserProviderCatalog,
@@ -85,7 +86,7 @@ import {
   type RuntimeSessionUnavailable,
   type ValidationRuntimeFacts
 } from "./runtime-session.js";
-import { isRuntimeSessionReadable } from "./runtime-session-types.js";
+import { isRuntimeDriverAvailable, isRuntimeSessionReadable } from "./runtime-session-types.js";
 import {
   appRuntimeStatusFixture,
   coreRuntimeFacts,
@@ -173,6 +174,7 @@ export {
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA
 } from "./provider-management.js";
 export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
+export { launchCamoufoxProvider } from "./camoufox-driver.js";
 /** @deprecated Use `legacyReadOperation` only for the bounded pre-cutover adapter. */
 export * as legacyReadOperation from "./read-operation.js";
 /** @deprecated Use `legacySiteRuntimeFacts` only for the bounded pre-cutover adapter. */
@@ -326,6 +328,7 @@ export type {
   LocalProviderLauncher,
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderDriverKind,
   LocalProviderMediaActionInput,
   LocalProviderMediaActionResult,
   LocalProviderPageFacts,
@@ -983,7 +986,7 @@ export class HarborRuntime {
     ) return "target_origin_not_allowed";
     if (
       !isRuntimeSessionReadable(session.facts) ||
-      session.facts.availability.cdp !== "available" ||
+      !isRuntimeDriverAvailable(session.facts) ||
       session.facts.current_error
     ) return "session_not_ready";
     if (

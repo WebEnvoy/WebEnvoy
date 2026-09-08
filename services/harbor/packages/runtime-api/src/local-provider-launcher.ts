@@ -7,6 +7,8 @@ import {
   bindIdentityEnvironmentDefaultProvider,
   classifyLaunchFailure,
   diagnoseBrowserProviderFailure,
+  detectBrowserProviders,
+  resolveCamoufoxOverride,
   type BrowserProviderDetectionInput,
   type IdentityEnvironmentProviderBinding
 } from "./provider-management.js";
@@ -15,6 +17,7 @@ import {
   resolveIdentityEnvironmentLaunchConfiguration,
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
+import { launchCamoufoxProvider } from "./camoufox-driver.js";
 import { prepareProfileStorage } from "./profile-storage.js";
 import {
   trustLocalProviderReadProbe,
@@ -62,9 +65,27 @@ class ProviderOriginDriftError extends Error {}
 
 export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const explicitBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
-  const providerBinding = explicitBrowserPath
+  const camoufoxOverride = resolveCamoufoxOverride(process.env);
+  const providerBinding = explicitBrowserPath && input.identity_environment?.provider_binding.selected_provider_id !== "camoufox"
     ? null
     : resolveRuntimeProviderBinding(input.identity_environment);
+  const configuredProvider = process.env.HARBOR_BROWSER_PROVIDER;
+  const providerId = selectLocalProviderId(
+    input.provider_id,
+    providerBinding?.selected_provider_id,
+    configuredProvider,
+    Boolean(camoufoxOverride && !explicitBrowserPath)
+  );
+  if (providerId === "camoufox") {
+    const camoufoxPath = input.browser_path || camoufoxOverride ||
+      (providerBinding?.selected_provider_id === "camoufox" ? providerBinding.selected_provider?.install.path : "") ||
+      detectBrowserProviders().providers.find((provider) => provider.provider_id === "camoufox")?.install.path || "";
+    return launchCamoufoxProvider({
+      ...input,
+      browser_path: camoufoxPath,
+      provider_id: "camoufox"
+    });
+  }
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
   if (!browserPath) {
     const diagnostic = providerBinding?.diagnostics[0] ?? diagnoseBrowserProviderFailure({ provider_id: "cloakbrowser", failure_class: "not_installed" });
@@ -101,6 +122,8 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     return {
       status: "ready",
       execution_surface: "local_provider",
+      driver_ref: opaqueRef("driver"),
+      driver_kind: "chromium_cdp",
       cdp_ref: opaqueRef("cdp"),
       viewer_entry: viewerEntry(input.headless),
       page,
@@ -149,6 +172,15 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     });
     return unavailable("launch_failed", diagnostic.app_summary, [...providerBindingFacts(providerBinding), ...profileStorage.facts]);
   }
+}
+
+export function selectLocalProviderId(
+  requested: string | undefined,
+  bound: string | null | undefined,
+  configured: string | undefined,
+  camoufoxAvailable: boolean
+): string | undefined {
+  return requested ?? bound ?? (configured === "camoufox" ? "camoufox" : undefined) ?? (camoufoxAvailable ? "camoufox" : undefined);
 }
 
 type WritePrecheckObservation = {
@@ -2104,6 +2136,8 @@ export function createFixtureLauncher(status: "ready" | "unavailable" | "profile
     return {
       status: "ready",
       execution_surface: "fixture",
+      driver_ref: opaqueRef("driver"),
+      driver_kind: "chromium_cdp",
       cdp_ref: opaqueRef("cdp"),
       viewer_entry: viewerEntry(input.headless),
       page,
@@ -2148,7 +2182,7 @@ function readyPage(current_url: string, title: string | null): LocalProviderPage
 
 function providerBindingFacts(binding: IdentityEnvironmentProviderBinding | null): RuntimeFact[] {
   const facts: RuntimeFact[] = [
-    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official" },
+    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official,camoufox" },
     { key: "provider.default", source: "configured", value: "cloakbrowser" },
     { key: "provider.excluded.chromium", source: "configured", value: "not_user_selectable" },
     { key: "provider.reference.donut_browser", source: "configured", value: "mechanism_reference_only" }

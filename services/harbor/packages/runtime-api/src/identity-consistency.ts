@@ -9,6 +9,7 @@ import {
 import type {
   BrowserProviderCapabilityFact,
   BrowserProviderDetectionInput,
+  BrowserProviderRole,
   IdentityEnvironmentProviderBinding
 } from "./provider-management.js";
 
@@ -62,7 +63,7 @@ export interface IdentityConsistencyFacts {
   profile_ref: string;
   provider: {
     selected_provider_id: IdentityEnvironmentProviderBinding["selected_provider_id"];
-    selected_role: "primary" | "restricted_fallback" | null;
+    selected_role: BrowserProviderRole | null;
     default_provider_id: "cloakbrowser";
     restricted_fallback_provider_id: "chrome_official";
     selection_reason: IdentityEnvironmentProviderBinding["selection_reason"];

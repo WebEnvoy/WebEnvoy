@@ -62,6 +62,7 @@ export type {
   LocalProviderLauncher,
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderDriverKind,
   LocalProviderMediaActionInput,
   LocalProviderMediaActionResult,
   LocalProviderPageFacts,
@@ -172,6 +173,7 @@ export class RuntimeSessionStore {
         }
         const result = await this.launcher({
           browser_path: input.browser_path ?? "",
+          provider_id: input.provider_id,
           headless,
           timeout_ms: input.timeout_ms ?? 15_000,
           url: requestedUrl,
@@ -218,11 +220,14 @@ export class RuntimeSessionStore {
       created_at: now,
       last_seen_at: now,
       availability: {
-        cdp: ready ? "available" : "unavailable",
+        driver: ready ? (launch.driver_ref || launch.cdp_ref ? "available" : "unsupported") : "unavailable",
+        cdp: ready ? (launch.cdp_ref ? "available" : "unsupported") : "unavailable",
         viewer: viewerAvailabilityState(viewer_entry.availability),
         snapshot: "unavailable",
         evidence: "unavailable"
       },
+      driver_ref: ready ? launch.driver_ref : undefined,
+      driver_kind: ready ? launch.driver_kind : undefined,
       cdp_ref: ready ? launch.cdp_ref : undefined,
       viewer_entry,
       current_page,
@@ -495,6 +500,7 @@ export class RuntimeSessionStore {
       record.facts.lifecycle_state = "failed";
       record.facts.current_error = error("session_cleanup_failed", "Runtime Session cleanup failed.", true);
       record.facts.availability.cdp = "unavailable";
+      record.facts.availability.driver = "unavailable";
       record.facts.availability.viewer = "unavailable";
       record.facts.availability.snapshot = "unavailable";
       this.viewerControls.markClosed(runtimeSessionRef, closingAt);
@@ -508,6 +514,7 @@ export class RuntimeSessionStore {
     record.facts.closed_at = now;
     record.facts.last_seen_at = now;
     record.facts.availability.cdp = "unavailable";
+    record.facts.availability.driver = "unavailable";
     record.facts.availability.viewer = "unavailable";
     record.facts.availability.snapshot = "unavailable";
     record.facts.control_owner = "none";

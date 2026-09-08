@@ -77,8 +77,10 @@ export function profileStoragePath(profileStorageRef: string): string {
 
 export function profileStorageHasExternalLock(profileStorageRef: string): boolean {
   const path = profileStoragePath(profileStorageRef);
-  const browserLock = join(path, "SingletonLock");
-  if (entryExists(browserLock) && !removeDemonstrablyStaleBrowserResidue(path, browserLock)) return true;
+  for (const browserLock of ["SingletonLock", "parent.lock", "lock"]) {
+    const lockPath = join(path, browserLock);
+    if (entryExists(lockPath) && !removeDemonstrablyStaleBrowserResidue(path, lockPath)) return true;
+  }
   return entryExists(join(path, ".harbor-profile-lock"));
 }
 
@@ -212,7 +214,7 @@ export function stageProfileStorageDelete(profileStorageRef: string): StagedProf
 }
 
 function clearRuntimeResidue(path: string): void {
-  for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", ".harbor-profile-lock"]) {
+  for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", "parent.lock", "lock", ".harbor-profile-lock"]) {
     rmSync(join(path, name), { recursive: true, force: true });
   }
 }
@@ -228,7 +230,7 @@ function removeDemonstrablyStaleBrowserResidue(profilePath: string, lockPath: st
     const unchanged = current.dev === entry.dev && current.ino === entry.ino && current.mtimeMs === entry.mtimeMs &&
       current.isSymbolicLink() && readlinkSync(lockPath) === original;
     if (!unchanged) return false;
-    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    for (const name of ["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", "parent.lock", "lock"]) {
       rmSync(join(profilePath, name), { recursive: true, force: true });
     }
     return !entryExists(lockPath);

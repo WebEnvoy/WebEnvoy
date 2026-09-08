@@ -1,4 +1,5 @@
 import type { LocalIdentityEnvironmentFacts, LocalIdentityEnvironmentInput } from "./identity-environment.js";
+import type { BrowserProviderId } from "./provider-management.js";
 import type { ControlOwner, InputCapability, TakeoverUnavailableReason, ViewerAccessMode, ViewerAvailability, ViewerTransport } from "./viewer-control.js";
 
 export const HARBOR_RUNTIME_FACTS_SCHEMA = "harbor-runtime-facts/v0";
@@ -8,6 +9,8 @@ export type AvailabilityState = "available" | "unavailable" | "policy_denied" | 
 export type FactSource = "configured" | "observed" | "provider_claim" | "validation_evidence";
 export type LifecycleState = "starting" | "active" | "idle" | "locked" | "disconnected" | "expired" | "failed" | "closed";
 export type ProviderMode = "local_dedicated_profile";
+/** The transport owned by a local provider driver. */
+export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler";
 export type RuntimeErrorCode =
   | "provider_unavailable"
   | "identity_environment_unavailable"
@@ -16,6 +19,7 @@ export type RuntimeErrorCode =
   | "session_locked"
   | "session_cleanup_failed"
   | "cdp_unavailable"
+  | "driver_unavailable"
   | "profile_locked"
   | "session_lost"
   | "capture_denied"
@@ -92,11 +96,15 @@ export interface RuntimeSessionFacts {
   last_seen_at: string;
   closed_at?: string;
   availability: {
+    /** Generic driver readiness. `cdp` remains for Chromium compatibility. */
+    driver?: AvailabilityState;
     cdp: AvailabilityState;
     viewer: AvailabilityState;
     snapshot: AvailabilityState;
     evidence: AvailabilityState;
   };
+  driver_ref?: string;
+  driver_kind?: LocalProviderDriverKind;
   cdp_ref?: string;
   viewer_ref?: string;
   viewer_entry?: RuntimeViewerEntry;
@@ -121,6 +129,12 @@ export function isRuntimeSessionReadable(
     );
 }
 
+export function isRuntimeDriverAvailable(
+  session: Pick<RuntimeSessionFacts, "availability">
+): boolean {
+  return (session.availability.driver ?? session.availability.cdp) === "available";
+}
+
 export interface ValidationRuntimeFacts {
   schema_version: typeof HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA;
   runtime_session_ref: string;
@@ -143,6 +157,7 @@ export interface CreateRuntimeSessionInput {
   profile_ref?: string;
   profile_storage_ref?: string;
   provider_ref?: string;
+  provider_id?: BrowserProviderId;
   control_owner?: ControlOwner;
   holder_ref?: string;
   managed_identity_environment?: LocalIdentityEnvironmentFacts;
@@ -167,6 +182,7 @@ export interface LocalProviderLaunchInput {
   profile_ref: string;
   profile_storage_ref?: string;
   provider_ref: string;
+  provider_id?: BrowserProviderId;
   identity_environment?: LocalIdentityEnvironmentFacts;
   resolve_proxy?: (proxy_ref: string) => string | null;
 }
@@ -641,7 +657,11 @@ export type LocalProviderReadProbeResult =
 export type LocalProviderLaunchResult =
   | {
       status: "ready";
-      cdp_ref: string;
+      /** Opaque generic driver handle. CDP providers may omit this for compatibility. */
+      driver_ref?: string;
+      driver_kind?: LocalProviderDriverKind;
+      /** Opaque CDP handle, present only for Chromium/CDP drivers. */
+      cdp_ref?: string;
       viewer_entry: RuntimeViewerEntry;
       page: LocalProviderPageFacts;
       facts: RuntimeFact[];

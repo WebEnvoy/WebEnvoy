@@ -240,7 +240,7 @@ test("reports provider unavailability as structured runtime facts", async () => 
   assert.equal(session.availability.cdp, "unavailable");
 });
 
-test("detects only CloakBrowser and official Chrome provider status", () => {
+test("detects registered provider status without promoting Camoufox to the default", () => {
   const catalog = detectBrowserProviders(providerFixture({
     [cloakPath]: { executable: true },
     [chromePath]: { executable: true },
@@ -250,13 +250,14 @@ test("detects only CloakBrowser and official Chrome provider status", () => {
     "/Applications/Chromium.app/Contents/MacOS/Chromium": { executable: true }
   }));
 
-  assert.deepEqual(catalog.providers.map((provider) => provider.provider_id), ["cloakbrowser", "chrome_official"]);
+  assert.deepEqual(catalog.providers.map((provider) => provider.provider_id), ["cloakbrowser", "chrome_official", "camoufox"]);
   assert.equal(catalog.providers.some((provider) => provider.display_name === "Chromium"), false);
   assert.equal(catalog.excluded_providers.some((provider) => provider.provider === "chromium"), true);
   assert.equal(catalog.excluded_providers.some((provider) => provider.provider === "donut_browser"), true);
 
   const cloak = catalog.providers[0]!;
   const chrome = catalog.providers[1]!;
+  const camoufox = catalog.providers[2]!;
   assert.equal(cloak.role, "primary");
   assert.equal(cloak.default_for_identity_environment, true);
   assert.equal(cloak.install.status, "installed");
@@ -264,6 +265,10 @@ test("detects only CloakBrowser and official Chrome provider status", () => {
   assert.equal(chrome.role, "restricted_fallback");
   assert.equal(chrome.install.version, "125.0.1");
   assert.equal(chrome.capabilities.find((capability) => capability.key === "native_fingerprint_control")?.state, "unsupported");
+  assert.equal(camoufox.role, "qualification");
+  assert.equal(camoufox.default_for_identity_environment, false);
+  assert.equal(camoufox.install.status, "missing");
+  assert.equal(camoufox.capabilities.find((capability) => capability.key === "cdp")?.state, "unsupported");
 });
 
 test("binds identity environments to CloakBrowser by default and warns on Chrome fallback", () => {
@@ -289,6 +294,16 @@ test("binds identity environments to CloakBrowser by default and warns on Chrome
   });
   assert.equal(unavailableRequested.selected_provider_id, null);
   assert.equal(unavailableRequested.selection_reason, "requested_provider_unavailable");
+
+  const camoufoxPath = "/private/tmp/camoufox.app/Contents/MacOS/camoufox";
+  const camoufox = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    requested_provider_id: "camoufox"
+  });
+  assert.equal(camoufox.selected_provider_id, "camoufox");
+  assert.equal(camoufox.selection_reason, "requested_provider_available");
+  assert.equal(camoufox.selected_provider?.role, "qualification");
 });
 
 test("explains provider install and launch failure diagnostics", () => {

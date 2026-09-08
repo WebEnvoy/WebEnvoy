@@ -1,0 +1,442 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  resolveCamoufoxOverride
+} from "./provider-management.js";
+import {
+  resolveIdentityEnvironmentLaunchConfiguration,
+  type ResolvedIdentityEnvironmentLaunchConfiguration
+} from "./identity-environment-configuration.js";
+import { opaqueRef } from "./refs.js";
+import { prepareProfileStorage, profileStorageHasExternalLock } from "./profile-storage.js";
+import { trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
+import type {
+  LocalProviderLaunchInput,
+  LocalProviderLaunchResult,
+  LocalProviderPageFacts,
+  LocalProviderSiteResourceProbeInput,
+  LocalProviderSiteResourceProbeResult,
+  RuntimeErrorCode,
+  RuntimeFact,
+  RuntimePageStatus
+} from "./runtime-session-types.js";
+
+const CAMOUFOX_DRIVER_KIND = "firefox_juggler" as const;
+const DRIVER_COMMAND_TIMEOUT_MS = 5_000;
+const SITE_PROBE_TIMEOUT_MS = 3_000;
+const MAX_DRIVER_LINE_BYTES = 256 * 1024;
+
+type DriverPage = {
+  current_url: string | null;
+  title: string | null;
+  status: RuntimePageStatus;
+};
+
+type DriverReady = {
+  page: DriverPage;
+  python_version?: string;
+  camoufox_version?: string;
+  browser_version?: string;
+  properties_source?: "adjacent" | "resources_copy";
+};
+
+class CamoufoxDriverProtocolError extends Error {}
+
+interface PendingResponse {
+  resolve: (value: Record<string, unknown>) => void;
+  reject: (cause: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+class CamoufoxDriverProcess {
+  private readonly child: ChildProcess;
+  private readonly pending = new Map<number, PendingResponse>();
+  private nextId = 1;
+  private stdoutBuffer = "";
+  private terminated = false;
+
+  constructor(pythonPath: string, helperPath: string) {
+    this.child = spawn(pythonPath, [helperPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, PYTHONUNBUFFERED: "1" }
+    });
+    this.child.stdout?.setEncoding("utf8");
+    this.child.stderr?.resume();
+    this.child.stdout?.on("data", (chunk: string) => this.readStdout(chunk));
+    this.child.on("error", (cause) => this.failPending(cause));
+    this.child.on("close", (code, signal) => {
+      this.terminated = true;
+      this.failPending(new CamoufoxDriverProtocolError(
+        `Camoufox Driver exited before completing the command (${code ?? "signal"}${signal ? `:${signal}` : ""}).`
+      ));
+    });
+  }
+
+  async request(op: string, payload: Record<string, unknown>, timeoutMs = DRIVER_COMMAND_TIMEOUT_MS): Promise<Record<string, unknown>> {
+    if (this.terminated || !this.child.stdin || this.child.stdin.destroyed) {
+      throw new CamoufoxDriverProtocolError("Camoufox Driver process is not running.");
+    }
+    const id = this.nextId++;
+    const line = `${JSON.stringify({ id, op, ...payload })}\n`;
+    if (Buffer.byteLength(line, "utf8") > MAX_DRIVER_LINE_BYTES) {
+      throw new CamoufoxDriverProtocolError("Camoufox Driver command is too large.");
+    }
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new CamoufoxDriverProtocolError(`Camoufox Driver command timed out: ${op}.`));
+      }, Math.max(1, timeoutMs));
+      this.pending.set(id, { resolve, reject, timer });
+      try {
+        this.child.stdin!.write(line, (cause) => {
+          if (!cause) return;
+          const pending = this.pending.get(id);
+          if (!pending) return;
+          clearTimeout(pending.timer);
+          this.pending.delete(id);
+          reject(cause);
+        });
+      } catch (cause) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(cause);
+      }
+    }).then((response) => {
+      if (response.status === "error") {
+        const message = typeof response.message === "string" ? response.message : "Camoufox Driver rejected the command.";
+        throw new CamoufoxDriverProtocolError(message);
+      }
+      return response;
+    });
+  }
+
+  async terminate(): Promise<void> {
+    if (this.terminated) return;
+    this.terminated = true;
+    this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver was closed."));
+    await new Promise<void>((resolve) => {
+      let exited = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onClose = () => {
+        exited = true;
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      this.child.once("close", onClose);
+      if (!this.child.killed) this.child.kill("SIGTERM");
+      timer = setTimeout(() => {
+        if (!exited) this.child.kill("SIGKILL");
+        resolve();
+      }, 500);
+    });
+  }
+
+  private readStdout(chunk: string): void {
+    this.stdoutBuffer += chunk;
+    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > MAX_DRIVER_LINE_BYTES * 2) {
+      void this.terminate();
+      this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver output is too large."));
+      return;
+    }
+    while (true) {
+      const newline = this.stdoutBuffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = this.stdoutBuffer.slice(0, newline).trim();
+      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
+      if (!line) continue;
+      if (Buffer.byteLength(line, "utf8") > MAX_DRIVER_LINE_BYTES) {
+        this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver response is too large."));
+        void this.terminate();
+        return;
+      }
+      let response: unknown;
+      try {
+        response = JSON.parse(line);
+      } catch {
+        this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver returned invalid JSON."));
+        void this.terminate();
+        return;
+      }
+      if (!response || typeof response !== "object" || Array.isArray(response)) continue;
+      const message = response as Record<string, unknown>;
+      const id = message.id;
+      if (typeof id !== "number") continue;
+      const pending = this.pending.get(id);
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.resolve(message);
+    }
+  }
+
+  private failPending(cause: unknown): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(cause);
+    }
+  }
+}
+
+export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
+  const browserPath = input.browser_path || resolveCamoufoxOverride(process.env) || "";
+  const helperPath = process.env.HARBOR_CAMOUFOX_DRIVER_PATH ||
+    join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
+  const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON || process.env.CAMOUFOX_PYTHON || "python3";
+  if (!browserPath) return unavailable("provider_unavailable", "Camoufox executable is not configured.");
+  if (!existsSync(helperPath)) return unavailable("driver_unavailable", "Camoufox Driver helper is not installed.");
+
+  const configuration = input.identity_environment
+    ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy)
+    : null;
+  if (input.identity_environment && !configuration) {
+    return unavailable("unsupported", "Identity environment configuration cannot be resolved by Camoufox.");
+  }
+  if (configuration && configuration.provider_id !== "camoufox") {
+    return unavailable("provider_unavailable", "The identity environment is bound to a different provider.");
+  }
+
+  const profileStorage = await prepareProfileStorage(input.profile_storage_ref);
+  if (input.profile_storage_ref && profileStorageHasExternalLock(input.profile_storage_ref)) {
+    return unavailable("profile_locked", "Camoufox cannot use a profile locked by another browser or Harbor operation.", profileStorage.facts);
+  }
+  const driver = new CamoufoxDriverProcess(pythonPath, helperPath);
+  const launchDeadline = Date.now() + Math.max(1, input.timeout_ms);
+  let closed = false;
+  try {
+    const initialUrl = camoufoxConfigurationPageUrl(input);
+    const readyResponse = await driver.request("launch", {
+      executable_path: browserPath,
+      profile_dir: profileStorage.profileDir,
+      headless: input.headless,
+      url: initialUrl,
+      locale: configuration?.language ?? null,
+      timezone: configuration?.timezone ?? null,
+      viewport: configuration?.viewport ?? null,
+      proxy_server: configuration?.proxy_server ?? null,
+      timeout_ms: input.timeout_ms
+    }, remainingTimeout(launchDeadline));
+    const ready = parseDriverReady(readyResponse);
+    let observedPage = ready.page;
+    let currentUrl = observedPage.current_url ?? initialUrl;
+    if (initialUrl !== input.url) {
+      const opened = await driver.request("open_url", { url: input.url }, remainingTimeout(launchDeadline));
+      observedPage = parseDriverPage(opened);
+      currentUrl = observedPage.current_url ?? input.url;
+    }
+    const evidenceRef = opaqueRef("validation");
+    const page = pageFacts(observedPage);
+    const facts = [
+      ...profileStorage.facts,
+      { key: "provider.id", source: "configured", value: "camoufox" } satisfies RuntimeFact,
+      { key: "provider.driver.kind", source: "configured", value: CAMOUFOX_DRIVER_KIND } satisfies RuntimeFact,
+      { key: "provider.driver.transport", source: "configured", value: "firefox_juggler_pipe" } satisfies RuntimeFact,
+      { key: "browser.launch", source: "observed", value: "ready", evidence_ref: evidenceRef } satisfies RuntimeFact,
+      { key: "camoufox.python.version", source: "observed", value: ready.python_version ?? "unknown", evidence_ref: evidenceRef } satisfies RuntimeFact,
+      { key: "camoufox.package.version", source: "observed", value: ready.camoufox_version ?? "unknown", evidence_ref: evidenceRef } satisfies RuntimeFact,
+      { key: "camoufox.browser.version", source: "observed", value: ready.browser_version ?? "unknown", evidence_ref: evidenceRef } satisfies RuntimeFact,
+      { key: "camoufox.properties.source", source: "observed", value: ready.properties_source ?? "adjacent", evidence_ref: evidenceRef } satisfies RuntimeFact,
+      ...configurationFacts(configuration, evidenceRef),
+      ...page.facts
+    ];
+    return {
+      status: "ready",
+      execution_surface: "local_provider",
+      driver_ref: opaqueRef("driver"),
+      driver_kind: CAMOUFOX_DRIVER_KIND,
+      viewer_entry: camoufoxViewerEntry(input.headless),
+      page,
+      facts,
+      openUrl: async (url) => {
+        const response = await driver.request("open_url", { url, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
+        const next = pageFacts(parseDriverPage(response));
+        currentUrl = next.current_url ?? url;
+        return next;
+      },
+      probeSiteResource: trustLocalProviderSiteResourceProbe((probe) =>
+        probeCamoufoxSiteResource(driver, currentUrl, probe)
+      ),
+      captureScreenshot: async () => ({
+        code: "unsupported",
+        message: "Camoufox Driver screenshot capture is outside this vertical slice.",
+        retryable: false
+      }),
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        try {
+          await driver.request("close", {}, 1_000);
+        } finally {
+          await driver.terminate();
+          if (!profileStorage.persistent) await rm(profileStorage.profileDir, { recursive: true, force: true });
+        }
+      }
+    };
+  } catch (cause) {
+    try {
+      // Give the bridge a chance to remove a Driver-owned launch layout after
+      // an early properties or runtime rejection before terminating it.
+      await driver.request("close", {}, 1_000);
+    } catch {
+      // A hung or already-dead provider is handled by the bounded terminate.
+    }
+    await driver.terminate();
+    if (!profileStorage.persistent) await rm(profileStorage.profileDir, { recursive: true, force: true });
+    const message = safeErrorMessage(cause);
+    const failureCode: RuntimeErrorCode = /driver|juggler|playwright|properties\.json/i.test(message)
+      ? "driver_unavailable"
+      : "provider_unavailable";
+    return unavailable(
+      failureCode,
+      `Camoufox Driver launch failed: ${message}`,
+      [...profileStorage.facts]
+    );
+  }
+}
+
+function parseDriverReady(response: Record<string, unknown>): DriverReady {
+  const page = parseDriverPage(response);
+  return {
+    page,
+    python_version: stringField(response, "python_version"),
+    camoufox_version: stringField(response, "camoufox_version"),
+    browser_version: stringField(response, "browser_version"),
+    properties_source: response.properties_source === "resources_copy" ? "resources_copy" : "adjacent"
+  };
+}
+
+function parseDriverPage(response: Record<string, unknown>): DriverPage {
+  const page = response.page;
+  if (!page || typeof page !== "object" || Array.isArray(page)) {
+    throw new CamoufoxDriverProtocolError("Camoufox Driver returned no page facts.");
+  }
+  const value = page as Record<string, unknown>;
+  const status: RuntimePageStatus = value.status === "ready" ? "ready" : value.status === "unavailable" ? "unavailable" : "unknown";
+  return {
+    current_url: typeof value.current_url === "string" ? value.current_url : null,
+    title: typeof value.title === "string" ? value.title : null,
+    status
+  };
+}
+
+async function probeCamoufoxSiteResource(
+  driver: CamoufoxDriverProcess,
+  currentUrl: string,
+  input: LocalProviderSiteResourceProbeInput
+): Promise<LocalProviderSiteResourceProbeResult> {
+  if (input.signal?.aborted) throw input.signal.reason;
+  const response = await driver.request("site_resource_probe", {
+    site_id: input.site_id,
+    task_kind: input.task_kind,
+    current_url: currentUrl
+  }, SITE_PROBE_TIMEOUT_MS);
+  if (input.signal?.aborted) throw input.signal.reason;
+  const observation = response.observation;
+  if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+    return { status: "unknown", failure_class: "provider_probe_unavailable", message: "Camoufox Driver returned no public site observation.", verified_fact_keys: [] };
+  }
+  const value = observation as Record<string, unknown>;
+  const origin = stringField(value, "origin");
+  const pathname = stringField(value, "pathname");
+  const loginLike = value.login_like === true;
+  const challengeLike = value.challenge_like === true;
+  if (challengeLike) return { status: "blocked", failure_class: "safety_challenge", message: "The site page shows a verification or safety challenge.", verified_fact_keys: [] };
+  if (loginLike) return { status: "blocked", failure_class: "not_logged_in", message: "The site page requires manual login.", verified_fact_keys: [] };
+  if (input.site_id === "xiaohongshu") {
+    if (origin !== "https://www.xiaohongshu.com") return { status: "unavailable", failure_class: "page_not_ready", message: "The active page is not on the canonical Xiaohongshu origin.", verified_fact_keys: [] };
+    const verified = [
+      ...(value.vue_ready === true ? ["page.vue_app.ready" as const] : []),
+      ...(value.pinia_ready === true ? ["page.pinia_store.ready" as const] : [])
+    ];
+    if (value.ready !== true || value.vue_ready !== true || value.pinia_ready !== true) {
+      return { status: "unavailable", failure_class: "page_not_ready", message: "The Xiaohongshu Vue app or Pinia store is not ready.", verified_fact_keys: verified };
+    }
+    return { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: verified };
+  }
+  if (origin !== "https://www.zhipin.com" || pathname !== "/web/geek/job") {
+    return { status: "unavailable", failure_class: "page_not_ready", message: "The active page is not the canonical BOSS job-search surface.", verified_fact_keys: [] };
+  }
+  if (value.ready !== true || value.vue_owned !== true || value.rendered_surface !== true || value.job_cards_valid !== true || typeof value.job_card_count !== "number" || value.job_card_count < 1) {
+    return { status: "unavailable", failure_class: "page_not_ready", message: "The canonical BOSS page has no verified SPA job-search surface.", verified_fact_keys: [] };
+  }
+  return { status: "available", observed_at: new Date().toISOString(), evidence_ref: opaqueRef("validation"), verified_fact_keys: ["page.boss_spa.ready"] };
+}
+
+function pageFacts(page: DriverPage): LocalProviderPageFacts {
+  return { current_url: page.current_url, title: page.title, status: page.status, facts: pageFactList(page, opaqueRef("validation")) };
+}
+
+function pageFactList(page: DriverPage, evidenceRef: string): RuntimeFact[] {
+  return [
+    { key: "page.current_url", source: "observed", value: page.current_url ?? "unavailable", evidence_ref: evidenceRef },
+    { key: "page.title", source: "observed", value: page.title ?? "unavailable", evidence_ref: evidenceRef },
+    { key: "page.status", source: "validation_evidence", value: page.status, evidence_ref: evidenceRef }
+  ];
+}
+
+function configurationFacts(configuration: ResolvedIdentityEnvironmentLaunchConfiguration | null, evidenceRef: string): RuntimeFact[] {
+  if (!configuration) return [];
+  const facts: RuntimeFact[] = [
+    { key: "identity_environment.provider_id", source: "validation_evidence", value: configuration.provider_id, evidence_ref: evidenceRef }
+  ];
+  if (configuration.proxy_server) facts.push({ key: "identity_environment.proxy", source: "configured", value: "provider_argument_applied", evidence_ref: evidenceRef });
+  if (configuration.language) facts.push({ key: "identity_environment.language", source: "observed", value: configuration.language, evidence_ref: evidenceRef });
+  if (configuration.timezone) facts.push({ key: "identity_environment.timezone", source: "observed", value: configuration.timezone, evidence_ref: evidenceRef });
+  if (configuration.viewport) facts.push({ key: "identity_environment.viewport", source: "observed", value: `${configuration.viewport.width}x${configuration.viewport.height}`, evidence_ref: evidenceRef });
+  return facts;
+}
+
+function camoufoxConfigurationPageUrl(input: LocalProviderLaunchInput): string {
+  try {
+    const url = new URL(input.url);
+    if (input.identity_environment?.site_binding.site_id === "xiaohongshu" &&
+      ((url.origin === "https://www.xiaohongshu.com" && ["/search_result", "/search_result/"].includes(url.pathname)) ||
+        (url.origin === "https://creator.xiaohongshu.com" && ["/publish/publish", "/publish/publish/"].includes(url.pathname)))) {
+      return "https://www.xiaohongshu.com/explore";
+    }
+  } catch {
+    // Runtime Session owns URL validation.
+  }
+  return input.url;
+}
+
+function camoufoxViewerEntry(headless: boolean): Exclude<LocalProviderLaunchResult, { status: "unavailable" }>['viewer_entry'] {
+  return headless ? {
+    availability: "unsupported",
+    access_mode: "none",
+    transport: "not_applicable",
+    input_capabilities: [],
+    unavailable_reason: "unsupported"
+  } : {
+    availability: "available",
+    access_mode: "interactive",
+    transport: "local_window",
+    input_capabilities: ["keyboard_mouse"]
+  };
+}
+
+function remainingTimeout(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Camoufox Driver launch timed out.");
+  return remaining;
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | undefined {
+  return typeof value[key] === "string" && value[key] ? value[key] as string : undefined;
+}
+
+function safeErrorMessage(cause: unknown): string {
+  if (!(cause instanceof Error)) return "unknown error";
+  return cause.message.replace(/\s+/g, " ").slice(0, 240);
+}
+
+function unavailable(code: RuntimeErrorCode, message: string, facts: RuntimeFact[] = []): LocalProviderLaunchResult {
+  return {
+    status: "unavailable",
+    error: { code, message, retryable: code !== "unsupported" },
+    facts: [...facts, { key: "browser.launch", source: "observed", value: code }]
+  };
+}
