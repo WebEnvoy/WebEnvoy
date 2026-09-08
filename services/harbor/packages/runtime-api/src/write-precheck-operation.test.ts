@@ -64,6 +64,7 @@ const publicObservationExpected = {
 const publicObservationRaw = {
   account_candidates: [{ label: "示例账号", ref: publicObservationExpected.account_ref }],
   business_target_candidates: [{ label: "图片草稿", ref: publicObservationExpected.business_target_ref }],
+  media_source_kind: "xiaohongshu.creator_publish_page.preview_image_source/v1",
   image_count: 2,
   ordered_item_refs: [...publicObservationExpected.media_refs],
   title_summary: { state: "present", length: publicObservationExpected.title.length, fingerprint: "fnv1a:12345678" },

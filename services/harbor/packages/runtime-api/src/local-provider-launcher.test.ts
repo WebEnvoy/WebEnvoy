@@ -495,6 +495,9 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     hidden: false,
     readOnly: false,
     textContent: label,
+    naturalWidth: 100,
+    naturalHeight: 100,
+    get currentSrc() { return attributes.src ?? ""; },
     contains: () => true,
     closest: () => null,
     getAttribute: (name: string) => attributes[name] ?? null,
@@ -504,9 +507,12 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   });
   const title = element("", { placeholder: "填写标题" });
   const body = element("test body", { contenteditable: "true" });
+  const firstImage = element("", { src: "blob:https://creator.xiaohongshu.com/first-preview" });
+  const secondImage = element("", { src: "https://ci.xiaohongshu.com/second-preview.webp" });
+  const imageElements = [firstImage, secondImage];
   const imageComposition = {
     ...element("图片编辑 1/18"),
-    querySelectorAll: (selector: string) => selector === "img" ? [element("")] : []
+    querySelectorAll: (selector: string) => selector === "img" ? imageElements : []
   };
   const hostAttributes: Record<string, string> = {
     "is-publish": "true",
@@ -556,6 +562,15 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_auth_store.user_info/v1");
   assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen", stable_id: "user-123" }]);
   assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page.image_text_upload/v1");
+  assert.equal(result.public_observation.media_source_kind, "xiaohongshu.creator_publish_page.preview_image_source/v1");
+  assert.equal(result.public_observation.ordered_item_refs.length, 2);
+  assert.equal(new Set(result.public_observation.ordered_item_refs).size, 2);
+  assert.equal(result.public_observation.ordered_item_refs.every((ref: string) => /^media:sha256:[a-f0-9]{64}$/.test(ref)), true);
+
+  imageElements.reverse();
+  const reordered = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  assert.deepEqual(reordered.public_observation.ordered_item_refs, [...result.public_observation.ordered_item_refs].reverse());
+  assert.notEqual(reordered.public_observation.page_fingerprint, result.public_observation.page_fingerprint);
 
   delete hostAttributes["submit-disabled"];
   const missingDisabled = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());

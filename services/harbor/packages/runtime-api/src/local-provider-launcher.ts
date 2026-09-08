@@ -183,6 +183,7 @@ type WritePrecheckObservation = {
     account_candidates?: readonly { label?: unknown; ref?: unknown; stable_id?: unknown }[];
     business_target_candidates?: readonly { label?: unknown; ref?: unknown }[];
     business_target_kind?: unknown;
+    media_source_kind?: unknown;
     image_count?: unknown;
     ordered_item_refs?: readonly unknown[];
     title_summary?: { state?: unknown; length?: unknown; fingerprint?: unknown };
@@ -384,7 +385,9 @@ function publicObservationFromObservation(
   const imageCount = typeof raw?.image_count === "number" && Number.isInteger(raw.image_count) && raw.image_count >= 0 && raw.image_count <= 100
     ? raw.image_count
     : null;
-  const refs = Array.isArray(raw?.ordered_item_refs) ? raw.ordered_item_refs.map(boundedPublicObservationRef) : [];
+  const refs = raw?.media_source_kind === "xiaohongshu.creator_publish_page.preview_image_source/v1" && Array.isArray(raw.ordered_item_refs)
+    ? raw.ordered_item_refs.map(boundedPublicObservationRef)
+    : [];
   const safeRefs = refs.every((ref): ref is string => ref !== null) && new Set(refs).size === refs.length ? refs : [];
   const order_status: XhsPublicObservation["media"]["order_status"] = imageCount === 0 || (imageCount !== null && safeRefs.length === imageCount) ? "observed" : "unknown";
   const expectedMediaRefs = expected?.media_refs;
@@ -1951,7 +1954,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
     const pathLabels = ${JSON.stringify(labels)};
     const selectPath = ${JSON.stringify(selectPath)};
     const strictPath = ${JSON.stringify(selectPath || exactPath)};
-    const observe = () => {
+    const observe = async () => {
       const bodyText = (document.body?.innerText || '').slice(0, 20000);
       const visible = (el, allowDisabled = true) => {
         const s = el ? getComputedStyle(el) : null;
@@ -2088,9 +2091,23 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const imageElements = imageCompositionSurface
         ? [...imageCompositionSurface.querySelectorAll('img')].filter((el) => visible(el) && (el.naturalWidth > 24 || el.getBoundingClientRect().width >= 24))
         : [];
-      // The current XHS page exposes no pinned opaque media-ref source. Keep
-      // order unknown instead of treating DOM position or an invented attr as a ref.
-      const imageRefs = imageElements.map(() => null);
+      const imageRef = async (el) => {
+        const source = typeof el.currentSrc === 'string' && el.currentSrc || el.getAttribute('src') || '';
+        if (!source || source.length > 8192 || !globalThis.crypto?.subtle) return null;
+        let canonical;
+        try {
+          canonical = new URL(source, location.href);
+        } catch {
+          return null;
+        }
+        if (!['https:', 'http:', 'blob:', 'data:'].includes(canonical.protocol)) return null;
+        const signal = JSON.stringify([canonical.href, el.naturalWidth || 0, el.naturalHeight || 0]);
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(signal));
+        return 'media:sha256:' + [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      };
+      // A source digest gives each visible app-owned preview an identity while
+      // keeping its URL in the page. DOM position only orders those identities.
+      const imageRefs = await Promise.all(imageElements.map(imageRef));
       const pageFingerprint = fingerprint([
         location.origin,
         location.pathname,
@@ -2139,6 +2156,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
           account_candidates: accountCandidates,
           business_target_candidates: businessTargetCandidates,
           business_target_kind: businessTargetKind,
+          media_source_kind: 'xiaohongshu.creator_publish_page.preview_image_source/v1',
           image_count: imageCompositionSurface ? imageElements.length : null,
           ordered_item_refs: imageRefs,
           title_summary: fieldSummary(Boolean(titleControl), titleValue),
@@ -2149,11 +2167,11 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
     };
     ${selectPath ? pathSelectionProbeExpression() : ""}
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const observation = observe();
+      const observation = await observe();
       if (observation.challenge_like || observation.login_like || observation.creator_app_owned) return { ...observation, selection_status: selectPath ? 'selected' : 'not_performed' };
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    return { ...observe(), selection_status: selectPath ? 'unknown' : 'not_performed' };
+    return { ...(await observe()), selection_status: selectPath ? 'unknown' : 'not_performed' };
   })()`;
 }
 
