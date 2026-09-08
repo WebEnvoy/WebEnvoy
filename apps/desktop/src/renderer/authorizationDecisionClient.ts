@@ -172,7 +172,8 @@ function parseConfirmationContext(value: unknown): XhsConfirmationContext | null
     record.schema_version !== "webenvoy.xhs-confirmation-context/v0" || (record.status !== "ready" && record.status !== "blocked") || record.fail_closed !== true ||
     binding == null || !hasExactKeys(binding, ["runtime_session_ref", "identity_environment_ref", "profile_ref", "provider_ref", "control_owner", "observation_generation", "observation_ref"]) ||
     ![binding.runtime_session_ref, binding.identity_environment_ref, binding.profile_ref, binding.provider_ref, binding.observation_ref].every(validRef) ||
-    binding.control_owner !== "core_task" || typeof binding.observation_generation !== "string" || !/^fnv1a:[a-f0-9]{8}$/.test(binding.observation_generation) ||
+    binding.control_owner !== "core_task" || typeof binding.observation_generation !== "string" ||
+    !(binding.observation_generation === "unknown" || /^fnv1a:[a-f0-9]{8}$/.test(binding.observation_generation)) ||
     account == null || businessTarget == null || page == null || !hasExactKeys(page, ["status", "url", "fingerprint", "diff"]) ||
     (page.status !== "verified" && page.status !== "unknown" && page.status !== "stale") || typeof page.url !== "string" || !validHttpsUrl(page.url) ||
     (page.fingerprint !== null && (typeof page.fingerprint !== "string" || !/^fnv1a:[a-f0-9]{8}$/.test(page.fingerprint))) ||
@@ -226,7 +227,7 @@ function isConfirmationStatus(value: unknown): value is ConfirmationStatus {
 }
 
 function validRef(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 512 && !value.includes("://");
+  return typeof value === "string" && value.length <= 200 && /^[A-Za-z][A-Za-z0-9._:/-]*$/.test(value);
 }
 
 function validSummary(value: unknown): value is string | null {
