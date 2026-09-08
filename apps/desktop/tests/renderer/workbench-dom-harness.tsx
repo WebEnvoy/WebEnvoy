@@ -1,3 +1,4 @@
+import { runControlChangedEvent } from "../../src/renderer/runInstanceClient";
 import { checkRunInstanceControls } from "./run-instance-controls-smoke";
 import { BriefcaseBusiness } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -1051,8 +1052,19 @@ async function checkXhsCommitConfirmationContext() {
     authorizationDecisionRefs: [decisionRef],
   };
   let ready = true;
+  let rejectSubmit = false;
+  let submissions = 0;
+  let delaySubmit = false;
+  let releaseSubmit: (() => void) | undefined;
   window.webenvoyShell!.requestOwnerJson = async (request) => {
-    if (request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}/preflight`) ready = true;
+    if (request.path.endsWith("/single-action")) {
+      submissions += 1;
+      if (delaySubmit) await new Promise<void>((resolve) => { releaseSubmit = resolve; });
+      ready = false;
+      rejectSubmit = true;
+      return { ok: false, status: 409, body: { error: { category: "action_risk", code: "account_unknown" } } };
+    }
+    if (request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}/preflight` && !rejectSubmit) ready = true;
     return request.path.startsWith(`/authorization-decisions/${encodeURIComponent(decisionRef)}`)
       ? { ok: true, body: { ok: true, authorization_decision: xhsCommitDecision(decisionRef, run.id, run.turnId), confirmation_context: xhsConfirmationContext(ready) } }
       : original(request);
@@ -1070,6 +1082,17 @@ async function checkXhsCommitConfirmationContext() {
     assert(mounted.container.textContent?.includes("已核验 · 创作者账号") && mounted.container.textContent?.includes("发布笔记") &&
       mounted.container.textContent?.includes("示例标题") && mounted.container.textContent?.includes("未变化") &&
       mounted.container.textContent?.includes("允许这一次"), "Ready XHS confirmation omitted facts or the allow action.");
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("账号状态未知") === true, "Rejected submit did not replace the previous ready summary.");
+    assert(submissions === 1 && !mounted.container.textContent?.includes("重试这次决定") && !mounted.container.textContent?.includes("允许这一次"), "Definite refusal retained a blind submit retry.");
+    rejectSubmit = false;
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "Refused confirmation did not require fresh observation.");
+    window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId: run.id } }));
+    await waitFor(() => mounted.container.textContent?.includes("控制权已操作") === true, "Control change did not invalidate cached confirmation.");
+    assert(!mounted.container.textContent?.includes("允许这一次"), "Takeover retained allow from before control changed.");
+    mounted.container.querySelector<HTMLButtonElement>("button")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "Control return did not recover after explicit reobservation.");
     mounted.root.unmount();
     mounted.container.remove();
     ready = false;
@@ -1079,6 +1102,14 @@ async function checkXhsCommitConfirmationContext() {
       mounted.container.textContent?.includes("重新检查"), "Blocked XHS confirmation exposed commit or omitted recovery.");
     mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
     await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "XHS confirmation did not recover after a fresh same-instance observation.");
+    delaySubmit = true;
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("处理中") === true, "Delayed confirmation did not enter submitting state.");
+    window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId: run.id } }));
+    await waitFor(() => mounted.container.textContent?.includes("控制权已操作") === true, "Control change did not invalidate an in-flight confirmation.");
+    releaseSubmit?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert(mounted.container.textContent?.includes("控制权已操作") && !mounted.container.textContent?.includes("允许这一次"), "Late submit response restored stale confirmation state.");
     mounted.root.unmount();
     mounted.container.remove();
   } finally {
@@ -1267,11 +1298,11 @@ async function runNarrowChecks() {
   return { fullWidthRightPanel: true, horizontalOverflow: false, viewport: `${innerWidth}x${innerHeight}` };
 }
 
-window.__runWorkbenchDomSmoke = async (phase: "desktop" | "narrow") =>
-  phase === "desktop" ? runDesktopChecks() : runNarrowChecks();
+window.__runWorkbenchDomSmoke = async (phase: "desktop" | "narrow" | "confirmation") =>
+  phase === "confirmation" ? checkXhsCommitConfirmationContext().then(async () => { await checkRunInstanceControls(); return { confirmation: true, control: true }; }) : phase === "desktop" ? runDesktopChecks() : runNarrowChecks();
 
 declare global {
   interface Window {
-    __runWorkbenchDomSmoke: (phase: "desktop" | "narrow") => Promise<Record<string, unknown>>;
+    __runWorkbenchDomSmoke: (phase: "desktop" | "narrow" | "confirmation") => Promise<Record<string, unknown>>;
   }
 }

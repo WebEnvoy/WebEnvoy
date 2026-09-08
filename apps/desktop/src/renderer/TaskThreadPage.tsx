@@ -2,6 +2,7 @@ import { AlertTriangle, Check, PanelRightOpen, ShieldAlert, X } from "lucide-rea
 import { useEffect, useRef, useState } from "react";
 
 import { canAllowPendingDecision, decideSingleAction, fetchPendingAuthorizationDecision, refreshPendingAuthorizationDecision, requiresXhsConfirmationContext, type PendingAuthorizationDecision, type XhsConfirmationContext } from "./authorizationDecisionClient";
+import { runControlChangedEvent } from "./runInstanceClient";
 import { fetchCoreRunResult, type CoreRunResultState } from "./coreRunResultClient";
 import { policySourceLabel } from "./executionPolicyClient";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
@@ -224,28 +225,47 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
   const [state, setState] = useState<ConfirmationState>({ status: "idle" });
   const [reloadKey, setReloadKey] = useState(0);
   const statusRef = useRef<HTMLElement>(null);
+  const generation = useRef(0);
+  useEffect(() => {
+    const invalidate = (event: Event) => {
+      const detail = (event as CustomEvent<{ coreEndpoint: string; runId: string }>).detail;
+      if (detail.coreEndpoint !== endpoint || detail.runId !== run.id) return;
+      generation.current += 1;
+      setState({ status: "failed", summary: "控制权已操作；请重新检查同一 Instance 后再次确认。", retry: "fetch" });
+    };
+    window.addEventListener(runControlChangedEvent, invalidate);
+    return () => {
+      generation.current += 1;
+      window.removeEventListener(runControlChangedEvent, invalidate);
+    };
+  }, [endpoint, run.id]);
   const refsKey = (run.authorizationDecisionRefs ?? []).join("\u0000");
 
   useEffect(() => {
     const refs = run.authorizationDecisionRefs ?? [];
     if (run.turnStatus !== "waiting_for_user" || run.turnId == null || refs.length === 0) {
+      generation.current += 1;
       setState({ status: "idle" });
       return;
     }
     let cancelled = false;
+    const currentGeneration = ++generation.current;
     setState({ status: "loading" });
-    void fetchPendingAuthorizationDecision(endpoint, {
+    void (reloadKey > 0 ? refreshPendingAuthorizationDecision : fetchPendingAuthorizationDecision)(endpoint, {
       decisionRef: refs.at(-1)!,
       runId: run.id,
       threadId: threadRef,
       turnId: run.turnId!,
     }).then((result) => {
-      if (cancelled) return;
+      if (cancelled || currentGeneration !== generation.current) return;
       setState(result.ok
         ? { status: "ready", decision: result.decision }
         : { status: "failed", summary: result.reason, retry: "fetch" });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      generation.current += 1;
+    };
   }, [endpoint, refsKey, reloadKey, run.id, run.turnId, run.turnStatus, threadRef]);
 
   async function submitDecision(
@@ -254,8 +274,14 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
     idempotencyKey = `app-single-action-${crypto.randomUUID()}`,
   ) {
     if (choice === "allow_once" && !canAllowPendingDecision(decision)) return;
+    const currentGeneration = ++generation.current;
     setState({ status: "submitting", decision });
     const result = await decideSingleAction(endpoint, decision.decisionRef, choice, idempotencyKey);
+    if (currentGeneration !== generation.current) return;
+    if (!result.ok && !result.retrySubmit) {
+      await refreshDecision(decision);
+      return;
+    }
     setState(result.ok
       ? { status: "settled", summary: result.summary }
       : { status: "failed", summary: result.reason, retry: "submit", decision, choice, idempotencyKey });
@@ -263,6 +289,7 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
   }
 
   async function refreshDecision(decision: PendingAuthorizationDecision) {
+    const currentGeneration = ++generation.current;
     setState({ status: "submitting", decision });
     const result = await refreshPendingAuthorizationDecision(endpoint, {
       decisionRef: decision.decisionRef,
@@ -270,6 +297,7 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
       threadId: threadRef,
       turnId: run.turnId!,
     });
+    if (currentGeneration !== generation.current) return;
     setState(result.ok
       ? { status: "ready", decision: result.decision }
       : { status: "failed", summary: result.reason, retry: "fetch" });

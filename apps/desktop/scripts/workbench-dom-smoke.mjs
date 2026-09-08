@@ -121,6 +121,12 @@ async function run() {
   await checkRendererSecurityBoundary(baseUrl);
   await checkPreloadIpcBoundary(baseUrl, mainWindows);
 
+  if (process.env.WEBENVOY_DOM_FOCUS === "confirmation") {
+    const result = await runRendererCheck("window.__runWorkbenchDomSmoke('confirmation')", "Confirmation DOM checks");
+    console.log(JSON.stringify(result));
+    return;
+  }
+
   stage("running desktop checks");
   const desktop = await withTimeout(
     runRendererCheck("window.__runWorkbenchDomSmoke('desktop')", "Desktop DOM checks"),

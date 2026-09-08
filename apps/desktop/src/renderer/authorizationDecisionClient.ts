@@ -127,6 +127,7 @@ export async function decideSingleAction(
     const response = await requestOwnerJson(endpoint, `/authorization-decisions/${encodeURIComponent(decisionRef)}/single-action`, {
       method: "POST",
       timeoutMs: 5000,
+      includeErrorBody: true,
       body: {
         schema_version: "webenvoy.single-action-decision-command.v0",
         idempotency_key: idempotencyKey,
@@ -138,9 +139,9 @@ export async function decideSingleAction(
     const expectedMode = choice === "allow_once" ? "auto" : "deny";
     return record?.ok === true && decision?.confirmation_decision_ref === decisionRef && decision.mode === expectedMode
       ? { ok: true as const, summary: choice === "allow_once" ? "已允许这一次。" : "已拒绝这一次。" }
-      : { ok: false as const, reason: ownerError(response, "Core 未接受当前单次决定。") };
+      : { ok: false as const, retrySubmit: !(typeof record?.status === "number" && record.status >= 400 && record.status < 500) && asRecord(asRecord(record?.body)?.error ?? record?.error)?.category !== "action_risk", reason: ownerError(response, "Core 未接受当前单次决定。") };
   } catch (error) {
-    return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
+    return { ok: false as const, retrySubmit: true, reason: error instanceof Error ? error.message : String(error) };
   }
 }
 

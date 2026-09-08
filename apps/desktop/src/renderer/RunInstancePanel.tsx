@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchRunInstance, projectRunInstance, type RunInstanceState } from "./runInstanceClient";
+import { fetchRunInstance, projectRunInstance, runControlChangedEvent, type RunInstanceState } from "./runInstanceClient";
 import { requestOwnerJson } from "./ownerApiClient";
 import { SourceField } from "./TaskThreadFields";
 
@@ -11,7 +11,12 @@ export function RunInstancePanel({ coreEndpoint, harborEndpoint, runId }: { core
     const controller = new AbortController();
     setState({ status: "loading" });
     void fetchRunInstance(coreEndpoint, harborEndpoint, runId, controller.signal).then((next) => {
-      if (!controller.signal.aborted) setState(next);
+      if (!controller.signal.aborted) {
+        setState(next);
+        if (next.status !== "ready" || next.instance.controlOwner !== "core_task" || next.instance.controlState !== "held") {
+          window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId } }));
+        }
+      }
     });
     return () => controller.abort();
   }, [coreEndpoint, harborEndpoint, runId, refresh]);
@@ -19,6 +24,7 @@ export function RunInstancePanel({ coreEndpoint, harborEndpoint, runId }: { core
   async function control(action: "takeover" | "return") {
     if (state.status !== "ready") return;
     const expected = state.instance.runtimeSessionRef;
+    window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId } }));
     setState({ status: "loading" });
     const current = await fetchRunInstance(coreEndpoint, harborEndpoint, runId);
     if (current.status !== "ready" || current.instance.runtimeSessionRef !== expected) {

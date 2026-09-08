@@ -1,3 +1,5 @@
+export const runControlChangedEvent = "webenvoy:run-control-changed";
+
 import { requestOwnerJson } from "./ownerApiClient";
 import { fixtureOrDemoPayloadReason } from "./ownerPayloadGuards";
 
