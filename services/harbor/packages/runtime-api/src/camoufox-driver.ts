@@ -126,11 +126,11 @@ class CamoufoxDriverProcess {
         resolve();
       };
       this.child.once("close", onClose);
-      if (!this.child.killed) this.child.kill("SIGTERM");
+      if (this.child.stdin && !this.child.stdin.destroyed) this.child.stdin.end();
       timer = setTimeout(() => {
         if (!exited) this.child.kill("SIGKILL");
         resolve();
-      }, 500);
+      }, 2_000);
     });
   }
 
@@ -268,7 +268,7 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
         if (closed) return;
         closed = true;
         try {
-          await driver.request("close", {}, 1_000);
+          await driver.request("close", {}, DRIVER_COMMAND_TIMEOUT_MS);
         } finally {
           await driver.terminate();
           if (!profileStorage.persistent) await rm(profileStorage.profileDir, { recursive: true, force: true });
@@ -279,7 +279,7 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
     try {
       // Give the bridge a chance to remove a Driver-owned launch layout after
       // an early properties or runtime rejection before terminating it.
-      await driver.request("close", {}, 1_000);
+      await driver.request("close", {}, DRIVER_COMMAND_TIMEOUT_MS);
     } catch {
       // A hung or already-dead provider is handled by the bounded terminate.
     }

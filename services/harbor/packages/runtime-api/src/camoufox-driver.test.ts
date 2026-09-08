@@ -37,6 +37,7 @@ for await (const line of rl) {
   } else if (request.op === "site_resource_probe") {
     output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: true, pinia_ready: true } });
   } else if (request.op === "close") {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     output({ id: request.id, status: "ok" });
     process.exit(0);
   } else {
