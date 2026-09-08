@@ -13,8 +13,19 @@ import {
 } from "./index.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { selectLocalProviderId } from "./local-provider-launcher.js";
+import { resolveCamoufoxPython } from "./camoufox-driver.js";
 
 const fixtureDir = mkdtempSync(join(tmpdir(), "harbor-camoufox-driver-"));
+test("finds the persistent Camoufox Python install without overriding explicit configuration", () => {
+  const home = join(fixtureDir, "python-home");
+  assert.equal(resolveCamoufoxPython({}, home), "python3");
+  const installed = join(home, ".webenvoy", "providers", "camoufox", "venv", "bin", "python");
+  mkdirSync(dirname(installed), { recursive: true });
+  writeFileSync(installed, "fixture");
+  assert.equal(resolveCamoufoxPython({}, home), installed);
+  assert.equal(resolveCamoufoxPython({ CAMOUFOX_PYTHON: "explicit" }, home), "explicit");
+  assert.equal(resolveCamoufoxPython({ HARBOR_CAMOUFOX_PYTHON: "harbor", CAMOUFOX_PYTHON: "explicit" }, home), "harbor");
+});
 const previousProfileStorageRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
 process.env.HARBOR_PROFILE_STORAGE_ROOT = join(fixtureDir, "profiles");
 const helperPath = join(fixtureDir, "fake-camoufox-driver.mjs");

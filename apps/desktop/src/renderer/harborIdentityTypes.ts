@@ -1,7 +1,7 @@
 import type { IdentityEnvironmentProjection } from "./identityEnvironmentFixtures";
 
 export type SiteId = "xiaohongshu" | "boss";
-export type ProviderId = "cloakbrowser" | "chrome_official";
+export type ProviderId = "cloakbrowser" | "chrome_official" | "camoufox";
 export type LoginState = "logged_in" | "logged_out" | "expired" | "unknown" | "manual_auth_required";
 export type ManualAuthState = "not_required" | "required" | "in_progress" | "completed" | "failed";
 
@@ -16,7 +16,7 @@ export type HarborProviderCatalog = {
 export type HarborProviderStatus = {
   provider_id: ProviderId;
   display_name: string;
-  role: "primary" | "restricted_fallback";
+  role: "primary" | "restricted_fallback" | "qualification";
   install: {
     status: "installed" | "missing" | "path_invalid";
     path: string | null;

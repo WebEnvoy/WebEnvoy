@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import type { IdentityEnvironmentProjection } from "./identityEnvironmentFixtures";
-import type { HarborProviderStatus } from "./harborIdentityTypes";
+import type { HarborProviderStatus, ProviderId } from "./harborIdentityTypes";
 
 export type IdentityManagementMode = "create" | "import" | "edit";
 
@@ -11,7 +11,7 @@ export type IdentityEditorValue = {
   siteId: "xiaohongshu" | "boss";
   accountIdentifier: string;
   importSourceRef: string;
-  providerId: "cloakbrowser" | "chrome_official";
+  providerId: ProviderId;
   proxyMode: "preserve" | "system" | "disabled";
   language: string;
   timezone: string;
@@ -84,7 +84,7 @@ export function IdentityEnvironmentManagementPanel({
           {mode === "import" ? <label>导入来源<input name="importSourceRef" required maxLength={240} placeholder="Harbor 可读取的导入来源标识" /></label> : null}
         </div> : null}
         <div className="identity-editor-grid">
-          <label>浏览器 Provider<select ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value === "chrome_official" ? "chrome_official" : "cloakbrowser")}>{providerOptions(providers, selectedProviderId)}</select></label>
+          <label>浏览器 Provider<select ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value as ProviderId)}>{providerOptions(providers, selectedProviderId)}</select></label>
           <label>代理<select name="proxyMode" defaultValue={identity?.environment.proxyRef ? "preserve" : "system"}>{identity?.environment.proxyRef ? <option value="preserve">保留当前代理</option> : null}<option value="system">不使用代理</option><option value="disabled">禁用代理配置</option></select></label>
           {supportsLocale ? <label>语言<input name="language" maxLength={40} defaultValue={known(identity?.environment.language)} placeholder="例如：zh-CN" /></label> : null}
           {supportsTimezone ? <label>时区<input name="timezone" maxLength={80} defaultValue={known(identity?.environment.timezone)} placeholder="例如：Asia/Shanghai" /></label> : null}
@@ -115,16 +115,18 @@ function known(value: string | undefined) {
 }
 
 function providerId(identity: IdentityEnvironmentProjection | undefined, providers: HarborProviderStatus[]) {
+  if (identity?.admissionFacts?.providerId) return identity.admissionFacts.providerId;
+  if (identity?.provider.selected === "Camoufox") return "camoufox";
   if (identity?.provider.selected === "官方 Chrome") return "chrome_official";
   if (identity?.provider.selected === "CloakBrowser") return "cloakbrowser";
   return providers.find((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable")?.provider_id ?? "cloakbrowser";
 }
 
-function providerOptions(providers: HarborProviderStatus[], selected: "cloakbrowser" | "chrome_official") {
+function providerOptions(providers: HarborProviderStatus[], selected: ProviderId) {
   const available = providers.filter((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable");
   const options = available.some((provider) => provider.provider_id === selected)
     ? available
-    : [{ provider_id: selected, display_name: selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available];
+    : [{ provider_id: selected, display_name: selected === "camoufox" ? "Camoufox" : selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available];
   return options.map((provider) => <option key={provider.provider_id} value={provider.provider_id}>{provider.display_name}</option>);
 }
 

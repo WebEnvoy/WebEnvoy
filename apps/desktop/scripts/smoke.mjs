@@ -271,7 +271,7 @@ for (const [request, expectedTimeout] of [
   [{ path: "/tasks", method: "POST" }, 65_000],
   [{ path: "/threads/thread_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/turns", method: "POST" }, 65_000],
   [{ path: "/execution-policy-configs/skill?skill_ref=lode%3A%2F%2Fsite-capability%2Ftest%40v1", method: "PUT" }, 5_000],
-  [{ path: "/runtime/identity-environment-sessions", method: "POST" }, 20_000],
+  [{ path: "/runtime/identity-environment-sessions", method: "POST" }, 65_000],
   [{ path: "/runtime/identity-environment-mutations", method: "POST" }, 20_000],
   [{ path: "/runtime/identity-environments", method: "POST" }, 20_000],
   [{ path: "/runtime/identity-environments/identity-env%3Aowner%2Faccount", method: "PATCH" }, 20_000],
@@ -1948,6 +1948,15 @@ try {
   ) {
     throw new Error("Harbor manual authentication smoke failed: packaged opaque refs were rejected or unsafe refs were accepted.");
   }
+  const ownerRuntimeRefs = manualAuthenticationCompletionModule.redactPublicManualAuthenticationResponse(JSON.stringify({
+    ...packagedRuntimeRefs,
+    identity_environment_ref: "identity-env_26acb6c902330d7b27f98f19",
+    refs: {
+      execution_identity_ref: "execution-identity_fb4ac3fc58acf3142a14c852",
+      profile_ref: "profile_913443b77fc4b9ae32b72c62",
+    },
+  }));
+  if (!ownerRuntimeRefs) throw new Error("Harbor manual authentication smoke failed: owner-generated refs were rejected.");
   const legacyRuntimeRefs = manualAuthenticationCompletionModule.redactPublicManualAuthenticationResponse(JSON.stringify({
     ...packagedRuntimeRefs,
     identity_environment_ref: "harbor://identity-environment/xhs-legacy",

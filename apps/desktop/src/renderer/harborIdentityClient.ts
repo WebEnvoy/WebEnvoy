@@ -71,18 +71,19 @@ export async function openHarborIdentitySession(
       retryable: true,
     };
   }
-  return postHarborSession(harborEndpoint, [
-    "/runtime/identity-environment-sessions",
-    "/runtime/sessions/identity-environment",
-    "/identity-environment-sessions",
-  ], {
+  const result = await requestJson<HarborRuntimeSession>(harborEndpoint, "/runtime/identity-environment-sessions", {
+    method: "POST",
+    body: JSON.stringify({
     identity_environment_ref: identity.identityEnvironmentRef,
     url: target.defaultUrl,
     headless: false,
     control_owner: "user",
     holder_ref: "app-browser-page",
     reuse_existing: true,
-  });
+    timeout_ms: 60_000,
+    }),
+  }, 65_000);
+  return result.ok ? result.value : { status: "unavailable" as const, message: result.error, retryable: false };
 }
 
 export async function lockHarborSession(harborEndpoint: string, sessionRef: string) {
@@ -186,12 +187,12 @@ async function postFirstJson<T>(
   return { ok: false as const, error: fallbackError };
 }
 
-async function requestJson<T>(base: string, path: string, init: RequestInit) {
+async function requestJson<T>(base: string, path: string, init: RequestInit, timeoutMs = 2500) {
   try {
     const payload = await requestOwnerJson(base, path, {
       method: init.method === "POST" || init.method === "PATCH" || init.method === "DELETE" ? init.method : "GET",
       body: typeof init.body === "string" ? parseJson(init.body) : undefined,
-      timeoutMs: 2500,
+      timeoutMs,
       signal: init.signal ?? undefined,
     });
     if (isOkFailure(payload)) return { ok: false as const, error: payload.error };
@@ -263,7 +264,7 @@ export function identityFactsFromPublicRecord(value: unknown, catalog: HarborPro
   const storageState = storageStateValue(status?.browser_storage_state);
   const manualAuthenticationState = manualAuthStateValue(status?.manual_authentication_state, loginState);
   const recoveryReasons = boundedRecoveryReasonCodes(status?.blocking_reasons, status?.repair_reasons);
-  const environmentRecoveryReasons = recoveryReasons.filter((reason) => !isAuthenticationRecoveryReason(reason));
+  const environmentRecoveryReasons = status?.readiness === "ready" ? [] : recoveryReasons.filter((reason) => !isAuthenticationRecoveryReason(reason));
   const recoveryRequired = status?.recovery_required === true;
   const manualAuthenticationRequired = requiresManualAuthentication(loginState, manualAuthenticationState) ||
     recoveryReasons.some(isAuthenticationRecoveryReason);
@@ -362,7 +363,7 @@ function fingerprintStrategyValue(value: unknown) {
 }
 
 function providerIdValue(value: unknown) {
-  return value === "cloakbrowser" || value === "chrome_official" ? value : null;
+  return value === "cloakbrowser" || value === "chrome_official" || value === "camoufox" ? value : null;
 }
 
 function loginStateValue(value: unknown): HarborIdentityFacts["login_state"]["state"] {

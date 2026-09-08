@@ -1,3 +1,4 @@
+import type { ProviderId, HarborProviderStatus } from "./harborIdentityTypes";
 import type { OwnerSource } from "./taskThreadFixtures";
 
 export type IdentityStatus = "ready" | "needs-auth" | "warning" | "blocked" | "unknown";
@@ -14,8 +15,8 @@ export type BrowserTargetProjection = {
 };
 
 export type BrowserProviderProjection = {
-  name: "CloakBrowser" | "官方 Chrome";
-  role: "推荐主力" | "受限后备";
+  name: "CloakBrowser" | "官方 Chrome" | "Camoufox";
+  role: "推荐主力" | "受限后备" | "验证 Provider";
   state: BrowserProviderState;
   statusLabel: string;
   summary: string;
@@ -57,8 +58,8 @@ export type IdentityEnvironmentProjection = {
   executionIdentityRef: string;
   profileRef: string;
   admissionFacts?: {
-    providerId: "cloakbrowser" | "chrome_official" | null;
-    providerRole: "primary" | "restricted_fallback" | null;
+    providerId: ProviderId | null;
+    providerRole: HarborProviderStatus["role"] | null;
     authenticationProvenance: string | null;
     loginState: string;
     manualAuthenticationState: string;
@@ -67,8 +68,8 @@ export type IdentityEnvironmentProjection = {
     warningReasonCodes: string[];
   };
   provider: {
-    selected: "CloakBrowser" | "官方 Chrome" | "未可用";
-    role: "默认主力" | "受限后备" | "不可启动";
+    selected: "CloakBrowser" | "官方 Chrome" | "Camoufox" | "未可用";
+    role: "默认主力" | "受限后备" | "验证 Provider" | "不可启动";
     state: IdentityStatus;
     reason: string;
   };

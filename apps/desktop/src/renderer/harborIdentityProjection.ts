@@ -53,7 +53,7 @@ export function projectHarborIdentity(
     },
     provider: {
       selected,
-      role: selected === "CloakBrowser" ? "默认主力" : selected === "官方 Chrome" ? "受限后备" : "不可启动",
+      role: selected === "Camoufox" ? "验证 Provider" : selected === "CloakBrowser" ? "默认主力" : selected === "官方 Chrome" ? "受限后备" : "不可启动",
       state: readiness.state,
       reason: facts.provider_binding.warnings.join("；") || facts.provider_binding.unavailable_reason || facts.provider_binding.selection_reason,
     },
@@ -90,9 +90,9 @@ export function projectHarborIdentity(
     siteBindings: siteBindings(siteId),
     browser: {
       providers: providerList(catalog, facts.provider_binding.selected_provider),
-      defaultProvider: selected === "官方 Chrome" ? "官方 Chrome" : "CloakBrowser",
+      defaultProvider: selected === "未可用" ? "CloakBrowser" : selected,
       targets: manualBrowserTargets,
-      session: emptySession(selected === "官方 Chrome" ? "官方 Chrome" : "CloakBrowser", facts.identity_environment_ref),
+      session: emptySession(selected === "未可用" ? "CloakBrowser" : selected, facts.identity_environment_ref),
       boundary: "App 只发送启动、查看、接管、释放、停止意图；Harbor 拥有 session、controller、viewer 和 provider truth。",
     },
     taskEntries: [],
@@ -143,8 +143,8 @@ function providerProjection(provider: HarborProviderStatus): BrowserProviderProj
   const launchable = provider.install.status === "installed" && provider.install.launchability === "launchable";
   const chrome = provider.provider_id === "chrome_official";
   return {
-    name: providerName(provider.provider_id) === "官方 Chrome" ? "官方 Chrome" : "CloakBrowser",
-    role: chrome ? "受限后备" : "推荐主力",
+    name: providerName(provider.provider_id) as BrowserProviderProjection["name"],
+    role: provider.role === "qualification" ? "验证 Provider" : chrome ? "受限后备" : "推荐主力",
     state: launchable ? (chrome ? "restricted" : "available") : "missing",
     statusLabel: launchable ? (chrome ? "受限可用" : "可用") : provider.install.status === "missing" ? "未安装" : "不可启动",
     summary: provider.diagnostics?.[0]?.app_summary ?? provider.limitations?.[0] ?? provider.install.reason ?? "Harbor provider 检测已回读。",
@@ -218,8 +218,8 @@ function siteLabel(siteId: SiteId): "小红书" | "BOSS" {
   return siteId === "boss" ? "BOSS" : "小红书";
 }
 
-function providerName(providerId: ProviderId | null): "CloakBrowser" | "官方 Chrome" | "未可用" {
-  return providerId === "chrome_official" ? "官方 Chrome" : providerId === "cloakbrowser" ? "CloakBrowser" : "未可用";
+function providerName(providerId: ProviderId | null): "CloakBrowser" | "官方 Chrome" | "Camoufox" | "未可用" {
+  return providerId === "camoufox" ? "Camoufox" : providerId === "chrome_official" ? "官方 Chrome" : providerId === "cloakbrowser" ? "CloakBrowser" : "未可用";
 }
 
 function loginLabel(state: string) {
