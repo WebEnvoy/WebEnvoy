@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   resolveCamoufoxOverride
@@ -196,11 +197,16 @@ class CamoufoxDriverProcess {
   }
 }
 
+export function resolveCamoufoxPython(env = process.env, home = homedir()): string {
+  const installed = join(home, ".webenvoy", "providers", "camoufox", "venv", "bin", "python");
+  return env.HARBOR_CAMOUFOX_PYTHON || env.CAMOUFOX_PYTHON || (existsSync(installed) ? installed : "python3");
+}
+
 export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const browserPath = input.browser_path || resolveCamoufoxOverride(process.env) || "";
   const helperPath = process.env.HARBOR_CAMOUFOX_DRIVER_PATH ||
     join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
-  const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON || process.env.CAMOUFOX_PYTHON || "python3";
+  const pythonPath = resolveCamoufoxPython();
   if (!browserPath) return unavailable("provider_unavailable", "Camoufox executable is not configured.");
   if (!existsSync(helperPath)) return unavailable("driver_unavailable", "Camoufox Driver helper is not installed.");
 
