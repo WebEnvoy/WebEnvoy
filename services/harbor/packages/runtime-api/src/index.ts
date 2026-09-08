@@ -794,6 +794,7 @@ export class HarborRuntime {
     if (probe.status !== "available") {
       if (probe.status === "blocked" &&
         (probe.failure_class === "not_logged_in" || probe.failure_class === "safety_challenge")) return null;
+      if (persistedAuthenticationRecovery && probe.status === "unknown" && probe.failure_class === "page_not_ready") return null;
       return this.failClosedPersistedAuthentication(
         identity_environment.identity_environment_ref,
         session.runtime_session_ref

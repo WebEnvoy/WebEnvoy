@@ -294,6 +294,53 @@ test("keeps the existing Harbor lifecycle around a Camoufox driver", async () =>
   await runtime.closeSession(reopened.runtime_session_ref);
 }));
 
+test("reopens a persisted Profile for explicit user authentication when identity probing is unsupported", async () => withCamoufoxEnv(async () => {
+  const persistencePath = join(fixtureDir, "camoufox-auth-restart.json");
+  rmSync(persistencePath, { force: true });
+  const first = new HarborRuntime(undefined, { persistence_path: persistencePath });
+  const identity = first.createLocalIdentityEnvironment({
+    identity_environment_ref: "identity-env-camoufox-auth-restart",
+    execution_identity_ref: "execution-identity-camoufox-auth-restart",
+    profile_ref: "profile-camoufox-auth-restart",
+    requested_provider_id: "camoufox",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+    login_state: "manual_auth_required",
+    storage_state: "present"
+  });
+  const initial = await first.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: identity.identity_environment_ref,
+    url: "https://www.xiaohongshu.com/explore",
+    control_owner: "user",
+    headless: false
+  });
+  assert.equal("status" in initial, false);
+  if ("status" in initial) return;
+  first.recordHandoff(initial.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
+  const confirmed = first.completeManualAuthentication(initial.runtime_session_ref);
+  assert.notEqual(confirmed.status, "unavailable", JSON.stringify(confirmed));
+  if (confirmed.status === "unavailable") return;
+  assert.equal(confirmed.status.login_state, "logged_in");
+  await first.closeSession(initial.runtime_session_ref);
+  await first.close();
+
+  const restarted = new HarborRuntime(undefined, { persistence_path: persistencePath });
+  const reopened = await restarted.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: identity.identity_environment_ref,
+    url: "https://www.xiaohongshu.com/explore",
+    control_owner: "user",
+    headless: false
+  });
+  assert.equal("status" in reopened, false);
+  if ("status" in reopened) return;
+  assert.equal(restarted.getManagedLocalIdentityEnvironment(identity.identity_environment_ref)?.status.recovery_required, true);
+  restarted.recordHandoff(reopened.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
+  const reconfirmed = restarted.completeManualAuthentication(reopened.runtime_session_ref);
+  assert.notEqual(reconfirmed.status, "unavailable", JSON.stringify(reconfirmed));
+  if (reconfirmed.status === "unavailable") return;
+  assert.equal(reconfirmed.status.login_state, "logged_in");
+  await restarted.close();
+}));
+
 
 test("redacts query secrets and poisons a timed-out driver", async () => withCamoufoxEnv(async () => {
   const launched = await launchCamoufoxProvider(input());
