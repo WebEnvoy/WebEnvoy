@@ -140,7 +140,7 @@ function RunTurn({
       {run.businessInput == null ? null : <TaskTurnBusinessInput input={run.businessInput} skill={inputSkill} />}
       {bossDeferred ? <BossHistoricalFailure run={run} /> : null}
       {bossDeferred ? null : <SingleActionConfirmation endpoint={coreEndpoint} identityLabel={identityLabel} run={run} threadRef={threadRef} />}
-      <TurnExecutionStatus bossDeferred={bossDeferred} isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: "evidence" })} run={run} />
+      <TurnExecutionStatus bossDeferred={bossDeferred} isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: run.source === "Core live" ? "session" : "evidence" })} run={run} />
       {bossDeferred ? null : (
         <TaskBusinessResult
           onOpenPreview={(request) => onOpenPreview({ runId: run.id, tab: "result", ...request })}
@@ -182,13 +182,14 @@ function TurnExecutionStatus({ bossDeferred, isSelected, onOpenPreview, run }: {
   const failed = bossDeferred || run.outcome === "failure" || run.lifecycle === "blocked";
   const label = bossDeferred ? "功能延期" : running ? "正在执行" : run.turnStatus === "cancelled" ? "已取消" : failed ? "未完成" : run.outcome === "partial" ? "部分完成" : "已处理";
   const duration = running ? "" : formatDuration(run.createdAt, run.terminalAt ?? run.updatedAt);
+  const opensSession = run.source === "Core live";
   return (
     <div className={`turn-execution-status${running ? " running" : ""}${failed ? " failed" : ""}`} aria-current={isSelected ? "step" : undefined}>
       <RunStatusGlyph run={run} />
       <strong>{label}</strong>
       {duration ? <span>{duration}</span> : null}
       {running ? <span className="turn-execution-shimmer" aria-hidden="true" /> : null}
-      {!bossDeferred && (run.evidenceCards.length > 0 || run.fieldSources?.length) ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label="在右栏打开结果依据" title="在右栏打开结果依据" data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
+      {!bossDeferred && (opensSession || run.evidenceCards.length > 0 || run.fieldSources?.length) ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label={opensSession ? "在右栏打开执行现场" : "在右栏打开结果依据"} title={opensSession ? "在右栏打开执行现场" : "在右栏打开结果依据"} data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
     </div>
   );
 }

@@ -519,6 +519,8 @@ if (
   !appShellViewSource.includes("rightPanelOpenRequestKey={controller.tasks.rightPanelOpenRequestKey}") ||
   !appShellViewSource.includes("onOpenPreview={tasks.requestRightPanel}") ||
   !taskThreadPageSource.includes("data-workbench-open-right") ||
+  !taskThreadPageSource.includes('tab: run.source === "Core live" ? "session" : "evidence"') ||
+  !taskThreadPageSource.includes('opensSession ? "在右栏打开执行现场"') ||
   !taskThreadPageSource.includes("onClick={onOpenPreview}") ||
   taskThreadPageSource.includes('?? "Harbor fixture"') ||
   taskThreadRightPanelSource.includes("sourceHealthFixture") ||

@@ -14,7 +14,7 @@ import { bossProductionDeferredReason, isBossProductionTask, projectDeferredBoss
 type SubmittedTaskOverride = { endpoint: string; taskId: string; task: TaskProjection };
 export type TaskPreviewSelection = {
   runId: string;
-  tab: "result" | "evidence";
+  tab: "result" | "evidence" | "session";
   itemIds?: string[];
 };
 
