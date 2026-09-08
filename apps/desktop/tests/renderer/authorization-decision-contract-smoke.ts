@@ -1,6 +1,7 @@
 import {
   decideSingleAction,
   fetchPendingAuthorizationDecision,
+  refreshPendingAuthorizationDecision,
   type PendingAuthorizationBinding,
 } from "../../src/renderer/authorizationDecisionClient";
 
@@ -15,9 +16,15 @@ const binding: PendingAuthorizationBinding = {
 export async function checkRejectedAuthorizationDecisions() {
   const original = window.webenvoyShell?.requestOwnerJson;
   if (window.webenvoyShell == null || original == null) throw new Error("Authorization smoke requires the Electron owner bridge mock.");
-  let responseKind: "active" | "http-owner" | "mismatch" | "terminal" | "wrong-single-action" = "active";
+  let responseKind: "active" | "http-owner" | "mismatch" | "terminal" | "wrong-single-action" | "stale-error" = "active";
   window.webenvoyShell.requestOwnerJson = async (request) => {
     if (!request.path.startsWith("/authorization-decisions/")) return original(request);
+    if (request.path.endsWith("/preflight") && responseKind === "stale-error") {
+      return { ok: false, status: 409, body: {
+        error: { category: "action_risk", code: "observation_stale" },
+        authorization_decision: decision("active"),
+      } };
+    }
     if (request.path.endsWith("/single-action")) {
       return { ok: true, body: { ok: true, single_action_decision: {
         schema_version: "webenvoy.single-action-decision.v0",
@@ -32,6 +39,9 @@ export async function checkRejectedAuthorizationDecisions() {
     if (!active.ok || active.decision.actionId !== "xhs_publish_note_path_prepare") {
       throw new Error("Authorization decision client rejected a production-shaped lode:// owner declaration.");
     }
+    responseKind = "stale-error";
+    const staleError = await refreshPendingAuthorizationDecision("http://127.0.0.1:8787", binding);
+    if (staleError.ok) throw new Error("Authorization decision client accepted stale context from an error response.");
     responseKind = "http-owner";
     const httpOwner = await fetchPendingAuthorizationDecision("http://127.0.0.1:8787", binding);
     if (httpOwner.ok) throw new Error("Authorization decision client accepted an HTTP owner declaration reference.");
@@ -49,7 +59,7 @@ export async function checkRejectedAuthorizationDecisions() {
   }
 }
 
-function decision(kind: "active" | "http-owner" | "mismatch" | "terminal" | "wrong-single-action") {
+function decision(kind: "active" | "http-owner" | "mismatch" | "terminal" | "wrong-single-action" | "stale-error") {
   const terminal = kind === "terminal";
   return {
     schema_version: "webenvoy.authorization-decision.v0",

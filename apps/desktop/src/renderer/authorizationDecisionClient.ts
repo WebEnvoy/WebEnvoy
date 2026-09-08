@@ -85,7 +85,7 @@ export async function refreshPendingAuthorizationDecision(endpoint: string, expe
     const record = asRecord(envelope?.body) ?? envelope;
     const context = parseConfirmationContext(record?.confirmation_context);
     const decision = parsePendingDecision(record?.authorization_decision);
-    if (decision != null && decision.decisionRef === expected.decisionRef && decision.runId === expected.runId &&
+    if (envelope?.ok !== false && envelope?.status === undefined && decision != null && decision.decisionRef === expected.decisionRef && decision.runId === expected.runId &&
       decision.threadId === expected.threadId && decision.turnId === expected.turnId
     ) return { ok: true as const, decision: { ...decision, ...(context ? { confirmationContext: context } : {}) } };
 
