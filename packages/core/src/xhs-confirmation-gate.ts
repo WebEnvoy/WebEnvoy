@@ -529,7 +529,7 @@ export async function collectXhsConfirmationObservation(input: CollectXhsConfirm
       failure: harborAdmission.failure
     };
   }
-  const runtimeBinding = validateHarborRuntimeBinding(admissionValue);
+  const runtimeBinding = validateHarborRuntimeBinding(admissionValue, "media_action");
   if (!runtimeBinding.ok) return { ok: false, runtime_session_ref: runtimeSessionRef, failure: runtimeBinding.failure };
   if (runtimeBinding.runtime_session_binding.runtime_session_ref !== runtimeSessionRef || runtimeBinding.runtime_session_binding.control_owner !== "core_task") {
     return { ok: false, runtime_session_ref: runtimeSessionRef, failure: failure("runtime_binding_mismatch", "refresh_confirmation_observation") };

@@ -2220,7 +2220,7 @@ async function dispatchApprovedXhsMediaAction(
   if (!fullAdmission.ok) {
     return completeAcceptedMediaAdmissionFailure(store, result, fullAdmission.failure, runtimeSessionRef, collectionFailure?.cleanup_failure, client);
   }
-  const runtimeBinding = validateHarborRuntimeBinding(admissionValue);
+  const runtimeBinding = validateHarborRuntimeBinding(admissionValue, "media_action");
   if (!runtimeBinding.ok || runtimeBinding.runtime_session_binding.runtime_session_ref !== runtimeSessionRef) {
     return completeAcceptedMediaAdmissionFailure(
       store,

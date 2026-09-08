@@ -561,11 +561,11 @@ function validateRuntimeFacts(
   if (factRefs?.session !== runtimeSessionRef || factRefs.viewer !== viewerRef) {
     return { ok: false, failure: failure("resource_admission", "runtime_ref_missing", "runtime_binding", "connect_runtime") };
   }
-  const coreOwnedReadLock = mode === "read" &&
+  const coreOwnedTaskLock = (mode === "read" || mode === "media_action") &&
     lifecycleState === "locked" &&
     controlOwner === "core_task" &&
     (lockOwner === undefined || lockOwner === "core_task");
-  if (!activeRuntimeStates.has(lifecycleState) && !coreOwnedReadLock) {
+  if (!activeRuntimeStates.has(lifecycleState) && !coreOwnedTaskLock) {
     return { ok: false, failure: failure("resource_admission", runtimeExpiredCode(lifecycleState), "runtime_binding", lifecycleState === "locked" ? "wait_or_request_handoff" : "connect_runtime") };
   }
   const binding: RuntimeSessionBindingFacts = {
@@ -597,7 +597,10 @@ function validateRuntimeFacts(
 }
 
 /** Validate the public runtime facts that Core must bind before a write-precheck dispatch. */
-export function validateHarborRuntimeBinding(input: HarborAdmissionInput): HarborRuntimeBindingAdmission {
+export function validateHarborRuntimeBinding(
+  input: HarborAdmissionInput,
+  mode: Extract<HarborAdmissionMode, "write_precheck" | "media_action"> = "write_precheck"
+): HarborRuntimeBindingAdmission {
   const forbiddenField = findForbiddenField(input);
   if (forbiddenField) {
     return { ok: false, failure: failure("resource_admission", `forbidden_field:${forbiddenField}`, "runtime_binding", "remove_private_field") };
@@ -608,7 +611,7 @@ export function validateHarborRuntimeBinding(input: HarborAdmissionInput): Harbo
   const providerStatusFailure = validateProviderStatus(input, identity);
   if (providerStatusFailure) return { ok: false, failure: providerStatusFailure };
 
-  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, "write_precheck");
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode);
   if (!runtime.ok) {
     return {
       ok: false,
@@ -826,7 +829,7 @@ export function validateHarborAdmission(input: HarborAdmissionInput, mode: Harbo
     return { ok: false, failure: providerStatusFailure };
   }
 
-  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode === "media_action" ? "write_precheck" : mode);
+  const runtime = validateRuntimeFacts(input.harbor_runtime_facts, identity, mode);
   if (!runtime.ok) {
     return {
       ok: false,
