@@ -134,6 +134,7 @@ export function harborSupervisorAuthorizationHeader(
 }
 
 export function ownerApiTimeoutMs(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
+  if (request.method === "POST" && request.path === "/runtime/identity-environment-sessions") return 65_000;
   if (request.method === "POST" && (request.path === "/tasks" || /^\/threads\/[^/]+\/turns$/.test(new URL(request.url).pathname))) return 65_000;
   if (request.method === "POST" && /^\/authorization-decisions\/[^/]+\/preflight$/.test(new URL(request.url).pathname)) return 20_000;
   if (isHarborSupervisorProtectedRequest(request)) return 20_000;

@@ -274,7 +274,7 @@ for (const [request, expectedTimeout] of [
   [{ path: "/tasks", method: "POST" }, 65_000],
   [{ path: "/threads/thread_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/turns", method: "POST" }, 65_000],
   [{ path: "/execution-policy-configs/skill?skill_ref=lode%3A%2F%2Fsite-capability%2Ftest%40v1", method: "PUT" }, 5_000],
-  [{ path: "/runtime/identity-environment-sessions", method: "POST" }, 20_000],
+  [{ path: "/runtime/identity-environment-sessions", method: "POST" }, 65_000],
   [{ path: "/runtime/identity-environment-mutations", method: "POST" }, 20_000],
   [{ path: "/runtime/identity-environments", method: "POST" }, 20_000],
   [{ path: "/runtime/identity-environments/identity-env%3Aowner%2Faccount", method: "PATCH" }, 20_000],
