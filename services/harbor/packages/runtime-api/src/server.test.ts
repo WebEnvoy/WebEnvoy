@@ -583,12 +583,16 @@ test("serves site resource facts failures without raw browser material", async (
     assert.equal(unsupportedTask.status, "unavailable");
     assert.equal(unsupportedTask.failure_class, "unsupported_task_kind");
 
-    const commitPrecheck = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=publish_note_image_text_commit`);
-    assert.equal(commitPrecheck.task_kind, "publish_note_image_text_commit");
-    assert.equal(commitPrecheck.public_boundary.external_write_actions, "not_performed");
-    const commitFacts = new Map(commitPrecheck.resource_facts.map((fact: any) => [fact.key, fact.state]));
-    assert.equal(commitFacts.get("runtime.execution_surface.available"), "available");
-    assert.equal(commitFacts.get("safety.challenge.absent"), "blocked");
+    for (const taskKind of ["publish_note_image_text_media", "publish_note_image_text_fields", "publish_note_image_text_commit"]) {
+      const precheck = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=${taskKind}`);
+      assert.equal(precheck.task_kind, taskKind);
+      assert.equal(precheck.public_boundary.external_write_actions, "not_performed");
+      const facts = new Map(precheck.resource_facts.map((fact: any) => [fact.key, fact.state]));
+      assert.equal(facts.get("runtime.execution_surface.available"), "available");
+      assert.equal(facts.get("no_submit_guard.active"), "available");
+      assert.equal(facts.get("runtime.public_https_navigation.allowed"), "unavailable");
+      assert.equal(facts.get("safety.challenge.absent"), "blocked");
+    }
 
     const challengeFacts = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=boss&task_kind=job_search`);
     const challenge = challengeFacts.resource_facts.find((fact: any) => fact.key === "safety.challenge.absent");
