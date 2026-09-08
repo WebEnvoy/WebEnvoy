@@ -1983,6 +1983,60 @@ test("replaces visibility-incompatible identity sessions without leaking viewer 
   }), "detail_ref_expired");
 });
 
+test("agent handback preserves a headed instance unless replacement is explicit", async () => {
+  for (const replacement of [undefined, { headless: true }, { reuse_existing: false }]) {
+    const launches: LocalProviderLaunchInput[] = [];
+    const closes: string[] = [];
+    let observations = 0;
+    const launch = capturingLauncher(launches, closes);
+    const runtime = new HarborRuntime(async (input) => {
+      const result = await launch(input);
+      if (result.status !== "ready") return result;
+      return { ...result, openUrl: async (url: string) => {
+        observations += 1;
+        return { current_url: url, title: "Fresh handback observation", status: "ready", facts: [] };
+      } };
+    });
+    const identity_environment = runtime.getLocalIdentityEnvironmentFacts({
+      ...providerFixture({ [cloakPath]: { executable: true } }),
+      identity_environment_ref: "identity-env_agent-handback",
+      execution_identity_ref: "execution-identity_agent-handback",
+      profile_ref: "profile_agent-handback",
+      site: { site_id: "boss", origin: "https://www.zhipin.com" },
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    const manual = await runtime.openIdentityEnvironmentSession({
+      identity_environment, url: "https://www.zhipin.com", control_owner: "user"
+    });
+    if ("status" in manual) throw new Error("manual session should open");
+    const blocked = await runtime.openIdentityEnvironmentSession({
+      identity_environment, url: "https://www.zhipin.com", control_owner: "agent"
+    });
+    assert.ok("status" in blocked && blocked.failure_class === "session_locked");
+    assert.equal(closes.length, 0);
+    runtime.releaseSession(manual.runtime_session_ref, { control_owner: "user" });
+    const agent = await runtime.openIdentityEnvironmentSession({
+      identity_environment, url: "https://www.zhipin.com/web/geek/job", control_owner: "agent", ...replacement
+    });
+    if ("status" in agent) throw new Error("released session should accept agent control");
+    assert.equal(agent.control_owner, "agent");
+    if (replacement) {
+      assert.notEqual(agent.runtime_session_ref, manual.runtime_session_ref);
+      assert.equal(closes.length, 1);
+      assert.equal(launches.length, 2);
+    } else {
+      assert.equal(agent.runtime_session_ref, manual.runtime_session_ref);
+      assert.equal(closes.length, 0);
+      assert.equal(launches.length, 1);
+      assert.equal(observations, 1);
+      assert.equal(agent.current_page.title, "Fresh handback observation");
+      assert.equal(agent.availability.viewer, "available");
+    }
+    await runtime.close();
+  }
+});
+
 test("replaces a headed Core session when Core requests headless execution", async () => {
   const launches: LocalProviderLaunchInput[] = [];
   const closes: string[] = [];

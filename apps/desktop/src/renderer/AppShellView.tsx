@@ -224,6 +224,7 @@ function AppRightPanel({ controller }: { controller: AppController }) {
   return (
     <RightPanel>
       <TaskThreadRightPanel
+        harborEndpoint={sources.connectionConfig.harborEndpoint}
         coreEndpoint={sources.connectionConfig.coreEndpoint}
         coreReadState={tasks.effectiveCoreReadState} coreSubmitState={tasks.coreSubmitState}
         runtimeSupervisorState={sources.runtimeSupervisorState} selectedRun={tasks.previewRun} selectedTask={tasks.selectedTask}

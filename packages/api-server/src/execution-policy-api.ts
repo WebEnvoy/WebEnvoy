@@ -23,6 +23,10 @@ export type ExecutionPolicyApiResult =
   | { handled: false; requires_body: true }
   | { handled: true; status: number; body: JsonBody };
 
+export type SingleActionPreflightResult =
+  | { ok: true }
+  | { ok: false; status: number; body: JsonBody };
+
 export type ExecutionPolicyApiDependencies = {
   configStore?: FileExecutionPolicyConfigStore;
   authorizationDecisionStore?: FileAuthorizationDecisionStore;
@@ -31,6 +35,8 @@ export type ExecutionPolicyApiDependencies = {
   clock?: () => Date;
   /** Dispatches a previously captured write-precheck continuation after allow_once. */
   continueWritePrecheck?: (decision: SingleActionDecision) => Promise<ExecutionPolicyContinuationResult | undefined>;
+  /** Runs the owner preflight before an allow_once decision can be consumed. */
+  preflightSingleAction?: (confirmationDecisionRef: string) => Promise<SingleActionPreflightResult | undefined>;
   /** Clears a waiting continuation when the user chooses deny. */
   clearWritePrecheckContinuation?: (confirmationDecisionRef: string) => void;
   /** Serializes decision, continuation, and cancellation for a task run. */
@@ -256,6 +262,12 @@ export async function handleExecutionPolicyApi(input: {
         ...(input.dependencies.clock === undefined ? {} : { clock: input.dependencies.clock })
       });
       const decideAndContinue = async (): Promise<ExecutionPolicyApiResult> => {
+        if (command.choice === "allow_once") {
+          const preflight = await input.dependencies.preflightSingleAction?.(decisionRef);
+          if (preflight?.ok === false) {
+            return { handled: true, status: preflight.status, body: preflight.body };
+          }
+        }
         const decision = await decide();
         if (decision.mode === "deny") {
           await input.dependencies.denyWritePrecheck?.(decision);

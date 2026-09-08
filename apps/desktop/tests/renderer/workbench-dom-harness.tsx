@@ -1,3 +1,5 @@
+import { runControlChangedEvent } from "../../src/renderer/runInstanceClient";
+import { checkRunInstanceControls } from "./run-instance-controls-smoke";
 import { BriefcaseBusiness } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -555,6 +557,7 @@ function WorkbenchDomHarness() {
       right={previewRun && previewSelection ? (
         <RightPanel>
           <TaskThreadRightPanel
+            harborEndpoint="http://harbor.owner"
             coreEndpoint={coreEndpoint}
             coreReadState={retainedState}
             coreSubmitState={initialCoreTaskSubmitState}
@@ -941,6 +944,8 @@ async function runDesktopChecks() {
   taskButton(taskAId)?.click();
   await waitFor(() => Boolean(previewButton()), "Task A did not restore after the empty thread check.");
   await checkBossFixtureResultDeferred();
+  await checkRunInstanceControls();
+  await checkXhsCommitConfirmationContext();
 
   return {
     emptyThreadOpenState: true,
@@ -953,6 +958,8 @@ async function runDesktopChecks() {
     retiredSkillCreateHidden: true,
     currentSkillCreateVisible: true,
     singleActionDecision: true,
+    runInstanceControls: true,
+    xhsConfirmationContext: true,
   };
 }
 
@@ -975,6 +982,7 @@ async function checkBossFixtureResultDeferred() {
         onOpenPreview={() => { throw new Error("BOSS fixture result exposed preview"); }}
       />
       <TaskThreadRightPanel
+        harborEndpoint="http://harbor.owner"
         coreEndpoint={coreEndpoint}
         coreReadState={retainedState}
         coreSubmitState={initialCoreTaskSubmitState}
@@ -987,7 +995,7 @@ async function checkBossFixtureResultDeferred() {
       />
     </>,
   );
-  await nextFrame();
+  await waitFor(() => container.querySelector(".thread-body") != null, "BOSS fixture thread did not render.");
   assert(container.textContent?.includes(bossProductionDeferredReason), "BOSS fixture result did not render the deferred state.");
   assert(container.querySelector("[data-workbench-open-right]") == null && !container.textContent?.includes("正在执行") && !container.textContent?.includes("已处理"),
     "BOSS fixture/fallback result was presented as live or previewable.");
@@ -1020,7 +1028,7 @@ async function checkBossLiveConfirmationDeferred() {
       onOpenPreview={() => { throw new Error("BOSS deferred confirmation exposed preview"); }}
     />,
   );
-  await nextFrame();
+  await waitFor(() => container.querySelector(".thread-body") != null, "BOSS deferred thread did not render.");
   assert(container.querySelector(".single-action-confirmation") == null && !container.textContent?.includes("允许这一次"),
     "BOSS Core live waiting-for-user run exposed a single-action decision.");
   assert(container.textContent?.includes("功能延期") && !container.textContent?.includes("等待本次决定") && !container.textContent?.includes("已处理"),
@@ -1029,6 +1037,144 @@ async function checkBossLiveConfirmationDeferred() {
     "BOSS Core live waiting-for-user run fetched or submitted an authorization decision.");
   root.unmount();
   container.remove();
+}
+
+async function checkXhsCommitConfirmationContext() {
+  const original = window.webenvoyShell?.requestOwnerJson;
+  const sourceRun = tasks.find((task) => task.id === taskAId)?.runs[0];
+  assert(original && sourceRun, "XHS confirmation context check requires owner bridge and a source Run.");
+  const decisionRef = `authorization-decision:${"c".repeat(32)}:${"d".repeat(32)}`;
+  const run = {
+    ...sourceRun,
+    id: "run-xhs-commit-confirmation",
+    turnId: `turn_${"c".repeat(32)}`,
+    turnStatus: "waiting_for_user" as const,
+    authorizationDecisionRefs: [decisionRef],
+  };
+  let ready = true;
+  let rejectSubmit = false;
+  let submissions = 0;
+  let delaySubmit = false;
+  let releaseSubmit: (() => void) | undefined;
+  window.webenvoyShell!.requestOwnerJson = async (request) => {
+    if (request.path.endsWith("/single-action")) {
+      submissions += 1;
+      if (delaySubmit) await new Promise<void>((resolve) => { releaseSubmit = resolve; });
+      ready = false;
+      rejectSubmit = true;
+      return { ok: false, status: 409, body: { error: { category: "action_risk", code: "account_unknown" } } };
+    }
+    if (request.path === `/authorization-decisions/${encodeURIComponent(decisionRef)}/preflight` && !rejectSubmit) ready = true;
+    return request.path.startsWith(`/authorization-decisions/${encodeURIComponent(decisionRef)}`)
+      ? { ok: true, body: { ok: true, authorization_decision: xhsCommitDecision(decisionRef, run.id, run.turnId), confirmation_context: xhsConfirmationContext(ready) } }
+      : original(request);
+  };
+  try {
+    const render = () => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(<SingleActionConfirmation endpoint={coreEndpoint} identityLabel="创作者账号" run={run} threadRef={taskAId} />);
+      return { container, root };
+    };
+    let mounted = render();
+    await waitFor(() => mounted.container.textContent?.includes("2 张图片，顺序已核对") === true, "Ready XHS confirmation did not show the current content summary.");
+    assert(mounted.container.textContent?.includes("已核验 · 创作者账号") && mounted.container.textContent?.includes("发布笔记") &&
+      mounted.container.textContent?.includes("示例标题") && mounted.container.textContent?.includes("未变化") &&
+      mounted.container.textContent?.includes("允许这一次"), "Ready XHS confirmation omitted facts or the allow action.");
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("账号状态未知") === true, "Rejected submit did not replace the previous ready summary.");
+    assert(submissions === 1 && !mounted.container.textContent?.includes("重试这次决定") && !mounted.container.textContent?.includes("允许这一次"), "Definite refusal retained a blind submit retry.");
+    rejectSubmit = false;
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "Refused confirmation did not require fresh observation.");
+    window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId: run.id } }));
+    await waitFor(() => mounted.container.textContent?.includes("控制权已操作") === true, "Control change did not invalidate cached confirmation.");
+    assert(!mounted.container.textContent?.includes("允许这一次"), "Takeover retained allow from before control changed.");
+    mounted.container.querySelector<HTMLButtonElement>("button")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "Control return did not recover after explicit reobservation.");
+    mounted.root.unmount();
+    mounted.container.remove();
+    ready = false;
+    mounted = render();
+    await waitFor(() => mounted.container.textContent?.includes("账号状态未知") === true, "Blocked XHS confirmation did not show the owner reason.");
+    assert(!mounted.container.textContent?.includes("允许这一次") && mounted.container.textContent?.includes("拒绝这一次") &&
+      mounted.container.textContent?.includes("重新检查"), "Blocked XHS confirmation exposed commit or omitted recovery.");
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("允许这一次") === true, "XHS confirmation did not recover after a fresh same-instance observation.");
+    delaySubmit = true;
+    mounted.container.querySelector<HTMLButtonElement>(".single-action-actions button:last-child")?.click();
+    await waitFor(() => mounted.container.textContent?.includes("处理中") === true, "Delayed confirmation did not enter submitting state.");
+    window.dispatchEvent(new CustomEvent(runControlChangedEvent, { detail: { coreEndpoint, runId: run.id } }));
+    await waitFor(() => mounted.container.textContent?.includes("控制权已操作") === true, "Control change did not invalidate an in-flight confirmation.");
+    releaseSubmit?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert(mounted.container.textContent?.includes("控制权已操作") && !mounted.container.textContent?.includes("允许这一次"), "Late submit response restored stale confirmation state.");
+    mounted.root.unmount();
+    mounted.container.remove();
+  } finally {
+    window.webenvoyShell!.requestOwnerJson = original;
+  }
+}
+
+function xhsCommitDecision(decisionRef: string, runId: string, turnId: string) {
+  return {
+    schema_version: "webenvoy.authorization-decision.v0",
+    decision_ref: decisionRef,
+    business_action: {
+      action_instance_ref: "action-instance:xhs-publish",
+      action_id: "xhs_publish_note_image_text_commit.publish",
+      category: "commit",
+      target: { target_ref: "target:xhs-publish", target_type: "creator_publish_page", site_slug: "xiaohongshu", origin: "https://creator.xiaohongshu.com" },
+    },
+    owner_declaration: {
+      matcher: "lode_action_declaration",
+      declaration_ref: "lode://site-capability/xiaohongshu/publish-note@0.1.0#publish",
+      declaration_version: "0.1.0",
+      resource_match_ref: "resource-match:xhs-publish",
+      resource_match_version: "sha256:xhs-publish",
+    },
+    effective_policy: { mode: "confirm", source: "installed_skill_user_version", source_version: "1" },
+    applicability: { scope: "task", run_id: runId, thread_id: taskAId, turn_id: turnId, config_refs: ["execution-policy:skill/xhs"] },
+    outcome: "confirm",
+    risk_marker: null,
+    decided_at: "2026-09-08T08:00:00Z",
+    expires_at: "2099-09-08T08:05:00Z",
+    state: "active",
+    invalidated_at: null,
+    invalidation_reason: null,
+    consumer_boundary: "Business policy decision summary only; technical trace and private browser, evidence, and content material are excluded.",
+  };
+}
+
+function xhsConfirmationContext(ready: boolean) {
+  const fingerprint = `sha256:${"a".repeat(64)}`;
+  return {
+    schema_version: "webenvoy.xhs-confirmation-context/v0",
+    status: ready ? "ready" : "blocked",
+    runtime_binding: {
+      runtime_session_ref: "runtime-session:xhs-confirmation",
+      identity_environment_ref: "identity-environment:xhs-confirmation",
+      profile_ref: "profile:xhs-confirmation",
+      provider_ref: "provider:chrome-official",
+      control_owner: "core_task",
+      observation_generation: "fnv1a:1a2b3c4d",
+      observation_ref: "operation:xhs-confirmation",
+    },
+    account: { status: ready ? "verified" : "unknown", account_ref: ready ? "account:xhs-creator" : null, label: ready ? "创作者账号" : null },
+    business_target: { status: "verified", target_ref: "target:xhs-publish", label: "发布笔记" },
+    page: { status: "verified", url: "https://creator.xiaohongshu.com/publish/publish", fingerprint: "fnv1a:1a2b3c4d", diff: "unchanged" },
+    media: { status: "verified", image_count: 2, ordered_item_refs: ["media:1", "media:2"], summary: "2 张图片，顺序已核对" },
+    fields: {
+      status: "verified",
+      title: { state: "present", length: 4, summary: "示例标题" },
+      body: { state: "present", length: 6, summary: "示例正文摘要" },
+    },
+    pending_issues: ready ? [] : ["账号状态未知"],
+    observed_at: "2026-09-08T08:00:00Z",
+    fingerprint,
+    fail_closed: true,
+  };
 }
 
 function resultModel(run: (typeof tasks)[number]["runs"][number], expected: string, data: Record<string, unknown>, resultKind: string) {
@@ -1152,11 +1298,11 @@ async function runNarrowChecks() {
   return { fullWidthRightPanel: true, horizontalOverflow: false, viewport: `${innerWidth}x${innerHeight}` };
 }
 
-window.__runWorkbenchDomSmoke = async (phase: "desktop" | "narrow") =>
-  phase === "desktop" ? runDesktopChecks() : runNarrowChecks();
+window.__runWorkbenchDomSmoke = async (phase: "desktop" | "narrow" | "confirmation") =>
+  phase === "confirmation" ? checkXhsCommitConfirmationContext().then(async () => { await checkRunInstanceControls(); return { confirmation: true, control: true }; }) : phase === "desktop" ? runDesktopChecks() : runNarrowChecks();
 
 declare global {
   interface Window {
-    __runWorkbenchDomSmoke: (phase: "desktop" | "narrow") => Promise<Record<string, unknown>>;
+    __runWorkbenchDomSmoke: (phase: "desktop" | "narrow" | "confirmation") => Promise<Record<string, unknown>>;
   }
 }

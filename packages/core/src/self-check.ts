@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createFileRunRecordStore, runLifecycleTransitions, type RunRecord } from "./run-record-store.js";
-import { validateHarborAdmission, type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
+import { validateHarborAdmission, validateHarborRuntimeBinding, type HarborBrowserProviderCatalog, type HarborCoreRuntimeFacts, type HarborCoreSceneReference, type HarborIdentityEnvironmentFacts, type HarborResourceFacts, type HarborWritePrecheckFacts } from "./harbor-admission.js";
 import { type LodePackageAdmissionContract } from "./lode-admission.js";
 import { completeRunWithFailure, completeRunWithPreviewResult, completeRunWithResult } from "./result-envelope.js";
 import { approvalCancellationQuerySchemaVersion, getApprovalCancellationSummary, getRunSummary, projectRunSummary, runQuerySchemaVersion } from "./run-query.js";
@@ -683,6 +683,8 @@ async function assertTaskSubmissionAdmission(): Promise<void> {
       harbor_resource_facts: harborResourceFacts
     };
     assert.equal(validateHarborAdmission(lockedCoreInput, "read").ok, true);
+    assert.equal(validateHarborAdmission(lockedCoreInput, "media_action").ok, true);
+    assert.equal(validateHarborRuntimeBinding(lockedCoreInput, "media_action").ok, true);
     const lockedWritePrecheck = validateHarborAdmission(lockedCoreInput, "write_precheck");
     assert.equal(lockedWritePrecheck.ok, false);
     assert.equal(lockedWritePrecheck.failure.code, "runtime_session_busy");

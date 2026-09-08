@@ -583,12 +583,16 @@ test("serves site resource facts failures without raw browser material", async (
     assert.equal(unsupportedTask.status, "unavailable");
     assert.equal(unsupportedTask.failure_class, "unsupported_task_kind");
 
-    const commitPrecheck = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=publish_note_image_text_commit`);
-    assert.equal(commitPrecheck.task_kind, "publish_note_image_text_commit");
-    assert.equal(commitPrecheck.public_boundary.external_write_actions, "not_performed");
-    const commitFacts = new Map(commitPrecheck.resource_facts.map((fact: any) => [fact.key, fact.state]));
-    assert.equal(commitFacts.get("runtime.execution_surface.available"), "available");
-    assert.equal(commitFacts.get("safety.challenge.absent"), "blocked");
+    for (const taskKind of ["publish_note_image_text_media", "publish_note_image_text_fields", "publish_note_image_text_commit"]) {
+      const precheck = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=xiaohongshu&task_kind=${taskKind}`);
+      assert.equal(precheck.task_kind, taskKind);
+      assert.equal(precheck.public_boundary.external_write_actions, "not_performed");
+      const facts = new Map(precheck.resource_facts.map((fact: any) => [fact.key, fact.state]));
+      assert.equal(facts.get("runtime.execution_surface.available"), "available");
+      assert.equal(facts.get("no_submit_guard.active"), "available");
+      assert.equal(facts.get("runtime.public_https_navigation.allowed"), "unavailable");
+      assert.equal(facts.get("safety.challenge.absent"), "blocked");
+    }
 
     const challengeFacts = await getJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/site-resource-facts?site_id=boss&task_kind=job_search`);
     const challenge = challengeFacts.resource_facts.find((fact: any) => fact.key === "safety.challenge.absent");
@@ -863,6 +867,40 @@ test("keeps a confirmed headed session trusted across separately released Core r
     });
     assert.equal(userClaim.status, 409);
     assert.equal((await userClaim.json()).failure_class, "session_locked");
+  } finally {
+    await running.close();
+  }
+});
+
+test("transfers a held Core session to the user only through the exact handoff endpoint", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const session = await runtime.createSession({ headless: false, control_owner: "core_task", holder_ref: "run-confirmation" });
+    const directLock = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/lock`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ control_owner: "user", holder_ref: "app-browser-page" })
+    });
+    assert.equal((await directLock.json()).failure_class, "session_locked");
+
+    const transferred = await postJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/handoff`, {
+      control_owner: "user",
+      expected_control_owner: "core_task",
+      handoff_reason: "user_requested"
+    });
+    assert.equal(transferred.runtime_session_ref, session.runtime_session_ref);
+    assert.equal(transferred.control_owner, "user");
+    assert.equal(transferred.control_lock.state, "held");
+    assert.equal(transferred.control_lock.holder_ref, "harbor_mediated_user");
+
+    const stale = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/handoff`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested" })
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).failure_class, "session_locked");
   } finally {
     await running.close();
   }
@@ -1886,7 +1924,7 @@ test("rejects an injected local-provider probe rather than minting a completed r
   }
 });
 
-test("fails closed when session control is released while a trusted read probe is pending", async () => {
+test("rejects control release until a trusted read probe completes", async () => {
   const deferredProbe: { finish?: () => void } = {};
   let markProbeStarted!: () => void;
   const probeStarted = new Promise<void>((resolve) => { markProbeStarted = resolve; });
@@ -1922,13 +1960,15 @@ test("fails closed when session control is released while a trusted read probe i
       city_code: "101010100"
     });
     await probeStarted;
-    runtime.releaseSession(session.runtime_session_ref, { control_owner: "core_task" });
+    const release = runtime.releaseSession(session.runtime_session_ref, { control_owner: "core_task" });
+    assert.equal("failure_class" in release && release.failure_class, "session_locked");
     assert.ok(deferredProbe.finish);
     deferredProbe.finish();
 
     const response = await pendingRead;
-    assert.equal(response.status, 409);
-    assert.equal(response.body.failure_class, "session_user_controlled");
+    assert.equal(response.status, 201);
+    assert.equal(response.body.status, "completed");
+    assert.equal("status" in runtime.releaseSession(session.runtime_session_ref, { control_owner: "core_task" }), false);
   } finally {
     await running.close();
   }
@@ -2261,13 +2301,12 @@ test("consumes a BOSS detail ref only once from the same real-search session", a
       site_id: "boss", operation_id: "boss_read_job_detail", detail_ref: generationRef
     });
     await probeStartedPromise;
-    await postJson(`${running.url}/runtime/sessions/${session.runtime_session_ref}/release`, { control_owner: "core_task" });
-    const reacquired = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
-      identity_environment_ref: "identity-env_boss-detail",
-      url: "https://www.zhipin.com/web/geek/job",
-      control_owner: "core_task"
-    });
-    assert.equal(reacquired.runtime_session_ref, session.runtime_session_ref);
+    const heldRelease = runtime.releaseSession(session.runtime_session_ref, { control_owner: "core_task" });
+    assert.equal("failure_class" in heldRelease && heldRelease.failure_class, "session_locked");
+    // Preserve the independent stale-generation/ref-consumption regression even
+    // though public control changes are now refused during Provider navigation.
+    const generationRecord = (runtime as unknown as { runtimeSessions: { getRecord(ref: string): { control_generation: number } } }).runtimeSessions.getRecord(session.runtime_session_ref);
+    generationRecord.control_generation += 1;
     releaseProbe();
     assert.equal((await inFlightFailure).body.failure_class, "page_not_ready");
     detailProbeBarrier = null;

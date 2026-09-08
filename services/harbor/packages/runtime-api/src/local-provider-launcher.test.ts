@@ -433,6 +433,7 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.match(upload, /!strictPath && label\(el\)\.includes/);
   assert.match(upload, /\[role=\\?"tab\\?"\].*aria-controls.*aria-selected/);
   assert.match(upload, /\.header-tabs \.creator-tab/);
+  assert.match(upload, /button, \[role="button"\], \[role="tab"\], \.header-tabs \.creator-tab/);
   assert.match(upload, /controls\.length !== 1/);
   assert.match(upload, /!el\.disabled && el\.getAttribute\('aria-disabled'\) !== 'true'/);
   assert.match(upload, /Number\(style\.opacity\) >= 0\.01/);
@@ -444,7 +445,7 @@ test("#405 path probe maps only the requested exact visible label and keeps file
   assert.doesNotMatch(upload, /files\s*\.\s*\w+|setInputFiles/);
 });
 
-test("#405 path probe does not click a data-testid decoy", async () => {
+for (const isDecoy of [false, true]) test(`#405 path probe ${isDecoy ? "rejects a decoy" : "awaits observation and selects one visible path"}`, async () => {
   let clicks = 0;
   const app = {
     hidden: false,
@@ -452,14 +453,14 @@ test("#405 path probe does not click a data-testid decoy", async () => {
     closest: () => null,
     getBoundingClientRect: () => ({ width: 100, height: 100, right: 100, bottom: 100, left: 0, top: 0 }),
     checkVisibility: () => true,
-    querySelectorAll: () => []
+    querySelectorAll: (selector: string): object[] => selector.startsWith('[id*="publish"]') ? [app] : []
   };
   const decoy = {
     disabled: false,
     hidden: false,
     textContent: "上传图文",
     getAttribute: () => null,
-    closest: (selector: string) => selector.includes('[data-testid*="decoy"]') ? {} : null,
+    closest: (selector: string) => isDecoy && selector.includes('[data-testid*="decoy"]') ? {} : null,
     getBoundingClientRect: () => ({ width: 20, height: 20, right: 21, bottom: 21, left: 1, top: 1 }),
     checkVisibility: () => true,
     querySelector: () => null,
@@ -468,7 +469,7 @@ test("#405 path probe does not click a data-testid decoy", async () => {
   const document = {
     body: { innerText: "" },
     querySelector: () => app,
-    querySelectorAll: (selector: string) => selector.includes("login") ? [] : [decoy]
+    querySelectorAll: (selector: string) => selector === "#app, [data-v-app]" ? [app] : selector.includes("login") ? [] : [decoy]
   };
   const evaluate = new Function(
     "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "HTMLInputElement", "setTimeout",
@@ -483,8 +484,8 @@ test("#405 path probe does not click a data-testid decoy", async () => {
     class {},
     (resolve: () => void) => resolve()
   );
-  assert.equal(result.selection_status, "unknown");
-  assert.equal(clicks, 0);
+  assert.equal(clicks, isDecoy ? 0 : 1);
+  assert.equal(result.selection_status, isDecoy ? "unknown" : "selected");
 });
 
 test("#419 precheck observes the public host contract for closed-shadow draft and publish controls", async () => {
@@ -494,17 +495,24 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     hidden: false,
     readOnly: false,
     textContent: label,
+    naturalWidth: 100,
+    naturalHeight: 100,
+    get currentSrc() { return attributes.src ?? ""; },
     contains: () => true,
     closest: () => null,
     getAttribute: (name: string) => attributes[name] ?? null,
     getBoundingClientRect: () => ({ width: 100, height: 40, right: 100, bottom: 100, left: 0, top: 0 }),
-    checkVisibility: () => true
+    checkVisibility: () => true,
+    querySelectorAll: () => []
   });
-  const title = element("", { placeholder: "填写标题" });
+  const title = { ...element("", { placeholder: "填写标题" }), value: "Original" };
   const body = element("test body", { contenteditable: "true" });
+  const firstImage = element("", { src: "blob:https://creator.xiaohongshu.com/first-preview" });
+  const secondImage = element("", { src: "https://ci.xiaohongshu.com/second-preview.webp" });
+  const imageElements = [firstImage, secondImage];
   const imageComposition = {
     ...element("图片编辑 1/18"),
-    querySelectorAll: (selector: string) => selector === "img" ? [element("")] : []
+    querySelectorAll: (selector: string) => selector === "img" ? imageElements : []
   };
   const hostAttributes: Record<string, string> = {
     "is-publish": "true",
@@ -515,18 +523,28 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     "save-disabled": "false"
   };
   const publishHost = element("", hostAttributes);
+  const accountName = element("Marchen");
+  const accountRoot = { ...element("Marchen"), querySelectorAll: (selector: string) => selector === ".name-box" ? [accountName] : [] };
   const imageCompositions = [imageComposition];
   const controls = [title, body];
+  let showPublishHost = true;
+  let extraCreatorRoot: object | undefined;
+  let missingCreatorRoot = false;
   const app = {
     ...element(""),
-    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? [publishHost]
+    __vue_app__: { config: { globalProperties: { $store: { state: { Auth: { userInfo: { userId: "user-123", userName: "Marchen" } } } } } } },
+    querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? (showPublishHost ? [publishHost] : [])
       : selector === ".publish-page-content-media" ? imageCompositions
-      : selector.includes("aria-invalid") ? [] : [app]
+      : selector === ".user-info" ? [accountRoot]
+      : selector === "input" ? controls.filter((el) => el.getAttribute("placeholder") === "填写标题")
+      : selector === '[contenteditable="true"]' ? controls.filter((el) => el.getAttribute("contenteditable") === "true")
+      : selector.includes("aria-invalid") || missingCreatorRoot ? [] : extraCreatorRoot ? [app, extraCreatorRoot] : [app]
   };
+  const appRoots = [app];
   const document = {
     body: { innerText: "" },
     querySelector: () => app,
-    querySelectorAll: (selector: string) => selector.includes("login") ? [] : controls
+    querySelectorAll: (selector: string) => selector === "#app, [data-v-app]" ? appRoots : selector.includes("login") ? [] : controls
   };
   const evaluate = new Function(
     "document", "location", "getComputedStyle", "innerWidth", "innerHeight", "setTimeout",
@@ -547,6 +565,34 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.save_draft_control.availability, "available");
   assert.equal(result.publish_control.availability, "available");
   assert.equal(result.composition_state, "composition_initialized");
+  assert.equal(result.public_observation.account_source_kind, "xiaohongshu.creator_auth_store.user_info/v1");
+  assert.deepEqual(result.public_observation.account_candidates, [{ label: "Marchen", stable_id: "user-123" }]);
+  assert.equal(result.public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
+  assert.equal(result.public_observation.media_source_kind, "xiaohongshu.creator_publish_page.preview_image_source/v1");
+  assert.equal(result.public_observation.ordered_item_refs.length, 2);
+  assert.equal(new Set(result.public_observation.ordered_item_refs).size, 2);
+  assert.equal(result.public_observation.ordered_item_refs.every((ref: string) => /^media:sha256:[a-f0-9]{64}$/.test(ref)), true);
+
+  const observeFields = () => evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  controls.unshift(element("标题帮助"), element("正文帮助"));
+  const withHelp = await observeFields();
+  assert.equal(withHelp.public_observation.page_fingerprint, result.public_observation.page_fingerprint);
+  title.value = "Changed";
+  const changedTitle = await observeFields();
+  assert.notEqual(changedTitle.public_observation.page_fingerprint, withHelp.public_observation.page_fingerprint);
+  body.textContent = "Changed body";
+  assert.notEqual((await observeFields()).public_observation.page_fingerprint, changedTitle.public_observation.page_fingerprint);
+  controls.push({ ...title });
+  assert.equal((await observeFields()).field_states.title_input.observation, "unknown");
+  controls.pop();
+  controls.splice(0, 2);
+  title.value = "Original";
+  body.textContent = "test body";
+
+  imageElements.reverse();
+  const reordered = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  assert.deepEqual(reordered.public_observation.ordered_item_refs, [...result.public_observation.ordered_item_refs].reverse());
+  assert.notEqual(reordered.public_observation.page_fingerprint, result.public_observation.page_fingerprint);
 
   delete hostAttributes["submit-disabled"];
   const missingDisabled = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
@@ -556,6 +602,70 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   controls.push(element("other body", { contenteditable: "true" }));
   const ambiguousBody = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
   assert.equal(ambiguousBody.field_states.content_editor.observation, "unknown");
+  // A default video tab is still the same authenticated creator-page target.
+  // It does not prove that image composition, media or fields are ready.
+  const videoAttributes = { "aria-selected": "true" };
+  const imageAttributes = { "aria-selected": "false" };
+  const videoTab = element("上传视频", videoAttributes);
+  const imageTab = element("上传图文", imageAttributes);
+  controls.splice(0, controls.length, videoTab, imageTab);
+  imageCompositions.length = 0;
+  showPublishHost = false;
+  const read = () => evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  const video = await read();
+  assert.equal(video.public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
+  assert.equal(video.path_observed, "unobserved");
+  assert.equal(video.composition_state, "composition_unknown");
+  assert.equal(video.public_observation.image_count, null);
+  assert.equal(video.field_states.title_input.observation, "unknown");
+  const target = validateXhsWritePrecheckObservation({ target_url: location.href, expected_origin: "https://creator.xiaohongshu.com", target_ref: "target_test", expected: { business_target_ref: "target:sha256:c9c53848257e15f50166830b48c959fd83f9f72824cf0a5b6d783b19f6405f3c" } }, video);
+  assert.equal(target.status, "completed");
+  if (target.status === "completed") {
+    assert.equal(target.public_observation.business_target.status, "observed");
+    assert.equal(target.public_observation.business_target.expected_match, "matched");
+  }
+  videoAttributes["aria-selected"] = "false";
+  imageAttributes["aria-selected"] = "true";
+  const image = await read();
+  assert.notEqual(image.public_observation.page_fingerprint, video.public_observation.page_fingerprint);
+  assert.equal(image.public_observation.business_target_kind, video.public_observation.business_target_kind);
+  controls.push(title);
+  assert.notEqual((await read()).public_observation.page_fingerprint, image.public_observation.page_fingerprint);
+  controls.pop();
+  accountName.textContent = "Different account";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  accountName.textContent = "Marchen";
+  location.origin = "https://example.test";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  location.origin = "https://creator.xiaohongshu.com";
+  location.pathname = "/other";
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  location.pathname = "/publish/publish";
+  missingCreatorRoot = true;
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  missingCreatorRoot = false;
+  // Nested Vue mounts belong to the same ownership tree, unlike disjoint Apps.
+  const nestedApp = { ...app, contains: () => false };
+  appRoots.push(nestedApp);
+  assert.equal((await read()).public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
+  appRoots.pop();
+  const disjointApp = { ...app, contains: () => false };
+  const appContains = app.contains;
+  app.contains = (node?: unknown) => node !== disjointApp;
+  appRoots.push(disjointApp);
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  appRoots.pop();
+  app.contains = appContains;
+  // Distinct candidate surfaces must not be collapsed to the first match.
+  const previousContains = app.contains;
+  extraCreatorRoot = { ...element(""), contains: (node: unknown) => controls.includes(node as typeof title) };
+  app.contains = (node?: unknown) => node !== extraCreatorRoot;
+  assert.equal((await read()).public_observation.business_target_kind, null);
+  extraCreatorRoot = undefined;
+  app.contains = previousContains;
+  app.closest = () => ({} as never);
+  assert.equal((await read()).public_observation.business_target_kind, null);
+
 });
 
 test("#405 path request observation continues requests and leaves external effects unknown", () => {

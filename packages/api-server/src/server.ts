@@ -8,8 +8,10 @@ import {
   getRunSessionRefs,
   getRunSummary,
   continueXhsMediaActionTask,
+  preflightXhsMediaActionConfirmation,
   isExactWritePrecheckRun,
   isExactXhsMediaActionRun,
+  xhsMediaActionPaths,
   previewIdentityCompatibility,
   type FailureRecord,
   type FileAuthorizationDecisionStore,
@@ -32,6 +34,7 @@ import {
   clearPendingWritePrecheckContinuations,
   clearPendingWritePrecheckContinuation,
   handleTaskThreadApi,
+  peekPendingWritePrecheckContinuation,
   takePendingWritePrecheckContinuation,
   type PendingWritePrecheckContinuation,
   withWritePrecheckRunLock
@@ -253,6 +256,73 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const runSessionRefsMatch = /^\/runs\/([^/]+)\/session-refs$/.exec(path);
   const runFailureMatch = /^\/runs\/([^/]+)\/failure$/.exec(path);
 
+  const preflightSingleAction = async (confirmationDecisionRef: string) => {
+    const authorizationStore = options.authorizationDecisionStore;
+    const runRecordStore = options.runRecordStore;
+    if (!authorizationStore) return undefined;
+    const confirmation = await authorizationStore.getAuthorizationDecision(confirmationDecisionRef);
+    if (!confirmation || confirmation.applicability.scope !== "task" || confirmation.state !== "active") return undefined;
+    const actionId = confirmation.business_action?.action_id;
+    const xhsMediaDecision = typeof actionId === "string" && Object.hasOwn(xhsMediaActionPaths, actionId);
+    const invalidXhsRun = (code: "authorization_run_store_unavailable" | "authorization_run_record_invalid") => ({
+      ok: false as const,
+      status: 503,
+      body: {
+        ok: false,
+        error: { category: "persistence_observability", code, phase: "admission", recovery_hint: "contact_operator" }
+      }
+    });
+    if (!runRecordStore) return xhsMediaDecision ? invalidXhsRun("authorization_run_store_unavailable") : undefined;
+    const run = await runRecordStore.getRunRecord(confirmation.applicability.run_id).catch(() => undefined);
+    if (!isExactXhsMediaActionRun(run, confirmationDecisionRef, confirmation.applicability.run_id)) {
+      return xhsMediaDecision ? invalidXhsRun("authorization_run_record_invalid") : undefined;
+    }
+    const pending = peekPendingWritePrecheckContinuation(confirmationDecisionRef);
+    if (!pending || pending.run_id !== confirmation.applicability.run_id || pending.confirmation_decision_ref !== confirmationDecisionRef) {
+      return {
+        ok: false as const,
+        status: 409,
+        body: {
+          ok: false,
+          error: {
+            category: "action_risk",
+            code: "single_action_continuation_unavailable",
+            phase: "admission",
+            recovery_hint: "refresh_confirmation_observation"
+          }
+        }
+      };
+    }
+    const preflight = await preflightXhsMediaActionConfirmation(runRecordStore, {
+      run_id: pending.run_id,
+      task_intent: pending.task_intent,
+      package_ref: pending.package_ref,
+      ...(pending.harbor === undefined ? {} : { harbor: pending.harbor }),
+      confirmation_decision_ref: confirmationDecisionRef,
+      ...(confirmation.business_action?.target.target_ref === undefined ? {} : {
+        expected_business_target_ref: confirmation.business_action.target.target_ref
+      })
+    }, {
+      ...(options.lodePackageResolver === undefined ? {} : { lodePackageResolver: options.lodePackageResolver }),
+      ...(options.harborRuntimeClient === undefined ? {} : { harborRuntimeClient: options.harborRuntimeClient }),
+      ...(options.executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore: options.executionPolicyConfigStore }),
+      ...(options.authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore: options.authorizationDecisionStore })
+    });
+    if (!preflight.ok) {
+      return {
+        ok: false as const,
+        status: 409,
+        body: {
+          ok: false,
+          error: preflight.failure,
+          ...(preflight.confirmation_context === undefined ? {} : { confirmation_context: preflight.confirmation_context }),
+          ...(preflight.run_record === undefined ? {} : { run: preflight.run_record })
+        }
+      };
+    }
+    return { ok: true as const };
+  };
+
   const executionPolicyInput = {
     method: request.method,
     url: requestUrl,
@@ -268,6 +338,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
         const runId = confirmation?.applicability.scope === "task" ? confirmation.applicability.run_id : undefined;
         return runId === undefined ? action() : withWritePrecheckRunLock(runId, action);
       },
+      preflightSingleAction,
       denyWritePrecheck: async (decision: import("@webenvoy/core-runtime").SingleActionDecision): Promise<void> => {
         const authorizationStore = options.authorizationDecisionStore;
         if (!authorizationStore) return;
@@ -279,7 +350,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
           ? await options.runRecordStore.getRunRecord(applicability.run_id)
           : undefined;
         if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
-          !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return;
+          !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref, applicability.run_id)) return;
         try {
           await authorizationStore.invalidateAuthorizationDecision(confirmation.decision_ref, "cancelled");
         } catch (error) {
@@ -317,7 +388,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
                 ? await options.runRecordStore.getRunRecord(confirmation.applicability.run_id)
                 : undefined;
               if (!isExactWritePrecheckRun(run, decision.confirmation_decision_ref) &&
-                !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref)) return undefined;
+                !isExactXhsMediaActionRun(run, decision.confirmation_decision_ref, confirmation.applicability.run_id)) return undefined;
             }
           } catch {
             // A missing/failed lookup keeps the generic single-action response;
@@ -385,7 +456,9 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     method: request.method,
     url: requestUrl,
     ...(options.authorizationDecisionStore === undefined ? {} : { store: options.authorizationDecisionStore }),
-    ...(options.runRecordStore === undefined ? {} : { runRecordStore: options.runRecordStore })
+    ...(options.runRecordStore === undefined ? {} : { runRecordStore: options.runRecordStore }),
+    preflightSingleAction,
+    withPreflightRunLock: withWritePrecheckRunLock
   });
   if (authorizationResult.handled) {
     sendJson(response, authorizationResult.status, authorizationResult.body);

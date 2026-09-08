@@ -387,6 +387,48 @@ export async function assertExecutionPolicyApi(): Promise<void> {
     assert.equal(asRecord(genericSingle.body.single_action_decision).mode, "auto");
     assert.equal((await runStore.getRunRecord(genericReservation.turn.run_id))?.status, "requires_user_action");
 
+    assert(genericConfirmation.business_action);
+    const invalidXhsRef = `authorization-decision:${"c".repeat(32)}:${"d".repeat(32)}`;
+    const invalidXhsDecision = {
+      ...genericConfirmation,
+      decision_ref: invalidXhsRef,
+      business_action: {
+        ...genericConfirmation.business_action,
+        action_id: "xhs_publish_note_image_text_commit.save_draft"
+      },
+      applicability: {
+        ...genericConfirmation.applicability,
+        scope: "task" as const,
+        run_id: genericReservation.turn.run_id,
+        thread_id: genericThread.thread_id,
+        turn_id: genericReservation.turn.turn_id
+      }
+    };
+    const invalidXhsServer = createApiServer({
+      runRecordStore: runStore,
+      taskThreadStore,
+      executionPolicyConfigStore: configStore,
+      authorizationDecisionStore: {
+        getAuthorizationDecision: async (ref: string) => ref === invalidXhsRef ? invalidXhsDecision : undefined
+      } as unknown as typeof authorizationStore
+    });
+    await new Promise<void>((resolve) => invalidXhsServer.listen(0, "127.0.0.1", resolve));
+    const invalidXhsAddress = invalidXhsServer.address();
+    assert(invalidXhsAddress && typeof invalidXhsAddress === "object");
+    try {
+      const blocked = await request(
+        invalidXhsAddress.port,
+        `/authorization-decisions/${encodeURIComponent(invalidXhsRef)}/single-action`,
+        "POST",
+        { ...singleCommand, idempotency_key: "invalid-xhs-run" }
+      );
+      assert.equal(blocked.status, 503);
+      assert.equal(asRecord(blocked.body.error).code, "authorization_run_record_invalid");
+      assert.equal(await configStore.getSingleActionDecision(invalidXhsRef, "invalid-xhs-run"), undefined);
+    } finally {
+      await new Promise<void>((resolve, reject) => invalidXhsServer.close((error) => error ? reject(error) : resolve()));
+    }
+
     const { thread: deniedThread } = await taskThreadStore.createOrGetTaskThread({
       capability_ref: "lode:capability/publish-note-precheck",
       identity_environment_ref: "identity-env_999999999999999999999999"

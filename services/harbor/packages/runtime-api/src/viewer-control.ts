@@ -27,7 +27,7 @@ export type TakeoverUnavailableReason =
   | "unsupported";
 export type ViewerAccessMode = "none" | "read_only" | "interactive" | "input_disabled";
 export type ViewerAvailability = "available" | "unavailable" | "permission_denied" | "expired" | "unsupported";
-export type ViewerControlFailureClass = "session_missing" | "viewer_unavailable" | "control_owner_unknown";
+export type ViewerControlFailureClass = "session_locked" | "session_missing" | "viewer_unavailable" | "control_owner_unknown";
 export type ViewerTransport = "not_applicable" | "local_window" | "remote_vnc" | "remote_browser_viewer";
 
 export interface ViewerControlSessionFacts {

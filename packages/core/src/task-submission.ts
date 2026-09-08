@@ -1,5 +1,5 @@
 import type { ActionRequest, AdmissionDecision, CreateRunRecordInput, FailureRecord, FileRunRecordStore, RunRecord } from "./run-record-store.js";
-import { validateHarborAdmission, type HarborAdmissionInput } from "./harbor-admission.js";
+import { validateHarborAdmission, type HarborAdmissionInput, type RuntimeSessionBindingFacts } from "./harbor-admission.js";
 import {
   validateLodePackageAdmission,
   xhsCommitPackageRef,
@@ -66,6 +66,8 @@ export type TaskSubmissionInput = HarborAdmissionInput & {
   resource_match_ref?: string;
   runtime_binding_refs?: readonly string[];
   evidence_refs?: readonly string[];
+  runtime_session_binding?: RuntimeSessionBindingFacts;
+  confirmation_context?: Record<string, unknown>;
 };
 
 export type TaskSubmissionResult =
@@ -606,9 +608,24 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
       admission: {
         decision: confirmationRequired ? "requires_user_action" : "blocked_pre_admission",
         action_risk: taskIntent.policy.risk,
-        resource_requirement_refs: lodeAdmission.resource_requirement_refs
+        resource_requirement_refs: lodeAdmission.resource_requirement_refs,
+        ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
+        ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref }),
+        ...(input.runtime_session_binding === undefined ? {} : { runtime_session_binding: input.runtime_session_binding })
       },
       action_request: buildActionRequest(taskIntent, input, { package_ref: lodeAdmission.package_ref }),
+      ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
+      ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+      ...(input.confirmation_context === undefined ? {} : {
+        public_result_summary: {
+          schema_version: "webenvoy.core-xhs-media-action-confirmation.v0",
+          submitted: false,
+          outcome: confirmationRequired ? "awaiting_confirmation" : "blocked",
+          confirmation_context: input.confirmation_context,
+          consumer_boundary: "Core exposes only the bounded XHS confirmation context; no browser, credential, cookie, or raw evidence material is persisted."
+        }
+      }),
       failure: input.execution_policy_failure,
       retention_state: "active"
     });
@@ -654,10 +671,20 @@ export async function acceptReadOnlyTaskSubmission(store: FileRunRecordStore, in
         resource_requirement_refs: lodeAdmission.resource_requirement_refs,
         ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
         ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
-        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref })
+        ...(input.resource_match_ref === undefined ? {} : { resource_match_ref: input.resource_match_ref }),
+        ...(input.runtime_session_binding === undefined ? {} : { runtime_session_binding: input.runtime_session_binding })
       },
       ...(input.runtime_binding_refs === undefined ? {} : { runtime_binding_refs: input.runtime_binding_refs }),
       ...(input.evidence_refs === undefined ? {} : { evidence_refs: input.evidence_refs }),
+      ...(input.confirmation_context === undefined ? {} : {
+        public_result_summary: {
+          schema_version: "webenvoy.core-xhs-media-action-confirmation.v0",
+          submitted: false,
+          outcome: "blocked",
+          confirmation_context: input.confirmation_context,
+          consumer_boundary: "Core exposes only the bounded XHS confirmation context; no browser, credential, cookie, or raw evidence material is persisted."
+        }
+      }),
       failure: input.harbor_admission_failure
     });
     return {

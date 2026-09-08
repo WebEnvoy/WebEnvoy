@@ -1,7 +1,8 @@
 import { AlertTriangle, Check, PanelRightOpen, ShieldAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { decideSingleAction, fetchPendingAuthorizationDecision, type PendingAuthorizationDecision } from "./authorizationDecisionClient";
+import { canAllowPendingDecision, decideSingleAction, fetchPendingAuthorizationDecision, refreshPendingAuthorizationDecision, requiresXhsConfirmationContext, type PendingAuthorizationDecision, type XhsConfirmationContext } from "./authorizationDecisionClient";
+import { runControlChangedEvent } from "./runInstanceClient";
 import { fetchCoreRunResult, type CoreRunResultState } from "./coreRunResultClient";
 import { policySourceLabel } from "./executionPolicyClient";
 import type { LodeCatalogSkill } from "./lodeCatalogClient";
@@ -140,7 +141,7 @@ function RunTurn({
       {run.businessInput == null ? null : <TaskTurnBusinessInput input={run.businessInput} skill={inputSkill} />}
       {bossDeferred ? <BossHistoricalFailure run={run} /> : null}
       {bossDeferred ? null : <SingleActionConfirmation endpoint={coreEndpoint} identityLabel={identityLabel} run={run} threadRef={threadRef} />}
-      <TurnExecutionStatus bossDeferred={bossDeferred} isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: "evidence" })} run={run} />
+      <TurnExecutionStatus bossDeferred={bossDeferred} isSelected={isSelected} onOpenPreview={() => onOpenPreview({ runId: run.id, tab: run.source === "Core live" ? "session" : "evidence" })} run={run} />
       {bossDeferred ? null : (
         <TaskBusinessResult
           onOpenPreview={(request) => onOpenPreview({ runId: run.id, tab: "result", ...request })}
@@ -182,13 +183,14 @@ function TurnExecutionStatus({ bossDeferred, isSelected, onOpenPreview, run }: {
   const failed = bossDeferred || run.outcome === "failure" || run.lifecycle === "blocked";
   const label = bossDeferred ? "功能延期" : running ? "正在执行" : run.turnStatus === "cancelled" ? "已取消" : failed ? "未完成" : run.outcome === "partial" ? "部分完成" : "已处理";
   const duration = running ? "" : formatDuration(run.createdAt, run.terminalAt ?? run.updatedAt);
+  const opensSession = run.source === "Core live";
   return (
     <div className={`turn-execution-status${running ? " running" : ""}${failed ? " failed" : ""}`} aria-current={isSelected ? "step" : undefined}>
       <RunStatusGlyph run={run} />
       <strong>{label}</strong>
       {duration ? <span>{duration}</span> : null}
       {running ? <span className="turn-execution-shimmer" aria-hidden="true" /> : null}
-      {!bossDeferred && (run.evidenceCards.length > 0 || run.fieldSources?.length) ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label="在右栏打开结果依据" title="在右栏打开结果依据" data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
+      {!bossDeferred && (opensSession || run.evidenceCards.length > 0 || run.fieldSources?.length) ? <button className="we-toolbar-icon-button cursor-interaction" type="button" aria-label={opensSession ? "在右栏打开执行现场" : "在右栏打开结果依据"} title={opensSession ? "在右栏打开执行现场" : "在右栏打开结果依据"} data-workbench-open-right onClick={onOpenPreview}><PanelRightOpen size={15} /></button> : null}
     </div>
   );
 }
@@ -223,28 +225,47 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
   const [state, setState] = useState<ConfirmationState>({ status: "idle" });
   const [reloadKey, setReloadKey] = useState(0);
   const statusRef = useRef<HTMLElement>(null);
+  const generation = useRef(0);
+  useEffect(() => {
+    const invalidate = (event: Event) => {
+      const detail = (event as CustomEvent<{ coreEndpoint: string; runId: string }>).detail;
+      if (detail.coreEndpoint !== endpoint || detail.runId !== run.id) return;
+      generation.current += 1;
+      setState({ status: "failed", summary: "控制权已操作；请重新检查同一 Instance 后再次确认。", retry: "fetch" });
+    };
+    window.addEventListener(runControlChangedEvent, invalidate);
+    return () => {
+      generation.current += 1;
+      window.removeEventListener(runControlChangedEvent, invalidate);
+    };
+  }, [endpoint, run.id]);
   const refsKey = (run.authorizationDecisionRefs ?? []).join("\u0000");
 
   useEffect(() => {
     const refs = run.authorizationDecisionRefs ?? [];
     if (run.turnStatus !== "waiting_for_user" || run.turnId == null || refs.length === 0) {
+      generation.current += 1;
       setState({ status: "idle" });
       return;
     }
     let cancelled = false;
+    const currentGeneration = ++generation.current;
     setState({ status: "loading" });
-    void fetchPendingAuthorizationDecision(endpoint, {
+    void (reloadKey > 0 ? refreshPendingAuthorizationDecision : fetchPendingAuthorizationDecision)(endpoint, {
       decisionRef: refs.at(-1)!,
       runId: run.id,
       threadId: threadRef,
       turnId: run.turnId!,
     }).then((result) => {
-      if (cancelled) return;
+      if (cancelled || currentGeneration !== generation.current) return;
       setState(result.ok
         ? { status: "ready", decision: result.decision }
         : { status: "failed", summary: result.reason, retry: "fetch" });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      generation.current += 1;
+    };
   }, [endpoint, refsKey, reloadKey, run.id, run.turnId, run.turnStatus, threadRef]);
 
   async function submitDecision(
@@ -252,11 +273,34 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
     choice: "allow_once" | "deny_once",
     idempotencyKey = `app-single-action-${crypto.randomUUID()}`,
   ) {
+    if (choice === "allow_once" && !canAllowPendingDecision(decision)) return;
+    const currentGeneration = ++generation.current;
     setState({ status: "submitting", decision });
     const result = await decideSingleAction(endpoint, decision.decisionRef, choice, idempotencyKey);
+    if (currentGeneration !== generation.current) return;
+    if (!result.ok && !result.retrySubmit) {
+      await refreshDecision(decision);
+      return;
+    }
     setState(result.ok
       ? { status: "settled", summary: result.summary }
       : { status: "failed", summary: result.reason, retry: "submit", decision, choice, idempotencyKey });
+    window.requestAnimationFrame(() => statusRef.current?.focus());
+  }
+
+  async function refreshDecision(decision: PendingAuthorizationDecision) {
+    const currentGeneration = ++generation.current;
+    setState({ status: "submitting", decision });
+    const result = await refreshPendingAuthorizationDecision(endpoint, {
+      decisionRef: decision.decisionRef,
+      runId: run.id,
+      threadId: threadRef,
+      turnId: run.turnId!,
+    });
+    if (currentGeneration !== generation.current) return;
+    setState(result.ok
+      ? { status: "ready", decision: result.decision }
+      : { status: "failed", summary: result.reason, retry: "fetch" });
     window.requestAnimationFrame(() => statusRef.current?.focus());
   }
 
@@ -283,6 +327,8 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
   }
   const decision = state.decision;
   const busy = state.status === "submitting";
+  const contextRequired = requiresXhsConfirmationContext(decision);
+  const canAllow = canAllowPendingDecision(decision);
   return (
     <section className={`single-action-confirmation${decision.destructive ? " destructive" : ""}`} aria-label="当前动作确认">
       <div className="single-action-copy">
@@ -292,13 +338,42 @@ export function SingleActionConfirmation({ endpoint, identityLabel, run, threadR
           <small>{identityLabel} · {targetLabel(decision)} · {policySourceLabel(decision.policySource)}</small>
         </span>
       </div>
+      {contextRequired ? <ConfirmationContext context={decision.confirmationContext} /> : null}
       {decision.destructive ? <span className="single-action-risk"><AlertTriangle size={13} />危险行为</span> : null}
       <div className="single-action-actions">
         <button type="button" disabled={busy} onClick={() => void submitDecision(decision, "deny_once")}><X size={14} />拒绝这一次</button>
-        <button className="primary" type="button" disabled={busy} onClick={() => void submitDecision(decision, "allow_once")}><Check size={14} />{busy ? "处理中" : "允许这一次"}</button>
+        {canAllow
+          ? <button className="primary" type="button" disabled={busy} onClick={() => void submitDecision(decision, "allow_once")}><Check size={14} />{busy ? "处理中" : "允许这一次"}</button>
+          : <button type="button" disabled={busy} onClick={() => void refreshDecision(decision)}>{busy ? "检查中" : "重新检查"}</button>}
       </div>
     </section>
   );
+}
+
+function ConfirmationContext({ context }: { context?: XhsConfirmationContext }) {
+  if (context == null) return <p className="single-action-blocked">当前 Instance 尚无可核验观察，不能提交。</p>;
+  const issues = context.pendingIssues.length > 0 ? context.pendingIssues.join("；") : context.status === "ready" ? "无" : "当前观察未满足提交条件";
+  return (
+    <dl className="single-action-context" aria-label="同实例提交摘要">
+      <div><dt>Instance</dt><dd>{context.runtimeBinding.runtimeSessionRef}</dd></div>
+      <div><dt>账号</dt><dd>{factLabel(context.account.status, context.account.label ?? context.account.accountRef)}</dd></div>
+      <div><dt>经营对象</dt><dd>{factLabel(context.businessTarget.status, context.businessTarget.label ?? context.businessTarget.targetRef)}</dd></div>
+      <div><dt>图片</dt><dd>{factLabel(context.media.status, context.media.summary ?? (context.media.imageCount == null ? null : `${context.media.imageCount} 张`))}</dd></div>
+      <div><dt>标题</dt><dd>{fieldLabel(context.fields.title)}</dd></div>
+      <div><dt>正文</dt><dd>{fieldLabel(context.fields.body)}</dd></div>
+      <div><dt>页面差异</dt><dd>{context.page.diff === "unchanged" ? "未变化" : context.page.diff === "changed" ? "已变化" : "未知"}</dd></div>
+      <div><dt>待处理</dt><dd>{issues}</dd></div>
+    </dl>
+  );
+}
+
+function factLabel(status: "verified" | "unknown" | "mismatch", value: string | null) {
+  return `${status === "verified" ? "已核验" : status === "mismatch" ? "不一致" : "未知"}${value ? ` · ${value}` : ""}`;
+}
+
+function fieldLabel(field: XhsConfirmationContext["fields"]["title"]) {
+  const state = field.state === "present" ? "已有内容" : field.state === "empty" ? "为空" : "未知";
+  return `${state}${field.length == null ? "" : ` · ${field.length} 字`}${field.summary ? ` · ${field.summary}` : ""}`;
 }
 
 function actionLabel(category: PendingAuthorizationDecision["category"]) {

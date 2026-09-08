@@ -213,6 +213,10 @@ export interface LocalProviderWritePrecheckProbeInput {
   target_url: string;
   expected_origin: "https://creator.xiaohongshu.com";
   target_ref: string;
+  /** Optional Core expectation used only for read-only public observation matching. */
+  expected?: XhsPublicObservationExpected;
+  /** Confirmation observations do not need a screenshot body; legacy probes may opt in. */
+  capture_screenshot?: boolean;
   /** Controlled path hint; no selector/script is accepted at this boundary. */
   composition_path?: XhsWritePrecheckCompositionPath;
   /** #405 user-selected path; Harbor may select only this exact visible control. */
@@ -445,6 +449,71 @@ export type XhsWritePrecheckCompositionState =
 export type XhsWritePrecheckObservationStatus = "observed" | "unobserved" | "unknown";
 export type XhsWritePrecheckAvailability = "available" | "unavailable" | "unknown";
 
+export type XhsPublicObservationExpected = {
+  account_ref?: string;
+  business_target_ref?: string;
+  title?: string;
+  body?: string;
+  media_refs?: readonly string[];
+};
+
+export type XhsPublicObservationExpectedMatch = "matched" | "mismatched" | "unknown";
+export type XhsPublicObservationPendingIssueCode =
+  | "account_unknown"
+  | "account_mismatch"
+  | "business_target_unknown"
+  | "business_target_mismatch"
+  | "image_count_unknown"
+  | "image_order_unknown"
+  | "image_order_mismatch"
+  | "title_unknown"
+  | "title_mismatch"
+  | "body_unknown"
+  | "body_mismatch"
+  | "page_fingerprint_unknown"
+  | "page_changed"
+  | "page_diff_unknown";
+
+export interface XhsPublicObservationLabelRef {
+  status: "observed" | "unknown";
+  label: string | null;
+  ref: string | null;
+  expected_match: XhsPublicObservationExpectedMatch;
+}
+
+export interface XhsPublicObservationFieldSummary {
+  status: "observed" | "unknown" | "mismatch";
+  summary: {
+    state: "empty" | "present" | "unknown";
+    length: number | null;
+    fingerprint: string | null;
+  };
+  expected_match: XhsPublicObservationExpectedMatch;
+}
+
+export interface XhsPublicObservation {
+  schema_version: "harbor-xhs-public-observation/v0";
+  status: "observed" | "unknown";
+  account: XhsPublicObservationLabelRef;
+  business_target: XhsPublicObservationLabelRef;
+  media: {
+    image_count: number | null;
+    order_status: "observed" | "unknown";
+    ordered_item_refs: readonly string[];
+    expected_match: XhsPublicObservationExpectedMatch;
+  };
+  fields: {
+    title: XhsPublicObservationFieldSummary;
+    body: XhsPublicObservationFieldSummary;
+  };
+  page: {
+    fingerprint: string | null;
+    diff: "unchanged" | "changed" | "unknown";
+  };
+  pending_issue_codes: readonly XhsPublicObservationPendingIssueCode[];
+  submitted: false;
+}
+
 /**
  * Refs-safe stage for a validate-only path-preparation failure.  This stays
  * deliberately small so the next live attempt has one bounded root cause to
@@ -498,6 +567,7 @@ export type LocalProviderWritePrecheckProbeResult =
       publish_control: XhsWritePrecheckFieldState;
       prohibited_actions_observed: { upload: false; generate: false; save: false; publish: false };
       target_ref: string;
+      public_observation: XhsPublicObservation;
       path_prepare?: XhsPathPrepareNormalizedState;
     }
   | {
