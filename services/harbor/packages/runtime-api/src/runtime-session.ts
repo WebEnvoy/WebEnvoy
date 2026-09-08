@@ -341,6 +341,12 @@ export class RuntimeSessionStore {
     const identityEnvironment = isLocalIdentityEnvironmentFacts(input.identity_environment)
       ? input.identity_environment
       : createLocalIdentityEnvironmentFacts(input.identity_environment);
+    if (input.provider_id && input.provider_id !== identityEnvironment.provider_binding.selected_provider_id) {
+      return unavailableSession("identity_environment_unavailable", error(
+        "identity_environment_unavailable",
+        "provider_mismatch: Requested provider does not match the managed identity binding."
+      ));
+    }
     const identityError = identityEnvironmentUnavailable(identityEnvironment);
     if (identityError) return unavailableSession("identity_environment_unavailable", identityError);
     if (this.mutatingIdentityEnvironmentRefs.has(identityEnvironment.identity_environment_ref) ||

@@ -562,6 +562,31 @@ test("manages local xhs and boss identity environments with redacted public outp
   }
 });
 
+test("rejects a mismatched managed provider before launch without changing identity state", async () => {
+  const launches: LocalProviderLaunchInput[] = [];
+  const runtime = new HarborRuntime(capturingLauncher(launches));
+  const camoufoxPath = "/private/tmp/camoufox.app/Contents/MacOS/camoufox";
+  const record = runtime.createLocalIdentityEnvironment({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    requested_provider_id: "camoufox",
+    identity_environment_ref: "identity-env_provider-mismatch",
+    profile_ref: "profile_provider-mismatch",
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" }
+  });
+  for (const url of [undefined, "https://www.xiaohongshu.com/explore"]) {
+    const input = { identity_environment_ref: record.identity_environment_ref, provider_id: "chrome_official" as const, control_owner: "user" as const };
+    const result = url
+      ? await runtime.openManagedIdentityEnvironmentSession({ ...input, url })
+      : await runtime.openManagedDefaultSiteSession(input);
+    assert.ok("status" in result);
+    assert.equal(result.failure_class, "identity_environment_unavailable");
+    assert.match(result.message, /provider_mismatch/);
+    assert.equal(launches.length, 0);
+    assert.deepEqual(runtime.listLocalIdentityEnvironments(), [record]);
+  }
+});
+
 test("opens managed user sessions with persistent profile storage refs and visible viewer facts", async () => {
   const launches: LocalProviderLaunchInput[] = [];
   const runtime = new HarborRuntime(capturingLauncher(launches));
