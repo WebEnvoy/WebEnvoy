@@ -90,7 +90,7 @@ export function parseOwnerApiRequest(request: OwnerApiJsonRequest): ParsedOwnerA
 }
 
 function isAuthorizationDecisionPath(value: string) {
-  const match = /^\/authorization-decisions\/([^/]+)(?:\/single-action)?$/.exec(value);
+  const match = /^\/authorization-decisions\/([^/]+)(?:\/(?:single-action|preflight))?$/.exec(value);
   if (!match) return false;
   try {
     return authorizationDecisionRefPattern.test(decodeURIComponent(match[1]!));
@@ -135,6 +135,7 @@ export function harborSupervisorAuthorizationHeader(
 
 export function ownerApiTimeoutMs(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
   if (request.method === "POST" && (request.path === "/tasks" || /^\/threads\/[^/]+\/turns$/.test(new URL(request.url).pathname))) return 65_000;
+  if (request.method === "POST" && /^\/authorization-decisions\/[^/]+\/preflight$/.test(new URL(request.url).pathname)) return 20_000;
   if (isHarborSupervisorProtectedRequest(request)) return 20_000;
   return 5_000;
 }

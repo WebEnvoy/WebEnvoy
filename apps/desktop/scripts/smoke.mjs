@@ -279,6 +279,7 @@ for (const [request, expectedTimeout] of [
   [{ path: "/runtime/identity-environments/identity-env%3Aowner%2Faccount", method: "PATCH" }, 20_000],
   [{ path: "/runtime/identity-environments/identity-env%3Aowner%2Faccount", method: "DELETE" }, 20_000],
   [{ path: "/runtime/sessions/session_public/release", method: "POST" }, 20_000],
+  [{ path: "/authorization-decisions/authorization-decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/preflight", method: "POST" }, 20_000],
   [{ path: "/runtime/identity-environments", method: "GET" }, 5_000],
 ]) {
   const parsed = ownerApiRequestModule.parseOwnerApiRequest({ base: "http://127.0.0.1:8788", ...request });
@@ -350,12 +351,13 @@ const authorizationDecisionRef = "authorization-decision:aaaaaaaaaaaaaaaaaaaaaaa
 for (const request of [
   { path: `/authorization-decisions/${authorizationDecisionRef}`, method: "GET" },
   { path: `/authorization-decisions/${encodeURIComponent(authorizationDecisionRef)}`, method: "GET" },
+  { path: `/authorization-decisions/${authorizationDecisionRef}/preflight`, method: "POST" },
   { path: `/authorization-decisions/${authorizationDecisionRef}/single-action`, method: "POST" },
 ]) {
   const parsed = ownerApiRequestModule.parseOwnerApiRequest({ base: "http://127.0.0.1:8788", ...request });
   if (!parsed.ok) throw new Error(`Owner API rejected a declared authorization-decision path: ${request.path}`);
 }
-for (const path of ["/authorization-decisions/password", "/authorization-decisions/not-a-ref/single-action"]) {
+for (const path of ["/authorization-decisions/password", "/authorization-decisions/not-a-ref/preflight", "/authorization-decisions/not-a-ref/single-action"]) {
   if (ownerApiRequestModule.parseOwnerApiRequest({ base: "http://127.0.0.1:8788", path }).ok) {
     throw new Error(`Owner API accepted a malformed authorization-decision path: ${path}`);
   }
