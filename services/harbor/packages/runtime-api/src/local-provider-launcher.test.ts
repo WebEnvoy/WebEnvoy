@@ -505,7 +505,7 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     checkVisibility: () => true,
     querySelectorAll: () => []
   });
-  const title = element("", { placeholder: "填写标题" });
+  const title = { ...element("", { placeholder: "填写标题" }), value: "Original" };
   const body = element("test body", { contenteditable: "true" });
   const firstImage = element("", { src: "blob:https://creator.xiaohongshu.com/first-preview" });
   const secondImage = element("", { src: "https://ci.xiaohongshu.com/second-preview.webp" });
@@ -536,6 +536,8 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
     querySelectorAll: (selector: string) => selector === "xhs-publish-btn" ? (showPublishHost ? [publishHost] : [])
       : selector === ".publish-page-content-media" ? imageCompositions
       : selector === ".user-info" ? [accountRoot]
+      : selector === "input" ? controls.filter((el) => el.getAttribute("placeholder") === "填写标题")
+      : selector === '[contenteditable="true"]' ? controls.filter((el) => el.getAttribute("contenteditable") === "true")
       : selector.includes("aria-invalid") || missingCreatorRoot ? [] : extraCreatorRoot ? [app, extraCreatorRoot] : [app]
   };
   const appRoots = [app];
@@ -570,6 +572,22 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   assert.equal(result.public_observation.ordered_item_refs.length, 2);
   assert.equal(new Set(result.public_observation.ordered_item_refs).size, 2);
   assert.equal(result.public_observation.ordered_item_refs.every((ref: string) => /^media:sha256:[a-f0-9]{64}$/.test(ref)), true);
+
+  const observeFields = () => evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
+  controls.unshift(element("标题帮助"), element("正文帮助"));
+  const withHelp = await observeFields();
+  assert.equal(withHelp.public_observation.page_fingerprint, result.public_observation.page_fingerprint);
+  title.value = "Changed";
+  const changedTitle = await observeFields();
+  assert.notEqual(changedTitle.public_observation.page_fingerprint, withHelp.public_observation.page_fingerprint);
+  body.textContent = "Changed body";
+  assert.notEqual((await observeFields()).public_observation.page_fingerprint, changedTitle.public_observation.page_fingerprint);
+  controls.push({ ...title });
+  assert.equal((await observeFields()).field_states.title_input.observation, "unknown");
+  controls.pop();
+  controls.splice(0, 2);
+  title.value = "Original";
+  body.textContent = "test body";
 
   imageElements.reverse();
   const reordered = await evaluate(document, location, () => ({ display: "block", visibility: "visible", pointerEvents: "auto", opacity: "1", zIndex: "0" }), 1200, 800, (resolve: () => void) => resolve());
@@ -626,9 +644,18 @@ test("#419 precheck observes the public host contract for closed-shadow draft an
   missingCreatorRoot = true;
   assert.equal((await read()).public_observation.business_target_kind, null);
   missingCreatorRoot = false;
-  appRoots.push({ ...app });
+  // Nested Vue mounts belong to the same ownership tree, unlike disjoint Apps.
+  const nestedApp = { ...app, contains: () => false };
+  appRoots.push(nestedApp);
+  assert.equal((await read()).public_observation.business_target_kind, "xiaohongshu.creator_publish_page/v1");
+  appRoots.pop();
+  const disjointApp = { ...app, contains: () => false };
+  const appContains = app.contains;
+  app.contains = (node?: unknown) => node !== disjointApp;
+  appRoots.push(disjointApp);
   assert.equal((await read()).public_observation.business_target_kind, null);
   appRoots.pop();
+  app.contains = appContains;
   // Distinct candidate surfaces must not be collapsed to the first match.
   const previousContains = app.contains;
   extraCreatorRoot = { ...element(""), contains: (node: unknown) => controls.includes(node as typeof title) };

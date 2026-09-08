@@ -1658,6 +1658,14 @@ function fieldReadbackFromProbe(probe: FieldFillProbe | undefined): Extract<Loca
   };
 }
 
+// Observation and field execution must identify the same unique editable controls.
+function creatorFieldCandidatesExpression(roots: string): string {
+  return String.raw`const fieldCandidates = (selector, predicate) => [...new Set((${roots}).flatMap((root) => [...root.querySelectorAll(selector)]))]
+      .filter((el) => visible(el) && predicate(el));
+    const titles = fieldCandidates('input', (el) => !el.disabled && !el.readOnly && /标题/.test(el.getAttribute('placeholder') || ''));
+    const bodies = fieldCandidates('[contenteditable="true"]', (el) => el.getAttribute('aria-disabled') !== 'true');`;
+}
+
 export function fieldFillProbeExpression(title: string, body: string, write: boolean): string {
   const titleLiteral = JSON.stringify(title);
   const bodyLiteral = JSON.stringify(body);
@@ -1671,9 +1679,7 @@ export function fieldFillProbeExpression(title: string, body: string, write: boo
         rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight &&
         (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
     };
-    const unique = (selector, predicate) => [...new Set(roots.flatMap((root) => [...root.querySelectorAll(selector)]))].filter((el) => visible(el) && predicate(el));
-    const titles = unique('input', (el) => !el.disabled && !el.readOnly && /标题/.test(el.getAttribute('placeholder') || ''));
-    const bodies = unique('[contenteditable="true"]', (el) => el.getAttribute('aria-disabled') !== 'true');
+    ${creatorFieldCandidatesExpression("roots")}
     const titleValue = ${titleLiteral};
     const bodyValue = ${bodyLiteral};
     if (${write ? "true" : "false"} && titles.length === 1 && bodies.length === 1) {
@@ -2023,7 +2029,8 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         return 'fnv1a:' + (hash >>> 0).toString(16).padStart(8, '0');
       };
       const interactive = [...document.querySelectorAll('button, [role="button"], [role="tab"], .header-tabs .creator-tab, input, textarea, [contenteditable="true"], [role="textbox"]')];
-      const apps = [...document.querySelectorAll('#app, [data-v-app]')].filter((el) => visible(el));
+      const outermostRoots = (nodes) => nodes.filter((node) => !nodes.some((other) => other !== node && other.contains(node)));
+      const apps = outermostRoots([...document.querySelectorAll('#app, [data-v-app]')].filter((el) => visible(el)));
       const app = apps.length === 1 ? apps[0] : undefined;
       const appVisible = Boolean(app);
       const controls = interactive.filter((el) => appVisible && app.contains(el) && visible(el));
@@ -2043,7 +2050,7 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
         .filter((el) => visible(el)) : [];
       const creatorRoots = semanticRoots.filter((root) => creatorControls.some((control) => root.contains(control)));
       // Nested containers describe one surface; disjoint creator roots are ambiguous.
-      const roots = creatorRoots.filter((root) => !creatorRoots.some((other) => other !== root && other.contains(root)));
+      const roots = outermostRoots(creatorRoots);
       const creatorSurface = roots.length === 1 ? roots[0] : undefined;
       const surfaceControls = creatorSurface ? controls.filter((el) => creatorSurface.contains(el)) : [];
       const pathControls = strictPath ? surfaceControls.filter((el) => visible(el, false)) : surfaceControls;
@@ -2061,10 +2068,9 @@ export function writePrecheckProbeExpression(compositionPath?: XhsWritePrecheckC
       const observedPath = activePath || imageComposition;
       const path_observed = observedPath ? 'observed' : pathEntryVisible ? 'unobserved' : 'unknown';
       const path_entry_visible = pathEntryVisible ? 'observed' : 'unknown';
-      const titleControl = findControl([/标题|title/i], false, surfaceControls);
-      const labeledContentControl = findControl([/正文|内容|简介|描述|content/i], false, surfaceControls);
-      const contentEditables = surfaceControls.filter((el) => el.getAttribute('contenteditable') === 'true');
-      const contentControl = labeledContentControl || (contentEditables.length === 1 ? contentEditables[0] : undefined);
+      ${creatorFieldCandidatesExpression("creatorSurface ? [creatorSurface] : []")}
+      const titleControl = titles.length === 1 ? titles[0] : undefined;
+      const contentControl = bodies.length === 1 ? bodies[0] : undefined;
       const publishControl = findControl([/^发布$|发布笔记|立即发布|publish/i], false, surfaceControls);
       const saveControl = findControl([/保存草稿|保存|save draft/i], false, surfaceControls);
       const publishHosts = creatorSurface ? [...creatorSurface.querySelectorAll('xhs-publish-btn')].filter((el) => visible(el, true)) : [];
