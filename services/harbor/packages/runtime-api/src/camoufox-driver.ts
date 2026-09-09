@@ -1,5 +1,6 @@
 import { managedUnavailable, trustManagedPublicPageOperation, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
 import { trustManagedInteractionOperation, type ManagedInteractionResult, type ManagedInteractionSnapshot } from "./managed-interaction.js";
+import { normalizeEnvironmentObservation, trustEnvironmentProbe } from "./profile-environment.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -271,6 +272,10 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       viewer_entry: camoufoxViewerEntry(input.headless),
       page,
       facts,
+      readEnvironment: trustEnvironmentProbe(async () => {
+        try { return normalizeEnvironmentObservation((await driver.request("environment_read", {})).result); }
+        catch { return null; }
+      }),
       clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
       interaction: trustManagedInteractionOperation(async input => {
         // After a private command is sent, a lost response cannot prove that an

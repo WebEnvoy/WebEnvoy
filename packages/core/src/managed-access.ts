@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "instance.navigate", "instance.read", "instance.handoff", "account.bind", ...managedInteractionOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", ...managedInteractionOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };
@@ -295,7 +295,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
       if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
       if (targetOrigin !== undefined && (!grant.allowed_origins.includes(targetOrigin) || !profile.allowed_origins.includes(targetOrigin) || !task.origins.includes(targetOrigin))) return fail("managed_access_denied");
-      if (["instance.start", "instance.observe", "instance.diagnostics", "instance.navigate", "instance.read", "account.bind", ...managedInteractionOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", ...managedInteractionOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
       return { ...result, profile_policy: profile };
     },

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvironmentState, type EnvironmentObservation, type EnvironmentProbe, type ProfileEnvironmentConfiguration } from "./profile-environment.js";
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { isTrustedManagedPublicPageOperation, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
@@ -134,6 +135,9 @@ export interface RuntimeSessionRecord {
   interaction_snapshot?: { page_ref: string; observation_ref: string; control_generation: number; holder_ref: string };
   observePage?: () => Promise<ManagedProviderObservation>;
   readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
+  readEnvironment?: EnvironmentProbe;
+  applied_environment?: ProfileEnvironmentConfiguration;
+  environment_observation?: EnvironmentObservation;
   managed_observations?: ManagedObservation[];
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
@@ -168,6 +172,7 @@ export class RuntimeSessionStore {
   ) {}
 
   async createSession(input: CreateRuntimeSessionInput = {}): Promise<RuntimeSessionFacts> {
+    const appliedEnvironment = input.managed_identity_environment ? profileEnvironmentConfiguration(input.managed_identity_environment) : undefined;
     const now = new Date().toISOString();
     const provider_ref = input.provider_ref ?? opaqueRef("provider");
     const profile_ref = input.profile_ref ?? opaqueRef("profile");
@@ -298,6 +303,8 @@ export class RuntimeSessionStore {
       interaction: ready ? launch.interaction : undefined,
       observePage: ready ? launch.observePage : undefined,
       readDiagnostics: ready ? launch.readDiagnostics : undefined,
+      readEnvironment: ready ? launch.readEnvironment : undefined,
+      applied_environment: ready ? appliedEnvironment : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
@@ -305,7 +312,25 @@ export class RuntimeSessionStore {
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined
     });
+    if (ready && input.managed_identity_environment) await this.readProfileEnvironment(input.managed_identity_environment);
     return snapshot(facts);
+  }
+
+  async readProfileEnvironment(identity: LocalIdentityEnvironmentFacts) {
+    const session = this.getActiveIdentityEnvironmentSession(identity.identity_environment_ref);
+    const record = session ? this.records.get(session.runtime_session_ref) : undefined;
+    const active = record && ["active", "locked", "idle"].includes(record.facts.lifecycle_state) ? record : undefined;
+    let observation: EnvironmentObservation | null = null;
+    if (active && active.execution_surface === "local_provider" && !active.active_provider_interactions && isTrustedEnvironmentProbe(active.readEnvironment)) {
+      active.active_provider_interactions += 1;
+      try {
+        observation = await active.readEnvironment();
+        if (observation) active.environment_observation = observation;
+      } catch { observation = null; }
+      finally { active.active_provider_interactions -= 1; }
+    }
+    return profileEnvironmentState(identity, active?.facts.runtime_session_ref ?? null, active?.applied_environment ?? null,
+      observation, active?.environment_observation?.observed_at ?? null);
   }
 
   getSession(runtime_session_ref: string): RuntimeSessionFacts | null {

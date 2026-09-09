@@ -12,10 +12,12 @@ import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 
 type ObjectValue = Record<string, unknown>;
+type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number };
+  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
+const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
 class InteractionFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_interaction_outcome_unknown"); }
 }
@@ -29,11 +31,21 @@ function text(value: unknown): string {
   if (typeof value !== "string" || !value.length || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) return fail("managed_browser_invalid_input");
   return value;
 }
+function configuration(value: unknown): EnvironmentConfiguration {
+  const input = object(value), fields = ["timezone", "language", "viewport"];
+  if (!Object.keys(input).length || Object.keys(input).some(key => !fields.includes(key))) return fail("managed_browser_invalid_input");
+  for (const key of fields) if (input[key] !== undefined) {
+    const item = input[key];
+    if (typeof item !== "string" || !item.length || item.length > 128 || /[\u0000-\u001f\u007f]/.test(item)) return fail("managed_browser_invalid_input");
+  }
+  return input as EnvironmentConfiguration;
+}
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
+  if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
   for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
@@ -65,12 +77,16 @@ function parse(value: unknown): Request {
     }
   } else if (input.operation === "instance.diagnostics") {
     if (["target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "observation_ref", "account_system_ref", "account_ref", "template_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
-  } else if (["page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
+  } else if (isEnvironment(String(input.operation))) {
+    if (["template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
+    if (input.operation === "environment.update") configuration(input.configuration);
+    else if (input.configuration !== undefined) return fail("managed_browser_invalid_input");
+  } else if (["page_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -164,6 +180,10 @@ export function createManagedBrowserService(options: {
     if (!profile) return fail("managed_browser_profile_not_found");
     if (input.operation === "profile.read") return { profile };
     const identity = encodeURIComponent(text(profile.identity_environment_ref));
+    if (input.operation === "environment.read") return await harbor(`/runtime/identity-environments/${identity}/environment`);
+    if (input.operation === "environment.update") return await harbor(`/runtime/identity-environments/${identity}/environment`, {
+      idempotency_key: runId, configuration: input.configuration!
+    });
     const active = await harbor(`/runtime/identity-environments/${identity}/session`);
     let session = active.runtime_session === null ? undefined : object(active.runtime_session);
     if (input.operation === "instance.start" && !session) {
@@ -247,9 +267,9 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(isInteraction(input.operation) ? { runtime_session_ref: input.runtime_session_ref, profile_ref: input.profile_ref, origin: input.origin, dispatch_state: "not_dispatched" } : {}) };
+          ...(isInteraction(input.operation) || isEnvironment(input.operation) ? { ...(isInteraction(input.operation) ? { runtime_session_ref: input.runtime_session_ref } : {}), profile_ref: input.profile_ref, origin: input.origin, ...(isInteraction(input.operation) ? { dispatch_state: "not_dispatched" } : {}) } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "account.bind"].includes(input.operation) || isInput(input.operation)) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: (["profile.create", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation)) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
@@ -273,6 +293,31 @@ export function createManagedBrowserService(options: {
       const principal = await options.accessStore.authenticateCredential(credentialHash);
       const run = await store.getRunRecord(runId);
       if (!run || run.public_result_summary?.principal_id !== principal.principal_id) return fail("managed_browser_operation_not_found");
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "environment.update" && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        const profileRef = typeof run.public_result_summary?.profile_ref === "string" ? run.public_result_summary.profile_ref : runId;
+        return withFileOwnershipLock(join(directory, `${digest(text(profileRef))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.status === "succeeded" || current.public_result_summary?.reconciliation) return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            // A receipt lookup is read-only; never reissue the environment update.
+            const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
+            if (receipt.status === "completed" || receipt.status === "rejected" || receipt.status === "repair_required") {
+              let environment: ObjectValue | undefined;
+              if (receipt.status === "completed" && typeof receipt.identity_environment_ref === "string") {
+                try {
+                  environment = await harbor(`/runtime/identity-environments/${encodeURIComponent(text(receipt.identity_environment_ref))}/environment`);
+                } catch { /* The persisted receipt remains the authoritative recovery fact. */ }
+              }
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result: { receipt, ...(environment === undefined ? {} : { environment }) } } });
+            }
+          } catch { /* Missing Runtime receipt never proves the original update did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
       if (["running", "admitted", "unknown_outcome"].includes(run.status) && isInteraction(String(run.public_result_summary?.operation)) && !run.public_result_summary?.reconciliation) {
         await mkdir(directory, { recursive: true, mode: 0o700 });
         return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.profile_ref))}.lock`), 5000, async () => {

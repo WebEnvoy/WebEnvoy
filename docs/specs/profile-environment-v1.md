@@ -27,7 +27,7 @@
 
 ## 2. 环境事实模型
 
-具体 wire schema 后续冻结，但每个受管 Profile 的环境事实必须能够表达：
+当前切片的 wire schema 由第 18 节冻结；每个受管 Profile 的环境事实必须能够表达：
 
 | 事实 | 含义 |
 |---|---|
@@ -516,3 +516,45 @@ Network／Console／controlled evaluation／viewer 等首批能力必须证明�
 - 将外部日常 Profile 长期挂载；
 - Agent 读取完整 fingerprint、Cookie 或代理凭据；
 - 用环境配置替代 Account／BusinessTarget 验证。
+
+## 18. 首个正式环境生命周期合同（#499）
+
+版本：`harbor-profile-environment/v1`；owner：Harbor（配置、Instance 应用和观测）、Core（授权、Run、查询）。Provider-private 持久材料另见 [Camoufox 环境连续性 V1](camoufox-environment-continuity-v1.md)，不得出现在本公共结构中。
+
+### 18.1 调用和授权
+
+Installed Plugin 的 `environment.read` 和 `environment.update` 复用现有 `webenvoy_operation`；输入必须包括 `idempotency_key`、`grant_id`、`task_scope`、`profile_ref`、精确 `origin`，Connector 绑定 Connection。两项分别需要既有 `allowed_operations` 中的同名操作，继续取 Profile ceiling ∩ Grant ∩ task scope 的交集。没有新 Grant field、scope dimension 或隐含权限；创建新 Profile 不能提高模板上限。
+
+`environment.update` 额外且仅接受 `configuration: {timezone?: string, language?: string, viewport?: string}`，至少一个字段。时区为有效 IANA 名称，language 为有效 locale，viewport 为既有 `宽x高` 表示（每边 200–16384）；拒绝空值、未知字段和不支持值。此切片不允许 Agent 改 Provider、proxy、hardware、GPU、seed 或 fingerprint。
+
+Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environment` 读取；`POST` 同路径以 `{idempotency_key, configuration}` 保存。POST 复用既有 `edit` mutation 和持久 receipt，不在浏览器上执行热变更。响应丢失时，Core 查询原 Run／mutation receipt，不再发送更新；新 read 只反映当前事实。停止和重启使用已授权的 `instance.stop/start`，不自动执行。
+
+### 18.2 公共 envelope
+
+成功为 `{status: "completed", schema_version: "harbor-profile-environment/v1", profile_ref, identity_environment_ref, runtime_session_ref, configured, effective, pending, observation_status, observed, provider, bundle_hash, drift, last_verified_at, support}`。
+
+| 字段 | 类型和语义 |
+| --- | --- |
+| refs | Profile、Environment 为 opaque string；`runtime_session_ref` 为当前活动 Instance ref 或 `null` |
+| `configured` | `{provider_id, proxy_ref, geoip_mode, language, timezone, viewport}`，值为 string 或 null；由已保存 Profile 配置派生，禁止 endpoint／凭据 |
+| `effective` | 同形配置或 null；只来自该活动 Instance 成功启动时的不可变配置快照，不由保存配置改写；无活动 Instance 时为 null |
+| `pending` | 同形配置或 null；configured 尚未应用到活动 Instance 时为 configured，否则 null；没有活动 Instance 时，configured 等待下次启动 |
+| `observation_status` | `observed`、`unavailable` 或 `inactive`，不把读取失败伪装为空的成功观测 |
+| `observed` | 当前有界环境回读或 null，结构见下文；不会覆盖 configured |
+| `provider` | `{camoufox_version, browser_version, properties_sha256}` 或 null，仅来自已校验 Driver 回读 |
+| `bundle_hash` | 64 位小写十六进制摘要或 null；稳定身份材料摘要，不包含可变 timezone/locale/viewport，不授予重建身份的材料 |
+| `drift` | `{state: match\|drift\|unknown, checked_fields: string[], changed_fields: string[], unknown_fields: string[]}`；只对 checked_fields 宣称结果，不把 unknown 当成一致 |
+| `last_verified_at` | 当前 Instance 最近成功环境回读的 UTC ISO 时间或 null；仅证明该 Instance/Provider，不跨 Runtime 退出冒称仍新鲜 |
+| `support` | 已实现配置字段、实际可回读字段和明确限制；代理出口、geo、WebRTC 等未观测项不得标 verified |
+
+`observed` 固定包含 nullable `language`、`timezone`、`hardware_concurrency`、`device_memory`、`webgl_vendor`、`webgl_renderer`、`fonts_hash`、`voices_hash`、`canvas_hash`、`audio_hash`，`languages` 为至多 16 项的字符串列表，`viewport`/`screen` 为 `{width,height}` 或 null。普通字符串至多 256 字符；hash 为 64 位小写十六进制。不包含字体／声音完整列表、raw canvas/audio、seed、完整指纹、Cookie 或存储内容。缺失或不支持的观察必须为 null／unknown，不从 configured 猜测。
+
+### 18.3 状态、漂移和失败
+
+活动 Instance 上保存 A→B 后：configured=B、effective=A、pending=B；不调用 Provider 配置 mutation，不改变租约或浏览器现场。安全停止后 effective=null；同 Profile 成功重启后 effective=B、pending=null，再以浏览器回读检验 B。启动失败保留 configured 和原材料，不创建替代 Profile 或回退 Provider。
+
+Drift 比较实际应用配置与回读的 timezone/language，以及 Provider-private 连续性校验明确可比较的字段。已解释的 pending 差异不算 drift；未知网络出口／geo／WebRTC 或 unsupported 设备事实只限制相关结论，不阻塞无关 Profile／能力。观测只读，不发外部网络探测，不启动/停止 Instance。读操作与既有在途 Provider 计数共用生命周期保护，但不取得输入 ControlLease。
+
+缺失 Profile、非法输入、配置拒绝或持久化失败返回 `{status:"unavailable",failure_class,message,retryable}`，failure_class 复用既有 mutation code；message 为固定有界摘要。活动 Provider 暂不可读时仍可返回已保存 configured 和已知启动快照，但 observation_status=unavailable、observed=null、drift=unknown；不能声称保存失败或启动配置已回读。
+
+本合同新增的是固定操作值和公共读模型。配置仍使用既有 Profile store 和 edit receipt，无重复持久配置状态或第二调度器。旧 Grant 不自动获得新操作；旧 Runtime／Plugin 缺少此版本时明确不可用。兼容升级、迁移及 private bundle 修复仍需 owner 决定，本项不提供任意环境编辑器。

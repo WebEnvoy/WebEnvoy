@@ -1,4 +1,5 @@
 import { hasManagedBindingConflict } from "./managed-observation.js";
+import { boundedEnvironmentUpdate } from "./profile-environment.js";
 import { createHash } from "node:crypto";
 import { createIdentityConsistencyFacts } from "./identity-consistency.js";
 import {
@@ -80,7 +81,8 @@ export function executeIdentityEnvironmentMutation(
   request: IdentityEnvironmentMutationRequest,
   store: IdentityEnvironmentMutationStore,
   options: IdentityEnvironmentMutationOptions = {},
-  conflict: IdentityEnvironmentMutationConflict | null = null
+  conflict: IdentityEnvironmentMutationConflict | null = null,
+  activeConfigurationOnly = false
 ): IdentityEnvironmentMutationResult {
   if ((request.operation === "create" || request.operation === "import") &&
     !hasOnlyIdentityEnvironmentBusinessInputKeys(request.identity_environment, request.operation)) {
@@ -101,6 +103,8 @@ export function executeIdentityEnvironmentMutation(
     if (receipt.result.status !== "repair_required") return receipt.result;
   }
   if (conflict) return rejected(request.operation, requestRef(request), conflict.code, true, conflict.recovery_actions);
+  // Metadata-only configuration does not touch the active browser's storage.
+  if (activeConfigurationOnly && !receipt && request.operation === "edit" && boundedEnvironmentUpdate(request.configuration)) return edit(request, hash, store, options);
   const materializedRequest = materializeIdentityEnvironmentMutation(request, options.provider_detection);
   let ownership;
   try {

@@ -17,12 +17,13 @@ export const agentOperations = [
   ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
   ["instance.start", "启动实例"], ["instance.stop", "停止实例"],
   ["instance.observe", "页面与身份事实"], ["instance.diagnostics", "网络与控制台诊断"], ["instance.handoff", "接管与交还"],
+  ["environment.read", "读取环境连续性事实"], ["environment.update", "修改时区、语言或视口（重启后生效）"],
   ["instance.navigate", "导航"], ["instance.read", "公开正文读取"],
   ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
   ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
   ["instance.scroll", "滚动"], ["instance.wait", "等待页面变化"],
 ] as const;
-export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "instance.read"];
+export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "environment.read", "instance.read"];
 export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 和必要操作。Profile 管理权不隐含网页输入权限。";
 export type AgentScopeInput = { origin: string; operations: string[]; controlled: boolean };
 
@@ -31,6 +32,7 @@ function selectedScope(input: AgentScopeInput) {
   const url = new URL(origin);
   if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new Error("请输入精确 origin（协议、主机及可选端口），不含路径、查询串或片段。");
   if (!input.operations.length) throw new Error("请选择必要操作。");
+  if (input.operations.some(operation => !agentOperations.some(([id]) => id === operation))) throw new Error("请选择有效操作。");
   return { allowed_operations: [...input.operations], allowed_origins: [origin], controlled_interaction_origins: input.controlled ? [origin] : [] };
 }
 

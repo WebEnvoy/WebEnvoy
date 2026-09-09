@@ -745,6 +745,7 @@ export type LocalProviderLaunchResult =
       interaction?: import("./managed-interaction.js").ManagedInteractionOperation;
       observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
       readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
+      readEnvironment?: import("./profile-environment.js").EnvironmentProbe;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;

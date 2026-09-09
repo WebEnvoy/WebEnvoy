@@ -132,6 +132,11 @@ async function route(
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
   }
+  if (["GET", "POST"].includes(method) && parts[0] === "runtime" && parts[1] === "identity-environments" && parts[2] && parts[3] === "environment" && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = method === "GET" ? await runtime.readProfileEnvironment(parts[2]) : await runtime.updateProfileEnvironment(parts[2], await readJson<unknown>(request));
+    writeJson(response, 200, result); return;
+  }
   if (method === "POST" && parts[0] === "runtime" && parts[1] === "identity-environments" && parts[2] && parts[3] === "account-bindings" && parts.length === 4) {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.bindManagedAccount(parts[2], await readJson<unknown>(request));

@@ -11,13 +11,16 @@ import contextlib
 import configparser
 from collections import deque
 from datetime import datetime, timezone
+import copy
 import importlib.metadata
 import hashlib
 import json
+import math
 import os
 import platform
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -57,6 +60,49 @@ DIAGNOSTIC_SENSITIVE_PATH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 DIAGNOSTIC_URL_PATTERN = re.compile(r'''https?://[^\s"'<>]+''', re.IGNORECASE)
+
+CAMOUFOX_VERSION_PIN = "0.5.6"
+BROWSER_VERSION_PIN = "152.0.4-beta.30"
+PROPERTIES_SHA256_PIN = "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+ENVIRONMENT_BUNDLE_FILENAME = ".webenvoy-camoufox-environment.v1.json"
+MAX_ENVIRONMENT_BUNDLE_BYTES = 2 * 1024 * 1024
+DYNAMIC_ENVIRONMENT_CONFIG_KEYS = frozenset({
+    "timezone",
+    "locale:language",
+    "locale:region",
+    "locale:script",
+    "locale:all",
+    "navigator.language",
+    "window.outerWidth",
+    "window.outerHeight",
+    "window.innerWidth",
+    "window.innerHeight",
+    "window.screenX",
+    "window.screenY",
+})
+CONTINUITY_STABLE_FIELDS = (
+    "screen",
+    "hardware_concurrency",
+    "webgl_vendor",
+    "webgl_renderer",
+    "canvas_hash",
+    "audio_hash",
+)
+ENVIRONMENT_OBSERVED_FIELDS = (
+    "language",
+    "languages",
+    "timezone",
+    "viewport",
+    "screen",
+    "hardware_concurrency",
+    "device_memory",
+    "webgl_vendor",
+    "webgl_renderer",
+    "fonts_hash",
+    "voices_hash",
+    "canvas_hash",
+    "audio_hash",
+)
 
 
 def send(message_id: int, status: str, **payload: Any) -> None:
@@ -305,6 +351,391 @@ def safe_error(error: BaseException) -> str:
     return f"{type(error).__name__}: {message}" if message else type(error).__name__
 
 
+def canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def json_hash(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def identity_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in config.items()
+        if key not in DYNAMIC_ENVIRONMENT_CONFIG_KEYS
+    }
+
+
+def environment_bundle_path(profile_dir: str | Path) -> Path:
+    return Path(profile_dir).absolute() / ENVIRONMENT_BUNDLE_FILENAME
+
+
+def profile_has_environment_state(profile_dir: str | Path) -> bool:
+    profile = Path(profile_dir).absolute()
+    if not profile.exists():
+        return False
+    if not profile.is_dir():
+        raise ValueError("Camoufox managed profile path is not a directory.")
+    return any(entry.name != ENVIRONMENT_BUNDLE_FILENAME for entry in profile.iterdir())
+
+
+def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
+    required = {
+        "schema_version",
+        "provider",
+        "camoufox_version",
+        "browser_version",
+        "properties_sha256",
+        "config",
+        "config_sha256",
+        "identity_hash",
+        "baseline",
+        "baseline_sha256",
+    }
+    if not isinstance(bundle, dict) or set(bundle) != required:
+        raise ValueError("Camoufox environment bundle schema is unsupported or corrupt.")
+    if (
+        type(bundle["schema_version"]) is not int
+        or bundle["schema_version"] != 1
+        or bundle["provider"] != "camoufox"
+        or bundle["camoufox_version"] != CAMOUFOX_VERSION_PIN
+        or bundle["browser_version"] != BROWSER_VERSION_PIN
+        or bundle["properties_sha256"] != PROPERTIES_SHA256_PIN
+    ):
+        raise ValueError("Camoufox environment bundle provider or version is unsupported.")
+
+    config = bundle["config"]
+    if not isinstance(config, dict) or not config:
+        raise ValueError("Camoufox environment bundle config is corrupt.")
+    try:
+        config_hash = json_hash(config)
+        identity_hash = json_hash(identity_config(config))
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Camoufox environment bundle config is not valid JSON.") from error
+    if len(canonical_json(config)) > MAX_ENVIRONMENT_BUNDLE_BYTES:
+        raise ValueError("Camoufox environment bundle config is too large.")
+    if bundle["config_sha256"] != config_hash or bundle["identity_hash"] != identity_hash:
+        raise ValueError("Camoufox environment bundle hash does not match its config.")
+
+    baseline = bundle["baseline"]
+    baseline_hash = bundle["baseline_sha256"]
+    if baseline is None:
+        if baseline_hash is not None:
+            raise ValueError("Camoufox environment bundle baseline hash is corrupt.")
+    else:
+        if not isinstance(baseline, dict) or set(baseline) != {"observed_at", "observed"}:
+            raise ValueError("Camoufox environment bundle baseline is corrupt.")
+        if (
+            not isinstance(baseline["observed_at"], str)
+            or not baseline["observed_at"]
+            or len(baseline["observed_at"]) > 64
+            or not isinstance(baseline["observed"], dict)
+            or set(baseline["observed"]) != set(CONTINUITY_STABLE_FIELDS)
+            or baseline_hash != json_hash(baseline)
+        ):
+            raise ValueError("Camoufox environment bundle baseline is corrupt.")
+    return bundle
+
+
+def _atomic_write_environment_bundle(path: Path, bundle: dict[str, Any], replace: bool) -> None:
+    payload = canonical_json(bundle) + b"\n"
+    if len(payload) > MAX_ENVIRONMENT_BUNDLE_BYTES:
+        raise ValueError("Camoufox environment bundle is too large.")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp_name = ""
+    try:
+        temp_fd, temp_name = tempfile.mkstemp(
+            prefix=f".{ENVIRONMENT_BUNDLE_FILENAME}.",
+            dir=path.parent,
+        )
+        with os.fdopen(temp_fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if replace:
+            os.replace(temp_name, path)
+            temp_name = ""
+        else:
+            # link() publishes the complete inode without overwriting a bundle
+            # created by a competing Profile owner.
+            os.link(temp_name, path)
+            os.unlink(temp_name)
+            temp_name = ""
+        os.chmod(path, 0o600)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_name:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temp_name)
+
+
+def save_environment_bundle(profile_dir: str | Path, bundle: dict[str, Any]) -> dict[str, Any]:
+    bundle = validate_environment_bundle(bundle)
+    path = environment_bundle_path(profile_dir)
+    if os.path.lexists(path):
+        raise ValueError("Camoufox environment bundle already exists.")
+    _atomic_write_environment_bundle(path, bundle, replace=False)
+    return bundle
+
+
+def update_environment_bundle(profile_dir: str | Path, bundle: dict[str, Any]) -> dict[str, Any]:
+    bundle = validate_environment_bundle(bundle)
+    path = environment_bundle_path(profile_dir)
+    if not os.path.lexists(path) or path.is_symlink():
+        raise ValueError("Camoufox environment bundle is missing or unsafe.")
+    _atomic_write_environment_bundle(path, bundle, replace=True)
+    return bundle
+
+
+def load_environment_bundle(profile_dir: str | Path) -> dict[str, Any]:
+    path = environment_bundle_path(profile_dir)
+    if not os.path.lexists(path):
+        raise FileNotFoundError("Camoufox environment bundle is missing.")
+    if path.is_symlink():
+        raise ValueError("Camoufox environment bundle must not be a symlink.")
+    try:
+        metadata = path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise ValueError("Camoufox environment bundle permissions or file type are unsafe.")
+        if metadata.st_size > MAX_ENVIRONMENT_BUNDLE_BYTES:
+            raise ValueError("Camoufox environment bundle is too large.")
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("Camoufox environment bundle is corrupt or unreadable.") from error
+    return validate_environment_bundle(bundle)
+
+
+def build_environment_bundle(config: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(config, dict) or not config:
+        raise ValueError("Camoufox launch did not produce a provider config.")
+    try:
+        canonical_json(config)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Camoufox launch produced a config that is not valid JSON.") from error
+    bundle = {
+        "schema_version": 1,
+        "provider": "camoufox",
+        "camoufox_version": CAMOUFOX_VERSION_PIN,
+        "browser_version": BROWSER_VERSION_PIN,
+        "properties_sha256": PROPERTIES_SHA256_PIN,
+        "config": copy.deepcopy(config),
+        "config_sha256": json_hash(config),
+        "identity_hash": json_hash(identity_config(config)),
+        "baseline": None,
+        "baseline_sha256": None,
+    }
+    return validate_environment_bundle(bundle)
+
+
+def extract_camoufox_config(options: dict[str, Any]) -> dict[str, Any]:
+    env = options.get("env") if isinstance(options, dict) else None
+    if not isinstance(env, dict):
+        raise ValueError("Camoufox launch did not return its private config environment.")
+    chunks: list[tuple[int, str]] = []
+    for key, value in env.items():
+        match = re.fullmatch(r"CAMOU_CONFIG_(\d+)", str(key))
+        if match and isinstance(value, str):
+            chunks.append((int(match.group(1)), value))
+    chunks.sort()
+    if not chunks or [number for number, _ in chunks] != list(range(1, len(chunks) + 1)):
+        raise ValueError("Camoufox launch returned incomplete private config chunks.")
+    try:
+        config = json.loads("".join(value for _, value in chunks))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("Camoufox launch returned corrupt private config.") from error
+    if not isinstance(config, dict):
+        raise ValueError("Camoufox launch returned a non-object private config.")
+    return config
+
+
+def environment_viewport(value: Any) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, dict)
+        or type(value.get("width")) is not int
+        or type(value.get("height")) is not int
+        or not 200 <= value["width"] <= 16_384
+        or not 200 <= value["height"] <= 16_384
+    ):
+        raise ValueError("Camoufox viewport configuration is unsupported.")
+    return value["width"], value["height"]
+
+
+def apply_environment_overrides(
+    config: dict[str, Any],
+    *,
+    timezone: Any = None,
+    viewport: Any = None,
+) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        raise ValueError("Camoufox replay config is corrupt.")
+    if isinstance(timezone, str) and timezone:
+        config["timezone"] = timezone
+    viewport_dimensions = environment_viewport(viewport)
+    if viewport_dimensions is None:
+        return config
+
+    for axis in ("Width", "Height"):
+        value = viewport_dimensions[0 if axis == "Width" else 1]
+        outer_key = f"window.outer{axis}"
+        inner_key = f"window.inner{axis}"
+        old_outer = config.get(outer_key)
+        old_inner = config.get(inner_key)
+        chrome = old_outer - old_inner if type(old_outer) is int and type(old_inner) is int else 0
+        config[outer_key] = value
+        if type(old_inner) is int:
+            config[inner_key] = max(1, value - max(0, chrome))
+
+        screen = config.get(f"screen.{axis.lower()}")
+        position_key = "window.screenX" if axis == "Width" else "window.screenY"
+        position = config.get(position_key)
+        if type(screen) is int and type(position) is int:
+            config[position_key] = max(0, min(position, max(0, screen - value)))
+    return config
+
+
+def _continuity_baseline(observed: dict[str, Any], observed_at: str) -> dict[str, Any]:
+    return {
+        "observed_at": observed_at,
+        "observed": {field: observed.get(field) for field in CONTINUITY_STABLE_FIELDS},
+    }
+
+
+def compare_environment_continuity(bundle: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]:
+    baseline = bundle.get("baseline")
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("observed"), dict):
+        return {
+            "state": "unknown",
+            "checked_fields": [],
+            "changed_fields": [],
+            "unknown_fields": list(CONTINUITY_STABLE_FIELDS),
+        }
+    checked: list[str] = []
+    changed: list[str] = []
+    unknown: list[str] = []
+    previous = baseline["observed"]
+    for field in CONTINUITY_STABLE_FIELDS:
+        before = previous.get(field)
+        current = observed.get(field)
+        if before is None or current is None:
+            unknown.append(field)
+        elif before != current:
+            checked.append(field)
+            changed.append(field)
+        else:
+            checked.append(field)
+    state = "drift" if changed else "match" if not unknown else "unknown"
+    return {
+        "state": state,
+        "checked_fields": checked,
+        "changed_fields": changed,
+        "unknown_fields": unknown,
+    }
+
+
+def establish_environment_baseline(
+    profile_dir: str | Path,
+    bundle: dict[str, Any],
+    observed: dict[str, Any],
+    observed_at: str,
+) -> dict[str, Any]:
+    if bundle.get("baseline") is not None:
+        raise ValueError("Camoufox environment baseline already exists.")
+    updated = copy.deepcopy(bundle)
+    updated["baseline"] = _continuity_baseline(observed, observed_at)
+    updated["baseline_sha256"] = json_hash(updated["baseline"])
+    return update_environment_bundle(profile_dir, updated)
+
+
+def _safe_observed_string(value: Any, limit: int = 256) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > limit or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return None
+    return value
+
+
+def _safe_observed_dimensions(value: Any, keys: tuple[str, ...]) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, int] = {}
+    for key in keys:
+        candidate = value.get(key)
+        if type(candidate) is not int or not 1 <= candidate <= 65_536:
+            return None
+        result[key] = candidate
+    return result
+
+
+def sanitize_environment_observation(raw: Any) -> dict[str, Any]:
+    observed = {field: None for field in ENVIRONMENT_OBSERVED_FIELDS}
+    if not isinstance(raw, dict):
+        raise ValueError("Camoufox environment readback is unavailable.")
+    observed["language"] = _safe_observed_string(raw.get("language"), 64)
+    languages = raw.get("languages")
+    if isinstance(languages, list) and len(languages) <= 16:
+        observed["languages"] = [item for item in (_safe_observed_string(value, 64) for value in languages) if item is not None]
+    observed["timezone"] = _safe_observed_string(raw.get("timezone"), 128)
+    observed["viewport"] = _safe_observed_dimensions(raw.get("viewport"), ("width", "height"))
+    observed["screen"] = _safe_observed_dimensions(raw.get("screen"), ("width", "height", "avail_width", "avail_height"))
+    hardware = raw.get("hardware_concurrency")
+    if type(hardware) is int and 1 <= hardware <= 1024:
+        observed["hardware_concurrency"] = hardware
+    memory = raw.get("device_memory")
+    if (type(memory) in (int, float) and not isinstance(memory, bool) and math.isfinite(memory) and 0 < memory <= 1024):
+        observed["device_memory"] = memory
+    observed["webgl_vendor"] = _safe_observed_string(raw.get("webgl_vendor"))
+    observed["webgl_renderer"] = _safe_observed_string(raw.get("webgl_renderer"))
+    for field in ("fonts_hash", "voices_hash", "canvas_hash", "audio_hash"):
+        value = raw.get(field)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+            observed[field] = value
+    return observed
+
+
+def environment_read(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    del request
+    if PAGE is None:
+        raise RuntimeError("Camoufox Driver has no active page.")
+    bundle = load_environment_bundle(PROFILE_DIR)
+    with contextlib.redirect_stdout(sys.stderr):
+        raw = PAGE.evaluate("mw:" + ENVIRONMENT_READ_EXPRESSION)
+    observed = sanitize_environment_observation(raw)
+    observed_at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    if bundle["baseline"] is None:
+        bundle = establish_environment_baseline(PROFILE_DIR, bundle, observed, observed_at)
+        continuity = {
+            "state": "unknown",
+            "checked_fields": [],
+            "changed_fields": [],
+            "unknown_fields": list(CONTINUITY_STABLE_FIELDS),
+        }
+    else:
+        continuity = compare_environment_continuity(bundle, observed)
+    return {
+        "status": "completed",
+        "observed_at": observed_at,
+        "provider": {
+            "camoufox_version": CAMOUFOX_VERSION_PIN,
+            "browser_version": BROWSER_VERSION_PIN,
+            "properties_sha256": PROPERTIES_SHA256_PIN,
+        },
+        "bundle_hash": bundle["identity_hash"],
+        "observed": observed,
+        "continuity": continuity,
+    }
+
+
 def prepare_properties(executable_path: str) -> tuple[str, str]:
     """Return a Camoufox-compatible executable path without mutating the install.
 
@@ -442,21 +873,153 @@ def boss_probe_expression() -> str:
     })()"""
 
 
+ENVIRONMENT_READ_EXPRESSION = r"""(async () => {
+  const clean = (value, limit) => {
+    if (typeof value !== 'string' || !value || value.length > limit || /[\u0000-\u001f\u007f]/.test(value)) return null;
+    return value;
+  };
+  const integer = (value, max) => Number.isInteger(value) && value >= 1 && value <= max ? value : null;
+  const dimensions = (value, keys) => {
+    if (!value) return null;
+    const result = {};
+    for (const key of keys) {
+      const number = integer(value[key], 65536);
+      if (number === null) return null;
+      result[key] = number;
+    }
+    return result;
+  };
+  const digest = async value => {
+    try {
+      if (!globalThis.crypto?.subtle || typeof TextEncoder !== 'function') return null;
+      const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
+    } catch { return null; }
+  };
+
+  const language = clean(navigator.language, 64);
+  const languages = Array.isArray(navigator.languages)
+    ? navigator.languages.slice(0, 16).map(value => clean(value, 64)).filter(Boolean)
+    : null;
+  let timezone = null;
+  try { timezone = clean(Intl.DateTimeFormat().resolvedOptions().timeZone, 128); } catch {}
+
+  const viewport = dimensions({width: innerWidth, height: innerHeight}, ['width', 'height']);
+  const screenValue = globalThis.screen;
+  const screen = dimensions(screenValue, ['width', 'height', 'availWidth', 'availHeight']);
+  const normalizedScreen = screen && {
+    width: screen.width,
+    height: screen.height,
+    avail_width: screen.availWidth,
+    avail_height: screen.availHeight
+  };
+
+  let webglVendor = null;
+  let webglRenderer = null;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl) {
+      const debug = gl.getExtension('WEBGL_debug_renderer_info');
+      webglVendor = clean(gl.getParameter(debug?.UNMASKED_VENDOR_WEBGL || gl.VENDOR), 256);
+      webglRenderer = clean(gl.getParameter(debug?.UNMASKED_RENDERER_WEBGL || gl.RENDERER), 256);
+    }
+  } catch {}
+
+  let fontsHash = null;
+  try {
+    const fonts = Array.from(document.fonts || []).slice(0, 256).map(font => [
+      String(font.family || ''), String(font.style || ''), String(font.weight || ''),
+      String(font.stretch || ''), String(font.status || '')
+    ]).sort();
+    if (fonts.length) fontsHash = await digest(JSON.stringify(fonts));
+  } catch {}
+
+  let voicesHash = null;
+  try {
+    const voices = typeof globalThis.speechSynthesis?.getVoices === 'function'
+      ? globalThis.speechSynthesis.getVoices().slice(0, 256).map(voice => [
+        String(voice.name || ''), String(voice.lang || ''), String(voice.voiceURI || ''),
+        Boolean(voice.default), Boolean(voice.localService)
+      ]).sort()
+      : [];
+    if (voices.length) voicesHash = await digest(JSON.stringify(voices));
+  } catch {}
+
+  let canvasHash = null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 240; canvas.height = 60;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.fillStyle = '#18324b'; context.fillRect(0, 0, 240, 60);
+      context.fillStyle = '#d7edf7'; context.font = '16px sans-serif';
+      context.textBaseline = 'middle'; context.fillText('WebEnvoy continuity', 8, 30);
+      canvasHash = await digest(canvas.toDataURL());
+    }
+  } catch {}
+
+  let audioHash = null;
+  try {
+    const AudioContext = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+    if (AudioContext) {
+      const context = new AudioContext(1, 2048, 44100);
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const compressor = context.createDynamicsCompressor();
+      oscillator.type = 'triangle'; oscillator.frequency.value = 997;
+      gain.gain.value = 0.25;
+      oscillator.connect(gain); gain.connect(compressor); compressor.connect(context.destination);
+      oscillator.start(0); oscillator.stop(0.02);
+      const rendered = await context.startRendering();
+      const samples = rendered.getChannelData(0);
+      const bounded = [];
+      for (let index = 0; index < samples.length; index += 8) bounded.push(Math.round(samples[index] * 10000000) / 10000000);
+      audioHash = await digest(JSON.stringify(bounded));
+    }
+  } catch {}
+
+  return {
+    language,
+    languages,
+    timezone,
+    viewport,
+    screen: normalizedScreen || null,
+    hardware_concurrency: integer(navigator.hardwareConcurrency, 1024),
+    device_memory: typeof navigator.deviceMemory === 'number' && Number.isFinite(navigator.deviceMemory) && navigator.deviceMemory > 0 && navigator.deviceMemory <= 1024 ? navigator.deviceMemory : null,
+    webgl_vendor: webglVendor,
+    webgl_renderer: webglRenderer,
+    fonts_hash: fontsHash,
+    voices_hash: voicesHash,
+    canvas_hash: canvasHash,
+    audio_hash: audioHash
+  };
+})()"""
+
+
 def launch(request: dict[str, Any]) -> dict[str, Any]:
     global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE, DIAGNOSTIC_EVENTS, DIAGNOSTIC_CURSOR, DIAGNOSTIC_INSTANCE_REF
-    PROFILE_DIR = str(request.get("profile_dir", ""))
+    PROFILE_DIR = str(Path(str(request.get("profile_dir", ""))).absolute()) if request.get("profile_dir") else ""
     EXECUTABLE_PATH = str(request.get("executable_path", ""))
     if not PROFILE_DIR or not EXECUTABLE_PATH:
         raise ValueError("Camoufox Driver launch requires an executable and managed profile.")
-    if sys.version_info[:2] != (3, 12) or importlib.metadata.version("camoufox") != "0.5.6" or importlib.metadata.version("playwright") != "1.60.0":
+    if sys.version_info[:2] != (3, 12) or importlib.metadata.version("camoufox") != CAMOUFOX_VERSION_PIN or importlib.metadata.version("playwright") != "1.60.0":
         raise ValueError("Camoufox Driver runtime does not match the qualified Python/package pins.")
     parser = configparser.ConfigParser()
     parser.read(Path(EXECUTABLE_PATH).parent.parent / "Resources" / "application.ini")
-    if parser.get("App", "Version", fallback="") != "152.0.4-beta.30":
+    if parser.get("App", "Version", fallback="") != BROWSER_VERSION_PIN:
         raise ValueError("Camoufox browser does not match the qualified version pin.")
     properties = Path(EXECUTABLE_PATH).parent.parent / "Resources" / "properties.json"
-    if hashlib.sha256(properties.read_bytes()).hexdigest() != "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4":
+    if hashlib.sha256(properties.read_bytes()).hexdigest() != PROPERTIES_SHA256_PIN:
         raise ValueError("Camoufox properties.json does not match the qualified browser schema pin.")
+    Path(PROFILE_DIR).mkdir(parents=True, exist_ok=True, mode=0o700)
+    bundle_path = environment_bundle_path(PROFILE_DIR)
+    if os.path.lexists(bundle_path):
+        bundle = load_environment_bundle(PROFILE_DIR)
+    else:
+        if profile_has_environment_state(PROFILE_DIR):
+            raise ValueError("Camoufox environment bundle is missing from a non-empty managed profile.")
+        bundle = None
     LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE = prepare_properties(EXECUTABLE_PATH)
     from camoufox import NewBrowser, launch_options
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -466,13 +1029,16 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
     timezone = request.get("timezone")
     viewport = request.get("viewport")
     proxy_server = request.get("proxy_server")
-    config = {"timezone": timezone} if isinstance(timezone, str) and timezone else {}
+    config = copy.deepcopy(bundle["config"]) if bundle is not None else ({"timezone": timezone} if isinstance(timezone, str) and timezone else {})
     proxy = {"server": proxy_server} if isinstance(proxy_server, str) and proxy_server else None
     window = None
-    if isinstance(viewport, dict) and isinstance(viewport.get("width"), int) and isinstance(viewport.get("height"), int):
-        window = (viewport["width"], viewport["height"])
+    if bundle is not None:
+        apply_environment_overrides(config, timezone=timezone, viewport=viewport)
+    else:
+        window = environment_viewport(viewport)
 
     target_os = {"darwin": "macos", "win32": "windows", "linux": "linux"}.get(sys.platform, "linux")
+    provider_env = {key: value for key, value in os.environ.items() if not key.startswith("CAMOU_CONFIG_")}
     with contextlib.redirect_stdout(sys.stderr):
         options = launch_options(
             executable_path=LAUNCH_EXECUTABLE_PATH,
@@ -487,7 +1053,12 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
             enable_cache=True,
             main_world_eval=True,
             i_know_what_im_doing=True,
+            env=provider_env,
         )
+        if bundle is None:
+            bundle = save_environment_bundle(PROFILE_DIR, build_environment_bundle(extract_camoufox_config(options)))
+        elif json_hash(identity_config(extract_camoufox_config(options))) != bundle["identity_hash"]:
+            raise ValueError("Camoufox environment replay changed the stored identity.")
         PLAYWRIGHT = sync_playwright().start()
         # NewBrowser is the package's public persistent-context entrypoint. It
         # also applies Camoufox's no_viewport rule when a spoofed window is
@@ -672,7 +1243,7 @@ INTERACTION_SNAPSHOT_EXPRESSION = r"""() => {
     if (!visible(el)) return null;
     const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || 'text').toLowerCase();
     const name = clean(el.getAttribute('aria-label') ||
-      (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => doc.getElementById(id)?.innerText || '').join(' ').trim() ||
+      (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(id => doc.getElementById(id)?.innerText || '').join(' ').trim() ||
       Array.from(el.labels || []).map(label => label.innerText).join(' ') ||
       (tag === 'input' || tag === 'textarea' ? el.getAttribute('placeholder') : el.innerText), 160);
     if (!name || sensitive.test([name, el.id, el.getAttribute('name'), el.getAttribute('autocomplete'), type].join(' '))) return null;
@@ -1185,6 +1756,8 @@ def main() -> None:
                 send(message_id, "ok", observation=observation)
             elif op == "diagnostics_read":
                 send(message_id, "ok", diagnostics=diagnostics_read(request))
+            elif op == "environment_read":
+                send(message_id, "ok", result=environment_read(request))
             elif op == "site_resource_probe":
                 send(message_id, "ok", **site_resource_probe(request))
             elif op == "read_operation_probe":
