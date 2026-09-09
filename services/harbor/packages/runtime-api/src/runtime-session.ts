@@ -124,6 +124,7 @@ export interface RuntimeSessionRecord {
   execution_surface: "local_provider" | "fixture" | "unknown";
   profile_ownership?: ProfileStorageOwnershipLock;
   openUrl?: (url: string) => Promise<LocalProviderPageFacts>;
+  clearPublicPageGuard?: () => Promise<void>;
   publicPage?: ManagedPublicPageOperation;
   observePage?: () => Promise<ManagedProviderObservation>;
   managed_observations?: ManagedObservation[];
@@ -283,6 +284,7 @@ export class RuntimeSessionStore {
       execution_surface: ready ? launch.execution_surface ?? "unknown" : "unknown",
       profile_ownership: profileOwnership ?? undefined,
       openUrl: ready ? launch.openUrl : undefined,
+      clearPublicPageGuard: ready ? launch.clearPublicPageGuard : undefined,
       publicPage: ready ? launch.publicPage : undefined,
       observePage: ready ? launch.observePage : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
@@ -660,6 +662,15 @@ export class RuntimeSessionStore {
     record.read_operation_user_handoff = true;
   }
 
+  async clearManagedPublicPageGuard(runtime_session_ref: string) {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || record.facts.control_owner !== "user" || record.facts.control_lock.state !== "held" || record.active_provider_interactions) return managedUnavailable("control_lock_conflict");
+    try {
+      if (record.clearPublicPageGuard) await this.withProviderInteraction(record, record.clearPublicPageGuard);
+      return { status: "completed" as const };
+    } catch { return managedUnavailable("managed_public_guard_release_failed"); }
+  }
+
   async operateManagedPublicPage(runtime_session_ref: string, holder_ref: string, input: ManagedPublicPageInput) {
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
@@ -971,6 +982,7 @@ export class RuntimeSessionStore {
     record.facts.control_lock = { owner: "none", state: "released", holder_ref: null, updated_at: now, conflict_error: null };
     delete record.openUrl;
     delete record.publicPage;
+    delete record.clearPublicPageGuard;
     delete record.observePage;
     delete record.managed_observations;
     delete record.probeReadOperation;

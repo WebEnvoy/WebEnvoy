@@ -466,6 +466,10 @@ async function routeSession(
       return;
     }
     const handoff = runtime.recordHandoff(runtimeSessionRef, { control_owner: "user", handoff_reason: "user_requested" });
+    if (!("status" in handoff)) {
+      const cleared = await runtime.clearManagedPublicPageGuard(runtimeSessionRef);
+      if (cleared.status !== "completed") { writeJson(response, 409, cleared); return; }
+    }
     const transferred = runtime.getSession(runtimeSessionRef);
     writeJson(response, "status" in handoff || !transferred ? 409 : 200, "status" in handoff ? handoff : transferred);
   }

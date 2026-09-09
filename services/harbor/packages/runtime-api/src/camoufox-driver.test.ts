@@ -432,44 +432,10 @@ test("propagates a dead Driver from a read probe", async () => withCamoufoxEnv(a
 }));
 
 
-test("the private public-page command uses the original page and refuses redirected content before evaluation", () => {
+test("the private public-page command blocks redirect and script requests before they leave the original page", () => {
   const helper = join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
-  const script = `
-import importlib.util, sys
-spec = importlib.util.spec_from_file_location("driver", sys.argv[1])
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-class Page:
-    url = "https://example.com/"
-    evaluations = 0
-    navigations = []
-    def title(self): return "Public"
-    def goto(self, url, **kwargs):
-        self.navigations.append(url)
-        self.url = "https://denied.example/" if url.endswith("/redirect") else url
-    def evaluate(self, expression, origin):
-        assert expression.startswith("mw:") and origin == "https://example.com"
-        self.evaluations += 1
-        return {"text": "A public paragraph from the original page.", "truncated": False}
-p = Page()
-m.PAGE = p
-for path in ["one", "two"]:
-    result = m.managed_public_page({"expected_origin": "https://example.com", "url": "https://example.com/" + path})
-    assert result["page"]["current_url"].endswith(path)
-    assert m.PAGE is p and p.evaluations == 0
-assert m.managed_public_page({"expected_origin": "https://example.com"})["text"] == "A public paragraph from the original page."
-assert p.evaluations == 1
-assert m.managed_public_page({"expected_origin": "https://example.com", "url": "https://denied.example/"})["failure_class"] == "managed_public_origin_denied"
-assert len(p.navigations) == 2
-redirected = m.managed_public_page({"expected_origin": "https://example.com", "url": "https://example.com/redirect"})
-assert redirected["failure_class"] == "managed_public_navigation_redirected"
-assert redirected["page"]["current_url"] == "https://denied.example/"
-assert "text" not in redirected and p.evaluations == 1
-assert m.managed_public_page({"expected_origin": "https://example.com"})["failure_class"] == "managed_public_origin_denied"
-assert p.evaluations == 1
-print("public page passed")
-`;
-  assert.match(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON || "python3", ["-c", script, helper], {
+  const check = join(dirname(fileURLToPath(import.meta.url)), "../../../../scripts/check-public-navigation-guard.py");
+  assert.match(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON || "python3", [check, helper], {
     encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
-  }), /public page passed/);
+  }), /public navigation guard passed/);
 });

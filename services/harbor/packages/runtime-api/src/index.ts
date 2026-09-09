@@ -458,6 +458,10 @@ export class HarborRuntime {
     return this.runtimeSessions.getSession(runtime_session_ref);
   }
 
+  async clearManagedPublicPageGuard(runtime_session_ref: string) {
+    return this.runtimeSessions.clearManagedPublicPageGuard(runtime_session_ref);
+  }
+
   async operateManagedPublicPage(runtime_session_ref: string, input: unknown, navigate: boolean) {
     if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
     const request = input as Record<string, unknown>;

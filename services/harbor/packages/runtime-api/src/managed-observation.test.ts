@@ -183,11 +183,12 @@ test("stop refuses a different principal holding the same Core control-owner kin
 
 test("bounded public operations keep the exact instance, refuse identity origins and changed leases, and report redirects without reading", async () => {
   const calls: { ref: string; url?: string }[] = [];
+  let guardClears = 0;
   const launcher: LocalProviderLauncher = async input => {
     const ready = await createFixtureLauncher("ready")(input);
     if (ready.status !== "ready") throw new Error("fixture unavailable");
     let current = input.url;
-    return { ...ready, execution_surface: "local_provider", publicPage: trustManagedPublicPageOperation(async operation => {
+    return { ...ready, execution_surface: "local_provider", clearPublicPageGuard: async () => { guardClears++; }, publicPage: trustManagedPublicPageOperation(async operation => {
       calls.push({ ref: input.profile_ref, url: operation.url });
       current = operation.url ?? current;
       if (current.endsWith("/redirect")) {
@@ -213,6 +214,8 @@ test("bounded public operations keep the exact instance, refuse identity origins
     const read = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
     assert.ok(read.status === "completed" && read.text === "A verifiable public paragraph.");
     assert.equal(runtime.getSession(b.runtime_session_ref)?.current_page.current_url, "https://example.com/");
+    assert.equal((await runtime.clearManagedPublicPageGuard(a.runtime_session_ref)).status, "unavailable");
+    assert.equal(guardClears, 0);
     const beforeDenied = calls.length;
     for (const invalid of [{ ...input, expected_origin: "https://creator.xiaohongshu.com" }, { ...input, expected_origin: "https://www.zhipin.com" }, { ...input, expression: "document.cookie" }]) {
       assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, invalid, false)).status, "unavailable");
@@ -221,6 +224,8 @@ test("bounded public operations keep the exact instance, refuse identity origins
     assert.equal((await runtime.operateManagedPublicPage("stale:session", input, false)).status, "unavailable");
     assert.equal(calls.length, beforeDenied);
     runtime.recordHandoff(a.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested" });
+    assert.equal((await runtime.clearManagedPublicPageGuard(a.runtime_session_ref)).status, "completed");
+    assert.equal(guardClears, 1);
     assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false)).status, "unavailable");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
     runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });

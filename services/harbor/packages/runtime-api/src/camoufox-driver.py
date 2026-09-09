@@ -32,6 +32,9 @@ EXECUTABLE_PATH = ""
 LAUNCH_EXECUTABLE_PATH = ""
 LAUNCH_LAYOUT_DIR = ""
 PROPERTIES_SOURCE = "adjacent"
+PUBLIC_NAVIGATION_GUARD: Any = None
+PUBLIC_NAVIGATION_ORIGIN = ""
+PUBLIC_NAVIGATION_DENIED: str | None = None
 
 
 def send(message_id: int, status: str, **payload: Any) -> None:
@@ -275,27 +278,81 @@ def open_url(request: dict[str, Any]) -> dict[str, Any]:
     return {"page": page_facts()}
 
 
+def public_origin(value: str) -> str:
+    parsed = urlparse(value)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def install_public_navigation_guard(expected_origin: str) -> None:
+    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
+    PUBLIC_NAVIGATION_ORIGIN = expected_origin
+    PUBLIC_NAVIGATION_DENIED = None
+    if PUBLIC_NAVIGATION_GUARD is not None:
+        return
+    def guard(route: Any) -> None:
+        global PUBLIC_NAVIGATION_DENIED
+        request = route.request
+        if not request.is_navigation_request() or request.frame != PAGE.main_frame:
+            route.continue_()
+            return
+        if public_origin(request.url) != PUBLIC_NAVIGATION_ORIGIN or request.method != "GET":
+            PUBLIC_NAVIGATION_DENIED = "managed_public_navigation_blocked"
+            route.abort("blockedbyclient")
+            return
+        # Playwright does not route redirected requests individually. Intercept
+        # this original Page navigation response without following ANY redirect,
+        # then render it in the same Page. Never export the response body.
+        response = None
+        try:
+            response = route.fetch(max_redirects=0, timeout=15_000)
+            if 300 <= response.status < 400:
+                PUBLIC_NAVIGATION_DENIED = "managed_public_redirect_blocked"
+                route.abort("blockedbyclient")
+            else:
+                route.fulfill(response=response)
+        except Exception:
+            PUBLIC_NAVIGATION_DENIED = "managed_public_navigation_unavailable"
+            route.abort("failed")
+        finally:
+            if response is not None:
+                response.dispose()
+    PUBLIC_NAVIGATION_GUARD = guard
+    PAGE.route("**/*", guard)
+
+
+def clear_public_navigation_guard() -> dict[str, Any]:
+    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
+    if PUBLIC_NAVIGATION_GUARD is not None and PAGE is not None:
+        PAGE.unroute("**/*", PUBLIC_NAVIGATION_GUARD)
+    PUBLIC_NAVIGATION_GUARD = None
+    PUBLIC_NAVIGATION_ORIGIN = ""
+    PUBLIC_NAVIGATION_DENIED = None
+    return {"cleared": True}
+
+
 def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
     if PAGE is None:
         raise RuntimeError("Camoufox Driver has no active page.")
     expected = request.get("expected_origin")
-    def origin(value: str) -> str:
-        parsed = urlparse(value)
-        return f"{parsed.scheme}://{parsed.netloc}"
-    if not isinstance(expected, str) or origin(expected) != expected:
+    if not isinstance(expected, str) or public_origin(expected) != expected:
         return {"failure_class": "managed_public_origin_denied"}
     target = request.get("url")
     with contextlib.redirect_stdout(sys.stderr):
         if target is not None:
-            if not isinstance(target, str) or origin(target) != expected:
+            if not isinstance(target, str) or public_origin(target) != expected:
                 return {"failure_class": "managed_public_origin_denied"}
-            # Native navigation may follow redirects. A refusal below means the
-            # navigation may have happened; it never means external effects were undone.
-            PAGE.goto(target, wait_until="domcontentloaded", timeout=15_000)
-        if origin(str(PAGE.url)) != expected:
+            install_public_navigation_guard(expected)
+            try:
+                PAGE.goto(target, wait_until="domcontentloaded", timeout=15_000)
+            except Exception:
+                if PUBLIC_NAVIGATION_DENIED:
+                    return {"failure_class": PUBLIC_NAVIGATION_DENIED, "page": page_facts()}
+                raise
+        if public_origin(str(PAGE.url)) != expected:
             return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": page_facts()}
         if target is not None:
             return {"page": page_facts()}
+        install_public_navigation_guard(expected)
         # Fixed read-only expression. No selectors, expressions or script from an Agent.
         observed = PAGE.evaluate("""mw:(expected => {
           if (location.origin !== expected) return null;
@@ -315,7 +372,7 @@ def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
           }
           return { text: parts.join(' ').slice(0, 4096), truncated };
         })""", expected)
-        if origin(str(PAGE.url)) != expected or not isinstance(observed, dict):
+        if public_origin(str(PAGE.url)) != expected or not isinstance(observed, dict):
             return {"failure_class": "managed_public_origin_denied"}
         text = public_text(observed.get("text"), 4096)
         if not text:
@@ -548,6 +605,8 @@ def main() -> None:
                 send(message_id, "ready", **launch(request))
             elif op == "open_url":
                 send(message_id, "ok", **open_url(request))
+            elif op == "clear_public_navigation_guard":
+                send(message_id, "ok", **clear_public_navigation_guard())
             elif op == "managed_public_page":
                 send(message_id, "ok", **managed_public_page(request))
             elif op == "managed_observe":

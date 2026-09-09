@@ -272,10 +272,11 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       viewer_entry: camoufoxViewerEntry(input.headless),
       page,
       facts,
+      clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
       publicPage: trustManagedPublicPageOperation(async input => {
         const result = await driver.request("managed_public_page", input, DRIVER_COMMAND_TIMEOUT_MS);
         if (result.page) currentUrl = parseDriverPage(result).current_url ?? currentUrl;
-        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(result.page ? { page: pageFacts(parseDriverPage(result)) } : {}) };
+        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(result.page ? { page: pageFacts(parseDriverPage(result)) } : {}) };
         const page = pageFacts(parseDriverPage(result));
         if (typeof result.text === "string") {
           if (result.text.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|(?:token|cookie|password|secret|authorization|credential)\s*[=:]/i.test(result.text)) return managedUnavailable("managed_public_content_unavailable");
