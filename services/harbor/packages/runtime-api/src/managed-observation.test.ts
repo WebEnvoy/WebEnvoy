@@ -165,3 +165,14 @@ test("the shared fixed expression requires visible creator labels to match the a
   origin = "https://example.com";
   assert.equal(normalizeManagedProviderObservation(evaluate()).account.status, "unknown");
 });
+
+
+test("stop refuses a different principal holding the same Core control-owner kind", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const session = await runtime.createSession({ control_owner: "core_task", holder_ref: "principal:original" });
+  const denied = await runtime.stopSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:other" });
+  assert.ok("status" in denied && denied.failure_class === "session_locked");
+  assert.notEqual(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "closed");
+  const stopped = await runtime.stopSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:original" });
+  assert.ok(!("status" in stopped) && stopped.lifecycle_state === "closed");
+});

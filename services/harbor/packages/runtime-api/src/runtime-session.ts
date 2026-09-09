@@ -502,6 +502,7 @@ export class RuntimeSessionStore {
     if (!record) return unavailableSession("session_missing", error("session_lost", "Runtime Session is missing.", true));
     const owner = input.control_owner;
     if (owner && record.facts.control_lock.owner !== owner && record.facts.control_lock.state === "held") return lockConflict(record, owner);
+    if (input.holder_ref && record.facts.control_lock.state === "held" && record.facts.control_lock.holder_ref !== input.holder_ref) return lockConflict(record, owner ?? record.facts.control_owner);
     return (await this.closeSession(runtime_session_ref)) ?? unavailableSession("session_missing", error("session_lost", "Runtime Session is missing.", true));
   }
 
