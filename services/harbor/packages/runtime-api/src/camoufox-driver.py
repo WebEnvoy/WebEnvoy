@@ -500,6 +500,14 @@ def main() -> None:
                 send(message_id, "ready", **launch(request))
             elif op == "open_url":
                 send(message_id, "ok", **open_url(request))
+            elif op == "managed_observe":
+                if PAGE is None:
+                    raise RuntimeError("Camoufox Driver has no active page.")
+                # Private pipe command; the expression is fixed by the Harbor adapter,
+                # never accepted from the public HTTP API.
+                with contextlib.redirect_stdout(sys.stderr):
+                    observation = PAGE.evaluate("mw:" + request["expression"])
+                send(message_id, "ok", observation=observation)
             elif op == "site_resource_probe":
                 send(message_id, "ok", **site_resource_probe(request))
             elif op == "read_operation_probe":

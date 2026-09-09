@@ -1,3 +1,4 @@
+import { boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
 import {
   createLocalIdentityEnvironmentFacts,
   HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA,
@@ -123,6 +124,8 @@ export interface RuntimeSessionRecord {
   execution_surface: "local_provider" | "fixture" | "unknown";
   profile_ownership?: ProfileStorageOwnershipLock;
   openUrl?: (url: string) => Promise<LocalProviderPageFacts>;
+  observePage?: () => Promise<ManagedProviderObservation>;
+  managed_observations?: ManagedObservation[];
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
   probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
@@ -279,6 +282,7 @@ export class RuntimeSessionStore {
       execution_surface: ready ? launch.execution_surface ?? "unknown" : "unknown",
       profile_ownership: profileOwnership ?? undefined,
       openUrl: ready ? launch.openUrl : undefined,
+      observePage: ready ? launch.observePage : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
@@ -653,6 +657,39 @@ export class RuntimeSessionStore {
     record.read_operation_user_handoff = true;
   }
 
+  async observeManagedSession(runtime_session_ref: string, holder_ref: string): Promise<ManagedObservation | ManagedObservationUnavailable> {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
+    const observe = record.observePage;
+    if (record.execution_surface !== "local_provider" || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
+    const generation = record.control_generation;
+    try {
+      const observed = await this.withProviderInteraction(record, observe);
+      if (record.control_generation !== generation || record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      if (!observed.page.current_url) return managedUnavailable("page_not_ready");
+      this.applyPageFacts(record, observed.page.current_url, observed.page);
+      const result: ManagedObservation = { status: "completed", observation_ref: opaqueRef("observation"), observed_at: new Date().toISOString(),
+        runtime_session_ref, identity_environment_ref: record.facts.identity_environment_ref, profile_ref: record.facts.profile_ref,
+        control_owner: record.facts.control_owner, control_generation: generation,
+        page: { current_url: observed.page.current_url, title: observed.page.title, status: observed.page.status }, account: observed.account };
+      record.managed_observations = [...(record.managed_observations ?? []).slice(-15), result];
+      return snapshot(result);
+    } catch { return managedUnavailable("managed_observation_unavailable"); }
+  }
+
+  findManagedObservation(identity_environment_ref: string, observation_ref: string, holder_ref: string): ManagedObservation | null {
+    for (const record of this.records.values()) {
+      const observed = record.managed_observations?.find(item => item.observation_ref === observation_ref);
+      if (!observed || observed.identity_environment_ref !== identity_environment_ref || observed.control_generation !== record.control_generation ||
+        !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" ||
+        record.facts.control_lock.holder_ref !== holder_ref || record.active_provider_interactions || Date.now() - Date.parse(observed.observed_at) > 30_000) continue;
+      return snapshot(observed);
+    }
+    return null;
+  }
+
   getValidationRuntimeFacts(runtime_session_ref: string): ValidationRuntimeFacts | null {
     const record = this.records.get(runtime_session_ref);
     if (!record) return null;
@@ -908,6 +945,8 @@ export class RuntimeSessionStore {
     record.facts.control_owner = "none";
     record.facts.control_lock = { owner: "none", state: "released", holder_ref: null, updated_at: now, conflict_error: null };
     delete record.openUrl;
+    delete record.observePage;
+    delete record.managed_observations;
     delete record.probeReadOperation;
     delete record.probeSiteResource;
     delete record.probeWritePrecheck;

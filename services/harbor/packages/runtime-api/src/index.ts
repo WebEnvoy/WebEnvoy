@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
 import { createLocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentInput } from "./identity-environment.js";
 import {
@@ -456,6 +458,29 @@ export class HarborRuntime {
     return this.runtimeSessions.getSession(runtime_session_ref);
   }
 
+  async observeManagedSession(runtime_session_ref: string, input: unknown): Promise<ManagedObservation | ManagedObservationUnavailable> {
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).join() !== "holder_ref" || !boundedManagedRef((input as { holder_ref?: unknown }).holder_ref)) return managedUnavailable("invalid_request");
+    return this.runtimeSessions.observeManagedSession(runtime_session_ref, (input as { holder_ref: string }).holder_ref);
+  }
+
+  async bindManagedAccount(identity_environment_ref: string, input: unknown): Promise<LocalIdentityEnvironmentPublicRecord | ManagedObservationUnavailable> {
+    const required = ["observation_ref", "account_system_ref", "account_ref", "idempotency_key", "holder_ref"];
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== required.length || !required.every(key => boundedManagedRef((input as Record<string, unknown>)[key]))) return managedUnavailable("invalid_request");
+    const request = input as Record<string, string>;
+    const observed = this.runtimeSessions.findManagedObservation(identity_environment_ref, request.observation_ref, request.holder_ref);
+    if (!observed || observed.account.status !== "verified" || observed.account.account_system_ref !== request.account_system_ref || observed.account.account_ref !== request.account_ref) return managedUnavailable("account_observation_required");
+    const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, request.holder_ref);
+    if (fresh.status !== "completed" || fresh.account.status !== "verified" || fresh.account.account_ref !== request.account_ref || fresh.account.account_system_ref !== request.account_system_ref || fresh.control_generation !== observed.control_generation) return managedUnavailable("account_observation_changed");
+    try {
+      return this.identityEnvironments.bindObservedAccount(identity_environment_ref, { account_system_ref: request.account_system_ref, account_ref: request.account_ref,
+        observation_ref: fresh.observation_ref, bound_at: fresh.observed_at }, request.idempotency_key,
+        createHash("sha256").update(JSON.stringify(required.map(key => request[key]))).digest("hex"));
+    } catch (error) {
+      const code = error instanceof Error && ["account_binding_conflict", "idempotency_conflict", "identity_environment_missing"].includes(error.message) ? error.message : "persistence_failed";
+      return managedUnavailable(code);
+    }
+  }
+
   completeManualAuthentication(
     runtime_session_ref: string,
     grant?: ManualAuthenticationAuthorizationGrant
@@ -577,6 +602,14 @@ export class HarborRuntime {
     return this.identityEnvironments.get(identity_environment_ref);
   }
 
+  getActiveManagedIdentitySession(identity_environment_ref: string): RuntimeSessionFacts | null {
+    return this.runtimeSessions.getActiveIdentityEnvironmentSession(identity_environment_ref);
+  }
+
+  getIdentityEnvironmentMutationResult(idempotency_key: string): IdentityEnvironmentMutationResult | null {
+    return this.identityEnvironments.getMutationResult(idempotency_key);
+  }
+
   listLocalIdentityEnvironments(): LocalIdentityEnvironmentPublicRecord[] {
     return this.identityEnvironments.list();
   }
@@ -669,8 +702,8 @@ export class HarborRuntime {
     return this.identityEnvironments.delete(identity_environment_ref);
   }
 
-  async openManagedIdentityEnvironmentSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment"> & { identity_environment_ref: string }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
-    if (this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
+  async openManagedIdentityEnvironmentSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment"> & { identity_environment_ref: string; operation_scope?: "profile_management" }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (input.operation_scope !== "profile_management" && this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
       return {
@@ -686,14 +719,15 @@ export class HarborRuntime {
       };
     }
     const session = await this.runtimeSessions.openIdentityEnvironmentSession({ ...input, identity_environment });
+    if (input.operation_scope === "profile_management") return session;
     const rebindFailure = await this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
     if (rebindFailure) return rebindFailure;
     this.bindPersistedAuthenticationToCoreReadSession(identity_environment, session, input);
     return session;
   }
 
-  async openManagedDefaultSiteSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment" | "url"> & { identity_environment_ref: string }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
-    if (this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
+  async openManagedDefaultSiteSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment" | "url"> & { identity_environment_ref: string; operation_scope?: "profile_management" }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (input.operation_scope !== "profile_management" && this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
       return {
@@ -713,6 +747,7 @@ export class HarborRuntime {
       identity_environment,
       url: defaultIdentitySiteUrl(identity_environment.site_binding.site_id, identity_environment.site_binding.origin)
     });
+    if (input.operation_scope === "profile_management") return session;
     const rebindFailure = await this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
     if (rebindFailure) return rebindFailure;
     this.bindPersistedAuthenticationToCoreReadSession(identity_environment, session, input);

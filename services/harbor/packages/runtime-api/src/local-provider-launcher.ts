@@ -1,3 +1,4 @@
+import { managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -151,6 +152,17 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
         { key: "cdp.version", source: "validation_evidence", value: `${version.Browser} ${version["Protocol-Version"]}`, evidence_ref },
         ...page.facts
       ],
+      observePage: trustManagedPageObserver(async () => {
+        const signal = AbortSignal.timeout(Math.max(1, input.timeout_ms));
+        const targets = await pageTargets(port, signal);
+        const target = currentPageTargetId ? targets.find(item => item.id === currentPageTargetId) : targets.length === 1 ? targets[0] : undefined;
+        if (!target?.webSocketDebuggerUrl) throw new Error("managed_page_unavailable");
+        currentPageTargetId = target.id;
+        return withCdp(target.webSocketDebuggerUrl, async client => {
+          const evaluated = await client.send("Runtime.evaluate", { expression: managedPageObservationExpression, returnByValue: true });
+          return normalizeManagedProviderObservation((evaluated.result as { value?: unknown } | undefined)?.value);
+        }, signal);
+      }),
       openUrl: async (url) => {
         const signal = AbortSignal.timeout(Math.max(1, input.timeout_ms));
         const existing = isXhsCreatorPublishUrl(input)

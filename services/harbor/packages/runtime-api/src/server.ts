@@ -1,3 +1,4 @@
+import { boundedManagedRef, managedOperationCatalog } from "./managed-observation.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   HarborRuntime,
@@ -124,6 +125,19 @@ async function route(
     return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "identity-environments" && parts[2] && parts[3] === "session" && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    writeJson(response, 200, { runtime_session: runtime.getActiveManagedIdentitySession(parts[2]) }); return;
+  }
+  if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
+    writeJson(response, 200, managedOperationCatalog); return;
+  }
+  if (method === "POST" && parts[0] === "runtime" && parts[1] === "identity-environments" && parts[2] && parts[3] === "account-bindings" && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.bindManagedAccount(parts[2], await readJson<unknown>(request));
+    writeJson(response, "failure_class" in result ? 409 : 200, result); return;
+  }
+
   if (method === "GET" && url.pathname === "/runtime/identity-environments") {
     writeJson(response, 200, {
       schema_version: "harbor-runtime-api-identity-environments/v0",
@@ -132,6 +146,12 @@ async function route(
     return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "identity-environment-mutations" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    if (parts[2].length > 256 || /[\u0000-\u001f\u007f]/.test(parts[2])) throw new BadRequest("Invalid idempotency key.");
+    const result = runtime.getIdentityEnvironmentMutationResult(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? { error: "mutation_not_found" }); return;
+  }
   if (method === "POST" && url.pathname === "/runtime/identity-environment-mutations") {
     if (!authorizeIdentityEnvironmentMutationRequest(manualAuthenticationAuthorizer, request, response)) return;
     const body = await readJson<unknown>(request);
@@ -157,7 +177,24 @@ async function route(
 
   if (method === "POST" && url.pathname === "/runtime/identity-environment-sessions") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
-    const body = await readJson<OpenIdentityEnvironmentSessionInput & { identity_environment_ref?: string }>(request);
+    const body = await readJson<OpenIdentityEnvironmentSessionInput & { identity_environment_ref?: string; operation_scope?: "profile_management" }>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new BadRequest("Invalid session request.");
+    if (body.operation_scope !== undefined) {
+      if (body.url !== undefined) {
+        try {
+          const target = new URL(body.url);
+          if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("invalid_target");
+        } catch { throw new BadRequest("Invalid profile management target."); }
+      }
+      const allowed = ["identity_environment_ref", "operation_scope", "url", "reuse_existing", "control_owner", "holder_ref", "headless", "timeout_ms"];
+      if (body.operation_scope !== "profile_management" || !body.identity_environment_ref || body.control_owner !== "core_task" ||
+        !boundedManagedRef(body.holder_ref) || !boundedManagedRef(body.identity_environment_ref) ||
+        (body.url !== undefined && (typeof body.url !== "string" || body.url.length > 2048)) ||
+        (body.headless !== undefined && typeof body.headless !== "boolean") ||
+        (body.reuse_existing !== undefined && typeof body.reuse_existing !== "boolean") ||
+        (body.timeout_ms !== undefined && (!Number.isSafeInteger(body.timeout_ms) || body.timeout_ms <= 0 || body.timeout_ms > 120_000)) ||
+        Object.keys(body).some(key => !allowed.includes(key))) throw new BadRequest("Invalid profile management session request.");
+    }
     if (body.identity_environment_ref) {
       const result = body.url
         ? await runtime.openManagedIdentityEnvironmentSession({ ...body, identity_environment_ref: body.identity_environment_ref })
@@ -323,6 +360,11 @@ async function routeSession(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
+  if (action === "observe" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.observeManagedSession(runtimeSessionRef, await readJson<unknown>(request));
+    writeJson(response, result.status === "completed" ? 200 : 409, result); return;
+  }
   if (action === "runtime-facts" && method === "GET") {
     const facts = runtime.getCoreRuntimeFacts(runtimeSessionRef);
     writeJson(response, "status" in facts && facts.failure_class === "session_missing" ? 404 : 200, facts);
@@ -399,7 +441,8 @@ async function routeSession(
   if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
   const body = await readJson<RuntimeSessionControlInput & Record<string, unknown>>(request, {});
   if (action === "handoff") {
-    if (Object.keys(body).sort().join(",") !== "control_owner,expected_control_owner,handoff_reason" ||
+    if (!["control_owner,expected_control_owner,handoff_reason", "control_owner,expected_control_owner,handoff_reason,holder_ref"].includes(Object.keys(body).sort().join(",")) ||
+      (body.holder_ref !== undefined && !boundedManagedRef(body.holder_ref)) ||
       body.control_owner !== "user" || body.expected_control_owner !== "core_task" || body.handoff_reason !== "user_requested") {
       throw new BadRequest("Invalid Runtime Session handoff request.");
     }
@@ -408,7 +451,8 @@ async function routeSession(
       writeJson(response, 404, sessionReadUnavailable(runtimeSessionRef, undefined));
       return;
     }
-    if (current.control_owner !== body.expected_control_owner || current.control_lock.state !== "held") {
+    if (current.control_owner !== body.expected_control_owner || current.control_lock.state !== "held" ||
+      (body.holder_ref !== undefined && current.control_lock.holder_ref !== body.holder_ref)) {
       writeJson(response, 409, { status: "unavailable", failure_class: "session_locked", message: "Runtime Session control owner changed before handoff.", retryable: true });
       return;
     }

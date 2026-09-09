@@ -737,6 +737,7 @@ export type LocalProviderLaunchResult =
       facts: RuntimeFact[];
       execution_surface?: "local_provider" | "fixture";
       openUrl: (url: string) => Promise<LocalProviderPageFacts>;
+      observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
