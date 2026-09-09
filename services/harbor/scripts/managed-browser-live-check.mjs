@@ -215,6 +215,9 @@ async function run(handoff, ownerReturn, packagedDefaultPolicy) {
       emit(phase, "human_controlled", { runtime_session_ref: original });
       const blocked = await submit(operationBody("instance.observe", { profile_ref: profile.profile_ref, origin }));
       denied(blocked, ["session_locked", "control_lock_conflict", "session_user_controlled"]);
+      const unaffected = await execute("instance.observe", { profile_ref: profiles[1].profile_ref, origin });
+      requireThat(unaffected.observation?.runtime_session_ref === sessions.get(profiles[1].profile_ref), "handoff_affected_other_profile");
+      emit("unrelated_instance_during_handoff", "same_instance_observed", { runtime_session_ref: unaffected.observation.runtime_session_ref });
       if (ownerReturn) {
         const released = await request(harborOwnerCredential, "POST", `/runtime/sessions/${encodeURIComponent(original)}/release`, { control_owner: "user" }, harbor);
         requireThat(released.status === 200 && released.body.runtime_session_ref === original && released.body.control_owner === "none" && released.body.control_lock?.state === "released", "owner_api_return_not_confirmed");
@@ -235,6 +238,11 @@ async function run(handoff, ownerReturn, packagedDefaultPolicy) {
       phase = `stop_${index + 1}`;
       await stop(profile);
       emit(phase, "closed_original_instance", { runtime_session_ref: sessions.get(profile.profile_ref) });
+      if (index === 0) {
+        const unaffected = await execute("instance.observe", { profile_ref: profiles[1].profile_ref, origin });
+        requireThat(unaffected.observation?.runtime_session_ref === sessions.get(profiles[1].profile_ref), "stop_affected_other_profile");
+        emit("unrelated_instance_after_stop", "same_instance_observed", { runtime_session_ref: unaffected.observation.runtime_session_ref });
+      }
     }
     phase = "revoke_grant";
     await owner("POST", `/agent-access/grants/${encodeURIComponent(grant.grant_id)}/revoke`, { idempotency_key: `${stamp}:revoke` });
