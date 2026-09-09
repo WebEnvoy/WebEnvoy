@@ -363,3 +363,6 @@ export {
   type TaskTurnInputPolicyResolver,
   type TaskTurnInputSummaryConstraint
 } from "./task-turn-input-policy.js";
+
+export { createFileManagedAccessStore, ManagedAccessError, managedOperations, type FileManagedAccessStore } from "./managed-access.js";
+export { createManagedBrowserService } from "./managed-browser.js";

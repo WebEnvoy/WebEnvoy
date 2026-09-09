@@ -293,13 +293,17 @@ export function createFileManagedAccessStore(options: { directory: string; clock
     async recordCreatedProfile(value: unknown): Promise<ManagedProfilePolicy> {
       const input = object(value, ["idempotency_key", "grant_id", "profile_ref"]), grantId = string(input.grant_id), profileRef = string(input.profile_ref);
       return transaction(state => receipt(state, "recordCreatedProfile", input, () => {
-        const grant = activeGrant(state, grantId);
-        if (!grant.creation_template || !grant.allowed_operations.includes("profile.create") || grant.created_profile_refs.length >= grant.max_created_profiles || state.profile_policies.some(item => item.profile_ref === profileRef)) return fail("managed_access_creation_denied");
+        const grant = state.grants.find(item => item.grant_id === grantId);
+        if (!grant || !grant.creation_template || !grant.allowed_operations.includes("profile.create") || grant.created_profile_refs.length >= grant.max_created_profiles || state.profile_policies.some(item => item.profile_ref === profileRef)) return fail("managed_access_creation_denied");
         grant.created_profile_refs.push(profileRef);
         if (!grant.profile_refs.includes(profileRef)) grant.profile_refs.push(profileRef);
         const profile = { profile_ref: profileRef, ...structuredClone(grant.creation_template.permission_ceiling) };
         state.profile_policies.push(profile); return profile;
       }));
+    },
+    async getOwnerOperation(key: string) {
+      const entry = (await read()).receipts.find(item => item.key_hash === hash(string(key)));
+      return entry ? { status: "completed" as const, result: entry.result } : undefined;
     },
     async list() {
       const state = await read();
