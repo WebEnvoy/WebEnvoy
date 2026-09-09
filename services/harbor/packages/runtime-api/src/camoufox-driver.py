@@ -18,6 +18,8 @@ import re
 import shutil
 import sys
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -35,6 +37,8 @@ PROPERTIES_SOURCE = "adjacent"
 PUBLIC_NAVIGATION_GUARD: Any = None
 PUBLIC_NAVIGATION_ORIGIN = ""
 PUBLIC_NAVIGATION_DENIED: str | None = None
+INTERACTION_GUARD: Any = None
+INTERACTION_STATE: dict[str, Any] | None = None
 
 
 def send(message_id: int, status: str, **payload: Any) -> None:
@@ -328,6 +332,7 @@ def clear_public_navigation_guard() -> dict[str, Any]:
     global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
     if PUBLIC_NAVIGATION_GUARD is not None and PAGE is not None:
         PAGE.unroute("**/*", PUBLIC_NAVIGATION_GUARD)
+    clear_interaction_guard()
     PUBLIC_NAVIGATION_GUARD = None
     PUBLIC_NAVIGATION_ORIGIN = ""
     PUBLIC_NAVIGATION_DENIED = None
@@ -382,6 +387,291 @@ def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
         if not text:
             return {"failure_class": "managed_public_content_unavailable"}
         return {"page": page_facts(), "text": text, "truncated": observed.get("truncated") is True}
+
+
+# This handle is never installed on window. The observer and ElementHandles stay
+# private to the Driver, so a page cannot supply its own target map or generation.
+INTERACTION_SNAPSHOT_EXPRESSION = r"""() => {
+  const doc = document;
+  let changed = false;
+  const observer = new MutationObserver(() => { changed = true; });
+  observer.observe(doc, {subtree:true, childList:true, attributes:true, characterData:true});
+  const sensitive = /password|passwd|token|cookie|secret|credential|authorization|one.time|验证码|密码|口令|密钥/i;
+  const clean = (value, limit) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    return text.length <= limit && !sensitive.test(text) ? text : '';
+  };
+  const visible = el => {
+    if (!el?.isConnected || el.closest('[hidden],[aria-hidden="true"],dialog:not([open])')) return false;
+    const rect = el.getBoundingClientRect();
+    let left=Math.max(0,rect.left), top=Math.max(0,rect.top), right=Math.min(innerWidth,rect.right), bottom=Math.min(innerHeight,rect.bottom);
+    for (let node=el; node; node=node.parentElement) {
+      const style=getComputedStyle(node);
+      if (style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) return false;
+      if (node !== el && /auto|scroll|hidden|clip/.test(style.overflowX + style.overflowY)) {
+        const clip=node.getBoundingClientRect();
+        left=Math.max(left,clip.left); right=Math.min(right,clip.right); top=Math.max(top,clip.top); bottom=Math.min(bottom,clip.bottom);
+      }
+    }
+    return right > left && bottom > top;
+  };
+  const describe = el => {
+    if (!visible(el)) return null;
+    const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || 'text').toLowerCase();
+    const name = clean(el.getAttribute('aria-label') ||
+      (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => doc.getElementById(id)?.innerText || '').join(' ').trim() ||
+      Array.from(el.labels || []).map(label => label.innerText).join(' ') ||
+      (tag === 'input' || tag === 'textarea' ? el.getAttribute('placeholder') : el.innerText), 160);
+    if (!name || sensitive.test([name, el.id, el.getAttribute('name'), el.getAttribute('autocomplete'), type].join(' '))) return null;
+    const editable = tag === 'textarea' || tag === 'input' && ['text','search','number'].includes(type);
+    const role = el.getAttribute('role') || (editable ? 'textbox' : tag === 'button' || tag === 'input' && ['button','submit','reset'].includes(type) ? 'button' : tag === 'a' ? 'link' : '');
+    if (!['textbox','button','link','checkbox','radio','region'].includes(role)) return null;
+    if (role === 'textbox' && !editable) return null;
+    const enabled = !el.matches(':disabled') && el.getAttribute('aria-disabled') !== 'true' && (!editable || !el.readOnly);
+    return {role, name, enabled, ...(editable ? {value:clean(el.value, 512)} : {})};
+  };
+  const nodes = [], controls = [];
+  let truncated = false;
+  const candidates = doc.querySelectorAll('input,textarea,button,a[href],[role]');
+  for (let index=0; index < Math.min(candidates.length, 2048); index++) {
+    const item = describe(candidates[index]);
+    if (!item) continue;
+    if (nodes.length >= 64) { truncated=true; break; }
+    nodes.push(candidates[index]); controls.push(item);
+  }
+  truncated ||= candidates.length > 2048;
+  const readText = () => {
+    if (!doc.body) return '';
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const parts=[]; let node, count=0, length=0;
+    while ((node=walker.nextNode()) && count++ < 10000) {
+      const el=node.parentElement;
+      if (!el || !visible(el) || el.closest('script,style,noscript,input,textarea,select,[contenteditable]')) continue;
+      const text=clean(node.textContent, 1024);
+      if (!text) continue;
+      parts.push(text); length += text.length+1;
+      if (length > 4096) { truncated=true; break; }
+    }
+    return parts.join(' ').slice(0,4096);
+  };
+  const text=readText();
+  return {doc, nodes, controls, text, truncated,
+    valid: () => { changed ||= observer.takeRecords().length > 0 || nodes.some((el,index) => JSON.stringify(describe(el)) !== JSON.stringify(controls[index])); return doc === document && !changed; },
+    sameDocument: () => doc === document,
+    describe, readText, dispose: () => observer.disconnect()};
+}"""
+
+
+def discard_interaction_snapshot() -> None:
+    global INTERACTION_STATE
+    if INTERACTION_STATE is not None:
+        with contextlib.suppress(Exception):
+            INTERACTION_STATE["handle"].evaluate("state => state.dispose()")
+        for handle in INTERACTION_STATE["targets"].values():
+            with contextlib.suppress(Exception):
+                handle.dispose()
+        with contextlib.suppress(Exception):
+            INTERACTION_STATE["handle"].dispose()
+    INTERACTION_STATE = None
+
+
+def clear_interaction_guard() -> None:
+    global INTERACTION_GUARD
+    if INTERACTION_GUARD is not None:
+        PAGE.unroute("**/*", INTERACTION_GUARD)
+        CONTEXT.unroute("**/*", INTERACTION_GUARD)
+    INTERACTION_GUARD = None
+    discard_interaction_snapshot()
+
+
+def install_interaction_guard(expected: str) -> None:
+    global INTERACTION_GUARD, PUBLIC_NAVIGATION_DENIED
+    install_public_navigation_guard(expected)
+    if INTERACTION_GUARD is not None:
+        return
+    def guard(route: Any) -> None:
+        global PUBLIC_NAVIGATION_DENIED
+        request = route.request
+        if public_origin(request.url) != PUBLIC_NAVIGATION_ORIGIN:
+            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+            route.abort("blockedbyclient")
+            return
+        try:
+            if request.frame.page != PAGE:
+                PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
+                route.abort("blockedbyclient")
+                return
+        except Exception:
+            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+            route.abort("blockedbyclient")
+            return
+        # The controlled page may run same-origin validation requests, but no
+        # redirect is followed, including redirects from XHR and subresources.
+        response = None
+        try:
+            response = route.fetch(max_redirects=0, timeout=10_000)
+            if 300 <= response.status < 400:
+                PUBLIC_NAVIGATION_DENIED = "managed_public_redirect_blocked"
+                route.abort("blockedbyclient")
+            else:
+                route.fulfill(response=response)
+        except Exception:
+            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+            route.abort("failed")
+        finally:
+            if response is not None:
+                response.dispose()
+    INTERACTION_GUARD = guard
+    CONTEXT.route("**/*", guard)  # Includes the first request of a popup.
+    PAGE.route("**/*", guard)
+
+
+def interaction_surface(expected: str) -> str | None:
+    if PAGE is None or PAGE.is_closed():
+        return "managed_interaction_page_missing"
+    if public_origin(str(PAGE.url)) != expected:
+        return "managed_public_origin_denied"
+    parsed = urlparse(str(PAGE.url))
+    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return "managed_interaction_url_unsupported"
+    if len(CONTEXT.pages) != 1 or len(PAGE.frames) != 1:
+        return "managed_interaction_window_unsupported"
+    return None
+
+
+def interaction_snapshot(generation: int) -> dict[str, Any]:
+    global INTERACTION_STATE
+    page_ref = "page_" + uuid.uuid4().hex
+    if INTERACTION_STATE is not None:
+        with contextlib.suppress(Exception):
+            if INTERACTION_STATE["handle"].evaluate("state => state.sameDocument()"):
+                page_ref = INTERACTION_STATE["page_ref"]
+    discard_interaction_snapshot()
+    handle = PAGE.evaluate_handle("mw:" + INTERACTION_SNAPSHOT_EXPRESSION)
+    observed = handle.evaluate("state => ({controls:state.controls,text:state.text,truncated:state.truncated})")
+    nodes = handle.get_property("nodes")
+    targets = {}
+    try:
+        for index, control in enumerate(observed["controls"]):
+            ref = "target_" + uuid.uuid4().hex
+            targets[ref] = nodes.get_property(str(index)).as_element()
+            control["target_ref"] = ref
+    finally:
+        nodes.dispose()
+    observation_ref = "observation_" + uuid.uuid4().hex
+    INTERACTION_STATE = {"handle":handle, "targets":targets, "generation":generation,
+                         "page_ref":page_ref, "observation_ref":observation_ref}
+    return {"page_ref":page_ref, "observation_ref":observation_ref, **observed}
+
+
+def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
+    dispatched = False
+    def refused(code: str) -> dict[str, Any]:
+        return {"status":"unknown_outcome" if dispatched else "unavailable",
+                "dispatch_state":"dispatched" if dispatched else "not_dispatched", "failure_class":code}
+    action, expected = request.get("action"), request.get("expected_origin")
+    generation = request.get("control_generation")
+    timeout = request.get("timeout_ms", 5000)
+    if action not in ("snapshot", "click", "input", "press", "scroll", "wait") or not isinstance(expected,str) or public_origin(expected) != expected or type(generation) is not int or generation < 0 or type(timeout) is not int or not 1 <= timeout <= 10000:
+        return refused("managed_interaction_invalid_input")
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            failure = interaction_surface(expected)
+            if failure:
+                return refused(failure)
+            install_interaction_guard(expected)
+            target = None
+            if action != "snapshot":
+                state = INTERACTION_STATE
+                if state is None or request.get("page_ref") != state["page_ref"] or request.get("observation_ref") != state["observation_ref"] or generation != state["generation"]:
+                    return refused("managed_interaction_stale_target")
+                if request.get("target_ref") is not None:
+                    target = state["targets"].get(request["target_ref"])
+                    if target is None:
+                        return refused("managed_interaction_stale_target")
+                if action != "wait" and not state["handle"].evaluate("state => state.valid()"):
+                    return refused("managed_interaction_stale_target")
+            if action in ("click", "input", "press"):
+                if target is None:
+                    return refused("managed_interaction_target_required")
+                descriptor = state["handle"].evaluate("(state, el) => state.describe(el)", target)
+                if not descriptor or not descriptor["enabled"]:
+                    return refused("managed_interaction_target_unavailable")
+                peers = state["handle"].evaluate("state => state.controls")
+                if sum(item["role"] == descriptor["role"] and item["name"] == descriptor["name"] for item in peers) != 1:
+                    return refused("managed_interaction_target_ambiguous")
+                # Same handle throughout: no selector retries that could hit a
+                # replacement element. Playwright checks visibility/stability.
+                target.wait_for_element_state("stable", timeout=timeout)
+                if not state["handle"].evaluate("state => state.valid()"):
+                    return refused("managed_interaction_stale_target")
+                if action == "input":
+                    value = request.get("text")
+                    if descriptor["role"] != "textbox" or not isinstance(value,str) or len(value) > 512 or re.search(r"[\x00-\x1f\x7f]|password|token|cookie|secret|credential|authorization|验证码|密码",value,re.I):
+                        return refused("managed_interaction_input_refused")
+                    dispatched = True
+                    target.fill(value, timeout=timeout)
+                elif action == "press":
+                    if request.get("key") not in ("Enter","Tab","Escape","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","Backspace","Delete","Space"):
+                        return refused("managed_interaction_key_refused")
+                    dispatched = True
+                    target.press(request["key"], timeout=timeout)
+                else:
+                    dispatched = True
+                    target.click(timeout=timeout, no_wait_after=True)
+            elif action == "scroll":
+                delta = request.get("delta_y")
+                if type(delta) is not int or delta == 0 or abs(delta) > 2000:
+                    return refused("managed_interaction_scroll_refused")
+                if target is not None:
+                    if not target.is_visible():
+                        return refused("managed_interaction_target_unavailable")
+                    dispatched = True
+                    target.hover(timeout=timeout)
+                else:
+                    viewport = PAGE.evaluate("mw:({width:innerWidth,height:innerHeight})")
+                    dispatched = True
+                    PAGE.mouse.move(viewport["width"]//2, viewport["height"]//2)
+                if not state["handle"].evaluate("state => state.valid()"):
+                    return refused("managed_interaction_stale_target")
+                dispatched = True
+                PAGE.mouse.wheel(0, delta)
+                # Allow the delivered wheel to update layout. The new snapshot,
+                # rather than dispatch alone, supplies the scroll result.
+                PAGE.evaluate("mw:() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+            elif action == "wait":
+                condition = request.get("wait_for")
+                if condition not in ("page_changed","text","enabled") or condition == "enabled" and target is None or condition == "text" and (not isinstance(request.get("text"), str) or not 1 <= len(request["text"]) <= 512):
+                    return refused("managed_interaction_wait_refused")
+                deadline = time.monotonic() + timeout/1000
+                while True:
+                    failure = interaction_surface(expected)
+                    if failure:
+                        return refused(failure)
+                    if condition == "page_changed":
+                        try:
+                            ready = not state["handle"].evaluate("state => state.valid()")
+                        except Exception:
+                            ready = True  # A same-origin document navigation destroyed the old handle.
+                    elif condition == "text":
+                        ready = request["text"] in state["handle"].evaluate("state => state.readText()")
+                    else:
+                        if not target.evaluate("el => el.isConnected"):
+                            return refused("managed_interaction_stale_target")
+                        ready = target.is_visible() and target.is_enabled()
+                    if ready:
+                        break
+                    if time.monotonic() >= deadline:
+                        return refused("managed_interaction_wait_timeout")
+                    PAGE.wait_for_timeout(min(50, max(1, (deadline-time.monotonic())*1000)))
+            failure = interaction_surface(expected) or PUBLIC_NAVIGATION_DENIED
+            if failure:
+                return refused(failure)
+            snapshot = interaction_snapshot(generation)
+            return {"status":"completed", "dispatch_state":"dispatched" if dispatched else "not_dispatched",
+                    "page":{**page_facts(), "title":public_text(str(PAGE.title()), 256)}, "snapshot":snapshot}
+    except Exception:
+        return refused("managed_interaction_outcome_unknown" if dispatched else "managed_interaction_target_unavailable")
 
 
 def site_resource_probe(request: dict[str, Any]) -> dict[str, Any]:
@@ -613,6 +903,8 @@ def main() -> None:
                 send(message_id, "ok", **clear_public_navigation_guard())
             elif op == "managed_public_page":
                 send(message_id, "ok", **managed_public_page(request))
+            elif op == "managed_interaction":
+                send(message_id, "ok", result=managed_interaction(request))
             elif op == "managed_observe":
                 if PAGE is None:
                     raise RuntimeError("Camoufox Driver has no active page.")
