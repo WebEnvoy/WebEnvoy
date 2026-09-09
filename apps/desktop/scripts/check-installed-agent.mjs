@@ -67,7 +67,6 @@ try {
   assert.equal((await verifyBundle()).optional_website_assets.state, 'unavailable');
   assert.equal((await ensureRuntime(data)).runtime_id, first.runtime_id);
   assert.equal((await localRequest(data, '/agent-connections', { method: 'POST', credential: client.credential, body: {} })).ok, true);
-  await rename(sites + '.held', sites);
   await cli('stop'); running = false;
   const config = JSON.parse(await readFile(join(data, 'installation.json'), 'utf8'));
   let authenticatedRequests = 0;
@@ -83,6 +82,8 @@ try {
   }
   const restarted = await cli('start'); running = true;
   assert.equal(restarted.ready, true); assert.notEqual(restarted.runtime_id, first.runtime_id);
+  assert.equal(restarted.assets.optional_website_assets.state, 'unavailable');
+  await rename(sites + '.held', sites);
   assert.equal((await verifyBundle()).integrity, 'verified');
   console.log('Installed auxiliary checks passed: startup/discovery, unregistered/owner denial, required missing/corrupt/version refusal and recovery, optional website isolation, occupied endpoint fail-closed/recovery, explicit stop/restart. No live Provider or host evidence claimed.');
 } finally {
