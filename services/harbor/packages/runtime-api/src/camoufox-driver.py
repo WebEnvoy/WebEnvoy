@@ -72,7 +72,7 @@ def diagnostic_path(path: str) -> str | None:
         decoded = unquote(path)
     except Exception:
         decoded = path
-    return "/<redacted>" if DIAGNOSTIC_SENSITIVE_PATH_PATTERN.search(decoded) else path or "/"
+    return "/<redacted>" if DIAGNOSTIC_SENSITIVE_PATH_PATTERN.search(decoded) or DIAGNOSTIC_SECRET_PATTERN.search(decoded) else path or "/"
 
 
 def diagnostics_url(value: Any) -> tuple[str, str] | None:
@@ -271,7 +271,7 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
     try:
         title = safe_text(str(PAGE.title()))[:256]
     except Exception:
-        title = None
+        return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "The active Page is no longer observable.", "retryable": False}
     origin = request.get("origin")
     current = diagnostics_url(str(PAGE.url))
     if not isinstance(origin, str) or not current or current[1] != origin:

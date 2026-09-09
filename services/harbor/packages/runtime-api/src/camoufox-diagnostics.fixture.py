@@ -82,6 +82,7 @@ class FakePage:
         self.title_calls = 0
         self.frame = self.main_frame
         self.document_generation = 1
+        self.closed = False
 
     def on(self, event: str, callback: Any) -> None:
         self._listeners.setdefault(event, []).append(callback)
@@ -99,6 +100,8 @@ class FakePage:
         self._pending.append(("navigate", url))
 
     def title(self) -> str:
+        if self.closed:
+            raise RuntimeError("Page has been closed")
         self.title_calls += 1
         while self._pending:
             event, value = self._pending.pop(0)
@@ -160,6 +163,9 @@ def main() -> None:
     assert any(item["truncated"] is True for item in result["console"])
     assert any(item["level"] == "pageerror" for item in result["console"])
     assert result["network"][0]["url"] == f"{origin}/ok"
+    for path in ("/reset/token=fixture-sentinel", "/reset/token%3Dfixture-sentinel"):
+        page.emit("request", FakeRequest(origin + path))
+        assert DRIVER.DIAGNOSTIC_EVENTS[-1]["url"] == origin + "/<redacted>"
 
     cross_origin = FakeRequest("https://third-party.test/private/token/secret")
     page.emit("request", cross_origin)
@@ -224,6 +230,9 @@ def main() -> None:
     assert len(DRIVER.DIAGNOSTIC_REQUESTS) <= DRIVER.DIAGNOSTIC_REQUEST_LIMIT
     assert len(DRIVER.DIAGNOSTIC_EVENTS) <= 128
 
+    page.closed = True
+    closed = DRIVER.diagnostics_read({"origin": origin})
+    assert closed["status"] == "unavailable" and closed["failure_class"] == "provider_unavailable"
     DRIVER.PAGE = None
     unavailable = DRIVER.diagnostics_read({"origin": origin})
     assert unavailable["status"] == "unavailable" and unavailable["failure_class"] == "provider_unavailable"

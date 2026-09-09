@@ -109,7 +109,8 @@ export function safeDiagnosticsUrl(value: unknown): { url: string; origin: strin
     const parsed = new URL(value);
     if (!isOrigin(parsed.origin) || parsed.username || parsed.password) return null;
     if (parsed.pathname.length > 512) return null;
-    const path = SENSITIVE_PATH.test(decodeURIComponent(parsed.pathname)) ? "/<redacted>" : parsed.pathname || "/";
+    const decodedPath = decodeURIComponent(parsed.pathname);
+    const path = SENSITIVE_PATH.test(decodedPath) || SENSITIVE_TEXT.test(decodedPath) ? "/<redacted>" : parsed.pathname || "/";
     return { url: `${parsed.origin}${path}`, origin: parsed.origin };
   } catch { return null; }
 }

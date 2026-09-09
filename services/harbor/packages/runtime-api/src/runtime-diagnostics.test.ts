@@ -127,4 +127,6 @@ test("normalization preserves event bindings and rejects unsafe cross-origin det
   assert.equal(malformed.status, "unavailable");
   if (malformed.status === "unavailable") assert.match(malformed.message, /unavailable/);
   assert.equal(safeDiagnosticsUrl(`${origin}/private/token/secret`)?.url, `${origin}/<redacted>`);
+  assert.equal(safeDiagnosticsUrl(`${origin}/reset/token=fixture-sentinel`)?.url, `${origin}/<redacted>`);
+  assert.equal(safeDiagnosticsUrl(`${origin}/reset/token%3Dfixture-sentinel`)?.url, `${origin}/<redacted>`);
 });
