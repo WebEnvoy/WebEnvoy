@@ -1,6 +1,6 @@
 # Agent 管理多个 Profile
 
-当前正式入口由 Desktop 监督的 Core HTTP API 提供。设置 → Agent 接入登记 Agent 客户端生成的 SHA-256 凭据指纹，向稳定 Principal 授予有期限、固定 Camoufox 模板和最多两个新 Profile 的管理 Grant。原始凭据只由客户端保存；不传入 App 表单、日志或 Issue。
+原双 Profile 管理切片由 Desktop 监督的 Core HTTP API 提供；安装后的单宿主路径见[独立 Agent 入口](installed-agent.md)。设置 → Agent 接入登记 Agent 客户端生成的 SHA-256 凭据指纹，向稳定 Principal 授予有期限、固定 Camoufox 模板和最多两个新 Profile 的管理 Grant。原始凭据只由客户端保存；不传入 App 表单、日志或 Issue。
 
 客户端以 `Authorization: Bearer <本地凭据>` 调用：
 
@@ -27,4 +27,4 @@ Grant 是管理授权的一层，每次操作还受 Profile 上限、任务范�
 
 真实 Profile 验收脚本及其 `--help` 说明只针对显式指定的隔离测试 store；不使用日常 Profile 或已有账号，不上传、编辑字段或发布。验证证据和完成状态以 [#454](https://github.com/WebEnvoy/WebEnvoy/issues/454) 为准。
 
-此入口依赖 Desktop 监督的 Runtime 生命周期。packaged 通过不证明关闭 App 后仍可独立使用；完整独立安装与常驻 Agent 消费由 #474/#475/#477 后继交付承接。
+本页历史证据对应 Desktop 监督的 Runtime；不能据此推导 App 退出后的可用性。安装后的单宿主生命周期由 [#490](https://github.com/WebEnvoy/WebEnvoy/issues/490) 单独验收，使用方式见[独立 Agent 入口](installed-agent.md)；#474/#475/#477 的完整范围仍由各 FR 承载。

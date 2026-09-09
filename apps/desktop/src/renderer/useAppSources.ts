@@ -12,6 +12,7 @@ export type ShellContext = {
   platform: string;
   colorScheme: "light" | "dark";
   configScope: "local-ui-only";
+  runtimeEndpoints?: { coreEndpoint: string; harborEndpoint: string };
 };
 
 const initialHarborIdentityState: HarborIdentityLoadState = {
@@ -71,7 +72,10 @@ function useShellSource(
     setConnectionConfig(loadLocalConnectionConfig());
     const read = window.webenvoyShell?.getShellContext;
     (read?.() ?? Promise.resolve(localShellContext())).then((context) => {
-      if (!cancelled) applyTheme(context, setShellContext);
+      if (!cancelled) {
+        applyTheme(context, setShellContext);
+        if (context.runtimeEndpoints) setConnectionConfig(current => ({ ...current, ...context.runtimeEndpoints }));
+      }
     }).catch(() => {
       if (!cancelled) applyTheme(localShellContext(), setShellContext);
     });

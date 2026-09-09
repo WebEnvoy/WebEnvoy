@@ -86,7 +86,10 @@ export async function openHarborIdentitySession(
   return result.ok ? result.value : { status: "unavailable" as const, message: result.error, retryable: false };
 }
 
-export async function lockHarborSession(harborEndpoint: string, sessionRef: string) {
+export async function lockHarborSession(harborEndpoint: string, sessionRef: string, handoffFromCore = false) {
+  if (handoffFromCore) return postHarborSession(harborEndpoint, [`/runtime/sessions/${encodeURIComponent(sessionRef)}/handoff`], {
+    control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested",
+  });
   return postHarborSession(harborEndpoint, sessionPaths(sessionRef, "lock"), {
     control_owner: "user",
     holder_ref: "app-browser-page",

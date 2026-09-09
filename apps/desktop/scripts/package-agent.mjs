@@ -1,0 +1,24 @@
+import { cp, mkdir, readFile, writeFile, stat, chmod } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import electron from 'electron';
+import { files, sha } from '../agent-entry/bundle.mjs';
+const output = resolve(process.argv[2] ?? 'artifacts/WebEnvoy Test.app');
+try { await stat(output); throw new Error('Output already exists; choose a new test installation location'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+if (process.platform !== 'darwin') throw new Error('This test slice supports only the verified macOS platform');
+await mkdir(dirname(output), { recursive: true });
+await cp(resolve(electron, '../../..'), output, { recursive: true, dereference: true });
+const appRoot = join(output, 'Contents/Resources/app');
+await mkdir(appRoot, { recursive: true });
+for (const directory of ['dist', 'dist-electron', 'agent-entry']) await cp(resolve(directory), join(appRoot, directory), { recursive: true, dereference: true });
+await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'webenvoy-installed-test', version: '0.1.0', type: 'module', main: 'dist-electron/main.js' }));
+const launcher = join(output, 'Contents/MacOS/webenvoy');
+await writeFile(launcher, '#!/bin/sh\napp_contents="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"\nELECTRON_RUN_AS_NODE=1 exec "$app_contents/MacOS/Electron" "$app_contents/Resources/app/agent-entry/cli.mjs" "$@"\n');
+await chmod(launcher, 0o755);
+const host = { electron_version: JSON.parse(await readFile(new URL('../node_modules/electron/package.json', import.meta.url))).version, executable_sha256: sha(await readFile(electron)) };
+const workspace = JSON.parse(await readFile(join(appRoot, 'dist-electron/runtime/packaging-state.json'), 'utf8')).workspace;
+const lode = JSON.parse(await readFile(join(appRoot, 'dist-electron/lode/provenance.json'), 'utf8'));
+const allFiles = await files(appRoot);
+const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json'));
+const requiredFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => !(name in optionalFiles)));
+await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.1.0', skill_version: '0.1.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
+console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace }));

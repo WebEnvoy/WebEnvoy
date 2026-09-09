@@ -1,0 +1,55 @@
+import { createInterface } from 'node:readline';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { root, sha, verifyBundle } from './bundle.mjs';
+import { ensureRuntime, localRequest, readClient } from './client.mjs';
+const client = await readClient(process.argv[2]);
+let connection;
+const tools = [
+  { name: 'webenvoy_status', description: 'Verify installed Runtime and SKILL assets; return actual versions, readiness, and safe recovery guidance.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'webenvoy_skill', description: 'Read the actual installed, integrity-verified WebEnvoy management/public browser SKILL before operating.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'webenvoy_connect', description: 'Connect the already registered Agent Principal. Cannot register or grant permissions.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'webenvoy_operation', description: 'Submit one authorized management or public-page operation. Exact runtime_session_ref required for navigate/read. Never retries an operation.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string' }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['profile.create','profile.list','profile.read','instance.start','instance.observe','instance.navigate','instance.read','instance.handoff','instance.stop'] }, task_scope: { type: 'object', properties: { operations: { type: 'array', items: { type: 'string' } }, profile_refs: { type: 'array', items: { type: 'string' } }, origins: { type: 'array', items: { type: 'string' } } }, required: ['operations','profile_refs','origins'], additionalProperties: false }, template_ref: { type: 'string' }, profile_ref: { type: 'string' }, runtime_session_ref: { type: 'string' }, origin: { type: 'string' }, url: { type: 'string' } }, required: ['idempotency_key','grant_id','operation','task_scope'], additionalProperties: false } },
+  { name: 'webenvoy_query', description: 'Query a prior Run without replay. If the response was lost, reconnect and query the original idempotency_key.', inputSchema: { type: 'object', properties: { run_id: { type: 'string', pattern: '^managed-[a-f0-9]{64}$' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false } },
+];
+async function call(name, args) {
+  await verifyBundle();
+  if (name === 'webenvoy_skill') return { skill: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8') };
+  const status = await ensureRuntime(client.data_dir);
+  if (name === 'webenvoy_status') return status;
+  const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  if (name === 'webenvoy_connect') { const result = await request('/agent-connections', {}); connection = result.connection; return result; }
+  if (name === 'webenvoy_query') {
+    let runId = args.run_id;
+    if (args.idempotency_key !== undefined) {
+      if (!connection) return { ok: false, error: { code: 'connect_first' } };
+      if (runId || typeof args.idempotency_key !== 'string' || !args.idempotency_key.length || args.idempotency_key.length > 512) throw new Error('query_input_refused');
+      runId = `managed-${sha(`${connection.principal_id}:${args.idempotency_key}`)}`;
+    }
+    if (!/^managed-[a-f0-9]{64}$/.test(runId)) throw new Error('query_input_refused');
+    return request(`/managed-browser/operations/${runId}`);
+  }
+  if (name === 'webenvoy_operation') {
+    if (!connection) return { ok: false, error: { code: 'connect_first' } };
+    if (!tools[3].inputSchema.properties.operation.enum.includes(args.operation) || Object.keys(args).some(k => !(k in tools[3].inputSchema.properties))) throw new Error('operation_input_refused');
+    return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
+  }
+  throw new Error('tool_not_found');
+}
+async function handle(message) {
+  const { id, method, params } = message;
+  if (id === undefined) return;
+  let result;
+  if (method === 'initialize') result = { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'webenvoy', version: '0.1.0' } };
+  else if (method === 'ping') result = {};
+  else if (method === 'tools/list') result = { tools };
+  else if (method === 'tools/call') {
+    try { result = { content: [{ type: 'text', text: JSON.stringify(await call(params.name, params.arguments ?? {})) }] }; }
+    catch (error) { result = { isError: true, content: [{ type: 'text', text: error.message }] }; }
+  } else return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } };
+  return { jsonrpc: '2.0', id, result };
+}
+for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
+  try { const response = await handle(JSON.parse(line)); if (response) process.stdout.write(JSON.stringify(response) + '\n'); }
+  catch { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }) + '\n'); }
+}

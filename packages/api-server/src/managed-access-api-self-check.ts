@@ -51,6 +51,12 @@ export async function assertManagedAccessApi(): Promise<void> {
       expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: null, max_created_profiles: 0,
     });
     assert.equal(grant.status, 201);
+    const reconnected = await call("/agent-connections", agent, {});
+    assert.deepEqual(reconnected.body.grants, [grant.body.grant]);
+    assert.notEqual(reconnected.body.connection.connection_id, connected.body.connection.connection_id);
+    const secondCredential = "another-agent-credential-long-enough";
+    await call("/agent-access/principals", owner, { ...input, idempotency_key: "register-second", credential_hash: createHash("sha256").update(secondCredential).digest("hex") });
+    assert.deepEqual((await call("/agent-connections", secondCredential, {})).body.grants, []);
     assert.equal((await call("/agent-access/grants", agent, {})).status, 401);
     assert.equal((await call("/managed-browser/operations", agent, {})).body.ok, true);
     assert.equal((await call("/managed-browser/operations/managed-run", agent)).body.run_id, "managed-run");

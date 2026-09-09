@@ -204,6 +204,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async authenticateCredential(credentialHash: unknown): Promise<ManagedPrincipal> { return publicPrincipal(authenticated(await read(), credentialHash)); },
+    async listAgentGrants(credentialHash: unknown): Promise<ManagedGrant[]> {
+      const state = await read(), principal = authenticated(state, credentialHash);
+      return state.grants.filter(grant => grant.principal_id === principal.principal_id);
+    },
     async connect(credentialHash: unknown): Promise<ManagedConnection> {
       return transaction(state => {
         const principal = authenticated(state, credentialHash);

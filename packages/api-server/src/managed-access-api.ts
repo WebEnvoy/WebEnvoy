@@ -72,7 +72,7 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       const credentialHash = createHash("sha256").update(token).digest("hex");
       await store.authenticateCredential(credentialHash);
       if (path === "/agent-connections" && request.method === "POST") {
-        send(response, 201, { ok: true, connection: await store.connect(credentialHash) }); return true;
+        send(response, 201, { ok: true, connection: await store.connect(credentialHash), grants: await store.listAgentGrants(credentialHash) }); return true;
       }
       const service = options.managedBrowserService;
       if (!service) { reject(response, 503, "managed_browser_unavailable"); return true; }
