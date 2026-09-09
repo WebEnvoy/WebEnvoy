@@ -51,6 +51,12 @@ export async function assertManagedAccessApi(): Promise<void> {
       expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: null, max_created_profiles: 0,
     });
     assert.equal(grant.status, 201);
+    const policy = { idempotency_key: "profile-policy", profile_ref: "profile:test", allowed_operations: ["instance.snapshot", "instance.input"], allowed_origins: ["http://127.0.0.1:18794"], controlled_interaction_origins: ["http://127.0.0.1:18794"] };
+    assert.equal((await call("/agent-access/profile-policies", agent, policy)).status, 401);
+    const ownerPolicy = await call("/agent-access/profile-policies", owner, policy);
+    assert.equal(ownerPolicy.status, 200);
+    assert.deepEqual(ownerPolicy.body.profile_policy.controlled_interaction_origins, policy.controlled_interaction_origins);
+    assert.equal((await call("/agent-access/operations/profile-policy", owner)).body.operation.status, "completed");
     const reconnected = await call("/agent-connections", agent, {});
     assert.deepEqual(reconnected.body.grants, [grant.body.grant]);
     assert.notEqual(reconnected.body.connection.connection_id, connected.body.connection.connection_id);

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileManagedAccessStore, managedOperations } from "./managed-access.js";
+import { createFileManagedAccessStore, managedOperations, managedInteractionOperations } from "./managed-access.js";
 import { createManagedBrowserService } from "./managed-browser.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
 import { createFileAuthorizationDecisionStore } from "./authorization-decision-store.js";
@@ -17,6 +17,7 @@ let creates = 0;
 let navigations = 0, observations = 0;
 let managedSession: Record<string, unknown>;
 let dropResponse = false;
+let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
 const receipts = new Map<string, unknown>();
 let afterCreate: (() => Promise<void>) | undefined;
 const server = createServer((req, res) => { void (async () => {
@@ -24,7 +25,8 @@ const server = createServer((req, res) => { void (async () => {
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: managedOperations.map(operation_id => ({ operation_id, category: ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] }))
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
+      ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
   else if (req.url === "/runtime/identity-environment-mutations") {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -46,6 +48,17 @@ const server = createServer((req, res) => { void (async () => {
     if (req.url!.endsWith("/navigate")) { navigations++; managedSession.current_page = { current_url: input.url }; }
     value = { status: "completed", session: managedSession, observed_at: new Date().toISOString(), ...(req.url!.endsWith("/read") ? { text: "Example Domain is for use in documentation examples.", truncated: false } : {}) };
   }
+  else if (req.url === "/runtime/sessions/session%3Aone/interactions") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    assert.equal(input.controlled_origin, input.expected_origin);
+    assert.equal(input.expected_origin, "http://127.0.0.1:18794");
+    if (!refuseInteraction) interactions++;
+    value = { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
+      operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
+    receipts.set(input.operation_ref, value);
+    if (dropInteractionResponse) { req.socket.destroy(); return; }
+  } else if (req.url?.startsWith("/runtime/managed-interactions/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else { res.writeHead(404); res.end('{}'); return; }
   res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value));
 })().catch(() => { res.writeHead(500); res.end('{}'); }); });
@@ -124,6 +137,51 @@ try {
   await assert.rejects(service.submit(credentialHash, { ...navigation, connection_id: publicReconnect.connection_id, idempotency_key: "after-public-revoke" }), /grant_unavailable/);
   assert.equal(navigations, 1);
   assert.deepEqual(await service.query(credentialHash, navigated.run_id), navigated);
+  const origin = "http://127.0.0.1:18794";
+  const interactionOps = [...managedInteractionOperations];
+  const policy = { profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin] };
+  await accessStore.setProfilePolicy({ idempotency_key: "no-declaration", ...policy });
+  const interactiveGrant = await accessStore.createGrant({ idempotency_key: "controlled-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const interactive = { idempotency_key: "snapshot", connection_id: connection.connection_id, grant_id: interactiveGrant.grant_id,
+    operation: "instance.snapshot", profile_ref: "profile:1", origin, runtime_session_ref: "session:one", task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [origin] } };
+  await assert.rejects(service.submit(credentialHash, interactive), /controlled_origin_required/);
+  await assert.rejects(accessStore.setProfilePolicy({ idempotency_key: "invalid-declaration", ...policy, controlled_interaction_origins: ["http://127.0.0.1:18795"] }), /invalid_input/);
+  await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration", ...policy, controlled_interaction_origins: [origin] });
+  const snapshot = await service.submit(credentialHash, interactive);
+  assert.equal(snapshot.status, "succeeded", JSON.stringify(snapshot));
+  const input = { ...interactive, idempotency_key: "input-one", operation: "instance.input", page_ref: "page:one", observation_ref: "observation:1", target_ref: "target:one", text: "ordinary test" };
+  const deniedPolicy = await service.submit(credentialHash, { ...input, idempotency_key: "prepare-not-allowed" });
+  assert.equal(deniedPolicy.failure?.code, "managed_browser_policy_refused");
+  assert.equal(deniedPolicy.dispatch_state, "not_dispatched");
+  assert.equal(interactions, 1);
+  await service.putManagementPolicy({ schema_version: executionPolicyMutationSchemaVersion, idempotency_key: "allow-controlled", expected_source_version: null, modes: { read: "auto", prepare: "auto", commit: "auto" } });
+  for (const override of [{ task_scope: { ...input.task_scope, operations: ["instance.snapshot"] } }, { profile_ref: "profile:2" }, { origin: "http://127.0.0.1:18795" }]) {
+    await assert.rejects(service.submit(credentialHash, { ...input, ...override }), /managed_access_denied/);
+  }
+  const readOnlyGrant = await accessStore.createGrant({ idempotency_key: "read-only-controlled", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: ["instance.snapshot"], allowed_origins: [origin], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  await assert.rejects(service.submit(credentialHash, { ...input, grant_id: readOnlyGrant.grant_id }), /managed_access_denied/);
+  const wrongInstance = await service.submit(credentialHash, { ...input, idempotency_key: "wrong-instance", runtime_session_ref: "session:other" });
+  assert.equal(wrongInstance.dispatch_state, "not_dispatched");
+  assert.equal(interactions, 1);
+  refuseInteraction = true;
+  const refused = await service.submit(credentialHash, { ...input, idempotency_key: "stale-target" });
+  assert.equal(refused.status, "failed"); assert.equal(refused.dispatch_state, "not_dispatched");
+  assert.equal(interactions, 1);
+  refuseInteraction = false;
+  dropInteractionResponse = true;
+  const lost = await service.submit(credentialHash, input);
+  assert.equal(lost.status, "unknown_outcome"); assert.equal(lost.dispatch_state, "dispatched");
+  assert.equal(interactions, 2);
+  dropInteractionResponse = false;
+  assert.deepEqual(await service.submit(credentialHash, input), lost, "same key cannot replay input");
+  await accessStore.revokeGrant({ idempotency_key: "revoke-controlled", grant_id: interactiveGrant.grant_id });
+  const interactiveReconnect = await accessStore.connect(credentialHash);
+  await assert.rejects(service.submit(credentialHash, { ...input, idempotency_key: "after-controlled-revoke", connection_id: interactiveReconnect.connection_id }), /grant_unavailable/);
+  const queried = await service.query(credentialHash, lost.run_id);
+  assert.equal(queried.status, "unknown_outcome", "receipt adds fact without erasing lost-response history");
+  assert.equal(queried.reconciliation, "completed");
+  assert.equal((queried.result as { snapshot: { text: string } }).snapshot.text, "Ready");
+  assert.equal(interactions, 2, "query after revocation does not replay input");
   console.log("managed browser Core HTTP boundary self-check passed");
 } finally {
   await new Promise<void>(resolve => server.close(() => resolve()));

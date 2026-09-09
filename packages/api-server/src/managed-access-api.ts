@@ -106,6 +106,9 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (path === "/agent-access/grants" && request.method === "POST") {
         send(response, 201, { ok: true, grant: await store.createGrant(await body(request)) }); return true;
       }
+      if (path === "/agent-access/profile-policies" && request.method === "POST") {
+        send(response, 200, { ok: true, profile_policy: await store.setProfilePolicy(await body(request)) }); return true;
+      }
       const revoke = /^\/agent-access\/(principals|connections|grants)\/([^/]+)\/revoke$/.exec(path);
       if (revoke && request.method === "POST") {
         const input = await body(request);

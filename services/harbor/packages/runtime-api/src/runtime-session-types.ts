@@ -741,6 +741,7 @@ export type LocalProviderLaunchResult =
       openUrl: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
       clearPublicPageGuard?: () => Promise<void>;
       publicPage?: import("./managed-observation.js").ManagedPublicPageOperation;
+      interaction?: import("./managed-interaction.js").ManagedInteractionOperation;
       observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;

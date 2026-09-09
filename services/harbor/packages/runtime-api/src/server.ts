@@ -211,6 +211,12 @@ async function route(
     return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "managed-interactions" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.getManagedInteraction(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? { status: "unavailable", failure_class: "managed_interaction_receipt_missing" }); return;
+  }
+
   if (parts[0] === "runtime" && (parts[1] === "sessions" || parts[1] === "identity-environment-sessions") && parts[2]) {
     await routeSession(runtime, manualAuthenticationAuthorizer, parts[2], parts[3], method, request, response);
     return;
@@ -360,6 +366,11 @@ async function routeSession(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
+  if (action === "interactions" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.operateManagedInteraction(runtimeSessionRef, await readJson<unknown>(request));
+    writeJson(response, result.status === "unavailable" ? 409 : 200, result); return;
+  }
   if ((action === "navigate" || action === "read") && method === "POST") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.operateManagedPublicPage(runtimeSessionRef, await readJson<unknown>(request), action === "navigate");
