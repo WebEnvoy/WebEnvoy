@@ -14,19 +14,25 @@ import { executionPolicyMutationSchemaVersion } from "./execution-policy-config.
 const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
 let creates = 0;
-let navigations = 0, observations = 0;
+let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let managedSession: Record<string, unknown>;
 let dropResponse = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
 const receipts = new Map<string, unknown>();
+let environmentReads = 0, environmentUpdates = 0, dropEnvironmentResponse = false, environmentUnavailable = false;
+let environmentConfigured = { timezone: "UTC", language: "en-US", viewport: "1280x720" };
+let environmentEffective = { ...environmentConfigured };
+let environmentPending: Record<string, string> | null = null;
+const environmentReceipts = new Map<string, Record<string, unknown>>();
 let afterCreate: (() => Promise<void>) | undefined;
+let afterProfileList: (() => Promise<void>) | undefined;
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: operation_id === "environment.update" ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
   else if (req.url === "/runtime/identity-environment-mutations") {
@@ -39,9 +45,37 @@ const server = createServer((req, res) => { void (async () => {
     receipts.set(input.idempotency_key, value);
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
-  } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
-  else if (req.url === "/runtime/identity-environments") value = { identity_environments: profiles };
-  else if (req.url === "/runtime/identity-environments/identity%3A1/session") value = { runtime_session: managedSession };
+  } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
+  else if (req.url === "/runtime/identity-environments") { await afterProfileList?.(); value = { identity_environments: profiles }; }
+  else if (req.url === "/runtime/identity-environments/identity%3A1/environment") {
+    if (req.method === "GET") {
+      environmentReads++;
+      value = environmentUnavailable ? { status: "unavailable", failure_class: "provider_unavailable", retryable: true } :
+        { status: "completed", identity_environment_ref: "identity:1", profile_ref: "profile:1",
+          configured: { ...environmentConfigured }, effective: { ...environmentEffective }, pending: environmentPending === null ? null : { ...environmentPending },
+          drift: "none", last_verified_at: "2026-09-09T00:00:00.000Z",
+          provider: { provider_id: "camoufox", provider_version: "0.5.6", browser_version: "135.0", support: "supported" },
+          observed: { language: environmentEffective.language, timezone: environmentEffective.timezone, viewport: environmentEffective.viewport } };
+    } else {
+      let body = ""; for await (const chunk of req) body += chunk;
+      const input = JSON.parse(body) as { idempotency_key?: string; configuration?: Record<string, string> };
+      assert.equal(typeof input.idempotency_key, "string");
+      assert.ok(input.configuration && typeof input.configuration === "object");
+      const key = input.idempotency_key!;
+      const existing = environmentReceipts.get(key);
+      if (existing) value = existing;
+      else {
+        environmentUpdates++;
+        const configuration = { ...input.configuration };
+        environmentConfigured = { ...environmentConfigured, ...configuration };
+        environmentPending = configuration;
+        const receipt = { status: "completed", idempotency_key: key, identity_environment_ref: "identity:1", configuration };
+        environmentReceipts.set(key, receipt); value = receipt;
+      }
+      if (dropEnvironmentResponse) { req.socket.destroy(); return; }
+    }
+  } else if (req.url === "/runtime/identity-environments/identity%3A1/session") { sessionReads++; value = { runtime_session: managedSession };
+  }
   else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
   else if (req.url === "/runtime/sessions/session%3Aone/diagnostics") {
     diagnostics++;
@@ -198,6 +232,65 @@ try {
   assert.equal(deniedPolicy.dispatch_state, "not_dispatched");
   assert.equal(interactions, 1);
   await service.putManagementPolicy({ schema_version: executionPolicyMutationSchemaVersion, idempotency_key: "allow-controlled", expected_source_version: null, modes: { read: "auto", prepare: "auto", commit: "auto" } });
+  const environmentOps = ["environment.read", "environment.update"];
+  await accessStore.setProfilePolicy({ idempotency_key: "environment-policy", profile_ref: "profile:1", allowed_operations: environmentOps, allowed_origins: ["https://example.com"] });
+  const environmentGrant = await accessStore.createGrant({ idempotency_key: "environment-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const environmentRead = { idempotency_key: "environment-read", connection_id: connection.connection_id, grant_id: environmentGrant.grant_id,
+    operation: "environment.read", profile_ref: "profile:1", origin: "https://example.com", task_scope: { operations: environmentOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  const sessionReadsBeforeEnvironment = sessionReads;
+  const environmentResult = await service.submit(credentialHash, environmentRead);
+  assert.equal(environmentResult.status, "succeeded", JSON.stringify(environmentResult));
+  assert.equal((environmentResult.result as { status: string }).status, "completed");
+  assert.equal(environmentReads, 1);
+  assert.equal(sessionReads, sessionReadsBeforeEnvironment, "environment reads do not require or create an Instance session");
+  environmentUnavailable = true;
+  const unavailableEnvironment = await service.submit(credentialHash, { ...environmentRead, idempotency_key: "environment-unavailable" });
+  assert.equal(unavailableEnvironment.status, "failed", "a Harbor unavailable envelope is a failed Core Run, not a successful result");
+  assert.equal(unavailableEnvironment.failure?.code, "provider_unavailable");
+  environmentUnavailable = false;
+  const environmentUpdate = { ...environmentRead, idempotency_key: "environment-update", operation: "environment.update", configuration: { timezone: "Asia/Shanghai" } };
+  const environmentUpdated = await service.submit(credentialHash, environmentUpdate);
+  assert.equal(environmentUpdated.status, "succeeded", JSON.stringify(environmentUpdated));
+  assert.equal(environmentUpdates, 1);
+  const observedEnvironment = (await service.submit(credentialHash, { ...environmentRead, idempotency_key: "environment-read-after-update" })).result as { configured: { timezone: string }; effective: { timezone: string }; pending: { timezone: string } };
+  assert.equal(observedEnvironment.configured.timezone, "Asia/Shanghai");
+  assert.equal(observedEnvironment.effective.timezone, "UTC", "configuration does not masquerade as active effective state");
+  assert.equal(observedEnvironment.pending.timezone, "Asia/Shanghai");
+  for (const invalidConfiguration of [{}, { timezone: "UTC", unknown: "value" }, { timezone: "x".repeat(129) }]) {
+    await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: `environment-invalid-${environmentUpdates}`, configuration: invalidConfiguration }), /managed_browser_invalid_input/);
+  }
+  assert.equal(environmentUpdates, 1, "invalid configuration does not reach Harbor or mutate the Profile");
+  await assert.rejects(service.submit(credentialHash, { ...environmentRead, idempotency_key: "environment-config-on-read", operation: "profile.read", configuration: { timezone: "UTC" } }), /managed_browser_invalid_input/);
+  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-task", task_scope: { ...environmentUpdate.task_scope, operations: ["environment.read"] } }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-profile", profile_ref: "profile:2" }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-origin", origin: "https://denied.example" }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-missing-origin", origin: undefined }), /managed_access_origin_required/);
+  const lostEnvironment = { ...environmentUpdate, idempotency_key: "environment-lost-response", configuration: { language: "zh-CN" } };
+  dropEnvironmentResponse = true;
+  const unknownEnvironment = await service.submit(credentialHash, lostEnvironment);
+  assert.equal(unknownEnvironment.status, "unknown_outcome");
+  assert.equal(environmentUpdates, 2);
+  dropEnvironmentResponse = false;
+  const reconciledEnvironment = await service.query(credentialHash, unknownEnvironment.run_id);
+  assert.equal(reconciledEnvironment.status, "unknown_outcome", "recovery preserves the original lost-response history");
+  assert.equal(reconciledEnvironment.reconciliation, "completed");
+  assert.equal((reconciledEnvironment.result as { receipt: { configuration: { language: string } } }).receipt.configuration.language, "zh-CN");
+  assert.equal(environmentUpdates, 2, "query uses the Runtime receipt and never replays the update");
+  assert.deepEqual(await service.submit(credentialHash, lostEnvironment), reconciledEnvironment);
+  assert.equal(environmentUpdates, 2, "duplicate submission of an unknown key never replays the update");
+  for (const operation of environmentOps) {
+    const key = `environment-revoked-in-flight-${operation}`;
+    const grant = await accessStore.createGrant({ idempotency_key: key, principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+    const before: { environmentReads: number; environmentUpdates: number; configured: typeof environmentConfigured } = { environmentReads, environmentUpdates, configured: { ...environmentConfigured } };
+    afterProfileList = async () => { await accessStore.revokeGrant({ idempotency_key: `${key}-revoke`, grant_id: grant.grant_id }); };
+    const refused = await service.submit(credentialHash, { ...environmentRead, idempotency_key: key, grant_id: grant.grant_id, operation, ...(operation === "environment.update" ? { configuration: { timezone: "Asia/Tokyo" } } : {}) });
+    afterProfileList = undefined;
+    assert.equal(refused.status, "failed", "revocation during Profile lookup must block environment dispatch");
+    assert.equal(refused.failure?.code, "managed_access_grant_unavailable");
+    assert.deepEqual({ environmentReads, environmentUpdates, configured: environmentConfigured }, before);
+  }
+  await accessStore.revokeGrant({ idempotency_key: "revoke-environment", grant_id: environmentGrant.grant_id });
+  await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration-after-environment", ...policy, controlled_interaction_origins: [origin] });
   for (const override of [{ task_scope: { ...input.task_scope, operations: ["instance.snapshot"] } }, { profile_ref: "profile:2" }, { origin: "http://127.0.0.1:18795" }]) {
     await assert.rejects(service.submit(credentialHash, { ...input, ...override }), /managed_access_denied/);
   }

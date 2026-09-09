@@ -127,7 +127,7 @@ try {
   const submittedGrant=await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/grants'&&x.method==='POST').at(-1).body");
   assert.deepEqual(submittedGrant.profile_refs,['profile:isolated']);
   assert.deepEqual(submittedGrant.allowed_origins,['http://127.0.0.1:43129']);
-  assert.deepEqual(submittedGrant.allowed_operations,['profile.list','profile.read','instance.observe','instance.read']);
+  assert.deepEqual(submittedGrant.allowed_operations,['profile.list','profile.read','instance.observe','environment.read','instance.read']);
   assert.equal(submittedGrant.principal_id,'principal:one');
   assert.equal(submittedGrant.creation_template,null);
   await waitFor(`!${button("保存 Profile 权限上限")}.disabled`);

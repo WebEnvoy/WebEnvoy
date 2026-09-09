@@ -45,6 +45,7 @@ import {
   type IdentityEnvironmentProviderBindingInput
 } from "./provider-management.js";
 import { opaqueRef } from "./refs.js";
+import { boundedEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
 import { withProfileBackedLocalMaterial } from "./profile-backed-local-material.js";
 import { profileStorageHasExternalLock, profileStoragePathExists } from "./profile-storage.js";
 import {
@@ -681,7 +682,25 @@ export class HarborRuntime {
     return this.identityEnvironments.list();
   }
 
+  async readProfileEnvironment(identity_environment_ref: string) {
+    const facts = this.identityEnvironments.getFacts(identity_environment_ref);
+    return facts ? this.runtimeSessions.readProfileEnvironment(facts) : environmentUnavailable("identity_environment_missing");
+  }
+
+  async updateProfileEnvironment(identity_environment_ref: string, value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return environmentUnavailable("invalid_request");
+    const input = value as Record<string, unknown>;
+    const configuration = boundedEnvironmentUpdate(input.configuration);
+    if (!configuration || Object.keys(input).length !== 2 || !boundedManagedRef(input.idempotency_key)) return environmentUnavailable("invalid_request");
+    const result = this.mutateLocalIdentityEnvironment({ operation: "edit", identity_environment_ref, idempotency_key: input.idempotency_key, configuration });
+    if (result.status !== "completed") return environmentUnavailable(result.failure?.code ?? "mutation_failed", result.failure?.retryable ?? false);
+    return this.readProfileEnvironment(identity_environment_ref);
+  }
+
   mutateLocalIdentityEnvironment(request: IdentityEnvironmentMutationRequest): IdentityEnvironmentMutationResult {
+    // These edits change only the owner configuration record. Active launch
+    // snapshots and browser storage stay untouched until an explicit restart.
+    if (request.operation === "edit" && boundedEnvironmentUpdate(request.configuration) && this.runtimeSessions.isIdentityEnvironmentInUse(request.identity_environment_ref)) return this.identityEnvironments.mutate(request, null, true);
     const materializedRequest = materializeIdentityEnvironmentMutation(request);
     const reservationRefs = this.mutationReservationRefs(materializedRequest);
     const sourceInUse = reservationRefs.source_identity_environment_ref &&

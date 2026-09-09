@@ -13,6 +13,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Network Runtime Contract V1](network-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 bounded Network metadata、Page binding、cursor、脱敏和生命周期语义。 |
 | [Console Runtime Contract V1](console-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 console/page-error levels、文本截断脱敏、source location 和生命周期语义。 |
 | [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 固定诊断 capability→MCP projection、版本、availability、授权与恢复语义。 |
+| [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md) | [Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499) | 冻结 Camoufox 私有 bundle、精确 replay、版本兼容、fail-closed 和有界 environment readback。 |
 
 ## 使用规则
 
@@ -50,4 +51,4 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 ### 当前已知映射
 
 - #498：`DO-NETWORK-CONTRACT = triggered`、`DO-CONSOLE-CONTRACT = triggered`；`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 在新增动态 exposure policy 或新 Grant wire dimension 时转为 `triggered`。
-- #499：`DO-PROVIDER-PRIVATE-SCHEMA = conditional`；若事实矩阵证明 WebEnvoy 需要自己持久化 Camoufox-specific bundle／seed／config version，则自动转为 `triggered`。
+- #499：`DO-PROVIDER-PRIVATE-SCHEMA = triggered`；固定版本 Camoufox 的 `launch_options()` 会生成必须由 WebEnvoy 重放的 fingerprint/config/seed 材料，正式私有合同见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 复用既有 operation/Grant 结构，不新增持久维度。

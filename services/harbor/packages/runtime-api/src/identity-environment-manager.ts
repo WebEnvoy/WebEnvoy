@@ -180,14 +180,14 @@ export class LocalIdentityEnvironmentManager {
     return this.withStoreMutation(() => this.upsert(input, "imported"));
   }
 
-  mutate(request: IdentityEnvironmentMutationRequest, conflict: IdentityEnvironmentMutationConflict | null = null): IdentityEnvironmentMutationResult {
+  mutate(request: IdentityEnvironmentMutationRequest, conflict: IdentityEnvironmentMutationConflict | null = null, activeConfigurationOnly = false): IdentityEnvironmentMutationResult {
     const result = this.withStoreMutation(() => executeIdentityEnvironmentMutation(request, {
         records: this.records,
         receipts: this.receipts,
         repairs: this.repairs,
         persist: (records, receipts, repairs) => this.persist(records, receipts, repairs),
         public_record: publicRecord
-      }, this.options, conflict));
+      }, this.options, conflict, activeConfigurationOnly));
     if (result.status === "completed" && result.identity_environment_ref) {
       this.currentProcessIdentityEnvironmentRefs.add(result.identity_environment_ref);
     }
