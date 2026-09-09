@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,7 @@ const helperPath = join(fixtureDir, "fake-camoufox-driver.mjs");
 const browserPath = join(fixtureDir, "Camoufox.app", "Contents", "MacOS", "camoufox");
 writeFileSync(helperPath, `#!/usr/bin/env node
 import * as readline from "node:readline";
+import { writeFileSync } from "node:fs";
 
 let page = { current_url: "about:blank", title: "", status: "ready" };
 const output = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
@@ -46,6 +47,10 @@ for await (const line of rl) {
     if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
     page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
+  } else if (request.op === "managed_interaction") {
+    await new Promise(resolve => setTimeout(resolve, 5300));
+    writeFileSync(new URL("late-input.json", import.meta.url), JSON.stringify({ pid: process.pid, input_completed: true }));
+    output({ id: request.id, status: "ok", result: { status: "completed", dispatch_state: "dispatched" } });
   } else if (request.op === "managed_public_page") {
     if (request.url) page = { ...page, current_url: request.url };
     output({ id: request.id, status: "ok", page, ...(request.url ? {} : { text: "Public paragraph from original page.", truncated: false }) });
@@ -451,4 +456,17 @@ test("forwards management scope to initial and reused driver navigation without 
     assert.equal((await launched.openUrl("https://example.com/one", "profile_management")).title, "Managed navigation");
     assert.equal((await launched.openUrl("https://example.com/owner")).title, "Camoufox fixture");
   } finally { await launched.close(); }
+}));
+
+
+test("timed-out interaction does not release control before the Driver has exited", async () => withCamoufoxEnv(async () => {
+  const launched = await launchCamoufoxProvider(input());
+  assert.equal(launched.status, "ready");
+  if (launched.status !== "ready") return;
+  const result = await launched.interaction!({ action: "click", expected_origin: "https://example.com", control_generation: 0, timeout_ms: 1 });
+  assert.equal(result.status, "unknown_outcome");
+  const receipt = JSON.parse(readFileSync(join(fixtureDir, "late-input.json"), "utf8"));
+  assert.equal(receipt.input_completed, true, "the in-flight command may continue after timeout; wait for its exit before releasing the lease guard");
+  assert.throws(() => process.kill(receipt.pid, 0), { code: "ESRCH" });
+  await launched.close();
 }));

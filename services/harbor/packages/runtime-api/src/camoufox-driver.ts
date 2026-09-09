@@ -62,6 +62,8 @@ class CamoufoxDriverProcess {
   private nextId = 1;
   private stdoutBuffer = "";
   private terminated = false;
+  private exited = false;
+  private termination?: Promise<void>;
 
   constructor(pythonPath: string, helperPath: string) {
     this.child = spawn(pythonPath, [helperPath], {
@@ -74,6 +76,7 @@ class CamoufoxDriverProcess {
     this.child.stdout?.on("data", (chunk: string) => this.readStdout(chunk));
     this.child.on("error", (cause) => this.failPending(cause));
     this.child.on("close", (code, signal) => {
+      this.exited = true;
       this.terminated = true;
       this.killGroup();
       this.failPending(new CamoufoxDriverProtocolError(
@@ -124,25 +127,17 @@ class CamoufoxDriverProcess {
     });
   }
 
-  async terminate(): Promise<void> {
-    if (this.terminated) return;
+  terminate(): Promise<void> {
+    if (this.termination) return this.termination;
+    if (this.exited) return Promise.resolve();
     this.terminated = true;
-    this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver was closed."));
-    await new Promise<void>((resolve) => {
-      let exited = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const onClose = () => {
-        exited = true;
-        if (timer) clearTimeout(timer);
-        resolve();
-      };
-      this.child.once("close", onClose);
+    this.termination = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => this.killGroup(), 2_000);
+      this.child.once("close", () => { clearTimeout(timer); resolve(); });
       if (this.child.stdin && !this.child.stdin.destroyed) this.child.stdin.end();
-      timer = setTimeout(() => {
-        if (!exited) this.killGroup();
-        resolve();
-      }, 2_000);
     });
+    this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver was closed."));
+    return this.termination;
   }
 
   private killGroup(): void {
@@ -282,6 +277,9 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
           const response = await driver.request("managed_interaction", input, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
           return normalizeManagedInteractionResponse(response.result, input.expected_origin);
         } catch {
+          // Keep Runtime's in-flight guard until the failed command's process
+          // has exited; rejecting a timeout alone does not stop native input.
+          await driver.terminate();
           const inputAction = ["click", "input", "press", "scroll"].includes(input.action);
           return { status: inputAction ? "unknown_outcome" : "unavailable", dispatch_state: inputAction ? "dispatched" : "not_dispatched", failure_class: "managed_interaction_driver_unavailable" };
         }
