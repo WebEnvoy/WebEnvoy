@@ -202,7 +202,13 @@ def main() -> None:
     failure = next(item for item in late_result["network"] if item["kind"] == "failure")
     response = next(item for item in navigation_events if item["kind"] == "response")
     assert failure["request_ref"] == response["request_ref"]
-    after_navigation = late_result
+    finished_navigation = FakeRequest(f"{origin}/finished", resource_type="document", navigation=True)
+    page.queue("request", finished_navigation)
+    page.queue("response", FakeResponse(finished_navigation))
+    page.queue("requestfinished", finished_navigation)
+    page.queue_navigation(f"{origin}/finished")
+    after_navigation = DRIVER.diagnostics_read({"origin": origin})
+    assert {item["kind"] for item in after_navigation["network"]} == {"request", "response"}
 
     for index in range(3):
         item = FakeRequest(f"{origin}/event-{index}")

@@ -157,7 +157,7 @@ def attach_diagnostics(page: Any) -> None:
         DIAGNOSTIC_INSTANCE_REF = uuid.uuid4().hex
     DIAGNOSTIC_PAGE_REF = f"page_{uuid.uuid4().hex}"
     DIAGNOSTIC_DOCUMENT_GENERATION = 1
-    pending_navigation: int | None = None
+    pending_navigation: tuple[int, dict[str, Any]] | None = None
 
     def is_main_navigation(request: Any) -> bool:
         try:
@@ -175,10 +175,10 @@ def attach_diagnostics(page: Any) -> None:
         try:
             safe = diagnostics_url(request.url)
             if safe:
-                if is_main_navigation(request):
-                    pending_navigation = id(request)
                 diagnostic_event("request", method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type))
                 DIAGNOSTIC_REQUESTS[id(request)] = (DIAGNOSTIC_EVENTS[-1], time.monotonic())
+                if is_main_navigation(request):
+                    pending_navigation = (id(request), DIAGNOSTIC_EVENTS[-1])
                 while len(DIAGNOSTIC_REQUESTS) > DIAGNOSTIC_REQUEST_LIMIT:
                     DIAGNOSTIC_REQUESTS.pop(next(iter(DIAGNOSTIC_REQUESTS)))
         except Exception:
@@ -204,7 +204,7 @@ def attach_diagnostics(page: Any) -> None:
             if safe:
                 error_text = str(request.failure or "unknown").lower()
                 failure = "timeout" if "timeout" in error_text else "aborted" if "abort" in error_text else "connection"
-                if pending_navigation == id(request):
+                if pending_navigation is not None and pending_navigation[0] == id(request):
                     pending_navigation = None
                 state = DIAGNOSTIC_REQUESTS.pop(id(request), None)
                 if state is None:
@@ -244,10 +244,9 @@ def attach_diagnostics(page: Any) -> None:
                             return
                     except Exception:
                         pass  # A destroyed execution context is a replaced document.
-                navigation = DIAGNOSTIC_REQUESTS.get(pending_navigation)
                 rotate_diagnostic_page()
-                if navigation is not None:
-                    request_event_ref = navigation[0]["event_ref"]
+                if pending_navigation is not None:
+                    request_event_ref = pending_navigation[1]["event_ref"]
                     for event in DIAGNOSTIC_EVENTS:
                         if event["event_ref"] == request_event_ref or event.get("request_ref") == request_event_ref:
                             event["page_ref"] = DIAGNOSTIC_PAGE_REF
