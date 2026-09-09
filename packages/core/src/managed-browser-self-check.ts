@@ -26,6 +26,7 @@ let environmentEffective = { ...environmentConfigured };
 let environmentPending: Record<string, string> | null = null;
 const environmentReceipts = new Map<string, Record<string, unknown>>();
 let afterCreate: (() => Promise<void>) | undefined;
+let afterProfileList: (() => Promise<void>) | undefined;
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
@@ -45,7 +46,7 @@ const server = createServer((req, res) => { void (async () => {
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
-  else if (req.url === "/runtime/identity-environments") value = { identity_environments: profiles };
+  else if (req.url === "/runtime/identity-environments") { await afterProfileList?.(); value = { identity_environments: profiles }; }
   else if (req.url === "/runtime/identity-environments/identity%3A1/environment") {
     if (req.method === "GET") {
       environmentReads++;
@@ -277,6 +278,17 @@ try {
   assert.equal(environmentUpdates, 2, "query uses the Runtime receipt and never replays the update");
   assert.deepEqual(await service.submit(credentialHash, lostEnvironment), reconciledEnvironment);
   assert.equal(environmentUpdates, 2, "duplicate submission of an unknown key never replays the update");
+  for (const operation of environmentOps) {
+    const key = `environment-revoked-in-flight-${operation}`;
+    const grant = await accessStore.createGrant({ idempotency_key: key, principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+    const before: { environmentReads: number; environmentUpdates: number; configured: typeof environmentConfigured } = { environmentReads, environmentUpdates, configured: { ...environmentConfigured } };
+    afterProfileList = async () => { await accessStore.revokeGrant({ idempotency_key: `${key}-revoke`, grant_id: grant.grant_id }); };
+    const refused = await service.submit(credentialHash, { ...environmentRead, idempotency_key: key, grant_id: grant.grant_id, operation, ...(operation === "environment.update" ? { configuration: { timezone: "Asia/Tokyo" } } : {}) });
+    afterProfileList = undefined;
+    assert.equal(refused.status, "failed", "revocation during Profile lookup must block environment dispatch");
+    assert.equal(refused.failure?.code, "managed_access_grant_unavailable");
+    assert.deepEqual({ environmentReads, environmentUpdates, configured: environmentConfigured }, before);
+  }
   await accessStore.revokeGrant({ idempotency_key: "revoke-environment", grant_id: environmentGrant.grant_id });
   await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration-after-environment", ...policy, controlled_interaction_origins: [origin] });
   for (const override of [{ task_scope: { ...input.task_scope, operations: ["instance.snapshot"] } }, { profile_ref: "profile:2" }, { origin: "http://127.0.0.1:18795" }]) {

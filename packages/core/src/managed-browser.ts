@@ -180,6 +180,7 @@ export function createManagedBrowserService(options: {
     if (!profile) return fail("managed_browser_profile_not_found");
     if (input.operation === "profile.read") return { profile };
     const identity = encodeURIComponent(text(profile.identity_environment_ref));
+    if (isEnvironment(input.operation)) await check();
     if (input.operation === "environment.read") return await harbor(`/runtime/identity-environments/${identity}/environment`);
     if (input.operation === "environment.update") return await harbor(`/runtime/identity-environments/${identity}/environment`, {
       idempotency_key: runId, configuration: input.configuration!

@@ -559,6 +559,19 @@ def extract_camoufox_config(options: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def replay_environment_options(options: dict[str, Any], bundle: dict[str, Any], target_os: str, executable: str) -> None:
+    from camoufox.utils import get_env_vars
+
+    candidate = extract_camoufox_config(options)
+    # A stored absence is part of the identity too: BrowserForge can generate
+    # optional keys on a later draw. Never inject those into an existing Profile.
+    replay = {key: value for key, value in candidate.items() if key in bundle["config"] or key in DYNAMIC_ENVIRONMENT_CONFIG_KEYS}
+    if json_hash(identity_config(replay)) != bundle["identity_hash"]:
+        raise ValueError("Camoufox environment replay changed the stored identity.")
+    options["env"] = {key: value for key, value in options["env"].items() if not key.startswith("CAMOU_CONFIG_")}
+    options["env"].update(get_env_vars(replay, target_os, path=Path(executable)))
+
+
 def environment_viewport(value: Any) -> tuple[int, int] | None:
     if value is None:
         return None
@@ -1057,8 +1070,8 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         )
         if bundle is None:
             bundle = save_environment_bundle(PROFILE_DIR, build_environment_bundle(extract_camoufox_config(options)))
-        elif json_hash(identity_config(extract_camoufox_config(options))) != bundle["identity_hash"]:
-            raise ValueError("Camoufox environment replay changed the stored identity.")
+        else:
+            replay_environment_options(options, bundle, target_os, LAUNCH_EXECUTABLE_PATH)
         PLAYWRIGHT = sync_playwright().start()
         # NewBrowser is the package's public persistent-context entrypoint. It
         # also applies Camoufox's no_viewport rule when a spoofed window is

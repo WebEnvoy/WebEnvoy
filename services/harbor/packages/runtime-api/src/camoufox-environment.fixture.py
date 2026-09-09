@@ -141,6 +141,8 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
         config.setdefault("audio:seed", calls["options"])
         config.setdefault("fonts:spacing_seed", calls["options"])
         config.setdefault("screen.width", 1920)
+        if calls["options"] > 1:
+            config["screen.availLeft"] = 0  # Optional BrowserForge key absent on the original draw.
         if change_identity:
             config["canvas:seed"] = -1
         seen.append(config)
@@ -148,6 +150,7 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
 
     def browser(*args, **kwargs):
         calls["browser"] += 1
+        assert "screen.availLeft" not in DRIVER.extract_camoufox_config(kwargs["from_options"])
         # Persistence precedes browser creation, even if creation then fails.
         assert DRIVER.load_environment_bundle(profile)["config"]["canvas:seed"] == seen[0]["canvas:seed"]
         if fail_browser:
@@ -157,10 +160,12 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
 
     camoufox = types.ModuleType("camoufox")
     camoufox.launch_options, camoufox.NewBrowser = options, browser
+    utils = types.ModuleType("camoufox.utils")
+    utils.get_env_vars = lambda config, *args, **kwargs: {"CAMOU_CONFIG_1": json.dumps(config)}
     sync = types.ModuleType("playwright.sync_api")
     sync.TimeoutError = TimeoutError
     sync.sync_playwright = lambda: types.SimpleNamespace(start=lambda: types.SimpleNamespace(stop=lambda: None))
-    modules = {"camoufox": camoufox, "playwright": types.ModuleType("playwright"), "playwright.sync_api": sync}
+    modules = {"camoufox": camoufox, "camoufox.utils": utils, "playwright": types.ModuleType("playwright"), "playwright.sync_api": sync}
     with patch.dict(DRIVER.sys.modules, modules), patch.object(DRIVER.sys, "version_info", (3, 12)), \
          patch.object(DRIVER.importlib.metadata, "version", side_effect=lambda name: {"camoufox": DRIVER.CAMOUFOX_VERSION_PIN, "playwright": "1.60.0"}[name]), \
          patch.object(DRIVER, "PROPERTIES_SHA256_PIN", hashlib.sha256(b"[]").hexdigest()), \
