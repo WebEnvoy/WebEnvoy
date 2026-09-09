@@ -1,6 +1,7 @@
 import type { LocalIdentityEnvironmentFacts, LocalIdentityEnvironmentInput } from "./identity-environment.js";
 import type { BrowserProviderId } from "./provider-management.js";
 import type { ControlOwner, InputCapability, TakeoverUnavailableReason, ViewerAccessMode, ViewerAvailability, ViewerTransport } from "./viewer-control.js";
+import type { RuntimeDiagnosticsInput, RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 
 export const HARBOR_RUNTIME_FACTS_SCHEMA = "harbor-runtime-facts/v0";
 export const HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA = "harbor-validation-runtime-facts/v0";
@@ -743,6 +744,7 @@ export type LocalProviderLaunchResult =
       publicPage?: import("./managed-observation.js").ManagedPublicPageOperation;
       interaction?: import("./managed-interaction.js").ManagedInteractionOperation;
       observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
+      readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;

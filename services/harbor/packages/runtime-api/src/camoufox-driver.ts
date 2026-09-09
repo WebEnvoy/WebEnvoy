@@ -16,6 +16,7 @@ import {
 import { opaqueRef } from "./refs.js";
 import { prepareProfileStorage, profileStorageHasExternalLock } from "./profile-storage.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
+import { normalizeRuntimeDiagnostics, trustRuntimeDiagnosticsProbe } from "./runtime-diagnostics.js";
 import type {
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
@@ -28,6 +29,7 @@ import type {
   RuntimeFact,
   RuntimePageStatus
 } from "./runtime-session-types.js";
+import type { RuntimeDiagnosticsInput } from "./runtime-diagnostics.js";
 
 const CAMOUFOX_DRIVER_KIND = "firefox_juggler" as const;
 const DRIVER_COMMAND_TIMEOUT_MS = 5_000;
@@ -298,6 +300,10 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       observePage: trustManagedPageObserver(async () => {
         const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
         return normalizeManagedProviderObservation(result.observation);
+      }),
+      readDiagnostics: trustRuntimeDiagnosticsProbe(async (diagnostics: RuntimeDiagnosticsInput) => {
+        const result = await driver.request("diagnostics_read", { ...diagnostics }, DRIVER_COMMAND_TIMEOUT_MS);
+        return normalizeRuntimeDiagnostics(result.diagnostics, { runtime_session_ref: "unknown", profile_ref: input.profile_ref });
       }),
       openUrl: async (url, operation_scope) => {
         const response = await driver.request("open_url", { url, operation_scope, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);

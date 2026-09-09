@@ -48,6 +48,7 @@ import {
   isTrustedLocalProviderSiteResourceProbe,
   isTrustedLocalProviderWritePrecheckProbe
 } from "./read-operation-probe-trust.js";
+import { diagnosticsUnavailable, isTrustedRuntimeDiagnosticsProbe, type RuntimeDiagnosticsInput, type RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 import type {
   ControlOwner,
   ControlOwnerFacts,
@@ -132,6 +133,7 @@ export interface RuntimeSessionRecord {
   interaction?: ManagedInteractionOperation;
   interaction_snapshot?: { page_ref: string; observation_ref: string; control_generation: number; holder_ref: string };
   observePage?: () => Promise<ManagedProviderObservation>;
+  readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
   managed_observations?: ManagedObservation[];
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
@@ -295,6 +297,7 @@ export class RuntimeSessionStore {
       publicPage: ready ? launch.publicPage : undefined,
       interaction: ready ? launch.interaction : undefined,
       observePage: ready ? launch.observePage : undefined,
+      readDiagnostics: ready ? launch.readDiagnostics : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
@@ -767,6 +770,24 @@ export class RuntimeSessionStore {
     } catch { return managedUnavailable("managed_observation_unavailable"); }
   }
 
+  async readRuntimeDiagnostics(runtime_session_ref: string, input: RuntimeDiagnosticsInput): Promise<RuntimeDiagnosticsResponse> {
+    const record = this.records.get(runtime_session_ref);
+    if (!record) return diagnosticsUnavailable("session_missing", "Runtime Session is missing.", true);
+    if (!["active", "idle", "locked"].includes(record.facts.lifecycle_state)) return diagnosticsUnavailable("session_not_ready", "Runtime Session is not ready for observation.", true);
+    const probe = record.readDiagnostics;
+    if (record.execution_surface !== "local_provider" || !isTrustedRuntimeDiagnosticsProbe(probe)) return diagnosticsUnavailable("provider_unavailable");
+    try {
+      // Diagnostics are observation-only: this path intentionally does not acquire or change ControlLease.
+      const result = await this.withProviderInteraction(record, () => probe(input));
+      return result.status === "completed"
+        ? { ...result, runtime_session_ref, profile_ref: record.facts.profile_ref }
+        : result;
+    } catch {
+      this.markDriverLost(record);
+      return diagnosticsUnavailable("provider_unavailable", "Runtime Session driver was lost.", false);
+    }
+  }
+
   findManagedObservation(identity_environment_ref: string, observation_ref: string, holder_ref: string): ManagedObservation | null {
     for (const record of this.records.values()) {
       const observed = record.managed_observations?.find(item => item.observation_ref === observation_ref);
@@ -1038,6 +1059,7 @@ export class RuntimeSessionStore {
     delete record.interaction_snapshot;
     delete record.clearPublicPageGuard;
     delete record.observePage;
+    delete record.readDiagnostics;
     delete record.managed_observations;
     delete record.probeReadOperation;
     delete record.probeSiteResource;

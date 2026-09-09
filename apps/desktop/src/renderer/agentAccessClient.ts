@@ -16,7 +16,7 @@ export type AgentAccessState = {
 export const agentOperations = [
   ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
   ["instance.start", "启动实例"], ["instance.stop", "停止实例"],
-  ["instance.observe", "页面与身份事实"], ["instance.handoff", "接管与交还"],
+  ["instance.observe", "页面与身份事实"], ["instance.diagnostics", "网络与控制台诊断"], ["instance.handoff", "接管与交还"],
   ["instance.navigate", "导航"], ["instance.read", "公开正文读取"],
   ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
   ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
