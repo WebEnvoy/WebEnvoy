@@ -2063,6 +2063,10 @@ async function completeAcceptedXhsMediaAction(
       : postCheck.status === "passed" ? {} : { code: "media_action_post_check_failed" })
   };
   if (operationObject.status !== "available" || lifecycle.terminal_state !== "success" || postCheck.status !== "passed") {
+    await store.updateRunRecord(result.run_record.run_id, {
+      runtime_binding_refs: [runtimeSessionRef],
+      ...projection
+    });
     const terminalFailure = unavailableFailure !== undefined
       ? unavailableFailure
       : mediaActionFailure(postCheck.status === "passed" ? `media_action_${operationObject.status}` : "media_action_post_check_failed", "runtime_execution");

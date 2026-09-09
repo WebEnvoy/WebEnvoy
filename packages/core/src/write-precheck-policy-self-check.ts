@@ -1311,7 +1311,9 @@ export async function assertWritePrecheckPolicyWiring(): Promise<void> {
   }
 
   await assertXhsMediaActionP1Wiring();
-  await assertXhsFieldActionWiring();
+  for (const outcome of ["success", "field_mismatch", "matched_fields_failed_effect"] as const) {
+    await assertXhsFieldActionWiring(outcome);
+  }
   assertXhsCommitProjection();
 }
 
@@ -1427,7 +1429,7 @@ function assertXhsCommitProjection(): void {
   assert.equal(unsupported.code, "unsupported_required_harbor_fact:snapshot.unknown_future_control.available");
 }
 
-async function assertXhsFieldActionWiring(): Promise<void> {
+async function assertXhsFieldActionWiring(outcome: "success" | "field_mismatch" | "matched_fields_failed_effect"): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "webenvoy-xhs-field-action-"));
   try {
     const runId = "app-xhs-field-action";
@@ -1495,7 +1497,7 @@ async function assertXhsFieldActionWiring(): Promise<void> {
         executeMediaAction: async (input) => {
           executeCalls += 1;
           assert.deepEqual(input.refs, intent.input.refs);
-          return mediaOutput({
+          const output = mediaOutput({
             action_id: input.action_id,
             requested_path: input.requested_path,
             canonical_url: input.url,
@@ -1503,6 +1505,23 @@ async function assertXhsFieldActionWiring(): Promise<void> {
             runtime_session_ref: "session_xhs_field_action",
             suffix: "field"
           });
+          if (outcome !== "success") {
+            output.classification = "partial_result";
+            const normalized = output.normalized as Record<string, unknown>;
+            normalized.source_status = "partially_located";
+            (normalized.business_effect as Record<string, unknown>).status = "failed";
+            (normalized.operation as Record<string, unknown>).terminal_state = "failure";
+            (normalized.post_check as Record<string, unknown>).status = "failed";
+            (normalized.reconciliation as Record<string, unknown>).status = "mismatched";
+            normalized.recovery = { status: "required", entrypoint: "inspect_operation_ref" };
+            if (outcome === "field_mismatch") {
+              const fields = normalized.field_readback as Record<string, unknown>;
+              fields.status = "mismatch";
+              fields.body = { status: "mismatch", value_state: "mismatch" };
+              fields.validation_status = "failed";
+            }
+          }
+          return output;
         },
         executeReadOperation: async () => { throw new Error("unexpected read dispatch"); },
         releaseCoreTaskSession: async () => undefined
@@ -1510,9 +1529,26 @@ async function assertXhsFieldActionWiring(): Promise<void> {
       clock: () => new Date(evaluatedAt)
     });
     assert.equal(executeCalls, 1);
-    assert.equal(continued.ok, true);
-    assert.equal(continued.run_record?.status, "succeeded");
-    assert.equal(continued.run_record?.result_kind, "xhs_publish_note_image_text_fields");
+    assert.equal(continued.ok, outcome === "success", outcome);
+    assert.equal(continued.run_record?.status, outcome === "success" ? "succeeded" : "failed", outcome);
+    if (outcome === "success") assert.equal(continued.run_record?.result_kind, "xhs_publish_note_image_text_fields");
+    const reopenedStore = createFileRunRecordStore({ directory: join(directory, "runs") });
+    const persisted = await reopenedStore.getRunRecord(runId);
+    const normalized = persisted?.public_result_summary?.normalized as Record<string, unknown> | undefined;
+    assert(normalized, `${outcome}: readback must survive reopening the Run store`);
+    assert.deepEqual(normalized.field_readback, {
+      status: outcome === "field_mismatch" ? "mismatch" : "observed",
+      title: { status: "observed", value_state: "matched" },
+      body: outcome === "field_mismatch" ? { status: "mismatch", value_state: "mismatch" } : { status: "observed", value_state: "matched" },
+      validation_status: outcome === "field_mismatch" ? "failed" : "passed"
+    });
+    assert.deepEqual(normalized.page_readback, { status: "observed", page_state_ref: "page_readback_field", route_state: "observed" });
+    assert.equal((normalized.operation as Record<string, unknown>).operation_ref, "operation_media_field");
+    assert.equal((normalized.post_check as Record<string, unknown>).status, outcome === "success" ? "passed" : "failed");
+    assert.equal((normalized.reconciliation as Record<string, unknown>).status, outcome === "success" ? "matched" : "mismatched");
+    assert.equal(persisted?.status, outcome === "success" ? "succeeded" : "failed");
+    assert.equal(persisted?.public_result_summary?.submitted, false);
+    assert.equal(executeCalls, 1, "Querying a failed Run must not replay its operation");
     assert.equal((continued.run_record?.public_result_summary as Record<string, unknown> | undefined)?.submitted, false);
   } finally {
     await rm(directory, { recursive: true, force: true });
