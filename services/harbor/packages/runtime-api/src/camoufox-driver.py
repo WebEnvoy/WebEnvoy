@@ -539,6 +539,10 @@ def interaction_surface(expected: str) -> str | None:
     return None
 
 
+class InteractionSnapshotError(Exception):
+    pass
+
+
 def interaction_snapshot(generation: int) -> dict[str, Any]:
     global INTERACTION_STATE
     page_ref = "page_" + uuid.uuid4().hex
@@ -547,8 +551,17 @@ def interaction_snapshot(generation: int) -> dict[str, Any]:
             if INTERACTION_STATE["handle"].evaluate("state => state.sameDocument()"):
                 page_ref = INTERACTION_STATE["page_ref"]
     discard_interaction_snapshot()
-    handle = PAGE.evaluate_handle("mw:" + INTERACTION_SNAPSHOT_EXPRESSION)
-    observed = handle.evaluate("state => ({controls:state.controls,text:state.text,truncated:state.truncated})")
+    try:
+        handle = PAGE.evaluate_handle("mw:" + INTERACTION_SNAPSHOT_EXPRESSION)
+    except Exception as error:
+        raise InteractionSnapshotError("handle_" + type(error).__name__.lower()) from None
+    try:
+        observed = handle.evaluate("state => ({controls:state.controls,text:state.text,truncated:state.truncated})")
+        if not isinstance(observed, dict) or not isinstance(observed.get("controls"), list):
+            raise TypeError()
+    except Exception as error:
+        handle.dispose()
+        raise InteractionSnapshotError("readback_" + type(error).__name__.lower()) from None
     nodes = handle.get_property("nodes")
     targets = {}
     try:
@@ -670,6 +683,8 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
             snapshot = interaction_snapshot(generation)
             return {"status":"completed", "dispatch_state":"dispatched" if dispatched else "not_dispatched",
                     "page":{**page_facts(), "title":public_text(str(PAGE.title()), 256)}, "snapshot":snapshot}
+    except InteractionSnapshotError as error:
+        return refused("managed_interaction_snapshot_" + str(error))
     except Exception:
         return refused("managed_interaction_outcome_unknown" if dispatched else "managed_interaction_target_unavailable")
 
