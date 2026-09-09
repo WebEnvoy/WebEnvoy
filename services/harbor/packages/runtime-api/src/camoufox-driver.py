@@ -1079,6 +1079,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         window = environment_viewport(viewport)
 
     target_os = {"darwin": "macos", "win32": "windows", "linux": "linux"}.get(sys.platform, "linux")
+    launch_timezone = config.get("timezone") if isinstance(config.get("timezone"), str) and config.get("timezone") else None
     provider_env = {key: value for key, value in os.environ.items() if not key.startswith("CAMOU_CONFIG_")}
     with contextlib.redirect_stdout(sys.stderr):
         options = launch_options(
@@ -1090,7 +1091,10 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
             locale=locale if isinstance(locale, str) and locale else None,
             window=window,
             config=config,
-            timezone_id=config.get("timezone") if isinstance(config.get("timezone"), str) and config.get("timezone") else None,
+            timezone_id=launch_timezone,
+            # The pinned default persistent context reads this cached preference
+            # before CAMOU_CONFIG, even after a native timezone_id override.
+            firefox_user_prefs={"roverfox.s.timezone_0": launch_timezone} if launch_timezone else None,
             proxy=proxy,
             enable_cache=True,
             main_world_eval=True,

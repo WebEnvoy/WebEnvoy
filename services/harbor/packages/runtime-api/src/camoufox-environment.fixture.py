@@ -171,12 +171,13 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
         if change_identity:
             config["canvas:seed"] = -1
         seen.append(config)
-        return {"env": {"CAMOU_CONFIG_1": json.dumps(config)}, "timezone_id": kwargs["timezone_id"]}
+        return {"env": {"CAMOU_CONFIG_1": json.dumps(config)}, "timezone_id": kwargs["timezone_id"], "firefox_user_prefs": kwargs["firefox_user_prefs"]}
 
     def browser(*args, **kwargs):
         calls["browser"] += 1
         assert "screen.availLeft" not in DRIVER.extract_camoufox_config(kwargs["from_options"])
         assert kwargs["from_options"]["timezone_id"] == seen[-1]["timezone"]
+        assert kwargs["from_options"]["firefox_user_prefs"]["roverfox.s.timezone_0"] == seen[-1]["timezone"]
         # Persistence precedes browser creation, even if creation then fails.
         assert DRIVER.load_environment_bundle(profile)["config"]["canvas:seed"] == seen[0]["canvas:seed"]
         if fail_browser:
