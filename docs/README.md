@@ -11,3 +11,7 @@
 | `draft/` | 短期草稿、迁移指针和仍需决策的候选材料。每个保留草稿必须有状态、owner、linked issue 和退出条件。 | Stage 3 实现依据、长期规划 truth、空目录占位。 |
 
 现在不创建 `guides/`。等仓库出现真实可运行流程，再用实际流程文档创建对应目录。
+
+## 正式入口验证
+
+- [Agent 管理多个 Profile](verification/managed-agent-profiles.md)：当前 HTTP 消费、权限和对账边界，以及适用检查。

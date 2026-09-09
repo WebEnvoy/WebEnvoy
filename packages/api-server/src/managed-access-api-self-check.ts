@@ -69,6 +69,10 @@ export async function assertManagedAccessApi(): Promise<void> {
     assert.equal((await call("/managed-browser/operations", agent, {})).status, 401);
     assert.equal(dispatches, 1);
     assert.equal(JSON.stringify((await call("/agent-access", owner)).body).includes(agent), false);
+    const unconfigured = createApiServer({ managedAccessStore: access });
+    const unconfiguredPort = await listen(unconfigured);
+    try { assert.equal((await fetch(`http://127.0.0.1:${unconfiguredPort}/agent-access`)).status, 401); }
+    finally { await closeServer(unconfigured); }
     console.log("Validated owner/Agent API authentication, duplicate-header rejection, redacted receipts and revocation.");
   } finally {
     await closeServer(server);

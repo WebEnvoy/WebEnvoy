@@ -35,7 +35,7 @@ export function authorizeCoreRequest(request: IncomingMessage, response: ServerR
   if (count > 1) { reject(response, 401, "core_authentication_required"); return false; }
   if (request.method === "GET" && (path === "/health" || path === "/admission/health")) return true;
   if (agentRoute(path)) return true; // The dedicated handler authenticates against the persistent Principal owner.
-  if (options.supervisorToken === undefined) return true;
+  if (options.supervisorToken === undefined && options.managedAccessStore === undefined) return true;
   const token = bearer(request);
   if (!token || !options.supervisorToken || !equalToken(token, options.supervisorToken)) {
     reject(response, 401, "core_owner_authentication_required"); return false;

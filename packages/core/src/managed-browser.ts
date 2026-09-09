@@ -65,7 +65,7 @@ export function createManagedBrowserService(options: {
   async function harbor(path: string, body?: ObjectValue): Promise<ObjectValue> {
     const result = await fetch(new URL(path, options.harborBaseUrl), { method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(60_000) });
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(70_000) });
     const value = object(await result.json());
     if (!result.ok || value.status === "unavailable" || value.status === "failed" || value.lifecycle_state === "failed") {
       const failure = value.failure && typeof value.failure === "object" ? object(value.failure) : {};
@@ -126,7 +126,7 @@ export function createManagedBrowserService(options: {
       await check();
       session = await harbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
         operation_scope: "profile_management", url: input.url ?? input.origin, reuse_existing: true,
-        control_owner: "core_task", holder_ref: holder, headless: false });
+        control_owner: "core_task", holder_ref: holder, headless: false, timeout_ms: 60_000 });
     }
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     const ref = encodeURIComponent(text(session.runtime_session_ref));
