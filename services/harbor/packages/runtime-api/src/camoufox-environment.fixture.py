@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
 import tempfile
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 
 DRIVER_PATH = Path(__file__).with_name("camoufox-driver.py")
@@ -115,3 +118,89 @@ with tempfile.TemporaryDirectory(prefix="camoufox-environment-fixture-") as temp
     assert DRIVER.profile_has_environment_state(missing)
 
 print("camoufox environment fixture passed")
+
+# Exercise the real launch/close boundary with a Provider stand-in. Source audit
+# and installed-browser live separately verify the pinned package's merge rules.
+with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
+    root = Path(temporary)
+    resources = root / "Camoufox.app" / "Contents" / "Resources"
+    resources.mkdir(parents=True)
+    (resources / "application.ini").write_text("[App]\nVersion=" + DRIVER.BROWSER_VERSION_PIN, encoding="utf-8")
+    (resources / "properties.json").write_text("[]", encoding="utf-8")
+    executable = resources.parent / "MacOS" / "camoufox"
+    profile = root / "profile"
+    calls = {"options": 0, "browser": 0}
+    fail_browser = False
+    change_identity = False
+    seen = []
+
+    def options(**kwargs):
+        calls["options"] += 1
+        config = copy.deepcopy(kwargs["config"])
+        config.setdefault("canvas:seed", calls["options"])
+        config.setdefault("audio:seed", calls["options"])
+        config.setdefault("fonts:spacing_seed", calls["options"])
+        config.setdefault("screen.width", 1920)
+        if change_identity:
+            config["canvas:seed"] = -1
+        seen.append(config)
+        return {"env": {"CAMOU_CONFIG_1": json.dumps(config)}}
+
+    def browser(*args, **kwargs):
+        calls["browser"] += 1
+        # Persistence precedes browser creation, even if creation then fails.
+        assert DRIVER.load_environment_bundle(profile)["config"]["canvas:seed"] == seen[0]["canvas:seed"]
+        if fail_browser:
+            raise ValueError("fixture launch failure")
+        page = types.SimpleNamespace(url="about:blank", title=lambda: "", on=lambda *_: None)
+        return types.SimpleNamespace(pages=[page], browser=types.SimpleNamespace(version=DRIVER.BROWSER_VERSION_PIN), close=lambda: None)
+
+    camoufox = types.ModuleType("camoufox")
+    camoufox.launch_options, camoufox.NewBrowser = options, browser
+    sync = types.ModuleType("playwright.sync_api")
+    sync.TimeoutError = TimeoutError
+    sync.sync_playwright = lambda: types.SimpleNamespace(start=lambda: types.SimpleNamespace(stop=lambda: None))
+    modules = {"camoufox": camoufox, "playwright": types.ModuleType("playwright"), "playwright.sync_api": sync}
+    with patch.dict(DRIVER.sys.modules, modules), patch.object(DRIVER.sys, "version_info", (3, 12)), \
+         patch.object(DRIVER.importlib.metadata, "version", side_effect=lambda name: {"camoufox": DRIVER.CAMOUFOX_VERSION_PIN, "playwright": "1.60.0"}[name]), \
+         patch.object(DRIVER, "PROPERTIES_SHA256_PIN", hashlib.sha256(b"[]").hexdigest()), \
+         patch.object(DRIVER, "prepare_properties", side_effect=lambda path: (path, "fixture")):
+        request = {"profile_dir": str(profile), "executable_path": str(executable), "timezone": "UTC"}
+        fail_browser = True
+        raises(lambda: DRIVER.launch(request), "launch failure")
+        baseline_bytes = DRIVER.environment_bundle_path(profile).read_bytes()
+        fail_browser = False
+        DRIVER.launch(request)
+        DRIVER.close()
+        DRIVER.launch({**request, "timezone": "Asia/Tokyo"})
+        DRIVER.close()
+        assert seen[0]["canvas:seed"] == seen[1]["canvas:seed"] == seen[2]["canvas:seed"]
+        assert seen[-1]["timezone"] == "Asia/Tokyo"
+        assert DRIVER.environment_bundle_path(profile).read_bytes() == baseline_bytes
+        before = calls.copy()
+        change_identity = True
+        raises(lambda: DRIVER.launch(request), "replay changed")
+        assert calls["browser"] == before["browser"]
+        assert DRIVER.environment_bundle_path(profile).read_bytes() == baseline_bytes
+        change_identity = False
+        for key, value in (("schema_version", 99), ("browser_version", "future")):
+            broken = json.loads(baseline_bytes)
+            broken[key] = value
+            DRIVER.environment_bundle_path(profile).write_text(json.dumps(broken), encoding="utf-8")
+            before = calls.copy()
+            raises(lambda: DRIVER.launch(request), "unsupported")
+            assert calls == before
+        DRIVER.environment_bundle_path(profile).write_bytes(baseline_bytes)
+        with patch.object(DRIVER.importlib.metadata, "version", return_value="unqualified"):
+            before = calls.copy()
+            raises(lambda: DRIVER.launch(request), "pins")
+            assert calls == before
+        DRIVER.environment_bundle_path(profile).unlink()
+        (profile / "places.sqlite").write_text("fixture", encoding="utf-8")
+        before = calls.copy()
+        raises(lambda: DRIVER.launch(request), "non-empty")
+        assert calls == before
+        assert not DRIVER.environment_bundle_path(profile).exists()
+        DRIVER.close()
+
+print("camoufox real launch boundary fixture passed")

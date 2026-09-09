@@ -11,7 +11,7 @@
 ## 1. Design Obligation disposition
 
 - `DO-PROVIDER-PRIVATE-SCHEMA = triggered`：pinned Camoufox `launch_options()` 每次会生成 BrowserForge fingerprint、fonts、voices、WebGL 参数以及 `fonts:spacing_seed`、`audio:seed`、`canvas:seed`。这些值不会由 persistent Profile 自动证明为稳定，Driver 必须先保存完整 provider config 再启动。
-- `DO-GRANT-WIRE = not-triggered`：本切片增加的是已有 Driver 私有 JSON-lines allowlist 的 `environment_read` 命令；不新增 Grant 字段、scope dimension 或持久授权对象。正式授权/Plugin 生命周期由主 agent 复用现有 Harbor/Core 链路。
+- `DO-GRANT-WIRE = not-triggered`：公共授权只在既有 `allowed_operations` 增加 `environment.read/update` 固定值；继续使用 Profile ceiling、Principal Grant 和 task scope，不新增 Grant 字段、scope dimension 或持久授权对象。
 - `DO-PLUGIN-EXPOSURE = triggered`：environment.read/update 已成为 Installed Plugin 的稳定 operation projection；公共配置、授权和 envelope 见 [Profile Environment V1](profile-environment-v1.md)，本文件只负责 Driver-private readback。
 - Network/Console contract：`not-triggered`。本文件不形成 Network/Console 公共 payload。
 - App IA：`not-triggered`。本切片不新增 App 工作台或导航。

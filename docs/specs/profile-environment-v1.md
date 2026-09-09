@@ -525,7 +525,7 @@ Network／Console／controlled evaluation／viewer 等首批能力必须证明�
 
 Installed Plugin 的 `environment.read` 和 `environment.update` 复用现有 `webenvoy_operation`；输入必须包括 `idempotency_key`、`grant_id`、`task_scope`、`profile_ref`、精确 `origin`，Connector 绑定 Connection。两项分别需要既有 `allowed_operations` 中的同名操作，继续取 Profile ceiling ∩ Grant ∩ task scope 的交集。没有新 Grant field、scope dimension 或隐含权限；创建新 Profile 不能提高模板上限。
 
-`environment.update` 额外且仅接受 `configuration: {timezone?: string, language?: string, viewport?: string}`，至少一个字段。时区为有效 IANA 名称，language 为有效 locale，viewport 为既有 `宽x高` 表示（每边 200–16384）；拒绝空值、未知字段和不支持值。此切片不允许 Agent 改 Provider、proxy、hardware、GPU、seed 或 fingerprint。
+`environment.update` 额外且仅接受 `configuration: {timezone?: string, language?: string, viewport?: string}`，至少一个字段，每项为 1–128 字符且无控制字符的字符串。时区为有效 IANA 名称，language 为有效 locale，viewport 为既有 `宽x高` 表示（每边 200–16384）；拒绝空值、未知字段和不支持值。此切片不允许 Agent 改 Provider、proxy、hardware、GPU、seed 或 fingerprint。
 
 Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environment` 读取；`POST` 同路径以 `{idempotency_key, configuration}` 保存。POST 复用既有 `edit` mutation 和持久 receipt，不在浏览器上执行热变更。响应丢失时，Core 查询原 Run／mutation receipt，不再发送更新；新 read 只反映当前事实。停止和重启使用已授权的 `instance.stop/start`，不自动执行。
 
@@ -551,7 +551,7 @@ Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environ
 
 ### 18.3 状态、漂移和失败
 
-活动 Instance 上保存 A→B 后：configured=B、effective=A、pending=B；不调用 Provider 配置 mutation，不改变租约或浏览器现场。安全停止后 effective=null；同 Profile 成功重启后 effective=B、pending=null，再以浏览器回读检验 B。启动失败保留 configured 和原材料，不创建替代 Profile 或回退 Provider。
+本 Runtime 持有的活动 Instance 上保存 A→B 后：configured=B、effective=A、pending=B；只更新 owner 配置记录，不调用 Provider 配置 mutation、不改变租约或浏览器现场。未由本 Runtime 持有的外部 Profile 锁仍按既有规则拒绝。安全停止后 effective=null；同 Profile 成功重启后 effective=B、pending=null，再以浏览器回读检验 B。启动失败保留 configured 和原材料，不创建替代 Profile 或回退 Provider。
 
 Drift 比较实际应用配置与回读的 timezone/language，以及 Provider-private 连续性校验明确可比较的字段。已解释的 pending 差异不算 drift；未知网络出口／geo／WebRTC 或 unsupported 设备事实只限制相关结论，不阻塞无关 Profile／能力。观测只读，不发外部网络探测，不启动/停止 Instance。读操作与既有在途 Provider 计数共用生命周期保护，但不取得输入 ControlLease。
 

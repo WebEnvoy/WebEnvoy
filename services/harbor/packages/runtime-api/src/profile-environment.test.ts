@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { boundedEnvironmentUpdate, normalizeEnvironmentObservation, trustEnvironmentProbe } from "./profile-environment.js";
@@ -11,6 +13,12 @@ const root = mkdtempSync(join(tmpdir(), "harbor-environment-test-"));
 process.env.HARBOR_PROFILE_STORAGE_ROOT = join(root, "profiles");
 after(() => rmSync(root, { recursive: true, force: true }));
 const hash = "a".repeat(64);
+test("private environment bundle and launch failure/replay follow the versioned contract", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const fixture = [join(here, "camoufox-environment.fixture.py"), join(here, "../../../../packages/runtime-api/src/camoufox-environment.fixture.py")].find(existsSync);
+  assert.ok(fixture);
+  assert.match(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? process.env.PYTHON ?? "python3", ["-B", fixture], { encoding: "utf8" }), /camoufox real launch boundary fixture passed/);
+});
 function observation(timezone = "Asia/Shanghai") {
   return normalizeEnvironmentObservation({ status: "completed", observed_at: "2026-09-09T18:00:00.000Z",
     provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: hash }, bundle_hash: hash,
