@@ -7,8 +7,8 @@ export type BrowserSessionState = "idle" | "running" | "takeover" | "stopped" | 
 export type BrowserController = "手动浏览" | "用户接管" | "智能体直接浏览" | "Core 任务运行" | "空闲";
 
 export type BrowserTargetProjection = {
-  id: "xiaohongshu" | "boss";
-  label: "小红书" | "BOSS";
+  id: string;
+  label: string;
   defaultUrl: string;
   defaultTitle: string;
   readiness: string;
@@ -48,8 +48,8 @@ export type IdentityTaskEntryProjection = {
 export type IdentityEnvironmentProjection = {
   id: string;
   name: string;
-  siteName: "小红书" | "BOSS";
-  siteId: "xiaohongshu" | "boss";
+  siteName: string;
+  siteId: string;
   origin: string;
   accountLabel: string;
   source: OwnerSource;
@@ -74,7 +74,7 @@ export type IdentityEnvironmentProjection = {
     reason: string;
   };
   login: {
-    state: "已登录" | "未登录" | "已过期" | "需要人工认证" | "未知";
+    state: "已登录" | "未登录" | "已过期" | "需要人工认证" | "未知" | "无需站点登录";
     recoveryRequired: boolean;
     manualAuthenticationState: "无需认证" | "需要认证" | "认证中" | "已完成" | "认证失败";
     recoveryActions: string[];
