@@ -20,11 +20,11 @@ try {
       import React from "react";
       import {createRoot} from "react-dom/client";
       import {AgentAccessPanel} from "./AgentAccessPanel";
-      import {projectAgentAccess,createAgentGrantInput} from "./agentAccessClient";
+      import {projectAgentAccess,createAgentGrantInput,createProfilePolicyInput,defaultAgentOperations} from "./agentAccessClient";
       window.check = {calls:[], rejection:true, unknown:false, receipt:false, reads:0};
-      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]}],profile_policies:[],secret:"never-render-this"};
+      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"]}],secret:"never-render-this"};
       window.webenvoyShell = {requestOwnerJson:async request=>{
-        if(request.path === "/agent-access/management-policy") return {ok:true,body:{ok:true,configuration:null}};
+        if(request.path === "/agent-access/management-policy") { if(request.method === "PUT") window.check.policyMutation=request.body; return {ok:true,body:{ok:true,configuration:null}}; }
         window.check.calls.push(request);
         if(request.path.includes("/operations/")) return window.check.receipt ? {ok:true,body:{ok:true,operation:{status:"completed",result:{}}}} : {ok:false,status:404,error:"not_found"};
         if(request.method==="GET"){window.check.reads++;const snapshot=structuredClone(state);if(window.check.holdRead){window.check.holdRead=false;await new Promise(resolve=>window.check.releaseRead=resolve);}return {ok:true,body:snapshot};}
@@ -36,7 +36,8 @@ try {
       const root=createRoot(document.getElementById("root"));
       window.mount=()=>root.render(<AgentAccessPanel endpoint="http://core.invalid"/>);
       window.projected=projectAgentAccess(state);
-      window.grantInput=createAgentGrantInput("principal:one",24,"key");
+      window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false});
+      window.check.inputs={createAgentGrantInput,createProfilePolicyInput,defaultAgentOperations};
       window.mount();
     `,
   }});
@@ -46,13 +47,20 @@ try {
   window = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
   window.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith("file:") }));
   await window.loadFile(join(directory, "index.html"));
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = async source => {
+    try { return await window.webContents.executeJavaScript(source); }
+    catch (error) { throw new Error(`UI evaluation failed: ${source}`, { cause: error }); }
+  };
   const waitFor = async source => {
     for (let attempt = 0; attempt < 100; attempt++) { if (await evaluate(source)) return; await new Promise(resolve => setTimeout(resolve, 20)); }
     throw new Error(`UI condition not met: ${source}`);
   };
   const button = label => `[...document.querySelectorAll('button')].find(el=>el.textContent===${JSON.stringify(label)})`;
   await waitFor("document.body.textContent.includes('connection:one')");
+  await evaluate(`${button("允许已授权的环境管理与受控页面操作")}.click()`);
+  await waitFor("Boolean(window.check.policyMutation)");
+  assert.deepEqual(await evaluate("window.check.policyMutation.modes"),{read:'auto',prepare:'auto',commit:'auto'});
+  await waitFor(`!${button("撤销授权")}.disabled`);
   assert.equal(await evaluate("document.body.textContent.includes('never-render-this')"), false);
   assert.equal(await evaluate("Object.hasOwn(window.projected,'secret')"), false);
   assert.equal(await evaluate("window.grantInput.creation_template.provider_id"), "camoufox");
@@ -60,22 +68,37 @@ try {
   assert.deepEqual(await evaluate("window.grantInput.profile_refs"), []);
   assert.equal(await evaluate("window.grantInput.allowed_operations.includes('instance.read') && window.grantInput.allowed_operations.includes('instance.navigate')"), true);
   assert.equal(await evaluate("window.grantInput.allowed_operations.includes('account.bind')"), false);
+  assert.deepEqual(await evaluate("window.grantInput.allowed_origins"), ["http://127.0.0.1:43129"]);
+  assert.deepEqual(await evaluate("window.grantInput.creation_template.permission_ceiling.controlled_interaction_origins"), []);
+  assert.equal(await evaluate("window.check.inputs.defaultAgentOperations.includes('instance.input')"), false);
+  assert.equal(await evaluate("document.querySelector('[name=controlled_origin]').checked"), false);
+  assert.equal(await evaluate("(()=>{try{window.check.inputs.createAgentGrantInput('p',24,'k',{origin:'https://a.invalid/path',operations:['instance.read'],controlled:false});return false}catch{return true}})()"), true);
+  const controlled = await evaluate("window.check.inputs.createProfilePolicyInput('profile:isolated',{origin:'http://127.0.0.1:43129',operations:['instance.snapshot','instance.input'],controlled:true},'policy-key')");
+  assert.deepEqual(controlled, {idempotency_key:'policy-key',profile_ref:'profile:isolated',allowed_operations:['instance.snapshot','instance.input'],allowed_origins:['http://127.0.0.1:43129'],controlled_interaction_origins:['http://127.0.0.1:43129']});
+  const existing = await evaluate("window.check.inputs.createAgentGrantInput('principal:one',1,'existing-key',{origin:'http://127.0.0.1:43129',operations:['instance.input'],controlled:true},'profile:isolated')");
+  assert.deepEqual(existing.profile_refs, ['profile:isolated']);
+  assert.equal(existing.creation_template, null);
+  assert.equal(existing.max_created_profiles, 0);
+  assert.deepEqual(existing.allowed_operations, ['instance.input']);
+  assert.equal(Object.hasOwn(existing,'controlled_interaction_origins'), false);
   await evaluate(`${button("撤销授权")}.click()`);
   await waitFor("document.querySelector('[role=alert]')?.textContent.includes('拒绝')");
-  assert.equal(await evaluate("window.check.reads"), 2);
+  assert.equal(await evaluate("window.check.reads"), 3);
   await evaluate(`window.check.holdRead=true;${button("刷新授权状态")}.click()`);
   await waitFor("typeof window.check.releaseRead==='function'");
   await evaluate(`window.check.rejection=false;${button("撤销授权")}.click()`);
   await waitFor(`${button("撤销授权")}.disabled && document.body.textContent.includes('已撤销')`);
-  assert.equal(await evaluate("window.check.reads"), 4);
+  assert.equal(await evaluate("window.check.reads"), 5);
   await evaluate("window.check.releaseRead()");
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(await evaluate(`${button("撤销授权")}.disabled`), true);
-  await evaluate(`window.check.unknown=true;const select=document.querySelector('select');select.value='principal:one';select.dispatchEvent(new Event('change',{bubbles:true}));`);
-  await waitFor(`!${button("授予以上管理范围")}.disabled`);
-  await evaluate(`${button("授予以上管理范围")}.click()`);
+  await evaluate(`window.check.unknown=true;const select=document.querySelector('[name=grant_principal]');select.value='principal:one';select.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await waitFor(`!${button("授予所选范围")}.disabled`);
+  await evaluate(`const origin=document.querySelectorAll('[name=scope_origin]')[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(origin,'http://127.0.0.1:43129');origin.dispatchEvent(new Event('input',{bubbles:true}));`);
+  await waitFor("document.querySelectorAll('[name=scope_origin]')[1].value==='http://127.0.0.1:43129'");
+  await evaluate(`${button("授予所选范围")}.click()`);
   await waitFor("document.body.textContent.includes('结果未知')");
-  assert.equal(await evaluate(`${button("授予以上管理范围")}.disabled`), true);
+  assert.equal(await evaluate(`${button("授予所选范围")}.disabled`), true);
   const posts = await evaluate("window.check.calls.filter(x=>x.method==='POST').map(x=>x.body.idempotency_key)");
   assert.equal(new Set(posts).size, 3);
   await evaluate(`${button("查询原操作结果")}.click()`);
@@ -86,6 +109,35 @@ try {
   await waitFor("document.body.textContent.includes('已确认原操作')");
   assert.equal(await evaluate("localStorage.length"), 0);
   assert.equal(await evaluate("window.check.calls.filter(x=>x.method==='POST').length"), 3);
+  await evaluate(`window.check.unknown=false;const policySelect=document.querySelector('select');policySelect.value='profile:isolated';policySelect.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await waitFor(`!${button("保存 Profile 权限上限")}.disabled`);
+  await evaluate(`const policyOrigin=document.querySelector('[name=scope_origin]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(policyOrigin,'http://127.0.0.1:43129');policyOrigin.dispatchEvent(new Event('input',{bubbles:true}));`);
+  await evaluate(`document.querySelector('[name=controlled_origin]').click();document.querySelector('[name="instance.input"]').click()`);
+  await evaluate(`${button("保存 Profile 权限上限")}.click()`);
+  await waitFor("window.check.calls.some(x=>x.path==='/agent-access/profile-policies')");
+  const policyPost=await evaluate("window.check.calls.find(x=>x.path==='/agent-access/profile-policies').body");
+  assert.equal(policyPost.profile_ref,'profile:isolated');
+  assert.deepEqual(policyPost.allowed_origins,['http://127.0.0.1:43129']);
+  assert.deepEqual(policyPost.controlled_interaction_origins,['http://127.0.0.1:43129']);
+  assert.deepEqual(policyPost.allowed_operations,['instance.read','instance.input']);
+  await waitFor(`!${button("授予所选范围")}.disabled`);
+  await evaluate(`const profileSelect=document.querySelector('[name=grant_profile]');profileSelect.value='profile:isolated';profileSelect.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await evaluate(`${button("授予所选范围")}.click()`);
+  await waitFor("window.check.calls.filter(x=>x.path==='/agent-access/grants'&&x.method==='POST').length===2");
+  const submittedGrant=await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/grants'&&x.method==='POST').at(-1).body");
+  assert.deepEqual(submittedGrant.profile_refs,['profile:isolated']);
+  assert.deepEqual(submittedGrant.allowed_origins,['http://127.0.0.1:43129']);
+  assert.deepEqual(submittedGrant.allowed_operations,['profile.list','profile.read','instance.observe','instance.read']);
+  assert.equal(submittedGrant.principal_id,'principal:one');
+  assert.equal(submittedGrant.creation_template,null);
+  await waitFor(`!${button("保存 Profile 权限上限")}.disabled`);
+  await evaluate(`window.check.unknown=true;window.check.receipt=false;${button("保存 Profile 权限上限")}.click()`);
+  await waitFor("document.body.textContent.includes('结果未知')");
+  const policyPosts=await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/profile-policies'&&x.method==='POST').length");
+  await evaluate(`${button("查询原操作结果")}.click()`);
+  await waitFor("document.body.textContent.includes('尚不能确认')");
+  assert.equal(await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/profile-policies'&&x.method==='POST').length"),policyPosts);
+  assert.equal(await evaluate(`${button("保存 Profile 权限上限")}.disabled`),true);
   console.log("Agent access UI: lists, refusal, revoke refresh, isolated mutation keys and query-only unknown recovery passed.");
 } catch (error) {
   console.error(error);
