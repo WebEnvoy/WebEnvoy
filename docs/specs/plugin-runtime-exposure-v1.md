@@ -9,10 +9,13 @@
 | Runtime capability | MCP 投影 | 授权值 | 结果合同 |
 | --- | --- | --- | --- |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation` 的 `operation=instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics` | [Network V1](network-runtime-contract-v1.md)、[Console V1](console-runtime-contract-v1.md) |
+| Profile environment facts / bounded configuration update | `webenvoy_operation` 的 `operation=environment.read` / `environment.update` | 既有 `allowed_operations` 中同名值 | [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) |
 
 诊断输入为 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、`runtime_session_ref`、精确 `origin`，可选 `page_ref`、`cursor`、`limit`（整数 1–64）。Plugin 添加当前 Connection ID；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数。Page 引用来自同一实例的观察，cursor 是不透明值。
 
 ## Availability 与授权
+
+#499 环境操作复用上述固定工具：输入 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、精确 `origin`；update 额外要求非空 `configuration`，只接受 timezone/language/viewport（各 1–128 字符）。不接受 Instance/Page/cursor、脚本、Provider/proxy/seed 参数。返回 `harbor-profile-environment/v1` 的 configured/effective/pending/observed/drift/provider/support/last_verified_at；字段与失败合同由 Profile Environment V1 §18 唯一维护。保存不热改活动 Instance，不隐式重启。更新响应丢失后 query 原 key，仅查询 mutation receipt 和当前环境事实，不再次提交更新。首次 readback/跨 restart 与未验证项必须区分；unknown 不等于 verified。此扩展触发 Plugin exposure，但不新增 Grant wire 维度；旧 Grant 不自动获得新操作。
 
 MCP 工具列表固定；工具可见不意味着 Provider 支持或主体获授权。本版本不做动态过滤、不按站点或 SKILL 发明诊断能力。Core 验证 Profile ceiling ∩ Principal Grant ∩ task scope；Harbor 验证 Instance、Page、origin、lifecycle 和 Provider 支持。没有网站 SKILL 不影响通用诊断。未实现能力返回 unavailable，不能以空事件冒充成功。单 Profile 拒绝不改变其他 Profile 授权。
 
