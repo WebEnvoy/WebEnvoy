@@ -9,6 +9,12 @@
 > 完成 App #298 的 inventory、用户确认 Story、
 > [canonical IA candidate](docs/design/human-workbench-information-architecture.md)
 > 和高保真原型场景验收。
+>
+> 2026-09-09 implementation correction：`Desktop App first` 作为当前实施优先级，
+> 已由 monorepo [ADR 0012](../../docs/adr/0012-runtime-capability-plane-and-plugin-first.md)
+> 的 Plugin-first 基线替代。V1 先通过已安装 Plugin 在真实第三方 Agent 中完整消费
+> Runtime 和 Agent 可委托管理能力；完整 App 产品化后移。此调整不取消 owner truth、
+> 必要授权与敏感决定、同一原 Instance 接管／交还，也不取消 App 的最终 V1 产品要求。
 
 WebEnvoy App 应像一个克制、紧凑、可信的人类网站工作台，而不是聊天应用或技术状态控制台。它同时承载 Work、Browser 和 Library；Browser 是账号身份、provider、浏览器环境和实例的操作台。
 
@@ -24,7 +30,7 @@ WebEnvoy App 应像一个克制、紧凑、可信的人类网站工作台，而�
 
 ## 2. 平台目标
 
-- 产品形态：Desktop App first。
+- 产品形态：长期为 cross-platform Desktop App 人类控制台；当前实施优先级为 Plugin-first，App 先保留最小 owner control plane。
 - 平台深度：cross-platform desktop。
 - 默认技术载体：Electron shell + React renderer + Radix primitives。
 - macOS 和 Windows 应共享信息架构，但窗口控制、菜单、快捷键、focus、selection、theme 和高对比模式跟随平台。
@@ -139,11 +145,13 @@ WebEnvoy App 应像一个克制、紧凑、可信的人类网站工作台，而�
 
 - `VISION.md`
 - `DESIGN.md`
+- `../../AGENTS.md`
+- `../../docs/adr/0012-runtime-capability-plane-and-plugin-first.md`
 - `docs/adr/0009-human-workbench-information-architecture.md`
 
 ADR 0008 只作为历史 checkpoint 和候选组件输入，不再拥有当前 IA 权威。
 
-新增 UI 时先说明它覆盖的用户旅程、业务域、主要对象、业务结果和 owner API boundary；旧 Task Thread 结构不得作为默认继承项。
+新增 UI 时先说明它覆盖的用户旅程、业务域、主要对象、业务结果和 owner API boundary；旧 Task Thread 结构不得作为默认继承项。还必须说明该工作属于当前最小 owner control plane，还是 Plugin 完整体验之后的完整 App 产品化；不得把普通 Agent 可委托能力做成 App-only 路径。
 
 修改 shell、panel、task entry、site skill 或 settings 时，优先复用现有 WebEnvoy-native foundation：
 

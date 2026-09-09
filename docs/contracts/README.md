@@ -1,8 +1,25 @@
-# Core contracts
+# WebEnvoy contracts
 
-本目录是合同索引，不重写已接受 ADR 的正文，也不把 draft 候选字段升级成 spec。
+本目录是稳定合同索引，不重写已接受 ADR 或规范性 spec 的正文，也不把 `docs/draft/` 中的候选字段升级成实现合同。
 
-## Stage 2 合同索引
+## V1 Browser Runtime 与 Profile 环境
+
+| 合同 | 权威位置 | 接受范围 |
+| --- | --- | --- |
+| Runtime Capability Plane 决策 | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 能力类别完整、Provider 无关公共语义、能力存在／工具暴露／授权／当前可执行性分离、Plugin-first 和 App 最小 owner control plane。 |
+| Runtime Capability Plane 架构 | [Runtime Capability Plane](../architecture/runtime-capability-plane.md) | Provider Driver、Harbor、Core、Plugin、SKILL 与 owner 入口的所有权、调用方向、执行和恢复路径。 |
+| Browser Runtime Capabilities V1 | [browser-runtime-capabilities-v1.md](../specs/browser-runtime-capabilities-v1.md) | V1 主要 browser capability 的规范性语义、支持状态、权限分级、数据边界、结果和完成条件；不冻结最终 wire 字段。 |
+| Profile Environment V1 | [profile-environment-v1.md](../specs/profile-environment-v1.md) | configured／effective／pending／observed／drift、Provider／设备／网络环境 owner、Camoufox 连续性、变更、迁移和验证语义。 |
+
+具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
+
+1. 引用上表对应的规范性语义；
+2. 说明 owner、版本和兼容范围；
+3. 提供有效／无效 fixture；
+4. 不把 Provider 私有协议或站点语义升级为公共合同；
+5. 从本索引添加稳定链接。
+
+## Stage 2 Core 合同索引
 
 | 合同 | 权威位置 | 接受范围 |
 | --- | --- | --- |
@@ -12,7 +29,7 @@
 | 统一任务授权策略 | [ADR 0009](../adr/0009-unified-authorization-policy.md) | 动作类别、全局默认、任务覆盖、单次授权、入口一致性和跨仓职责；supersede approval-request-first 产品模型。 |
 | 授权决定摘要与引用 | [`authorization-decision.schema.json`](../../packages/schemas/schemas/authorization-decision.schema.json), [`authorization-decision-ref.schema.json`](../../packages/schemas/schemas/authorization-decision-ref.schema.json) | Core 持久化不可变业务决定和 append-only 失效历史；Run Record/turn 与 Harbor operation record 只引用统一 opaque ref。 |
 | 任务意图与运行生命周期 v0 | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md) | Task Intent Envelope、Run lifecycle、Run Record 创建规则。 |
-| 共用任务入口 v0 | [ADR 0006](../adr/0006-common-task-entry-v0.md) | API、CLI、MCP、SDK 和 App 的共同入口投影。 |
+| 共用任务入口 v0 | [ADR 0006](../adr/0006-common-task-entry-v0.md) | API、CLI、MCP、SDK、Plugin 和 App 的共同正式入口投影；任何消费者不得绕过 owner。 |
 | 持久任务线程与有序回合 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) | 一个 Lode capability 与一个 Harbor identity environment 形成稳定线程；回合按序、幂等、单活动并可恢复，敏感正文与文件只保存 owner refs。 |
 | 身份兼容性只读预检查 | [`identity-compatibility-preview-request.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview-request.schema.json), [`identity-compatibility-preview.schema.json`](../../packages/schemas/schemas/identity-compatibility-preview.schema.json) | Core 对版本锁定的 Lode operation 与 Harbor 公共身份事实做有界投影；`current_execution_window` 只返回运行时未知，不创建 task、run、session 或浏览器动作。 |
 | 引用和版本归属合同 v0 | [ADR 0007](../adr/0007-reference-version-ownership-v0.md) | Lode/Harbor/App/Core 引用、版本、失效和 failure mapping。 |
@@ -21,23 +38,26 @@
 
 ## 使用规则
 
-- 实现、测试和跨仓消费优先引用本索引中的权威 ADR。
+- 实现、测试和跨仓消费优先引用本索引中的权威 ADR／spec。
 - 若合同需要最终 JSON Schema、OpenAPI、fixture 或生成类型，新建专门规格文件，并从本索引链接。
 - ADR 0002-0004 仍是拟议 ADR；只有其中已经标注 `accepted` 的 Stage 1/Stage 2 facts 进入本索引。
 - Core–Harbor owner、failure、sensitive boundary、compatibility/cutover/rollback 以 [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) 为准；它冻结责任，不冻结最终 wire field/API。
-- 后续 API Server、Core Runtime、Run Record、Schema、CLI、MCP、SDK 和 App-facing API 骨架必须先读 [ADR 0008](../adr/0008-core-technical-architecture-baseline.md)，再创建代码、schema、fixture、依赖或生成类型。
+- Browser capability 和 Profile environment 的公共语义分别以两份 V1 spec 为准；Provider 私有能力不能仅因底层可调用而成为公共合同。
+- 后续 API Server、Core Runtime、Run Record、Schema、CLI、MCP、Plugin、SDK 和 App-facing API 骨架必须先读 [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)，再创建代码、schema、fixture、依赖或生成类型。
 - 不把 `docs/draft/` 当作实现依据。
 
 ## 后续骨架入口
 
 | 后续实现主题 | 必读合同 | 当前 deferred 内容 |
 | --- | --- | --- |
+| Browser Runtime capability | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md), [Runtime 架构](../architecture/runtime-capability-plane.md), [能力规格](../specs/browser-runtime-capabilities-v1.md) | 各能力的最终 wire schema、Provider adapter、capability catalog schema 和 Plugin tool mapping。 |
+| Profile environment | [环境规格](../specs/profile-environment-v1.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 环境事实 JSON Schema、Camoufox persistence adapter、migration schema 和公开诊断投影。 |
 | API Server / API routes | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | HTTP framework、OpenAPI、auth middleware、route implementation。 |
-| Core Runtime | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md), [ADR 0009](../adr/0009-unified-authorization-policy.md) | Runtime executor、queue、resource lock、true-write execution。 |
+| Core Runtime | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md), [ADR 0009](../adr/0009-unified-authorization-policy.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | Runtime executor、queue、resource lock、true-write execution。 |
 | Run Record / persistence | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Database/storage choice、migration tooling、query implementation。 |
 | Schema / generated types | [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | JSON Schema files、Zod helpers、Ajv validators、type generation. |
-| Cross-entry conformance | [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | read-only submit、invalid input、admission failure、result/query fixture files and runner. |
-| Cross-repo consumption | [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Harbor/Lode/App final field names, schemas, generated consumers. |
+| Cross-entry conformance | [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md), [能力规格](../specs/browser-runtime-capabilities-v1.md) | capability discovery、授权拒绝、Provider limited／unsupported、result/query 和 Plugin conformance fixtures。 |
+| Cross-repo consumption | [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md), [跨仓架构](../architecture/cross-repo-architecture.md) | Harbor/Lode/Plugin/App 最终字段名、schema 和生成消费者。 |
 
 ## 已吸收的实现判断
 
@@ -45,12 +65,12 @@
 
 | 主题 | 可消费判断 | 权威位置 |
 | --- | --- | --- |
-| 单一任务入口 | API、CLI、MCP、SDK 和 App 都应经 API Server/Core Runtime 进入同一任务路径，不各自直接调用 Harbor 或 Lode。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0006](../adr/0006-common-task-entry-v0.md) |
-| 能力准入 | stable execution 只接受 Lode 声明了 lifecycle、input/output contract、resource requirements、fixtures/post-check、version/invalidation 和 evidence expectation 的能力；缺失时 fail closed。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
+| 单一正式入口 | API、CLI、MCP、Plugin、SDK 和 App 都应经 API Server/Core Runtime 进入同一正式路径，不各自直接调用 Harbor 或 Lode。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) |
+| 能力完整与准入 | V1 Browser Runtime 先定义主要能力类别；站点 capability stable execution 仍只接受声明 lifecycle、input/output、resource requirements、fixtures/post-check、version/invalidation 和 evidence expectation 的资产。两类“capability”不得混淆。 | [Browser Runtime 能力规格](../specs/browser-runtime-capabilities-v1.md), [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
 | 资源匹配 | Lode 声明资源需求，Harbor 提供 runtime/profile/session facts，Core 做匹配和拒绝原因；Harbor 不输出业务适配结论。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
 | Result Envelope | Core 校验 Lode output 并生成 public envelope；raw payload、DOM、HAR、screenshot、network/runtime material 只能以 refs 进入公共结果；旧 Harbor `public_summary` 仅在兼容窗口作为 legacy adapter。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md) |
 | Run Record | `accepted` 后的 run 是 durable truth；状态单调；记录 request/capability/resource/runtime/result/failure/evidence/raw/source/resource/write/reconciliation refs。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md) |
 | Task Thread | 稳定 `thread_id` 绑定 capability 与 identity environment；每个结构化输入形成唯一有序回合，活动或未知回合阻止隐式排队，重复 idempotency key 不重复执行。 | [`task-thread.schema.json`](../../packages/schemas/schemas/task-thread.schema.json), [`task-turn-input.schema.json`](../../packages/schemas/schemas/task-turn-input.schema.json) |
 | 写侧安全 | 真实写入必须区分 action declaration、effective authorization、idempotency、write operation ref、post-check、unknown outcome、manual recovery 和 reconciliation；unknown outcome 不能转成 success。 | [ADR 0009](../adr/0009-unified-authorization-policy.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md) |
 | no-leakage | Core 不保存 Cookie、Token、完整 DOM、完整请求/响应、未脱敏页面现场、本地路径、provider private object 或业务私有 payload；也不复制 Lode package body/normalizer code。 | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0010](../adr/0010-core-harbor-ownership-migration-v0.md), [跨仓架构](../architecture/cross-repo-architecture.md) |
-| 非目标 | Core 不成为通用 browser agent loop、Harbor process manager、Lode asset store、provider router/marketplace、account risk scoring system、business strategy engine、ETL/data warehouse。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0004](../adr/0004-admission-and-action-risk.md) |
+| 非目标 | Core 不成为通用 browser agent loop、Harbor process manager、Lode asset store、provider router/marketplace、account risk scoring system、business strategy engine、ETL/data warehouse；Runtime 完整能力也不等于 DevTools 克隆。 | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) |

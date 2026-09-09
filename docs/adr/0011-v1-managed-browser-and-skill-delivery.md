@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-09-06
 - 规范：[WebEnvoy v1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+- 后续关系：[ADR 0012](0012-runtime-capability-plane-and-plugin-first.md) 部分替代本 ADR 第 1 条中“未被当前消费者使用的 Runtime 基础能力类别可以不定义”的过度实施解释；本 ADR 的纵向交付、模块 owner、SKILL 边界和不预建大型平台等决策继续有效。
 
 ## 背景
 
@@ -28,6 +29,7 @@
 - Desktop ADR 0009 中 Work/Browser/Library 的长期信息架构仍是候选方向；Task Thread、固定布局和完整工作台不再是首批实现前置。
 - Harbor ADR 0003/0009 中已确认的 Provider 所有权和生命周期保留；Chrome/CDP-first、横向 Provider 集成或未验证 Provider claim 不再决定优先级。
 - Lode ADR 0006 的既有站点资料保留；BOSS 退出近期交付，小红书全形态合同不再是首版前置。
+- 本 ADR 第 1 条不能再解释为“只要当前站点没有使用，就不需要在 V1 定义该 Runtime 基础能力类别”；该解释由 [ADR 0012](0012-runtime-capability-plane-and-plugin-first.md) 替代。对象、字段、Schema 和实现仍按当前与下一批真实结果滚动细化。
 
 ## 验收与回退
 
