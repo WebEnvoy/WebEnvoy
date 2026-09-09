@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +16,16 @@ const harborPort = await reservePort();
 const userDataDir = await mkdtemp(path.join(tmpdir(), "webenvoy-app-packaged-runtime-"));
 
 try {
+  const { WEBENVOY_CORE_SUPERVISOR_TOKEN: _omittedOwnerCredential, ...environment } = process.env;
+  const missingCredential = spawnSync(process.execPath, [path.resolve("dist-electron/runtime/core/start-runtime.mjs")], {
+    timeout: 5_000,
+    encoding: "utf8",
+    env: { ...environment, PORT: String(corePort), WEBENVOY_RUNTIME_DATA_DIR: path.join(userDataDir, "missing-owner"),
+      WEBENVOY_RUN_RECORD_DIR: path.join(userDataDir, "missing-owner", "runs"), WEBENVOY_HARBOR_RUNTIME_URL: "", WEBENVOY_LODE_REGISTRY_PATH: "" },
+  });
+  if (missingCredential.status !== 1 || !missingCredential.stderr.includes("Core requires a supervisor credential")) {
+    throw new Error("Packaged Core must reject startup without its supervisor credential.");
+  }
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   const result = await runElectronSmoke({
     coreEndpoint: `http://127.0.0.1:${corePort}`,
@@ -40,6 +51,10 @@ try {
     throw new Error("Packaged runtime smoke failed: renderer did not consume Core /threads.");
   }
   if (
+    result.packagedTaskBoundary?.unauthenticatedThreadStatus !== 401 ||
+    result.packagedTaskBoundary?.coreAgentAccessStatus !== 200 ||
+    !result.packagedTaskBoundary?.coreAgentAccessReady ||
+    !result.packagedTaskBoundary?.managedCatalogReady ||
     !result.packagedBossDeferred?.uiDisabled ||
     !result.packagedBossDeferred?.deferredCopyVisible ||
     result.packagedBossDeferred.bossSkillCount < 1 ||
@@ -69,7 +84,9 @@ try {
       `Harbor endpoint: http://127.0.0.1:${harborPort}`,
       `Core pid: ${core.pid}`,
       `Harbor pid: ${harbor.pid}`,
-      "Core /threads: ready",
+      "Core startup without supervisor credential: rejected",
+      "Core /threads: owner ready; unauthenticated 401",
+      "Core /agent-access: authenticated owner ready; Harbor managed catalog: ready",
       "Packaged Lode action + Core policy + first-turn boundary: verified fail-closed before Harbor session creation",
       "BOSS production skill entries: visibly deferred and disabled",
       "Production viewport: 720px without horizontal overflow",
