@@ -29,7 +29,7 @@ App 只持有 owner 连接。完整退出 App 不停止独立 Runtime 或 Profil
 
 ## 操作边界与恢复
 
-`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例原 PAGE 内导航和读取至多 4096 字符的可见正文；不执行网站 SKILL、任意脚本、CDP、表单编辑或上传。导航通过原 PAGE 的请求拦截禁用重定向跟随（所有 3xx 拒绝），允许响应仍在同页渲染；持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
+`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例原 PAGE 内导航和读取至多 4096 字符的可见正文；不执行网站 SKILL、任意脚本、CDP、表单编辑或上传。导航通过原 PAGE 的请求拦截禁用重定向跟随（所有 3xx 拒绝），允许响应仍在同页渲染；持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。本切片 URL 不含查询串、片段或内嵌凭据；每个 Instance 操作须显式传入 origin。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
 
 每次操作仍取 Principal Grant、Profile ceiling、task scope、origin 和 ControlLease 的交集。人工在 App 的真实 Instance 面板接管、交还后，Agent 先观察同一实例再继续。撤销只停止后续动作，不回滚已发生结果。响应丢失时重新连接，使用原 `idempotency_key` 查询；不得改 key 重发未知动作。
 
