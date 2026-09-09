@@ -90,11 +90,36 @@ with tempfile.TemporaryDirectory(prefix="camoufox-environment-fixture-") as temp
     page = Page()
     DRIVER.PROFILE_DIR = str(profile)
     DRIVER.PAGE = page
+    DRIVER.DIAGNOSTIC_INSTANCE_REF = "1" * 32
     first = DRIVER.environment_read()
     assert first["status"] == "completed" and first["continuity"]["state"] == "unknown"
     assert first["observed_at"].endswith(".000Z")
     second = DRIVER.environment_read()
+    assert second["continuity"]["state"] == "unknown"
+    assert "canvas_hash" in second["continuity"]["unknown_fields"]
+    DRIVER.DIAGNOSTIC_INSTANCE_REF = "2" * 32
+    second = DRIVER.environment_read()
     assert second["continuity"]["state"] == "match"
+    page.value["canvas_hash"] = "c" * 64
+    assert "canvas_hash" in DRIVER.environment_read()["continuity"]["changed_fields"]
+    page.value = observed()
+
+    # Legacy PNG evidence stays intact; an algorithm upgrade is not a match.
+    legacy = DRIVER.load_environment_bundle(profile)
+    del legacy["baseline"]["canvas"]
+    legacy["baseline"]["observed"]["canvas_hash"] = "d" * 64
+    legacy["baseline_sha256"] = DRIVER.json_hash(legacy["baseline"])
+    DRIVER.update_environment_bundle(profile, legacy)
+    migrated = DRIVER.environment_read()
+    assert migrated["continuity"]["state"] == "unknown"
+    persisted = DRIVER.load_environment_bundle(profile)
+    assert persisted["baseline"]["observed"] == legacy["baseline"]["observed"]
+    assert persisted["config"] == legacy["config"] and persisted["identity_hash"] == legacy["identity_hash"]
+    assert DRIVER.environment_read()["continuity"]["state"] == "unknown"
+    DRIVER.DIAGNOSTIC_INSTANCE_REF = "3" * 32
+    assert DRIVER.environment_read()["continuity"]["state"] == "match"
+    page.value["canvas_hash"] = "c" * 64
+    assert "canvas_hash" in DRIVER.environment_read()["continuity"]["changed_fields"]
     page.value = observed(1600)
     drift = DRIVER.environment_read()
     assert drift["continuity"]["state"] == "drift"
@@ -146,11 +171,12 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
         if change_identity:
             config["canvas:seed"] = -1
         seen.append(config)
-        return {"env": {"CAMOU_CONFIG_1": json.dumps(config)}}
+        return {"env": {"CAMOU_CONFIG_1": json.dumps(config)}, "timezone_id": kwargs["timezone_id"]}
 
     def browser(*args, **kwargs):
         calls["browser"] += 1
         assert "screen.availLeft" not in DRIVER.extract_camoufox_config(kwargs["from_options"])
+        assert kwargs["from_options"]["timezone_id"] == seen[-1]["timezone"]
         # Persistence precedes browser creation, even if creation then fails.
         assert DRIVER.load_environment_bundle(profile)["config"]["canvas:seed"] == seen[0]["canvas:seed"]
         if fail_browser:

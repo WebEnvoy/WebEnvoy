@@ -66,6 +66,7 @@ BROWSER_VERSION_PIN = "152.0.4-beta.30"
 PROPERTIES_SHA256_PIN = "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
 ENVIRONMENT_BUNDLE_FILENAME = ".webenvoy-camoufox-environment.v1.json"
 MAX_ENVIRONMENT_BUNDLE_BYTES = 2 * 1024 * 1024
+CANVAS_HASH_ALGORITHM = "rgba8-240x60-v1"
 DYNAMIC_ENVIRONMENT_CONFIG_KEYS = frozenset({
     "timezone",
     "locale:language",
@@ -430,8 +431,18 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
         if baseline_hash is not None:
             raise ValueError("Camoufox environment bundle baseline hash is corrupt.")
     else:
-        if not isinstance(baseline, dict) or set(baseline) != {"observed_at", "observed"}:
+        if not isinstance(baseline, dict) or set(baseline) not in ({"observed_at", "observed"}, {"observed_at", "observed", "canvas"}):
             raise ValueError("Camoufox environment bundle baseline is corrupt.")
+        canvas = baseline.get("canvas")
+        if "canvas" in baseline and (
+            not isinstance(canvas, dict)
+            or set(canvas) != {"algorithm", "instance_ref", "hash"}
+            or canvas["algorithm"] != CANVAS_HASH_ALGORITHM
+            or not isinstance(canvas["instance_ref"], str)
+            or not re.fullmatch(r"[0-9a-f]{32}", canvas["instance_ref"])
+            or (canvas["hash"] is not None and (not isinstance(canvas["hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", canvas["hash"])))
+        ):
+            raise ValueError("Camoufox Canvas baseline algorithm is unsupported or corrupt.")
         if (
             not isinstance(baseline["observed_at"], str)
             or not baseline["observed_at"]
@@ -623,7 +634,12 @@ def _continuity_baseline(observed: dict[str, Any], observed_at: str) -> dict[str
     return {
         "observed_at": observed_at,
         "observed": {field: observed.get(field) for field in CONTINUITY_STABLE_FIELDS},
+        "canvas": _canvas_baseline(observed),
     }
+
+
+def _canvas_baseline(observed: dict[str, Any]) -> dict[str, Any]:
+    return {"algorithm": CANVAS_HASH_ALGORITHM, "instance_ref": DIAGNOSTIC_INSTANCE_REF, "hash": observed.get("canvas_hash")}
 
 
 def compare_environment_continuity(bundle: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]:
@@ -642,6 +658,12 @@ def compare_environment_continuity(bundle: dict[str, Any], observed: dict[str, A
     for field in CONTINUITY_STABLE_FIELDS:
         before = previous.get(field)
         current = observed.get(field)
+        if field == "canvas_hash":
+            canvas = baseline.get("canvas")
+            if not isinstance(canvas, dict) or canvas["instance_ref"] == DIAGNOSTIC_INSTANCE_REF:
+                unknown.append(field)
+                continue
+            before = canvas["hash"]
         if before is None or current is None:
             unknown.append(field)
         elif before != current:
@@ -734,6 +756,12 @@ def environment_read(request: dict[str, Any] | None = None) -> dict[str, Any]:
             "unknown_fields": list(CONTINUITY_STABLE_FIELDS),
         }
     else:
+        if "canvas" not in bundle["baseline"]:
+            # Upgrade observation only: retain the original PNG hash and every
+            # identity/config value. This launch cannot verify its own baseline.
+            bundle["baseline"]["canvas"] = _canvas_baseline(observed)
+            bundle["baseline_sha256"] = json_hash(bundle["baseline"])
+            bundle = update_environment_bundle(PROFILE_DIR, bundle)
         continuity = compare_environment_continuity(bundle, observed)
     return {
         "status": "completed",
@@ -905,7 +933,7 @@ ENVIRONMENT_READ_EXPRESSION = r"""(async () => {
   const digest = async value => {
     try {
       if (!globalThis.crypto?.subtle || typeof TextEncoder !== 'function') return null;
-      const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+      const bytes = await globalThis.crypto.subtle.digest('SHA-256', typeof value === 'string' ? new TextEncoder().encode(value) : value);
       return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
     } catch { return null; }
   };
@@ -968,7 +996,7 @@ ENVIRONMENT_READ_EXPRESSION = r"""(async () => {
       context.fillStyle = '#18324b'; context.fillRect(0, 0, 240, 60);
       context.fillStyle = '#d7edf7'; context.font = '16px sans-serif';
       context.textBaseline = 'middle'; context.fillText('WebEnvoy continuity', 8, 30);
-      canvasHash = await digest(canvas.toDataURL());
+      canvasHash = await digest(context.getImageData(0, 0, 240, 60).data);
     }
   } catch {}
 
@@ -1062,6 +1090,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
             locale=locale if isinstance(locale, str) and locale else None,
             window=window,
             config=config,
+            timezone_id=config.get("timezone") if isinstance(config.get("timezone"), str) and config.get("timezone") else None,
             proxy=proxy,
             enable_cache=True,
             main_world_eval=True,

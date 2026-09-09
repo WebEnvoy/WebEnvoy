@@ -549,6 +549,8 @@ Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environ
 
 `observed` 固定包含 nullable `language`、`timezone`、`hardware_concurrency`、`device_memory`、`webgl_vendor`、`webgl_renderer`、`fonts_hash`、`voices_hash`、`canvas_hash`、`audio_hash`，`languages` 为至多 16 项的字符串列表，`viewport`/`screen` 为 `{width,height}` 或 null。普通字符串至多 256 字符；hash 为 64 位小写十六进制。不包含字体／声音完整列表、raw canvas/audio、seed、完整指纹、Cookie 或存储内容。缺失或不支持的观察必须为 null／unknown，不从 configured 猜测。
 
+Camoufox 的 `canvas_hash` 使用 [私有观测合同](camoufox-environment-continuity-v1.md) 的 `rgba8-240x60-v1` 固定绘图 RGBA8 摘要，不比较 PNG 编码元数据。旧 PNG 基线保留，升级观测算法的当前 Instance 为 unknown，必须另一次同 Profile 启动后才能验证 Canvas continuity；不得将不同算法摘要直接比较。
+
 ### 18.3 状态、漂移和失败
 
 本 Runtime 持有的活动 Instance 上保存 A→B 后：configured=B、effective=A、pending=B；只更新 owner 配置记录，不调用 Provider 配置 mutation、不改变租约或浏览器现场。未由本 Runtime 持有的外部 Profile 锁仍按既有规则拒绝。安全停止后 effective=null；同 Profile 成功重启后 effective=B、pending=null，再以浏览器回读检验 B。启动失败保留 configured 和原材料，不创建替代 Profile 或回退 Provider。
