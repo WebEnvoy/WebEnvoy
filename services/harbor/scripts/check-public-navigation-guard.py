@@ -89,6 +89,12 @@ assert other.url == "https://other.example/" and other.guard is None
 assert m.clear_public_navigation_guard()["cleared"]
 p.goto("https://denied.example/human")
 assert p.url == "https://denied.example/human"
+try:
+    m.open_url({"url": "https://example.com/redirect", "operation_scope": "profile_management"})
+except RuntimeError:
+    pass
+assert "https://denied.example/" not in p.requests
+assert p.guard is not None
 assert m.managed_public_page({"expected_origin": "https://example.com", "url": "https://example.com/recovered"})["page"]["current_url"] == "https://example.com/recovered"
 assert p.guard is not None
 print("public navigation guard passed")

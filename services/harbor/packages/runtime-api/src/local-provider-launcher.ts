@@ -103,6 +103,7 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
       provider_id: "camoufox"
     });
   }
+  if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
   if (!browserPath) {
     const diagnostic = providerBinding?.diagnostics[0] ?? diagnoseBrowserProviderFailure({ provider_id: "cloakbrowser", failure_class: "not_installed" });

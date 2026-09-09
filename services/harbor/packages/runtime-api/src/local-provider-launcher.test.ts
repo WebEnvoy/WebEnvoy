@@ -790,6 +790,8 @@ test("managed launch rejects mixed provider, installation and Profile before lau
     profile_storage_ref: identity.browser_storage.profile_storage_ref,
     identity_environment: identity
   };
+  const guarded = await launchLocalDedicatedProvider({ ...input, operation_scope: "profile_management" });
+  assert.ok(guarded.status === "unavailable" && guarded.error.code === "provider_unavailable");
   for (const mismatch of [
     { provider_id: "camoufox" as const },
     { browser_path: "/fixture/camoufox" },

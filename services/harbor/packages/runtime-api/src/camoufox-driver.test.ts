@@ -40,11 +40,11 @@ for await (const line of rl) {
   if (!line.trim()) continue;
   const request = JSON.parse(line);
   if (request.op === "launch") {
-    page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
+    page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ready", page, python_version: "3.12.1", camoufox_version: "0.5.6", playwright_version: "1.60.0", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
   } else if (request.op === "open_url") {
     if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
-    page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
+    page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
   } else if (request.op === "managed_public_page") {
     if (request.url) page = { ...page, current_url: request.url };
@@ -439,3 +439,16 @@ test("the private public-page command blocks redirect and script requests before
     encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
   }), /public navigation guard passed/);
 });
+
+
+test("forwards management scope to initial and reused driver navigation without changing owner calls", async () => withCamoufoxEnv(async () => {
+  const launched = await launchCamoufoxProvider({ ...input("managed-initial-driver-scope"), url: "https://creator.xiaohongshu.com/publish/publish", operation_scope: "profile_management" });
+  assert.ok(launched.status === "ready");
+  if (launched.status !== "ready") return;
+  try {
+    assert.equal(launched.page.title, "Managed navigation");
+    assert.equal(launched.page.current_url, "https://creator.xiaohongshu.com/publish/publish");
+    assert.equal((await launched.openUrl("https://example.com/one", "profile_management")).title, "Managed navigation");
+    assert.equal((await launched.openUrl("https://example.com/owner")).title, "Camoufox fixture");
+  } finally { await launched.close(); }
+}));

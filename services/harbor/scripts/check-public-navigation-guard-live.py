@@ -15,7 +15,8 @@ class Target(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        hits.append(self.path)
+        if self.path in ["/redirect-target", "/script-target", "/human"]:
+            hits.append(self.path)
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
@@ -61,9 +62,20 @@ try:
     with TemporaryDirectory(prefix="webenvoy-public-guard-live-") as directory:
         try:
             from camoufox import NewBrowser, launch_options
+            initial = load("initial_guard_driver")
+            modules.append(initial)
+            try:
+                initial.launch({"profile_dir": str(Path(directory) / "initial"), "executable_path": sys.argv[2], "headless": True, "url": origin + "/redirect", "timeout_ms": 15000, "operation_scope": "profile_management"})
+            except Exception:
+                assert initial.PUBLIC_NAVIGATION_DENIED == "managed_public_redirect_blocked"
+            assert not hits, "management initial redirect target received an unauthorized request"
+            initial.close()
+            modules.remove(initial)
             m = load("guard_driver")
             modules.append(m)
-            m.launch({"profile_dir": str(Path(directory) / "first"), "executable_path": sys.argv[2], "headless": True, "url": origin + "/start", "timeout_ms": 15000})
+            m.launch({"profile_dir": str(Path(directory) / "first"), "executable_path": sys.argv[2], "headless": True, "url": origin + "/script", "timeout_ms": 15000, "operation_scope": "profile_management"})
+            m.PAGE.wait_for_timeout(250)
+            assert not hits, "management initial script target received an unauthorized request"
             other_context = NewBrowser(m.PLAYWRIGHT, from_options=launch_options(executable_path=m.LAUNCH_EXECUTABLE_PATH, user_data_dir=str(Path(directory) / "second"), headless=True, ff_version=m.firefox_major(sys.argv[2]), os="macos", main_world_eval=True, i_know_what_im_doing=True), persistent_context=True)
             other_page = other_context.pages[0] if other_context.pages else other_context.new_page()
             other_page.goto(origin + "/start", wait_until="domcontentloaded")
@@ -83,13 +95,18 @@ try:
             assert m.PUBLIC_NAVIGATION_DENIED == "managed_public_navigation_blocked"
             assert other_page.url == origin + "/start"
             m.clear_public_navigation_guard()
-            m.PAGE.goto(target_origin + "/human", wait_until="domcontentloaded")
+            m.open_url({"url": target_origin + "/human", "timeout_ms": 15000})
             assert "/human" in hits
             hits.clear()
+            try:
+                m.open_url({"url": origin + "/redirect", "operation_scope": "profile_management", "timeout_ms": 15000})
+            except Exception:
+                assert m.PUBLIC_NAVIGATION_DENIED == "managed_public_redirect_blocked"
+            assert not hits, f"management reuse redirect target received an unauthorized request: {hits}"
             m.managed_public_page({"expected_origin": origin, "url": origin + "/recovered"})
             m.managed_public_page({"expected_origin": origin, "url": origin + "/redirect"})
             assert not hits
-            print(json.dumps({"provider": "camoufox 0.5.6 / Playwright 1.60.0", "isolated_profiles": 2, "redirect_target_requests": 0, "script_target_requests": 0, "same_page_navigations_and_rendered_reads": 2, "other_profile_unchanged": True, "human_guard_release_and_reinstall": True}))
+            print(json.dumps({"provider": "camoufox 0.5.6 / Playwright 1.60.0", "isolated_profiles": 3, "management_initial_redirect_target_requests": 0, "management_reuse_redirect_target_requests": 0, "redirect_target_requests": 0, "script_target_requests": 0, "same_page_navigations_and_rendered_reads": 2, "other_profile_unchanged": True, "human_guard_release_and_reinstall": True}))
         finally:
             if "other_context" in locals():
                 other_context.close()

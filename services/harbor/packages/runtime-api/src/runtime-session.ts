@@ -123,7 +123,7 @@ export interface RuntimeSessionRecord {
   read_operation_user_handoff: boolean;
   execution_surface: "local_provider" | "fixture" | "unknown";
   profile_ownership?: ProfileStorageOwnershipLock;
-  openUrl?: (url: string) => Promise<LocalProviderPageFacts>;
+  openUrl?: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
   clearPublicPageGuard?: () => Promise<void>;
   publicPage?: ManagedPublicPageOperation;
   observePage?: () => Promise<ManagedProviderObservation>;
@@ -184,6 +184,7 @@ export class RuntimeSessionStore {
           }
         }
         const result = await this.launcher({
+          operation_scope: input.operation_scope,
           browser_path: input.browser_path ?? "",
           provider_id: input.provider_id,
           headless,
@@ -407,7 +408,7 @@ export class RuntimeSessionStore {
       const conflict = this.acquireControl(existing, owner, holder);
       if (conflict) return conflict;
       try {
-        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!)));
+        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!, input.operation_scope)));
       } catch {
         this.markDriverLost(existing);
       }

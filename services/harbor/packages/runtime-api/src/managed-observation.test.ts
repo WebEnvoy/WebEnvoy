@@ -185,6 +185,7 @@ test("bounded public operations keep the exact instance, refuse identity origins
   const calls: { ref: string; url?: string }[] = [];
   let guardClears = 0;
   const launcher: LocalProviderLauncher = async input => {
+    assert.equal(input.operation_scope, "profile_management");
     const ready = await createFixtureLauncher("ready")(input);
     if (ready.status !== "ready") throw new Error("fixture unavailable");
     let current = input.url;

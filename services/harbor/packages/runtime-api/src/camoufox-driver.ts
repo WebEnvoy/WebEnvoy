@@ -229,8 +229,9 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
   const launchDeadline = Date.now() + Math.max(1, input.timeout_ms);
   let closed = false;
   try {
-    const initialUrl = camoufoxConfigurationPageUrl(input);
+    const initialUrl = input.operation_scope === "profile_management" ? input.url : camoufoxConfigurationPageUrl(input);
     const readyResponse = await driver.request("launch", {
+      operation_scope: input.operation_scope,
       executable_path: browserPath,
       profile_dir: profileStorage.profileDir,
       headless: input.headless,
@@ -288,8 +289,8 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
         const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
         return normalizeManagedProviderObservation(result.observation);
       }),
-      openUrl: async (url) => {
-        const response = await driver.request("open_url", { url, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
+      openUrl: async (url, operation_scope) => {
+        const response = await driver.request("open_url", { url, operation_scope, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
         const next = pageFacts(parseDriverPage(response));
         currentUrl = next.current_url ?? url;
         return next;

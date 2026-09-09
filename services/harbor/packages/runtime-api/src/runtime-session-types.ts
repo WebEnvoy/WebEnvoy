@@ -148,6 +148,7 @@ export interface ValidationRuntimeFacts {
 }
 
 export interface CreateRuntimeSessionInput {
+  operation_scope?: "profile_management";
   browser_path?: string;
   headless?: boolean;
   timeout_ms?: number;
@@ -175,6 +176,7 @@ export interface RuntimeSessionControlInput {
 }
 
 export interface LocalProviderLaunchInput {
+  operation_scope?: "profile_management";
   browser_path: string;
   headless: boolean;
   timeout_ms: number;
@@ -736,7 +738,7 @@ export type LocalProviderLaunchResult =
       page: LocalProviderPageFacts;
       facts: RuntimeFact[];
       execution_surface?: "local_provider" | "fixture";
-      openUrl: (url: string) => Promise<LocalProviderPageFacts>;
+      openUrl: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
       clearPublicPageGuard?: () => Promise<void>;
       publicPage?: import("./managed-observation.js").ManagedPublicPageOperation;
       observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;

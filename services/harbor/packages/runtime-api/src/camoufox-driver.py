@@ -244,6 +244,8 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         PAGE = CONTEXT.pages[0] if CONTEXT.pages else CONTEXT.new_page()
         url = request.get("url")
         if isinstance(url, str) and url:
+            if request.get("operation_scope") == "profile_management":
+                install_public_navigation_guard(public_origin(url))
             PAGE.goto(url, wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 5_000)))
 
     browser = CONTEXT.browser if CONTEXT is not None else None
@@ -274,6 +276,8 @@ def open_url(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(url, str) or not url:
         raise ValueError("Camoufox Driver open_url requires a URL.")
     with contextlib.redirect_stdout(sys.stderr):
+        if request.get("operation_scope") == "profile_management":
+            install_public_navigation_guard(public_origin(url))
         PAGE.goto(url, wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 5_000)))
     return {"page": page_facts()}
 
