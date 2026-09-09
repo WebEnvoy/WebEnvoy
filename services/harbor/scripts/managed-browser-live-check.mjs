@@ -6,7 +6,8 @@ import { createInterface } from "node:readline/promises";
 const help = `Managed browser HTTP acceptance check (Node.js 24+)
 
 No requests are made without --run and MANAGED_LIVE_OPT_IN=isolated-test-store.
-Use a NEW isolated Core store and Harbor registry; existing global policy is refused.
+Use a NEW isolated Core store and Harbor registry; existing global policy is refused
+unless --packaged-default-policy matches the exact version-1 packaged defaults.
 The runtime must already be running with Camoufox installed by its normal installer.
 
 Required environment:
@@ -19,7 +20,11 @@ Optional environment:
 Usage:
   node managed-browser-live-check.mjs --run
   node managed-browser-live-check.mjs --run --handoff
-  node managed-browser-live-check.mjs --run --owner-return
+  node managed-browser-live-check.mjs --run --owner-return --packaged-default-policy
+
+--packaged-default-policy accepts only source global_user_config, version 1,
+read auto and prepare/commit/destructive confirm. All other existing policies
+remain refused. The isolated-store opt-in is still mandatory.
 
 --owner-return uses HARBOR_URL + HARBOR_OWNER_TOKEN (coordinator-only credentials)
 to return control through the formal Harbor owner release API. Its evidence is
@@ -37,14 +42,14 @@ replays an uncertain operation, reads private packages, or prints credentials.
 const args = process.argv.slice(2);
 if (!args.length || args.includes("--help")) {
   process.stdout.write(help);
-} else if (args.some(arg => !["--run", "--handoff", "--owner-return"].includes(arg)) || !args.includes("--run")) {
+} else if (args.some(arg => !["--run", "--handoff", "--owner-return", "--packaged-default-policy"].includes(arg)) || !args.includes("--run")) {
   process.stderr.write("Use --help or explicitly select --run.\n");
   process.exitCode = 2;
 } else {
-  await run(args.includes("--handoff") || args.includes("--owner-return"), args.includes("--owner-return"));
+  await run(args.includes("--handoff") || args.includes("--owner-return"), args.includes("--owner-return"), args.includes("--packaged-default-policy"));
 }
 
-async function run(handoff, ownerReturn) {
+async function run(handoff, ownerReturn, packagedDefaultPolicy) {
   const stamp = `managed-live-${randomUUID()}`;
   const hash = value => createHash("sha256").update(value).digest("hex");
   const safeRef = value => typeof value === "string" ? `ref:${hash(value).slice(0, 20)}` : null;
@@ -129,12 +134,17 @@ async function run(handoff, ownerReturn) {
   try {
     phase = "isolated_policy";
     const existing = await owner("GET", "/execution-policy-configs/global");
-    requireThat(existing.configuration === null, "nonempty_global_policy_refused");
+    const configuration = existing.configuration;
+    const packagedDefault = packagedDefaultPolicy && configuration?.schema_version === "webenvoy.execution-policy-configuration.v0" &&
+      configuration.source === "global_user_config" && configuration.source_version === "1" &&
+      Object.keys(configuration.modes ?? {}).sort().join(",") === "commit,destructive,prepare,read" &&
+      configuration.modes.read === "auto" && ["prepare", "commit", "destructive"].every(category => configuration.modes[category] === "confirm");
+    requireThat(configuration === null || packagedDefault, "nonempty_global_policy_refused");
     const policy = await owner("PUT", "/execution-policy-configs/global", { schema_version: "webenvoy.execution-policy-mutation.v0", idempotency_key: nextKey("policy"),
-      expected_source_version: null, modes: { read: "auto", prepare: "deny", commit: "auto", destructive: "deny" } });
+      expected_source_version: packagedDefault ? "1" : null, modes: { read: "auto", prepare: "deny", commit: "auto", destructive: "deny" } });
     policyVersion = policy.configuration?.source_version;
     requireThat(typeof policyVersion === "string", "policy_version_missing");
-    emit(phase, "configured_new_isolated_store");
+    emit(phase, packagedDefault ? "configured_isolated_packaged_defaults" : "configured_new_isolated_store");
 
     phase = "stable_principal";
     const registered = await owner("POST", "/agent-access/principals", { idempotency_key: nextKey("register"), display_name: stamp, credential_hash: hash(agentCredential) });
