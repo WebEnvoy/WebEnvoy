@@ -56,6 +56,8 @@ for await (const line of rl) {
     output({ id: request.id, status: "ok", page, ...(request.url ? {} : { text: "Public paragraph from original page.", truncated: false }) });
   } else if (request.op === "managed_observe") {
     output({ id: request.id, status: "ok", observation: { current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: null } });
+  } else if (request.op === "diagnostics_read") {
+    output({ id: request.id, status: "ok", diagnostics: { status: "completed", page_ref: "page:fixture", document_generation: 1, cursor: "cursor:2", next_cursor: "cursor:2", truncated: false, observed_at: "2026-09-10T00:00:00.000Z", page, network: [{ event_ref: "event:1", kind: "response", observed_at: "2026-09-10T00:00:00.000Z", method: "GET", url: "https://www.xiaohongshu.com/api?token=secret", resource_kind: "fetch", status: 503, duration_ms: 3 }], console: [{ event_ref: "event:2", level: "pageerror", observed_at: "2026-09-10T00:00:00.000Z", text: "token=secret", source: { url: "https://www.xiaohongshu.com/app.js?token=secret", line: 1 } }] } });
   } else if (request.op === "site_resource_probe") {
     output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: request.task_kind !== "authentication_recovery", pinia_ready: request.task_kind !== "authentication_recovery" } });
   } else if (request.op === "read_operation_probe") {
@@ -258,6 +260,13 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
   const observed = await launched.observePage!();
   assert.equal(observed.page.current_url, "https://www.xiaohongshu.com/search_result");
   assert.equal(observed.account.status, "unknown");
+  const diagnostics = await launched.readDiagnostics!({ origin: "https://www.xiaohongshu.com" });
+  assert.equal(diagnostics.status, "completed", JSON.stringify(diagnostics));
+  if (diagnostics.status === "completed") {
+    assert.equal(diagnostics.network[0]?.url, "https://www.xiaohongshu.com/api");
+    assert.equal(diagnostics.console[0]?.text, "[redacted]");
+    assert.equal(diagnostics.console[0]?.source?.url, "https://www.xiaohongshu.com/app.js");
+  }
   const probe = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "search_notes" });
   assert.equal(probe.status, "available");
   const authentication = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "authentication_recovery" });

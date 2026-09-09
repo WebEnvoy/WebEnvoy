@@ -1,6 +1,7 @@
 import { parseManagedInteractionRequest } from "./managed-interaction-request.js";
 import { createHash } from "node:crypto";
 import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
+import { boundedDiagnosticsInput, diagnosticsUnavailable, type RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
 import { createLocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentInput } from "./identity-environment.js";
 import {
@@ -188,6 +189,19 @@ export { HARBOR_ALLOWLISTED_READ_OPERATION_SCHEMA, LODE_262_ALLOWLIST_PIN, LODE_
 export { HARBOR_SITE_RESOURCE_FACTS_SCHEMA } from "./site-runtime-facts.js";
 export { HARBOR_PREVIEW_EVIDENCE_STATUS_FIXTURE_SCHEMA, HARBOR_REDACTED_PREVIEW_EXPORT_FIXTURE_SCHEMA, HARBOR_WRITE_PRECHECK_FACTS_SCHEMA } from "./runtime-fixtures.js";
 export { HARBOR_RUNTIME_FACTS_SCHEMA, HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA } from "./runtime-session.js";
+export { HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA } from "./runtime-diagnostics.js";
+export type {
+  DiagnosticsConsoleLevel,
+  DiagnosticsFailureClass,
+  DiagnosticsNetworkKind,
+  DiagnosticsResourceKind,
+  RuntimeDiagnosticsConsoleEvent,
+  RuntimeDiagnosticsInput,
+  RuntimeDiagnosticsNetworkEvent,
+  RuntimeDiagnosticsResponse,
+  RuntimeDiagnosticsResult,
+  RuntimeDiagnosticsUnavailable
+} from "./runtime-diagnostics.js";
 export { HARBOR_APP_RUNTIME_STATUS_FIXTURE_SCHEMA, HARBOR_CORE_RUNTIME_FACTS_SCHEMA, HARBOR_VIEWER_CONTROL_FACTS_SCHEMA } from "./viewer-control.js";
 export type {
   CaptureFailureClass,
@@ -503,6 +517,17 @@ export class HarborRuntime {
   async observeManagedSession(runtime_session_ref: string, input: unknown): Promise<ManagedObservation | ManagedObservationUnavailable> {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).join() !== "holder_ref" || !boundedManagedRef((input as { holder_ref?: unknown }).holder_ref)) return managedUnavailable("invalid_request");
     return this.runtimeSessions.observeManagedSession(runtime_session_ref, (input as { holder_ref: string }).holder_ref);
+  }
+
+  async readRuntimeDiagnostics(runtime_session_ref: string, input: unknown): Promise<RuntimeDiagnosticsResponse> {
+    const request = boundedDiagnosticsInput(input);
+    if (!request) return diagnosticsUnavailable("invalid_request", "Invalid diagnostics request.");
+    const session = this.runtimeSessions.getSession(runtime_session_ref);
+    if (!session) return diagnosticsUnavailable("session_missing", "Runtime Session is missing.", true);
+    try {
+      if (new URL(session.current_page.current_url ?? "").origin !== request.origin) return diagnosticsUnavailable("wrong_page", "The requested origin is not the active Page origin.");
+    } catch { return diagnosticsUnavailable("wrong_page", "The active Page has no usable origin."); }
+    return this.runtimeSessions.readRuntimeDiagnostics(runtime_session_ref, request);
   }
 
   async bindManagedAccount(identity_environment_ref: string, input: unknown): Promise<LocalIdentityEnvironmentPublicRecord | ManagedObservationUnavailable> {

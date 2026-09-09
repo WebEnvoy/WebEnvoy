@@ -4,6 +4,8 @@
 
 ## V1 Browser Runtime 与 Profile 环境
 
+Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/network-runtime-contract-v1.md)、[Console Runtime V1](../specs/console-runtime-contract-v1.md)、[Plugin Runtime Exposure V1](../specs/plugin-runtime-exposure-v1.md)。
+
 | 合同 | 权威位置 | 接受范围 |
 | --- | --- | --- |
 | Runtime Capability Plane 决策 | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 能力类别完整、Provider 无关公共语义、能力存在／工具暴露／授权／当前可执行性分离、Plugin-first 和 App 最小 owner control plane。 |

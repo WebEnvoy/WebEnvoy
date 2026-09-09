@@ -15,6 +15,7 @@ const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let navigations = 0, observations = 0;
+let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let managedSession: Record<string, unknown>;
 let dropResponse = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
@@ -42,6 +43,16 @@ const server = createServer((req, res) => { void (async () => {
   else if (req.url === "/runtime/identity-environments") value = { identity_environments: profiles };
   else if (req.url === "/runtime/identity-environments/identity%3A1/session") value = { runtime_session: managedSession };
   else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
+  else if (req.url === "/runtime/sessions/session%3Aone/diagnostics") {
+    diagnostics++;
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    assert.equal(input.origin, "https://example.com");
+    if (input.cursor) { assert.equal(input.page_ref, "page:one"); assert.equal(input.limit, 1); }
+    if (dropDiagnosticsResponse) { req.socket.destroy(); return; }
+    value = { status: "completed", schema_version: "harbor-runtime-diagnostics/v1", runtime_session_ref: "session:one", profile_ref: "profile:1", page_ref: "page:one", document_generation: 1, page: { current_url: "https://example.com/", title: "Fixture", status: "ready" }, cursor: "cursor:2", next_cursor: "cursor:2", truncated: false, observed_at: new Date().toISOString(), network: [{ event_ref: "event:1", kind: "response", observed_at: new Date().toISOString(), method: "GET", url: "https://example.com/health", origin: "https://example.com", resource_kind: "fetch", status: 503, duration_ms: 4 }], console: [{ event_ref: "event:2", level: "error", observed_at: new Date().toISOString(), page_ref: "page:one", document_generation: 1, text: "fixture error", truncated: false }] };
+  }
+  else if (req.url === "/runtime/sessions/session%3Aone/lock") { lockAttempts++; value = { ...managedSession, control_owner: "core_task", control_lock: { state: "held", holder_ref: "fixture-agent" } }; }
   else if (["/runtime/sessions/session%3Aone/navigate", "/runtime/sessions/session%3Aone/read"].includes(req.url ?? "")) {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
@@ -115,6 +126,38 @@ try {
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   managedSession = { runtime_session_ref: "session:one", profile_ref: "profile:1", control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
+  const diagnosticsOps = ["instance.diagnostics"];
+  await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-policy", profile_ref: "profile:1", allowed_operations: [...diagnosticsOps, ...browserOps], allowed_origins: ["https://example.com"] });
+  const diagnosticsGrant = await accessStore.createGrant({ idempotency_key: "diagnostics-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: diagnosticsOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  managedSession.control_owner = "user";
+  managedSession.control_lock = { state: "released", holder_ref: null };
+  const diagnosticResult = await service.submit(credentialHash, { idempotency_key: "diagnostics-one", connection_id: connection.connection_id, grant_id: diagnosticsGrant.grant_id, operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", task_scope: { operations: diagnosticsOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } });
+  assert.equal(diagnosticResult.status, "succeeded", JSON.stringify(diagnosticResult));
+  assert.equal((diagnosticResult.result as { network: { status: number }[] }).network[0]?.status, 503);
+  assert.equal(diagnostics, 1);
+  assert.equal(lockAttempts, 0, "diagnostics must not acquire ControlLease");
+  const diagnosticRequest = { idempotency_key: "diagnostics-page", connection_id: connection.connection_id, grant_id: diagnosticsGrant.grant_id, operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", page_ref: "page:one", cursor: "cursor:1", limit: 1, task_scope: { operations: diagnosticsOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  assert.equal((await service.submit(credentialHash, diagnosticRequest)).status, "succeeded");
+  for (const invalid of [{ limit: 65 }, { limit: 0 }, { target_ref: "target:one" }, { body: "not allowed" }, { headers: { authorization: "fixture" } }]) {
+    await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, ...invalid, idempotency_key: "invalid-diagnostics" }), /invalid_input/);
+  }
+  for (const override of [{ profile_ref: "profile:2" }, { origin: "https://denied.example" }, { grant_id: publicGrant.grant_id }, { task_scope: { ...diagnosticRequest.task_scope, operations: [] } }]) {
+    await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, ...override, idempotency_key: "denied-diagnostics" }), /managed_access_denied/);
+  }
+  assert.equal((await service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "wrong-instance-diagnostics", runtime_session_ref: "session:wrong" })).failure?.code, "managed_browser_session_mismatch");
+  assert.equal(diagnostics, 2, "denials must not reach the provider");
+  dropDiagnosticsResponse = true;
+  const lostDiagnostics = await service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "lost-diagnostics" });
+  dropDiagnosticsResponse = false;
+  const diagnosticReconnect = await accessStore.connect(credentialHash);
+  assert.deepEqual(await service.query(credentialHash, lostDiagnostics.run_id), lostDiagnostics);
+  assert.equal((await service.submit(credentialHash, { ...diagnosticRequest, connection_id: diagnosticReconnect.connection_id, idempotency_key: "fresh-diagnostics" })).status, "succeeded");
+  assert.equal(navigations, 0, "diagnostic response loss and reconnect never generate a page action");
+  assert.equal(lockAttempts, 0);
+  await accessStore.revokeGrant({ idempotency_key: "revoke-diagnostics", grant_id: diagnosticsGrant.grant_id });
+  await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "revoked-diagnostics" }), /grant_unavailable/);
+  managedSession.control_owner = "core_task";
+  managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
   const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
   await assert.rejects(service.submit(credentialHash, { ...navigation, runtime_session_ref: undefined }), /invalid_input/);
   const stale = await service.submit(credentialHash, { ...navigation, idempotency_key: "old-session", runtime_session_ref: "session:old" });

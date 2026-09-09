@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import contextlib
 import configparser
+from collections import deque
+from datetime import datetime, timezone
 import importlib.metadata
 import hashlib
 import json
@@ -22,7 +24,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 PLAYWRIGHT: Any = None
@@ -39,6 +41,22 @@ PUBLIC_NAVIGATION_ORIGIN = ""
 PUBLIC_NAVIGATION_DENIED: str | None = None
 INTERACTION_GUARD: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
+DIAGNOSTIC_EVENTS: deque[dict[str, Any]] = deque(maxlen=128)
+DIAGNOSTIC_CURSOR = 0
+DIAGNOSTIC_INSTANCE_REF = ""
+DIAGNOSTIC_PAGE_REF = ""
+DIAGNOSTIC_DOCUMENT_GENERATION = 0
+DIAGNOSTIC_REQUESTS: dict[int, tuple[dict[str, Any], float]] = {}
+DIAGNOSTIC_REQUEST_LIMIT = 256
+DIAGNOSTIC_SECRET_PATTERN = re.compile(
+    r'''(?:\bbearer\s+\S+|["']?(?:authorization|cookie|password|passwd|secret|token|credential|api[_ -]?key|access[_ -]?(?:key|token)|refresh[_ -]?token|session)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,\s}]+))''',
+    re.IGNORECASE,
+)
+DIAGNOSTIC_SENSITIVE_PATH_PATTERN = re.compile(
+    r"(?:^|/)(?:authorization|bearer|cookie|password|passwd|secret|token|credential|api[_ -]?key|access[_ -]?(?:key|token)|refresh[_ -]?token|session)(?:/|$)",
+    re.IGNORECASE,
+)
+DIAGNOSTIC_URL_PATTERN = re.compile(r'''https?://[^\s"'<>]+''', re.IGNORECASE)
 
 
 def send(message_id: int, status: str, **payload: Any) -> None:
@@ -47,8 +65,238 @@ def send(message_id: int, status: str, **payload: Any) -> None:
     sys.stdout.flush()
 
 
+def diagnostic_path(path: str) -> str | None:
+    if len(path) > 512:
+        return None
+    try:
+        decoded = unquote(path)
+    except Exception:
+        decoded = path
+    return "/<redacted>" if DIAGNOSTIC_SENSITIVE_PATH_PATTERN.search(decoded) or DIAGNOSTIC_SECRET_PATTERN.search(decoded) else path or "/"
+
+
+def diagnostics_url(value: Any) -> tuple[str, str] | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or parsed.username or parsed.password or not parsed.netloc:
+            return None
+        path = diagnostic_path(parsed.path)
+        if path is None:
+            return None
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        return f"{origin}{path}", origin
+    except ValueError:
+        return None
+
+
+def diagnostic_text(value: Any, limit: int = 512) -> tuple[str, bool]:
+    text = str(value)
+    if DIAGNOSTIC_SECRET_PATTERN.search(text):
+        return "[redacted]", False
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    text = " ".join(text.split())
+    text = re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", text)
+    text = DIAGNOSTIC_URL_PATTERN.sub(lambda match: (diagnostics_url(match.group(0)) or ("[redacted]", ""))[0], text)
+    return text[:limit], len(text) > limit
+
+
 def safe_text(value: str) -> str:
-    return re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", value)
+    return diagnostic_text(value)[0]
+
+
+def diagnostics_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def diagnostic_event(kind: str, **payload: Any) -> None:
+    global DIAGNOSTIC_CURSOR
+    DIAGNOSTIC_CURSOR += 1
+    DIAGNOSTIC_EVENTS.append({"event_ref": f"event:{DIAGNOSTIC_CURSOR}", "kind": kind, "observed_at": diagnostics_now(), "page_ref": DIAGNOSTIC_PAGE_REF, "document_generation": DIAGNOSTIC_DOCUMENT_GENERATION, **payload, "_cursor": DIAGNOSTIC_CURSOR})
+
+
+def diagnostic_resource_kind(value: Any) -> str:
+    return value if value in ("document", "script", "stylesheet", "image", "font", "xhr", "fetch", "websocket") else "other"
+
+
+def diagnostic_page_origin(page: Any) -> str | None:
+    try:
+        current = diagnostics_url(str(page.url))
+        return current[1] if current else None
+    except Exception:
+        return None
+
+
+def diagnostic_cursor(position: int) -> str:
+    return f"cursor:{DIAGNOSTIC_INSTANCE_REF}:{DIAGNOSTIC_PAGE_REF}:{DIAGNOSTIC_DOCUMENT_GENERATION}:{position}"
+
+
+def parse_diagnostic_cursor(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.split(":")
+    if len(parts) != 5 or parts[0] != "cursor" or parts[1] != DIAGNOSTIC_INSTANCE_REF or parts[2] != DIAGNOSTIC_PAGE_REF or parts[3] != str(DIAGNOSTIC_DOCUMENT_GENERATION):
+        return None
+    try:
+        position = int(parts[4])
+    except ValueError:
+        return None
+    return position if position >= 0 else None
+
+
+def rotate_diagnostic_page() -> None:
+    global DIAGNOSTIC_PAGE_REF, DIAGNOSTIC_DOCUMENT_GENERATION
+    DIAGNOSTIC_DOCUMENT_GENERATION += 1
+    DIAGNOSTIC_PAGE_REF = f"page_{uuid.uuid4().hex}"
+
+
+def attach_diagnostics(page: Any) -> None:
+    global DIAGNOSTIC_INSTANCE_REF, DIAGNOSTIC_PAGE_REF, DIAGNOSTIC_DOCUMENT_GENERATION
+    if not DIAGNOSTIC_INSTANCE_REF:
+        DIAGNOSTIC_INSTANCE_REF = uuid.uuid4().hex
+    DIAGNOSTIC_PAGE_REF = f"page_{uuid.uuid4().hex}"
+    DIAGNOSTIC_DOCUMENT_GENERATION = 1
+    pending_navigation: tuple[int, dict[str, Any]] | None = None
+
+    def is_main_navigation(request: Any) -> bool:
+        try:
+            if request.frame != page.main_frame:
+                return False
+        except Exception:
+            return False
+        try:
+            return bool(request.is_navigation_request())
+        except Exception:
+            return getattr(request, "resource_type", None) == "document"
+
+    def request_event(request: Any) -> None:
+        nonlocal pending_navigation
+        try:
+            safe = diagnostics_url(request.url)
+            if safe:
+                diagnostic_event("request", method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type))
+                DIAGNOSTIC_REQUESTS[id(request)] = (DIAGNOSTIC_EVENTS[-1], time.monotonic())
+                if is_main_navigation(request):
+                    pending_navigation = (id(request), DIAGNOSTIC_EVENTS[-1])
+                while len(DIAGNOSTIC_REQUESTS) > DIAGNOSTIC_REQUEST_LIMIT:
+                    DIAGNOSTIC_REQUESTS.pop(next(iter(DIAGNOSTIC_REQUESTS)))
+        except Exception:
+            pass
+
+    def response_event(response: Any) -> None:
+        try:
+            safe = diagnostics_url(response.url)
+            if safe:
+                state = DIAGNOSTIC_REQUESTS.get(id(response.request))
+                if state is None:
+                    return
+                event, started = state
+                redirected = getattr(response.request, "redirected_from", None) is not None
+                diagnostic_event("response", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(response.request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(response.request.resource_type), status=int(response.status), duration_ms=round((time.monotonic() - started) * 1000), redirected=redirected)
+        except Exception:
+            pass
+
+    def failed_event(request: Any) -> None:
+        nonlocal pending_navigation
+        try:
+            safe = diagnostics_url(request.url)
+            if safe:
+                error_text = str(request.failure or "unknown").lower()
+                failure = "timeout" if "timeout" in error_text else "aborted" if "abort" in error_text else "connection"
+                if pending_navigation is not None and pending_navigation[0] == id(request):
+                    pending_navigation = None
+                state = DIAGNOSTIC_REQUESTS.pop(id(request), None)
+                if state is None:
+                    return
+                event, started = state
+                diagnostic_event("failure", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type), failure_class=failure, duration_ms=round((time.monotonic() - started) * 1000), redirected=getattr(request, "redirected_from", None) is not None)
+        except Exception:
+            pass
+
+    def console_event(message: Any) -> None:
+        try:
+            level = str(message.type)
+            if level not in ("warning", "error"):
+                return
+            location = message.location or {}
+            source = diagnostics_url(location.get("url"))
+            event_origin = source[1] if source else diagnostic_page_origin(page)
+            text, truncated = diagnostic_text(message.text)
+            diagnostic_event("console", _origin=event_origin, level="warn" if level == "warning" else "error", text=text, truncated=truncated, **({"source": {"url": source[0], "line": location.get("lineNumber", 0), "column": location.get("columnNumber", 0)}} if source else {}))
+        except Exception:
+            pass
+
+    def page_error(error: Any) -> None:
+        try:
+            text, truncated = diagnostic_text(error)
+            diagnostic_event("console", _origin=diagnostic_page_origin(page), level="pageerror", text=text, truncated=truncated)
+        except Exception:
+            pass
+
+    def navigated(frame: Any) -> None:
+        nonlocal pending_navigation
+        try:
+            if frame == page.main_frame:
+                if pending_navigation is None and INTERACTION_STATE is not None:
+                    try:
+                        if INTERACTION_STATE["handle"].evaluate("state => state.sameDocument()"):
+                            return
+                    except Exception:
+                        pass  # A destroyed execution context is a replaced document.
+                rotate_diagnostic_page()
+                if pending_navigation is not None:
+                    request_event_ref = pending_navigation[1]["event_ref"]
+                    for event in DIAGNOSTIC_EVENTS:
+                        if event["event_ref"] == request_event_ref or event.get("request_ref") == request_event_ref:
+                            event["page_ref"] = DIAGNOSTIC_PAGE_REF
+                            event["document_generation"] = DIAGNOSTIC_DOCUMENT_GENERATION
+                pending_navigation = None
+        except Exception:
+            pass
+
+    page.on("request", request_event)
+    page.on("response", response_event)
+    page.on("requestfailed", failed_event)
+    page.on("requestfinished", lambda request: DIAGNOSTIC_REQUESTS.pop(id(request), None))
+    page.on("console", console_event)
+    page.on("pageerror", page_error)
+    page.on("framenavigated", navigated)
+
+
+def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
+    if PAGE is None:
+        return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "Camoufox Driver has no active page.", "retryable": False}
+    try:
+        title = safe_text(str(PAGE.title()))[:256]
+    except Exception:
+        return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "The active Page is no longer observable.", "retryable": False}
+    origin = request.get("origin")
+    current = diagnostics_url(str(PAGE.url))
+    if not isinstance(origin, str) or not current or current[1] != origin:
+        return {"status": "unavailable", "failure_class": "wrong_page", "message": "The active page origin does not match the requested origin.", "retryable": False}
+    if request.get("page_ref") is not None and request.get("page_ref") != DIAGNOSTIC_PAGE_REF:
+        return {"status": "unavailable", "failure_class": "stale_page", "message": "The requested Page binding is stale.", "retryable": False}
+    cursor = request.get("cursor")
+    after = parse_diagnostic_cursor(cursor) if cursor is not None else None
+    oldest = DIAGNOSTIC_EVENTS[0]["_cursor"] if DIAGNOSTIC_EVENTS else DIAGNOSTIC_CURSOR + 1
+    if cursor is not None and (after is None or after > DIAGNOSTIC_CURSOR or after < oldest - 1):
+        return {"status": "unavailable", "failure_class": "cursor_stale", "message": "The diagnostics cursor is invalid or no longer retained for this Instance Page generation.", "retryable": True}
+    if after is None:
+        after = oldest - 1
+    limit = request.get("limit", 64)
+    high_watermark = DIAGNOSTIC_CURSOR
+    retained = [event for event in DIAGNOSTIC_EVENTS if event["_cursor"] > after and event["_cursor"] <= high_watermark and event.get("page_ref") == DIAGNOSTIC_PAGE_REF and event.get("document_generation") == DIAGNOSTIC_DOCUMENT_GENERATION and event.get("origin", event.get("_origin")) == current[1]]
+    events = retained[:max(1, min(64, int(limit)))]
+    network, console = [], []
+    for event in events:
+        public = {key: value for key, value in event.items() if not key.startswith("_")}
+        if event["kind"] == "console":
+            console.append(public)
+        else:
+            network.append(public)
+    last = events[-1]["_cursor"] if events else after
+    return {"status": "completed", "page_ref": DIAGNOSTIC_PAGE_REF, "document_generation": DIAGNOSTIC_DOCUMENT_GENERATION, "page": {"current_url": current[0], "title": title, "status": "ready"}, "cursor": diagnostic_cursor(after), "next_cursor": diagnostic_cursor(last), "truncated": (oldest > 1 and after == oldest - 1) or len(retained) > len(events), "observed_at": diagnostics_now(), "network": network, "console": console}
 
 
 def safe_error(error: BaseException) -> str:
@@ -195,7 +443,7 @@ def boss_probe_expression() -> str:
 
 
 def launch(request: dict[str, Any]) -> dict[str, Any]:
-    global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE
+    global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE, DIAGNOSTIC_EVENTS, DIAGNOSTIC_CURSOR, DIAGNOSTIC_INSTANCE_REF
     PROFILE_DIR = str(request.get("profile_dir", ""))
     EXECUTABLE_PATH = str(request.get("executable_path", ""))
     if not PROFILE_DIR or not EXECUTABLE_PATH:
@@ -246,6 +494,11 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         # configured, which avoids the known Juggler viewport handshake hang.
         CONTEXT = NewBrowser(PLAYWRIGHT, from_options=options, persistent_context=True)
         PAGE = CONTEXT.pages[0] if CONTEXT.pages else CONTEXT.new_page()
+        DIAGNOSTIC_EVENTS.clear()
+        DIAGNOSTIC_REQUESTS.clear()
+        DIAGNOSTIC_CURSOR = 0
+        DIAGNOSTIC_INSTANCE_REF = uuid.uuid4().hex
+        attach_diagnostics(PAGE)
         url = request.get("url")
         if isinstance(url, str) and url:
             if request.get("operation_scope") == "profile_management":
@@ -545,7 +798,7 @@ class InteractionSnapshotError(Exception):
 
 def interaction_snapshot(generation: int) -> dict[str, Any]:
     global INTERACTION_STATE
-    page_ref = "page_" + uuid.uuid4().hex
+    page_ref = DIAGNOSTIC_PAGE_REF or "page_" + uuid.uuid4().hex
     if INTERACTION_STATE is not None:
         with contextlib.suppress(Exception):
             if INTERACTION_STATE["handle"].evaluate("state => state.sameDocument()"):
@@ -930,6 +1183,8 @@ def main() -> None:
                 with contextlib.redirect_stdout(sys.stderr):
                     observation = PAGE.evaluate("mw:" + request["expression"])
                 send(message_id, "ok", observation=observation)
+            elif op == "diagnostics_read":
+                send(message_id, "ok", diagnostics=diagnostics_read(request))
             elif op == "site_resource_probe":
                 send(message_id, "ok", **site_resource_probe(request))
             elif op == "read_operation_probe":

@@ -13,7 +13,7 @@ import { completeRunWithFailure, completeRunWithResult } from "./result-envelope
 
 type ObjectValue = Record<string, unknown>;
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_ref?: string; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number };
+  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
 class InteractionFailure extends ManagedAccessError {
@@ -31,20 +31,23 @@ function text(value: unknown): string {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
-  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "target_ref"]) if (input[key] !== undefined) text(input[key]);
+  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
+  if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
     let url: URL;
     try { url = new URL(text(input.url)); } catch { return fail("managed_browser_invalid_input"); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.origin !== input.origin || !["instance.start", "instance.navigate"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
   }
-  if (["instance.navigate", "instance.read", ...managedInteractionOperations].includes(String(input.operation))) {
+  if (["instance.navigate", "instance.read", "instance.diagnostics", ...managedInteractionOperations].includes(String(input.operation))) {
     text(input.runtime_session_ref);
     if (input.operation === "instance.navigate") text(input.url);
+    if (input.operation === "instance.diagnostics" && input.url !== undefined) return fail("managed_browser_invalid_input");
   }
   if (isInteraction(String(input.operation))) {
+    if (input.cursor !== undefined || input.limit !== undefined) return fail("managed_browser_invalid_input");
     const action = String(input.operation).slice("instance.".length);
     const fields: Record<string, string[]> = { snapshot: [], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
     const all = ["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "account_ref", "account_system_ref", "url", "template_ref"];
@@ -60,12 +63,14 @@ function parse(value: unknown): Request {
       if (input.wait_for === "enabled") text(input.target_ref); else if (input.target_ref !== undefined) return fail("managed_browser_invalid_input");
       if (input.wait_for === "text") { if (text(input.text).length > 256) return fail("managed_browser_invalid_input"); } else if (input.text !== undefined) return fail("managed_browser_invalid_input");
     }
-  } else if (["page_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
+  } else if (input.operation === "instance.diagnostics") {
+    if (["target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "observation_ref", "account_system_ref", "account_ref", "template_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
+  } else if (["page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -170,6 +175,14 @@ export function createManagedBrowserService(options: {
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
     const ref = encodeURIComponent(text(session.runtime_session_ref));
+    if (input.operation === "instance.diagnostics") {
+      // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
+      await check();
+      return await harbor(`/runtime/sessions/${ref}/diagnostics`, {
+        origin: input.origin!, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
+      });
+    }
     await check();
     const lease = object(session.control_lock);
     if (session.control_owner !== "core_task" || lease.state !== "held" || lease.holder_ref !== holder) {

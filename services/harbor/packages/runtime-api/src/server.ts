@@ -252,6 +252,7 @@ function readinessBody(): object {
       "/runtime/identity-environment-sessions",
       "/runtime/sessions/{runtime_session_ref}",
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
+      "/runtime/sessions/{runtime_session_ref}/diagnostics",
       "/runtime/sessions/{runtime_session_ref}/handoff",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",
@@ -268,6 +269,8 @@ function readinessBody(): object {
       raw_dom: "not_exposed",
       raw_har: "not_exposed",
       raw_network_bodies: "not_exposed",
+      network_metadata: "bounded_sanitized_only",
+      console_text: "bounded_redacted_only",
       screenshot_body: "not_exposed",
       hosted_browser: "not_provided",
       external_write_actions: "not_performed"
@@ -380,6 +383,12 @@ async function routeSession(
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.observeManagedSession(runtimeSessionRef, await readJson<unknown>(request));
     writeJson(response, result.status === "completed" ? 200 : 409, result); return;
+  }
+  if (action === "diagnostics" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.readRuntimeDiagnostics(runtimeSessionRef, await readJson<unknown>(request));
+    writeJson(response, result.status === "completed" ? 200 : result.failure_class === "session_missing" ? 404 : 409, result);
+    return;
   }
   if (action === "runtime-facts" && method === "GET") {
     const facts = runtime.getCoreRuntimeFacts(runtimeSessionRef);

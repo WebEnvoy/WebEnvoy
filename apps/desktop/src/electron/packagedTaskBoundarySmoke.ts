@@ -61,11 +61,12 @@ export async function runPackagedTaskBoundarySmoke(
   if (!harborEndpoint) throw new Error("Packaged managed catalog smoke requires its isolated Harbor endpoint.");
   const catalogResponse = await fetch(new URL("/runtime/managed-operation-catalog", harborEndpoint), { signal: AbortSignal.timeout(5_000) });
   const catalog = await catalogResponse.json() as { schema_version?: string; catalog_ref?: string; operations?: { operation_id?: string; category?: string; target_scope?: { target_types?: string[] }; resource_requirement_refs?: string[] }[] };
-  const operations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "account.bind"];
+  const operations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "controlled-page.observe", "controlled-page.interact"];
   const managedCatalogReady = catalogResponse.ok && catalog.schema_version === "webenvoy.harbor-operation-catalog.v0" && catalog.catalog_ref === "harbor://managed-operations" &&
     catalog.operations?.length === operations.length && operations.every(id => catalog.operations?.some(item => item.operation_id === id &&
-      item.category === (["profile.create", "account.bind"].includes(id) ? "commit" : "read") &&
-      item.target_scope?.target_types?.includes("managed_profile") && item.resource_requirement_refs?.includes("harbor://managed-profile")));
+      item.category === (["profile.create", "account.bind"].includes(id) ? "commit" : id === "controlled-page.interact" ? "prepare" : "read") &&
+      item.target_scope?.target_types?.includes("managed_profile") && item.resource_requirement_refs?.includes("harbor://managed-profile") &&
+      (!id.startsWith("controlled-page.") || item.resource_requirement_refs.includes("harbor://controlled-page"))));
   if (!managedCatalogReady) throw new Error("Packaged Harbor managed operation owner declarations are unavailable.");
   const result = (await window.webContents.executeJavaScript(`
     (async () => {
