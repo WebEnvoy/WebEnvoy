@@ -136,6 +136,10 @@ async function assertManagementPolicyApi(): Promise<void> {
       operation: "profile.create", template_ref: "template:policy", task_scope: { operations: ["profile.create"], profile_refs: [], origins: ["https://example.com"] } };
     const before = await call("/managed-browser/operations", agent, "POST", operation);
     assert.equal(before.body.failure.code, "managed_browser_policy_refused");
+    const denied = await call("/managed-browser/operations", agent, "POST", { ...operation, idempotency_key: "denied-scope", task_scope: { ...operation.task_scope, operations: [] } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error.code, "managed_access_denied");
+    assert.equal(denied.body.dispatch_state, "not_dispatched");
     assert.equal(creates, 0);
     const path = "/agent-access/management-policy";
     assert.deepEqual((await call(path, owner)).body, { ok: true, configuration: null });
@@ -159,6 +163,12 @@ async function assertManagementPolicyApi(): Promise<void> {
     assert.equal(creates, 1);
     assert.equal(await policy.getGlobalConfiguration(), undefined, "scoped management policy must not modify global business policy");
     assert.equal((await policy.resolveSources({ skill_ref: "other:business" })).installed_skill_user_version, undefined);
+    await call(`/agent-access/grants/${encodeURIComponent(granted.body.grant.grant_id)}/revoke`, owner, "POST", { idempotency_key: "revoke-policy-grant" });
+    const revoked = await call("/managed-browser/operations", agent, "POST", { ...operation, idempotency_key: "after-revoke" });
+    assert.equal(revoked.status, 403);
+    assert.equal(revoked.body.error.code, "managed_access_grant_unavailable");
+    assert.equal(revoked.body.dispatch_state, "not_dispatched");
+    assert.equal(creates, 1);
     console.log("Validated owner-scoped management policy, default refusal, CAS/idempotency, Agent rejection and unchanged global policy.");
   } finally { await closeServer(server); await closeServer(harbor); await rm(directory, { recursive: true, force: true }); }
 }
