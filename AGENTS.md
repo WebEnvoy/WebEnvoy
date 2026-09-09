@@ -6,9 +6,11 @@
 
 ## 实施原则
 
-- 用户或 Agent 的真实路径是交付单元；对象、Schema 和合同只细化到当前消费者需要的程度。
+- 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。
 - 先验证会推翻设计的页面或 Provider 假设。Camoufox 是首个默认 Provider 验证目标，不是已确认结论；Chrome 是显式兼容 Provider；不得引入 ego-lite／ego-browser 或 Wayfern。
 - Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
+- Browser Runtime capability 是否存在，与 Plugin 向 Agent 展示哪些工具以及当前 Grant 是否允许调用必须分离；Network、Console、文件、窗口、受控执行、画面等通用能力不得按站点特例散落到 Harbor／Core。
+- V1 实施优先采用 Plugin-first：一个已安装 Plugin 在真实第三方 Agent 中持续消费 Runtime、Profile、账号、环境、SKILL 和结果能力；完整 App 产品化后移，但必要 owner 授权、敏感决定、同实例接管与交还持续可用。
 - 每条业务规则只有一个 owner。预检和正式执行复用同一判定，不在 App、站点代码或 Lode 复制授权白名单。
 - 防御作用域不大于风险作用域。身份、授权、控制权和重复写入必须保护；可选 evidence、viewer 或未安装网站 SKILL 不得全局阻断通用浏览器与环境管理。
 - unknown 写入禁止重放，但允许安全查询、对账、人工接管和停止后续执行。
@@ -32,4 +34,4 @@
 - 当前状态只以 GitHub Issue、原生 parent/sub-issue/dependency、Milestone、Project、PR、checks、review 和 `main` 回读为准；不创建 carrier 或第二状态机。
 - 普通工作可直接使用 Work Item；只细化当前和下一批，只有真实阻塞才建 dependency。
 - PR 绑定真实 Work Item，保持单一可验收范围；合并前完成 exact-head 独立 review 和 required checks。
-- `completed` 需要原验收证据；`not_planned` 对应 Won’t Do；延期保持 open、退出活跃 Milestone并进入 Backlog。PR 合并不自动关闭业务 Issue。
+- `completed` 需要原验收证据；`not_planned` 对应 Won’t Do。Milestone 表达产品目标归属，Project 状态表达当前执行状态：待授权或延期但仍属于 V1 的事项保持原 Milestone并进入 Backlog；只有明确移出该产品目标时才移出 Milestone。PR 合并不自动关闭业务 Issue。
