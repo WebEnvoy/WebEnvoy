@@ -12,7 +12,6 @@ import type {
   HarborProviderStatus,
   HarborRuntimeSession,
   ProviderId,
-  SiteId,
 } from "./harborIdentityTypes";
 import { isAuthenticationRecoveryReason, isBrowserEnvironmentRepairReason, requiresManualAuthentication } from "./harborIdentityRecovery";
 
@@ -32,7 +31,7 @@ export function projectHarborIdentity(
   return {
     id: facts.identity_environment_ref,
     name: `${facts.site_binding.display_name} ${facts.site_binding.account_label ?? "本地身份"}`,
-    siteName: siteLabel(siteId),
+    siteName: siteId === "boss" ? "BOSS" : siteId === "xiaohongshu" ? "小红书" : facts.site_binding.display_name,
     siteId,
     origin: facts.site_binding.origin,
     accountLabel: facts.site_binding.account_label ?? "未绑定账号",
@@ -58,10 +57,10 @@ export function projectHarborIdentity(
       reason: facts.provider_binding.warnings.join("；") || facts.provider_binding.unavailable_reason || facts.provider_binding.selection_reason,
     },
     login: {
-      state: loginLabel(facts.login_state.state),
+      state: isAccountSite(siteId) ? loginLabel(facts.login_state.state) : "无需站点登录",
       recoveryRequired: manualAuthenticationRequired,
-      manualAuthenticationState: manualAuthLabel(facts.login_state.manual_authentication_state),
-      recoveryActions: Array.from(new Set(recoveryActions)),
+      manualAuthenticationState: isAccountSite(siteId) ? manualAuthLabel(facts.login_state.manual_authentication_state) : "无需认证",
+      recoveryActions: isAccountSite(siteId) ? Array.from(new Set(recoveryActions)) : [],
       reason: facts.login_state.reason ?? "登录恢复和人工认证由 Harbor 浏览器现场完成。",
     },
     environment: {
@@ -91,8 +90,8 @@ export function projectHarborIdentity(
     browser: {
       providers: providerList(catalog, facts.provider_binding.selected_provider),
       defaultProvider: selected === "未可用" ? "CloakBrowser" : selected,
-      targets: manualBrowserTargets,
-      session: emptySession(selected === "未可用" ? "CloakBrowser" : selected, facts.identity_environment_ref),
+      targets: isAccountSite(siteId) ? manualBrowserTargets : [{ id: siteId, label: facts.site_binding.display_name, defaultUrl: facts.site_binding.origin, defaultTitle: facts.site_binding.display_name, readiness: "公开浏览" }],
+      session: emptySession(selected === "未可用" ? "CloakBrowser" : selected),
       boundary: "App 只发送启动、查看、接管、释放、停止意图；Harbor 拥有 session、controller、viewer 和 provider truth。",
     },
     taskEntries: [],
@@ -100,18 +99,19 @@ export function projectHarborIdentity(
 }
 
 export function projectHarborSession(
-  result: HarborRuntimeSession,
+  result: HarborRuntimeSession | null,
   fallback: BrowserSessionProjection,
 ): BrowserSessionProjection {
+  if (result === null) return emptySession(fallback.provider);
   if ("status" in result) {
     return { ...fallback, state: "failed", statusLabel: "不可用", message: result.message };
   }
   const state =
     result.lifecycle_state === "closed"
       ? "stopped"
-      : result.lifecycle_state === "failed"
+      : !["active", "idle", "locked"].includes(result.lifecycle_state)
       ? "failed"
-      : result.lifecycle_state === "idle" || result.control_owner === "none"
+      : result.control_owner === "none"
       ? "idle"
       : result.control_owner === "user"
       ? "takeover"
@@ -174,7 +174,7 @@ function readinessFromFacts(facts: HarborIdentityFacts): { state: IdentityStatus
   if (factsRequireManualAuthentication(facts)) {
     return { state: "needs-auth", label: "需要登录或人工认证", reasons: facts.login_state.human_verification.map(authLabel) };
   }
-  if (facts.login_state.recovery_required) {
+  if (isAccountSite(facts.site_binding.site_id) && facts.login_state.recovery_required) {
     return { state: "blocked", label: "需要修复浏览器环境", reasons: facts.diagnostics };
   }
   return {
@@ -185,37 +185,38 @@ function readinessFromFacts(facts: HarborIdentityFacts): { state: IdentityStatus
 }
 
 function factsRequireManualAuthentication(facts: HarborIdentityFacts) {
+  if (!isAccountSite(facts.site_binding.site_id)) return false;
   return requiresManualAuthentication(facts.login_state.state, facts.login_state.manual_authentication_state) ||
     facts.provider_binding.warnings.some(isAuthenticationRecoveryReason) ||
     facts.login_state.human_verification.length > 0 ||
     facts.credential_recovery.recovery_actions.some((action) => action === "manual_login" || isAuthenticationRecoveryReason(action));
 }
 
-function emptySession(provider: BrowserSessionProjection["provider"], identityRef: string): BrowserSessionProjection {
+function emptySession(provider: BrowserSessionProjection["provider"]): BrowserSessionProjection {
   return {
     provider,
     state: "idle",
     statusLabel: "空闲",
     controller: "空闲",
-    browserSessionRef: `${identityRef}:session-next`,
-    viewerRef: `${identityRef}:viewer-next`,
+    browserSessionRef: "无",
+    viewerRef: "无",
     currentUrl: "未打开",
     title: "无活动页面",
     startedAt: "未启动",
-    message: "从目标站点入口启动后，App 只展示 Harbor 返回的 session facts。",
+    message: "Harbor 当前没有返回活动实例。",
   };
 }
 
-function siteBindings(siteId: SiteId) {
-  return siteId === "boss" ? ["BOSS 职位搜索", "BOSS 打招呼写前预览"] : ["小红书搜索和笔记读取", "小红书发布草稿写前预览"];
+function siteBindings(siteId: string) {
+  return siteId === "boss" ? ["BOSS 职位搜索", "BOSS 打招呼写前预览"] : siteId === "xiaohongshu" ? ["小红书搜索和笔记读取", "小红书发布草稿写前预览"] : [];
 }
 
-function normalizeSiteId(value: string): SiteId {
-  return value === "boss" || value === "zhipin" ? "boss" : "xiaohongshu";
+function normalizeSiteId(value: string): string {
+  return value === "zhipin" ? "boss" : value;
 }
 
-function siteLabel(siteId: SiteId): "小红书" | "BOSS" {
-  return siteId === "boss" ? "BOSS" : "小红书";
+function isAccountSite(siteId: string) {
+  return ["boss", "zhipin", "xiaohongshu"].includes(siteId);
 }
 
 function providerName(providerId: ProviderId | null): "CloakBrowser" | "官方 Chrome" | "Camoufox" | "未可用" {

@@ -14,4 +14,6 @@
 
 ## 正式入口验证
 
+- [安装后的单宿主 Agent 入口](verification/installed-agent.md)
+
 - [Agent 管理多个 Profile](verification/managed-agent-profiles.md)：当前 HTTP 消费、权限和对账边界，以及适用检查。

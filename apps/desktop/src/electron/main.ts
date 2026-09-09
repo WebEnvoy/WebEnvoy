@@ -1,11 +1,13 @@
-import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, dialog } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ownerApiResponseMaxBytes, readBoundedJsonResponse } from "./boundedJsonResponse.js";
 import { runPackagedBossDeferredSmoke, runPackagedTaskBoundarySmoke } from "./packagedTaskBoundarySmoke.js";
 import { createRuntimeSupervisor } from "./runtimeSupervisor.js";
+import { connectInstalledRuntime } from "./installedRuntime.js";
 import { readLodeCatalog } from "./lodeCatalog.js";
 import {
   isExpectedManualAuthenticationRendererUrl,
@@ -37,12 +39,17 @@ const packagedSmokeLodeEndpoint = process.env.WEBENVOY_PACKAGED_SMOKE_LODE_ENDPO
 const packagedSmokeUserDataDir = process.env.WEBENVOY_PACKAGED_SMOKE_USER_DATA_DIR;
 const localConnectionStorageKey = "webenvoy.localConnectionConfig.v1";
 let runtimeSupervisor = createRuntimeSupervisor();
+let installedConfig: { coreEndpoint: string; harborEndpoint: string } | undefined;
+const installationLink = path.join(__dirname, "../../webenvoy-installation.json");
+const installedRuntimeDir: string | undefined = process.env.WEBENVOY_INSTALLED_RUNTIME_DIR ?? (existsSync(installationLink) ? JSON.parse(readFileSync(installationLink, "utf8")).data_dir : undefined);
 const mainWindows = new Set<BrowserWindow>();
 app.setName("WebEnvoy App");
 
 if (packagedSmoke && process.platform === "darwin") {
   app.commandLine.appendSwitch("use-mock-keychain");
 }
+
+if (installedRuntimeDir) app.setPath("userData", path.join(installedRuntimeDir, "app"));
 
 if (packagedSmoke && packagedSmokeUserDataDir) {
   app.setPath("userData", packagedSmokeUserDataDir);
@@ -526,14 +533,23 @@ function reloadWindow(window: BrowserWindow) {
 
 app.whenReady().then(async () => {
   const protectedWorkbenchStore = await registerWorkbenchIpc(mainWindows, expectedRendererUrl());
-  runtimeSupervisor = createRuntimeSupervisor({
-    dataDir: path.join(app.getPath("userData"), "runtime"),
-    protectedWorkbenchStore,
-  });
+  if (installedRuntimeDir) {
+    const entry = await import(pathToFileURL(path.join(__dirname, "../agent-entry/client.mjs")).href);
+    await entry.ensureRuntime(installedRuntimeDir);
+    const installed = await connectInstalledRuntime(installedRuntimeDir);
+    runtimeSupervisor = installed;
+    installedConfig = installed.config;
+  } else {
+    runtimeSupervisor = createRuntimeSupervisor({
+      dataDir: path.join(app.getPath("userData"), "runtime"),
+      protectedWorkbenchStore,
+    });
+  }
   ipcMain.handle("webenvoy:shell-context", () => ({
     platform: process.platform,
     colorScheme: getSystemColorScheme(),
     configScope: "local-ui-only",
+    ...(installedConfig ? { runtimeEndpoints: installedConfig } : {}),
   }));
   ipcMain.handle("webenvoy:runtime-supervisor-state", (_event, config) =>
     runtimeSupervisor.readState(config),
@@ -560,6 +576,9 @@ app.whenReady().then(async () => {
       createMainWindow();
     }
   });
+}).catch(error => {
+  dialog.showErrorBox("WebEnvoy Runtime 不可用", error instanceof Error ? error.message : "请使用安装入口 diagnose 检查并恢复。");
+  app.quit();
 });
 
 app.on("window-all-closed", () => {
@@ -572,7 +591,13 @@ app.on("before-quit", () => {
   runtimeSupervisor.stop();
 });
 
+async function installedConnectionReady() {
+  if (!installedConfig) return true;
+  try { return (await runtimeSupervisor.readState(installedConfig)).canUseLiveRuntime; } catch { return false; }
+}
+
 async function requestOwnerApiJson(request: OwnerApiJsonRequest) {
+  if (!await installedConnectionReady()) return { ok: false, error: "Installed Runtime disconnected; reopen App after recovery." };
   const parsed = parseOwnerApiRequest(request);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const productionPostBlockReason = ownerApiProductionPostBlockReason(parsed);
@@ -635,6 +660,7 @@ async function requestHarborManualAuthenticationCompletion(event: Electron.IpcMa
   }
   const parsedIntent = parseManualAuthenticationCompletionIntent(intent);
   if (!parsedIntent) return { ok: false, error: "Manual authentication completion is unavailable." };
+  if (!await installedConnectionReady()) return { ok: false, error: "Installed Runtime disconnected; reopen App after recovery." };
   const supervisorToken = runtimeSupervisor.getHarborManualAuthSupervisorToken(parsedIntent.base);
   if (!supervisorToken) return { ok: false, error: "Manual authentication completion is unavailable." };
   const result = await requestManualAuthenticationCompletion({

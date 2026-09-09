@@ -17,7 +17,9 @@
     "smoke:packaged:vertical": "pnpm run build && node scripts/smoke-packaged-vertical.mjs",
     "smoke:packaged:runtime": "WEBENVOY_REQUIRE_PACKAGED_RUNTIME=1 pnpm run build && node scripts/smoke-packaged-runtime.mjs",
     "smoke:packaged:readonly": "pnpm run build && node scripts/smoke-packaged-readonly.mjs",
-    "start": "electron dist-electron/main.js"
+    "start": "electron dist-electron/main.js",
+    "package:agent": "pnpm build && node scripts/package-agent.mjs",
+    "check:installed-agent": "node scripts/check-installed-agent.mjs"
   },
   "dependencies": {
     "@radix-ui/react-tabs": "^1.1.16",

@@ -40,12 +40,15 @@ for await (const line of rl) {
   if (!line.trim()) continue;
   const request = JSON.parse(line);
   if (request.op === "launch") {
-    page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
+    page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ready", page, python_version: "3.12.1", camoufox_version: "0.5.6", playwright_version: "1.60.0", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
   } else if (request.op === "open_url") {
     if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
-    page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
+    page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
+  } else if (request.op === "managed_public_page") {
+    if (request.url) page = { ...page, current_url: request.url };
+    output({ id: request.id, status: "ok", page, ...(request.url ? {} : { text: "Public paragraph from original page.", truncated: false }) });
   } else if (request.op === "managed_observe") {
     output({ id: request.id, status: "ok", observation: { current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: null } });
   } else if (request.op === "site_resource_probe") {
@@ -269,6 +272,10 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
     assert.deepEqual(read.source_refs.map((ref) => ref.kind), ["pinia_store_summary", "network_summary", "dom_snapshot_summary"]);
     assert.deepEqual(read.evidence_ref_kinds.map((ref) => ref.kind), ["snapshot_ref"]);
   }
+  const navigated = await launched.publicPage!({ expected_origin: "https://example.com", url: "https://example.com/one" });
+  assert.ok(navigated.status === "completed" && navigated.page.current_url === "https://example.com/one");
+  const publicRead = await launched.publicPage!({ expected_origin: "https://example.com" });
+  assert.ok(publicRead.status === "completed" && publicRead.text === "Public paragraph from original page.");
   await launched.close();
   assert.equal(existsSync(profileStoragePath(profileStorageRef)), true);
 }));
@@ -422,4 +429,26 @@ test("propagates a dead Driver from a read probe", async () => withCamoufoxEnv(a
     expected_origin: "https://www.xiaohongshu.com"
   }), /exited/);
   await launched.close();
+}));
+
+
+test("the private public-page command blocks redirect and script requests before they leave the original page", () => {
+  const helper = join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
+  const check = join(dirname(fileURLToPath(import.meta.url)), "../../../../scripts/check-public-navigation-guard.py");
+  assert.match(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON || "python3", [check, helper], {
+    encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  }), /public navigation guard passed/);
+});
+
+
+test("forwards management scope to initial and reused driver navigation without changing owner calls", async () => withCamoufoxEnv(async () => {
+  const launched = await launchCamoufoxProvider({ ...input("managed-initial-driver-scope"), url: "https://creator.xiaohongshu.com/publish/publish", operation_scope: "profile_management" });
+  assert.ok(launched.status === "ready");
+  if (launched.status !== "ready") return;
+  try {
+    assert.equal(launched.page.title, "Managed navigation");
+    assert.equal(launched.page.current_url, "https://creator.xiaohongshu.com/publish/publish");
+    assert.equal((await launched.openUrl("https://example.com/one", "profile_management")).title, "Managed navigation");
+    assert.equal((await launched.openUrl("https://example.com/owner")).title, "Camoufox fixture");
+  } finally { await launched.close(); }
 }));

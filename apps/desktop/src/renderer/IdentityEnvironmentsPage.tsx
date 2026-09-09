@@ -26,6 +26,7 @@ import { createLatestRequestGate } from "./latestRequestGate";
 import {
   completeHarborManualAuthentication,
   fetchHarborIdentityState,
+  fetchHarborIdentitySession,
   lockHarborSession,
   openHarborIdentitySession,
   projectHarborSession,
@@ -89,6 +90,7 @@ export function IdentityEnvironmentsPage({
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [topbarHost, setTopbarHost] = useState<HTMLElement | null>(null);
   const harborStateRef = useRef(initialState);
+  const sessionGateRef = useRef(createLatestRequestGate());
   const refreshGateRef = useRef(createLatestRequestGate());
   const mutationRetryRef = useRef<{ intent: string; idempotencyKey: string } | null>(null);
   const handledRecoveryKeyRef = useRef<number | undefined>(undefined);
@@ -100,7 +102,7 @@ export function IdentityEnvironmentsPage({
   const selected = identities.find((identity) => identity.id === selectedId);
   const canMutate = harborState.status === "ready" && runtimeSupervisorState.canUseLiveRuntime;
   const selectedSession = selected ? sessionOverrides[selected.id] ?? selected.browser.session : null;
-  const environmentLocked = selectedSession?.state === "running" || selectedSession?.state === "takeover";
+  const environmentLocked = selectedSession != null && selectedSession.browserSessionRef !== "无" && ["running", "takeover", "idle"].includes(selectedSession.state);
   const filtered = useMemo(
     () => filterAndSortIdentities(identities, tasks, { provider, query, site, sort, status }),
     [identities, provider, query, site, sort, status, tasks],
@@ -134,6 +136,21 @@ export function IdentityEnvironmentsPage({
     setMode(recoveryRequest.destination === "provider" ? "edit" : "detail");
     if (recoveryRequest.destination === "refresh") void refreshHarborState();
   }, [recoveryRequest?.key, identities]);
+
+  useEffect(() => {
+    if (selected && mode === "detail") void refreshSession(selected);
+    else setSessionBusy("");
+    return () => sessionGateRef.current.invalidate();
+  }, [selected?.id, mode, harborState.fetchedAt, harborEndpoint]);
+
+  async function refreshSession(identity: IdentityEnvironmentProjection) {
+    const request = sessionGateRef.current.begin();
+    setSessionBusy("refresh");
+    const session = await fetchHarborIdentitySession(harborEndpoint, identity, request.signal);
+    if (!request.isCurrent()) return;
+    setSessionOverrides((current) => ({ ...current, [identity.id]: session }));
+    setSessionBusy("");
+  }
 
   async function refreshHarborState() {
     const request = refreshGateRef.current.begin();
@@ -207,6 +224,7 @@ export function IdentityEnvironmentsPage({
 
   async function updateSession(action: string, request: () => Promise<unknown>) {
     if (!selected || !canMutate || sessionBusy) return;
+    sessionGateRef.current.invalidate();
     setSessionBusy(action);
     const fallback = sessionOverrides[selected.id] ?? selected.browser.session;
     const result = await request();
@@ -275,11 +293,12 @@ export function IdentityEnvironmentsPage({
       onBack={() => setMode("catalog")}
       onCompleteAuthentication={() => void completeAuthentication()}
       onOpenBrowser={openBrowser}
+      onRefresh={() => void refreshSession(selected)}
       onOpenLibrary={onOpenLibrary}
       onOpenSettings={onOpenSettings}
       onRelease={() => void updateSession("release", () => releaseHarborSession(harborEndpoint, session.browserSessionRef))}
       onStop={() => void updateSession("stop", () => stopHarborSession(harborEndpoint, session.browserSessionRef))}
-      onTakeover={() => void updateSession("takeover", () => lockHarborSession(harborEndpoint, session.browserSessionRef))}
+      onTakeover={() => void updateSession("takeover", () => lockHarborSession(harborEndpoint, session.browserSessionRef, session.controller === "Core 任务运行"))}
       onRemove={() => setConfirmOperation("remove")}
       onDelete={() => setConfirmOperation("delete")}
     />
@@ -300,15 +319,15 @@ function IdentityCatalog({ canCreate, identities, hasAny, onCreate, onOpen }: { 
   return <section className="identity-catalog-list" aria-label="账号身份列表">{identities.map((identity) => <button className="identity-catalog-row" type="button" data-identity-ref={identity.identityEnvironmentRef} key={identity.id} onClick={() => onOpen(identity)}><span className="identity-avatar compact">{avatarLabel(identity)}</span><span className="identity-catalog-copy"><strong>{identity.accountLabel}</strong><small>{identity.siteName} · {identity.provider.selected}</small></span><IdentityStatus state={identity.readiness.state} /></button>)}</section>;
 }
 
-function IdentityDetail(props: { identity: IdentityEnvironmentProjection; session: BrowserSessionProjection; mutationsDisabled: boolean; sessionBusy: string; onBack: () => void; onCompleteAuthentication: () => void; onOpenBrowser: () => void; onOpenLibrary: () => void; onOpenSettings: () => void; onRelease: () => void; onStop: () => void; onTakeover: () => void; onRemove: () => void; onDelete: () => void }) {
+function IdentityDetail(props: { identity: IdentityEnvironmentProjection; session: BrowserSessionProjection; mutationsDisabled: boolean; sessionBusy: string; onBack: () => void; onCompleteAuthentication: () => void; onOpenBrowser: () => void; onRefresh: () => void; onOpenLibrary: () => void; onOpenSettings: () => void; onRelease: () => void; onStop: () => void; onTakeover: () => void; onRemove: () => void; onDelete: () => void }) {
   const { identity, session } = props;
-  const running = session.state === "running" || session.state === "takeover";
+  const running = session.browserSessionRef !== "无" && ["running", "takeover", "idle"].includes(session.state);
   const runtimeBlocked = identity.source !== "Harbor live";
   return <>
-    <button className="identity-back-link" type="button" onClick={props.onBack}>账号身份</button>
+    <button className="identity-back-link" type="button" onClick={props.onBack}>账号身份</button><button type="button" disabled={Boolean(props.sessionBusy)} onClick={props.onRefresh}>刷新实例状态</button>
     <header className="identity-detail-title"><span className="identity-avatar">{avatarLabel(identity)}</span><div><h1>{identity.accountLabel}</h1><p><span className="identity-site-tag">{identity.siteName}</span>{identity.login.state} · {identity.provider.selected}</p></div></header>
     <div className="identity-status-line"><IdentityStatus state={identity.readiness.state} /><span>{identity.readiness.label}</span></div>
-    <section className="identity-instance-section"><div className="identity-instance-copy"><span className="identity-instance-icon"><Monitor size={18} /></span><div><h2>{running ? "浏览器实例正在运行" : identity.readiness.state === "blocked" ? "浏览器当前不可用" : "浏览器环境已就绪"}</h2><p>{session.title || identity.provider.selected} · {session.statusLabel}</p></div></div><div className="identity-detail-actions"><button className="primary" type="button" disabled={props.mutationsDisabled || runtimeBlocked || Boolean(props.sessionBusy)} onClick={props.onOpenBrowser}><Monitor size={14} />{props.sessionBusy === "open" ? "正在打开" : running ? "聚焦浏览器" : identity.login.recoveryRequired ? "打开浏览器并登录" : "打开浏览器"}</button>{session.state === "running" ? <button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onTakeover}>接管</button> : null}{session.state === "takeover" ? <><button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onCompleteAuthentication}>已完成，继续</button><button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onRelease}>放弃接管</button></> : null}{running ? <button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onStop}>停止实例</button> : null}<button type="button" disabled={identity.readiness.state === "blocked"} onClick={props.onOpenLibrary}>选择技能</button></div></section>
+    <section className="identity-instance-section"><div className="identity-instance-copy"><span className="identity-instance-icon"><Monitor size={18} /></span><div><h2>{running ? "浏览器实例正在运行" : identity.readiness.state === "blocked" ? "浏览器当前不可用" : "浏览器环境已就绪"}</h2><p>{session.title || identity.provider.selected} · {session.statusLabel}</p></div></div><div className="identity-detail-actions"><button className="primary" type="button" disabled={props.mutationsDisabled || runtimeBlocked || Boolean(props.sessionBusy) || session.state === "failed"} onClick={running ? props.onRefresh : props.onOpenBrowser}><Monitor size={14} />{props.sessionBusy === "open" ? "正在打开" : running ? "刷新实例" : identity.login.recoveryRequired ? "打开浏览器并登录" : "打开浏览器"}</button>{running && session.state !== "takeover" ? <button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onTakeover}>接管</button> : null}{session.state === "takeover" ? <>{["xiaohongshu", "boss"].includes(identity.siteId) ? <button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onCompleteAuthentication}>已完成，继续</button> : null}<button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onRelease}>交还控制</button></> : null}{running ? <button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy)} onClick={props.onStop}>停止实例</button> : null}<button type="button" disabled={identity.readiness.state === "blocked"} onClick={props.onOpenLibrary}>选择技能</button></div></section>
     <section className="identity-environment-section"><div className="identity-section-heading"><div><h2>环境配置</h2><p>由 Harbor 管理的 Provider、代理与浏览器参数。</p></div><button className="inline-link" type="button" onClick={props.onOpenSettings}>检查环境依赖</button></div><dl className="identity-environment-list"><div><dt>Provider</dt><dd>{identity.provider.selected}</dd></div><div><dt>代理</dt><dd>{identity.environment.proxy}</dd></div><div><dt>地区与语言</dt><dd>{identity.environment.region} · {identity.environment.language} · {identity.environment.timezone}</dd></div></dl><details className="identity-profile-details"><summary>高级环境信息</summary><dl className="identity-environment-list"><div><dt>浏览器</dt><dd>{identity.environment.browser}</dd></div><div><dt>视口</dt><dd>{identity.environment.viewport}</dd></div><div><dt>User agent</dt><dd>{identity.environment.userAgent}</dd></div><div><dt>指纹摘要</dt><dd>{identity.environment.fingerprint}</dd></div></dl></details></section>
     <section className="identity-danger-zone"><div><h2>移除账号身份</h2><p>从 App 移除会保留本机数据；删除本机数据不可撤销。</p></div><div><button type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy) || running} onClick={props.onRemove}>从 App 移除</button><button className="danger" type="button" disabled={props.mutationsDisabled || Boolean(props.sessionBusy) || running} onClick={props.onDelete}><Trash2 size={14} />删除本机数据</button></div></section>
   </>;

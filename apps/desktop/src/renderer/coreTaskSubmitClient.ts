@@ -266,7 +266,7 @@ export function readOnlyIdentityAdmissionBlockReason(
   if (!readSpec) {
     return "当前入口不是已登记的真实只读任务；保持 fail closed。";
   }
-  if (isReadOnlyIdentityAdmitted(identity, identity.siteId, readSpec)) {
+  if ((identity.siteId === "xiaohongshu" || identity.siteId === "boss") && isReadOnlyIdentityAdmitted(identity, identity.siteId, readSpec)) {
     return null;
   }
   return "身份环境尚未 ready；受限或告警状态不能直接启动真实 Core task。";

@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "account.bind"] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind"] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };
@@ -204,6 +204,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async authenticateCredential(credentialHash: unknown): Promise<ManagedPrincipal> { return publicPrincipal(authenticated(await read(), credentialHash)); },
+    async listAgentGrants(credentialHash: unknown): Promise<ManagedGrant[]> {
+      const state = await read(), principal = authenticated(state, credentialHash);
+      return state.grants.filter(grant => grant.principal_id === principal.principal_id);
+    },
     async connect(credentialHash: unknown): Promise<ManagedConnection> {
       return transaction(state => {
         const principal = authenticated(state, credentialHash);
@@ -285,7 +289,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
       if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
       if (targetOrigin !== undefined && (!grant.allowed_origins.includes(targetOrigin) || !profile.allowed_origins.includes(targetOrigin) || !task.origins.includes(targetOrigin))) return fail("managed_access_denied");
-      if (["instance.start", "instance.observe", "account.bind"].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if (["instance.start", "instance.observe", "instance.navigate", "instance.read", "account.bind"].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       return { ...result, profile_policy: profile };
     },
     // The caller coordinates Harbor creation with its existing operation/idempotency owner.

@@ -58,6 +58,7 @@ export type RuntimeServiceState = {
   command?: string;
   cwd?: string;
   pid?: number;
+  readyAnnounced?: boolean;
   health: RuntimeProbe;
   admission?: RuntimeProbe;
   checkedAt: string;
@@ -82,6 +83,8 @@ type ProcessSnapshot = {
   child?: ChildProcess;
   endpoint?: string;
   supervisorToken?: string;
+  readyAnnounced?: boolean;
+  startupOutput?: string;
   outputRedactor?: RuntimeOutputRedactor;
   errorRedactor?: RuntimeOutputRedactor;
   lastExitCode?: number | null;
@@ -162,7 +165,7 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
   let mediaResolverConfigPromise: Promise<ProtectedMediaResolverConfig | undefined> | undefined;
   const getSupervisorToken = (id: RuntimeServiceId, endpoint: string) => {
     const snapshot = processSnapshots.get(id);
-    return snapshot?.endpoint === normalizeEndpoint(endpoint) && snapshot.child
+    return snapshot?.endpoint === normalizeEndpoint(endpoint) && snapshot.child && snapshot.child.exitCode === null && !snapshot.child.killed
       ? snapshot.supervisorToken
       : undefined;
   };
@@ -241,6 +244,7 @@ async function readServiceState(
     command: launch?.command,
     cwd: launch?.cwd,
     pid: snapshot.child?.pid,
+    readyAnnounced: snapshot.readyAnnounced,
     health,
     ...(admission ? { admission } : {}),
     checkedAt,
@@ -299,6 +303,11 @@ function ensureProcess(
       snapshot.lastError = error.message;
     });
     child.stdout?.on("data", (chunk) => {
+      if (!snapshot.readyAnnounced) {
+        snapshot.startupOutput = ((snapshot.startupOutput ?? "") + chunk.toString()).slice(-8192);
+        snapshot.readyAnnounced = snapshot.startupOutput.includes('"status":"ready"');
+        if (snapshot.readyAnnounced) snapshot.startupOutput = undefined;
+      }
       snapshot.lastOutput = appendRuntimeOutput(snapshot.lastOutput, snapshot.outputRedactor?.write(chunk.toString()) ?? "");
     });
     child.stderr?.on("data", (chunk) => {

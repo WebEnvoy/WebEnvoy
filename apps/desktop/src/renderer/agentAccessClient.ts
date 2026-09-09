@@ -13,8 +13,8 @@ export type AgentAccessState = {
   profile_policies: { profile_ref: string; allowed_operations: string[]; allowed_origins: string[] }[];
 };
 
-const managementOperations = ["profile.list", "profile.read", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "account.bind"];
-export const agentManagementScope = "创建最多 2 个 Camoufox Profile；列出、读取、启动、停止、观察、人工接管及账号绑定；仅限 https://example.com。";
+const managementOperations = ["profile.list", "profile.read", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "instance.navigate", "instance.read"];
+export const agentManagementScope = "创建最多 2 个 Camoufox Profile；列出、读取、启动、停止、观察、人工接管及公开页面导航/正文读取；仅限 https://example.com。";
 
 export function createAgentGrantInput(principalId: string, hours: number, key: string) {
   if (!principalId || ![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 和授权时限。");
@@ -106,4 +106,20 @@ export async function queryAgentAccessOperation(endpoint: string, key: string): 
     const result = record(await requestOwnerJson(endpoint, `/agent-access/operations/${encodeURIComponent(key)}`));
     return result.ok === true && record(result.operation).status === "completed" ? "completed" : "unknown";
   } catch { return "unknown"; }
+}
+
+export async function fetchAgentManagementPolicy(endpoint: string): Promise<{ source_version: string; modes: Record<string, string> } | null> {
+  const result = record(await requestOwnerJson(endpoint, '/agent-access/management-policy'));
+  if (result.ok !== true) throw new Error('无法读取管理执行策略。');
+  if (result.configuration === null) return null;
+  const configuration = record(result.configuration);
+  return { source_version: text(configuration.source_version), modes: record(configuration.modes) as Record<string, string> };
+}
+
+export async function allowAgentManagement(endpoint: string) {
+  const current = await fetchAgentManagementPolicy(endpoint);
+  const result = record(await requestOwnerJson(endpoint, '/agent-access/management-policy', {
+    method: 'PUT', body: { schema_version: 'webenvoy.execution-policy-mutation.v0', idempotency_key: crypto.randomUUID(), expected_source_version: current?.source_version ?? null, modes: { read: 'auto', commit: 'auto' } },
+  }));
+  if (result.ok !== true) throw new Error('未确认管理策略已保存，请刷新核对；不会自动重发。');
 }

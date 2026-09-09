@@ -59,6 +59,26 @@ export async function fetchHarborIdentityState(
   };
 }
 
+export async function fetchHarborIdentitySession(
+  harborEndpoint: string,
+  identity: IdentityEnvironmentProjection,
+  signal?: AbortSignal,
+): Promise<BrowserSessionProjection> {
+  const empty = projectHarborSession(null, identity.browser.session);
+  const result = await requestJson<unknown>(harborEndpoint, `/runtime/identity-environments/${encodeURIComponent(identity.identityEnvironmentRef)}/session`, { method: "GET", signal });
+  if (result.ok && isRecord(result.value) && result.value.runtime_session === null) return empty;
+  const session = result.ok && isRecord(result.value) ? result.value.runtime_session : null;
+  if (!isRecord(session) || fixtureOrDemoPayloadReason(session) || session.schema_version !== "harbor-runtime-facts/v0" ||
+    session.identity_environment_ref !== identity.identityEnvironmentRef || session.profile_ref !== identity.profileRef ||
+    typeof session.runtime_session_ref !== "string" || typeof session.lifecycle_state !== "string" || typeof session.control_owner !== "string" ||
+    !isRecord(session.current_page) || typeof session.current_page.requested_url !== "string" || typeof session.created_at !== "string" ||
+    !(session.current_page.current_url === null || typeof session.current_page.current_url === "string") ||
+    !(session.current_page.title === null || typeof session.current_page.title === "string")) {
+    return { ...empty, state: "failed", statusLabel: "状态未知", message: result.ok ? "Harbor 未返回匹配该 Profile 的有效实例。" : result.error };
+  }
+  return projectHarborSession(session as unknown as HarborRuntimeSession, empty);
+}
+
 export async function openHarborIdentitySession(
   harborEndpoint: string,
   identity: IdentityEnvironmentProjection,
@@ -86,7 +106,10 @@ export async function openHarborIdentitySession(
   return result.ok ? result.value : { status: "unavailable" as const, message: result.error, retryable: false };
 }
 
-export async function lockHarborSession(harborEndpoint: string, sessionRef: string) {
+export async function lockHarborSession(harborEndpoint: string, sessionRef: string, handoffFromCore = false) {
+  if (handoffFromCore) return postHarborSession(harborEndpoint, [`/runtime/sessions/${encodeURIComponent(sessionRef)}/handoff`], {
+    control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested",
+  });
   return postHarborSession(harborEndpoint, sessionPaths(sessionRef, "lock"), {
     control_owner: "user",
     holder_ref: "app-browser-page",

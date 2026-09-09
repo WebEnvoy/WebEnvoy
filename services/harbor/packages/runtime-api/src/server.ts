@@ -360,6 +360,11 @@ async function routeSession(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
+  if ((action === "navigate" || action === "read") && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.operateManagedPublicPage(runtimeSessionRef, await readJson<unknown>(request), action === "navigate");
+    writeJson(response, result.status === "completed" ? 200 : 409, result); return;
+  }
   if (action === "observe" && method === "POST") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.observeManagedSession(runtimeSessionRef, await readJson<unknown>(request));
@@ -461,6 +466,10 @@ async function routeSession(
       return;
     }
     const handoff = runtime.recordHandoff(runtimeSessionRef, { control_owner: "user", handoff_reason: "user_requested" });
+    if (!("status" in handoff)) {
+      const cleared = await runtime.clearManagedPublicPageGuard(runtimeSessionRef);
+      if (cleared.status !== "completed") { writeJson(response, 409, cleared); return; }
+    }
     const transferred = runtime.getSession(runtimeSessionRef);
     writeJson(response, "status" in handoff || !transferred ? 409 : 200, "status" in handoff ? handoff : transferred);
   }

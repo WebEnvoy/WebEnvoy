@@ -24,6 +24,7 @@ try {
       window.check = {calls:[], rejection:true, unknown:false, receipt:false, reads:0};
       const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]}],profile_policies:[],secret:"never-render-this"};
       window.webenvoyShell = {requestOwnerJson:async request=>{
+        if(request.path === "/agent-access/management-policy") return {ok:true,body:{ok:true,configuration:null}};
         window.check.calls.push(request);
         if(request.path.includes("/operations/")) return window.check.receipt ? {ok:true,body:{ok:true,operation:{status:"completed",result:{}}}} : {ok:false,status:404,error:"not_found"};
         if(request.method==="GET"){window.check.reads++;const snapshot=structuredClone(state);if(window.check.holdRead){window.check.holdRead=false;await new Promise(resolve=>window.check.releaseRead=resolve);}return {ok:true,body:snapshot};}
@@ -57,6 +58,8 @@ try {
   assert.equal(await evaluate("window.grantInput.creation_template.provider_id"), "camoufox");
   assert.equal(await evaluate("window.grantInput.max_created_profiles"), 2);
   assert.deepEqual(await evaluate("window.grantInput.profile_refs"), []);
+  assert.equal(await evaluate("window.grantInput.allowed_operations.includes('instance.read') && window.grantInput.allowed_operations.includes('instance.navigate')"), true);
+  assert.equal(await evaluate("window.grantInput.allowed_operations.includes('account.bind')"), false);
   await evaluate(`${button("撤销授权")}.click()`);
   await waitFor("document.querySelector('[role=alert]')?.textContent.includes('拒绝')");
   assert.equal(await evaluate("window.check.reads"), 2);

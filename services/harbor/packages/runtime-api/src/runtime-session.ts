@@ -1,4 +1,4 @@
-import { boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
+import { isTrustedManagedPublicPageOperation, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
 import {
   createLocalIdentityEnvironmentFacts,
   HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA,
@@ -123,7 +123,9 @@ export interface RuntimeSessionRecord {
   read_operation_user_handoff: boolean;
   execution_surface: "local_provider" | "fixture" | "unknown";
   profile_ownership?: ProfileStorageOwnershipLock;
-  openUrl?: (url: string) => Promise<LocalProviderPageFacts>;
+  openUrl?: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
+  clearPublicPageGuard?: () => Promise<void>;
+  publicPage?: ManagedPublicPageOperation;
   observePage?: () => Promise<ManagedProviderObservation>;
   managed_observations?: ManagedObservation[];
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
@@ -182,6 +184,7 @@ export class RuntimeSessionStore {
           }
         }
         const result = await this.launcher({
+          operation_scope: input.operation_scope,
           browser_path: input.browser_path ?? "",
           provider_id: input.provider_id,
           headless,
@@ -282,6 +285,8 @@ export class RuntimeSessionStore {
       execution_surface: ready ? launch.execution_surface ?? "unknown" : "unknown",
       profile_ownership: profileOwnership ?? undefined,
       openUrl: ready ? launch.openUrl : undefined,
+      clearPublicPageGuard: ready ? launch.clearPublicPageGuard : undefined,
+      publicPage: ready ? launch.publicPage : undefined,
       observePage: ready ? launch.observePage : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
@@ -403,7 +408,7 @@ export class RuntimeSessionStore {
       const conflict = this.acquireControl(existing, owner, holder);
       if (conflict) return conflict;
       try {
-        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!)));
+        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!, input.operation_scope)));
       } catch {
         this.markDriverLost(existing);
       }
@@ -656,6 +661,37 @@ export class RuntimeSessionStore {
     record.read_operation_user_confirmed = true;
     record.read_operation_user_release_pending = false;
     record.read_operation_user_handoff = true;
+  }
+
+  async clearManagedPublicPageGuard(runtime_session_ref: string) {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || record.facts.control_owner !== "user" || record.facts.control_lock.state !== "held" || record.active_provider_interactions) return managedUnavailable("control_lock_conflict");
+    try {
+      if (record.clearPublicPageGuard) await this.withProviderInteraction(record, record.clearPublicPageGuard);
+      return { status: "completed" as const };
+    } catch { return managedUnavailable("managed_public_guard_release_failed"); }
+  }
+
+  async operateManagedPublicPage(runtime_session_ref: string, holder_ref: string, input: ManagedPublicPageInput) {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
+    const operation = record.publicPage;
+    if (record.execution_surface !== "local_provider" || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
+    const generation = record.control_generation;
+    try {
+      const result = await this.withProviderInteraction(record, () => operation(input));
+      if (record.control_generation !== generation || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      if (result.status !== "completed") {
+        if (result.page?.current_url) this.applyPageFacts(record, result.page.current_url, result.page);
+        return managedUnavailable(result.failure_class);
+      }
+      if (!result.page.current_url || new URL(result.page.current_url).origin !== input.expected_origin) return managedUnavailable("managed_public_origin_denied");
+      this.applyPageFacts(record, result.page.current_url, result.page);
+      return { status: "completed" as const, session: snapshot(record.facts), observed_at: new Date().toISOString(),
+        ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }) };
+    } catch { return managedUnavailable("managed_public_page_unavailable"); }
   }
 
   async observeManagedSession(runtime_session_ref: string, holder_ref: string): Promise<ManagedObservation | ManagedObservationUnavailable> {
@@ -946,6 +982,8 @@ export class RuntimeSessionStore {
     record.facts.control_owner = "none";
     record.facts.control_lock = { owner: "none", state: "released", holder_ref: null, updated_at: now, conflict_error: null };
     delete record.openUrl;
+    delete record.publicPage;
+    delete record.clearPublicPageGuard;
     delete record.observePage;
     delete record.managed_observations;
     delete record.probeReadOperation;

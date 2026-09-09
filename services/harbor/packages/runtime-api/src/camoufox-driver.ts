@@ -1,4 +1,4 @@
-import { managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
+import { managedUnavailable, trustManagedPublicPageOperation, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -229,8 +229,9 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
   const launchDeadline = Date.now() + Math.max(1, input.timeout_ms);
   let closed = false;
   try {
-    const initialUrl = camoufoxConfigurationPageUrl(input);
+    const initialUrl = input.operation_scope === "profile_management" ? input.url : camoufoxConfigurationPageUrl(input);
     const readyResponse = await driver.request("launch", {
+      operation_scope: input.operation_scope,
       executable_path: browserPath,
       profile_dir: profileStorage.profileDir,
       headless: input.headless,
@@ -272,12 +273,24 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       viewer_entry: camoufoxViewerEntry(input.headless),
       page,
       facts,
+      clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
+      publicPage: trustManagedPublicPageOperation(async input => {
+        const result = await driver.request("managed_public_page", input, DRIVER_COMMAND_TIMEOUT_MS);
+        if (result.page) currentUrl = parseDriverPage(result).current_url ?? currentUrl;
+        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(result.page ? { page: pageFacts(parseDriverPage(result)) } : {}) };
+        const page = pageFacts(parseDriverPage(result));
+        if (typeof result.text === "string") {
+          if (result.text.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|(?:token|cookie|password|secret|authorization|credential)\s*[=:]/i.test(result.text)) return managedUnavailable("managed_public_content_unavailable");
+          return { status: "completed", page, text: result.text, truncated: result.truncated === true };
+        }
+        return input.url ? { status: "completed", page } : managedUnavailable("managed_public_content_unavailable");
+      }),
       observePage: trustManagedPageObserver(async () => {
         const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
         return normalizeManagedProviderObservation(result.observation);
       }),
-      openUrl: async (url) => {
-        const response = await driver.request("open_url", { url, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
+      openUrl: async (url, operation_scope) => {
+        const response = await driver.request("open_url", { url, operation_scope, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
         const next = pageFacts(parseDriverPage(response));
         currentUrl = next.current_url ?? url;
         return next;

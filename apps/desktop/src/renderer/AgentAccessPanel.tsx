@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createLatestRequestGate } from "./latestRequestGate";
 import {
-  agentManagementScope, createAgentGrantInput, fetchAgentAccess, mutateAgentAccess, queryAgentAccessOperation,
+  allowAgentManagement, fetchAgentManagementPolicy, agentManagementScope, createAgentGrantInput, fetchAgentAccess, mutateAgentAccess, queryAgentAccessOperation,
   type AgentAccessState,
 } from "./agentAccessClient";
 
@@ -10,6 +10,7 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
   const storageKey = `webenvoy.agent-access.pending:${endpoint}`;
   const [state, setState] = useState<AgentAccessState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [managementAllowed, setManagementAllowed] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(() => localStorage.getItem(storageKey) ?? "");
@@ -22,6 +23,9 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
 
   async function refresh() {
     const request = readGate.current.begin();
+    void fetchAgentManagementPolicy(endpoint).then(policy => {
+      if (alive.current && request.isCurrent()) setManagementAllowed(policy?.modes.commit === "auto" && policy?.modes.read === "auto");
+    }).catch(() => { if (alive.current && request.isCurrent()) setManagementAllowed(false); });
     try {
       const next = await fetchAgentAccess(endpoint, request.signal);
       if (alive.current && request.isCurrent()) { setState(next); setError(""); }
@@ -108,6 +112,16 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
       {error && <p className="settings-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
       {pending && <div role="status"><p>待确认操作：{pending}</p><button type="button" className="save-button" disabled={busy} onClick={() => void reconcile()}>查询原操作结果</button></div>}
+      <div className="settings-action-row">
+        <p>{managementAllowed ? "已授权的环境管理操作可直接执行。" : "创建 Profile 还需要允许环境管理操作直接执行。此设置不更改网站任务的执行方式，也不授予新的权限。"}</p>
+        <button type="button" className="save-button" disabled={disabled || managementAllowed} onClick={async () => {
+          if (busyRef.current) return;
+          busyRef.current = true; setBusy(true); setError("");
+          try { await allowAgentManagement(endpoint); await refresh(); }
+          catch (error) { setError(error instanceof Error ? error.message : "请刷新核对管理执行策略。"); }
+          finally { busyRef.current = false; setBusy(false); }
+        }}>允许已授权的环境管理操作</button>
+      </div>
       <form onSubmit={register}>
         <h3>登记 Agent</h3>
         <p>先由 Agent 本地客户端生成凭据，仅粘贴其 SHA-256 公开指纹。不要粘贴原始 token；App 不生成或展示密钥。</p>

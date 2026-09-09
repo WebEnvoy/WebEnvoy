@@ -4,6 +4,7 @@ type WebEnvoyShellContext = {
   platform: NodeJS.Platform;
   colorScheme: "light" | "dark";
   configScope: "local-ui-only";
+  runtimeEndpoints?: { coreEndpoint: string; harborEndpoint: string };
 };
 type WebEnvoyColorScheme = WebEnvoyShellContext["colorScheme"];
 type RuntimeEndpointConfig = {
