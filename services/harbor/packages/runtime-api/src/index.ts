@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
+import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
 import { createLocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentFacts, type LocalIdentityEnvironmentInput } from "./identity-environment.js";
 import {
@@ -456,6 +456,27 @@ export class HarborRuntime {
 
   getSession(runtime_session_ref: string): RuntimeSessionFacts | null {
     return this.runtimeSessions.getSession(runtime_session_ref);
+  }
+
+  async operateManagedPublicPage(runtime_session_ref: string, input: unknown, navigate: boolean) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
+    const request = input as Record<string, unknown>;
+    const keys = navigate ? ["holder_ref", "expected_origin", "url"] : ["holder_ref", "expected_origin"];
+    if (Object.keys(request).length !== keys.length || !keys.every(key => typeof request[key] === "string") || !boundedManagedRef(request.holder_ref) || !managedPublicOrigin(request.expected_origin)) return managedUnavailable("managed_public_origin_denied");
+    if (navigate) {
+      try {
+        const url = new URL(request.url as string);
+        if (url.origin !== request.expected_origin || url.username || url.password || url.search || url.hash || url.href.length > 512) return managedUnavailable("managed_public_origin_denied");
+        request.url = url.href;
+      } catch { return managedUnavailable("invalid_request"); }
+    }
+    const session = this.runtimeSessions.getSession(runtime_session_ref);
+    const profile = session?.identity_environment_ref ? this.identityEnvironments.get(session.identity_environment_ref) : null;
+    if (!profile) return managedUnavailable("session_missing");
+    // A generic public read cannot consume a declared identity-dependent origin.
+    if ((profile.account_bindings.length || profile.site.account_ref) && profile.site.origin === request.expected_origin) return managedUnavailable("managed_public_identity_required");
+    return this.runtimeSessions.operateManagedPublicPage(runtime_session_ref, request.holder_ref as string,
+      { expected_origin: request.expected_origin as string, ...(navigate ? { url: request.url as string } : {}) });
   }
 
   async observeManagedSession(runtime_session_ref: string, input: unknown): Promise<ManagedObservation | ManagedObservationUnavailable> {

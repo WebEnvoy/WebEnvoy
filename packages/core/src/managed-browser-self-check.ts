@@ -14,6 +14,8 @@ import { executionPolicyMutationSchemaVersion } from "./execution-policy-config.
 const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
 let creates = 0;
+let navigations = 0, observations = 0;
+let managedSession: Record<string, unknown>;
 let dropResponse = false;
 const receipts = new Map<string, unknown>();
 let afterCreate: (() => Promise<void>) | undefined;
@@ -36,6 +38,14 @@ const server = createServer((req, res) => { void (async () => {
     if (dropResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else if (req.url === "/runtime/identity-environments") value = { identity_environments: profiles };
+  else if (req.url === "/runtime/identity-environments/identity%3A1/session") value = { runtime_session: managedSession };
+  else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
+  else if (["/runtime/sessions/session%3Aone/navigate", "/runtime/sessions/session%3Aone/read"].includes(req.url ?? "")) {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    if (req.url!.endsWith("/navigate")) { navigations++; managedSession.current_page = { current_url: input.url }; }
+    value = { status: "completed", session: managedSession, observed_at: new Date().toISOString(), ...(req.url!.endsWith("/read") ? { text: "Example Domain is for use in documentation examples.", truncated: false } : {}) };
+  }
   else { res.writeHead(404); res.end('{}'); return; }
   res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value));
 })().catch(() => { res.writeHead(500); res.end('{}'); }); });
@@ -88,6 +98,32 @@ try {
   assert.equal((reconciled.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:3");
   assert.equal(creates, 3, "receipt query must not replay creation");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === recoveryGrant.grant_id)?.created_profile_refs.length, 1);
+  const browserOps = ["instance.navigate", "instance.read"];
+  await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
+  const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  managedSession = { runtime_session_ref: "session:one", profile_ref: "profile:1", control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
+  const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  await assert.rejects(service.submit(credentialHash, { ...navigation, runtime_session_ref: undefined }), /invalid_input/);
+  const stale = await service.submit(credentialHash, { ...navigation, idempotency_key: "old-session", runtime_session_ref: "session:old" });
+  assert.equal(stale.failure?.code, "managed_browser_session_mismatch");
+  assert.equal(navigations, 0);
+  const navigated = await service.submit(credentialHash, navigation);
+  assert.equal(navigated.status, "succeeded", JSON.stringify(navigated));
+  assert.equal(navigations, 1);
+  assert.equal(observations, 1, "fresh observation precedes navigation after reconnect or handback");
+  assert.deepEqual(await service.query(credentialHash, navigated.run_id), navigated);
+  assert.deepEqual(await service.submit(credentialHash, navigation), navigated);
+  assert.equal(navigations, 1, "query and duplicate submission never replay navigation");
+  const content = await service.submit(credentialHash, { ...navigation, idempotency_key: "read-one", operation: "instance.read", url: undefined });
+  assert.equal((content.result as { text: string }).text, "Example Domain is for use in documentation examples.");
+  for (const denied of [{ ...navigation, profile_ref: "profile:2" }, { ...navigation, origin: "https://denied.example", url: "https://denied.example/" }, { ...navigation, task_scope: { ...navigation.task_scope, operations: ["instance.read"] } }]) {
+    await assert.rejects(service.submit(credentialHash, { ...denied, idempotency_key: "denied" }), /managed_access_denied/);
+  }
+  await accessStore.revokeGrant({ idempotency_key: "revoke-public", grant_id: publicGrant.grant_id });
+  const publicReconnect = await accessStore.connect(credentialHash);
+  await assert.rejects(service.submit(credentialHash, { ...navigation, connection_id: publicReconnect.connection_id, idempotency_key: "after-public-revoke" }), /grant_unavailable/);
+  assert.equal(navigations, 1);
+  assert.deepEqual(await service.query(credentialHash, navigated.run_id), navigated);
   console.log("managed browser Core HTTP boundary self-check passed");
 } finally {
   await new Promise<void>(resolve => server.close(() => resolve()));

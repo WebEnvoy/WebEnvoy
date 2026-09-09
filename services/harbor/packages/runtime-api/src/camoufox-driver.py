@@ -275,6 +275,54 @@ def open_url(request: dict[str, Any]) -> dict[str, Any]:
     return {"page": page_facts()}
 
 
+def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
+    if PAGE is None:
+        raise RuntimeError("Camoufox Driver has no active page.")
+    expected = request.get("expected_origin")
+    def origin(value: str) -> str:
+        parsed = urlparse(value)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    if not isinstance(expected, str) or origin(expected) != expected:
+        return {"failure_class": "managed_public_origin_denied"}
+    target = request.get("url")
+    with contextlib.redirect_stdout(sys.stderr):
+        if target is not None:
+            if not isinstance(target, str) or origin(target) != expected:
+                return {"failure_class": "managed_public_origin_denied"}
+            # Native navigation may follow redirects. A refusal below means the
+            # navigation may have happened; it never means external effects were undone.
+            PAGE.goto(target, wait_until="domcontentloaded", timeout=15_000)
+        if origin(str(PAGE.url)) != expected:
+            return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": page_facts()}
+        if target is not None:
+            return {"page": page_facts()}
+        # Fixed read-only expression. No selectors, expressions or script from an Agent.
+        observed = PAGE.evaluate("""mw:(expected => {
+          if (location.origin !== expected) return null;
+          const root = document.querySelector('main, article') || document.body;
+          if (!root) return null;
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          const parts = []; let length = 0, truncated = false, node;
+          while ((node = walker.nextNode())) {
+            const el = node.parentElement;
+            if (!el || el.closest('script,style,noscript,input,textarea,select,button,form,[contenteditable],[hidden],[aria-hidden="true"]')) continue;
+            const style = getComputedStyle(el);
+            if (style.display === 'none' || style.visibility !== 'visible' || !el.getClientRects().length) continue;
+            const text = node.textContent.replace(/\\s+/g, ' ').trim();
+            if (!text) continue;
+            parts.push(text); length += text.length + 1;
+            if (length > 4096) { truncated = true; break; }
+          }
+          return { text: parts.join(' ').slice(0, 4096), truncated };
+        })""", expected)
+        if origin(str(PAGE.url)) != expected or not isinstance(observed, dict):
+            return {"failure_class": "managed_public_origin_denied"}
+        text = public_text(observed.get("text"), 4096)
+        if not text:
+            return {"failure_class": "managed_public_content_unavailable"}
+        return {"page": page_facts(), "text": text, "truncated": observed.get("truncated") is True}
+
+
 def site_resource_probe(request: dict[str, Any]) -> dict[str, Any]:
     if PAGE is None:
         raise RuntimeError("Camoufox Driver has no active page.")
@@ -500,6 +548,8 @@ def main() -> None:
                 send(message_id, "ready", **launch(request))
             elif op == "open_url":
                 send(message_id, "ok", **open_url(request))
+            elif op == "managed_public_page":
+                send(message_id, "ok", **managed_public_page(request))
             elif op == "managed_observe":
                 if PAGE is None:
                     raise RuntimeError("Camoufox Driver has no active page.")

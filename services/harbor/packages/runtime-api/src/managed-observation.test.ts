@@ -8,7 +8,7 @@ import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 import { createMutationInput, identityInput, isolateProfileStorage, testProviderDetection } from "./identity-environment-mutation-test-helpers.js";
-import { managedOperationCatalog, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
+import { trustManagedPublicPageOperation, managedOperationCatalog, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
 
@@ -117,6 +117,9 @@ test("management scope opens persisted unauthenticated profiles without promotin
       assert.equal((await fetch(`${server.url}${path}`)).status, 403);
       assert.equal((await fetch(`${server.url}${path}`, { headers: { authorization: `Bearer ${token}` } })).status, 200);
     }
+    for (const action of ["navigate", "read"]) {
+      assert.equal((await fetch(`${server.url}/runtime/sessions/${encodeURIComponent(session.runtime_session_ref)}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 403);
+    }
     const wrongHandoff = await fetch(`${server.url}/runtime/sessions/${encodeURIComponent(session.runtime_session_ref)}/handoff`, {
       method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: "principal:other" })
@@ -175,4 +178,57 @@ test("stop refuses a different principal holding the same Core control-owner kin
   assert.notEqual(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "closed");
   const stopped = await runtime.stopSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:original" });
   assert.ok(!("status" in stopped) && stopped.lifecycle_state === "closed");
+});
+
+
+test("bounded public operations keep the exact instance, refuse identity origins and changed leases, and report redirects without reading", async () => {
+  const calls: { ref: string; url?: string }[] = [];
+  const launcher: LocalProviderLauncher = async input => {
+    const ready = await createFixtureLauncher("ready")(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    let current = input.url;
+    return { ...ready, execution_surface: "local_provider", publicPage: trustManagedPublicPageOperation(async operation => {
+      calls.push({ ref: input.profile_ref, url: operation.url });
+      current = operation.url ?? current;
+      if (current.endsWith("/redirect")) {
+        current = "https://denied.example/";
+        return { status: "unavailable", failure_class: "managed_public_navigation_redirected", retryable: false,
+          page: { current_url: current, title: "Redirected", status: "ready", facts: [] } };
+      }
+      return { status: "completed", page: { current_url: current, title: "Public", status: "ready", facts: [] },
+        ...(operation.url ? {} : { text: "A verifiable public paragraph.", truncated: false }) };
+    }) };
+  };
+  const runtime = new HarborRuntime(launcher);
+  for (const suffix of ["a", "b"]) runtime.createLocalIdentityEnvironment({ ...identityInput(`public:${suffix}`, `public-profile:${suffix}`), site: { site_id: "public", origin: "https://example.com", display_name: "Public" } });
+  const a = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "public:a", url: "https://example.com/", control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+  const b = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "public:b", url: "https://example.com/", control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+  if ("status" in a || "status" in b) throw new Error("session unavailable");
+  const input = { holder_ref: "principal:one", expected_origin: "https://example.com" };
+  try {
+    for (const url of ["https://example.com/one", "https://example.com/two"]) {
+      const result = await runtime.operateManagedPublicPage(a.runtime_session_ref, { ...input, url }, true);
+      assert.ok(result.status === "completed" && result.session.runtime_session_ref === a.runtime_session_ref);
+    }
+    const read = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
+    assert.ok(read.status === "completed" && read.text === "A verifiable public paragraph.");
+    assert.equal(runtime.getSession(b.runtime_session_ref)?.current_page.current_url, "https://example.com/");
+    const beforeDenied = calls.length;
+    for (const invalid of [{ ...input, expected_origin: "https://creator.xiaohongshu.com" }, { ...input, expected_origin: "https://www.zhipin.com" }, { ...input, expression: "document.cookie" }]) {
+      assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, invalid, false)).status, "unavailable");
+    }
+    assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, { ...input, url: "https://denied.example/" }, true)).status, "unavailable");
+    assert.equal((await runtime.operateManagedPublicPage("stale:session", input, false)).status, "unavailable");
+    assert.equal(calls.length, beforeDenied);
+    runtime.recordHandoff(a.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested" });
+    assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false)).status, "unavailable");
+    runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
+    runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
+    const resumed = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
+    assert.ok(resumed.status === "completed" && resumed.session.runtime_session_ref === a.runtime_session_ref);
+    const redirected = await runtime.operateManagedPublicPage(a.runtime_session_ref, { ...input, url: "https://example.com/redirect" }, true);
+    assert.ok(redirected.status === "unavailable" && redirected.failure_class === "managed_public_navigation_redirected");
+    assert.equal(runtime.getSession(a.runtime_session_ref)?.current_page.current_url, "https://denied.example/");
+    assert.equal("text" in redirected, false);
+  } finally { await runtime.stopSession(a.runtime_session_ref); await runtime.stopSession(b.runtime_session_ref); }
 });

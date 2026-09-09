@@ -4,7 +4,7 @@ import type { LocalProviderPageFacts } from "./runtime-session-types.js";
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
   catalog_ref: "harbor://managed-operations", catalog_version: "1",
-  operations: ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "account.bind"].map(operation_id => ({
+  operations: ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind"].map(operation_id => ({
     operation_id, category: ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"]
   }))
@@ -69,4 +69,20 @@ export function hasManagedBindingConflict(records: Iterable<import("./identity-e
     if (effectiveManagedBindings(record).some(other => bindings.some(binding => binding.account_system_ref === other.account_system_ref && binding.account_ref === other.account_ref))) return true;
   }
   return false;
+}
+
+export type ManagedPublicPageInput = { expected_origin: string; url?: string };
+export type ManagedPublicPageResult = { status: "completed"; page: LocalProviderPageFacts; text?: string; truncated?: boolean } | (ManagedObservationUnavailable & { page?: LocalProviderPageFacts });
+export type ManagedPublicPageOperation = (input: ManagedPublicPageInput) => Promise<ManagedPublicPageResult>;
+const trustedPublicOperations = new WeakSet<ManagedPublicPageOperation>();
+export function trustManagedPublicPageOperation(operation: ManagedPublicPageOperation): ManagedPublicPageOperation { trustedPublicOperations.add(operation); return operation; }
+export function isTrustedManagedPublicPageOperation(operation: ManagedPublicPageOperation | undefined): operation is ManagedPublicPageOperation { return operation !== undefined && trustedPublicOperations.has(operation); }
+
+export function managedPublicOrigin(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && url.origin === value &&
+      !/(^|\.)(xiaohongshu\.com|zhipin\.com)$/.test(url.hostname);
+  } catch { return false; }
 }

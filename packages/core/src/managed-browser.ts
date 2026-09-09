@@ -11,7 +11,7 @@ import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 
 type ObjectValue = Record<string, unknown>;
-type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string };
+type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
 function object(value: unknown): ObjectValue {
@@ -24,20 +24,24 @@ function text(value: unknown): string {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "observation_ref", "account_system_ref", "account_ref"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
-  for (const key of ["url", "observation_ref", "account_system_ref", "account_ref"]) if (input[key] !== undefined) text(input[key]);
+  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.url !== undefined) {
     let url: URL;
     try { url = new URL(text(input.url)); } catch { return fail("managed_browser_invalid_input"); }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.origin !== input.origin || input.operation !== "instance.start") return fail("managed_browser_invalid_input");
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.origin !== input.origin || !["instance.start", "instance.navigate"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
+  }
+  if (["instance.navigate", "instance.read"].includes(String(input.operation))) {
+    text(input.runtime_session_ref);
+    if (input.operation === "instance.navigate") text(input.url);
   }
   if (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, observation_ref: _observation, account_system_ref: _system, account_ref: _account, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -129,6 +133,7 @@ export function createManagedBrowserService(options: {
         control_owner: "core_task", holder_ref: holder, headless: false, timeout_ms: 60_000 });
     }
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
+    if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
     const ref = encodeURIComponent(text(session.runtime_session_ref));
     await check();
     const lease = object(session.control_lock);
@@ -138,6 +143,13 @@ export function createManagedBrowserService(options: {
     await check();
     if (input.operation === "instance.stop") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/stop`, { control_owner: "core_task", holder_ref: holder })) };
     if (input.operation === "instance.handoff") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/handoff`, { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: holder })) };
+    if (input.operation === "instance.navigate" || input.operation === "instance.read") {
+      await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
+      await check();
+      const result = await harbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
+        holder_ref: holder, expected_origin: input.origin, ...(input.url ? { url: input.url } : {}) });
+      return { session: publicSession(result.session), ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }), observed_at: result.observed_at };
+    }
     const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
     const page = object(observation.page);
     let observedOrigin: string;
