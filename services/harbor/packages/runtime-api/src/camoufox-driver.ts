@@ -1,4 +1,5 @@
 import { managedUnavailable, trustManagedPublicPageOperation, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
+import { trustManagedInteractionOperation, type ManagedInteractionResult, type ManagedInteractionSnapshot } from "./managed-interaction.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -61,6 +62,8 @@ class CamoufoxDriverProcess {
   private nextId = 1;
   private stdoutBuffer = "";
   private terminated = false;
+  private exited = false;
+  private termination?: Promise<void>;
 
   constructor(pythonPath: string, helperPath: string) {
     this.child = spawn(pythonPath, [helperPath], {
@@ -73,6 +76,7 @@ class CamoufoxDriverProcess {
     this.child.stdout?.on("data", (chunk: string) => this.readStdout(chunk));
     this.child.on("error", (cause) => this.failPending(cause));
     this.child.on("close", (code, signal) => {
+      this.exited = true;
       this.terminated = true;
       this.killGroup();
       this.failPending(new CamoufoxDriverProtocolError(
@@ -123,25 +127,17 @@ class CamoufoxDriverProcess {
     });
   }
 
-  async terminate(): Promise<void> {
-    if (this.terminated) return;
+  terminate(): Promise<void> {
+    if (this.termination) return this.termination;
+    if (this.exited) return Promise.resolve();
     this.terminated = true;
-    this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver was closed."));
-    await new Promise<void>((resolve) => {
-      let exited = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const onClose = () => {
-        exited = true;
-        if (timer) clearTimeout(timer);
-        resolve();
-      };
-      this.child.once("close", onClose);
+    this.termination = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => this.killGroup(), 2_000);
+      this.child.once("close", () => { clearTimeout(timer); resolve(); });
       if (this.child.stdin && !this.child.stdin.destroyed) this.child.stdin.end();
-      timer = setTimeout(() => {
-        if (!exited) this.killGroup();
-        resolve();
-      }, 2_000);
     });
+    this.failPending(new CamoufoxDriverProtocolError("Camoufox Driver was closed."));
+    return this.termination;
   }
 
   private killGroup(): void {
@@ -274,6 +270,20 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       page,
       facts,
       clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
+      interaction: trustManagedInteractionOperation(async input => {
+        // After a private command is sent, a lost response cannot prove that an
+        // input was not dispatched. Preserve unknown; never retry the command.
+        try {
+          const response = await driver.request("managed_interaction", input, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
+          return normalizeManagedInteractionResponse(response.result, input.expected_origin);
+        } catch {
+          // Keep Runtime's in-flight guard until the failed command's process
+          // has exited; rejecting a timeout alone does not stop native input.
+          await driver.terminate();
+          const inputAction = ["click", "input", "press", "scroll"].includes(input.action);
+          return { status: inputAction ? "unknown_outcome" : "unavailable", dispatch_state: inputAction ? "dispatched" : "not_dispatched", failure_class: "managed_interaction_driver_unavailable" };
+        }
+      }),
       publicPage: trustManagedPublicPageOperation(async input => {
         const result = await driver.request("managed_public_page", input, DRIVER_COMMAND_TIMEOUT_MS);
         if (result.page) currentUrl = parseDriverPage(result).current_url ?? currentUrl;
@@ -602,4 +612,31 @@ function unavailable(code: RuntimeErrorCode, message: string, facts: RuntimeFact
     error: { code, message, retryable: code !== "unsupported" },
     facts: [...facts, { key: "browser.launch", source: "observed", value: code }]
   };
+}
+
+export function normalizeManagedInteractionResponse(value: unknown, expectedOrigin: string): ManagedInteractionResult {
+  const invalid = (): ManagedInteractionResult => ({ status: "unknown_outcome", dispatch_state: "dispatched", failure_class: "managed_interaction_response_invalid" });
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  const result = value as Record<string, unknown>;
+  if (!["completed", "unavailable", "unknown_outcome"].includes(String(result.status)) || !["dispatched", "not_dispatched"].includes(String(result.dispatch_state))) return invalid();
+  if (result.status !== "completed") {
+    if (typeof result.failure_class !== "string" || !/^managed_[a-z_]{1,96}$/.test(result.failure_class)) return invalid();
+    return { status: result.dispatch_state === "dispatched" ? "unknown_outcome" : "unavailable", dispatch_state: result.dispatch_state as "dispatched" | "not_dispatched", failure_class: result.failure_class };
+  }
+  const snapshot = result.snapshot as ManagedInteractionSnapshot | undefined;
+  const ref = (value: unknown) => typeof value === "string" && /^(?:page|observation|target)_[a-f0-9]{32}$/.test(value);
+  const safe = (value: unknown, max: number) => typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]|password|passwd|token|cookie|secret|credential|authorization|验证码|密码|口令|密钥/i.test(value);
+  if (!snapshot || !ref(snapshot.page_ref) || !ref(snapshot.observation_ref) || !Array.isArray(snapshot.controls) || snapshot.controls.length > 64 || !safe(snapshot.text, 4096) || typeof snapshot.truncated !== "boolean") return invalid();
+  const refs = new Set<string>();
+  for (const control of snapshot.controls) {
+    if (!control || !ref(control.target_ref) || refs.has(control.target_ref) || !["textbox", "button", "link", "checkbox", "radio", "region"].includes(control.role) || !safe(control.name, 160) || !control.name || typeof control.enabled !== "boolean" || control.value !== undefined && !safe(control.value, 512)) return invalid();
+    refs.add(control.target_ref);
+  }
+  const page = pageFacts(parseDriverPage(result));
+  try {
+    if (!page.current_url || new URL(page.current_url).origin !== expectedOrigin) return invalid();
+  } catch { return invalid(); }
+  return { status: "completed", dispatch_state: result.dispatch_state as "dispatched" | "not_dispatched", page,
+    snapshot: { page_ref: snapshot.page_ref, observation_ref: snapshot.observation_ref, text: snapshot.text, truncated: snapshot.truncated,
+      controls: snapshot.controls.map(({ target_ref, role, name, enabled, value }) => ({ target_ref, role, name, enabled, ...(value === undefined ? {} : { value }) })) } };
 }

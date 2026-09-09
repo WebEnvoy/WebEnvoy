@@ -3,11 +3,15 @@ import type { LocalProviderPageFacts } from "./runtime-session-types.js";
 
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
-  catalog_ref: "harbor://managed-operations", catalog_version: "1",
-  operations: ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind"].map(operation_id => ({
+  catalog_ref: "harbor://managed-operations", catalog_version: "2",
+  operations: [...["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind"].map(operation_id => ({
     operation_id, category: ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"]
-  }))
+  })),
+  ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({
+    operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read",
+    target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"]
+  }))]
 };
 export type DiscoveredManagedAccount = { status: "verified" | "unknown"; account_system_ref: string | null; account_ref: string | null };
 export type ManagedProviderObservation = { page: LocalProviderPageFacts; account: DiscoveredManagedAccount };

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
+import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { isTrustedManagedPublicPageOperation, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
 import {
   createLocalIdentityEnvironmentFacts,
@@ -126,6 +129,8 @@ export interface RuntimeSessionRecord {
   openUrl?: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
   clearPublicPageGuard?: () => Promise<void>;
   publicPage?: ManagedPublicPageOperation;
+  interaction?: ManagedInteractionOperation;
+  interaction_snapshot?: { page_ref: string; observation_ref: string; control_generation: number; holder_ref: string };
   observePage?: () => Promise<ManagedProviderObservation>;
   managed_observations?: ManagedObservation[];
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
@@ -145,6 +150,7 @@ const baselineFacts: RuntimeFact[] = [
 
 export class RuntimeSessionStore {
   private readonly records = new Map<string, RuntimeSessionRecord>();
+  private readonly interactionReceipts = new Map<string, { request_hash: string; result: ManagedInteractionResult & { operation_ref: string; runtime_session_ref: string; observed_at: string } }>();
   private readonly openingIdentityEnvironmentRefs = new Set<string>();
   private readonly openingProfileStorageRefs = new Set<string>();
   private readonly mutatingIdentityEnvironmentRefs = new Set<string>();
@@ -287,6 +293,7 @@ export class RuntimeSessionStore {
       openUrl: ready ? launch.openUrl : undefined,
       clearPublicPageGuard: ready ? launch.clearPublicPageGuard : undefined,
       publicPage: ready ? launch.publicPage : undefined,
+      interaction: ready ? launch.interaction : undefined,
       observePage: ready ? launch.observePage : undefined,
       probeReadOperation: ready ? launch.probeReadOperation : undefined,
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
@@ -672,6 +679,50 @@ export class RuntimeSessionStore {
     } catch { return managedUnavailable("managed_public_guard_release_failed"); }
   }
 
+  getManagedInteraction(operation_ref: string) {
+    return this.interactionReceipts.get(operation_ref)?.result ?? null;
+  }
+
+  async operateManagedInteraction(runtime_session_ref: string, input: ManagedInteractionRequest) {
+    const refused = (failure_class: string) => ({ status: "unavailable" as const, dispatch_state: "not_dispatched" as const,
+      failure_class, operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() });
+    const requestHash = createHash("sha256").update(JSON.stringify([runtime_session_ref, Object.entries(input).sort(([a], [b]) => a.localeCompare(b))])).digest("hex");
+    const previous = this.interactionReceipts.get(input.operation_ref);
+    if (previous) return previous.request_hash === requestHash ? previous.result : refused("managed_interaction_idempotency_conflict");
+    const record = this.records.get(runtime_session_ref);
+    if (!record) return refused("session_missing");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== input.holder_ref) return refused("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
+    const operation = record.interaction;
+    if (record.execution_surface !== "local_provider" || !isTrustedManagedInteractionOperation(operation)) return refused("managed_interaction_provider_unavailable");
+    const generation = record.control_generation;
+    const observed = record.interaction_snapshot;
+    if (input.action !== "snapshot" && (!observed || observed.control_generation !== generation || observed.holder_ref !== input.holder_ref ||
+      observed.page_ref !== input.page_ref || observed.observation_ref !== input.observation_ref)) return refused("managed_interaction_observation_stale");
+    // Retain receipts until Runtime exit: eviction would allow a duplicate input.
+    const receipt = { request_hash: requestHash, result: { status: "unknown_outcome" as const, dispatch_state: "dispatched" as const,
+      failure_class: "managed_interaction_in_progress", operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() } as ManagedInteractionResult & { operation_ref: string; runtime_session_ref: string; observed_at: string } };
+    this.interactionReceipts.set(input.operation_ref, receipt);
+    const { holder_ref: _holder, operation_ref: _operation, controlled_origin: _controlled, ...action } = input;
+    try {
+      const result = await this.withProviderInteraction(record, () => operation({ ...action, control_generation: generation }));
+      if (record.control_generation !== generation || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) {
+        receipt.result = { ...receipt.result, failure_class: "managed_interaction_control_changed" };
+      } else {
+        receipt.result = { ...result, operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() };
+        if (result.page?.current_url && new URL(result.page.current_url).origin === input.expected_origin) this.applyPageFacts(record, result.page.current_url, result.page);
+        if (result.status === "completed" && result.snapshot) record.interaction_snapshot = {
+          page_ref: result.snapshot.page_ref, observation_ref: result.snapshot.observation_ref, control_generation: generation, holder_ref: input.holder_ref
+        };
+        else delete record.interaction_snapshot;
+      }
+    } catch {
+      receipt.result = { ...receipt.result, failure_class: "managed_interaction_outcome_unknown" };
+      delete record.interaction_snapshot;
+    }
+    return receipt.result;
+  }
+
   async operateManagedPublicPage(runtime_session_ref: string, holder_ref: string, input: ManagedPublicPageInput) {
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
@@ -983,6 +1034,8 @@ export class RuntimeSessionStore {
     record.facts.control_lock = { owner: "none", state: "released", holder_ref: null, updated_at: now, conflict_error: null };
     delete record.openUrl;
     delete record.publicPage;
+    delete record.interaction;
+    delete record.interaction_snapshot;
     delete record.clearPublicPageGuard;
     delete record.observePage;
     delete record.managed_observations;

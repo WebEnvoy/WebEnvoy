@@ -3,18 +3,19 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind"] as const;
+export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.navigate", "instance.read", "instance.handoff", "account.bind", ...managedInteractionOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };
-export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: ManagedOperation[]; allowed_origins: string[] };
+export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: ManagedOperation[]; allowed_origins: string[]; controlled_interaction_origins?: string[] };
 export type ManagedCreationTemplate = {
   template_ref: string;
   provider_id: string;
   site: { site_id: string; origin: string; display_name: string };
   language: string;
   timezone: string;
-  permission_ceiling: { allowed_operations: ManagedOperation[]; allowed_origins: string[] };
+  permission_ceiling: Omit<ManagedProfilePolicy, "profile_ref">;
 };
 export type ManagedGrant = {
   grant_id: string;
@@ -87,8 +88,11 @@ function credential(value: unknown): string {
   return value;
 }
 function ceiling(value: unknown): ManagedCreationTemplate["permission_ceiling"] {
-  const obj = object(value, ["allowed_operations", "allowed_origins"]);
-  return { allowed_operations: operations(obj.allowed_operations), allowed_origins: strings(obj.allowed_origins, origin) };
+  const obj = object(value, ["allowed_operations", "allowed_origins"], ["controlled_interaction_origins"]);
+  const allowed_origins = strings(obj.allowed_origins, origin);
+  const controlled = obj.controlled_interaction_origins === undefined ? undefined : strings(obj.controlled_interaction_origins, origin);
+  if (controlled?.some(item => !allowed_origins.includes(item))) return fail("managed_access_invalid_input");
+  return { allowed_operations: operations(obj.allowed_operations), allowed_origins, ...(controlled === undefined ? {} : { controlled_interaction_origins: controlled }) };
 }
 function template(value: unknown): ManagedCreationTemplate | null {
   if (value === null) return null;
@@ -99,8 +103,9 @@ function template(value: unknown): ManagedCreationTemplate | null {
     language: string(obj.language), timezone: string(obj.timezone), permission_ceiling: ceiling(obj.permission_ceiling) };
 }
 function policy(value: unknown): ManagedProfilePolicy {
-  const obj = object(value, ["profile_ref", "allowed_operations", "allowed_origins"]);
-  return { profile_ref: string(obj.profile_ref), ...ceiling({ allowed_operations: obj.allowed_operations, allowed_origins: obj.allowed_origins }) };
+  const obj = object(value, ["profile_ref", "allowed_operations", "allowed_origins"], ["controlled_interaction_origins"]);
+  const { profile_ref, ...limits } = obj;
+  return { profile_ref: string(profile_ref), ...ceiling(limits) };
 }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -254,8 +259,9 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async setProfilePolicy(value: unknown): Promise<ManagedProfilePolicy> {
-      const input = object(value, ["idempotency_key", "profile_ref", "allowed_operations", "allowed_origins"]);
-      const parsed = policy({ profile_ref: input.profile_ref, allowed_operations: input.allowed_operations, allowed_origins: input.allowed_origins });
+      const input = object(value, ["idempotency_key", "profile_ref", "allowed_operations", "allowed_origins"], ["controlled_interaction_origins"]);
+      const { idempotency_key: _key, ...limits } = input;
+      const parsed = policy(limits);
       return transaction(state => receipt(state, "setProfilePolicy", input, () => {
         state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== parsed.profile_ref);
         state.profile_policies.push(parsed); return parsed;
@@ -289,7 +295,8 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
       if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
       if (targetOrigin !== undefined && (!grant.allowed_origins.includes(targetOrigin) || !profile.allowed_origins.includes(targetOrigin) || !task.origins.includes(targetOrigin))) return fail("managed_access_denied");
-      if (["instance.start", "instance.observe", "instance.navigate", "instance.read", "account.bind"].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if (["instance.start", "instance.observe", "instance.navigate", "instance.read", "account.bind", ...managedInteractionOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
       return { ...result, profile_policy: profile };
     },
     // The caller coordinates Harbor creation with its existing operation/idempotency owner.

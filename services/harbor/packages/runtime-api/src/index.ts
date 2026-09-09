@@ -1,3 +1,4 @@
+import { parseManagedInteractionRequest } from "./managed-interaction-request.js";
 import { createHash } from "node:crypto";
 import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
@@ -460,6 +461,22 @@ export class HarborRuntime {
 
   async clearManagedPublicPageGuard(runtime_session_ref: string) {
     return this.runtimeSessions.clearManagedPublicPageGuard(runtime_session_ref);
+  }
+
+  getManagedInteraction(operation_ref: string) {
+    return this.runtimeSessions.getManagedInteraction(operation_ref);
+  }
+
+  async operateManagedInteraction(runtime_session_ref: string, value: unknown) {
+    const input = parseManagedInteractionRequest(value);
+    const refused = (failure_class: string) => ({ status: "unavailable" as const, dispatch_state: "not_dispatched" as const, failure_class });
+    if (!input) return refused("managed_interaction_invalid_input");
+    const session = this.runtimeSessions.getSession(runtime_session_ref);
+    const profile = session?.identity_environment_ref ? this.identityEnvironments.get(session.identity_environment_ref) : null;
+    if (!profile) return refused("session_missing");
+    // A declaration for a controlled page cannot override a real bound identity.
+    if (profile.account_bindings.length || profile.site.account_ref) return refused("managed_interaction_identity_required");
+    return this.runtimeSessions.operateManagedInteraction(runtime_session_ref, input);
   }
 
   async operateManagedPublicPage(runtime_session_ref: string, input: unknown, navigate: boolean) {

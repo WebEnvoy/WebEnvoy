@@ -10,29 +10,53 @@ export type AgentGrant = {
 };
 export type AgentAccessState = {
   principals: AgentPrincipal[]; connections: AgentConnection[]; grants: AgentGrant[];
-  profile_policies: { profile_ref: string; allowed_operations: string[]; allowed_origins: string[] }[];
+  profile_policies: { profile_ref: string; allowed_operations: string[]; allowed_origins: string[]; controlled_interaction_origins: string[] }[];
 };
 
-const managementOperations = ["profile.list", "profile.read", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "instance.navigate", "instance.read"];
-export const agentManagementScope = "创建最多 2 个 Camoufox Profile；列出、读取、启动、停止、观察、人工接管及公开页面导航/正文读取；仅限 https://example.com。";
+export const agentOperations = [
+  ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
+  ["instance.start", "启动实例"], ["instance.stop", "停止实例"],
+  ["instance.observe", "页面与身份事实"], ["instance.handoff", "接管与交还"],
+  ["instance.navigate", "导航"], ["instance.read", "公开正文读取"],
+  ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
+  ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
+  ["instance.scroll", "滚动"], ["instance.wait", "等待页面变化"],
+] as const;
+export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "instance.read"];
+export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 和必要操作。Profile 管理权不隐含网页输入权限。";
+export type AgentScopeInput = { origin: string; operations: string[]; controlled: boolean };
 
-export function createAgentGrantInput(principalId: string, hours: number, key: string) {
+function selectedScope(input: AgentScopeInput) {
+  const origin = input.origin.trim();
+  const url = new URL(origin);
+  if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new Error("请输入精确 origin（协议、主机及可选端口），不含路径、查询串或片段。");
+  if (!input.operations.length) throw new Error("请选择必要操作。");
+  return { allowed_operations: [...input.operations], allowed_origins: [origin], controlled_interaction_origins: input.controlled ? [origin] : [] };
+}
+
+export function createProfilePolicyInput(profileRef: string, input: AgentScopeInput, key: string) {
+  if (!profileRef) throw new Error("请选择受管 Profile。");
+  return { idempotency_key: key, profile_ref: profileRef, ...selectedScope(input) };
+}
+
+export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "") {
   if (!principalId || ![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 和授权时限。");
+  const ceiling = selectedScope(input);
   return {
     idempotency_key: key,
     principal_id: principalId,
-    profile_refs: [],
-    allowed_operations: ["profile.create", ...managementOperations],
-    allowed_origins: ["https://example.com"],
+    profile_refs: profileRef ? [profileRef] : [],
+    allowed_operations: profileRef ? ceiling.allowed_operations : ["profile.create", ...ceiling.allowed_operations],
+    allowed_origins: ceiling.allowed_origins,
     expires_at: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
-    max_created_profiles: 2,
-    creation_template: {
+    max_created_profiles: profileRef ? 0 : 2,
+    creation_template: profileRef ? null : {
       template_ref: crypto.randomUUID(),
       provider_id: "camoufox",
-      site: { site_id: "generic", origin: "https://example.com", display_name: "非生产公开浏览器" },
+      site: { site_id: "generic", origin: input.origin.trim(), display_name: "非生产浏览器" },
       language: "zh-CN",
       timezone: "Asia/Shanghai",
-      permission_ceiling: { allowed_operations: [...managementOperations], allowed_origins: ["https://example.com"] },
+      permission_ceiling: ceiling,
     },
   };
 }
@@ -82,7 +106,7 @@ export function projectAgentAccess(value: unknown): AgentAccessState {
     }),
     profile_policies: list(source.profile_policies, value => {
       const item = record(value);
-      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text) };
+      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text), controlled_interaction_origins: item.controlled_interaction_origins === undefined ? [] : list(item.controlled_interaction_origins, text) };
     }),
   };
 }
@@ -119,7 +143,7 @@ export async function fetchAgentManagementPolicy(endpoint: string): Promise<{ so
 export async function allowAgentManagement(endpoint: string) {
   const current = await fetchAgentManagementPolicy(endpoint);
   const result = record(await requestOwnerJson(endpoint, '/agent-access/management-policy', {
-    method: 'PUT', body: { schema_version: 'webenvoy.execution-policy-mutation.v0', idempotency_key: crypto.randomUUID(), expected_source_version: current?.source_version ?? null, modes: { read: 'auto', commit: 'auto' } },
+    method: 'PUT', body: { schema_version: 'webenvoy.execution-policy-mutation.v0', idempotency_key: crypto.randomUUID(), expected_source_version: current?.source_version ?? null, modes: { read: 'auto', prepare: 'auto', commit: 'auto' } },
   }));
   if (result.ok !== true) throw new Error('未确认管理策略已保存，请刷新核对；不会自动重发。');
 }

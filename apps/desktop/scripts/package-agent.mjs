@@ -10,7 +10,7 @@ await cp(resolve(electron, '../../..'), output, { recursive: true, dereference: 
 const appRoot = join(output, 'Contents/Resources/app');
 await mkdir(appRoot, { recursive: true });
 for (const directory of ['dist', 'dist-electron', 'agent-entry']) await cp(resolve(directory), join(appRoot, directory), { recursive: true, dereference: true });
-await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'webenvoy-installed-test', version: '0.1.0', type: 'module', main: 'dist-electron/main.js' }));
+await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'webenvoy-installed-test', version: '0.2.0', type: 'module', main: 'dist-electron/main.js' }));
 const launcher = join(output, 'Contents/MacOS/webenvoy');
 await writeFile(launcher, '#!/bin/sh\napp_contents="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"\nELECTRON_RUN_AS_NODE=1 exec "$app_contents/MacOS/Electron" "$app_contents/Resources/app/agent-entry/cli.mjs" "$@"\n');
 await chmod(launcher, 0o755);
@@ -20,5 +20,5 @@ const lode = JSON.parse(await readFile(join(appRoot, 'dist-electron/lode/provena
 const allFiles = await files(appRoot);
 const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json'));
 const requiredFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => !(name in optionalFiles)));
-await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.1.0', skill_version: '0.1.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
+await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
 console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace }));

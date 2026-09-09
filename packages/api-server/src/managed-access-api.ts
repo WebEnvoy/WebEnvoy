@@ -13,8 +13,8 @@ function send(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(body));
 }
-function reject(response: ServerResponse, status: number, code: string) {
-  send(response, status, { ok: false, error: { code } });
+function reject(response: ServerResponse, status: number, code: string, notDispatched = false) {
+  send(response, status, { ok: false, error: { code }, ...(notDispatched ? { dispatch_state: "not_dispatched" } : {}) });
 }
 function bearer(request: IncomingMessage): string | undefined {
   const authorizationHeaders = request.rawHeaders.filter((_, index, headers) => index % 2 === 0 && headers[index]?.toLowerCase() === "authorization");
@@ -106,6 +106,9 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (path === "/agent-access/grants" && request.method === "POST") {
         send(response, 201, { ok: true, grant: await store.createGrant(await body(request)) }); return true;
       }
+      if (path === "/agent-access/profile-policies" && request.method === "POST") {
+        send(response, 200, { ok: true, profile_policy: await store.setProfilePolicy(await body(request)) }); return true;
+      }
       const revoke = /^\/agent-access\/(principals|connections|grants)\/([^/]+)\/revoke$/.exec(path);
       if (revoke && request.method === "POST") {
         const input = await body(request);
@@ -128,7 +131,9 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       reject(response, error.message.endsWith("_invalid") && error.message !== "execution_policy_store_invalid" ? 400 : error.message.endsWith("_conflict") ? 409 : 503, error.message); return true;
     }
     const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
-    reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" ? 400 : error instanceof ManagedAccessError ? 403 : 503, code);
+    // submit returns admitted Run failures itself; access errors escaping it precede dispatch.
+    const notDispatched = path === "/managed-browser/operations" && request.method === "POST" && error instanceof ManagedAccessError && code.startsWith("managed_access_");
+    reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" ? 400 : error instanceof ManagedAccessError ? 403 : 503, code, notDispatched);
   }
   return true;
 }

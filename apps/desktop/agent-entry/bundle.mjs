@@ -17,7 +17,7 @@ export async function files(directory, prefix = '') {
 }
 export async function verifyBundle() {
   const manifest = JSON.parse(await readFile(join(root, 'agent-manifest.json'), 'utf8'));
-  if (manifest.schema !== 'webenvoy-installed-agent/v1' || manifest.skill_version !== '0.1.0') throw new Error('asset_version_mismatch: reinstall the matching bundle');
+  if (manifest.schema !== 'webenvoy-installed-agent/v1' || manifest.skill_version !== '0.2.0') throw new Error('asset_version_mismatch: reinstall the matching bundle');
   if (process.versions.electron && sha(await readFile(process.execPath)) !== manifest.host?.executable_sha256) throw new Error('runtime_host_integrity_failed');
   const required = ['agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/skills/webenvoy-browser/SKILL.md', 'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs'];
   if (!manifest.files || required.some(name => !manifest.files[name])) throw new Error('asset_manifest_incomplete');
