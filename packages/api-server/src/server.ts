@@ -40,10 +40,12 @@ import {
   withWritePrecheckRunLock
 } from "./task-thread-api.js";
 
+import { authorizeCoreRequest, handleManagedAccessApi, type ManagedAccessApiOptions } from "./managed-access-api.js";
+
 type JsonBody = Record<string, unknown>;
 type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
 
-export type ApiServerOptions = {
+export type ApiServerOptions = ManagedAccessApiOptions & {
   runRecordStore?: FileRunRecordStore;
   authorizationDecisionStore?: FileAuthorizationDecisionStore;
   executionPolicyConfigStore?: FileExecutionPolicyConfigStore;
@@ -250,6 +252,8 @@ function admissionHealth(options: ApiServerOptions): JsonBody {
 async function route(request: IncomingMessage, response: ServerResponse, options: ApiServerOptions): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const path = requestUrl.pathname;
+  if (!authorizeCoreRequest(request, response, path, options)) return;
+  if (await handleManagedAccessApi(request, response, path, options)) return;
   const runMatch = /^\/runs\/([^/]+)$/.exec(path);
   const runResultMatch = /^\/runs\/([^/]+)\/result$/.exec(path);
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);

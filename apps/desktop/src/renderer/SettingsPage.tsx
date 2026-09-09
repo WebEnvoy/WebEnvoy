@@ -8,10 +8,11 @@ import {
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import { AgentAccessPanel } from "./AgentAccessPanel";
 import { type LocalConnectionConfig } from "./localConnectionConfig";
 import type { RuntimeSupervisorState } from "./runtimeSupervisorState";
 
-type SettingsSectionId = "connections" | "appearance" | "boundaries" | "diagnostics";
+type SettingsSectionId = "agent-access" | "connections" | "appearance" | "boundaries" | "diagnostics";
 
 type SettingsSection = {
   id: SettingsSectionId;
@@ -35,6 +36,7 @@ type SettingsPageProps = {
 };
 
 const settingsSections: SettingsSection[] = [
+  { id: "agent-access", label: "Agent 接入", group: "运行来源", icon: ShieldCheck },
   { id: "connections", label: "本地端点", group: "运行来源", icon: DatabaseZap },
   { id: "appearance", label: "外观", group: "App", icon: MonitorCog },
   { id: "boundaries", label: "数据边界", group: "App", icon: ShieldCheck },
@@ -105,6 +107,8 @@ export function SettingsPage({
               <h1>{activeSectionLabel}</h1>
               <p>App 只保存本机 UI 设置和非敏感连接入口。</p>
             </header>
+
+            {activeSection === "agent-access" ? <AgentAccessPanel key={connectionConfig.coreEndpoint} endpoint={connectionConfig.coreEndpoint} /> : null}
 
             {activeSection === "connections" ? (
               <SettingsGroup

@@ -160,9 +160,9 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
     ? createProtectedMediaRefResolver(options.protectedWorkbenchStore, mediaResolverToken)
     : undefined;
   let mediaResolverConfigPromise: Promise<ProtectedMediaResolverConfig | undefined> | undefined;
-  const getHarborSupervisorToken = (harborEndpoint: string) => {
-    const snapshot = processSnapshots.get("harbor");
-    return snapshot?.endpoint === normalizeEndpoint(harborEndpoint) && snapshot.child
+  const getSupervisorToken = (id: RuntimeServiceId, endpoint: string) => {
+    const snapshot = processSnapshots.get(id);
+    return snapshot?.endpoint === normalizeEndpoint(endpoint) && snapshot.child
       ? snapshot.supervisorToken
       : undefined;
   };
@@ -194,8 +194,9 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
         snapshot.child?.kill();
       }
     },
-    getHarborRuntimeSupervisorToken: getHarborSupervisorToken,
-    getHarborManualAuthSupervisorToken: getHarborSupervisorToken,
+    getCoreRuntimeSupervisorToken: (endpoint: string) => getSupervisorToken("core", endpoint),
+    getHarborRuntimeSupervisorToken: (endpoint: string) => getSupervisorToken("harbor", endpoint),
+    getHarborManualAuthSupervisorToken: (endpoint: string) => getSupervisorToken("harbor", endpoint),
   };
 }
 
@@ -329,6 +330,7 @@ export function runtimeSupervisorChildEnvironment(
   parentEnvironment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const {
+    WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredCoreSupervisorToken,
     HARBOR_RUNTIME_SUPERVISOR_TOKEN: _ignoredRuntimeSupervisorToken,
     HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: _ignoredManualAuthSupervisorToken,
     HARBOR_MEDIA_REF_RESOLVER_URL: _ignoredMediaResolverUrl,
@@ -336,6 +338,7 @@ export function runtimeSupervisorChildEnvironment(
     ...parentEnv
   } = parentEnvironment;
   const {
+    WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredServiceCoreSupervisorToken,
     HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl,
     HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverToken,
     ...serviceEnv
@@ -345,6 +348,7 @@ export function runtimeSupervisorChildEnvironment(
     ...(launchSource === "packaged-path" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     ...serviceEnv,
     ...(supervisorToken ? { HARBOR_RUNTIME_SUPERVISOR_TOKEN: supervisorToken } : {}),
+    ...(id === "core" && supervisorToken ? { WEBENVOY_CORE_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "harbor" && supervisorToken ? { HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "harbor"
       ? {

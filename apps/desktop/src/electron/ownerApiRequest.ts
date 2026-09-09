@@ -133,6 +133,14 @@ export function harborSupervisorAuthorizationHeader(
     : undefined;
 }
 
+export function ownerSupervisorAuthorizationHeader(
+  request: Extract<ParsedOwnerApiRequest, { ok: true }>,
+  coreSupervisorToken: string | undefined,
+  harborSupervisorToken: string | undefined,
+) {
+  return coreSupervisorToken ? `Bearer ${coreSupervisorToken}` : harborSupervisorAuthorizationHeader(request, harborSupervisorToken);
+}
+
 export function ownerApiTimeoutMs(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
   if (request.method === "POST" && request.path === "/runtime/identity-environment-sessions") return 65_000;
   if (request.method === "POST" && (request.path === "/tasks" || /^\/threads\/[^/]+\/turns$/.test(new URL(request.url).pathname))) return 65_000;

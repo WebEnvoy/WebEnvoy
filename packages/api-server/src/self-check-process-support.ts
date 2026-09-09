@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
@@ -7,6 +8,9 @@ import { fileURLToPath } from "node:url";
 export type JsonObject = Record<string, unknown>;
 export type JsonResponse = { status: number; body: unknown };
 export type SpawnedProcess = { child: ChildProcess; output: () => string };
+
+const processOwnerTokens = new Map<number, string>();
+const ownerHeaders = (port: number) => processOwnerTokens.has(port) ? { Authorization: `Bearer ${processOwnerTokens.get(port)}` } : {};
 
 const apiServerEntry = join(dirname(fileURLToPath(import.meta.url)), "index.js");
 
@@ -40,14 +44,14 @@ export async function reservePort(): Promise<number> {
 }
 
 export async function getJson(port: number, path: string): Promise<JsonResponse> {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`);
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, { headers: ownerHeaders(port) });
   return { status: response.status, body: await response.json() };
 }
 
 export async function postJson(port: number, path: string, body: unknown): Promise<JsonResponse> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...ownerHeaders(port) },
     body: JSON.stringify(body)
   });
   return { status: response.status, body: await response.json() };
@@ -116,5 +120,9 @@ export function spawnApiServer(
   runRecordDir: string,
   env: Record<string, string | undefined> = {}
 ): SpawnedProcess {
-  return spawnNode(apiServerEntry, { ...env, PORT: String(port), WEBENVOY_RUN_RECORD_DIR: runRecordDir });
+  const token = randomBytes(32).toString("base64url");
+  processOwnerTokens.set(port, token);
+  const process = spawnNode(apiServerEntry, { ...env, PORT: String(port), WEBENVOY_RUN_RECORD_DIR: runRecordDir, WEBENVOY_CORE_SUPERVISOR_TOKEN: token });
+  process.child.once("exit", () => processOwnerTokens.delete(port));
+  return process;
 }

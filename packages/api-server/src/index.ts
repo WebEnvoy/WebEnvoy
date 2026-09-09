@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import {
   createFileRunRecordStore,
+  createFileManagedAccessStore,
+  createManagedBrowserService,
   createFileAuthorizationDecisionStore,
   createFileExecutionPolicyConfigStore,
   createHttpHarborIdentityFactsReader,
@@ -31,6 +33,8 @@ const entrypoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : undef
 
 if (import.meta.url === entrypoint) {
   const port = parsePort(process.env.PORT);
+  const supervisorToken = process.env.WEBENVOY_CORE_SUPERVISOR_TOKEN;
+  if (!supervisorToken || !/^[A-Za-z0-9_-]{32,512}$/.test(supervisorToken)) throw new Error("Core requires a supervisor credential before accepting requests.");
   const runRecordStore = process.env.WEBENVOY_RUN_RECORD_DIR
     ? createFileRunRecordStore({ directory: process.env.WEBENVOY_RUN_RECORD_DIR })
     : undefined;
@@ -65,7 +69,17 @@ if (import.meta.url === entrypoint) {
   if (runRecordStore && harborRuntimeClient) {
     await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
   }
+  const managedAccessStore = runRecordStore
+    ? createFileManagedAccessStore({ directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? `${runRecordStore.directory}.managed-access` })
+    : undefined;
+  const managedBrowserService = managedAccessStore && runRecordStore && authorizationDecisionStore && executionPolicyConfigStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
+    ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
+        harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+    : undefined;
   const server = createApiServer({
+    supervisorToken,
+    ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
+    ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),
     ...(executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore }),
