@@ -552,7 +552,9 @@ def interaction_snapshot(generation: int) -> dict[str, Any]:
                 page_ref = INTERACTION_STATE["page_ref"]
     discard_interaction_snapshot()
     try:
-        handle = PAGE.evaluate_handle("mw:" + INTERACTION_SNAPSHOT_EXPRESSION)
+        # DOM handles must stay in Camoufox's isolated world; main-world
+        # evaluation cannot return element references. No page JS state is needed.
+        handle = PAGE.evaluate_handle(INTERACTION_SNAPSHOT_EXPRESSION)
     except Exception as error:
         raise InteractionSnapshotError("handle_" + type(error).__name__.lower()) from None
     try:
