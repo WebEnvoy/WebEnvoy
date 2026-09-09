@@ -7,6 +7,7 @@ import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { matchHarborBusinessOperationOwner } from "./execution-policy-owner-proof.js";
+import { normalizeExecutionPolicyMutation } from "./execution-policy-config.js";
 import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 
@@ -165,6 +166,14 @@ export function createManagedBrowserService(options: {
     return { session: publicSession(session), observation };
   }
   return {
+    async getManagementPolicy() {
+      return await options.executionPolicyConfigStore.getInstalledSkillConfiguration("harbor:managed-browser") ?? null;
+    },
+    async putManagementPolicy(value: unknown) {
+      // These are the categories declared by Harbor's managed operation catalog.
+      const mutation = normalizeExecutionPolicyMutation(value, { allowed_categories: new Set(["read", "commit"]) });
+      return options.executionPolicyConfigStore.putInstalledSkillConfiguration("harbor:managed-browser", mutation);
+    },
     async submit(credentialHash: string, value: unknown) {
       const input = parse(value);
       const principal = await options.accessStore.authenticateCredential(credentialHash);

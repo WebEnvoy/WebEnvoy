@@ -1,11 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService } from "@webenvoy/core-runtime";
+import { ExecutionPolicyVersionConflictError, ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService } from "@webenvoy/core-runtime";
 
 export type ManagedAccessApiOptions = {
   supervisorToken?: string;
   managedAccessStore?: FileManagedAccessStore;
-  managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query">;
+  managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
+    Partial<Pick<ReturnType<typeof createManagedBrowserService>, "getManagementPolicy" | "putManagementPolicy">>;
 };
 
 function send(response: ServerResponse, status: number, body: unknown) {
@@ -83,6 +84,12 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
         send(response, 200, await service.query(credentialHash, decodeURIComponent(operation[1]!))); return true;
       }
     } else {
+      if (path === "/agent-access/management-policy" && (request.method === "GET" || request.method === "PUT")) {
+        const service = options.managedBrowserService;
+        if (!service?.getManagementPolicy || !service.putManagementPolicy) { reject(response, 503, "managed_browser_unavailable"); return true; }
+        const configuration = request.method === "GET" ? await service.getManagementPolicy() : await service.putManagementPolicy(await body(request));
+        send(response, 200, { ok: true, configuration }); return true;
+      }
       if (path === "/agent-access" && request.method === "GET") {
         send(response, 200, { ok: true, ...await store.list() }); return true;
       }
@@ -114,6 +121,12 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     }
     reject(response, 404, "managed_access_route_not_found");
   } catch (error) {
+    if (error instanceof ExecutionPolicyVersionConflictError) {
+      send(response, 409, { ok: false, error: { code: error.message }, current: error.current ?? null }); return true;
+    }
+    if (path === "/agent-access/management-policy" && error instanceof Error && /^execution_policy_|^expected_source_version_invalid$/.test(error.message)) {
+      reject(response, error.message.endsWith("_invalid") && error.message !== "execution_policy_store_invalid" ? 400 : error.message.endsWith("_conflict") ? 409 : 503, error.message); return true;
+    }
     const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
     reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" ? 400 : error instanceof ManagedAccessError ? 403 : 503, code);
   }
