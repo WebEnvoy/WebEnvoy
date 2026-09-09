@@ -257,8 +257,7 @@ test("full copy includes owner session material while configuration-only copy ex
         site_id: "xiaohongshu",
         origin: "https://www.xiaohongshu.com",
         display_name: "小红书",
-        account_identifier: "owner@example.test",
-        account_ref: "account-source"
+        account_identifier: "owner@example.test"
       }
     });
     manager.completeManualAuthentication("identity-source", "session-source");
@@ -274,7 +273,7 @@ test("full copy includes owner session material while configuration-only copy ex
     assert.equal(full.status, "completed");
     assert.equal(full.effects.login_state, "preserved_unverified");
     assert.equal(full.record?.status.readiness, "unknown");
-    assert.equal(full.record?.site.account_ref, "account-source");
+    assert.equal(full.record?.site.account_ref, null);
     assert.equal(full.record?.environment_summary.timezone, "Asia/Tokyo");
     assert.equal(full.record?.refs.cookie_jar_ref?.startsWith("cookie_jar_ref_"), true);
     assert.equal(readFileSync(join(fullPath, "session-owner-data"), "utf8"), "cookie-secret");

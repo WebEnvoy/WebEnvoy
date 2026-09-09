@@ -46,6 +46,8 @@ for await (const line of rl) {
     if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
     page = { current_url: request.url, title: "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
+  } else if (request.op === "managed_observe") {
+    output({ id: request.id, status: "ok", observation: { current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: null } });
   } else if (request.op === "site_resource_probe") {
     output({ id: request.id, status: "ok", observation: { origin: "https://www.xiaohongshu.com", pathname: "/explore", ready: true, login_like: false, challenge_like: false, vue_ready: request.task_kind !== "authentication_recovery", pinia_ready: request.task_kind !== "authentication_recovery" } });
   } else if (request.op === "read_operation_probe") {
@@ -245,6 +247,9 @@ test("drives a Firefox/Juggler process without a CDP readiness file", async () =
 
   const opened = await launched.openUrl("https://www.xiaohongshu.com/search_result?keyword=%E4%B8%AD%E6%96%87");
   assert.equal(opened.current_url, "https://www.xiaohongshu.com/search_result?keyword=<redacted>");
+  const observed = await launched.observePage!();
+  assert.equal(observed.page.current_url, "https://www.xiaohongshu.com/search_result");
+  assert.equal(observed.account.status, "unknown");
   const probe = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "search_notes" });
   assert.equal(probe.status, "available");
   const authentication = await launched.probeSiteResource!({ site_id: "xiaohongshu", task_kind: "authentication_recovery" });

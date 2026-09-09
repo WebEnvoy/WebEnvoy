@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertManagedAccessApi } from "./managed-access-api-self-check.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -796,3 +797,5 @@ async function main(): Promise<void> {
 }
 
 await main();
+
+await assertManagedAccessApi();

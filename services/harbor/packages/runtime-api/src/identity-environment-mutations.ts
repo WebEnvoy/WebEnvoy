@@ -1,3 +1,4 @@
+import { hasManagedBindingConflict } from "./managed-observation.js";
 import { createHash } from "node:crypto";
 import { createIdentityConsistencyFacts } from "./identity-consistency.js";
 import {
@@ -321,6 +322,8 @@ function copiedRecord(
   const now = new Date().toISOString();
   return {
     ...source,
+    account_bindings: full ? source.account_bindings ?? [] : [],
+    account_binding_receipts: [],
     operation: "created",
     created_at: now,
     updated_at: now,
@@ -439,6 +442,7 @@ function ownerRef(kind: string, request: IdentityEnvironmentMutationRequest): st
   return `${kind}_${createHash("sha256").update(`${request.operation}\0${request.idempotency_key}\0${source}\0${kind}`).digest("hex").slice(0, 24)}`;
 }
 function hasIdentityReferenceConflict(records: Map<string, StoredLocalIdentityEnvironmentRecord>, candidate: StoredLocalIdentityEnvironmentRecord): boolean {
+  if (hasManagedBindingConflict(records.values(), candidate)) return true;
   const candidateFacts = candidate.identity_environment;
   for (const record of records.values()) {
     const facts = record.identity_environment;

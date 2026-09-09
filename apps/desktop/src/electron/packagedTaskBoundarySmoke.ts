@@ -1,6 +1,10 @@
 import type { BrowserWindow } from "electron";
 
 export type PackagedTaskBoundarySmokeResult = {
+  unauthenticatedThreadStatus: number;
+  coreAgentAccessStatus: number;
+  coreAgentAccessReady: boolean;
+  managedCatalogReady: boolean;
   lodeActionDeclared: boolean;
   effectivePolicyStatus: number;
   effectivePolicyReady: boolean;
@@ -51,6 +55,18 @@ export async function runPackagedTaskBoundarySmoke(
   window: BrowserWindow,
   coreEndpoint: string,
 ): Promise<PackagedTaskBoundarySmokeResult> {
+  const unauthenticated = await fetch(new URL("/threads", coreEndpoint), { credentials: "omit", signal: AbortSignal.timeout(5_000) });
+  if (unauthenticated.status !== 401) throw new Error(`Packaged Core accepted an unauthenticated /threads request: ${unauthenticated.status}`);
+  const harborEndpoint = process.env.WEBENVOY_PACKAGED_SMOKE_HARBOR_ENDPOINT;
+  if (!harborEndpoint) throw new Error("Packaged managed catalog smoke requires its isolated Harbor endpoint.");
+  const catalogResponse = await fetch(new URL("/runtime/managed-operation-catalog", harborEndpoint), { signal: AbortSignal.timeout(5_000) });
+  const catalog = await catalogResponse.json() as { schema_version?: string; catalog_ref?: string; operations?: { operation_id?: string; category?: string; target_scope?: { target_types?: string[] }; resource_requirement_refs?: string[] }[] };
+  const operations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.handoff", "account.bind"];
+  const managedCatalogReady = catalogResponse.ok && catalog.schema_version === "webenvoy.harbor-operation-catalog.v0" && catalog.catalog_ref === "harbor://managed-operations" &&
+    catalog.operations?.length === operations.length && operations.every(id => catalog.operations?.some(item => item.operation_id === id &&
+      item.category === (["profile.create", "account.bind"].includes(id) ? "commit" : "read") &&
+      item.target_scope?.target_types?.includes("managed_profile") && item.resource_requirement_refs?.includes("harbor://managed-profile")));
+  if (!managedCatalogReady) throw new Error("Packaged Harbor managed operation owner declarations are unavailable.");
   const result = (await window.webContents.executeJavaScript(`
     (async () => {
       const shell = window.webenvoyShell;
@@ -59,6 +75,10 @@ export async function runPackagedTaskBoundarySmoke(
       }
 
       const coreEndpoint = ${JSON.stringify(coreEndpoint)};
+      const access = await shell.requestOwnerJson({ base: coreEndpoint, path: "/agent-access", method: "GET" });
+      const coreAgentAccessReady = access?.ok === true && access.status === 200 && access.body?.ok === true &&
+        ["principals", "connections", "grants", "profile_policies"].every(key => Array.isArray(access.body[key]));
+      if (!coreAgentAccessReady) throw new Error("Packaged Core Agent access owner API is unavailable.");
       const packageRef = "lode://site-capability/xiaohongshu/search-notes@0.1.0";
       const capabilityRef = "lode:capability/search-notes";
       const identityRef = "identity-env_000000000000000000000239";
@@ -153,6 +173,10 @@ export async function runPackagedTaskBoundarySmoke(
       }
 
       return {
+        unauthenticatedThreadStatus: ${unauthenticated.status},
+        coreAgentAccessStatus: access.status,
+        coreAgentAccessReady,
+        managedCatalogReady: true,
         lodeActionDeclared,
         effectivePolicyStatus: effectivePolicy.status,
         effectivePolicyReady,

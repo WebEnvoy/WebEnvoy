@@ -1,3 +1,4 @@
+import { hasManagedBindingConflict, type ManagedAccountBinding } from "./managed-observation.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -88,6 +89,8 @@ export interface StoredLocalIdentityEnvironmentRecord {
     local_secret_ref: string | null;
   };
   imported_from: string | null;
+  account_bindings?: ManagedAccountBinding[];
+  account_binding_receipts?: { key_hash: string; request_hash: string }[];
   authentication_provenance?: "unknown" | "user_confirmed_managed_session";
   user_confirmed_session_ref: string | null;
   repair_state: "clean" | "repair_required";
@@ -95,6 +98,7 @@ export interface StoredLocalIdentityEnvironmentRecord {
 }
 
 export interface LocalIdentityEnvironmentPublicRecord {
+  account_bindings: ManagedAccountBinding[];
   schema_version: typeof HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA;
   identity_environment_ref: string;
   created_at: string;
@@ -279,6 +283,12 @@ export class LocalIdentityEnvironmentManager {
     return record ? publicRecord(record) : null;
   }
 
+  getMutationResult(idempotency_key: string): IdentityEnvironmentMutationResult | null {
+    this.refresh();
+    const receipt = this.receipts.get(idempotency_key);
+    return receipt ? snapshot(receipt.result) : null;
+  }
+
   list(): LocalIdentityEnvironmentPublicRecord[] {
     this.refresh();
     return Array.from(this.records.values()).map(publicRecord);
@@ -427,6 +437,30 @@ export class LocalIdentityEnvironmentManager {
     });
   }
 
+  bindObservedAccount(identity_environment_ref: string, binding: ManagedAccountBinding, idempotency_key: string, request_hash: string): LocalIdentityEnvironmentPublicRecord {
+    return this.withStoreMutation(() => {
+      const current = this.records.get(identity_environment_ref);
+      if (!current) throw new Error("identity_environment_missing");
+      const key_hash = createHash("sha256").update(idempotency_key).digest("hex");
+      for (const record of this.records.values()) {
+        const receipt = record.account_binding_receipts?.find(item => item.key_hash === key_hash);
+        if (receipt) {
+          if (record !== current || receipt.request_hash !== request_hash) throw new Error("idempotency_conflict");
+          return publicRecord(current);
+        }
+      }
+      const bindings = current.account_bindings ?? [];
+      const existing = bindings.find(item => item.account_system_ref === binding.account_system_ref);
+      if (existing && existing.account_ref !== binding.account_ref) throw new Error("account_binding_conflict");
+      const next = { ...current, updated_at: new Date().toISOString(), account_bindings: existing ? bindings : [...bindings, binding],
+        account_binding_receipts: [...(current.account_binding_receipts ?? []), { key_hash, request_hash }] };
+      if (hasManagedBindingConflict(this.records.values(), next)) throw new Error("account_binding_conflict");
+      const records = new Map(this.records).set(identity_environment_ref, next);
+      this.persist(records); this.records.set(identity_environment_ref, next);
+      return publicRecord(next);
+    });
+  }
+
   private upsert(input: ManagedLocalIdentityEnvironmentInput, operation: LocalIdentityEnvironmentOperation, created_at = new Date().toISOString()): LocalIdentityEnvironmentPublicRecord {
     const record = createStoredIdentityRecord(input, operation, created_at);
     if (record.identity_environment.browser_storage.state !== "present" ||
@@ -441,6 +475,10 @@ export class LocalIdentityEnvironmentManager {
       });
     }
     const facts = record.identity_environment;
+    const previous = this.records.get(facts.identity_environment_ref);
+    if (previous?.account_bindings) record.account_bindings = previous.account_bindings;
+    if (previous?.account_binding_receipts) record.account_binding_receipts = previous.account_binding_receipts;
+    if (hasManagedBindingConflict(this.records.values(), record)) throw new Error("account_binding_conflict");
     const records = new Map(this.records).set(facts.identity_environment_ref, record);
     this.persist(records);
     this.records.set(facts.identity_environment_ref, record);
@@ -578,6 +616,7 @@ function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdenti
   const facts = record.identity_environment;
   return {
     schema_version: HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA,
+    account_bindings: snapshot(record.account_bindings ?? []),
     identity_environment_ref: facts.identity_environment_ref,
     created_at: record.created_at,
     updated_at: record.updated_at,

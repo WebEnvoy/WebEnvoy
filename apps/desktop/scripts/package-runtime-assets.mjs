@@ -141,6 +141,8 @@ import {
   createFileAuthorizationDecisionStore,
   createFileExecutionPolicyConfigStore,
   createFileRunRecordStore,
+  createFileManagedAccessStore,
+  createManagedBrowserService,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
@@ -149,6 +151,8 @@ import {
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 
+const supervisorToken = process.env.WEBENVOY_CORE_SUPERVISOR_TOKEN;
+if (!supervisorToken || !/^[A-Za-z0-9_-]{32,512}$/.test(supervisorToken)) throw new Error("Core requires a supervisor credential before accepting requests.");
 const host = process.env.WEBENVOY_CORE_RUNTIME_HOST ?? "127.0.0.1";
 const port = parsePort(process.env.PORT ?? process.env.WEBENVOY_CORE_RUNTIME_PORT, 8787);
 const runtimeDataDir = process.env.WEBENVOY_RUNTIME_DATA_DIR ?? join(process.cwd(), "data");
@@ -186,7 +190,17 @@ if (harborRuntimeClient) {
   await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
 }
 
+const managedAccessStore = createFileManagedAccessStore({
+  directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? runRecordDir + ".managed-access"
+});
+const managedBrowserService = harborRuntimeUrl
+  ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
+      harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+  : undefined;
 const server = createApiServer({
+  supervisorToken,
+  managedAccessStore,
+  ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
   runRecordStore,
   authorizationDecisionStore,
   executionPolicyConfigStore,

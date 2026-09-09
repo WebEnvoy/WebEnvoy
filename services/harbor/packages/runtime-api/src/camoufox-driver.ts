@@ -1,3 +1,4 @@
+import { managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -271,6 +272,10 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       viewer_entry: camoufoxViewerEntry(input.headless),
       page,
       facts,
+      observePage: trustManagedPageObserver(async () => {
+        const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
+        return normalizeManagedProviderObservation(result.observation);
+      }),
       openUrl: async (url) => {
         const response = await driver.request("open_url", { url, timeout_ms: input.timeout_ms }, DRIVER_COMMAND_TIMEOUT_MS);
         const next = pageFacts(parseDriverPage(response));

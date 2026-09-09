@@ -13,7 +13,7 @@ import {
   requestManualAuthenticationCompletion,
 } from "./manualAuthenticationCompletion.js";
 import {
-  harborSupervisorAuthorizationHeader,
+  ownerSupervisorAuthorizationHeader,
   isHarborSupervisorProtectedRequest,
   ownerApiProductionPostBlockReason,
   ownerApiTimeoutMs,
@@ -582,7 +582,7 @@ async function requestOwnerApiJson(request: OwnerApiJsonRequest) {
   const supervisorToken = isHarborSupervisorProtectedRequest(parsed)
     ? runtimeSupervisor.getHarborRuntimeSupervisorToken(parsed.base)
     : undefined;
-  const supervisorAuthorization = harborSupervisorAuthorizationHeader(parsed, supervisorToken);
+  const supervisorAuthorization = ownerSupervisorAuthorizationHeader(parsed, runtimeSupervisor.getCoreRuntimeSupervisorToken(parsed.base), supervisorToken);
   if (isHarborSupervisorProtectedRequest(parsed) && !supervisorAuthorization) {
     return { ok: false, error: "Protected Harbor owner API request requires the supervised runtime." };
   }

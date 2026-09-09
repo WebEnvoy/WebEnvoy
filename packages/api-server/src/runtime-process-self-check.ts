@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createFileRunRecordStore } from "@webenvoy/core-runtime";
 import { runReadonlyVerticalSlice } from "./readonly-vertical-slice-self-check.js";
@@ -10,7 +11,7 @@ import {
   createHarborMock, expectedRuntimeBindingRefs, harborSupervisorToken, packageRef, taskIntent, writeLodeRegistry
 } from "./runtime-process-fixture.js";
 import {
-  asRecord, closeServer, getJson, listen, postJson, reservePort, spawnApiServer, stopProcess, waitForJson
+  asRecord, closeServer, getJson, listen, postJson, reservePort, spawnApiServer, spawnNode, stopProcess, waitForJson
 } from "./self-check-process-support.js";
 
 const interruptedRunId = "run_process_recover_interrupted_core_task";
@@ -148,6 +149,15 @@ async function assertConfiguredTaskProcessSmoke(): Promise<void> {
     await rm(runRecordDir, { recursive: true, force: true });
   }
 }
+
+const unauthenticatedProcess = spawnNode(fileURLToPath(new URL("./index.js", import.meta.url)), {
+  PORT: String(await reservePort()), WEBENVOY_CORE_SUPERVISOR_TOKEN: undefined,
+});
+await new Promise<void>((resolve, reject) => {
+  const timeout = setTimeout(() => { unauthenticatedProcess.child.kill(); reject(new Error("Core started without its supervisor credential.")); }, 5_000);
+  unauthenticatedProcess.child.once("exit", code => { clearTimeout(timeout); assert.equal(code, 1); resolve(); });
+});
+assert(unauthenticatedProcess.output().includes("Core requires a supervisor credential"));
 
 await assertDegradedProcessSmoke();
 await assertConfiguredTaskProcessSmoke();
