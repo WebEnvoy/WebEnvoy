@@ -24,7 +24,7 @@
 | operation | 输入选择 | 结果边界 |
 | --- | --- | --- |
 | `skill.list` | 仅 task scope；返回范围内批准资产/修订元数据与本地状态。 | 不返回正文。 |
-| `skill.inspect` | `skill_ref`；可带与清单精确相等的 `source_ref`。 | 只返回该资产的批准元数据、选择和状态。 |
+| `skill.inspect` | `skill_ref`。 | 只返回该资产的批准元数据、选择和状态。 |
 | `skill.install` | 明确完整 `revision_ref`，可带精确 `source_ref`。 | 安装后保持 disabled，不自动选择或启用；同一有效请求幂等。 |
 | `skill.enable` | `skill_ref`、已安装目标 `target_revision_ref`，以及当前选择的 CAS 预期值。 | 只启用完整且兼容的已安装修订。 |
 | `skill.read` | `skill_ref`；读取当前 enabled revision。 | 先校验同一物化 Buffer，再返回真实 content 和 read receipt。 |
