@@ -132,6 +132,15 @@ test("management scope opens persisted unauthenticated profiles without promotin
   } finally { await server.close(); await runtime.stopSession(session.runtime_session_ref); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("managed operation catalog preserves compatibility categories", () => {
+  const categories = new Map(managedOperationCatalog.operations.map(operation => [operation.operation_id, operation.category]));
+  for (const [category, operations] of Object.entries({
+    commit: ["profile.create", "account.bind"],
+    read: ["recovery.inspect", "recovery.request", "recovery.status", "page.list"],
+    prepare: ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"]
+  })) for (const operation of operations) assert.equal(categories.get(operation), category, operation);
+});
+
 
 test("in-flight observation cannot publish after stop or permit concurrent takeover", async () => {
   let unblock!: () => void, started!: () => void;
