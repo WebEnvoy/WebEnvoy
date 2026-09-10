@@ -210,7 +210,7 @@ export class PageRegistry {
     }
     this.sync(await this.controller.closePage(record.provider_page_ref));
     const current = this.activePageId ? this.byId.get(this.activePageId) : undefined;
-    return current && !current.closed
+    return current && !current.closed && this.visible(current, allowed)
       ? this.public(current)
       : this.unavailable("page_not_found", "Page was closed.", false, input, record);
   }

@@ -1002,11 +1002,12 @@ def set_active_provider_page(page: Any) -> dict[str, Any]:
     if page is None or getattr(page, "is_closed", lambda: False)():
         raise ValueError("Camoufox Driver Page is closed.")
     state = page_state_for(page) or register_provider_page(page)
+    # Do not publish the new active Page until native focus succeeds. A
+    # failed bring-to-front must remain an unavailable/unknown activation.
+    page.bring_to_front()
     PAGE = page
     for candidate in PAGE_STATES.values():
         candidate["active"] = candidate["page"] is page and not candidate.get("closed")
-    with contextlib.suppress(Exception):
-        page.bring_to_front()
     return page_state_facts(state)
 
 
