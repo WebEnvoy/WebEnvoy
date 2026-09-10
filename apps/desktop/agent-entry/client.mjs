@@ -5,13 +5,24 @@ import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 export function localRequest(dataDir, path, { method = 'GET', body, credential } = {}) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = error => { if (!settled) { settled = true; reject(error); } };
+    const succeed = value => { if (!settled) { settled = true; resolve(value); } };
     const req = request({ socketPath: join(dataDir, 'runtime.sock'), path, method, headers: { 'content-type': 'application/json', ...(credential ? { authorization: `Bearer ${credential}` } : {}) } }, res => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; if (data.length > 1024 * 1024) req.destroy(new Error('response_too_large')); });
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { reject(new Error('runtime_response_invalid')); } });
+      const chunks = [];
+      let bytes = 0;
+      res.on('data', chunk => {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += value.length;
+        if (bytes > 1024 * 1024) { fail(new Error('response_too_large')); return req.destroy(); }
+        chunks.push(value);
+      });
+      res.on('aborted', () => fail(new Error('runtime_response_aborted')));
+      res.on('error', fail);
+      res.on('end', () => { if (settled) return; try { succeed(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { fail(new Error('runtime_response_invalid')); } });
     });
     req.setTimeout(90_000, () => req.destroy(new Error('runtime_timeout: query the original operation; do not replay')));
-    req.on('error', reject);
+    req.on('error', fail);
     req.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }

@@ -37,8 +37,15 @@ const server = createServer(async (req, res) => {
     if (!ownerRoute && !agentRoute) return send(res, 403, { ok: false, error: { code: 'agent_route_denied' } });
     if (req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === 'authorization').length !== 1) return send(res, 401, { ok: false, error: { code: ownerRoute ? 'owner_authentication_required' : 'agent_authentication_required' } });
     if (ownerRoute && (!ownerToken || req.headers.authorization !== `Bearer ${ownerToken}`)) return send(res, 401, { ok: false, error: { code: 'owner_authentication_required' } });
-    let body = '';
-    for await (const chunk of req) { body += chunk; if (body.length > 65536) return send(res, 413, { ok: false, error: { code: 'input_too_large' } }); }
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of req) {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += value.length;
+      if (bytes > 65536) return send(res, 413, { ok: false, error: { code: 'input_too_large' } });
+      chunks.push(value);
+    }
+    const body = Buffer.concat(chunks).toString('utf8');
     const upstream = await fetch(state.coreEndpoint + req.url, { method: req.method, headers: { authorization: req.headers.authorization, 'content-type': 'application/json' }, ...(req.method === 'POST' ? { body } : {}), signal: AbortSignal.timeout(85_000) });
     send(res, upstream.status, await upstream.json());
   } catch { send(res, 503, { ok: false, error: { code: 'runtime_unavailable_query_without_replay' } }); }
