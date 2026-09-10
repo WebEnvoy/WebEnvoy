@@ -10,6 +10,7 @@ import { createFileRunRecordStore } from "./run-record-store.js";
 import { createFileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import { createFileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { executionPolicyMutationSchemaVersion } from "./execution-policy-config.js";
+import { createManagedRecoveryService } from "./profile-recovery.js";
 
 const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
@@ -76,6 +77,10 @@ const server = createServer((req, res) => { void (async () => {
       if (dropEnvironmentResponse) { req.socket.destroy(); return; }
     }
   } else if (req.url === "/runtime/identity-environments/identity%3A1/session") { sessionReads++; value = { runtime_session: managedSession };
+  } else if (req.url === "/runtime/profile-recovery/inspect") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { profile_ref?: string };
+    value = { schema_version: "harbor-profile-recovery/v1", profile_ref: input.profile_ref, status: "compatible" };
   }
   else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
   else if (req.url === "/runtime/sessions/session%3Aone/diagnostics") {
@@ -336,6 +341,18 @@ try {
   const recoveryStatusResult = await service.submit(credentialHash, recoveryStatusRequest);
   assert.equal(recoveryStatusResult.status, "succeeded", JSON.stringify(recoveryStatusResult));
   assert.equal(recoveryExpectedProfileRef, "profile:1", "recovery status must enforce the Agent's Profile scope");
+  const actualRecoveryService = createManagedRecoveryService({ runRecordStore, harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor" });
+  const actualInspection = await actualRecoveryService.inspect({ idempotency_key: "recovery-real-inspect", profile_ref: "profile:owner" });
+  assert.equal(actualInspection.ok, true, JSON.stringify(actualInspection));
+  const crossProfileRecoveryOperations = ["recovery.status"] as const;
+  await accessStore.setProfilePolicy({ idempotency_key: "recovery-cross-profile-policy", profile_ref: "profile:other", allowed_operations: [...crossProfileRecoveryOperations], allowed_origins: [] });
+  const crossProfileGrant = await accessStore.createGrant({ idempotency_key: "recovery-cross-profile-grant", principal_id: principal.principal_id, profile_refs: ["profile:other"], allowed_operations: [...crossProfileRecoveryOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const actualRecoveryBrowser = createManagedBrowserService({ accessStore, runRecordStore, executionPolicyConfigStore,
+    authorizationDecisionStore: createFileAuthorizationDecisionStore({ directory: join(directory, "cross-profile-decisions"), runRecordStore }),
+    harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService: actualRecoveryService });
+  const crossProfileResult = await actualRecoveryBrowser.submit(credentialHash, { ...recoveryStatusRequest, idempotency_key: "recovery-real-cross-profile", grant_id: crossProfileGrant.grant_id, profile_ref: "profile:other", operation_ref: actualInspection.operation_ref, task_scope: { operations: [...crossProfileRecoveryOperations], profile_refs: ["profile:other"], origins: [] } });
+  assert.equal(crossProfileResult.status, "failed", JSON.stringify(crossProfileResult));
+  assert.equal(crossProfileResult.failure?.code, "recovery_operation_not_found", JSON.stringify(crossProfileResult));
   console.log("managed browser Core HTTP boundary self-check passed");
 } finally {
   await new Promise<void>(resolve => server.close(() => resolve()));

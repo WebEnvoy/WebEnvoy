@@ -10,7 +10,7 @@ import { matchHarborBusinessOperationOwner } from "./execution-policy-owner-proo
 import { normalizeExecutionPolicyMutation } from "./execution-policy-config.js";
 import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
-import type { ManagedRecoveryService } from "./profile-recovery.js";
+import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile-recovery.js";
 
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
@@ -169,12 +169,17 @@ export function createManagedBrowserService(options: {
     if (isRecovery(input.operation)) {
       await check();
       if (!options.recoveryService) return fail("recovery_unavailable");
-      const recovery = input.operation === "recovery.inspect"
-        ? await options.recoveryService.inspect({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref })
-        : input.operation === "recovery.request"
-          ? await options.recoveryService.request({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref, ...(input.backup_ref === undefined ? {} : { backup_ref: input.backup_ref }) })
-          : await options.recoveryService.status({ operation_ref: input.operation_ref! }, input.profile_ref);
-      return { recovery, authorization_decision_ref: access.decision_ref };
+      try {
+        const recovery = input.operation === "recovery.inspect"
+          ? await options.recoveryService.inspect({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref })
+          : input.operation === "recovery.request"
+            ? await options.recoveryService.request({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref, ...(input.backup_ref === undefined ? {} : { backup_ref: input.backup_ref }) })
+            : await options.recoveryService.status({ operation_ref: input.operation_ref! }, input.profile_ref);
+        return { recovery, authorization_decision_ref: access.decision_ref };
+      } catch (error) {
+        if (error instanceof ProfileRecoveryCoreError) throw new ManagedAccessError(error.code);
+        throw error;
+      }
     }
     if (input.operation === "profile.create") {
       // Unknown creation blocks further quota consumption until the existing receipt is reconciled.

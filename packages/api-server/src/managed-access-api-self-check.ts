@@ -64,6 +64,12 @@ export async function assertManagedAccessApi(): Promise<void> {
     await call("/agent-access/principals", owner, { ...input, idempotency_key: "register-second", credential_hash: createHash("sha256").update(secondCredential).digest("hex") });
     assert.deepEqual((await call("/agent-connections", secondCredential, {})).body.grants, []);
     assert.equal((await call("/agent-access/grants", agent, {})).status, 401);
+    for (const path of ["/owner/recovery/backup", "/owner/recovery/apply"]) {
+      assert.equal((await call(path, agent, {})).status, 401);
+      const ownerResponse = await call(path, owner, {});
+      assert.equal(ownerResponse.status, 503);
+      assert.equal(ownerResponse.body.error.code, "recovery_unavailable");
+    }
     assert.equal((await call("/managed-browser/operations", agent, {})).body.ok, true);
     assert.equal((await call("/managed-browser/operations/managed-run", agent)).body.run_id, "managed-run");
     assert.equal((await call("/managed-browser/operations", undefined, {})).status, 401);
