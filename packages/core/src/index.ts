@@ -364,6 +364,18 @@ export {
   type TaskTurnInputSummaryConstraint
 } from "./task-turn-input-policy.js";
 
-export { createFileManagedAccessStore, ManagedAccessError, managedOperations, type FileManagedAccessStore } from "./managed-access.js";
+export { createFileManagedAccessStore, ManagedAccessError, managedOperations, managedSkillOperations, type FileManagedAccessStore, type ManagedSkillOperation, type ManagedSkillScope } from "./managed-access.js";
 export { createManagedBrowserService } from "./managed-browser.js";
+export {
+  createFileSkillLibraryService,
+  ManagedSkillError,
+  approvedSkillManifestSha256,
+  skillLibrarySchemaVersion,
+  skillResultSchemaVersion,
+  skillSourceManifestSchemaVersion,
+  type FileSkillLibraryService,
+  type SkillOperation,
+  type SkillRevision,
+  type SkillScopeRequest
+} from "./skill-library.js";
 export { CORE_PROFILE_RECOVERY_SCHEMA, ProfileRecoveryCoreError, createManagedRecoveryService, type ManagedRecoveryService, type RecoveryResult } from "./profile-recovery.js";

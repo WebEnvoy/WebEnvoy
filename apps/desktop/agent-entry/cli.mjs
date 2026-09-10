@@ -56,6 +56,32 @@ if (command === 'setup') {
     legacyFiles
   });
   console.log(JSON.stringify({ installed: true, credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
+} else if (command === 'access') {
+  const action = args[0];
+  const status = await ensureRuntime(dataDir);
+  const owner = JSON.parse(await readFile(join(dataDir, 'owner.json'), 'utf8'));
+  if (owner.runtime_id !== status.runtime_id || typeof owner.credential !== 'string' || !owner.credential.length) throw new Error('owner_runtime_mismatch');
+  const requestOwner = (path, body) => localRequest(dataDir, path, { credential: owner.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  let result;
+  if (action === 'list') {
+    result = await requestOwner('/agent-access');
+  } else if (action === 'register') {
+    result = await requestOwner('/agent-access/principals', { idempotency_key: arg('--idempotency-key') ?? `owner-principal:${randomBytes(16).toString('hex')}`, display_name: required('--display-name'), credential_hash: required('--credential-hash') });
+  } else if (action === 'grant') {
+    const value = await readJsonFile(required('--grant-file'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_grant_file_invalid');
+    const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope'];
+    if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('access_grant_file_invalid');
+    result = await requestOwner('/agent-access/grants', value);
+  } else if (action === 'revoke') {
+    const kind = required('--kind');
+    if (!['principals', 'connections', 'grants'].includes(kind)) throw new Error('access_revoke_kind_invalid');
+    const id = required('--id');
+    result = await requestOwner(`/agent-access/${kind}/${encodeURIComponent(id)}/revoke`, { idempotency_key: required('--idempotency-key') });
+  } else if (action === 'operation') {
+    result = await requestOwner(`/agent-access/operations/${encodeURIComponent(required('--operation-ref'))}`);
+  } else throw new Error('Use access list, register, grant, revoke or operation with --data-dir. Owner credentials stay local.');
+  console.log(JSON.stringify(result));
 } else if (command === 'recovery') {
   const action = args[0];
   const status = await ensureRuntime(dataDir);
@@ -130,7 +156,7 @@ if (command === 'setup') {
   const child = spawn(process.execPath, [root], { detached: true, stdio: 'ignore', env: { ...environment, WEBENVOY_INSTALLED_RUNTIME_DIR: dataDir } });
   child.unref();
   console.log(JSON.stringify({ app_started: true, pid: child.pid }));
-} else throw new Error('Use setup, start, diagnose, app or stop with --data-dir. Stop is an owner command, not an Agent tool.');
+} else throw new Error('Use setup, access, recovery, start, diagnose, app or stop with --data-dir. Stop and access are owner commands, not Agent tools.');
 async function reservePort() {
   const server = createServer();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -143,7 +169,7 @@ function required(name) { const value = arg(name); if (!value) throw new Error(`
 async function readJsonFile(path) { try { return JSON.parse(await readFile(resolve(path), 'utf8')); } catch { throw new Error('recovery_json_file_invalid'); } }
 function hostConfig(installRoot, clientPath, approveTools, includeRecovery, executable = process.execPath) {
   let config = `[mcp_servers.webenvoy]\ncommand = ${JSON.stringify(executable)}\nargs = ${JSON.stringify([join(installRoot, 'agent-entry/mcp.mjs'), clientPath])}\nstartup_timeout_sec = 30\ntool_timeout_sec = 100\n[mcp_servers.webenvoy.env]\nELECTRON_RUN_AS_NODE = "1"\n`;
-  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_operation', 'webenvoy_query', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
+  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_operation', 'webenvoy_query', 'webenvoy_skills', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
   return config;
 }
 async function verifyPrevious(rootPath) {

@@ -1,0 +1,31 @@
+{
+  "schema_version": "webenvoy.skill-source-manifest.v1",
+  "asset_ref": "webenvoy-browser-reference",
+  "asset_name": "webenvoy-browser",
+  "source_repository": "WebEnvoy/WebEnvoy",
+  "source_path": "apps/desktop/agent-entry/skills/webenvoy-browser/SKILL.md",
+  "revisions": [
+    {
+      "revision_ref": "git:WebEnvoy/WebEnvoy@047917cd5c17b546336504fa7b56725805bd6e0c:apps/desktop/agent-entry/skills/webenvoy-browser/SKILL.md#81726c79132bb8bc968746d40de18ceecbb87de1",
+      "source_ref": "github:WebEnvoy/WebEnvoy:apps/desktop/agent-entry/skills/webenvoy-browser/SKILL.md@047917cd5c17b546336504fa7b56725805bd6e0c",
+      "source_commit": "047917cd5c17b546336504fa7b56725805bd6e0c",
+      "source_blob": "81726c79132bb8bc968746d40de18ceecbb87de1",
+      "version": "0.2.0",
+      "path": "r1.md",
+      "content_sha256": "ee486fec882fea40fc68e29622e604a5088d47a15486044a0fd18b10487d93e0",
+      "content_bytes": 5351,
+      "compatibility": { "host": "codex", "plugin_version": "0.2.0" }
+    },
+    {
+      "revision_ref": "git:WebEnvoy/WebEnvoy@c113f4537f206384705df81c35ca5e2e64b8c261:apps/desktop/agent-entry/skills/webenvoy-browser/SKILL.md#fef903a0c9a96b5c378913ff25c460741a10d879",
+      "source_ref": "github:WebEnvoy/WebEnvoy:apps/desktop/agent-entry/skills/webenvoy-browser/SKILL.md@c113f4537f206384705df81c35ca5e2e64b8c261",
+      "source_commit": "c113f4537f206384705df81c35ca5e2e64b8c261",
+      "source_blob": "fef903a0c9a96b5c378913ff25c460741a10d879",
+      "version": "0.2.0",
+      "path": "r2.md",
+      "content_sha256": "a5176205c9c87a5492498053749f4ba567d713fa007426f4ee38cb9084d0475c",
+      "content_bytes": 7443,
+      "compatibility": { "host": "codex", "plugin_version": "0.2.0" }
+    }
+  ]
+}
