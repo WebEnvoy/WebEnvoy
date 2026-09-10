@@ -26,9 +26,12 @@ Core 持久化以下 v1 对象；字段未知、缺失、类型错误、额外�
     "backup_time": "<UTC>",
     "current_material_fingerprint": "<sha256>",
     "backup_material_fingerprint": "<sha256>",
+    "current_environment_fingerprint": "<sha256>",
+    "backup_environment_fingerprint": "<sha256>",
     "current_material_version": "<opaque>",
     "backup_material_version": "<opaque>",
     "owner_binding": "<sha256>",
+    "compatibility": { "provider_id": "camoufox", "provider_version": "<pinned>", "camoufox_version": "<pinned>", "browser_version": "<pinned>", "properties_sha256": "<sha256>", "bundle_schema_version": 1 },
     "scope": "profile_storage_and_matching_environment_bundle",
     "preserved_current_truth": ["grants", "revocations", "security_policy", "account_bindings", "runs", "receipts", "external_outcomes", "audit", "other_profiles"],
     "expires_at": "<UTC>"

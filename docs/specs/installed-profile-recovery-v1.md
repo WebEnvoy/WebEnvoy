@@ -32,15 +32,13 @@ Core 的 Run Record 是 owner 操作记录的持久真相。Harbor 只持久化�
   "profile_ref": "<opaque>",
   "identity_environment_ref": "<opaque>",
   "created_at": "<UTC>",
-  "source": {
-    "backup_time": "<UTC>",
-    "storage_fingerprint": "<sha256>",
-    "environment_fingerprint": "<sha256>",
-    "material_version": "<opaque provider/profile material version>",
-    "owner_binding": "<sha256 of profile and identity ownership binding>",
-    "provider_id": "camoufox",
-    "compatibility": { "camoufox_version": "<pinned>", "browser_version": "<pinned>", "properties_sha256": "<sha256>", "bundle_schema_version": 1 }
-  },
+  "backup_time": "<UTC>",
+  "storage_fingerprint": "<sha256>",
+  "environment_fingerprint": "<sha256>",
+  "material_version": "<opaque provider/profile material version>",
+  "owner_binding": "<sha256 of profile and identity ownership binding>",
+  "provider_id": "camoufox",
+  "compatibility": { "provider_id": "camoufox", "provider_version": "<pinned>", "camoufox_version": "<pinned>", "browser_version": "<pinned>", "properties_sha256": "<sha256>", "bundle_schema_version": 1 },
   "scope": "profile_storage_and_matching_environment_bundle",
   "private": true
 }
@@ -61,10 +59,12 @@ Backup 是不可启动的隔离副本，不登记为第二运行 Profile。Harbo
   "backup_time": "<UTC>",
   "current_material_fingerprint": "<sha256>",
   "backup_material_fingerprint": "<sha256>",
+  "current_environment_fingerprint": "<sha256>",
+  "backup_environment_fingerprint": "<sha256>",
   "current_material_version": "<opaque provider/profile material version>",
   "backup_material_version": "<opaque provider/profile material version>",
   "owner_binding": "<sha256 of profile and identity ownership binding>",
-  "compatibility": { "bundle_schema_version": 1, "provider_id": "camoufox", "camoufox_version": "<pinned>", "browser_version": "<pinned>", "properties_sha256": "<sha256>" },
+  "compatibility": { "provider_id": "camoufox", "provider_version": "<pinned>", "camoufox_version": "<pinned>", "browser_version": "<pinned>", "properties_sha256": "<sha256>", "bundle_schema_version": 1 },
   "scope": "profile_storage_and_matching_environment_bundle",
   "preserved_current_truth": ["grants", "revocations", "security_policy", "account_bindings", "runs", "receipts", "external_outcomes", "audit", "other_profiles"],
   "expected_effect": "restore_selected_profile_to_backup_timepoint_without_replay"

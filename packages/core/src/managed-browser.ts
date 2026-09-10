@@ -173,7 +173,7 @@ export function createManagedBrowserService(options: {
         ? await options.recoveryService.inspect({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref })
         : input.operation === "recovery.request"
           ? await options.recoveryService.request({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref, ...(input.backup_ref === undefined ? {} : { backup_ref: input.backup_ref }) })
-          : await options.recoveryService.status({ operation_ref: input.operation_ref! });
+          : await options.recoveryService.status({ operation_ref: input.operation_ref! }, input.profile_ref);
       return { recovery, authorization_decision_ref: access.decision_ref };
     }
     if (input.operation === "profile.create") {
