@@ -18,6 +18,8 @@
       const tab = target._tab;
       const browser = tab?.linkedBrowser;
       const window = tab?.ownerGlobal || tab?.documentGlobal;
+      if (target._nativeSwapPending || target._nativeAdopting)
+        throw new Error('Native association is transferring');
       if (target._disposed || !window || window.closed || !tab.isConnected ||
           browser !== target._linkedBrowser || !window.gBrowser?.tabs.includes(tab))
         throw new Error('Native association changed');

@@ -21,6 +21,8 @@ Object.defineProperty(focus,'activeWindow',{configurable:true,get(){throw new Er
 assert.equal(read().windows[0].browserWindowActive,null);assert.equal(read().windows[0].selectedTargetId,'target-b');
 h._shouldAttachToTarget=t=>t===a;const filtered=read();assert.equal(filtered.pages.length,1);assert.equal(filtered.windows[0].selectedTargetId,null);assert.equal(filtered.windows[0].selectionStatus,'out_of_scope');h._shouldAttachToTarget=()=>true;
 selected=a._tab;
+b._nativeSwapPending=true;assert.throws(read,/transferring/);b._nativeSwapPending=false;
+b._nativeAdopting=true;assert.throws(read,/transferring/);b._nativeAdopting=false;
 b._disposed=true;assert.throws(read,/association changed/);b._disposed=false;
 b._tab.isConnected=false;assert.throws(read,/association changed/);b._tab.isConnected=true;
 selected=b._tab;targets=[a];assert.throws(read,/selection is unavailable/);selected=a._tab;
