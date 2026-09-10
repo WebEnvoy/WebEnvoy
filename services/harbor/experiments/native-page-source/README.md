@@ -48,10 +48,10 @@ BrowserHandler 只返回当前私有连接可附着的 target；窗口选中了�
 3. 构建只读因果追踪副本：`python3 services/harbor/experiments/native-page-source/build-trace.py '/tmp/webenvoy-native-prototype-504/r-trace/WebEnvoy Native Prototype.app'`。该脚本基于未修复快照增加有界 trace，不启用 adoption patch；它会额外校验固定 `PageHandler.js` pin。
 4. 用固定 venv 的 Python 运行 `prepare-options.py <副本 executable> <本轮 Profile 路径> <新 options.json>`；可在末尾加 `--headless`。它复用现有 Driver 的环境生成、校验和重放，只截获启动参数，不启动浏览器；options 文件是私有材料。
 5. 可选地编译独立前台参照：`xcrun clang++ -bundle -undefined dynamic_lookup -fobjc-arc -I <Node24/include/node> -framework Foundation -framework AppKit process-state.mm -o /tmp/webenvoy-native-prototype-504/process-state.node`。
-6. 运行 Node 探针：`node probe.mjs <options.json> <私有 evidence.jsonl> [process-state.node] [--trace]`；保持 stdin 打开。它只接受固定的 `snapshot`、`inspect`、`wait-association`、`checkpoint`、`verify-continuity`、`inventory`、`invalid-query`、`disconnect`、`arm-disconnect` 和 `stop` 命令，另可用 `--baseline` 读取 U。开页、切页、重排、移窗和关闭测试使用浏览器原生交互，不能把 Agent activate 充当人工动作。
+6. `probe.mjs` 已永久停用并在浏览器派发前拒绝；不再运行 live 探针或 `--baseline`，历史调用记录只作离线核对。开页、切页、重排、移窗和关闭测试不在本轮执行。
 7. 运行 `node native-snapshot.test.mjs`，检查只读 selected、对象失效、scope 过滤、代次、边界及缺失/复用进程身份；运行 `node adoption.test.mjs`，将固定源码的实际补丁方法载入 VM 检验 swap 和引用失效；这是离线组件检查，不是原生 live。
 
-探针只打开本轮 loopback 合成页；正文 A/B 是独立验收参照，不进入识别逻辑，`inspect` 也不用于任意真实页面。原生截图、对象绑定、环境参数和私有日志留在临时实验目录；GitHub 只回写脱敏结论及摘要。停止时断开/关闭所属浏览器和本地服务，保留 Profile、恢复前副本和证据。
+历史探针只打开本轮 loopback 合成页；正文 A/B 是独立验收参照，不进入识别逻辑，`inspect` 也不用于任意真实页面。原生截图、对象绑定、环境参数和私有日志留在临时实验目录；GitHub 只回写脱敏结论及摘要。现有现场不重开，必要材料保留供核对。
 
 ## 已确认的因果链
 
@@ -108,6 +108,14 @@ F3 原生 UI 记录 `f3-native-ui.jsonl` 第 2 条显示 `Move Tab` 及其子项
 固定 source 的 UI 入口也只支持有限结论：`tabbrowser.js` 约 10603–10610 行在仅有一个 visible tab 时禁用整个 Move Tab；`browser.xhtml` 约 494–507 行只列出 start/end/new 等目标，没有已有窗口目的地；`replaceTabWithWindow` 约 6837–6840 行对单 tab 直接 return。故当前 fixture 的入口是不可达或不完整，不能把它写成 transfer 已失败的完整矩阵，也不能据此推断所有 Firefox 原生路径永远不可达。
 
 本轮一次 UI 助手错误启动了原版空白默认窗口，随后已停止。原版安装资源 hash 未改变；该事件不是 F3 证据。日常 Profile 的自动 metadata 未核对，本 README 对“日常 Profile 不变”不作断言。
+
+### 误启动防护（2026-09-11）
+
+仓内没有 `skyUI`、按应用名查找或自动启动原版浏览器的产品入口；该次误启动来源是主会话 `node_repl` 中的历史闭包 `adoptionEvidence`、`adoptionEvidenceFor`、`f3MoveToNewWindow`、`f3Tile`、`adoptionSky`，不属于本仓库的可执行入口。主会话已清除这些闭包和 `sky` 引用，并以拒绝函数替换旧 helper。
+
+本实验入口也已在 `probe.mjs` 的浏览器派发前永久拒绝。`ui-launch-guard.mjs` 只接受用于核对的已登记目标事实：运行状态、PID/启动身份、隔离可执行文件、隔离 Profile 和实验 manifest；缺失、退出、身份不符、原版路径、非测试 Profile 或 manifest 不匹配均拒绝。即使全部匹配，暂停中的 UI 自动化仍拒绝，且入口不接收 launcher callback，不能派发进程。
+
+离线断言：`node services/harbor/experiments/native-page-source/ui-launch-guard.test.mjs`。该检查只构造内存事实，不访问日常 Profile、不扫描进程、不启动浏览器；覆盖上述拒绝条件并断言启动派发次数为 `0`。既有 `f3-native-ui.jsonl` 与 `adoption-ui.jsonl` 只作历史调用记录核对，不能证明日常 Profile 未受影响。
 
 ## 构建器和归档审计
 

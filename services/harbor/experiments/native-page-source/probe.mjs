@@ -1,4 +1,7 @@
 // Local-only prototype Driver; no public tool or network protocol endpoint.
+// This paused experiment has no executable UI entry until a new owner decision.
+import {denyUiLaunch} from './ui-launch-guard.mjs';
+denyUiLaunch({registered: false, status: 'missing'});
 import assert from 'node:assert/strict';
 import {foreground} from './foreground.mjs';
 import {isCurrentObservation} from './observation-reference.mjs';
