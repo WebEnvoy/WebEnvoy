@@ -211,6 +211,47 @@ print("properties layout passed")
   assert.match(output, /properties layout passed/);
 });
 
+test("fails closed when native Page activation cannot bring the Page to front", () => {
+  const helperPath = join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
+  const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON || "python3";
+  const script = `
+import importlib.util
+spec = importlib.util.spec_from_file_location("camoufox_driver", __import__("sys").argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class FakePage:
+    def __init__(self, name, fails=False):
+        self.name = name
+        self.fails = fails
+    def is_closed(self):
+        return False
+    def bring_to_front(self):
+        if self.fails:
+            raise RuntimeError("native focus unavailable")
+old = FakePage("old")
+candidate = FakePage("candidate", fails=True)
+old_state = module.register_provider_page(old)
+candidate_state = module.register_provider_page(candidate)
+module.PAGE = old
+old_state["active"] = True
+try:
+    module.set_active_provider_page(candidate)
+except RuntimeError as error:
+    assert str(error) == "native focus unavailable"
+else:
+    raise AssertionError("failed native activation was reported as success")
+assert module.PAGE is old
+assert old_state["active"] is True
+assert candidate_state.get("active") is not True
+print("activation failure passed")
+`;
+  const output = execFileSync(pythonPath, ["-c", script, helperPath], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+  assert.match(output, /activation failure passed/);
+});
+
 async function withCamoufoxEnv<T>(callback: () => Promise<T>): Promise<T> {
   const previousPython = process.env.HARBOR_CAMOUFOX_PYTHON;
   const previousHelper = process.env.HARBOR_CAMOUFOX_DRIVER_PATH;

@@ -85,6 +85,24 @@ test("closing a background Page returns the unchanged active Page", async () => 
   assert.equal((result as ManagedPageFacts).active, true);
 });
 
+test("closing an authorized background Page does not project an unauthorized active Page", async () => {
+  const registry = new PageRegistry("session:test", controller([
+    page("provider:one", "https://s1.example", true),
+    page("provider:two", "https://s2.example", false)
+  ]));
+  await registry.refresh();
+  const pages = registry.list(["https://s1.example", "https://s2.example"]).pages;
+  const background = pages.find(item => !item.active)!;
+  const result = await registry.operate({
+    operation: "page.close", page_id: background.page_id, page_ref: background.page_ref,
+    authorized_origins: ["https://s2.example"]
+  });
+  assert.equal("failure_class" in result && result.failure_class, "page_not_found");
+  assert.equal(JSON.stringify(result).includes("s1.example"), false);
+  const remaining = registry.list(["https://s1.example", "https://s2.example"]);
+  assert.equal(remaining.pages.some(item => item.current_url?.startsWith("https://s1.example") && item.active), true);
+});
+
 test("PageRegistry rotates the document binding for same-URL reloads and rejects the old ref", async () => {
   const registry = new PageRegistry("session:test", controller([page("provider:one", "https://s1.example/detail", true)]));
   await registry.refresh();

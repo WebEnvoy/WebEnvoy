@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
         assert DRIVER.load_environment_bundle(profile)["config"]["canvas:seed"] == seen[0]["canvas:seed"]
         if fail_browser:
             raise ValueError("fixture launch failure")
-        page = types.SimpleNamespace(url="about:blank", title=lambda: "", on=lambda *_: None)
+        page = types.SimpleNamespace(url="about:blank", title=lambda: "", on=lambda *_: None, bring_to_front=lambda: None)
         return types.SimpleNamespace(pages=[page], browser=types.SimpleNamespace(version=DRIVER.BROWSER_VERSION_PIN), close=lambda: None)
 
     camoufox = types.ModuleType("camoufox")
