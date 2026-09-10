@@ -29,9 +29,11 @@ const server = createServer(async (req, res) => {
     }
     if (!state.ready) return send(res, 503, { ok: false, error: { code: state.error ?? 'runtime_starting' } });
     const ownerRoute = (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
-      (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url));
-    const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations'].includes(req.url)) ||
-      (req.method === 'GET' && /^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url));
+      (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
+      (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
+      (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/profile-policies'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url)));
+    const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
+      (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
     if (!ownerRoute && !agentRoute) return send(res, 403, { ok: false, error: { code: 'agent_route_denied' } });
     if (req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === 'authorization').length !== 1) return send(res, 401, { ok: false, error: { code: ownerRoute ? 'owner_authentication_required' : 'agent_authentication_required' } });
     if (ownerRoute && (!ownerToken || req.headers.authorization !== `Bearer ${ownerToken}`)) return send(res, 401, { ok: false, error: { code: 'owner_authentication_required' } });
@@ -67,6 +69,7 @@ try {
   for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
   Object.assign(process.env, {
     WEBENVOY_RUNTIME_DATA_DIR: dataDir,
+    WEBENVOY_SKILL_ASSETS_PATH: join(root, 'agent-entry/skill-assets'),
     HARBOR_PROFILE_STORAGE_ROOT: join(dataDir, 'profiles'),
     WEBENVOY_LODE_ASSETS_PATH: join(root, 'dist-electron/lode'),
     WEBENVOY_CORE_RUNTIME_COMMAND: '', WEBENVOY_CORE_RUNTIME_PATH: '', WEBENVOY_CORE_RUNTIME_CWD: '',

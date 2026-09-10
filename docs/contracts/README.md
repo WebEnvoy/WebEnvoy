@@ -4,7 +4,7 @@
 
 ## V1 Browser Runtime 与 Profile 环境
 
-Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/network-runtime-contract-v1.md)、[Console Runtime V1](../specs/console-runtime-contract-v1.md)、[Plugin Runtime Exposure V1](../specs/plugin-runtime-exposure-v1.md)。
+Network/Console 首切与已安装 SKILL 的正式 wire/投影合同：[Network Runtime V1](../specs/network-runtime-contract-v1.md)、[Console Runtime V1](../specs/console-runtime-contract-v1.md)、[Plugin Runtime Exposure V1](../specs/plugin-runtime-exposure-v1.md)、[Managed SKILL Library Lifecycle V1](../specs/skill-library-lifecycle-v1.md)。
 
 | 合同 | 权威位置 | 接受范围 |
 | --- | --- | --- |
@@ -13,13 +13,14 @@ Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/netw
 | Browser Runtime Capabilities V1 | [browser-runtime-capabilities-v1.md](../specs/browser-runtime-capabilities-v1.md) | V1 主要 browser capability 的规范性语义、支持状态、权限分级、数据边界、结果和完成条件；不冻结最终 wire 字段。 |
 | Profile Environment V1 | [profile-environment-v1.md](../specs/profile-environment-v1.md) | configured／effective／pending／observed／drift、Provider／设备／网络环境 owner、Camoufox 连续性、变更、迁移和验证语义。 |
 | Installed Profile Recovery V1 | [installed-profile-recovery-v1.md](../specs/installed-profile-recovery-v1.md) | 已安装更新/重装、长期 Profile 接续、私有 backup/plan/apply、owner 确认、恢复边界和 fail-closed 验收。 |
-| Grant Wire Contract V1 | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery.inspect/request/status 的 Grant 投影、单计划确认、撤销/过期与 idempotency 语义。 |
+| Managed SKILL Library Lifecycle V1 | [skill-library-lifecycle-v1.md](../specs/skill-library-lifecycle-v1.md) | 可选固定来源 SKILL 的身份、受管 data-root 存储、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与重启持久性。 |
+| Grant Wire Contract V1 (v1.1) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery.inspect/request/status 的 Grant 投影、SKILL `skill_scope` 新维度、v1.1 兼容/旧严格 reader 拒绝边界、单计划确认、撤销/过期与 idempotency 语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 
 1. 引用上表对应的规范性语义；
 2. 说明 owner、版本和兼容范围；
-3. 提供有效／无效 fixture；
+3. 若本次实现已经冻结 schema/fixture，则提供真实有效／无效 fixture；文件存在前不得虚构路径或验收结果；
 4. 不把 Provider 私有协议或站点语义升级为公共合同；
 5. 从本索引添加稳定链接。
 
@@ -56,6 +57,7 @@ Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/netw
 | --- | --- | --- |
 | Browser Runtime capability | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md), [Runtime 架构](../architecture/runtime-capability-plane.md), [能力规格](../specs/browser-runtime-capabilities-v1.md) | 各能力的最终 wire schema、Provider adapter、capability catalog schema 和 Plugin tool mapping。 |
 | Profile environment | [环境规格](../specs/profile-environment-v1.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 环境事实 JSON Schema、Camoufox persistence adapter、migration schema 和公开诊断投影。 |
+| Installed SKILL library | [SKILL 生命周期规格](../specs/skill-library-lifecycle-v1.md), [Plugin exposure](../specs/plugin-runtime-exposure-v1.md), [Grant wire](../specs/grant-wire-contract-v1.md) | 最终 JSON Schema/fixture、owner API 生成类型和跨宿主消费者；不得从可选 SKILL 推导网页 scope。 |
 | API Server / API routes | [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0006](../adr/0006-common-task-entry-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | HTTP framework、OpenAPI、auth middleware、route implementation。 |
 | Core Runtime | [ADR 0002](../adr/0002-run-task-capability-model.md), [ADR 0004](../adr/0004-admission-and-action-risk.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md), [ADR 0009](../adr/0009-unified-authorization-policy.md), [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | Runtime executor、queue、resource lock、true-write execution。 |
 | Run Record / persistence | [ADR 0003](../adr/0003-result-envelope-and-run-record.md), [ADR 0005](../adr/0005-task-intent-and-run-lifecycle-v0.md), [ADR 0007](../adr/0007-reference-version-ownership-v0.md), [ADR 0008](../adr/0008-core-technical-architecture-baseline.md) | Database/storage choice、migration tooling、query implementation。 |

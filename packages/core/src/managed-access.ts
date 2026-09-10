@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedInteractionOperations] as const;
+export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.install", "skill.enable", "skill.read", "skill.update", "skill.rollback", "skill.disable"] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedInteractionOperations, ...managedSkillOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
+export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };
 export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: ManagedOperation[]; allowed_origins: string[]; controlled_interaction_origins?: string[] };
+export type ManagedSkillScope = { skill_refs: string[]; source_refs: string[] };
 export type ManagedCreationTemplate = {
   template_ref: string;
   provider_id: string;
@@ -28,11 +31,12 @@ export type ManagedGrant = {
   creation_template: ManagedCreationTemplate | null;
   max_created_profiles: number;
   created_profile_refs: string[];
+  skill_scope?: ManagedSkillScope;
 };
-export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[] };
+export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; skill_refs?: string[]; source_refs?: string[] };
 export type ManagedAccessRequest = {
   connection_id: string; grant_id: string; operation: ManagedOperation;
-  profile_ref?: string; origin?: string; template_ref?: string; task_scope: ManagedTaskScope;
+  profile_ref?: string; origin?: string; template_ref?: string; skill_ref?: string; source_ref?: string; revision_ref?: string; task_scope: ManagedTaskScope;
 };
 export type ManagedAccess = {
   principal: ManagedPrincipal; connection: ManagedConnection; grant: ManagedGrant;
@@ -94,6 +98,10 @@ function ceiling(value: unknown): ManagedCreationTemplate["permission_ceiling"] 
   if (controlled?.some(item => !allowed_origins.includes(item))) return fail("managed_access_invalid_input");
   return { allowed_operations: operations(obj.allowed_operations), allowed_origins, ...(controlled === undefined ? {} : { controlled_interaction_origins: controlled }) };
 }
+function skillScope(value: unknown): ManagedSkillScope {
+  const obj = object(value, ["skill_refs", "source_refs"]);
+  return { skill_refs: strings(obj.skill_refs), source_refs: strings(obj.source_refs) };
+}
 function template(value: unknown): ManagedCreationTemplate | null {
   if (value === null) return null;
   const obj = object(value, ["template_ref", "provider_id", "site", "language", "timezone", "permission_ceiling"]);
@@ -136,9 +144,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (entry.revoked_at !== null) timestamp(entry.revoked_at);
       }
       for (const entry of state.grants) {
-        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"]);
+        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"], ["skill_scope"]);
         string(entry.grant_id); string(entry.principal_id); strings(entry.profile_refs);
         operations(entry.allowed_operations); strings(entry.allowed_origins, origin); timestamp(entry.expires_at); template(entry.creation_template);
+        if (entry.skill_scope !== undefined) skillScope(entry.skill_scope);
         if (entry.revoked_at !== null) timestamp(entry.revoked_at);
         strings(entry.created_profile_refs);
         if (!Number.isSafeInteger(entry.max_created_profiles) || entry.max_created_profiles < entry.created_profile_refs.length ||
@@ -222,9 +231,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       });
     },
     async createGrant(value: unknown): Promise<ManagedGrant> {
-      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"]);
+      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope"]);
       const parsed = { principal_id: string(input.principal_id), profile_refs: strings(input.profile_refs), allowed_operations: operations(input.allowed_operations),
-        allowed_origins: strings(input.allowed_origins, origin), expires_at: timestamp(input.expires_at), creation_template: template(input.creation_template), max_created_profiles: input.max_created_profiles };
+        allowed_origins: strings(input.allowed_origins, origin), expires_at: timestamp(input.expires_at), creation_template: template(input.creation_template), max_created_profiles: input.max_created_profiles,
+        ...(input.skill_scope === undefined ? {} : { skill_scope: skillScope(input.skill_scope) }) };
       if (!Number.isSafeInteger(parsed.max_created_profiles) || (parsed.max_created_profiles as number) < 0 || (parsed.max_created_profiles as number) > 1024 ||
         (!parsed.creation_template && parsed.max_created_profiles !== 0)) return fail("managed_access_invalid_input");
       return transaction(state => receipt(state, "createGrant", input, () => {
@@ -268,19 +278,38 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
-      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref"]);
+      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "skill_ref", "source_ref", "revision_ref"]);
       const connectionId = string(input.connection_id), grantId = string(input.grant_id), op = operation(input.operation);
       const profileRef = input.profile_ref === undefined ? undefined : string(input.profile_ref);
       const targetOrigin = input.origin === undefined ? undefined : origin(input.origin);
       const templateRef = input.template_ref === undefined ? undefined : string(input.template_ref);
-      const scope = object(input.task_scope, ["operations", "profile_refs", "origins"]);
-      const task = { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin) };
+      const skillRef = input.skill_ref === undefined ? undefined : string(input.skill_ref);
+      const sourceRef = input.source_ref === undefined ? undefined : string(input.source_ref);
+      const revisionRef = input.revision_ref === undefined ? undefined : string(input.revision_ref);
+      const skillOperation = (managedSkillOperations as readonly string[]).includes(op);
+      const scope = skillOperation
+        ? object(input.task_scope, ["operations", "skill_refs", "source_refs"])
+        : object(input.task_scope, ["operations", "profile_refs", "origins"]);
+      const task = (skillOperation
+        ? { operations: operations(scope.operations), profile_refs: [] as string[], origins: [] as string[], skill_refs: strings(scope.skill_refs), source_refs: strings(scope.source_refs) }
+        : { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin) }) as ManagedTaskScope;
       const state = await read(), principal = authenticated(state, credentialHash);
       const connection = state.connections.find(item => item.connection_id === connectionId && item.principal_id === principal.principal_id && item.revoked_at === null);
       if (!connection) return fail("managed_access_connection_unavailable");
       const grant = activeGrant(state, grantId);
       if (grant.principal_id !== principal.principal_id || !grant.allowed_operations.includes(op) || !task.operations.includes(op)) return fail("managed_access_denied");
       const result: ManagedAccess = { principal: publicPrincipal(principal), connection, grant };
+      if (skillOperation) {
+        const taskSkillRefs = task.skill_refs ?? [], taskSourceRefs = task.source_refs ?? [], grantSkillScope = grant.skill_scope;
+        if (profileRef !== undefined || targetOrigin !== undefined || templateRef !== undefined || !grantSkillScope) return fail("managed_access_denied");
+        if (taskSkillRefs.some(ref => !grantSkillScope.skill_refs.includes(ref)) || taskSourceRefs.some(ref => !grantSkillScope.source_refs.includes(ref)) ||
+          revisionRef !== undefined && (!grantSkillScope.source_refs.includes(revisionRef) || !taskSourceRefs.includes(revisionRef)) ||
+          skillRef !== undefined && (!grantSkillScope.skill_refs.includes(skillRef) || !taskSkillRefs.includes(skillRef)) ||
+          sourceRef !== undefined && (!grantSkillScope.source_refs.includes(sourceRef) || !taskSourceRefs.includes(sourceRef))) return fail("managed_access_denied");
+        if (skillRef === undefined && (sourceRef !== undefined || revisionRef !== undefined)) return fail("managed_access_invalid_input");
+        return result;
+      }
+      if (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined) return fail("managed_access_invalid_input");
       if (op === "profile.create") {
         if (profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles) return fail("managed_access_creation_denied");
         const creationOrigin = grant.creation_template.site.origin;

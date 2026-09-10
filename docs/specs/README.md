@@ -12,10 +12,11 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Profile Environment V1](profile-environment-v1.md) | [Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471) | 定义长期 Profile 环境的 configured／effective／pending／observed／drift、Provider owner、连续性和验证。 |
 | [Network Runtime Contract V1](network-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 bounded Network metadata、Page binding、cursor、脱敏和生命周期语义。 |
 | [Console Runtime Contract V1](console-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 console/page-error levels、文本截断脱敏、source location 和生命周期语义。 |
-| [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 固定诊断 capability→MCP projection、版本、availability、授权与恢复语义。 |
+| [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md) | [Work Items #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定诊断与已安装 SKILL capability→MCP projection、版本、availability、授权与恢复语义。 |
 | [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md) | [Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499) | 冻结 Camoufox 私有 bundle、精确 replay、版本兼容、fail-closed 和有界 environment readback。 |
 | [Installed Profile Recovery V1](installed-profile-recovery-v1.md) | [安装 Profile 接续与恢复 #505](https://github.com/WebEnvoy/WebEnvoy/issues/505) | 定义已安装更新/重装的数据 root 接续、受管 Profile backup/plan/apply、owner 确认、撤销/历史保留和 fail-closed 语义。 |
-| [Grant Wire Contract V1](grant-wire-contract-v1.md) | [安装 Profile 接续与恢复 #505](https://github.com/WebEnvoy/WebEnvoy/issues/505) | 固定 recovery Agent operation projection 与单计划 owner 确认的持久安全语义。 |
+| [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) | [Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定可选 SKILL 的来源身份、受管 data-root 生命周期、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与恢复语义。 |
+| [Grant Wire Contract V1 (v1.1)](grant-wire-contract-v1.md) | [Work Items #505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定 recovery projection、SKILL `skill_scope` 新维度、版本兼容、旧 Grant 读取与旧严格 reader 拒绝边界、单计划 owner 确认的持久安全语义。 |
 
 ## 使用规则
 
@@ -23,7 +24,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 2. Spec 定义语义；Issue 定义当前交付切片；verification 只保存实际证据。
 3. 当前实现缺失不能反向缩小 spec；需要缩小 V1 范围时先更新产品决策。
 4. Provider 私有 API、站点 selector、临时测试字段和未经接受的草稿不能进入公共 spec。
-5. 规格中尚未冻结的 wire 名称应在实现 Work Item 中通过 schema／fixture／兼容和迁移说明收敛。
+5. 规格中尚未冻结的 wire 名称应在实现 Work Item 中通过真实 schema／fixture（存在后再链接）、兼容和迁移说明收敛；不得虚构 fixture 路径或验收证据。
 6. 新 spec 必须声明状态、版本、owner、产品依据、架构依据和非目标。
 
 ## Design Obligation Gate
@@ -55,3 +56,4 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 - #498：`DO-NETWORK-CONTRACT = triggered`、`DO-CONSOLE-CONTRACT = triggered`；`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 在新增动态 exposure policy 或新 Grant wire dimension 时转为 `triggered`。
 - #499：`DO-PROVIDER-PRIVATE-SCHEMA = triggered`；固定版本 Camoufox 的 `launch_options()` 会生成必须由 WebEnvoy 重放的 fingerprint/config/seed 材料，正式私有合同见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 复用既有 operation/Grant 结构，不新增持久维度。
 - #505：`DO-PLUGIN-EXPOSURE = triggered`，恢复 projection 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)；`DO-GRANT-WIRE = triggered`，恢复值与单计划确认见 [Grant Wire Contract V1](grant-wire-contract-v1.md)；`DO-PROVIDER-PRIVATE-SCHEMA = conditional`，仅当改变 Camoufox 私有 bundle/兼容规则时转为 triggered，恢复默认沿用 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。
+- #508：`DO-PLUGIN-EXPOSURE = triggered`，固定 `webenvoy_skills` 与八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)；`DO-GRANT-WIRE = triggered`，`skill_scope`、task scope、旧 Grant 读取和旧严格 reader 拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)；SKILL 生命周期与内容/receipt 见 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)。`DO-NETWORK-CONTRACT`、`DO-CONSOLE-CONTRACT`、`DO-PROVIDER-PRIVATE-SCHEMA`、`DO-APP-IA` 为 `not-triggered`：本项不改变这些边界。

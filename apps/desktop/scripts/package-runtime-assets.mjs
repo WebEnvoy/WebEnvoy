@@ -142,6 +142,8 @@ import {
   createFileExecutionPolicyConfigStore,
   createFileRunRecordStore,
   createFileManagedAccessStore,
+  createFileSkillLibraryService,
+  approvedSkillManifestSha256,
   createManagedBrowserService,
   createManagedRecoveryService,
   createHttpHarborIdentityFactsReader,
@@ -194,6 +196,15 @@ if (harborRuntimeClient) {
 const managedAccessStore = createFileManagedAccessStore({
   directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? runRecordDir + ".managed-access"
 });
+const skillLibraryDirectory = process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? runtimeDataDir;
+const skillAssetsPath = process.env.WEBENVOY_SKILL_ASSETS_PATH ?? join(process.cwd(), "agent-entry", "skill-assets");
+const managedSkillService = createFileSkillLibraryService({
+  accessStore: managedAccessStore,
+  runRecordStore,
+  directory: skillLibraryDirectory,
+  trustedManifestSha256: approvedSkillManifestSha256,
+  sourceManifestPath: join(skillAssetsPath, "manifest.json")
+});
 const managedRecoveryService = harborRuntimeUrl
   ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
   : undefined;
@@ -205,6 +216,7 @@ const managedBrowserService = harborRuntimeUrl
 const server = createApiServer({
   supervisorToken,
   managedAccessStore,
+  managedSkillService,
   ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
   ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
   runRecordStore,

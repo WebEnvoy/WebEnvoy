@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   createFileRunRecordStore,
   createFileManagedAccessStore,
+  createFileSkillLibraryService,
+  approvedSkillManifestSha256,
   createManagedBrowserService,
   createManagedRecoveryService,
   createFileAuthorizationDecisionStore,
@@ -81,10 +83,20 @@ if (import.meta.url === entrypoint) {
         harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
         ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
     : undefined;
+  const skillLibraryDirectory = runRecordStore
+    ? process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? process.env.WEBENVOY_RUNTIME_DATA_DIR ?? join(runRecordStore.directory, "..", "..")
+    : undefined;
+  const skillAssetsPath = process.env.WEBENVOY_SKILL_ASSETS_PATH;
+  const managedSkillService = managedAccessStore && runRecordStore && skillLibraryDirectory
+    ? createFileSkillLibraryService({ accessStore: managedAccessStore, runRecordStore, directory: skillLibraryDirectory,
+        trustedManifestSha256: approvedSkillManifestSha256,
+        ...(skillAssetsPath === undefined ? {} : { sourceManifestPath: join(skillAssetsPath, "manifest.json") }) })
+    : undefined;
   const server = createApiServer({
     supervisorToken,
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
+    ...(managedSkillService === undefined ? {} : { managedSkillService }),
     ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),

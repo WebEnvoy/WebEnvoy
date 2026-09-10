@@ -18,7 +18,7 @@ const host = { electron_version: JSON.parse(await readFile(new URL('../node_modu
 const workspace = JSON.parse(await readFile(join(appRoot, 'dist-electron/runtime/packaging-state.json'), 'utf8')).workspace;
 const lode = JSON.parse(await readFile(join(appRoot, 'dist-electron/lode/provenance.json'), 'utf8'));
 const allFiles = await files(appRoot);
-const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json'));
+const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => (name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json') || name.startsWith('agent-entry/skill-assets/')));
 const requiredFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => !(name in optionalFiles)));
 await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
 console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace }));

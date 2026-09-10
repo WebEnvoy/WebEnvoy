@@ -31,7 +31,7 @@ try {
   assert.equal((await ensureRuntime(data)).runtime_id, first.runtime_id);
   const client = JSON.parse(await readFile(join(directory, 'host/webenvoy-client.json'), 'utf8'));
   assert.equal((await localRequest(data, '/agent-connections', { method: 'POST', credential: client.credential, body: {} })).error.code, 'managed_access_authentication_required');
-  assert.equal((await localRequest(data, '/agent-access', { credential: client.credential })).error.code, 'agent_route_denied');
+  assert.equal((await localRequest(data, '/agent-access', { credential: client.credential })).error.code, 'owner_authentication_required');
   const owner = JSON.parse(await readFile(join(data, 'owner.json'), 'utf8'));
   const ownerCall = async (path, body) => (await fetch(first.coreEndpoint + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.credential}` }, body: JSON.stringify(body) })).json();
   const registered = await ownerCall('/agent-access/principals', { idempotency_key: 'aux-register', display_name: 'Auxiliary connector check', credential_hash: createHash('sha256').update(client.credential).digest('hex') });

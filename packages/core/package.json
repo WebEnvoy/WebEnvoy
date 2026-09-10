@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node dist/self-check.js && node --test dist/profile-recovery.test.js",
+    "test": "pnpm build && node dist/self-check.js && node --test dist/profile-recovery.test.js dist/skill-library.test.js",
     "lint": "tsc -p tsconfig.json --noEmit"
   }
 }

@@ -29,10 +29,14 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
     const path = join(bundleRoot, name);
     if (!(await lstat(path)).isFile() || sha(await readFile(path)) !== hash) throw new Error(`asset_integrity_failed: ${name}; reinstall the matching bundle`);
   }
-  let optionalUnavailable = 0;
+  let optionalUnavailable = 0, optionalSkillUnavailable = 0;
   for (const [name, hash] of Object.entries(manifest.optional_files ?? {})) {
-    if (!name.startsWith('dist-electron/lode/') || name.includes('..')) throw new Error('asset_manifest_invalid');
-    try { if (sha(await readFile(join(bundleRoot, name))) !== hash) optionalUnavailable++; } catch { optionalUnavailable++; }
+    if (!(name.startsWith('dist-electron/lode/') || name.startsWith('agent-entry/skill-assets/')) || name.includes('..')) throw new Error('asset_manifest_invalid');
+    try {
+      const info = await lstat(join(bundleRoot, name));
+      if (name.startsWith('agent-entry/skill-assets/') && (!info.isFile() || info.size > 1024 * 1024)) { optionalSkillUnavailable++; continue; }
+      if (sha(await readFile(join(bundleRoot, name))) !== hash) name.startsWith('agent-entry/skill-assets/') ? optionalSkillUnavailable++ : optionalUnavailable++;
+    } catch { name.startsWith('agent-entry/skill-assets/') ? optionalSkillUnavailable++ : optionalUnavailable++; }
   }
-  return { host: { node: process.versions.node, electron: process.versions.electron ?? null, executable_integrity: process.versions.electron ? 'verified' : 'not_checked_by_node_helper' }, optional_website_assets: optionalUnavailable ? { state: 'unavailable', affected_files: optionalUnavailable } : { state: 'verified' }, version: manifest.version, skill_version: manifest.skill_version, workspace: manifest.workspace, lode: manifest.lode, integrity: 'verified', digest: sha(JSON.stringify(manifest)) };
+  return { host: { node: process.versions.node, electron: process.versions.electron ?? null, executable_integrity: process.versions.electron ? 'verified' : 'not_checked_by_node_helper' }, optional_website_assets: optionalUnavailable ? { state: 'unavailable', affected_files: optionalUnavailable } : { state: 'verified' }, optional_skill_assets: optionalSkillUnavailable ? { state: 'unavailable', affected_files: optionalSkillUnavailable } : { state: 'verified' }, version: manifest.version, skill_version: manifest.skill_version, workspace: manifest.workspace, lode: manifest.lode, integrity: 'verified', digest: sha(JSON.stringify(manifest)) };
 }
