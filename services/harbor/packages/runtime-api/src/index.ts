@@ -89,7 +89,11 @@ import {
   type RuntimeSessionFacts,
   type RuntimeSessionRecord,
   type RuntimeSessionUnavailable,
-  type ValidationRuntimeFacts
+  type ValidationRuntimeFacts,
+  type ManagedPageOperation,
+  type ManagedPageFacts,
+  type ManagedPageList,
+  type ManagedPageUnavailable
 } from "./runtime-session.js";
 import { isRuntimeDriverAvailable, isRuntimeSessionReadable } from "./runtime-session-types.js";
 import {
@@ -482,6 +486,33 @@ export class HarborRuntime {
     return this.runtimeSessions.getManagedInteraction(operation_ref);
   }
 
+  async operateManagedPage(runtime_session_ref: string, input: unknown): Promise<ManagedPageFacts | ManagedPageList | ManagedPageUnavailable> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Invalid Page operation request.", retryable: false };
+    }
+    const request = input as Record<string, unknown>;
+    const operations = ["page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"] as const;
+    if (!operations.includes(request.operation as typeof operations[number])) {
+      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Unknown Page operation.", retryable: false };
+    }
+    const authorized = request.authorized_origins;
+    if (!Array.isArray(authorized) || !authorized.every(item => typeof item === "string")) {
+      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Authorized origin facts are required.", retryable: false };
+    }
+    const inputRecord = {
+      operation: request.operation as ManagedPageOperation,
+      ...(typeof request.operation_ref === "string" ? { operation_ref: request.operation_ref } : {}),
+      ...(typeof request.idempotency_key === "string" ? { idempotency_key: request.idempotency_key } : {}),
+      ...(typeof request.holder_ref === "string" ? { holder_ref: request.holder_ref } : {}),
+      ...(typeof request.page_id === "string" ? { page_id: request.page_id } : {}),
+      ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
+      ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {}),
+      ...(typeof request.url === "string" ? { url: request.url } : {}),
+      authorized_origins: authorized
+    };
+    return this.runtimeSessions.operateManagedPage(runtime_session_ref, inputRecord);
+  }
+
   async operateManagedInteraction(runtime_session_ref: string, value: unknown) {
     const input = parseManagedInteractionRequest(value);
     const refused = (failure_class: string) => ({ status: "unavailable" as const, dispatch_state: "not_dispatched" as const, failure_class });
@@ -525,9 +556,12 @@ export class HarborRuntime {
     if (!request) return diagnosticsUnavailable("invalid_request", "Invalid diagnostics request.");
     const session = this.runtimeSessions.getSession(runtime_session_ref);
     if (!session) return diagnosticsUnavailable("session_missing", "Runtime Session is missing.", true);
-    try {
-      if (new URL(session.current_page.current_url ?? "").origin !== request.origin) return diagnosticsUnavailable("wrong_page", "The requested origin is not the active Page origin.");
-    } catch { return diagnosticsUnavailable("wrong_page", "The active Page has no usable origin."); }
+    if (request.authorized_origins && !request.authorized_origins.includes(request.origin)) return diagnosticsUnavailable("wrong_page", "The requested origin is not authorized for this Profile.");
+    if (!request.page_ref) {
+      try {
+        if (new URL(session.current_page.current_url ?? "").origin !== request.origin) return diagnosticsUnavailable("wrong_page", "The requested origin is not the active Page origin.");
+      } catch { return diagnosticsUnavailable("wrong_page", "The active Page has no usable origin."); }
+    }
     return this.runtimeSessions.readRuntimeDiagnostics(runtime_session_ref, request);
   }
 

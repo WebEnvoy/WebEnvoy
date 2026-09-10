@@ -39,7 +39,7 @@ export interface RuntimeErrorFact {
   retryable: boolean;
 }
 
-export type RuntimePageStatus = "ready" | "unavailable" | "unknown";
+export type RuntimePageStatus = "loading" | "ready" | "failed" | "closed" | "unavailable" | "unknown";
 export type RuntimeControlLockState = "held" | "released" | "closed";
 
 export interface LocalProviderScreenshotFacts {
@@ -66,6 +66,13 @@ export interface RuntimePageFacts {
   status: RuntimePageStatus;
   error_reason: RuntimeErrorFact | null;
   observed_at: string;
+  /** v2 stable Page object and current document-bound projection. */
+  page_id?: string;
+  page_ref?: string;
+  document_generation?: number;
+  origin?: string | null;
+  active?: boolean;
+  opener_page_id?: string;
 }
 
 export interface RuntimeControlLockFacts {
@@ -196,6 +203,28 @@ export interface LocalProviderPageFacts {
   status: RuntimePageStatus;
   error?: RuntimeErrorFact;
   facts: RuntimeFact[];
+  page_id?: string;
+  page_ref?: string;
+  document_generation?: number;
+  origin?: string | null;
+  active?: boolean;
+  opener_page_id?: string;
+}
+
+/** Provider-private page handle facts. Harbor maps these to opaque Page refs. */
+export interface LocalProviderPageState extends LocalProviderPageFacts {
+  provider_page_ref: string;
+  opener_provider_page_ref?: string;
+  active?: boolean;
+  document_generation?: number;
+}
+
+export interface LocalProviderPageController {
+  listPages: () => Promise<LocalProviderPageState[]>;
+  openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
+  activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
+  closePage: (provider_page_ref: string) => Promise<LocalProviderPageState[]>;
+  navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
 }
 
 export type AllowlistedReadOperationSite = "xiaohongshu" | "boss";
@@ -737,6 +766,8 @@ export type LocalProviderLaunchResult =
       cdp_ref?: string;
       viewer_entry: RuntimeViewerEntry;
       page: LocalProviderPageFacts;
+      pages?: LocalProviderPageState[];
+      pageController?: LocalProviderPageController;
       facts: RuntimeFact[];
       execution_surface?: "local_provider" | "fixture";
       openUrl: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;

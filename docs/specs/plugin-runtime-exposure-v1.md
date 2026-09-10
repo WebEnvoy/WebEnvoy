@@ -8,16 +8,17 @@
 
 | Runtime capability | MCP 投影 | 授权值 | 结果合同 |
 | --- | --- | --- | --- |
+| Page list/open/activate/close and navigation | `webenvoy_operation` 的 `operation=page.list` / `page.open` / `page.activate` / `page.close` / `page.navigate` / `page.reload` / `page.back` / `page.forward` | 既有 `allowed_operations` 中同名值 | [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation` 的 `operation=instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics` | [Network V1](network-runtime-contract-v1.md)、[Console V1](console-runtime-contract-v1.md) |
 | Profile environment facts / bounded configuration update | `webenvoy_operation` 的 `operation=environment.read` / `environment.update` | 既有 `allowed_operations` 中同名值 | [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) |
 
-诊断输入为 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、`runtime_session_ref`、精确 `origin`，可选 `page_ref`、`cursor`、`limit`（整数 1–64）。Plugin 添加当前 Connection ID；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数。Page 引用来自同一实例的观察，cursor 是不透明值。
+Page/导航输入只接受合同定义的 URL、`page_ref`、`idempotency_key` 与可选 operation 字段；URL query/fragment 可用但不出现在公开摘要。`page.list` 与诊断是 observation-only；其他 Page 操作需要明确 target 并走既有 Run/receipt。诊断输入为 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、`runtime_session_ref`、精确 `origin`，可选 `page_ref`、`document_generation`、`cursor`、`limit`（整数 1–64）。Plugin 添加当前 Connection ID；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数。Page 引用来自同一实例的观察，cursor 是不透明值。
 
 ## Availability 与授权
 
 #499 环境操作复用上述固定工具：输入 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、精确 `origin`；update 额外要求非空 `configuration`，只接受 timezone/language/viewport（各 1–128 字符）。不接受 Instance/Page/cursor、脚本、Provider/proxy/seed 参数。返回 `harbor-profile-environment/v1` 的 configured/effective/pending/observed/drift/provider/support/last_verified_at；字段与失败合同由 Profile Environment V1 §18 唯一维护。保存不热改活动 Instance，不隐式重启。更新响应丢失后 query 原 key，仅查询 mutation receipt 和当前环境事实，不再次提交更新。首次 readback/跨 restart 与未验证项必须区分；unknown 不等于 verified。此扩展触发 Plugin exposure，但不新增 Grant wire 维度；旧 Grant 不自动获得新操作。
 
-MCP 工具列表固定；工具可见不意味着 Provider 支持或主体获授权。本版本不做动态过滤、不按站点或 SKILL 发明诊断能力。Core 验证 Profile ceiling ∩ Principal Grant ∩ task scope；Harbor 验证 Instance、Page、origin、lifecycle 和 Provider 支持。没有网站 SKILL 不影响通用诊断。未实现能力返回 unavailable，不能以空事件冒充成功。单 Profile 拒绝不改变其他 Profile 授权。
+MCP 工具列表固定；工具可见不意味着 Provider 支持或主体获授权。本版本按固定 operation enum 投影，不按站点或 SKILL 发明能力。Core 验证 Profile ceiling ∩ Principal Grant ∩ task scope，并把结果 origin 集交给 Harbor；Harbor 验证 Instance、Page、document generation、lifecycle 和 Provider 支持。没有网站 SKILL 不影响通用诊断或 Page 操作。未实现能力返回 unavailable，不能以空事件冒充成功。单 Profile 拒绝不改变其他 Profile 授权。
 
 新增 operation 值复用既有 Grant 数组、持久化与交集模型；不增加 Grant 字段、scope 维度或持久授权对象，所以 `DO-GRANT-WIRE=not-triggered`。本次新增 capability→tool 投影，`DO-PLUGIN-EXPOSURE=triggered`。
 
@@ -31,4 +32,4 @@ Plugin 不重试 operation。断线后重新 connect，按原 `idempotency_key` 
 
 安装 bundle/skill/MCP 版本保持现有 `0.2.0` 兼容系列，实际代码由安装 manifest 的 exact commit/tree 与文件哈希识别；diagnostics 为新增枚举值，旧授权默认不包含它。旧 Plugin 不会调用此值；新 Plugin 遇到不支持该 operation 的旧 Runtime 必须拒绝，不回退到内部 HTTP 或浏览器协议。破坏现有输入/结果语义需升级对应合同版本。
 
-本切片不定义多宿主平台、动态工具路由、第二权限系统、Network body/interception/modification 或通用任意脚本能力。
+本切片不定义多宿主平台、动态工具路由、第二权限系统、Network body/interception/modification 或通用任意脚本能力。Provider-specific page handles、popup focus 实现和 diagnostics ring 仍是 Harbor/Driver 私有实现。

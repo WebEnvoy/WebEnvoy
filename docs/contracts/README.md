@@ -4,7 +4,7 @@
 
 ## V1 Browser Runtime 与 Profile 环境
 
-Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/network-runtime-contract-v1.md)、[Console Runtime V1](../specs/console-runtime-contract-v1.md)、[Plugin Runtime Exposure V1](../specs/plugin-runtime-exposure-v1.md)。
+Page/navigation、Network/Console 和 Plugin 首切的正式 wire 合同：[Page, Document and Navigation V1](../specs/page-navigation-runtime-contract-v1.md)、[Network Runtime V1](../specs/network-runtime-contract-v1.md)、[Console Runtime V1](../specs/console-runtime-contract-v1.md)、[Plugin Runtime Exposure V1](../specs/plugin-runtime-exposure-v1.md)。
 
 | 合同 | 权威位置 | 接受范围 |
 | --- | --- | --- |
@@ -12,6 +12,10 @@ Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/netw
 | Runtime Capability Plane 架构 | [Runtime Capability Plane](../architecture/runtime-capability-plane.md) | Provider Driver、Harbor、Core、Plugin、SKILL 与 owner 入口的所有权、调用方向、执行和恢复路径。 |
 | Browser Runtime Capabilities V1 | [browser-runtime-capabilities-v1.md](../specs/browser-runtime-capabilities-v1.md) | V1 主要 browser capability 的规范性语义、支持状态、权限分级、数据边界、结果和完成条件；不冻结最终 wire 字段。 |
 | Profile Environment V1 | [profile-environment-v1.md](../specs/profile-environment-v1.md) | configured／effective／pending／observed／drift、Provider／设备／网络环境 owner、Camoufox 连续性、变更、迁移和验证语义。 |
+| Page, Document and Navigation V1 | [page-navigation-runtime-contract-v1.md](../specs/page-navigation-runtime-contract-v1.md) | Page 对象与 document binding、popup/opener、active/focus、origin/redirect authorization、导航、关闭安全和 v1/v2 ref 兼容。 |
+| Network Runtime V1 | [network-runtime-contract-v1.md](../specs/network-runtime-contract-v1.md) | bounded Network metadata、Page/document binding、cursor、脱敏和生命周期语义。 |
+| Console Runtime V1 | [console-runtime-contract-v1.md](../specs/console-runtime-contract-v1.md) | console/page-error levels、文本截断脱敏、source location、Page/document binding 和生命周期语义。 |
+| Plugin Runtime Exposure V1 | [plugin-runtime-exposure-v1.md](../specs/plugin-runtime-exposure-v1.md) | Page/navigation 与 diagnostics capability→MCP projection、版本、availability、授权与恢复语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 

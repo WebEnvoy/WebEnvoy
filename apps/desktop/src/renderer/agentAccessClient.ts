@@ -19,21 +19,26 @@ export const agentOperations = [
   ["instance.observe", "页面与身份事实"], ["instance.diagnostics", "网络与控制台诊断"], ["instance.handoff", "接管与交还"],
   ["environment.read", "读取环境连续性事实"], ["environment.update", "修改时区、语言或视口（重启后生效）"],
   ["instance.navigate", "导航"], ["instance.read", "公开正文读取"],
+  ["page.list", "列出页面"], ["page.open", "打开后台页面"], ["page.activate", "激活页面"], ["page.close", "关闭页面"],
+  ["page.navigate", "导航指定页面"], ["page.reload", "刷新指定页面"], ["page.back", "页面后退"], ["page.forward", "页面前进"],
   ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
   ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
   ["instance.scroll", "滚动"], ["instance.wait", "等待页面变化"],
 ] as const;
 export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "environment.read", "instance.read"];
-export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 和必要操作。Profile 管理权不隐含网页输入权限。";
-export type AgentScopeInput = { origin: string; operations: string[]; controlled: boolean };
+export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 集合和必要操作。Profile 管理权不隐含网页输入权限。";
+export type AgentScopeInput = { origin: string; origins?: string[]; operations: string[]; controlled: boolean };
 
 function selectedScope(input: AgentScopeInput) {
-  const origin = input.origin.trim();
-  const url = new URL(origin);
-  if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new Error("请输入精确 origin（协议、主机及可选端口），不含路径、查询串或片段。");
+  const origins = [...new Set((input.origins?.length ? input.origins : [input.origin]).map(value => value.trim()).filter(Boolean))];
+  if (!origins.length) throw new Error("至少需要一个精确 origin。");
+  for (const origin of origins) {
+    const url = new URL(origin);
+    if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new Error("请输入精确 origin（协议、主机及可选端口），不含路径、查询串或片段。");
+  }
   if (!input.operations.length) throw new Error("请选择必要操作。");
   if (input.operations.some(operation => !agentOperations.some(([id]) => id === operation))) throw new Error("请选择有效操作。");
-  return { allowed_operations: [...input.operations], allowed_origins: [origin], controlled_interaction_origins: input.controlled ? [origin] : [] };
+  return { allowed_operations: [...input.operations], allowed_origins: origins, controlled_interaction_origins: input.controlled ? origins : [] };
 }
 
 export function createProfilePolicyInput(profileRef: string, input: AgentScopeInput, key: string) {
@@ -44,6 +49,7 @@ export function createProfilePolicyInput(profileRef: string, input: AgentScopeIn
 export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "") {
   if (!principalId || ![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 和授权时限。");
   const ceiling = selectedScope(input);
+  if (!profileRef && ceiling.allowed_origins.length !== 1) throw new Error("创建模板需要一个站点 origin；多个 origin 请先选择已有 Profile。");
   return {
     idempotency_key: key,
     principal_id: principalId,
@@ -55,7 +61,7 @@ export function createAgentGrantInput(principalId: string, hours: number, key: s
     creation_template: profileRef ? null : {
       template_ref: crypto.randomUUID(),
       provider_id: "camoufox",
-      site: { site_id: "generic", origin: input.origin.trim(), display_name: "非生产浏览器" },
+      site: { site_id: "generic", origin: ceiling.allowed_origins[0], display_name: "非生产浏览器" },
       language: "zh-CN",
       timezone: "Asia/Shanghai",
       permission_ceiling: ceiling,

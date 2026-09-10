@@ -12,9 +12,11 @@ does not replay an earlier operation when its response is lost.
 The public path is Driver → Harbor `POST
 /runtime/sessions/{runtime_session_ref}/diagnostics` → Core managed-browser
 operation → Agent projection. The operation is bound to the authorized
-`profile_ref`, `runtime_session_ref`, active Page origin, `page_ref`, and
-document generation. A stale Page, cursor, closed/lost Instance, provider
-failure, or origin mismatch returns an explicit unavailable result.
+`profile_ref`, `runtime_session_ref`, selected `page_ref`, and document
+generation. Core supplies the intersection of the Profile, Grant and task
+scope origin sets; the Agent cannot submit an origin allowlist. A stale Page,
+cursor, closed/lost Instance, provider failure, or origin mismatch returns an
+explicit unavailable result.
 
 ## Public result
 
@@ -25,7 +27,10 @@ generation. Network events expose only request/response/failure kind, method,
 sanitized URL and origin, resource kind, optional status/duration, and a small
 failure class (`aborted`, `blocked`, `connection`, `dns`, `timeout`, or
 `unknown`). Redirects are represented by subsequent sanitized events; no
-redirect chain is inferred by the consumer.
+redirect chain is inferred by the consumer. Authorized same-origin and
+cross-origin redirects are allowed after each destination is checked against
+the Core-provided origin set; an unauthorized destination is blocked before
+its request is sent and appears only as a bounded `blocked` fact.
 
 The normative completed envelope has these fields; arbitrary Provider fields
 are not forwarded:
@@ -34,7 +39,7 @@ are not forwarded:
 | --- | --- |
 | `status`, `schema_version` | Exactly `completed`, `harbor-runtime-diagnostics/v1` |
 | `runtime_session_ref`, `profile_ref` | Opaque strings bound by Harbor to the selected Instance/Profile |
-| `page_ref`, `document_generation` | Opaque current Page string and positive integer document generation; shared with the current controlled-page snapshot |
+| `page_ref`, `document_generation` | Opaque selected Page string and positive integer document generation; shared with the selected controlled-page snapshot |
 | `page` | `{current_url: string\|null, title: string\|null, status: ready\|unavailable\|unknown}`; sanitized URL and bounded title |
 | `cursor`, `next_cursor` | Opaque window checkpoints; never selectors, endpoint IDs or authority |
 | `observed_at` | UTC ISO timestamp of the read, distinct from each event's timestamp |
@@ -55,8 +60,10 @@ above). Missing timing/redirect linkage means unknown, not zero/no redirect.
 response headers/status availability, including non-2xx; `failure` records
 transport failure. Duration measures the bounded elapsed time from request
 start to the observed response/failure, not response body completion. A 503
-is a response, not a transport failure. Existing navigation/controlled-input
-redirect refusal remains in force; diagnostics cannot enable redirects.
+is a response, not a transport failure. Navigation and controlled-input
+redirects are checked against the Core-provided origin set; an unauthorized
+destination is blocked before its request is sent. Diagnostics cannot enable
+redirects or broaden that set.
 
 `cursor` is the starting checkpoint; `next_cursor` is the last returned
 event, not the newest unreturned event. Reads capture a high-water mark and
@@ -82,16 +89,19 @@ returned window reached its limit or the provider evicted older events.
 
 ## Lifecycle and failure
 
-`wrong_page`, `stale_page`, and `cursor_stale` are non-success results and must
-be surfaced without guessing. Driver loss invalidates the Page binding and
+`wrong_page`, `stale_page`, `stale_document`, and `cursor_stale` are non-success
+results and must be surfaced without guessing. Driver loss invalidates the
+selected Page binding and
 returns `provider_unavailable`; subsequent calls cannot revive the old
 Instance. Closing or revoking the authorized session prevents further reads.
 
-The observation exists only during the active Page's lifetime, starting when
-the Driver attaches native listeners. Navigation invalidates the old Page
-binding and cursor; Instance stop/Driver exit destroys the in-memory window.
+The observation exists only during the selected Page's lifetime, starting when
+the Driver attaches native listeners. Navigation rotates that Page's document
+generation and cursor; Instance stop/Driver exit destroys all in-memory
+windows.
 There is no independent durable observation session or background recorder.
-The ring retains at most 128 sanitized events, and per-request correlation
+Each Page ring retains at most 128 sanitized events and the Instance applies
+an additional total cap. Per-request correlation
 state retains at most 256 requests and is released at request completion or
 failure. If correlation was evicted, a later response/failure is omitted,
 never assigned fabricated timing or request linkage. Document navigation
@@ -113,9 +123,13 @@ Message is a bounded safe summary. `retryable` never authorizes replay of a
 page action. Core preserves the failure class in its existing failure result;
 authentication/Grant/Profile/task refusals occur at the Core boundary first.
 
-The trusted internal Harbor route accepts only `{origin, page_ref?, cursor?,
-limit?}` (origin must be exact HTTP(S), limit integer 1–64). It requires the
-existing Core/owner authorization; ordinary Agents use the
+The trusted internal Harbor route accepts `{origin, authorized_origins?,
+page_ref?, document_generation?, cursor?, limit?}` (`origin` and every
+authorized origin must be exact HTTP(S), limit integer 1–64). The optional
+`authorized_origins` is a Core-derived internal field and is never accepted
+from the ordinary Agent projection. Harbor verifies the Core-provided authorized origin set and the
+selected Page binding; it requires the existing Core/owner authorization;
+ordinary Agents use the
 [Installed Plugin projection](plugin-runtime-exposure-v1.md). Inputs cannot
 request headers, bodies, interception, mutation, storage or arbitrary script.
 This additive v1 payload requires a matching Runtime/Plugin build; unknown
