@@ -48,9 +48,14 @@ export interface RuntimeDiagnosticsConsoleEvent {
 
 export interface RuntimeDiagnosticsInput {
   origin: string;
+  /** Core-derived Profile ∩ Grant ∩ task origin set; never Agent supplied. */
+  authorized_origins?: string[];
   page_ref?: string;
+  document_generation?: number;
   cursor?: string;
   limit?: number;
+  /** Harbor-internal provider binding; never accepted by the public route. */
+  provider_page_ref?: string;
 }
 
 export interface RuntimeDiagnosticsResult {
@@ -71,7 +76,7 @@ export interface RuntimeDiagnosticsResult {
 
 export interface RuntimeDiagnosticsUnavailable {
   status: "unavailable";
-  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "wrong_page" | "stale_page" | "cursor_stale" | "provider_unavailable";
+  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "page_selection_required" | "wrong_page" | "stale_page" | "stale_document" | "cursor_stale" | "provider_unavailable";
   message: string;
   retryable: boolean;
 }
@@ -89,11 +94,13 @@ export function diagnosticsUnavailable(
 export function boundedDiagnosticsInput(value: unknown): RuntimeDiagnosticsInput | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["origin", "page_ref", "cursor", "limit"].includes(key)) || typeof input.origin !== "string" || input.origin.length > MAX_REF) return null;
+  if (Object.keys(input).some(key => !["origin", "authorized_origins", "page_ref", "document_generation", "cursor", "limit"].includes(key)) || typeof input.origin !== "string" || input.origin.length > MAX_REF) return null;
   if (!isOrigin(input.origin)) return null;
+  if (input.authorized_origins !== undefined && (!Array.isArray(input.authorized_origins) || input.authorized_origins.length > 64 || !input.authorized_origins.every(item => typeof item === "string" && isOrigin(item)))) return null;
   for (const key of ["page_ref", "cursor"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key] || input[key].length > MAX_REF)) return null;
+  if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return null;
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > MAX_EVENTS)) return null;
-  return { origin: input.origin, ...(typeof input.page_ref === "string" ? { page_ref: input.page_ref } : {}), ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}), ...(typeof input.limit === "number" ? { limit: input.limit } : {}) };
+  return { origin: input.origin, ...(Array.isArray(input.authorized_origins) ? { authorized_origins: [...new Set(input.authorized_origins)] } : {}), ...(typeof input.page_ref === "string" ? { page_ref: input.page_ref } : {}), ...(typeof input.document_generation === "number" ? { document_generation: input.document_generation } : {}), ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}), ...(typeof input.limit === "number" ? { limit: input.limit } : {}) };
 }
 
 export function isOrigin(value: string): boolean {
@@ -152,7 +159,7 @@ export function normalizeRuntimeDiagnostics(value: unknown, context: { runtime_s
   if (!value || typeof value !== "object" || Array.isArray(value)) return diagnosticsUnavailable("provider_unavailable");
   const raw = value as Record<string, unknown>;
   if (raw.status === "unavailable") {
-    const failure = ["invalid_request", "session_missing", "session_not_ready", "wrong_page", "stale_page", "cursor_stale", "provider_unavailable"].includes(String(raw.failure_class))
+    const failure = ["invalid_request", "session_missing", "session_not_ready", "page_selection_required", "wrong_page", "stale_page", "stale_document", "cursor_stale", "provider_unavailable"].includes(String(raw.failure_class))
       ? raw.failure_class as RuntimeDiagnosticsUnavailable["failure_class"] : "provider_unavailable";
     const message = typeof raw.message === "string" ? safeDiagnosticsText(raw.message).text : undefined;
     return diagnosticsUnavailable(failure, message || undefined, raw.retryable === true);
@@ -210,7 +217,7 @@ export function normalizeRuntimeDiagnostics(value: unknown, context: { runtime_s
   }
   const observedAt = timestamp(raw.observed_at);
   if (!observedAt) return diagnosticsUnavailable("provider_unavailable");
-  return { status: "completed", schema_version: HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA, runtime_session_ref: context.runtime_session_ref, profile_ref: context.profile_ref, page_ref: pageRef, document_generation: documentGeneration, page: { current_url: currentUrl, title: typeof page.title === "string" ? safeDiagnosticsText(page.title).text : null, status: ["ready", "unavailable", "unknown"].includes(String(page.status)) ? page.status as RuntimePageStatus : "unknown" }, cursor: raw.cursor, next_cursor: raw.next_cursor, truncated: raw.truncated === true, observed_at: observedAt, network, console: consoleEvents };
+  return { status: "completed", schema_version: HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA, runtime_session_ref: context.runtime_session_ref, profile_ref: context.profile_ref, page_ref: pageRef, document_generation: documentGeneration, page: { current_url: currentUrl, title: typeof page.title === "string" ? safeDiagnosticsText(page.title).text : null, status: ["loading", "ready", "failed", "closed", "unavailable", "unknown"].includes(String(page.status)) ? page.status as RuntimePageStatus : "unknown" }, cursor: raw.cursor, next_cursor: raw.next_cursor, truncated: raw.truncated === true, observed_at: observedAt, network, console: consoleEvents };
 }
 
 export type RuntimeDiagnosticsProbe = (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;

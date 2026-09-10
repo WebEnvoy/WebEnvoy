@@ -10,6 +10,7 @@
 
 | Runtime/管理能力 | MCP 工具与 operation | 授权和结果归口 |
 | --- | --- | --- |
+| Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation`：`instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics`；详见 [Network V1](network-runtime-contract-v1.md) 与 [Console V1](console-runtime-contract-v1.md)。 |
 | Profile environment facts / bounded configuration update | `webenvoy_operation`：`environment.read`、`environment.update` | 既有同名 `allowed_operations`；字段与失败语义由 [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) 维护。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
@@ -34,6 +35,8 @@
 `enable`、`update`、`rollback`、`disable` 的 CAS 必须在 Core 锁内再次检查；缺少或不匹配的当前 revision/record version 拒绝并返回稳定 conflict。`skill.update` 与 `skill.rollback` 只接受已安装且 valid 的目标，rollback 还须是仍可用的历史修订。来源身份、大小、UTF-8、hash、路径越界和 symlink 规则见生命周期合同。
 
 ## 既有 Runtime 输入与 availability
+
+`webenvoy_operation` 的 Page 输入为 `idempotency_key`、`grant_id`、对应 `operation`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref`，并按 operation 接受精确 `origin`、受管 `page_id`/`page_ref`、`document_generation` 或同源 URL。`page.list` 与诊断是 observation-only；其余 Page 操作走既有 Run/receipt 和 ControlLease。Plugin 添加当前 `connection_id`；未知输入字段拒绝。页面输入不接受 selector、脚本、header、body 或 raw endpoint 参数。关系异常或原生 selected 页面无法与受管 Page 可靠对应时，Harbor 必须返回结构化 unavailable、暂停受影响 Instance 的网页派发并保留现场；不得猜测、重放、reload/reopen/rebuild 或影响其他 Profile。
 
 `webenvoy_operation` 的诊断输入仍为 `idempotency_key`、`grant_id`、`operation=instance.diagnostics`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref` 和精确 `origin`，可选同一 Instance 的 `page_ref`、不透明 `cursor`、`limit`（整数 1–64）。Plugin 添加当前 `connection_id`；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数，结果仍是有界脱敏 metadata。
 

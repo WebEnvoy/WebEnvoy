@@ -19,9 +19,9 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
   const [principalId, setPrincipalId] = useState("");
   const [hours, setHours] = useState(24);
   const [profileRef, setProfileRef] = useState("");
-  const [scope, setScope] = useState<AgentScopeInput>({ origin: "", operations: [...defaultAgentOperations], controlled: false });
+  const [scope, setScope] = useState<AgentScopeInput>({ origin: "", origins: [""], operations: [...defaultAgentOperations], controlled: false });
   const [policyRef, setPolicyRef] = useState("");
-  const [policyScope, setPolicyScope] = useState<AgentScopeInput>({ origin: "", operations: [...defaultAgentOperations], controlled: false });
+  const [policyScope, setPolicyScope] = useState<AgentScopeInput>({ origin: "", origins: [""], operations: [...defaultAgentOperations], controlled: false });
   const alive = useRef(true);
   const readGate = useRef(createLatestRequestGate());
 
@@ -139,7 +139,7 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
         <label className="connection-field"><span>配置 Profile</span><select required value={policyRef} disabled={disabled} onChange={event => {
           const ref = event.currentTarget.value; setPolicyRef(ref);
           const policy = state?.profile_policies.find(item => item.profile_ref === ref);
-          setPolicyScope({ origin: policy?.allowed_origins.length === 1 ? policy.allowed_origins[0] : "", operations: policy?.allowed_operations ?? [...defaultAgentOperations], controlled: false });
+          setPolicyScope({ origin: policy?.allowed_origins[0] ?? "", origins: policy?.allowed_origins ?? [""], operations: policy?.allowed_operations ?? [...defaultAgentOperations], controlled: false });
         }}><option value="">请选择受管 Profile</option>{state?.profile_policies.map(item => <option key={item.profile_ref} value={item.profile_ref}>{item.profile_ref}</option>)}</select></label>
         <ScopeFields value={policyScope} onChange={setPolicyScope} disabled={disabled} declaration />
         <button className="save-button" type="submit" disabled={disabled || !policyRef}>保存 Profile 权限上限</button>
@@ -177,9 +177,16 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
 }
 
 function ScopeFields({ value, onChange, disabled, declaration }: { value: AgentScopeInput; onChange: (scope: AgentScopeInput) => void; disabled: boolean; declaration: boolean }) {
+  const origins = value.origins?.length ? value.origins : [value.origin];
+  const updateOrigins = (next: string[]) => onChange({ ...value, origin: next[0] ?? "", origins: next });
   return <fieldset disabled={disabled}>
     <legend>明确授权范围</legend>
-    <label className="connection-field"><span>精确 origin</span><input name="scope_origin" type="url" required value={value.origin} placeholder="协议://主机:端口" onChange={event => onChange({ ...value, origin: event.currentTarget.value, controlled: false })} /></label>
+    <span>精确 origin 集合</span>
+    {origins.map((origin, index) => <div className="settings-action-row" key={index}>
+      <label className="connection-field" style={{ flex: 1 }}><span className="sr-only">origin {index + 1}</span><input name={`scope_origin_${index}`} type="url" required value={origin} placeholder="协议://主机:端口" onChange={event => updateOrigins(origins.map((item, itemIndex) => itemIndex === index ? event.currentTarget.value : item))} /></label>
+      {origins.length > 1 && <button className="save-button" type="button" onClick={() => updateOrigins(origins.filter((_, itemIndex) => itemIndex !== index))}>移除</button>}
+    </div>)}
+    <button className="save-button" type="button" onClick={() => updateOrigins([...origins, ""])}>添加 origin</button>
     <fieldset><legend>必要操作（逐项选择）</legend>{agentOperations.map(([operation, label]) => <label key={operation} style={{ display: "block" }}><input type="checkbox" name={operation} checked={value.operations.includes(operation)} onChange={event => onChange({ ...value, operations: event.currentTarget.checked ? [...value.operations, operation] : value.operations.filter(item => item !== operation) })} />{label}（{operation}）</label>)}</fieldset>
     <p>控件观察、点击、输入、按键、滚动和等待仅适用于 owner 明确声明的专用受控 origin；不得用于真实身份或外部业务效果。未声明时 Core 拒绝这些操作，公开正文读取不受此声明影响。</p>
     {declaration && <label><input type="checkbox" name="controlled_origin" checked={value.controlled} onChange={event => onChange({ ...value, controlled: event.currentTarget.checked })} />此 origin 是无登录身份、无外部业务效果的专用受控页面</label>}

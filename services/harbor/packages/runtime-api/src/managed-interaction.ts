@@ -12,6 +12,8 @@ export type ManagedInteractionInput = {
   delta_y?: number;
   wait_for?: "page_changed" | "text" | "enabled";
   timeout_ms?: number;
+  /** Harbor-only provider selector; never accepted from the Agent route. */
+  provider_page_ref?: string;
 };
 export type ManagedInteractionSnapshot = {
   page_ref: string;

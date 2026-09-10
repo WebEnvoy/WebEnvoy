@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
-import { ManagedAccessError, managedInteractionOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
+import { ManagedAccessError, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
 import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
@@ -15,7 +15,7 @@ import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string };
+  page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
 const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
@@ -44,23 +44,31 @@ function configuration(value: unknown): EnvironmentConfiguration {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
   if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
-  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
+  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
+  if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return fail("managed_browser_invalid_input");
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
     let url: URL;
     try { url = new URL(text(input.url)); } catch { return fail("managed_browser_invalid_input"); }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.origin !== input.origin || !["instance.start", "instance.navigate"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.origin !== input.origin || !["instance.start", "instance.navigate", "page.open", "page.navigate"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
   }
-  if (["instance.navigate", "instance.read", "instance.diagnostics", ...managedInteractionOperations].includes(String(input.operation))) {
+  if (["instance.navigate", "instance.read", "instance.diagnostics", ...managedPageOperations, ...managedInteractionOperations].includes(String(input.operation))) {
     text(input.runtime_session_ref);
-    if (input.operation === "instance.navigate") text(input.url);
+    if (["instance.navigate", "page.navigate", "page.open"].includes(String(input.operation))) text(input.url);
     if (input.operation === "instance.diagnostics" && input.url !== undefined) return fail("managed_browser_invalid_input");
   }
-  if (isInteraction(String(input.operation))) {
+  if ((managedPageOperations as readonly string[]).includes(String(input.operation))) {
+    const operation = String(input.operation);
+    if (!["page.list", "page.open"].includes(operation) && input.page_id === undefined && input.page_ref === undefined) return fail("managed_browser_invalid_input");
+    if (["page.open", "page.navigate"].includes(operation)) text(input.url);
+    if (!["page.open", "page.navigate"].includes(operation) && input.url !== undefined) return fail("managed_browser_invalid_input");
+    if (input.cursor !== undefined || input.limit !== undefined || input.document_generation !== undefined && operation === "page.list" ||
+      input.observation_ref !== undefined || input.target_ref !== undefined || input.text !== undefined || input.key !== undefined || input.delta_y !== undefined || input.wait_for !== undefined || input.timeout_ms !== undefined || input.configuration !== undefined || input.account_ref !== undefined || input.account_system_ref !== undefined || input.template_ref !== undefined) return fail("managed_browser_invalid_input");
+  } else if (isInteraction(String(input.operation))) {
     if (input.cursor !== undefined || input.limit !== undefined) return fail("managed_browser_invalid_input");
     const action = String(input.operation).slice("instance.".length);
     const fields: Record<string, string[]> = { snapshot: [], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
@@ -89,12 +97,12 @@ function parse(value: unknown): Request {
     if (input.operation === "recovery.status") text(input.operation_ref);
     if (input.backup_ref !== undefined && input.operation !== "recovery.request") return fail("managed_browser_invalid_input");
     if (input.backup_ref !== undefined) text(input.backup_ref);
-  } else if (["page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
+  } else if (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -219,11 +227,24 @@ export function createManagedBrowserService(options: {
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
     const ref = encodeURIComponent(text(session.runtime_session_ref));
+    if ((managedPageOperations as readonly string[]).includes(input.operation)) {
+      await check();
+      return await harbor(`/runtime/sessions/${ref}/pages`, {
+        operation: input.operation,
+        ...(input.operation === "page.list" ? {} : { holder_ref: holder, operation_ref: runId, idempotency_key: runId }),
+        ...(input.page_id ? { page_id: input.page_id } : {}),
+        ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        ...(input.document_generation ? { document_generation: input.document_generation } : {}),
+        ...(input.url ? { url: input.url } : {}),
+        authorized_origins: access.authorized_origins
+      });
+    }
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
       await check();
       return await harbor(`/runtime/sessions/${ref}/diagnostics`, {
-        origin: input.origin!, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        origin: input.origin!, authorized_origins: access.authorized_origins, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
       });
     }
