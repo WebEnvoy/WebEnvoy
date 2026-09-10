@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
+import { previousRoot } from './previous-installation.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
   const root = await mkdtemp(join(tmpdir(), 'webenvoy-installation-test-'));
@@ -41,4 +42,17 @@ test('managed A→B, modified-file preservation, uninstall/reinstall and symlink
 test('derives the same recovery operation ref from an idempotency key', () => {
   assert.equal(recoveryOperationRef('apply', 'lost-response'), 'recovery:091ddd10bbbaec94ee0da9f965b35ef2ea4fd7987b8244e8dba0e13ed0364097');
   assert.notEqual(recoveryOperationRef('apply', 'lost-response'), recoveryOperationRef('backup', 'lost-response'));
+});
+
+test('canonicalizes a symlinked previous app before constructing legacy paths', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-previous-installation-test-'));
+  try {
+    const app = join(root, 'WebEnvoy Baseline A.app');
+    const appRoot = join(app, 'Contents/Resources/app');
+    await mkdir(join(appRoot, 'agent-entry'), { recursive: true });
+    await writeFile(join(appRoot, 'agent-entry/bundle.mjs'), '');
+    const alias = join(root, 'previous-alias.app');
+    await symlink(app, alias);
+    assert.equal(await previousRoot(alias), await realpath(appRoot));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

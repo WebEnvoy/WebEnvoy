@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
+import { previousRoot } from './previous-installation.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -144,13 +145,6 @@ function hostConfig(installRoot, clientPath, approveTools, includeRecovery, exec
   let config = `[mcp_servers.webenvoy]\ncommand = ${JSON.stringify(executable)}\nargs = ${JSON.stringify([join(installRoot, 'agent-entry/mcp.mjs'), clientPath])}\nstartup_timeout_sec = 30\ntool_timeout_sec = 100\n[mcp_servers.webenvoy.env]\nELECTRON_RUN_AS_NODE = "1"\n`;
   if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_operation', 'webenvoy_query', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
   return config;
-}
-async function previousRoot(input) {
-  if (!input) return undefined;
-  const path = resolve(input);
-  const candidates = [path, join(path, 'Contents/Resources/app')];
-  for (const candidate of candidates) { try { await readFile(join(candidate, 'agent-entry/bundle.mjs')); return candidate; } catch {} }
-  throw new Error('previous_installation_invalid');
 }
 async function verifyPrevious(rootPath) {
   const suffix = '/Contents/Resources/app';
