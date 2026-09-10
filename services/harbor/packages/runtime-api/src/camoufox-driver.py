@@ -527,6 +527,24 @@ def load_environment_bundle(profile_dir: str | Path) -> dict[str, Any]:
     return validate_environment_bundle(bundle)
 
 
+def validate_environment_bundle_request(request: dict[str, Any]) -> dict[str, Any]:
+    profile_dir = request.get("profile_dir")
+    if not isinstance(profile_dir, str) or not profile_dir:
+        raise ValueError("Camoufox environment validation requires a managed profile.")
+    bundle = load_environment_bundle(profile_dir)
+    return {
+        "valid": True,
+        "provider": bundle["provider"],
+        "camoufox_version": bundle["camoufox_version"],
+        "browser_version": bundle["browser_version"],
+        "properties_sha256": bundle["properties_sha256"],
+        "config_sha256": bundle["config_sha256"],
+        "identity_hash": bundle["identity_hash"],
+        "bundle_hash": json_hash(bundle),
+        "baseline_present": bundle["baseline"] is not None,
+    }
+
+
 def build_environment_bundle(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict) or not config:
         raise ValueError("Camoufox launch did not produce a provider config.")
@@ -1804,6 +1822,8 @@ def main() -> None:
                 send(message_id, "ok", diagnostics=diagnostics_read(request))
             elif op == "environment_read":
                 send(message_id, "ok", result=environment_read(request))
+            elif op == "validate_environment_bundle":
+                send(message_id, "ok", result=validate_environment_bundle_request(request))
             elif op == "site_resource_probe":
                 send(message_id, "ok", **site_resource_probe(request))
             elif op == "read_operation_probe":

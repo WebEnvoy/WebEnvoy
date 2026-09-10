@@ -22,6 +22,7 @@ export type RuntimeErrorCode =
   | "cdp_unavailable"
   | "driver_unavailable"
   | "profile_locked"
+  | "recovery_operation_unfinished"
   | "session_lost"
   | "capture_denied"
   | "unsupported";

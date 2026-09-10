@@ -4,7 +4,7 @@ import type { LocalProviderPageFacts } from "./runtime-session-types.js";
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
   catalog_ref: "harbor://managed-operations", catalog_version: "4",
-  operations: [...["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind"].map(operation_id => ({
+  operations: [...["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status"].map(operation_id => ({
     operation_id, category: operation_id === "environment.update" ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"]
   })),

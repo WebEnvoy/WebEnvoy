@@ -5,6 +5,7 @@ import {
   createFileRunRecordStore,
   createFileManagedAccessStore,
   createManagedBrowserService,
+  createManagedRecoveryService,
   createFileAuthorizationDecisionStore,
   createFileExecutionPolicyConfigStore,
   createHttpHarborIdentityFactsReader,
@@ -72,14 +73,19 @@ if (import.meta.url === entrypoint) {
   const managedAccessStore = runRecordStore
     ? createFileManagedAccessStore({ directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? `${runRecordStore.directory}.managed-access` })
     : undefined;
+  const managedRecoveryService = runRecordStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
+    ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+    : undefined;
   const managedBrowserService = managedAccessStore && runRecordStore && authorizationDecisionStore && executionPolicyConfigStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
-        harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+        harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
+        ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
     : undefined;
   const server = createApiServer({
     supervisorToken,
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
+    ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),
     ...(executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore }),

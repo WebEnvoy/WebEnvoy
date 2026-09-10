@@ -114,6 +114,7 @@ import {
   type ManagedProviderLifecycleStatus,
   type ManagedProviderOperationInput
 } from "./managed-provider-lifecycle.js";
+import { ProfileRecoveryManager, type ProfileRecoveryApplyInput, type ProfileRecoveryPlanInput, type RecoveryProfileFacts } from "./profile-recovery.js";
 import {
   admitXhsPublishPrecheck,
   admitXhsPublishPathPrepare,
@@ -161,6 +162,8 @@ export { createLocalIdentityEnvironmentFacts, HARBOR_LOCAL_IDENTITY_ENVIRONMENT_
 export { HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 export { HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA } from "./identity-environment-mutation-types.js";
 export { HARBOR_MANAGED_PROVIDER_LIFECYCLE_SCHEMA, ManagedProviderLifecycle } from "./managed-provider-lifecycle.js";
+export { HARBOR_PROFILE_RECOVERY_SCHEMA, HARBOR_PROFILE_RECOVERY_BACKUP_SCHEMA, HARBOR_PROFILE_RECOVERY_OPERATION_SCHEMA, ProfileRecoveryError, ProfileRecoveryManager } from "./profile-recovery.js";
+export type { ProfileRecoveryApplyInput, ProfileRecoveryBackupSummary, ProfileRecoveryInspection, ProfileRecoveryOperation, ProfileRecoveryPlanInput, RecoveryCompatibility, RecoveryProfileFacts } from "./profile-recovery.js";
 export { HARBOR_VALIDATE_ONLY_WRITE_PRECHECK_SCHEMA, HARBOR_XHS_PATH_PREPARE_SCHEMA, XHS_PUBLISH_PRECHECK_PIN, XHS_PUBLISH_PATH_PREPARE_PIN } from "./write-precheck-operation.js";
 export {
   HARBOR_XHS_FIELD_ACTION_SCHEMA,
@@ -444,6 +447,7 @@ export class HarborRuntime {
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
   private readonly runtimeSessions: RuntimeSessionStore;
   private readonly providerLifecycle: ManagedProviderLifecycle;
+  private readonly profileRecovery: ProfileRecoveryManager;
 
   constructor(
     launcher: LocalProviderLauncher = launchLocalDedicatedProvider,
@@ -464,6 +468,23 @@ export class HarborRuntime {
       }
     });
     this.providerLifecycle = new ManagedProviderLifecycle(providerLifecycleOptions);
+    const resolveRecoveryProfile = (profileRef: string): RecoveryProfileFacts | null => {
+      const publicRecord = this.identityEnvironments.list().find(record => record.refs.profile_ref === profileRef);
+      if (!publicRecord) return null;
+      const facts = this.identityEnvironments.getFacts(publicRecord.identity_environment_ref);
+      if (!facts) return null;
+      return { facts, account_bindings: publicRecord.account_bindings, in_use: () => this.runtimeSessions.isIdentityEnvironmentInUse(facts.identity_environment_ref) || this.runtimeSessions.isProfileStorageInUse(facts.browser_storage.profile_storage_ref) };
+    };
+    const listRecoveryProfiles = (): RecoveryProfileFacts[] => this.identityEnvironments.list().flatMap(record => {
+      const facts = this.identityEnvironments.getFacts(record.identity_environment_ref);
+      return facts ? [{ facts, account_bindings: record.account_bindings, in_use: () => this.runtimeSessions.isIdentityEnvironmentInUse(facts.identity_environment_ref) || this.runtimeSessions.isProfileStorageInUse(facts.browser_storage.profile_storage_ref) }] : [];
+    });
+    this.profileRecovery = new ProfileRecoveryManager({
+      persistence_path: identityEnvironmentOptions.persistence_path,
+      resolveProfile: resolveRecoveryProfile,
+      listProfiles: listRecoveryProfiles,
+      restoreEnvironment: (profile, environment) => this.identityEnvironments.restoreRecoveryEnvironment(profile.facts, environment, profile.account_bindings ?? [])
+    });
   }
 
   async createSession(input: CreateRuntimeSessionInput = {}): Promise<RuntimeSessionFacts> {
@@ -677,6 +698,16 @@ export class HarborRuntime {
   getIdentityEnvironmentMutationResult(idempotency_key: string): IdentityEnvironmentMutationResult | null {
     return this.identityEnvironments.getMutationResult(idempotency_key);
   }
+
+  inspectProfileRecovery(profile_ref: unknown) { return this.profileRecovery.inspect(profile_ref); }
+
+  backupProfileRecovery(input: { idempotency_key: unknown; operation_ref: unknown; profile_ref: unknown }) { return this.profileRecovery.backup(input); }
+
+  prepareProfileRecoveryPlan(input: ProfileRecoveryPlanInput) { return this.profileRecovery.preparePlan(input); }
+
+  applyProfileRecovery(input: ProfileRecoveryApplyInput) { return this.profileRecovery.apply(input); }
+
+  getProfileRecoveryOperation(operation_ref: unknown) { return this.profileRecovery.getOperation(operation_ref); }
 
   listLocalIdentityEnvironments(): LocalIdentityEnvironmentPublicRecord[] {
     return this.identityEnvironments.list();
