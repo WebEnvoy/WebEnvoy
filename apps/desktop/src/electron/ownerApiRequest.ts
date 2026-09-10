@@ -52,7 +52,8 @@ export function parseOwnerApiRequest(request: OwnerApiJsonRequest): ParsedOwnerA
     return { ok: false, error: "Owner API path must be an absolute local path." };
   }
   const knownAuthorizationPath = isAuthorizationDecisionPath(request.path);
-  if (sensitiveOwnerApiFragment.test(request.base) || sensitiveOwnerApiFragment.test(request.path) && !knownAuthorizationPath) {
+  const knownAgentProfilePolicyPath = request.path === "/agent-access/profile-policies";
+  if (sensitiveOwnerApiFragment.test(request.base) || sensitiveOwnerApiFragment.test(request.path) && !knownAuthorizationPath && !knownAgentProfilePolicyPath) {
     return { ok: false, error: "Owner API URL cannot include sensitive fragments." };
   }
 

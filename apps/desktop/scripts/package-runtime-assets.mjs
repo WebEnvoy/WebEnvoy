@@ -143,6 +143,7 @@ import {
   createFileRunRecordStore,
   createFileManagedAccessStore,
   createManagedBrowserService,
+  createManagedRecoveryService,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
   createLocalLodePackageResolver,
@@ -193,14 +194,19 @@ if (harborRuntimeClient) {
 const managedAccessStore = createFileManagedAccessStore({
   directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? runRecordDir + ".managed-access"
 });
+const managedRecoveryService = harborRuntimeUrl
+  ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+  : undefined;
 const managedBrowserService = harborRuntimeUrl
   ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
-      harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+      harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
+      ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
   : undefined;
 const server = createApiServer({
   supervisorToken,
   managedAccessStore,
   ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
+  ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
   runRecordStore,
   authorizationDecisionStore,
   executionPolicyConfigStore,

@@ -30,4 +30,18 @@ When a response is lost, reconnect and call `webenvoy_query` with the original i
 
 Human takeover stops Agent input for that Instance. Wait for explicit App handback, then take a new snapshot of the same Instance before continuing; do not resume old input or reclaim human control. Another authorized Profile can continue independently. Revocation prevents later operations and survives reconnect; it does not undo earlier page effects.
 
-Required assets damaged/missing: restore the matching installation and reconnect. Provider unavailable: the owner repairs the configured Provider; do not install/switch one. Runtime unavailable: use installed diagnostics. Never read owner credentials or Profile files, access internal HTTP/CDP directly, save/publish/upload, or silently expand origin/Profile/operation scope.
+## 安装接续与 Profile 恢复
+
+更新或重装接入口后，重新调用 status/connect，核对原 Principal、Profile 和当前有效 Grant；原 Instance 不会因 Runtime 重启而复活。使用原 Profile 启动新的 Instance，再重新读取环境与页面事实。撤销或过期权限不会因重连恢复；历史动作只查询，不重新执行。
+
+使用 `webenvoy_recovery` 提交以下已获准的意图；仍须携带 `idempotency_key`、`grant_id`、明确 `profile_ref` 和 `task_scope`。task_scope 使用 `operations`、`profile_refs`、`origins` 三个数组；恢复不携带网页 origin，`origins` 为 `[]`。
+
+- `recovery.inspect`：读取当前诊断与受管备份摘要。每次新检查用新 key；复用旧 key 只返回原检查事实。
+- `recovery.request`：可附 inspect 返回的 `backup_ref` 请求形成待 owner 确认的计划；没有指定备份时请求 owner 选择。不会停止实例、创建备份或恢复数据。
+- `recovery.status`：携带原恢复 `operation_ref` 查询 receipt；目标必须属于这个获准 Profile。查询原 Agent 工具调用也可用 `webenvoy_query` 的原 key，但这只读取该调用的历史结果；需要对账恢复进度时提交新的 `recovery.status` 读取。
+
+备份与 apply 只能由可信本机 owner CLI 完成，普通 Agent 不能确认自己的恢复请求、调用 owner 路径或获取 owner 凭据。计划绑定目标、当前材料、匹配备份、时间和范围；过期、材料变化或实例重新活动时要求新计划。恢复仅回到所选备份时点，不回滚权限、账号归属、Run 或其他 Profile；环境恢复后须重新观测。
+
+若非空 Profile 缺少原环境 bundle 且没有合法匹配备份，保留数据并报告 `manual_recovery_required`；不得重新生成身份或新建 Profile 冒充恢复。丢失 apply 响应后只查询原 receipt；`unknown_outcome` 的原 Run 保持不变，`reconciliation: completed` 与返回的完成 receipt 是新增对账证据，不能用新 key 重做恢复。
+
+Required assets damaged/missing: the owner reinstalls an integrity-verified compatible package before using recovery. Provider unavailable: the owner repairs the configured Provider; do not install/switch one. Runtime unavailable: use installed diagnostics. Never read owner credentials or Profile files, access internal HTTP/CDP directly, save/publish/upload, or silently expand origin/Profile/operation scope.

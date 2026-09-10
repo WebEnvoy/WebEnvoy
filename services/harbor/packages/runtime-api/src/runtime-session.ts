@@ -3,6 +3,7 @@ import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvi
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { isTrustedManagedPublicPageOperation, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
+import { assertNoUnfinishedProfileRecovery } from "./profile-recovery.js";
 import {
   createLocalIdentityEnvironmentFacts,
   HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA,
@@ -208,6 +209,12 @@ export class RuntimeSessionStore {
             profileOwnership.release();
             profileOwnership = null;
             return { status: "unavailable" as const, error: error("profile_locked", "Profile storage is locked by an external browser.", true), facts: [] };
+          }
+          try { assertNoUnfinishedProfileRecovery(input.profile_storage_ref, profile_ref); }
+          catch {
+            profileOwnership.release();
+            profileOwnership = null;
+            return { status: "unavailable" as const, error: error("recovery_operation_unfinished", "Query the original recovery operation before starting this Profile.", false), facts: [] };
           }
         }
         const result = await this.launcher({

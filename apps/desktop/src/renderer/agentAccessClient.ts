@@ -24,6 +24,7 @@ export const agentOperations = [
   ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
   ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
   ["instance.scroll", "滚动"], ["instance.wait", "等待页面变化"],
+  ["recovery.inspect", "检查 Profile 恢复兼容性"], ["recovery.request", "请求恢复计划"], ["recovery.status", "查询恢复操作"],
 ] as const;
 export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "environment.read", "instance.read"];
 export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 集合和必要操作。Profile 管理权不隐含网页输入权限。";

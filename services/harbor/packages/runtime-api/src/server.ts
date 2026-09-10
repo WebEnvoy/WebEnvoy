@@ -30,6 +30,7 @@ import {
   readProviderMutationJson,
   requireEmptyProviderJsonObject
 } from "./provider-lifecycle-http.js";
+import type { ProfileRecoveryApplyInput, ProfileRecoveryPlanInput } from "./profile-recovery.js";
 
 export const HARBOR_RUNTIME_API_READINESS_SCHEMA = "harbor-runtime-api-readiness/v0";
 
@@ -131,6 +132,39 @@ async function route(
   }
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/profile-recovery/inspect") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<{ profile_ref?: unknown }>(request);
+    if (Object.keys(body).length !== 1 || typeof body.profile_ref !== "string") throw new BadRequest("Invalid recovery inspection request.");
+    writeJson(response, 200, runtime.inspectProfileRecovery(body.profile_ref)); return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/profile-recovery/backups") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<{ idempotency_key?: unknown; operation_ref?: unknown; profile_ref?: unknown }>(request);
+    if (Object.keys(body).length !== 3 || typeof body.idempotency_key !== "string" || typeof body.operation_ref !== "string" || typeof body.profile_ref !== "string") throw new BadRequest("Invalid recovery backup request.");
+    const result = runtime.backupProfileRecovery(body as { idempotency_key: string; operation_ref: string; profile_ref: string });
+    writeJson(response, result.status === "completed" ? 200 : result.status === "running" ? 202 : 409, result); return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/profile-recovery/plan") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<ProfileRecoveryPlanBody>(request);
+    if (Object.keys(body).some(key => !["idempotency_key", "operation_ref", "profile_ref", "backup_ref", "current_material_fingerprint"].includes(key)) || typeof body.idempotency_key !== "string" || typeof body.operation_ref !== "string" || typeof body.profile_ref !== "string" || typeof body.backup_ref !== "string") throw new BadRequest("Invalid recovery plan request.");
+    try { writeJson(response, 200, runtime.prepareProfileRecoveryPlan(body)); } catch (error) { writeJson(response, 409, { status: "rejected", failure: recoveryFailure(error) }); } return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/profile-recovery/apply") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<ProfileRecoveryApplyBody>(request);
+    try {
+      const result = runtime.applyProfileRecovery(body as never);
+      writeJson(response, result.status === "completed" ? 200 : result.status === "running" ? 202 : 409, result);
+    } catch (error) { writeJson(response, 409, { status: "rejected", failure: recoveryFailure(error) }); }
+    return;
+  }
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "profile-recovery" && parts[2] === "operations" && parts[3] && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.getProfileRecoveryOperation(parts[3]);
+    writeJson(response, result ? 200 : 404, result ?? { status: "unavailable", failure: { code: "recovery_operation_not_found" } }); return;
   }
   if (["GET", "POST"].includes(method) && parts[0] === "runtime" && parts[1] === "identity-environments" && parts[2] && parts[3] === "environment" && parts.length === 4) {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
@@ -253,6 +287,11 @@ function readinessBody(): object {
       "/runtime/browser-providers/cloakbrowser/lifecycle/recheck",
       "/runtime/identity-environments",
       "/runtime/identity-environment-mutations",
+      "/runtime/profile-recovery/inspect",
+      "/runtime/profile-recovery/backups",
+      "/runtime/profile-recovery/plan",
+      "/runtime/profile-recovery/apply",
+      "/runtime/profile-recovery/operations/{operation_ref}",
       "/runtime/identity-environments/{identity_environment_ref}",
       "/runtime/identity-environment-sessions",
       "/runtime/sessions/{runtime_session_ref}",
@@ -559,6 +598,15 @@ function siteResourceFactsInput(url: URL): SiteResourceFactsInput {
     site_id: url.searchParams.get("site_id") ?? undefined,
     task_kind: url.searchParams.get("task_kind") ?? undefined
   };
+}
+
+type ProfileRecoveryPlanBody = ProfileRecoveryPlanInput;
+type ProfileRecoveryApplyBody = ProfileRecoveryApplyInput;
+
+function recoveryFailure(error: unknown): { code: string; recovery_hint: string } {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? { code: error.code, recovery_hint: "inspect_profile_and_request_new_plan" }
+    : { code: "recovery_execution_failed", recovery_hint: "inspect_operation_and_request_new_plan" };
 }
 
 function readOperationStatusCode(result: { status: string; failure_class?: string }): number {

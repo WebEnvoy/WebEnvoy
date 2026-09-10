@@ -16,6 +16,8 @@ Page/navigation、Network/Console 和 Plugin 首切的正式 wire 合同：[Page
 | Network Runtime V1 | [network-runtime-contract-v1.md](../specs/network-runtime-contract-v1.md) | bounded Network metadata、Page/document binding、cursor、脱敏和生命周期语义。 |
 | Console Runtime V1 | [console-runtime-contract-v1.md](../specs/console-runtime-contract-v1.md) | console/page-error levels、文本截断脱敏、source location、Page/document binding 和生命周期语义。 |
 | Plugin Runtime Exposure V1 | [plugin-runtime-exposure-v1.md](../specs/plugin-runtime-exposure-v1.md) | Page/navigation 与 diagnostics capability→MCP projection、版本、availability、授权与恢复语义。 |
+| Installed Profile Recovery V1 | [installed-profile-recovery-v1.md](../specs/installed-profile-recovery-v1.md) | 已安装更新/重装、长期 Profile 接续、私有 backup/plan/apply、owner 确认、恢复边界和 fail-closed 验收。 |
+| Grant Wire Contract V1 | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery.inspect/request/status 的 Grant 投影、单计划确认、撤销/过期与 idempotency 语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 

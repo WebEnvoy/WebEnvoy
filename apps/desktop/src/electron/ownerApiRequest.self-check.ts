@@ -20,4 +20,9 @@ for (const path of ["/agent-access", "/agent-access/principals", "/runs/run-one/
 const harborRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8788", path: "/runtime/sessions/session-one/lock", method: "POST" });
 assert(harborRequest.ok);
 assert.equal(ownerSupervisorAuthorizationHeader(harborRequest, undefined, credential), `Bearer ${credential}`);
+const profilePolicyRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/profile-policies", method: "POST" });
+assert(profilePolicyRequest.ok);
+assert.equal(profilePolicyRequest.method, "POST");
+const adjacentSensitivePath = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/profile-policies/profile", method: "POST" });
+assert.equal(adjacentSensitivePath.ok, false);
 console.log("Validated isolated Core supervisor headers and existing Harbor protection.");

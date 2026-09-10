@@ -11,6 +11,7 @@
 | Page list/open/activate/close and navigation | `webenvoy_operation` 的 `operation=page.list` / `page.open` / `page.activate` / `page.close` / `page.navigate` / `page.reload` / `page.back` / `page.forward` | 既有 `allowed_operations` 中同名值 | [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation` 的 `operation=instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics` | [Network V1](network-runtime-contract-v1.md)、[Console V1](console-runtime-contract-v1.md) |
 | Profile environment facts / bounded configuration update | `webenvoy_operation` 的 `operation=environment.read` / `environment.update` | 既有 `allowed_operations` 中同名值 | [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) |
+| Installed Profile recovery diagnosis/request/status | `webenvoy_recovery` 的 `operation=recovery.inspect` / `recovery.request` / `recovery.status` | 明确授予的同名 `allowed_operations`；不能自批恢复 | [Installed Profile Recovery V1](installed-profile-recovery-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md) |
 
 Page/导航输入只接受合同定义的 URL、`page_ref`、`idempotency_key` 与可选 operation 字段；URL query/fragment 可用但不出现在公开摘要。`page.list` 与诊断是 observation-only；其他 Page 操作需要明确 target 并走既有 Run/receipt。诊断输入为 `idempotency_key`、`grant_id`、`operation`、`task_scope`、`profile_ref`、`runtime_session_ref`、精确 `origin`，可选 `page_ref`、`document_generation`、`cursor`、`limit`（整数 1–64）。Plugin 添加当前 Connection ID；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数。Page 引用来自同一实例的观察，cursor 是不透明值。
 
@@ -20,7 +21,9 @@ Page/导航输入只接受合同定义的 URL、`page_ref`、`idempotency_key` �
 
 MCP 工具列表固定；工具可见不意味着 Provider 支持或主体获授权。本版本按固定 operation enum 投影，不按站点或 SKILL 发明能力。Core 验证 Profile ceiling ∩ Principal Grant ∩ task scope，并把结果 origin 集交给 Harbor；Harbor 验证 Instance、Page、document generation、lifecycle 和 Provider 支持。没有网站 SKILL 不影响通用诊断或 Page 操作。未实现能力返回 unavailable，不能以空事件冒充成功。单 Profile 拒绝不改变其他 Profile 授权。
 
-新增 operation 值复用既有 Grant 数组、持久化与交集模型；不增加 Grant 字段、scope 维度或持久授权对象，所以 `DO-GRANT-WIRE=not-triggered`。本次新增 capability→tool 投影，`DO-PLUGIN-EXPOSURE=triggered`。
+恢复投影只允许 `recovery.inspect`、`recovery.request`、`recovery.status`。inspect 返回安全摘要；request 创建待 owner 决定的 plan/operation，不自动 stop、覆盖或确认；status 只查询原 operation/receipt。Plugin 永远不能调用 owner-only 的 backup/plan/apply，不能携带 owner token。plan 的 Profile、当前材料指纹、backup ref、范围与有效期由 Core 持久化；目标/材料/归属变化或活动 Instance 会使后续确认失效。
+
+新增 operation 值复用既有 Grant 数组、持久化与交集模型；不增加 Grant 字段、scope 维度或持久授权对象，但本项冻结了恢复 operation 的持久安全语义，正式合同见 [Grant Wire Contract V1](grant-wire-contract-v1.md)，因此 `DO-GRANT-WIRE=triggered`。本次新增 capability→tool 投影，`DO-PLUGIN-EXPOSURE=triggered`。
 
 ## 结果与恢复
 
