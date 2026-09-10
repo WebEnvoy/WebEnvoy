@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", ...managedInteractionOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedInteractionOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };

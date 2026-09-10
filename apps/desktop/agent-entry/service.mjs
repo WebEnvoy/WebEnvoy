@@ -28,10 +28,13 @@ const server = createServer(async (req, res) => {
       send(res, 200, { stopped: true }); return shutdown();
     }
     if (!state.ready) return send(res, 503, { ok: false, error: { code: state.error ?? 'runtime_starting' } });
-    const allowed = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations'].includes(req.url)) ||
+    const ownerRoute = (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
+      (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url));
+    const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations'].includes(req.url)) ||
       (req.method === 'GET' && /^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url));
-    if (!allowed) return send(res, 403, { ok: false, error: { code: 'agent_route_denied' } });
-    if (req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === 'authorization').length !== 1) return send(res, 401, { ok: false, error: { code: 'agent_authentication_required' } });
+    if (!ownerRoute && !agentRoute) return send(res, 403, { ok: false, error: { code: 'agent_route_denied' } });
+    if (req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === 'authorization').length !== 1) return send(res, 401, { ok: false, error: { code: ownerRoute ? 'owner_authentication_required' : 'agent_authentication_required' } });
+    if (ownerRoute && (!ownerToken || req.headers.authorization !== `Bearer ${ownerToken}`)) return send(res, 401, { ok: false, error: { code: 'owner_authentication_required' } });
     let body = '';
     for await (const chunk of req) { body += chunk; if (body.length > 65536) return send(res, 413, { ok: false, error: { code: 'input_too_large' } }); }
     const upstream = await fetch(state.coreEndpoint + req.url, { method: req.method, headers: { authorization: req.headers.authorization, 'content-type': 'application/json' }, ...(req.method === 'POST' ? { body } : {}), signal: AbortSignal.timeout(85_000) });

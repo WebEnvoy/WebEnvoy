@@ -366,3 +366,4 @@ export {
 
 export { createFileManagedAccessStore, ManagedAccessError, managedOperations, type FileManagedAccessStore } from "./managed-access.js";
 export { createManagedBrowserService } from "./managed-browser.js";
+export { CORE_PROFILE_RECOVERY_SCHEMA, ProfileRecoveryCoreError, createManagedRecoveryService, type ManagedRecoveryService, type RecoveryResult } from "./profile-recovery.js";

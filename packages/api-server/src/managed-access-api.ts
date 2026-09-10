@@ -1,12 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ExecutionPolicyVersionConflictError, ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService } from "@webenvoy/core-runtime";
+import { ExecutionPolicyVersionConflictError, ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService, type createManagedRecoveryService } from "@webenvoy/core-runtime";
 
 export type ManagedAccessApiOptions = {
   supervisorToken?: string;
   managedAccessStore?: FileManagedAccessStore;
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
     Partial<Pick<ReturnType<typeof createManagedBrowserService>, "getManagementPolicy" | "putManagementPolicy">>;
+  managedRecoveryService?: Pick<ReturnType<typeof createManagedRecoveryService>, "inspect" | "backup" | "plan" | "apply" | "status" | "request">;
 };
 
 function send(response: ServerResponse, status: number, body: unknown) {
@@ -28,6 +29,9 @@ function equalToken(value: string, expected: string): boolean {
 }
 function agentRoute(path: string): boolean {
   return path === "/agent-connections" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path);
+}
+function ownerRecoveryRoute(path: string): boolean {
+  return path === "/owner/recovery/inspect" || path === "/owner/recovery/backup" || path === "/owner/recovery/plan" || path === "/owner/recovery/apply" || /^\/owner\/recovery\/status\/[^/]+$/.test(path);
 }
 
 /** Production enables the owner gate at startup; authenticated Agent credentials have only these dedicated routes. */
@@ -62,8 +66,24 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 export async function handleManagedAccessApi(request: IncomingMessage, response: ServerResponse, path: string, options: ManagedAccessApiOptions): Promise<boolean> {
-  if (!agentRoute(path) && path !== "/agent-access" && !path.startsWith("/agent-access/")) return false;
+  if (!agentRoute(path) && !ownerRecoveryRoute(path) && path !== "/agent-access" && !path.startsWith("/agent-access/")) return false;
   const store = options.managedAccessStore;
+  if (ownerRecoveryRoute(path)) {
+    const service = options.managedRecoveryService;
+    if (!service) { reject(response, 503, "recovery_unavailable"); return true; }
+    try {
+      if (path === "/owner/recovery/inspect" && request.method === "POST") { send(response, 200, await service.inspect(await body(request))); return true; }
+      if (path === "/owner/recovery/backup" && request.method === "POST") { send(response, 200, await service.backup(await body(request))); return true; }
+      if (path === "/owner/recovery/plan" && request.method === "POST") { send(response, 200, await service.plan(await body(request))); return true; }
+      if (path === "/owner/recovery/apply" && request.method === "POST") { send(response, 200, await service.apply(await body(request))); return true; }
+      const status = /^\/owner\/recovery\/status\/([^/]+)$/.exec(path);
+      if (status && request.method === "GET") { send(response, 200, await service.status({ operation_ref: decodeURIComponent(status[1]!) })); return true; }
+      reject(response, 405, "recovery_method_not_allowed"); return true;
+    } catch (error) {
+      const code = error instanceof ManagedAccessError ? error.code : error instanceof Error ? error.message : "recovery_unavailable";
+      reject(response, code === "recovery_input_invalid" || code.endsWith("_invalid") ? 400 : 409, code); return true;
+    }
+  }
   if (!store) { reject(response, 503, "managed_access_unavailable"); return true; }
   try {
     if (agentRoute(path)) {

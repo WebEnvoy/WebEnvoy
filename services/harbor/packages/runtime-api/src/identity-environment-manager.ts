@@ -1,5 +1,7 @@
 import { hasManagedBindingConflict, type ManagedAccountBinding } from "./managed-observation.js";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { validateIdentityEnvironmentConfiguration } from "./identity-environment-configuration.js";
 import {
   closeSync,
   constants,
@@ -200,6 +202,29 @@ export class LocalIdentityEnvironmentManager {
       throw new Error("Reserved authentication provenance can only be set by a managed session confirmation.");
     }
     return this.updateRecord(identity_environment_ref, input);
+  }
+
+  // Recovery owns its durable operation receipt and holds the Profile lock.
+  // This owner alone changes the configuration record; identity/security fields
+  // and account bindings remain the current record, never the backup's record.
+  restoreRecoveryEnvironment(expected: LocalIdentityEnvironmentFacts, environment: LocalIdentityEnvironmentFacts["environment"], accountBindings: readonly unknown[]): void {
+    this.withStoreMutation(() => {
+      const current = this.records.get(expected.identity_environment_ref);
+      if (!current || !isDeepStrictEqual(internalIdentityEnvironmentFacts(current), expected) || !isDeepStrictEqual(current.account_bindings ?? [], accountBindings)) throw new Error("recovery_material_changed");
+      const staticEnvironment = (value: LocalIdentityEnvironmentFacts["environment"]) => {
+        const { language, timezone, viewport, ...identity } = value;
+        return identity;
+      };
+      if (!isDeepStrictEqual(staticEnvironment(environment), staticEnvironment(expected.environment))) throw new Error("recovery_environment_incompatible");
+      const facts = snapshot(current.identity_environment);
+      facts.environment = snapshot(environment);
+      const configuration = Object.fromEntries(Object.entries({ language: environment.language, timezone: environment.timezone, viewport: environment.viewport }).filter(([, value]) => value !== null));
+      if (validateIdentityEnvironmentConfiguration(configuration, facts, this.options)) throw new Error("recovery_environment_incompatible");
+      const record = { ...current, operation: "updated" as const, updated_at: new Date().toISOString(), identity_environment: facts, consistency: createIdentityConsistencyFacts({ identity_environment: facts }) };
+      const records = new Map(this.records).set(expected.identity_environment_ref, record);
+      this.persist(records);
+      this.records.set(expected.identity_environment_ref, record);
+    });
   }
 
   completeManualAuthentication(identity_environment_ref: string, runtime_session_ref: string): LocalIdentityEnvironmentPublicRecord | null {

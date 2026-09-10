@@ -12,6 +12,8 @@ Network/Console 首切的正式 wire 合同：[Network Runtime V1](../specs/netw
 | Runtime Capability Plane 架构 | [Runtime Capability Plane](../architecture/runtime-capability-plane.md) | Provider Driver、Harbor、Core、Plugin、SKILL 与 owner 入口的所有权、调用方向、执行和恢复路径。 |
 | Browser Runtime Capabilities V1 | [browser-runtime-capabilities-v1.md](../specs/browser-runtime-capabilities-v1.md) | V1 主要 browser capability 的规范性语义、支持状态、权限分级、数据边界、结果和完成条件；不冻结最终 wire 字段。 |
 | Profile Environment V1 | [profile-environment-v1.md](../specs/profile-environment-v1.md) | configured／effective／pending／observed／drift、Provider／设备／网络环境 owner、Camoufox 连续性、变更、迁移和验证语义。 |
+| Installed Profile Recovery V1 | [installed-profile-recovery-v1.md](../specs/installed-profile-recovery-v1.md) | 已安装更新/重装、长期 Profile 接续、私有 backup/plan/apply、owner 确认、恢复边界和 fail-closed 验收。 |
+| Grant Wire Contract V1 | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery.inspect/request/status 的 Grant 投影、单计划确认、撤销/过期与 idempotency 语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 

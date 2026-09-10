@@ -10,14 +10,16 @@ import { matchHarborBusinessOperationOwner } from "./execution-policy-owner-proo
 import { normalizeExecutionPolicyMutation } from "./execution-policy-config.js";
 import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
+import type { ManagedRecoveryService } from "./profile-recovery.js";
 
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration };
+  page_ref?: string; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
 const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
+const isRecovery = (operation: string) => ["recovery.inspect", "recovery.request", "recovery.status"].includes(operation);
 class InteractionFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_interaction_outcome_unknown"); }
 }
@@ -42,7 +44,7 @@ function configuration(value: unknown): EnvironmentConfiguration {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
   if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
@@ -81,12 +83,18 @@ function parse(value: unknown): Request {
     if (["template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
     if (input.operation === "environment.update") configuration(input.configuration);
     else if (input.configuration !== undefined) return fail("managed_browser_invalid_input");
+  } else if (isRecovery(String(input.operation))) {
+    if (input.origin !== undefined || input.url !== undefined || input.runtime_session_ref !== undefined || input.page_ref !== undefined || input.cursor !== undefined || input.limit !== undefined || input.target_ref !== undefined || input.text !== undefined || input.key !== undefined || input.delta_y !== undefined || input.wait_for !== undefined || input.timeout_ms !== undefined || input.configuration !== undefined) return fail("managed_browser_invalid_input");
+    text(input.profile_ref);
+    if (input.operation === "recovery.status") text(input.operation_ref);
+    if (input.backup_ref !== undefined && input.operation !== "recovery.request") return fail("managed_browser_invalid_input");
+    if (input.backup_ref !== undefined) text(input.backup_ref);
   } else if (["page_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_ref: _page, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -109,7 +117,7 @@ function response(run: RunRecord) {
 export function createManagedBrowserService(options: {
   accessStore: FileManagedAccessStore; runRecordStore: FileRunRecordStore;
   authorizationDecisionStore: FileAuthorizationDecisionStore; executionPolicyConfigStore: FileExecutionPolicyConfigStore;
-  harborBaseUrl: string; supervisorToken: string;
+  harborBaseUrl: string; supervisorToken: string; recoveryService?: ManagedRecoveryService;
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-operation-locks");
@@ -158,6 +166,16 @@ export function createManagedBrowserService(options: {
     const check = () => options.accessStore.checkAccess(hash, accessRequest(input));
     await store.updateRunRecord(runId, { evidence_refs: [access.decision_ref] });
     const holder = access.principal.principal_id;
+    if (isRecovery(input.operation)) {
+      await check();
+      if (!options.recoveryService) return fail("recovery_unavailable");
+      const recovery = input.operation === "recovery.inspect"
+        ? await options.recoveryService.inspect({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref })
+        : input.operation === "recovery.request"
+          ? await options.recoveryService.request({ idempotency_key: input.idempotency_key, profile_ref: input.profile_ref, ...(input.backup_ref === undefined ? {} : { backup_ref: input.backup_ref }) })
+          : await options.recoveryService.status({ operation_ref: input.operation_ref! });
+      return { recovery, authorization_decision_ref: access.decision_ref };
+    }
     if (input.operation === "profile.create") {
       // Unknown creation blocks further quota consumption until the existing receipt is reconciled.
       const unresolved = (await store.listRunRecords()).some(run => run.run_id !== runId && run.public_result_summary?.grant_id === input.grant_id &&
