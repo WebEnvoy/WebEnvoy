@@ -50,4 +50,3 @@
       windows: [...windows.values()],
     };
   }
-
