@@ -110,7 +110,7 @@ test("semantic snapshot excludes hidden/sensitive controls and permanently expir
   assert.equal(state.valid(), false, "consuming mutation records must never revive an expired target");
 });
 
-test("controlled interaction requests reject external origins, redirects and popup requests before following them", () => {
+test("controlled interaction requests reject external origins and redirects while allowing a registered background popup", () => {
   const script = String.raw`
 import importlib.util,sys
 from types import SimpleNamespace
@@ -126,8 +126,10 @@ class Route:
         self.fetched+=1
         return SimpleNamespace(status=self.status,dispose=lambda:None)
     def fulfill(self,**kwargs):self.fulfilled=True
+popup=object(); m.PAGE_STATES={'popup':{'provider_page_ref':'popup','page':popup,'closed':False}}; m.PAGE_STATE_BY_OBJECT[id(popup)]='popup'
 for route in [Route('https://other.example/post'),Route('https://example.com/popup',page=object())]:
     m.INTERACTION_GUARD(route);assert route.aborted and route.fetched==0
+background=Route('https://example.com/popup',page=popup);m.INTERACTION_GUARD(background);assert background.fulfilled and not background.aborted
 redirect=Route('https://example.com/redirect',status=302);m.INTERACTION_GUARD(redirect);assert redirect.aborted and not redirect.fulfilled and redirect.fetched==1
 allowed=Route('https://example.com/filter');m.INTERACTION_GUARD(allowed);assert allowed.fulfilled and not allowed.aborted
 print('controlled request boundaries passed')

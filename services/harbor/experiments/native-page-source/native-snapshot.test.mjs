@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const source=readFileSync(new URL('./native-snapshot.js',import.meta.url),'utf8');
+let nextId=0;
+const focus={activeWindow:null};
+const Handler=vm.runInNewContext(`(class {${source}})`,{helper:{generateId:()=>String(++nextId)},Services:{focus}});
+const window={closed:false,gBrowser:{tabs:[]},focus(){throw new Error('read stole focus');}};
+let selected;
+Object.defineProperty(window.gBrowser,'selectedTab',{get:()=>selected,set(){throw new Error('read switched tab');}});
+function target(){const browser={};const tab={linkedBrowser:browser,ownerGlobal:window,isConnected:true};window.gBrowser.tabs.push(tab);return {_tab:tab,_linkedBrowser:browser,_disposed:false,id:()=>`target-${window.gBrowser.tabs.indexOf(tab)}`};}
+const a=target(),b=target();a.id=()=> 'target-a';b.id=()=> 'target-b';selected=a._tab;
+let targets=[a,b];
+function handler(){const h=new Handler();h._enabled=true;h._targetRegistry={targets:()=>targets,targetForBrowser:browser=>targets.find(t=>t._linkedBrowser===browser)};h._shouldAttachToTarget=()=>true;return h;}
+const h=handler(),read=()=>h['Browser.webenvoyNativeSnapshot']();
+const first=read();assert.equal(first.windows[0].selectedTargetId,'target-a');
+selected=b._tab;window.gBrowser.tabs.reverse();const reordered=read();
+assert.equal(reordered.windows[0].selectedTargetId,'target-b');
+assert.deepEqual(reordered.pages,first.pages);assert(reordered.sampleSequence>first.sampleSequence);
+Object.defineProperty(focus,'activeWindow',{configurable:true,get(){throw new Error('foreground unavailable');}});
+assert.equal(read().windows[0].browserWindowActive,null);assert.equal(read().windows[0].selectedTargetId,'target-b');
+h._shouldAttachToTarget=t=>t===a;const filtered=read();assert.equal(filtered.pages.length,1);assert.equal(filtered.windows[0].selectedTargetId,null);assert.equal(filtered.windows[0].selectionStatus,'out_of_scope');h._shouldAttachToTarget=()=>true;
+selected=a._tab;
+b._nativeSwapPending=true;assert.throws(read,/transferring/);b._nativeSwapPending=false;
+b._nativeAdopting=true;assert.throws(read,/transferring/);b._nativeAdopting=false;
+b._disposed=true;assert.throws(read,/association changed/);b._disposed=false;
+b._tab.isConnected=false;assert.throws(read,/association changed/);b._tab.isConnected=true;
+selected=b._tab;targets=[a];assert.throws(read,/selection is unavailable/);selected=a._tab;
+assert.equal(read().pages.length,1);
+const restarted=handler()['Browser.webenvoyNativeSnapshot']();assert.notEqual(restarted.epoch,first.epoch);assert.notEqual(restarted.pages[0].windowId,first.pages[0].windowId);
+window.closed=true;assert.throws(read,/association changed/);window.closed=false;
+targets=Array(257).fill(a);assert.throws(read,/bound exceeded/);targets=[];assert.equal(read().windows.length,0);
+h._enabled=false;assert.throws(read,/not enabled/);
+console.log('PASS: read-only selection, reorder, filtering, missing foreground, invalidation, new epoch and bounds');
+
+const {foreground}=await import('./foreground.mjs');
+assert.equal(foreground(null,{launch:null,active:true},{launch:null,active:true},true),null);
+assert.equal(foreground('1:2',{launch:'1:2',active:true},{launch:'1:3',active:true},true),null);
+assert.equal(foreground('1:2',{launch:'1:2',active:false},{launch:'1:2',active:true},true),null);
+assert.equal(foreground('1:2',{launch:'1:2',active:false},{launch:'1:2',active:false},true),false);
+assert.equal(foreground('1:2',{launch:'1:2',active:true},{launch:'1:2',active:true},true),true);
+console.log('PASS: absent/reused process identity and changing OS state never become known foreground');

@@ -27,13 +27,16 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 
 PLAYWRIGHT: Any = None
 PLAYWRIGHT_TIMEOUT_ERROR: type[BaseException] | None = None
 CONTEXT: Any = None
 PAGE: Any = None
+PAGE_STATES: dict[str, dict[str, Any]] = {}
+PAGE_STATE_BY_OBJECT: dict[int, str] = {}
+PAGE_CONTEXT_HANDLER: Any = None
 PROFILE_DIR = ""
 EXECUTABLE_PATH = ""
 LAUNCH_EXECUTABLE_PATH = ""
@@ -42,6 +45,10 @@ PROPERTIES_SOURCE = "adjacent"
 PUBLIC_NAVIGATION_GUARD: Any = None
 PUBLIC_NAVIGATION_ORIGIN = ""
 PUBLIC_NAVIGATION_DENIED: str | None = None
+PAGE_NAVIGATION_GUARDS: dict[str, Any] = {}
+PAGE_NAVIGATION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
+PAGE_NAVIGATION_DENIED: dict[str, str] = {}
+PAGE_NAVIGATION_CONTEXT_GUARD: Any = None
 INTERACTION_GUARD: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
 DIAGNOSTIC_EVENTS: deque[dict[str, Any]] = deque(maxlen=128)
@@ -157,10 +164,10 @@ def diagnostics_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def diagnostic_event(kind: str, **payload: Any) -> None:
+def diagnostic_event(kind: str, _page_ref: str | None = None, _document_generation: int | None = None, **payload: Any) -> None:
     global DIAGNOSTIC_CURSOR
     DIAGNOSTIC_CURSOR += 1
-    DIAGNOSTIC_EVENTS.append({"event_ref": f"event:{DIAGNOSTIC_CURSOR}", "kind": kind, "observed_at": diagnostics_now(), "page_ref": DIAGNOSTIC_PAGE_REF, "document_generation": DIAGNOSTIC_DOCUMENT_GENERATION, **payload, "_cursor": DIAGNOSTIC_CURSOR})
+    DIAGNOSTIC_EVENTS.append({"event_ref": f"event:{DIAGNOSTIC_CURSOR}", "kind": kind, "observed_at": diagnostics_now(), "page_ref": _page_ref or DIAGNOSTIC_PAGE_REF, "document_generation": _document_generation or DIAGNOSTIC_DOCUMENT_GENERATION, **payload, "_cursor": DIAGNOSTIC_CURSOR})
 
 
 def diagnostic_resource_kind(value: Any) -> str:
@@ -175,15 +182,15 @@ def diagnostic_page_origin(page: Any) -> str | None:
         return None
 
 
-def diagnostic_cursor(position: int) -> str:
-    return f"cursor:{DIAGNOSTIC_INSTANCE_REF}:{DIAGNOSTIC_PAGE_REF}:{DIAGNOSTIC_DOCUMENT_GENERATION}:{position}"
+def diagnostic_cursor(position: int, page_ref: str | None = None, generation: int | None = None) -> str:
+    return f"cursor:{DIAGNOSTIC_INSTANCE_REF}:{page_ref or DIAGNOSTIC_PAGE_REF}:{generation or DIAGNOSTIC_DOCUMENT_GENERATION}:{position}"
 
 
-def parse_diagnostic_cursor(value: Any) -> int | None:
+def parse_diagnostic_cursor(value: Any, page_ref: str | None = None, generation: int | None = None) -> int | None:
     if not isinstance(value, str):
         return None
     parts = value.split(":")
-    if len(parts) != 5 or parts[0] != "cursor" or parts[1] != DIAGNOSTIC_INSTANCE_REF or parts[2] != DIAGNOSTIC_PAGE_REF or parts[3] != str(DIAGNOSTIC_DOCUMENT_GENERATION):
+    if len(parts) != 5 or parts[0] != "cursor" or parts[1] != DIAGNOSTIC_INSTANCE_REF or parts[2] != (page_ref or DIAGNOSTIC_PAGE_REF) or parts[3] != str(generation or DIAGNOSTIC_DOCUMENT_GENERATION):
         return None
     try:
         position = int(parts[4])
@@ -202,8 +209,24 @@ def attach_diagnostics(page: Any) -> None:
     global DIAGNOSTIC_INSTANCE_REF, DIAGNOSTIC_PAGE_REF, DIAGNOSTIC_DOCUMENT_GENERATION
     if not DIAGNOSTIC_INSTANCE_REF:
         DIAGNOSTIC_INSTANCE_REF = uuid.uuid4().hex
-    DIAGNOSTIC_PAGE_REF = f"page_{uuid.uuid4().hex}"
-    DIAGNOSTIC_DOCUMENT_GENERATION = 1
+    page_state = page_state_for(page)
+    newly_registered = page_state is None
+    if newly_registered:
+        page_state = register_provider_page(page)
+    # A diagnostic Page binding is distinct from the private provider handle.
+    # It must rotate with each document so a cursor or observation from the
+    # previous document cannot be reused after navigation.
+    page_ref = (page_state or {}).get("diagnostic_page_ref") or f"page_{uuid.uuid4().hex}"
+    if page_state and page_state.get("diagnostics_attached"):
+        return
+    if page_state:
+        page_state["diagnostics_attached"] = True
+        page_state["diagnostic_page_ref"] = page_ref
+    DIAGNOSTIC_PAGE_REF = page_ref
+    DIAGNOSTIC_DOCUMENT_GENERATION = int((page_state or {}).get("document_generation", 1))
+    def emit(kind: str, **payload: Any) -> None:
+        generation = int((page_state or {}).get("document_generation", DIAGNOSTIC_DOCUMENT_GENERATION))
+        diagnostic_event(kind, _page_ref=(page_state or {}).get("diagnostic_page_ref") or page_ref, _document_generation=generation, **payload)
     pending_navigation: tuple[int, dict[str, Any]] | None = None
 
     def is_main_navigation(request: Any) -> bool:
@@ -222,7 +245,7 @@ def attach_diagnostics(page: Any) -> None:
         try:
             safe = diagnostics_url(request.url)
             if safe:
-                diagnostic_event("request", method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type))
+                emit("request", method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type))
                 DIAGNOSTIC_REQUESTS[id(request)] = (DIAGNOSTIC_EVENTS[-1], time.monotonic())
                 if is_main_navigation(request):
                     pending_navigation = (id(request), DIAGNOSTIC_EVENTS[-1])
@@ -240,7 +263,7 @@ def attach_diagnostics(page: Any) -> None:
                     return
                 event, started = state
                 redirected = getattr(response.request, "redirected_from", None) is not None
-                diagnostic_event("response", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(response.request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(response.request.resource_type), status=int(response.status), duration_ms=round((time.monotonic() - started) * 1000), redirected=redirected)
+                emit("response", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(response.request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(response.request.resource_type), status=int(response.status), duration_ms=round((time.monotonic() - started) * 1000), redirected=redirected)
         except Exception:
             pass
 
@@ -257,7 +280,7 @@ def attach_diagnostics(page: Any) -> None:
                 if state is None:
                     return
                 event, started = state
-                diagnostic_event("failure", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type), failure_class=failure, duration_ms=round((time.monotonic() - started) * 1000), redirected=getattr(request, "redirected_from", None) is not None)
+                emit("failure", request_ref=event["event_ref"], page_ref=event["page_ref"], document_generation=event["document_generation"], method=str(request.method)[:16].upper(), url=safe[0], origin=safe[1], resource_kind=diagnostic_resource_kind(request.resource_type), failure_class=failure, duration_ms=round((time.monotonic() - started) * 1000), redirected=getattr(request, "redirected_from", None) is not None)
         except Exception:
             pass
 
@@ -270,14 +293,14 @@ def attach_diagnostics(page: Any) -> None:
             source = diagnostics_url(location.get("url"))
             event_origin = source[1] if source else diagnostic_page_origin(page)
             text, truncated = diagnostic_text(message.text)
-            diagnostic_event("console", _origin=event_origin, level="warn" if level == "warning" else "error", text=text, truncated=truncated, **({"source": {"url": source[0], "line": location.get("lineNumber", 0), "column": location.get("columnNumber", 0)}} if source else {}))
+            emit("console", _origin=event_origin, level="warn" if level == "warning" else "error", text=text, truncated=truncated, **({"source": {"url": source[0], "line": location.get("lineNumber", 0), "column": location.get("columnNumber", 0)}} if source else {}))
         except Exception:
             pass
 
     def page_error(error: Any) -> None:
         try:
             text, truncated = diagnostic_text(error)
-            diagnostic_event("console", _origin=diagnostic_page_origin(page), level="pageerror", text=text, truncated=truncated)
+            emit("console", _origin=diagnostic_page_origin(page), level="pageerror", text=text, truncated=truncated)
         except Exception:
             pass
 
@@ -291,13 +314,18 @@ def attach_diagnostics(page: Any) -> None:
                             return
                     except Exception:
                         pass  # A destroyed execution context is a replaced document.
-                rotate_diagnostic_page()
+                if page_state:
+                    # register_provider_page owns the generation counter;
+                    # this listener only rebinds the navigation event.
+                    pass
+                else:
+                    rotate_diagnostic_page()
                 if pending_navigation is not None:
                     request_event_ref = pending_navigation[1]["event_ref"]
                     for event in DIAGNOSTIC_EVENTS:
                         if event["event_ref"] == request_event_ref or event.get("request_ref") == request_event_ref:
-                            event["page_ref"] = DIAGNOSTIC_PAGE_REF
-                            event["document_generation"] = DIAGNOSTIC_DOCUMENT_GENERATION
+                            event["page_ref"] = (page_state or {}).get("diagnostic_page_ref") or page_ref
+                            event["document_generation"] = int((page_state or {}).get("document_generation", DIAGNOSTIC_DOCUMENT_GENERATION))
                 pending_navigation = None
         except Exception:
             pass
@@ -314,26 +342,39 @@ def attach_diagnostics(page: Any) -> None:
 def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
     if PAGE is None:
         return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "Camoufox Driver has no active page.", "retryable": False}
+    provider_requested_ref = request.get("provider_page_ref")
+    public_requested_ref = request.get("page_ref")
+    target_state = page_by_provider_ref(provider_requested_ref) if isinstance(provider_requested_ref, str) else page_state_for(PAGE)
+    target_page = target_state.get("page") if target_state else PAGE
+    target_ref = (target_state or {}).get("diagnostic_page_ref") or public_requested_ref or provider_page_ref(PAGE) or DIAGNOSTIC_PAGE_REF
+    target_generation = int((target_state or {}).get("document_generation", DIAGNOSTIC_DOCUMENT_GENERATION))
     try:
-        title = safe_text(str(PAGE.title()))[:256]
+        title = safe_text(str(target_page.title()))[:256]
     except Exception:
-        return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "The active Page is no longer observable.", "retryable": False}
+        return {"status": "unavailable", "failure_class": "provider_unavailable", "message": "The requested Page is no longer observable.", "retryable": False}
+    # Reading the title can flush the provider's pending navigation callbacks
+    # (and therefore rotate the diagnostic Page binding). Resolve the current
+    # binding after that flush before validating the public reference/cursor.
+    target_ref = (target_state or {}).get("diagnostic_page_ref") or target_ref
+    target_generation = int((target_state or {}).get("document_generation", target_generation))
     origin = request.get("origin")
-    current = diagnostics_url(str(PAGE.url))
+    current = diagnostics_url(str(target_page.url))
     if not isinstance(origin, str) or not current or current[1] != origin:
-        return {"status": "unavailable", "failure_class": "wrong_page", "message": "The active page origin does not match the requested origin.", "retryable": False}
-    if request.get("page_ref") is not None and request.get("page_ref") != DIAGNOSTIC_PAGE_REF:
+        return {"status": "unavailable", "failure_class": "wrong_page", "message": "The requested page origin does not match the requested origin.", "retryable": False}
+    if public_requested_ref is not None and public_requested_ref != target_ref:
         return {"status": "unavailable", "failure_class": "stale_page", "message": "The requested Page binding is stale.", "retryable": False}
     cursor = request.get("cursor")
-    after = parse_diagnostic_cursor(cursor) if cursor is not None else None
-    oldest = DIAGNOSTIC_EVENTS[0]["_cursor"] if DIAGNOSTIC_EVENTS else DIAGNOSTIC_CURSOR + 1
+    after = parse_diagnostic_cursor(cursor, target_ref, target_generation) if cursor is not None else None
+    page_events = [event for event in DIAGNOSTIC_EVENTS if event.get("page_ref") == target_ref and event.get("document_generation") == target_generation]
+    page_events = page_events[-128:]
+    oldest = page_events[0]["_cursor"] if page_events else DIAGNOSTIC_CURSOR + 1
     if cursor is not None and (after is None or after > DIAGNOSTIC_CURSOR or after < oldest - 1):
         return {"status": "unavailable", "failure_class": "cursor_stale", "message": "The diagnostics cursor is invalid or no longer retained for this Instance Page generation.", "retryable": True}
     if after is None:
         after = oldest - 1
     limit = request.get("limit", 64)
     high_watermark = DIAGNOSTIC_CURSOR
-    retained = [event for event in DIAGNOSTIC_EVENTS if event["_cursor"] > after and event["_cursor"] <= high_watermark and event.get("page_ref") == DIAGNOSTIC_PAGE_REF and event.get("document_generation") == DIAGNOSTIC_DOCUMENT_GENERATION and event.get("origin", event.get("_origin")) == current[1]]
+    retained = [event for event in page_events if event["_cursor"] > after and event["_cursor"] <= high_watermark and event.get("origin", event.get("_origin")) == current[1]]
     events = retained[:max(1, min(64, int(limit)))]
     network, console = [], []
     for event in events:
@@ -343,7 +384,7 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
         else:
             network.append(public)
     last = events[-1]["_cursor"] if events else after
-    return {"status": "completed", "page_ref": DIAGNOSTIC_PAGE_REF, "document_generation": DIAGNOSTIC_DOCUMENT_GENERATION, "page": {"current_url": current[0], "title": title, "status": "ready"}, "cursor": diagnostic_cursor(after), "next_cursor": diagnostic_cursor(last), "truncated": (oldest > 1 and after == oldest - 1) or len(retained) > len(events), "observed_at": diagnostics_now(), "network": network, "console": console}
+    return {"status": "completed", "page_ref": target_ref, "document_generation": target_generation, "page": {"current_url": current[0], "title": title, "status": "ready"}, "cursor": diagnostic_cursor(after, target_ref, target_generation), "next_cursor": diagnostic_cursor(last, target_ref, target_generation), "truncated": (oldest > 1 and after == oldest - 1) or len(retained) > len(events), "observed_at": diagnostics_now(), "network": network, "console": console}
 
 
 def safe_error(error: BaseException) -> str:
@@ -882,6 +923,150 @@ def facts_for_page(page: Any) -> dict[str, Any]:
     return {"current_url": current_url, "title": title, "status": "ready" if current_url is not None else "unknown"}
 
 
+def page_state_for(page: Any) -> dict[str, Any] | None:
+    """Return the private provider state for a Playwright Page object."""
+    ref = PAGE_STATE_BY_OBJECT.get(id(page))
+    return PAGE_STATES.get(ref) if ref else None
+
+
+def provider_page_ref(page: Any) -> str | None:
+    state = page_state_for(page)
+    return state.get("provider_page_ref") if state else None
+
+
+def page_state_facts(state: dict[str, Any]) -> dict[str, Any]:
+    page = state.get("page")
+    facts = facts_for_page(page)
+    current_url = facts.get("current_url")
+    # A private driver handle is deliberately the only page identity emitted
+    # on this pipe. Harbor replaces it with an opaque public page_ref.
+    return {
+        **facts,
+        "provider_page_ref": state["provider_page_ref"],
+        "document_generation": int(state.get("document_generation", 1)),
+        "active": page is PAGE,
+        **({"opener_provider_page_ref": state["opener_provider_page_ref"]} if state.get("opener_provider_page_ref") else {})
+    }
+
+
+def all_page_states() -> list[dict[str, Any]]:
+    return [page_state_facts(state) for state in PAGE_STATES.values() if not state.get("closed")]
+
+
+def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
+    """Track a browser Page without exporting the Playwright object."""
+    existing = page_state_for(page)
+    if existing is not None:
+        if opener is not None and not existing.get("opener_provider_page_ref"):
+            existing["opener_provider_page_ref"] = provider_page_ref(opener)
+        return existing
+    ref = f"provider_page_{uuid.uuid4().hex}"
+    state: dict[str, Any] = {
+        "provider_page_ref": ref,
+        "page": page,
+        "document_generation": 1,
+        "closed": False,
+    }
+    opener_ref = provider_page_ref(opener) if opener is not None else None
+    if opener_ref:
+        state["opener_provider_page_ref"] = opener_ref
+    PAGE_STATES[ref] = state
+    PAGE_STATE_BY_OBJECT[id(page)] = ref
+
+    def on_frame_navigated(frame: Any) -> None:
+        try:
+            if frame == page.main_frame:
+                # A same-document history transition still creates a new
+                # public document binding; the registry cannot safely infer
+                # that distinction from a URL comparison alone.
+                state["document_generation"] = int(state.get("document_generation", 1)) + 1
+                state["diagnostic_page_ref"] = f"page_{uuid.uuid4().hex}"
+                state.pop("interaction_page_ref", None)
+        except Exception:
+            pass
+
+    def on_close() -> None:
+        global PAGE
+        state["closed"] = True
+        PAGE_STATE_BY_OBJECT.pop(id(page), None)
+        guard = PAGE_NAVIGATION_GUARDS.pop(ref, None)
+        PAGE_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
+        PAGE_NAVIGATION_DENIED.pop(ref, None)
+        if guard is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", guard)
+        if page is PAGE:
+            # Native close is not an activation signal. Leave active unset
+            # until a provider focus event or an explicit page.activate.
+            PAGE = None
+
+    def on_dialog(dialog: Any) -> None:
+        try:
+            if str(getattr(dialog, "type", "")) == "beforeunload":
+                state["beforeunload_blocked"] = True
+            dialog.dismiss()
+        except Exception:
+            pass
+
+    with contextlib.suppress(Exception):
+        page.on("framenavigated", on_frame_navigated)
+        page.on("close", on_close)
+        page.on("dialog", on_dialog)
+    return state
+
+
+def set_active_provider_page(page: Any) -> dict[str, Any]:
+    global PAGE
+    if page is None or getattr(page, "is_closed", lambda: False)():
+        raise ValueError("Camoufox Driver Page is closed.")
+    state = page_state_for(page) or register_provider_page(page)
+    # Do not publish the new active Page until native focus succeeds. A
+    # failed bring-to-front must remain an unavailable/unknown activation.
+    page.bring_to_front()
+    PAGE = page
+    for candidate in PAGE_STATES.values():
+        candidate["active"] = candidate["page"] is page and not candidate.get("closed")
+    return page_state_facts(state)
+
+
+def context_page_created(page: Any) -> None:
+    opener = None
+    with contextlib.suppress(Exception):
+        opener = page.opener
+        if callable(opener):
+            opener = opener()
+    register_provider_page(page, opener)
+    with contextlib.suppress(Exception):
+        attach_diagnostics(page)
+
+
+def install_page_context_handler() -> None:
+    global PAGE_CONTEXT_HANDLER
+    if CONTEXT is None or PAGE_CONTEXT_HANDLER is not None:
+        return
+    PAGE_CONTEXT_HANDLER = context_page_created
+    with contextlib.suppress(Exception):
+        CONTEXT.on("page", PAGE_CONTEXT_HANDLER)
+
+
+def reset_provider_pages() -> None:
+    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD
+    if PAGE_NAVIGATION_CONTEXT_GUARD is not None and CONTEXT is not None:
+        with contextlib.suppress(Exception):
+            CONTEXT.unroute("**/*", PAGE_NAVIGATION_CONTEXT_GUARD)
+    PAGE_STATES.clear()
+    PAGE_STATE_BY_OBJECT.clear()
+    PAGE_NAVIGATION_GUARDS.clear()
+    PAGE_NAVIGATION_ALLOWED_ORIGINS.clear()
+    PAGE_NAVIGATION_DENIED.clear()
+    PAGE_CONTEXT_HANDLER = None
+    PAGE_NAVIGATION_CONTEXT_GUARD = None
+
+
+def page_by_provider_ref(ref: Any) -> dict[str, Any] | None:
+    return PAGE_STATES.get(ref) if isinstance(ref, str) else None
+
+
 def xhs_probe_expression() -> str:
     return """(() => {
       const text = document.body?.innerText || "";
@@ -1099,6 +1284,17 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
     target_os = {"darwin": "macos", "win32": "windows", "linux": "linux"}.get(sys.platform, "linux")
     launch_timezone = config.get("timezone") if isinstance(config.get("timezone"), str) and config.get("timezone") else None
     provider_env = {key: value for key, value in os.environ.items() if not key.startswith("CAMOU_CONFIG_")}
+    firefox_prefs = {
+        # Ask the native browser to keep diverted/new tabs in the background.
+        # Active facts still come only from the provider's tracked focus state;
+        # Agent input cannot override these provider-owned preferences.
+        "browser.tabs.loadDivertedInBackground": True,
+        "browser.tabs.loadInBackground": True,
+        "browser.link.open_newwindow": 3,
+        "focusmanager.testmode": False,
+    }
+    if launch_timezone:
+        firefox_prefs["roverfox.s.timezone_0"] = launch_timezone
     with contextlib.redirect_stdout(sys.stderr):
         options = launch_options(
             executable_path=LAUNCH_EXECUTABLE_PATH,
@@ -1112,7 +1308,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
             timezone_id=launch_timezone,
             # The pinned default persistent context reads this cached preference
             # before CAMOU_CONFIG, even after a native timezone_id override.
-            firefox_user_prefs={"roverfox.s.timezone_0": launch_timezone} if launch_timezone else None,
+            firefox_user_prefs=firefox_prefs,
             proxy=proxy,
             enable_cache=True,
             main_world_eval=True,
@@ -1128,12 +1324,20 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         # also applies Camoufox's no_viewport rule when a spoofed window is
         # configured, which avoids the known Juggler viewport handshake hang.
         CONTEXT = NewBrowser(PLAYWRIGHT, from_options=options, persistent_context=True)
+        reset_provider_pages()
         PAGE = CONTEXT.pages[0] if CONTEXT.pages else CONTEXT.new_page()
+        for existing_page in list(getattr(CONTEXT, "pages", []) or []):
+            register_provider_page(existing_page)
+        if page_state_for(PAGE) is None:
+            register_provider_page(PAGE)
+        set_active_provider_page(PAGE)
+        install_page_context_handler()
         DIAGNOSTIC_EVENTS.clear()
         DIAGNOSTIC_REQUESTS.clear()
         DIAGNOSTIC_CURSOR = 0
         DIAGNOSTIC_INSTANCE_REF = uuid.uuid4().hex
-        attach_diagnostics(PAGE)
+        for state in PAGE_STATES.values():
+            attach_diagnostics(state["page"])
         url = request.get("url")
         if isinstance(url, str) and url:
             if request.get("operation_scope") == "profile_management":
@@ -1153,6 +1357,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
         camoufox_version = None
     return {
         "page": page_facts(),
+        "pages": all_page_states(),
         "python_version": platform.python_version(),
         "camoufox_version": camoufox_version,
         "playwright_version": importlib.metadata.version("playwright"),
@@ -1177,6 +1382,261 @@ def open_url(request: dict[str, Any]) -> dict[str, Any]:
 def public_origin(value: str) -> str:
     parsed = urlparse(value)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def navigation_location(response: Any, request_url: str) -> str | None:
+    headers = getattr(response, "headers", {})
+    if callable(headers):
+        with contextlib.suppress(Exception):
+            headers = headers()
+    if not isinstance(headers, dict):
+        return None
+    location = next((value for key, value in headers.items() if str(key).lower() == "location"), None)
+    if not isinstance(location, str) or not location or len(location) > 4096:
+        return None
+    try:
+        resolved = urljoin(request_url, location)
+        parsed = urlparse(resolved)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+            return None
+        return resolved
+    except Exception:
+        return None
+
+
+def request_page(request: Any) -> Any:
+    with contextlib.suppress(Exception):
+        frame = request.frame
+        page = frame.page
+        if page is not None:
+            return page
+    return PAGE
+
+
+def request_redirect_hops(request: Any) -> int:
+    hops = 0
+    current = request
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen and hops < 16:
+        seen.add(id(current))
+        with contextlib.suppress(Exception):
+            current = current.redirected_from
+            hops += 1
+            continue
+        break
+    return hops
+
+
+def follow_authorized_redirect(route: Any, response: Any, request: Any, allowed: set[str], denied: str) -> bool:
+    """Follow one redirect in the browser after validating its actual target.
+
+    Playwright's route.fetch(max_redirects=0) gives us the Location response
+    without sending the next hop. The pinned 1.60 API exposes the private
+    redirected-navigation continuation used here; falling back to continue()
+    would lose the preflight boundary, so an unqualified runtime is rejected.
+    """
+    location = navigation_location(response, str(getattr(request, "url", "")))
+    destination_origin = public_origin(location) if location else ""
+    page = request_page(request)
+    page_ref = provider_page_ref(page)
+    if not location or destination_origin not in allowed or request_redirect_hops(request) >= 8:
+        if page_ref:
+            PAGE_NAVIGATION_DENIED[page_ref] = denied
+        route.abort("blockedbyclient")
+        return False
+    implementation = getattr(route, "_impl_obj", None)
+    continuation = getattr(implementation, "_redirected_navigation_request", None)
+    sync = getattr(route, "_sync", None)
+    if not callable(continuation) or not callable(sync):
+        if page_ref:
+            PAGE_NAVIGATION_DENIED[page_ref] = "navigation_guard_unavailable"
+        route.abort("failed")
+        return False
+    try:
+        sync(continuation(location))
+        return True
+    except Exception:
+        if page_ref:
+            PAGE_NAVIGATION_DENIED[page_ref] = "navigation_guard_unavailable"
+        route.abort("failed")
+        return False
+
+
+def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tuple[str, ...] | set[str]) -> None:
+    """Install a per-Page, per-hop origin guard for page.* navigation."""
+    global PAGE_NAVIGATION_CONTEXT_GUARD
+    state = page_state_for(page) or register_provider_page(page)
+    page_ref = state["provider_page_ref"]
+    allowed = {origin for origin in authorized_origins if isinstance(origin, str) and public_origin(origin) == origin}
+    PAGE_NAVIGATION_ALLOWED_ORIGINS[page_ref] = allowed
+    PAGE_NAVIGATION_DENIED.pop(page_ref, None)
+
+    def guard(route: Any) -> None:
+        request = route.request
+        request_origin = public_origin(str(getattr(request, "url", "")))
+        request_page_ref = provider_page_ref(request_page(request)) or page_ref
+        if request_origin not in allowed:
+            PAGE_NAVIGATION_DENIED[request_page_ref] = "navigation_origin_denied"
+            route.abort("blockedbyclient")
+            return
+        response = None
+        try:
+            response = route.fetch(max_redirects=0, timeout=15_000)
+            status = int(getattr(response, "status", 0))
+            if 300 <= status < 400:
+                follow_authorized_redirect(route, response, request, allowed, "navigation_origin_denied")
+            else:
+                route.fulfill(response=response)
+        except Exception:
+            PAGE_NAVIGATION_DENIED[request_page_ref] = "navigation_guard_unavailable"
+            with contextlib.suppress(Exception):
+                route.abort("failed")
+        finally:
+            if response is not None:
+                with contextlib.suppress(Exception):
+                    response.dispose()
+
+    previous = PAGE_NAVIGATION_GUARDS.get(page_ref)
+    if previous is not None:
+        with contextlib.suppress(Exception):
+            page.unroute("**/*", previous)
+    PAGE_NAVIGATION_GUARDS[page_ref] = guard
+    with contextlib.suppress(Exception):
+        page.route("**/*", guard)
+
+    if PAGE_NAVIGATION_CONTEXT_GUARD is None and CONTEXT is not None:
+        def context_guard(route: Any) -> None:
+            request = route.request
+            target_page = request_page(request)
+            target_ref = provider_page_ref(target_page)
+            active_ref = provider_page_ref(PAGE)
+            target_allowed = PAGE_NAVIGATION_ALLOWED_ORIGINS.get(target_ref or "")
+            allowed_for_request = target_allowed if target_allowed is not None else PAGE_NAVIGATION_ALLOWED_ORIGINS.get(active_ref or "", set())
+            request_origin = public_origin(str(getattr(request, "url", "")))
+            failure_ref = target_ref or active_ref
+            if not allowed_for_request:
+                # The context guard only owns pages participating in a page
+                # operation; unrelated provider traffic stays untouched.
+                route.continue_()
+                return
+            if request_origin not in allowed_for_request:
+                if failure_ref:
+                    PAGE_NAVIGATION_DENIED[failure_ref] = "navigation_origin_denied"
+                route.abort("blockedbyclient")
+                return
+            response = None
+            try:
+                response = route.fetch(max_redirects=0, timeout=15_000)
+                status = int(getattr(response, "status", 0))
+                if 300 <= status < 400:
+                    follow_authorized_redirect(route, response, request, allowed_for_request, "navigation_origin_denied")
+                else:
+                    route.fulfill(response=response)
+            except Exception:
+                if failure_ref:
+                    PAGE_NAVIGATION_DENIED[failure_ref] = "navigation_guard_unavailable"
+                with contextlib.suppress(Exception):
+                    route.abort("failed")
+            finally:
+                if response is not None:
+                    with contextlib.suppress(Exception):
+                        response.dispose()
+        PAGE_NAVIGATION_CONTEXT_GUARD = context_guard
+        with contextlib.suppress(Exception):
+            CONTEXT.route("**/*", context_guard)
+
+
+def page_navigation_failure(page: Any) -> str | None:
+    ref = provider_page_ref(page)
+    return PAGE_NAVIGATION_DENIED.get(ref) if ref else None
+
+
+def page_navigation_state(page: Any) -> dict[str, Any]:
+    state = page_state_for(page) or register_provider_page(page)
+    facts = page_state_facts(state)
+    failure = page_navigation_failure(page)
+    if failure:
+        facts["status"] = "failed"
+        facts["error"] = {"code": "url_unreachable", "message": failure, "retryable": False}
+    return facts
+
+
+def list_pages() -> dict[str, Any]:
+    return {"pages": all_page_states()}
+
+
+def open_page(request: dict[str, Any]) -> dict[str, Any]:
+    if CONTEXT is None:
+        raise RuntimeError("Camoufox Driver has no active context.")
+    url = request.get("url")
+    if url is not None and (not isinstance(url, str) or not url):
+        raise ValueError("Camoufox Driver open_page URL is invalid.")
+    with contextlib.redirect_stdout(sys.stderr):
+        page = CONTEXT.new_page()
+        register_provider_page(page)
+        if isinstance(url, str):
+            install_page_navigation_guard(page, request.get("authorized_origins", []))
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 15_000)))
+            except Exception:
+                if not page_navigation_failure(page):
+                    raise
+    failure = page_navigation_failure(page)
+    return {"page": page_navigation_state(page), "pages": all_page_states(), **({"failure_class": failure} if failure else {})}
+
+
+def activate_page(request: dict[str, Any]) -> dict[str, Any]:
+    state = page_by_provider_ref(request.get("provider_page_ref"))
+    if state is None or state.get("closed"):
+        raise ValueError("Camoufox Driver Page handle is stale.")
+    with contextlib.redirect_stdout(sys.stderr):
+        facts = set_active_provider_page(state["page"])
+    return {"page": facts, "pages": all_page_states()}
+
+
+def close_page(request: dict[str, Any]) -> dict[str, Any]:
+    state = page_by_provider_ref(request.get("provider_page_ref"))
+    if state is None or state.get("closed"):
+        raise ValueError("Camoufox Driver Page handle is stale.")
+    page = state["page"]
+    with contextlib.redirect_stdout(sys.stderr):
+        page.close()
+    # Playwright may not emit close synchronously on a mocked page.
+    state["closed"] = True
+    return {"pages": all_page_states()}
+
+
+def navigate_page(request: dict[str, Any]) -> dict[str, Any]:
+    state = page_by_provider_ref(request.get("provider_page_ref"))
+    if state is None or state.get("closed"):
+        raise ValueError("Camoufox Driver Page handle is stale.")
+    page = state["page"]
+    action = request.get("action")
+    if action not in ("navigate", "reload", "back", "forward"):
+        raise ValueError("Camoufox Driver Page navigation action is unsupported.")
+    allowed = request.get("authorized_origins", [])
+    install_page_navigation_guard(page, allowed)
+    state.pop("beforeunload_blocked", None)
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            if action == "navigate":
+                url = request.get("url")
+                if not isinstance(url, str) or not url:
+                    raise ValueError("Camoufox Driver navigate requires a URL.")
+                page.goto(url, wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 15_000)))
+            elif action == "reload":
+                page.reload(wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 15_000)))
+            elif action == "back":
+                page.go_back(wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 15_000)))
+            else:
+                page.go_forward(wait_until="domcontentloaded", timeout=int(request.get("timeout_ms", 15_000)))
+        except Exception:
+            if not page_navigation_failure(page):
+                raise
+    if state.pop("beforeunload_blocked", False):
+        PAGE_NAVIGATION_DENIED[state["provider_page_ref"]] = "navigation_beforeunload_blocked"
+    failure = page_navigation_failure(page)
+    return {"page": page_navigation_state(page), "pages": all_page_states(), **({"failure_class": failure} if failure else {})}
 
 
 def install_public_navigation_guard(expected_origin: str) -> None:
@@ -1385,7 +1845,8 @@ def install_interaction_guard(expected: str) -> None:
             route.abort("blockedbyclient")
             return
         try:
-            if request.frame.page != PAGE:
+            target_page = request_page(request)
+            if target_page is not PAGE and page_state_for(target_page) is None:
                 PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
                 route.abort("blockedbyclient")
                 return
@@ -1393,14 +1854,14 @@ def install_interaction_guard(expected: str) -> None:
             PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
             route.abort("blockedbyclient")
             return
-        # The controlled page may run same-origin validation requests, but no
-        # redirect is followed, including redirects from XHR and subresources.
+        # The controlled Page and a Provider-registered background popup may
+        # run same-origin validation requests. Each redirect hop is checked
+        # before the next request is sent.
         response = None
         try:
             response = route.fetch(max_redirects=0, timeout=10_000)
             if 300 <= response.status < 400:
-                PUBLIC_NAVIGATION_DENIED = "managed_public_redirect_blocked"
-                route.abort("blockedbyclient")
+                follow_authorized_redirect(route, response, request, {expected}, "managed_public_redirect_blocked")
             else:
                 route.fulfill(response=response)
         except Exception:
@@ -1420,10 +1881,14 @@ def interaction_surface(expected: str) -> str | None:
     if public_origin(str(PAGE.url)) != expected:
         return "managed_public_origin_denied"
     parsed = urlparse(str(PAGE.url))
-    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+    if parsed.username or parsed.password:
         return "managed_interaction_url_unsupported"
-    if len(CONTEXT.pages) != 1 or len(PAGE.frames) != 1:
+    if len(PAGE.frames) != 1:
         return "managed_interaction_window_unsupported"
+    if CONTEXT is not None:
+        for candidate in getattr(CONTEXT, "pages", []) or []:
+            if candidate is not PAGE and page_state_for(candidate) is None:
+                return "managed_interaction_window_unsupported"
     return None
 
 
@@ -1433,7 +1898,11 @@ class InteractionSnapshotError(Exception):
 
 def interaction_snapshot(generation: int) -> dict[str, Any]:
     global INTERACTION_STATE
-    page_ref = DIAGNOSTIC_PAGE_REF or "page_" + uuid.uuid4().hex
+    page_state = page_state_for(PAGE) or register_provider_page(PAGE)
+    page_state.setdefault("diagnostic_page_ref", DIAGNOSTIC_PAGE_REF or "page_" + uuid.uuid4().hex)
+    diagnostic_ref = page_state.get("diagnostic_page_ref") or DIAGNOSTIC_PAGE_REF
+    candidate = diagnostic_ref if re.fullmatch(r"page_[0-9a-f]{32}", diagnostic_ref or "") else "page_" + uuid.uuid4().hex
+    page_ref = page_state.setdefault("interaction_page_ref", candidate)
     if INTERACTION_STATE is not None:
         with contextlib.suppress(Exception):
             if INTERACTION_STATE["handle"].evaluate("state => state.sameDocument()"):
@@ -1479,6 +1948,13 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
         return refused("managed_interaction_invalid_input")
     try:
         with contextlib.redirect_stdout(sys.stderr):
+            provider_ref = request.get("provider_page_ref")
+            selected = page_by_provider_ref(provider_ref) if isinstance(provider_ref, str) else page_state_for(PAGE)
+            # Legacy fixture providers do not expose a private Page handle;
+            # the existing single-Page interaction contract remains valid for
+            # them while Camoufox uses the explicit provider binding.
+            if isinstance(provider_ref, str) and (selected is None or selected.get("closed") or selected.get("page") is not PAGE):
+                return refused("managed_interaction_page_not_active")
             failure = interaction_surface(expected)
             if failure:
                 return refused(failure)
@@ -1783,6 +2259,7 @@ def close() -> None:
         PAGE = None
         CONTEXT = None
         PLAYWRIGHT = None
+        reset_provider_pages()
         cleanup_launch_layout()
 
 
@@ -1804,6 +2281,16 @@ def main() -> None:
                 send(message_id, "ready", **launch(request))
             elif op == "open_url":
                 send(message_id, "ok", **open_url(request))
+            elif op == "list_pages":
+                send(message_id, "ok", **list_pages())
+            elif op == "open_page":
+                send(message_id, "ok", **open_page(request))
+            elif op == "activate_page":
+                send(message_id, "ok", **activate_page(request))
+            elif op == "close_page":
+                send(message_id, "ok", **close_page(request))
+            elif op == "navigate_page":
+                send(message_id, "ok", **navigate_page(request))
             elif op == "clear_public_navigation_guard":
                 send(message_id, "ok", **clear_public_navigation_guard())
             elif op == "managed_public_page":

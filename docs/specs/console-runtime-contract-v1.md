@@ -3,7 +3,8 @@
 状态：Accepted；版本：1.0；owner：Harbor / Provider Driver。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续由 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
 
 Console and page-error observations use the same `instance.diagnostics` route,
-authorization, Page binding, cursor, lifecycle, and bounded window as the
+authorization, selected Page binding, document generation, cursor, lifecycle,
+and bounded window as the
 [Network Runtime Contract V1](network-runtime-contract-v1.md).
 
 The public levels are `warn`, `error`, and `pageerror`. A record contains an
@@ -15,7 +16,8 @@ public fields. Secret-looking `name=value` material is replaced with
 `[redacted]` before it leaves the Driver.
 
 An observation is not a control target and never changes the Instance
-ControlLease. Page navigation, close, driver loss, stale cursor, origin drift,
+ControlLease. Page navigation rotates the selected Page's document generation;
+close, driver loss, stale cursor, origin drift,
 or revocation makes the corresponding read unavailable; consumers must not
 pretend an empty window means that the browser had no errors.
 
@@ -35,8 +37,8 @@ it as a page error). Missing Provider events are not inferred. Error objects,
 arguments and stack frames are never serialized as a public structure.
 
 Text truncation remains visible after Driver and Harbor normalization. The
-shared event limit is 64 per read, with at most 128 retained events per active
-Page; lifecycle and unavailable fields are defined by Network V1. Secret-like
+shared event limit is 64 per read, with at most 128 retained events per Page
+and an additional Instance-wide cap; lifecycle and unavailable fields are defined by Network V1. Secret-like
 text is filtered before retention and again at the public normalization
 boundary; filtering must precede truncation. Content is untrusted data and
 must never be executed or treated as authority by the consuming Agent.
