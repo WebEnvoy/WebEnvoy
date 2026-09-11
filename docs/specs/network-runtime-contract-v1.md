@@ -13,10 +13,11 @@ The public path is Driver → Harbor `POST
 /runtime/sessions/{runtime_session_ref}/diagnostics` → Core managed-browser
 operation → Agent projection. The operation is bound to the authorized
 `profile_ref`, `runtime_session_ref`, selected `page_ref`, and document
-generation. Core supplies the intersection of the Profile, Grant and task
-scope origin sets; the Agent cannot submit an origin allowlist. A stale Page,
-cursor, closed/lost Instance, provider failure, or origin mismatch returns an
-explicit unavailable result.
+generation. Core supplies the intersection of one current Grant, the target
+Profile policy, and task scope origins; the Agent cannot submit an origin
+allowlist or combine multiple Grants. A stale Page, cursor, closed/lost
+Instance, provider failure, origin mismatch, or unproven Page relation returns
+an explicit unavailable result.
 
 ## Public result
 
@@ -40,7 +41,7 @@ are not forwarded:
 | `status`, `schema_version` | Exactly `completed`, `harbor-runtime-diagnostics/v1` |
 | `runtime_session_ref`, `profile_ref` | Opaque strings bound by Harbor to the selected Instance/Profile |
 | `page_ref`, `document_generation` | Opaque selected Page string and positive integer document generation; shared with the selected controlled-page snapshot |
-| `page` | `{current_url: string\|null, title: string\|null, status: ready\|unavailable\|unknown}`; sanitized URL and bounded title |
+| `page` | `{current_url: string\|null, title: string\|null, status: loading\|ready\|failed\|closed\|unavailable\|unknown}`; sanitized URL and bounded title |
 | `cursor`, `next_cursor` | Opaque window checkpoints; never selectors, endpoint IDs or authority |
 | `observed_at` | UTC ISO timestamp of the read, distinct from each event's timestamp |
 | `truncated` | Boolean indicating the bounded window did not represent all available/history events |
@@ -89,11 +90,13 @@ returned window reached its limit or the provider evicted older events.
 
 ## Lifecycle and failure
 
-`wrong_page`, `stale_page`, `stale_document`, and `cursor_stale` are non-success
-results and must be surfaced without guessing. Driver loss invalidates the
-selected Page binding and
-returns `provider_unavailable`; subsequent calls cannot revive the old
-Instance. Closing or revoking the authorized session prevents further reads.
+`wrong_page`, `stale_page`, `stale_document`, `cursor_stale`, and
+`page_relation_unavailable` are non-success results and must be surfaced
+without guessing. Driver loss invalidates the selected Page binding and
+returns `provider_unavailable`; a Page list that cannot prove its relation
+returns `page_relation_unavailable` and pauses dependent web dispatch.
+Subsequent calls cannot revive the old Instance or guess a replacement Page.
+Closing or revoking the authorized session prevents further reads.
 
 The observation exists only during the selected Page's lifetime, starting when
 the Driver attaches native listeners. Navigation rotates that Page's document
@@ -116,11 +119,14 @@ to existing Run retention/query semantics and do not revive an observation.
 The unavailable wire result is `{status: "unavailable", failure_class,
 message, retryable}`. `failure_class` is one of `invalid_request` (malformed
 or unsupported input), `session_missing` (no such Instance),
-`session_not_ready` (stopped/failed/not active), `wrong_page` (origin does not
-match), `stale_page` (Page binding replaced), `cursor_stale` (window replaced,
-expired or invalid), or `provider_unavailable` (missing capability/Driver).
-Message is a bounded safe summary. `retryable` never authorizes replay of a
-page action. Core preserves the failure class in its existing failure result;
+`session_not_ready` (stopped/failed/not active), `page_selection_required`
+(multiple visible Pages without an explicit selection), `wrong_page` (origin
+does not match), `stale_page` (Page binding replaced), `stale_document`
+(document generation replaced), `cursor_stale` (window replaced, expired or
+invalid), `page_relation_unavailable` (Provider cannot prove the Page
+relation), or `provider_unavailable` (missing capability/Driver). Message is a
+bounded safe summary. `retryable` never authorizes replay of a page action.
+Core preserves the failure class in its existing failure result;
 authentication/Grant/Profile/task refusals occur at the Core boundary first.
 
 The trusted internal Harbor route accepts `{origin, authorized_origins?,
@@ -132,6 +138,7 @@ selected Page binding; it requires the existing Core/owner authorization;
 ordinary Agents use the
 [Installed Plugin projection](plugin-runtime-exposure-v1.md). Inputs cannot
 request headers, bodies, interception, mutation, storage or arbitrary script.
-This additive v1 payload requires a matching Runtime/Plugin build; unknown
-versions must not be reinterpreted as a raw Provider result. No data migration
-is needed because the event ring is ephemeral.
+This additive v1 payload requires a matching Runtime/Plugin build; unknown,
+malformed, or incompatible versions must be rejected as unavailable and must
+not be reinterpreted as a raw Provider result or silently downgraded. No data
+migration is needed because the event ring is ephemeral.
