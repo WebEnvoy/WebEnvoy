@@ -62,11 +62,18 @@ function pageBody(service, path) {
       <p><a id="history-link" href="/history?step=link#${lower}-link">History link</a></p>`,
     script: `
       console.info("phase1-${lower}-console");
-      if (${service === "S2"}) {
-        const queryPhase1 = location.pathname === "/query" && new URLSearchParams(location.search).get("phase") === "1";
-        const fragmentS2 = location.pathname === "/query" && location.hash === "#s2-fragment";
-        if (queryPhase1 && fragmentS2) document.title = "S2 Phase 1 Page marker-q1-f1";
-      }
+      const updatePageTitle = () => {
+        const queryPhase1 = ${service === "S2"} && location.pathname === "/query" && new URLSearchParams(location.search).get("phase") === "1";
+        const fragmentS2 = ${service === "S2"} && location.pathname === "/query" && location.hash === "#s2-fragment";
+        if (queryPhase1 && fragmentS2) {
+          document.title = "S2 Phase 1 Page marker-q1-f1";
+        } else if (location.pathname === "/history") {
+          document.title = "${service} Phase 1 History";
+        } else {
+          document.title = ${JSON.stringify(title)};
+        }
+      };
+      updatePageTitle();
       fetch("/__phase1/network/${lower}", { cache: "no-store" }).catch(() => {});
       document.querySelector("#count-button").addEventListener("click", async () => {
         const value = document.querySelector("#safe-input").value;
@@ -79,7 +86,8 @@ function pageBody(service, path) {
         window.open(${JSON.stringify(popupUrl)}, "phase1-popup");
       });
       document.querySelector("#history-link").addEventListener("click", event => { event.preventDefault(); history.pushState({ phase1: true }, "", "/history?step=link#${lower}-link"); });
-      window.addEventListener("popstate", () => { document.title = "${service} Phase 1 History"; });`
+      window.addEventListener("popstate", updatePageTitle);
+      window.addEventListener("hashchange", updatePageTitle);`
   };
 }
 
