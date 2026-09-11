@@ -178,7 +178,7 @@ function isIdentityEnvironmentInput(value: unknown): boolean {
     optionalEnum(input.geoip_mode, ["proxy", "system", "disabled"]) &&
     optionalEnum(input.interaction_preset, ["default", "humanized"]) &&
     optionalEnum(input.fingerprint_strategy, ["provider_default", "stable"]) &&
-    optionalEnum(input.requested_provider_id, ["cloakbrowser", "chrome_official", "camoufox"]);
+    optionalEnum(input.requested_provider_id, ["cloakbrowser", "chrome_official", "camoufox", "obscura"]);
 }
 
 function isIdentityEnvironmentMutationInput(value: unknown, operation: "create" | "import"): boolean {

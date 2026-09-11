@@ -14,8 +14,14 @@ import { startHarborRuntimeServer as startUnconfiguredHarborRuntimeServer } from
 const testProfileRoot = mkdtempSync(join(tmpdir(), "harbor-server-profiles-"));
 const identityAliases = new Map<string, string>();
 const identityEnvironmentOwners = new Map<string, HarborRuntime>();
+const previousChromePath = process.env.HARBOR_CHROME_PATH;
 process.env.HARBOR_PROFILE_STORAGE_ROOT = testProfileRoot;
-after(() => rmSync(testProfileRoot, { recursive: true, force: true }));
+process.env.HARBOR_CHROME_PATH = process.execPath;
+after(() => {
+  if (previousChromePath === undefined) delete process.env.HARBOR_CHROME_PATH;
+  else process.env.HARBOR_CHROME_PATH = previousChromePath;
+  rmSync(testProfileRoot, { recursive: true, force: true });
+});
 
 async function startHarborRuntimeServer(options: Parameters<typeof startUnconfiguredHarborRuntimeServer>[0] = {}) {
   const running = await startUnconfiguredHarborRuntimeServer({
@@ -558,7 +564,7 @@ test("serves site resource facts failures without raw browser material", async (
 
     const session = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
-        requested_provider_id: "cloakbrowser",
+        requested_provider_id: "chrome_official",
         identity_environment_ref: "identity-env_challenge-test",
         execution_identity_ref: "execution-identity_challenge-test",
         profile_ref: "profile_challenge-test",
@@ -1518,7 +1524,7 @@ test("rejects missing, unmanaged, closed, and failed sessions without changing i
 
     const unmanaged = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
-        requested_provider_id: "cloakbrowser",
+        requested_provider_id: "chrome_official",
         identity_environment_ref: "identity-env_inline-unmanaged",
         execution_identity_ref: "execution-identity_inline-unmanaged",
         profile_ref: "profile_inline-unmanaged",
@@ -1612,7 +1618,7 @@ test("ignores caller-supplied owner refs when creating identities through the co
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": "same-profile-b", ...manualAuthHeaders() },
       body: JSON.stringify({
-        requested_provider_id: "cloakbrowser",
+        requested_provider_id: "chrome_official",
         identity_environment_ref: "identity-env_same-profile-b",
         execution_identity_ref: "identity-env_same-profile-b:execution",
         profile_ref: "profile_same-profile",
@@ -2517,7 +2523,7 @@ async function postJson(url: string, body: unknown): Promise<any> {
 async function postIdentityEnvironment(url: string, body: Record<string, unknown>): Promise<any> {
   const stateKeys = ["login_state", "login_state_reason", "storage_state", "manual_authentication_state"] as const;
   const businessInput = {
-    requested_provider_id: "cloakbrowser",
+    requested_provider_id: "chrome_official",
     ...Object.fromEntries(Object.entries(body).filter(([key]) => !stateKeys.includes(key as typeof stateKeys[number])))
   };
   const stateUpdate = Object.fromEntries(stateKeys.flatMap((key) => Object.hasOwn(body, key) ? [[key, body[key]]] : []));

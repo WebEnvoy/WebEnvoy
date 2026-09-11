@@ -23,6 +23,7 @@ import {
 import { profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
 import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
+import { isIdentityEnvironmentMutationRequest } from "./identity-environment-mutation-http.js";
 
 after(isolateProfileStorage("identity-mutations"));
 
@@ -66,6 +67,11 @@ test("persists idempotent receipts and rejects sensitive or conflicting payloads
 });
 
 test("allocates owner refs and rejects provider metadata that conflicts with the selected provider", () => {
+  assert.equal(isIdentityEnvironmentMutationRequest({
+    operation: "create",
+    idempotency_key: "obscura-http-contract",
+    identity_environment: { requested_provider_id: "obscura", site: { site_id: "controlled", origin: "https://example.com" } }
+  }), true);
   const manager = new LocalIdentityEnvironmentManager({ provider_detection: testProviderDetection });
   const selectionRequired = manager.mutate({
     operation: "create",
