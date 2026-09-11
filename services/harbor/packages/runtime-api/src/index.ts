@@ -568,8 +568,13 @@ export class HarborRuntime {
   async operateManagedPublicPage(runtime_session_ref: string, input: unknown, navigate: boolean) {
     if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
     const request = input as Record<string, unknown>;
-    const keys = navigate ? ["holder_ref", "expected_origin", "url"] : ["holder_ref", "expected_origin"];
-    if (Object.keys(request).length !== keys.length || !keys.every(key => typeof request[key] === "string") || !boundedManagedRef(request.holder_ref) || !managedPublicOrigin(request.expected_origin)) return managedUnavailable("managed_public_origin_denied");
+    const allowed = navigate ? ["holder_ref", "expected_origin", "url", "page_id", "page_ref", "document_generation"] : ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation"];
+    if (Object.keys(request).some(key => !allowed.includes(key)) || typeof request.holder_ref !== "string" || typeof request.expected_origin !== "string" ||
+      !boundedManagedRef(request.holder_ref) || !managedPublicOrigin(request.expected_origin) ||
+      (request.page_id !== undefined && !boundedManagedRef(request.page_id)) ||
+      (request.page_ref !== undefined && !boundedManagedRef(request.page_ref)) ||
+      (request.document_generation !== undefined && (!Number.isSafeInteger(request.document_generation) || Number(request.document_generation) < 1)) ||
+      (navigate ? typeof request.url !== "string" : request.url !== undefined)) return managedUnavailable("managed_public_origin_denied");
     if (navigate) {
       try {
         const url = new URL(request.url as string);
@@ -583,12 +588,29 @@ export class HarborRuntime {
     // A generic public read cannot consume a declared identity-dependent origin.
     if ((profile.account_bindings.length || profile.site.account_ref) && profile.site.origin === request.expected_origin) return managedUnavailable("managed_public_identity_required");
     return this.runtimeSessions.operateManagedPublicPage(runtime_session_ref, request.holder_ref as string,
-      { expected_origin: request.expected_origin as string, ...(navigate ? { url: request.url as string } : {}) });
+      { expected_origin: request.expected_origin as string,
+        ...(navigate ? { url: request.url as string } : {}),
+        ...(typeof request.page_id === "string" ? { page_id: request.page_id } : {}),
+        ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
+        ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {}) });
   }
 
   async observeManagedSession(runtime_session_ref: string, input: unknown): Promise<ManagedObservation | ManagedObservationUnavailable> {
-    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).join() !== "holder_ref" || !boundedManagedRef((input as { holder_ref?: unknown }).holder_ref)) return managedUnavailable("invalid_request");
-    return this.runtimeSessions.observeManagedSession(runtime_session_ref, (input as { holder_ref: string }).holder_ref);
+    if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
+    const request = input as Record<string, unknown>;
+    const allowed = ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation"];
+    if (Object.keys(request).some(key => !allowed.includes(key)) || !boundedManagedRef(request.holder_ref) ||
+      (request.expected_origin !== undefined && !managedPublicOrigin(request.expected_origin)) ||
+      (request.page_id !== undefined && !boundedManagedRef(request.page_id)) ||
+      (request.page_ref !== undefined && !boundedManagedRef(request.page_ref)) ||
+      (request.document_generation !== undefined && (!Number.isSafeInteger(request.document_generation) || Number(request.document_generation) < 1))) return managedUnavailable("invalid_request");
+    return this.runtimeSessions.observeManagedSession(runtime_session_ref, {
+      holder_ref: request.holder_ref,
+      ...(typeof request.expected_origin === "string" ? { expected_origin: request.expected_origin } : {}),
+      ...(typeof request.page_id === "string" ? { page_id: request.page_id } : {}),
+      ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
+      ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {})
+    });
   }
 
   async readRuntimeDiagnostics(runtime_session_ref: string, input: unknown): Promise<RuntimeDiagnosticsResponse> {
@@ -611,7 +633,7 @@ export class HarborRuntime {
     const request = input as Record<string, string>;
     const observed = this.runtimeSessions.findManagedObservation(identity_environment_ref, request.observation_ref, request.holder_ref);
     if (!observed || observed.account.status !== "verified" || observed.account.account_system_ref !== request.account_system_ref || observed.account.account_ref !== request.account_ref) return managedUnavailable("account_observation_required");
-    const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, request.holder_ref);
+    const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, { holder_ref: request.holder_ref });
     if (fresh.status !== "completed" || fresh.account.status !== "verified" || fresh.account.account_ref !== request.account_ref || fresh.account.account_system_ref !== request.account_system_ref || fresh.control_generation !== observed.control_generation) return managedUnavailable("account_observation_changed");
     try {
       return this.identityEnvironments.bindObservedAccount(identity_environment_ref, { account_system_ref: request.account_system_ref, account_ref: request.account_ref,

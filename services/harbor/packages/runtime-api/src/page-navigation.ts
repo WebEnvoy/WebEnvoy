@@ -1,6 +1,7 @@
 import { opaqueRef } from "./refs.js";
 import type {
   LocalProviderPageController,
+  LocalProviderPageFacts,
   LocalProviderPageState,
   RuntimeErrorFact,
   RuntimePageFacts,
@@ -157,6 +158,25 @@ export class PageRegistry {
     if (!this.relationFresh) return undefined;
     const record = this.activePageId ? this.byId.get(this.activePageId) : undefined;
     return record && !record.closed && record.present ? { facts: this.public(record), provider_page_ref: record.provider_page_ref } : undefined;
+  }
+
+  /** Harbor-internal legacy selection; an omitted allowlist means all live Pages. */
+  legacyBindings(authorizedOrigins?: readonly string[]): Array<{ facts: ManagedPageFacts; provider_page_ref: string }> {
+    if (!this.relationFresh) return [];
+    const allowed = authorizedOrigins === undefined ? undefined : new Set(authorizedOrigins);
+    return [...this.byId.values()]
+      .filter(record => !record.closed && record.present && (allowed === undefined || this.visible(record, allowed)))
+      .map(record => ({ facts: this.public(record), provider_page_ref: record.provider_page_ref }));
+  }
+
+  /** Reconcile a bounded result from a trusted operation without guessing identity from URL/title. */
+  updateProviderPage(provider_page_ref: string, facts: LocalProviderPageFacts): { facts: ManagedPageFacts; provider_page_ref: string } | undefined {
+    if (!this.relationFresh) return undefined;
+    const record = this.byProvider.get(provider_page_ref);
+    if (!record || record.closed || !record.present) return undefined;
+    const state: LocalProviderPageState = { ...record.provider_state, ...facts, provider_page_ref };
+    this.updated(record, state);
+    return { facts: this.public(record), provider_page_ref };
   }
 
   list(authorizedOrigins: readonly string[] = []): ManagedPageList {

@@ -31,6 +31,7 @@ const environmentReceipts = new Map<string, Record<string, unknown>>();
 let recoveryExpectedProfileRef: string | undefined;
 let afterCreate: (() => Promise<void>) | undefined;
 let afterProfileList: (() => Promise<void>) | undefined;
+let principalId: string | undefined;
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
@@ -84,7 +85,17 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body) as { profile_ref?: string };
     value = { schema_version: "harbor-profile-recovery/v1", profile_ref: input.profile_ref, status: "compatible" };
   }
-  else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
+  else if (req.url === "/runtime/sessions/session%3Aone/observe") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    assert.equal(input.holder_ref, principalId);
+    assert.equal(input.expected_origin, "https://example.com");
+    assert.equal(input.page_id, "page-id:one");
+    assert.equal(input.page_ref, "page:one");
+    assert.equal(input.document_generation, 1);
+    observations++;
+    value = { status: "completed", page: { current_url: (managedSession.current_page as { current_url?: string }).current_url, title: "Fixture", status: "ready" } };
+  }
   else if (req.url === "/runtime/sessions/session%3Aone/diagnostics") {
     diagnostics++;
     let body = ""; for await (const chunk of req) body += chunk;
@@ -170,6 +181,7 @@ try {
     harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
   const credentialHash = createHash("sha256").update("fixture-agent").digest("hex");
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
+  principalId = principal.principal_id;
   const connection = await accessStore.connect(credentialHash);
   const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...managedOperations], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
     creation_template: { template_ref: "template:example", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] } } });
@@ -207,7 +219,7 @@ try {
   assert.equal((reconciled.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:3");
   assert.equal(creates, 3, "receipt query must not replay creation");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === recoveryGrant.grant_id)?.created_profile_refs.length, 1);
-  const browserOps = ["instance.navigate", "instance.read"];
+  const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   managedSession = { runtime_session_ref: "session:one", profile_ref: "profile:1", control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
@@ -243,7 +255,7 @@ try {
   await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "revoked-diagnostics" }), /grant_unavailable/);
   managedSession.control_owner = "core_task";
   managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
-  const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1, task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
   await assert.rejects(service.submit(credentialHash, { ...navigation, runtime_session_ref: undefined }), /invalid_input/);
   const stale = await service.submit(credentialHash, { ...navigation, idempotency_key: "old-session", runtime_session_ref: "session:old" });
   assert.equal(stale.failure?.code, "managed_browser_session_mismatch");
@@ -257,6 +269,9 @@ try {
   assert.equal(navigations, 1, "query and duplicate submission never replay navigation");
   const content = await service.submit(credentialHash, { ...navigation, idempotency_key: "read-one", operation: "instance.read", url: undefined });
   assert.equal((content.result as { text: string }).text, "Example Domain is for use in documentation examples.");
+  const observed = await service.submit(credentialHash, { ...navigation, idempotency_key: "observe-one", operation: "instance.observe", url: undefined });
+  assert.equal(observed.status, "succeeded", JSON.stringify(observed));
+  assert.equal((observed.result as { observation: { page: { current_url: string } } }).observation.page.current_url, "https://example.com/one");
   for (const denied of [{ ...navigation, profile_ref: "profile:2" }, { ...navigation, origin: "https://denied.example", url: "https://denied.example/" }, { ...navigation, task_scope: { ...navigation.task_scope, operations: ["instance.read"] } }]) {
     await assert.rejects(service.submit(credentialHash, { ...denied, idempotency_key: "denied" }), /managed_access_denied/);
   }

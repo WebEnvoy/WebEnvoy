@@ -780,7 +780,7 @@ export type LocalProviderLaunchResult =
       clearPublicPageGuard?: () => Promise<void>;
       publicPage?: import("./managed-observation.js").ManagedPublicPageOperation;
       interaction?: import("./managed-interaction.js").ManagedInteractionOperation;
-      observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
+      observePage?: (input?: import("./managed-observation.js").ManagedProviderPageInput) => Promise<import("./managed-observation.js").ManagedProviderObservation>;
       readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
       readEnvironment?: import("./profile-environment.js").EnvironmentProbe;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;

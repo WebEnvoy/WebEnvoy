@@ -44,6 +44,8 @@ type DriverPage = {
   current_url: string | null;
   title: string | null;
   status: RuntimePageStatus;
+  document_generation?: number;
+  active?: boolean;
 };
 
 type DriverReady = {
@@ -320,18 +322,19 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       }),
       publicPage: trustManagedPublicPageOperation(async input => {
         const result = await driver.request("managed_public_page", input, DRIVER_COMMAND_TIMEOUT_MS);
-        if (result.page) currentUrl = parseDriverPage(result).current_url ?? currentUrl;
-        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(result.page ? { page: pageFacts(parseDriverPage(result)) } : {}) };
-        const page = pageFacts(parseDriverPage(result));
+        const resultPage = result.page ? pageFacts(parseDriverPage(result)) : undefined;
+        if (resultPage) currentUrl = resultPage.current_url ?? currentUrl;
+        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(resultPage ? { page: resultPage } : {}) };
+        const page = resultPage ?? pageFacts(parseDriverPage(result));
         if (typeof result.text === "string") {
           if (result.text.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|(?:token|cookie|password|secret|authorization|credential)\s*[=:]/i.test(result.text)) return managedUnavailable("managed_public_content_unavailable");
           return { status: "completed", page, text: result.text, truncated: result.truncated === true };
         }
         return input.url ? { status: "completed", page } : managedUnavailable("managed_public_content_unavailable");
       }),
-      observePage: trustManagedPageObserver(async () => {
-        const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
-        return normalizeManagedProviderObservation(result.observation);
+      observePage: trustManagedPageObserver(async input => {
+        const result = await driver.request("managed_observe", { expression: managedPageObservationExpression, ...(input?.provider_page_ref ? { provider_page_ref: input.provider_page_ref } : {}) }, DRIVER_COMMAND_TIMEOUT_MS);
+        return { ...normalizeManagedProviderObservation(result.observation), ...(input?.provider_page_ref ? { provider_page_ref: input.provider_page_ref } : {}) };
       }),
       readDiagnostics: trustRuntimeDiagnosticsProbe(async (diagnostics: RuntimeDiagnosticsInput) => {
         const result = await driver.request("diagnostics_read", { ...diagnostics }, DRIVER_COMMAND_TIMEOUT_MS);
@@ -528,7 +531,9 @@ function parseDriverPage(response: Record<string, unknown>): DriverPage {
   return {
     current_url: typeof value.current_url === "string" ? safePublicText(value.current_url) : null,
     title: typeof value.title === "string" ? safePublicText(value.title) : null,
-    status
+    status,
+    ...(Number.isSafeInteger(value.document_generation) && Number(value.document_generation) >= 1 ? { document_generation: Number(value.document_generation) } : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {})
   };
 }
 
@@ -618,7 +623,9 @@ async function probeCamoufoxSiteResource(
 }
 
 function pageFacts(page: DriverPage): LocalProviderPageFacts {
-  return { current_url: page.current_url, title: page.title, status: page.status, facts: pageFactList(page, opaqueRef("validation")) };
+  return { current_url: page.current_url, title: page.title, status: page.status, facts: pageFactList(page, opaqueRef("validation")),
+    ...(page.document_generation === undefined ? {} : { document_generation: page.document_generation }),
+    ...(page.active === undefined ? {} : { active: page.active }) };
 }
 
 function pageFactList(page: DriverPage, evidenceRef: string): RuntimeFact[] {

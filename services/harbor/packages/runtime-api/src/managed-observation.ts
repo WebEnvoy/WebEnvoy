@@ -14,11 +14,17 @@ export const managedOperationCatalog = {
   }))]
 };
 export type DiscoveredManagedAccount = { status: "verified" | "unknown"; account_system_ref: string | null; account_ref: string | null };
-export type ManagedProviderObservation = { page: LocalProviderPageFacts; account: DiscoveredManagedAccount };
+export type ManagedProviderPageInput = {
+  /** Harbor-only provider selector; never accepted from the Agent route. */
+  provider_page_ref?: string;
+};
+export type ManagedPageSelector = { page_id?: string; page_ref?: string; document_generation?: number };
+export type ManagedObservationInput = ManagedPageSelector & { holder_ref: string; expected_origin?: string };
+export type ManagedProviderObservation = { page: LocalProviderPageFacts; account: DiscoveredManagedAccount; provider_page_ref?: string };
 export type ManagedObservation = {
   status: "completed"; observation_ref: string; observed_at: string; runtime_session_ref: string;
   identity_environment_ref: string; profile_ref: string; control_owner: string; control_generation: number;
-  page: Pick<LocalProviderPageFacts, "current_url" | "title" | "status">; account: DiscoveredManagedAccount;
+  page: Pick<LocalProviderPageFacts, "current_url" | "title" | "status" | "page_id" | "page_ref" | "document_generation" | "origin" | "active">; account: DiscoveredManagedAccount;
 };
 export type ManagedObservationUnavailable = { status: "unavailable"; failure_class: string; retryable: boolean };
 export type ManagedAccountBinding = { account_system_ref: string; account_ref: string; observation_ref: string; bound_at: string };
@@ -50,13 +56,14 @@ export function normalizeManagedProviderObservation(value: unknown): ManagedProv
   } catch { /* Unavailable URLs remain unknown. */ }
   const title = typeof raw.title === "string" && raw.title.length <= 256 && !/[\u0000-\u001f\u007f]|(?:token|cookie|password|secret|authorization)\s*[=:]/i.test(raw.title) ? raw.title : null;
   const ready = raw.ready_state === "complete" || raw.ready_state === "interactive";
+  const document_generation = Number.isSafeInteger(raw.document_generation) && Number(raw.document_generation) >= 1 ? Number(raw.document_generation) : undefined;
   const verified = ready && current_url?.startsWith("https://creator.xiaohongshu.com/") && typeof raw.stable_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(raw.stable_id);
-  return { page: { current_url, title, status: current_url && ready ? "ready" : "unknown", facts: [] }, account: verified
+  return { page: { current_url, title, status: current_url && ready ? "ready" : "unknown", facts: [], ...(document_generation === undefined ? {} : { document_generation }) }, account: verified
     ? { status: "verified", account_system_ref: "account-system:xiaohongshu", account_ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", stable_id: raw.stable_id })).digest("hex")}` }
     : unknownManagedAccount() };
 }
 
-type ObservePage = () => Promise<ManagedProviderObservation>;
+type ObservePage = (input?: ManagedProviderPageInput) => Promise<ManagedProviderObservation>;
 const trustedObservers = new WeakSet<ObservePage>();
 export function trustManagedPageObserver(observer: ObservePage): ObservePage { trustedObservers.add(observer); return observer; }
 export function isTrustedManagedPageObserver(observer: ObservePage | undefined): observer is ObservePage { return observer !== undefined && trustedObservers.has(observer); }
@@ -75,7 +82,12 @@ export function hasManagedBindingConflict(records: Iterable<import("./identity-e
   return false;
 }
 
-export type ManagedPublicPageInput = { expected_origin: string; url?: string };
+export type ManagedPublicPageInput = ManagedPageSelector & {
+  expected_origin: string;
+  url?: string;
+  /** Harbor-only provider selector; never accepted from the Agent route. */
+  provider_page_ref?: string;
+};
 export type ManagedPublicPageResult = { status: "completed"; page: LocalProviderPageFacts; text?: string; truncated?: boolean } | (ManagedObservationUnavailable & { page?: LocalProviderPageFacts });
 export type ManagedPublicPageOperation = (input: ManagedPublicPageInput) => Promise<ManagedPublicPageResult>;
 const trustedPublicOperations = new WeakSet<ManagedPublicPageOperation>();

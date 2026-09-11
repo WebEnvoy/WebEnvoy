@@ -61,7 +61,7 @@ function parse(value: unknown): Request {
     try { url = new URL(text(input.url)); } catch { return fail("managed_browser_invalid_input"); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.origin !== input.origin || !["instance.start", "instance.navigate", "page.open", "page.navigate"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
   }
-  if (["instance.navigate", "instance.read", "instance.diagnostics", ...managedPageOperations, ...managedInteractionOperations].includes(String(input.operation))) {
+  if (["instance.navigate", "instance.read", "instance.observe", "instance.diagnostics", ...managedPageOperations, ...managedInteractionOperations].includes(String(input.operation))) {
     text(input.runtime_session_ref);
     if (["instance.navigate", "page.navigate", "page.open"].includes(String(input.operation))) text(input.url);
     if (input.operation === "instance.diagnostics" && input.url !== undefined) return fail("managed_browser_invalid_input");
@@ -102,7 +102,7 @@ function parse(value: unknown): Request {
     if (input.operation === "recovery.status") text(input.operation_ref);
     if (input.backup_ref !== undefined && input.operation !== "recovery.request") return fail("managed_browser_invalid_input");
     if (input.backup_ref !== undefined) text(input.backup_ref);
-  } else if (!["instance.navigate", "instance.read"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
+  } else if (!["instance.navigate", "instance.read", "instance.observe"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
@@ -297,7 +297,10 @@ export function createManagedBrowserService(options: {
       return result;
     }
     if (input.operation === "instance.navigate" || input.operation === "instance.read") {
-      await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
+      const pageBinding = { holder_ref: holder, expected_origin: input.origin,
+        ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        ...(input.document_generation ? { document_generation: input.document_generation } : {}) };
+      await harbor(`/runtime/sessions/${ref}/observe`, pageBinding);
       await check();
       const result = await harbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
         holder_ref: holder, expected_origin: input.origin, ...(input.page_id ? { page_id: input.page_id } : {}),
@@ -305,7 +308,9 @@ export function createManagedBrowserService(options: {
         ...(input.url ? { url: input.url } : {}) });
       return { session: publicSession(result.session), ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }), observed_at: result.observed_at };
     }
-    const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
+    const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder, expected_origin: input.origin,
+      ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+      ...(input.document_generation ? { document_generation: input.document_generation } : {}) });
     const page = object(observation.page);
     let observedOrigin: string;
     try { observedOrigin = new URL(text(page.current_url)).origin; } catch { return fail("managed_browser_observation_unknown"); }

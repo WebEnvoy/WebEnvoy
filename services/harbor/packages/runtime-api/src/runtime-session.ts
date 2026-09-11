@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvironmentState, type EnvironmentObservation, type EnvironmentProbe, type ProfileEnvironmentConfiguration } from "./profile-environment.js";
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
-import { isTrustedManagedPublicPageOperation, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable, type ManagedProviderObservation } from "./managed-observation.js";
+import { isTrustedManagedPublicPageOperation, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
 import { assertNoUnfinishedProfileRecovery } from "./profile-recovery.js";
 import {
   createLocalIdentityEnvironmentFacts,
@@ -148,7 +148,7 @@ export interface RuntimeSessionRecord {
   publicPage?: ManagedPublicPageOperation;
   interaction?: ManagedInteractionOperation;
   interaction_snapshot?: { page_ref: string; provider_snapshot_ref?: string; observation_ref: string; control_generation: number; holder_ref: string };
-  observePage?: () => Promise<ManagedProviderObservation>;
+  observePage?: (input?: ManagedProviderPageInput) => Promise<ManagedProviderObservation>;
   readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
   readEnvironment?: EnvironmentProbe;
   applied_environment?: ProfileEnvironmentConfiguration;
@@ -807,9 +807,12 @@ export class RuntimeSessionStore {
     // A direct internal caller may bypass the HTTP parser, but it must not be
     // allowed to turn an explicitly supplied Core intersection into a union.
     if (!authorizedOrigins.includes(input.expected_origin)) return refused("managed_interaction_origin_denied");
+    const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return refused(relationFailure);
-    const generation = record.control_generation;
+    if (record.control_generation !== generation) return refused("managed_interaction_control_changed");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== input.holder_ref) return refused("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const observed = record.interaction_snapshot;
     let pageBinding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
     if (record.page_registry) {
@@ -878,42 +881,72 @@ export class RuntimeSessionStore {
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const operation = record.publicPage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
+    const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
-    const generation = record.control_generation;
+    if (record.control_generation !== generation) return managedUnavailable("control_changed");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
+    const pageBinding = this.resolveLegacyPageBinding(record, input, input.expected_origin, "managed_public_origin_denied");
+    if (pageBinding.failure) return managedUnavailable(pageBinding.failure);
+    const providerInput = pageBinding.binding
+      ? { ...input, provider_page_ref: pageBinding.binding.provider_page_ref }
+      : input;
     try {
-      const result = await this.withProviderInteraction(record, () => operation(input));
-      if (record.control_generation !== generation || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      const result = await this.withProviderInteraction(record, () => operation(providerInput));
+      if (record.control_generation !== generation || record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      let resultPage = result.page;
+      if (resultPage && pageBinding.binding) {
+        const current = record.page_registry?.updateProviderPage(pageBinding.binding.provider_page_ref, resultPage) ?? pageBinding.binding;
+        resultPage = { ...resultPage, page_id: current.facts.page_id, page_ref: current.facts.page_ref, document_generation: current.facts.document_generation, origin: current.facts.origin, active: current.facts.active };
+      }
       if (result.status !== "completed") {
-        if (result.page?.current_url) this.applyPageFacts(record, result.page.current_url, result.page);
+        if (resultPage?.current_url) this.applyPageFacts(record, resultPage.current_url, resultPage);
         return managedUnavailable(result.failure_class);
       }
-      if (!result.page.current_url || new URL(result.page.current_url).origin !== input.expected_origin) return managedUnavailable("managed_public_origin_denied");
-      this.applyPageFacts(record, result.page.current_url, result.page);
+      if (!resultPage?.current_url || new URL(resultPage.current_url).origin !== input.expected_origin) return managedUnavailable("managed_public_origin_denied");
+      this.applyPageFacts(record, resultPage.current_url, resultPage);
       return { status: "completed" as const, session: snapshot(record.facts), observed_at: new Date().toISOString(),
         ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }) };
     } catch { return managedUnavailable("managed_public_page_unavailable"); }
   }
 
-  async observeManagedSession(runtime_session_ref: string, holder_ref: string): Promise<ManagedObservation | ManagedObservationUnavailable> {
+  async observeManagedSession(runtime_session_ref: string, input: ManagedObservationInput | string): Promise<ManagedObservation | ManagedObservationUnavailable> {
+    const holder_ref = typeof input === "string" ? input : input.holder_ref;
+    const selector: ManagedPageSelector = typeof input === "string" ? {} : input;
+    const expectedOrigin = typeof input === "string" ? undefined : input.expected_origin;
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
     if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
     const observe = record.observePage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
+    const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
-    const generation = record.control_generation;
+    if (record.control_generation !== generation) return managedUnavailable("control_changed");
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
+    const pageBinding = this.resolveLegacyPageBinding(record, selector, expectedOrigin, "managed_observation_unavailable");
+    if (pageBinding.failure) return managedUnavailable(pageBinding.failure);
+    const providerInput = pageBinding.binding ? { provider_page_ref: pageBinding.binding.provider_page_ref } : undefined;
     try {
-      const observed = await this.withProviderInteraction(record, observe);
-      if (record.control_generation !== generation || record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      const observed = await this.withProviderInteraction(record, () => observe(providerInput));
+      if (record.control_generation !== generation || record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref || record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
       if (!observed.page.current_url) return managedUnavailable("page_not_ready");
-      this.applyPageFacts(record, observed.page.current_url, observed.page);
+      let observedPage = observed.page;
+      if (pageBinding.binding) {
+        const current = record.page_registry?.updateProviderPage(pageBinding.binding.provider_page_ref, observed.page) ?? pageBinding.binding;
+        observedPage = { ...observed.page, page_id: current.facts.page_id, page_ref: current.facts.page_ref, document_generation: current.facts.document_generation, origin: current.facts.origin, active: current.facts.active };
+        if (observed.provider_page_ref !== undefined && observed.provider_page_ref !== pageBinding.binding.provider_page_ref) return managedUnavailable("managed_observation_unavailable");
+      }
+      const observedUrl = observedPage.current_url;
+      if (!observedUrl) return managedUnavailable("page_not_ready");
+      this.applyPageFacts(record, observedUrl, observedPage);
       const result: ManagedObservation = { status: "completed", observation_ref: opaqueRef("observation"), observed_at: new Date().toISOString(),
         runtime_session_ref, identity_environment_ref: record.facts.identity_environment_ref, profile_ref: record.facts.profile_ref,
         control_owner: record.facts.control_owner, control_generation: generation,
-        page: { current_url: observed.page.current_url, title: observed.page.title, status: observed.page.status }, account: observed.account };
+        page: { current_url: observedPage.current_url, title: observedPage.title, status: observedPage.status, ...(observedPage.page_id ? { page_id: observedPage.page_id } : {}), ...(observedPage.page_ref ? { page_ref: observedPage.page_ref } : {}), ...(observedPage.document_generation ? { document_generation: observedPage.document_generation } : {}), ...(observedPage.origin !== undefined ? { origin: observedPage.origin } : {}), ...(observedPage.active !== undefined ? { active: observedPage.active } : {}) }, account: observed.account };
       record.managed_observations = [...(record.managed_observations ?? []).slice(-15), result];
       return snapshot(result);
     } catch { return managedUnavailable("managed_observation_unavailable"); }
@@ -1044,6 +1077,39 @@ export class RuntimeSessionStore {
     } catch (cause) {
       return pageNavigationFailureClass(cause) === "provider_unavailable" ? "provider_unavailable" : "page_relation_unavailable";
     }
+  }
+
+  private resolveLegacyPageBinding(
+    record: RuntimeSessionRecord,
+    selector: ManagedPageSelector,
+    expectedOrigin: string | undefined,
+    emptyFailure: string
+  ): { binding?: { facts: ManagedPageFacts; provider_page_ref: string }; failure?: string } {
+    const hasSelector = selector.page_id !== undefined || selector.page_ref !== undefined;
+    if (!record.page_registry) return hasSelector ? { failure: "stale_page" } : {};
+    if (hasSelector) {
+      if ((selector.page_id !== undefined && !boundedManagedRef(selector.page_id)) ||
+        (selector.page_ref !== undefined && !boundedManagedRef(selector.page_ref)) ||
+        (selector.document_generation !== undefined && (!Number.isSafeInteger(selector.document_generation) || selector.document_generation < 1))) {
+        return { failure: "stale_page" };
+      }
+      const binding = record.page_registry.binding({ page_id: selector.page_id, page_ref: selector.page_ref });
+      if (!binding) return { failure: "stale_page" };
+      if (expectedOrigin !== undefined && binding.facts.origin !== expectedOrigin) return { failure: "managed_public_origin_denied" };
+      if (selector.document_generation !== undefined && binding.facts.document_generation !== selector.document_generation) return { failure: "stale_document" };
+      return { binding };
+    }
+    // Ambiguity is about the Instance's Page relation, not only the subset
+    // that happens to match the requested origin.  Filtering first would
+    // silently choose an authorized Page while hiding another live Page and
+    // would make the legacy route depend on authorization ordering.
+    const candidates = record.page_registry.legacyBindings();
+    if (candidates.length > 1) return { failure: "page_selection_required" };
+    if (candidates.length === 0) return { failure: emptyFailure };
+    const binding = candidates[0]!;
+    if (expectedOrigin !== undefined && binding.facts.origin !== expectedOrigin) return { failure: emptyFailure };
+    if (selector.document_generation !== undefined && selector.document_generation !== binding.facts.document_generation) return { failure: "stale_document" };
+    return { binding };
   }
 
   async probeReadOperation(
