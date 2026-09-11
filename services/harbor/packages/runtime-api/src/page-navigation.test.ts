@@ -16,8 +16,9 @@ function controller(initial: LocalProviderPageState[]): LocalProviderPageControl
       pages = pages.map(page => ({ ...page, active: page.provider_page_ref === ref }));
       return structuredClone(pages.find(page => page.provider_page_ref === ref)!);
     },
-    closePage: async (ref) => {
+    closePage: async (ref, safeReturnRef) => {
       pages = pages.filter(page => page.provider_page_ref !== ref);
+      if (safeReturnRef) pages = pages.map(page => ({ ...page, active: page.provider_page_ref === safeReturnRef }));
       return structuredClone(pages);
     },
     navigatePage: async (ref, _action, url) => {

@@ -54,8 +54,10 @@ import { diagnosticsUnavailable, isTrustedRuntimeDiagnosticsProbe, type RuntimeD
 import {
   PageRegistry,
   createLegacyPageController,
+  pageNavigationFailureClass,
   type ManagedPageFacts,
   type ManagedPageList,
+  type ManagedPageOperationReceipt,
   type ManagedPageOperationInput,
   type ManagedPageUnavailable
 } from "./page-navigation.js";
@@ -124,7 +126,7 @@ export type {
   ValidationRuntimeFacts
 } from "./runtime-session-types.js";
 export { HARBOR_PAGE_LIST_SCHEMA, HARBOR_PAGE_NAVIGATION_SCHEMA, PageRegistry } from "./page-navigation.js";
-export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageUnavailable } from "./page-navigation.js";
+export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageOperationReceipt, ManagedPageUnavailable } from "./page-navigation.js";
 
 export interface RuntimeSessionRecord {
   facts: RuntimeSessionFacts;
@@ -423,12 +425,16 @@ export class RuntimeSessionStore {
     try {
       await record.page_registry.refresh();
       return record.page_registry.list(authorized_origins);
-    } catch {
-      return pageUnavailable("provider_unavailable", runtime_session_ref, true);
+    } catch (cause) {
+      return pageUnavailable(pageFailureClass(cause), runtime_session_ref, true);
     }
   }
 
-  async operateManagedPage(runtime_session_ref: string, input: ManagedPageOperationInput): Promise<ManagedPageFacts | ManagedPageUnavailable | ManagedPageList> {
+  getManagedPageOperation(operation_ref: string): ManagedPageOperationReceipt | null {
+    return this.records.size === 0 ? null : [...this.records.values()].map(record => record.page_registry?.getOperation(operation_ref)).find(Boolean) ?? null;
+  }
+
+  async operateManagedPage(runtime_session_ref: string, input: ManagedPageOperationInput): Promise<ManagedPageOperationReceipt | ManagedPageList | ManagedPageUnavailable> {
     if (input.operation === "page.list") return this.listManagedPages(runtime_session_ref, input.authorized_origins ?? []);
     const record = this.records.get(runtime_session_ref);
     if (!record) return pageUnavailable("session_missing", runtime_session_ref, true, input.operation_ref);
@@ -439,14 +445,21 @@ export class RuntimeSessionStore {
     if (record.active_provider_interactions) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref);
     const generation = record.control_generation;
     try {
-      const result = await this.withProviderInteraction(record, () => record.page_registry!.operate(input));
-      if (record.control_generation !== generation) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref);
-      if (result.status !== "unavailable") {
-        record.facts.current_page = pageFacts(result.requested_url, { ...result, facts: [] }, result.observed_at);
+      const result = await this.withProviderInteraction(record, () => record.page_registry!.operateReceipt(input));
+      if (record.control_generation !== generation) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref, result.dispatch_state);
+      if (result.status === "completed" && result.page) {
+        record.facts.current_page = pageFacts(result.page.requested_url, { ...result.page, facts: [] }, result.page.observed_at);
       }
       return result;
     } catch {
-      return pageUnavailable("provider_unavailable", runtime_session_ref, true, input.operation_ref);
+      // The registry may already have persisted a receipt before an outer
+      // bookkeeping/error path failed. Preserve that evidence verbatim. If
+      // no receipt is readable, the Provider call may still have crossed its
+      // dispatch boundary, so report an unknown dispatched outcome and never
+      // downgrade it to `not_dispatched`.
+      const receipt = input.operation_ref ? record.page_registry.getOperation(input.operation_ref) : undefined;
+      if (receipt) return receipt;
+      return pageUnavailable("unknown_outcome", runtime_session_ref, true, input.operation_ref, "dispatched");
     }
   }
 
@@ -561,7 +574,7 @@ export class RuntimeSessionStore {
     record.facts.last_seen_at = now;
     record.facts.control_lock.state = "held";
     record.facts.control_lock.updated_at = now;
-    record.control_generation += 1;
+    bumpControlGeneration(record);
     record.facts.facts.push({ key: "session.lock", source: "observed", value: record.facts.control_owner });
     return snapshot(record.facts);
   }
@@ -592,7 +605,7 @@ export class RuntimeSessionStore {
       updated_at: now,
       conflict_error: null
     };
-    record.control_generation += 1;
+    bumpControlGeneration(record);
     record.user_held_session = false;
     record.read_operation_user_release_pending = confirmedReadControllerRelease;
     record.read_operation_user_handoff = false;
@@ -632,7 +645,7 @@ export class RuntimeSessionStore {
     const runtimeSessionRef = record.facts.runtime_session_ref;
     this.diagnosticsCursorBindings.delete(runtimeSessionRef);
     const closingAt = new Date().toISOString();
-    record.control_generation += 1;
+    bumpControlGeneration(record);
     record.facts.lifecycle_state = "disconnected";
     record.facts.last_seen_at = closingAt;
     record.facts.control_owner = "none";
@@ -720,7 +733,7 @@ export class RuntimeSessionStore {
       updated_at: control.updated_at,
       conflict_error: null
     };
-    record.control_generation += 1;
+    bumpControlGeneration(record);
     // Only the server-owned handoff path calls applyHandoff; create/lock input
     // must never be treated as proof that a user held this session.
     record.user_held_session = control.owner === "user" && isInteractiveUserViewer(record.facts);
@@ -788,21 +801,28 @@ export class RuntimeSessionStore {
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const operation = record.interaction;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedInteractionOperation(operation)) return refused("managed_interaction_provider_unavailable");
+    const authorizedOrigins = input.authorized_origins === undefined
+      ? [input.expected_origin]
+      : [...new Set(input.authorized_origins)];
+    // A direct internal caller may bypass the HTTP parser, but it must not be
+    // allowed to turn an explicitly supplied Core intersection into a union.
+    if (!authorizedOrigins.includes(input.expected_origin)) return refused("managed_interaction_origin_denied");
+    const relationFailure = await this.refreshPageRelation(record);
+    if (relationFailure) return refused(relationFailure);
     const generation = record.control_generation;
     const observed = record.interaction_snapshot;
     let pageBinding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
     if (record.page_registry) {
       try {
-        await record.page_registry.refresh();
         if (input.page_ref) pageBinding = record.page_registry.binding({ page_ref: input.page_ref });
         else {
-          const pages = record.page_registry.list([input.expected_origin]).pages;
+          const pages = record.page_registry.list(authorizedOrigins).pages;
           if (pages.length === 1) pageBinding = record.page_registry.binding({ page_id: pages[0]!.page_id });
           else if (pages.length > 1) return refused("page_selection_required");
         }
       } catch { return refused("managed_interaction_provider_unavailable"); }
       if (!pageBinding) return refused(input.page_ref ? "managed_interaction_observation_stale" : "page_selection_required");
-      if (pageBinding.facts.origin !== input.expected_origin) return refused("managed_interaction_origin_denied");
+      if (pageBinding.facts.origin !== input.expected_origin || !authorizedOrigins.includes(pageBinding.facts.origin)) return refused("managed_interaction_origin_denied");
     }
     if (input.action !== "snapshot" && (!observed || observed.control_generation !== generation || observed.holder_ref !== input.holder_ref ||
       observed.page_ref !== input.page_ref || observed.observation_ref !== input.observation_ref)) return refused("managed_interaction_observation_stale");
@@ -813,9 +833,10 @@ export class RuntimeSessionStore {
     const { holder_ref: _holder, operation_ref: _operation, controlled_origin: _controlled, ...action } = input;
     const providerAction = pageBinding ? {
       ...action,
+      authorized_origins: authorizedOrigins,
       provider_page_ref: pageBinding.provider_page_ref,
       ...(input.action === "snapshot" ? {} : { page_ref: observed?.provider_snapshot_ref ?? action.page_ref })
-    } : action;
+    } : { ...action, authorized_origins: authorizedOrigins };
     try {
       const result = await this.withProviderInteraction(record, () => operation({ ...providerAction, control_generation: generation }));
       if (record.control_generation !== generation || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) {
@@ -857,6 +878,8 @@ export class RuntimeSessionStore {
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const operation = record.publicPage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
+    const relationFailure = await this.refreshPageRelation(record);
+    if (relationFailure) return managedUnavailable(relationFailure);
     const generation = record.control_generation;
     try {
       const result = await this.withProviderInteraction(record, () => operation(input));
@@ -879,6 +902,8 @@ export class RuntimeSessionStore {
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
     const observe = record.observePage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
+    const relationFailure = await this.refreshPageRelation(record);
+    if (relationFailure) return managedUnavailable(relationFailure);
     const generation = record.control_generation;
     try {
       const observed = await this.withProviderInteraction(record, observe);
@@ -900,12 +925,13 @@ export class RuntimeSessionStore {
     if (!["active", "idle", "locked"].includes(record.facts.lifecycle_state)) return diagnosticsUnavailable("session_not_ready", "Runtime Session is not ready for observation.", true);
     const probe = record.readDiagnostics;
     if (record.execution_surface !== "local_provider" || !isTrustedRuntimeDiagnosticsProbe(probe)) return diagnosticsUnavailable("provider_unavailable");
+    const relationFailure = await this.refreshPageRelation(record);
+    if (relationFailure) return diagnosticsUnavailable(relationFailure === "page_relation_unavailable" ? relationFailure : "provider_unavailable", "The Provider Page relation is unavailable.", true);
     try {
       // Diagnostics are observation-only: this path intentionally does not acquire or change ControlLease.
       let providerInput = input;
       let binding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
       if (record.page_registry) {
-        await record.page_registry.refresh();
         const authorizedOrigins = new Set(input.authorized_origins ?? [input.origin]);
         if (input.page_ref) {
           binding = record.page_registry.binding({ page_ref: input.page_ref });
@@ -998,6 +1024,28 @@ export class RuntimeSessionStore {
     }
   }
 
+  private async withPageRelation<T>(
+    record: RuntimeSessionRecord,
+    operation: () => Promise<T>
+  ): Promise<{ relationFailure: "page_relation_unavailable" | "provider_unavailable" } | { result: T }> {
+    return this.withProviderInteraction(record, async () => {
+      const relationFailure = await this.refreshPageRelation(record);
+      if (relationFailure) return { relationFailure };
+      return { result: await operation() };
+    });
+  }
+
+  /** Refresh the Provider Page relation before any operation that consumes it. */
+  private async refreshPageRelation(record: RuntimeSessionRecord): Promise<"page_relation_unavailable" | "provider_unavailable" | null> {
+    if (!record.page_registry) return "page_relation_unavailable";
+    try {
+      await record.page_registry.refresh();
+      return null;
+    } catch (cause) {
+      return pageNavigationFailureClass(cause) === "provider_unavailable" ? "provider_unavailable" : "page_relation_unavailable";
+    }
+  }
+
   async probeReadOperation(
     runtime_session_ref: string,
     input: LocalProviderReadProbeInput
@@ -1029,7 +1077,16 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      const result = await this.withProviderInteraction(record, () => probeReadOperation(input));
+      const outcome = await this.withPageRelation(record, () => probeReadOperation(input));
+      if ("relationFailure" in outcome) {
+        return {
+          status: "unavailable",
+          failure_class: outcome.relationFailure === "page_relation_unavailable" ? outcome.relationFailure : "provider_probe_unavailable",
+          message: "The Provider Page relation is unavailable.",
+          retryable: true
+        };
+      }
+      const result = outcome.result;
       if (result.page) this.applyPageFacts(record, result.page.current_url ?? input.target_url, result.page);
       return result;
     } catch {
@@ -1053,7 +1110,16 @@ export class RuntimeSessionStore {
       };
     }
     try {
-      return await this.withProviderInteraction(record, () => probe(input));
+      const outcome = await this.withPageRelation(record, () => probe(input));
+      if ("relationFailure" in outcome) {
+        return {
+          status: "unknown",
+          failure_class: outcome.relationFailure === "page_relation_unavailable" ? outcome.relationFailure : "provider_probe_unavailable",
+          message: "The Provider Page relation is unavailable.",
+          verified_fact_keys: []
+        };
+      }
+      return outcome.result;
     } catch {
       this.markDriverLost(record);
       return {
@@ -1198,7 +1264,7 @@ export class RuntimeSessionStore {
       updated_at: now,
       conflict_error: null
     };
-    record.control_generation += 1;
+    bumpControlGeneration(record);
     record.user_held_session = false;
     record.read_operation_user_handoff = preserveReadOperationHandoff ||
       record.read_operation_user_release_pending && owner === "core_task";
@@ -1215,7 +1281,8 @@ export class RuntimeSessionStore {
   private markDriverLost(record: RuntimeSessionRecord): void {
     const now = new Date().toISOString();
     this.diagnosticsCursorBindings.delete(record.facts.runtime_session_ref);
-    record.control_generation += 1;
+    bumpControlGeneration(record);
+    record.page_registry?.invalidateRelation();
     // Keep ownership until explicit close proves that provider resources are gone.
     record.facts.lifecycle_state = "disconnected";
     record.facts.last_seen_at = now;
@@ -1369,7 +1436,8 @@ function pageUnavailable(
   failure_class: import("./page-navigation.js").ManagedPageUnavailableClass,
   runtime_session_ref: string,
   retryable: boolean,
-  operation_ref?: string
+  operation_ref?: string,
+  dispatch_state: "not_dispatched" | "dispatched" = "not_dispatched"
 ): ManagedPageUnavailable {
   return {
     status: "unavailable",
@@ -1377,9 +1445,19 @@ function pageUnavailable(
     failure_class,
     message: failure_class.replaceAll("_", " ").slice(0, 256),
     retryable,
+    dispatch_state,
     runtime_session_ref,
     ...(operation_ref ? { operation_ref } : {})
   };
+}
+
+function pageFailureClass(error: unknown): import("./page-navigation.js").ManagedPageUnavailableClass {
+  return pageNavigationFailureClass(error);
+}
+
+function bumpControlGeneration(record: RuntimeSessionRecord): void {
+  record.control_generation += 1;
+  record.page_registry?.invalidatePageBindings();
 }
 
 function snapshot<T>(value: T): T {
