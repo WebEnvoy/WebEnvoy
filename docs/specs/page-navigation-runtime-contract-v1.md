@@ -1,6 +1,6 @@
 # Page, Document and Navigation Runtime Contract V1
 
-状态：Accepted；版本：1.0；owner：Harbor / Provider Driver（现场）、Core（授权与 Run）。产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。依据：[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)。
+状态：Accepted；版本：1.0；owner：Harbor / Provider Driver（现场）、Core（授权与 Run）。产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510)。依据：[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)。
 
 本文冻结受管 Instance 中 Page、Document 和导航的公共语义。Provider 的 page object、CDP/Juggler handle、window id 和地址不得越过 Harbor 边界。Page list 使用 `harbor-page-list/v2`；现有 `harbor-runtime-diagnostics/v1` 与 controlled-page snapshot 继续使用 document-bound `page_ref` 投影。旧投影只能映射到当前 Page 对象和当前 generation，不能把旧 ref 猜测映射到另一个 Page；未提供明确兼容适配的旧 Runtime/客户端必须报告版本错误，不能静默降级。
 
@@ -52,6 +52,18 @@ Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分�
 - Provider list 只是遗漏一个仍在 Registry 中的 live Page 时，Harbor 返回 `page_relation_unavailable` 并暂停受影响 Instance 的 Page/网页派发；在获得完整关系前不得把遗漏解释成 human close、reload、reopen 或新的 Page。
 - Provider 的真实焦点事实优先于请求顺序。Agent `page.open` 不调用 bring-to-front；popup 是否 active 只由 provider 事件和真实焦点决定。
 
+## 2.2 Native tab handoff and relation recovery
+
+#510 的 native tab handoff 是原生 tab/window location 的变化，不是新的 Page、document 或 navigation。只有在 Provider 给出一个较新的、完整且可双向验证的 relation，并证明仍是同一个客户端 Page、同一个稳定的 target 与同一个 `BrowsingContext` 时，Harbor 才能接受这次 handoff。此时：
+
+- `page_id` 保持不变；只有在 `document_generation`、控制代次和当前 document 都未改变时，当前 `page_ref` 才能继续作为 public document binding 使用；native tab/window 的变化本身不递增 document generation，也不创建 replacement Page。
+- 已确认的 document state（包括页面输入/滚动状态、history 和 opener 关系）保持在原 Page 上；不能证明连续性时返回 `page_relation_unavailable`，不得通过 URL/title、关闭后重开、reload 或复制页面来修复。
+- 成功 handoff 仍会使旧的 observation、interaction target、diagnostics cursor 和进行中的 relation-bound read 失效。即使 `page_ref` 因 document 未变而保持不变，调用方也必须完成一次新的 `page.list`/`observe` 后再执行交互；不得重用旧 target、selector 快照或 cursor。旧 binding 按既有 `stale_page`、`stale_document` 或 `cursor_stale` 规则拒绝。
+
+在 `SwapDocShells`/`EndSwapDocShells` 尚未形成完整成对 relation，或 relation 为 partial、unknown、过期或不一致时，受影响 Instance 进入安全暂停：Page list、observe、diagnostics 以及依赖该关系的 Page/网页派发返回 `page_relation_unavailable`；已可能触及 Provider 的 mutation 保留 `unknown_outcome` + `dispatched`，不得自动重放。Harbor 保留最后一个可信 relation，但不把它当作当前可执行事实。
+
+恢复只能依赖更新且完整的 native relation，再做一次完整 Page list 与 fresh observation；成功恢复前不能把缺失解释成 close、reload、reopen 或新的 Page。若完整 relation 证明 Page/target/`BrowsingContext` identity 被替换，则当前连接的 relation latch 终止继续使用，必须由 owner 选择匹配的重启/回滚路径；不得猜测映射。
+
 ## 3. URL、origin and redirects
 
 URL 只允许 `http` 或 `https`，拒绝 embedded credentials、控制字符和超过 2048 字符的值。Query string 和 fragment 是有效 URL 部分，可以由导航传递；它们不出现在公开日志、Run summary、diagnostics event、error message 或 receipt summary 中。需要展示时只展示 origin 与 bounded pathname。
@@ -64,7 +76,7 @@ Core 根据一个当前有效 Grant、目标 Profile 的 permission ceiling 和 
 
 ## 4. Observation and stale refs
 
-Observation、interaction target、network event、console event 和 diagnostics cursor 必须绑定 `page_ref` 与 `document_generation`。Page navigation、close、driver loss、control generation change 或 Runtime restart 让旧绑定失效；返回 `stale_page`/`stale_document`，不能重试去命中相似的 Page 或 selector。关系无法证明时优先返回 `page_relation_unavailable`，不得把关系错误降级成 `page_not_found` 后继续派发。
+Observation、interaction target、network event、console event 和 diagnostics cursor 必须绑定 `page_ref` 与 `document_generation`，并受当前 relation/control generation 保护。Page navigation、close、native handoff reobserve、driver loss、control generation change 或 Runtime restart 让旧绑定失效；返回 `stale_page`/`stale_document`/`cursor_stale`，不能重试去命中相似的 Page 或 selector。关系无法证明时优先返回 `page_relation_unavailable`，不得把关系错误降级成 `page_not_found` 后继续派发。
 
 Diagnostics 为每个 Page 保留独立有界 ring，并受 Instance 总量上限约束：最多 64 个 Page 对象、每 Page 128 条事件、每 Instance 512 条事件、最多 256 个 pending request correlation。cursor 绑定 Instance、Page、document generation 和 ring position。读操作不改变 active Page。网络/console 记录过滤 query、fragment、credentials、headers、bodies、cookies、raw exception 和 Provider handles 后再进入 ring；超出上限返回 bounded unavailable/evicted facts，不静默扩大缓存。
 
@@ -76,7 +88,7 @@ Popup/new tab、query/fragment、same-origin redirect、authorized cross-origin 
 
 ## 6. Design obligations and evidence
 
-Work Item #504 / A records the following Design Obligation decisions:
+Work Items #504 and #510 record the following Design Obligation decisions:
 
 | Trigger | disposition | evidence or transition condition |
 | --- | --- | --- |
@@ -84,7 +96,7 @@ Work Item #504 / A records the following Design Obligation decisions:
 | `DO-GRANT-WIRE` | `not-triggered` | The Page slice reuses the existing single-Grant `profile_refs`/`allowed_origins`/`allowed_operations` intersection; it adds no persisted Grant dimension, confirmation credential, or security field. |
 | `DO-NETWORK-CONTRACT` | `triggered` | Network observations are bound to the selected Page/document and authorized origin set; [Network Runtime V1](network-runtime-contract-v1.md) carries the public result and stale/cursor rules. |
 | `DO-CONSOLE-CONTRACT` | `triggered` | Console and page-error observations use the same selected Page/document binding and lifecycle; [Console Runtime V1](console-runtime-contract-v1.md) carries the public result rules. |
-| `DO-PROVIDER-PRIVATE-SCHEMA` | `triggered` | The fixed native snapshot, Playwright adapter, and test-only Camoufox artifact are governed by [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md); public Page facts still do not expose provider handles. |
+| `DO-PROVIDER-PRIVATE-SCHEMA` | `triggered` | The fixed native snapshot, Playwright adapter, test-only Camoufox artifact, and #510 v2 tab-handoff lifecycle/CSS variant are governed by [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md); public Page facts still do not expose provider handles. |
 | `DO-APP-IA` | `not-triggered` | Page operations use the existing owner/handback entry; this slice does not add a Library, Activity, multi-instance workspace, or other complete App information architecture. |
 
-The deterministic Harbor evidence is kept in `services/harbor/packages/runtime-api/src/page-navigation.test.ts` and the real listener coverage in `runtime-diagnostics.test.ts` plus `camoufox-diagnostics.fixture.py`. Installed live evidence remains a separate acceptance requirement: a fixture pass does not claim that native foreground focus, human close observation, or installed Plugin consumption is verified for a pinned Camoufox build.
+The deterministic Harbor evidence is kept in `services/harbor/packages/runtime-api/src/page-navigation.test.ts` and the real listener coverage in `runtime-diagnostics.test.ts` plus `camoufox-diagnostics.fixture.py`; #510 relation, artifact and CSS integrity evidence is linked from [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md). Installed live evidence remains a separate acceptance requirement: a fixture pass does not claim that native foreground focus, human close observation, complete handoff cycles, or installed Plugin consumption is verified for a pinned Camoufox build.

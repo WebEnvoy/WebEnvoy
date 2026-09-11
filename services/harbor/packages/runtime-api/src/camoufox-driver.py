@@ -1994,11 +1994,13 @@ def refresh_native_selected_page() -> None:
                 NATIVE_RELATION_INVALID = True
                 raise RuntimeError("Native browsing context moved to a different target or Page object.")
             raise RuntimeError("Native browsing context is mapped to multiple Page objects.")
+        # A native tab handoff adopts the destination tab/browser and window
+        # objects while the live Juggler target, BrowsingContext and client
+        # Page remain the same.  Target/BCID prove page continuity; tab/window
+        # ids are current location facts and are refreshed below.
         identity_pairs = (
             ("native_target_id", "target_id"),
-            ("native_tab_id", "tab_id"),
             ("native_browsing_context_id", "browsing_context_id"),
-            ("native_window_id", "window_id"),
         )
         for state_key, fact_key in identity_pairs:
             previous = state.get(state_key)
@@ -2022,8 +2024,30 @@ def refresh_native_selected_page() -> None:
     if active_window_id is not None and len(active_candidates) != 1:
         raise RuntimeError("Native selected-window snapshot did not prove one active-window Page.")
 
+    # A native handoff changes only the tab/window location of the existing
+    # client Page.  It is still a new relation observation: rotate the
+    # relation-bound diagnostics binding and drop any interaction handles
+    # before publishing the new native identities.  Keep the public Page and
+    # document identity stable; callers must re-list/re-observe before using
+    # the Page again.
+    handoff_states = [
+        state for state, native_facts in mapped
+        if (
+            state.get("native_tab_id") is not None
+            and state.get("native_tab_id") != native_facts["tab_id"]
+        ) or (
+            state.get("native_window_id") is not None
+            and state.get("native_window_id") != native_facts["window_id"]
+        )
+    ]
+
     # Commit only after the full bidirectional relation and freshness checks
     # pass. This preserves the last trusted native identities on any failure.
+    if handoff_states:
+        discard_interaction_snapshot()
+        for state in handoff_states:
+            state["diagnostic_page_ref"] = f"page_{uuid.uuid4().hex}"
+            state.pop("interaction_page_ref", None)
     for candidate in open_states:
         candidate["native_selected"] = False
         candidate["native_active"] = False

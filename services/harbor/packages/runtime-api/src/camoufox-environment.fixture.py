@@ -436,21 +436,41 @@ class RelationPage:
         pass
 
 
+class DiscardProbe:
+    def __init__(self) -> None:
+        self.evaluate_calls = 0
+        self.dispose_calls = 0
+
+    def evaluate(self, _expression: str) -> None:
+        self.evaluate_calls += 1
+
+    def dispose(self) -> None:
+        self.dispose_calls += 1
+
+
 def native_relation(epoch: str, sequence: int, pages: list[tuple[RelationPage, str, str, str, str, bool]], active_window_id: str = "window-a") -> dict[str, object]:
     facts = [
         {"page": page, "target_id": target, "tab_id": tab, "browsing_context_id": context,
          "window_id": window, "selected": selected}
         for page, target, tab, context, window, selected in pages
     ]
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for fact in facts:
+        grouped.setdefault(str(fact["window_id"]), []).append(fact)
+    windows = []
+    for window_id, window_facts in grouped.items():
+        windows.append({
+            "window_id": window_id,
+            "os_foreground": window_id == active_window_id,
+            "selected_tab_id": next((item["tab_id"] for item in window_facts if item["selected"]), None),
+            "pages": [{key: value for key, value in item.items() if key != "page"} for item in window_facts],
+        })
     return {
         "epoch": epoch,
         "sample_sequence": sequence,
         "selection_status": "complete",
         "active_window_id": active_window_id,
-        "windows": [{
-            "window_id": "window-a", "os_foreground": True,
-            "pages": [{key: value for key, value in item.items() if key != "page"} for item in facts],
-        }],
+        "windows": windows,
         "pages": facts,
     }
 
@@ -533,6 +553,56 @@ try:
                     DRIVER.page_state_for(page_a).get("native_active"),
                     DRIVER.page_state_for(page_b).get("native_selected"))
     assert after_atomic == before_atomic
+
+    # Native adoption keeps the client Page, target and BrowsingContext while
+    # replacing the destination tab/window location identities.
+    DRIVER.reset_provider_pages()
+    moved = RelationPage("moved")
+    DRIVER.CONTEXT.pages = [moved]
+    DRIVER.register_provider_page(moved)
+    moved_adapter = RelationAdapter(
+        native_relation("move-epoch", 1, [(moved, "target-move", "tab-source", "context-move", "window-source", True)], "window-source"),
+        native_relation("move-epoch", 2, [(moved, "target-move", "tab-destination", "context-move", "window-destination", True)], "window-destination"),
+    )
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = moved_adapter
+    DRIVER.PAGE = moved
+    DRIVER.refresh_native_selected_page()
+    moved_state = DRIVER.page_state_for(moved)
+    assert moved_state and moved_state["native_tab_id"] == "tab-source" and moved_state["native_window_id"] == "window-source"
+    moved_state["diagnostic_page_ref"] = "page_" + "a" * 32
+    moved_state["interaction_page_ref"] = "page_" + "b" * 32
+    old_generation = moved_state["document_generation"]
+    old_diagnostic_ref = moved_state["diagnostic_page_ref"]
+    snapshot_handle, snapshot_target = DiscardProbe(), DiscardProbe()
+    DRIVER.INTERACTION_STATE = {
+        "handle": snapshot_handle,
+        "targets": {"target_old": snapshot_target},
+        "generation": 1,
+        "page_ref": old_diagnostic_ref,
+        "observation_ref": "observation_old",
+    }
+    DRIVER.refresh_native_selected_page()
+    assert DRIVER.NATIVE_RELATION_INVALID is False
+    assert DRIVER.PAGE is moved and DRIVER.page_state_for(moved) is moved_state
+    assert moved_state["native_target_id"] == "target-move" and moved_state["native_browsing_context_id"] == "context-move"
+    assert moved_state["native_tab_id"] == "tab-destination" and moved_state["native_window_id"] == "window-destination"
+    assert DRIVER.INTERACTION_STATE is None
+    assert snapshot_handle.evaluate_calls == 1 and snapshot_handle.dispose_calls == 1
+    assert snapshot_target.dispose_calls == 1
+    assert moved_state["diagnostic_page_ref"] != old_diagnostic_ref
+    assert "interaction_page_ref" not in moved_state
+    assert moved_state["document_generation"] == old_generation
+    assert DRIVER.PAGE is moved
+
+    changed_context = RelationAdapter(native_relation("move-epoch", 3, [(moved, "target-move", "tab-next", "context-replaced", "window-next", True)], "window-next"))
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = changed_context
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "identity changed" in str(error) or "different target" in str(error)
+    else:
+        raise AssertionError("changed native BrowsingContext identity was accepted")
+    assert DRIVER.NATIVE_RELATION_INVALID is True
 
     stale_adapter = RelationAdapter(native_relation("stale-epoch", 1, [
         (page_a, "target-a", "tab-a", "context-a", "window-a", True),

@@ -28,8 +28,14 @@ CAMOUFOX_VERSION_PIN = "0.5.6"
 BROWSER_VERSION_PIN = "152.0.4-beta.30"
 PROPERTIES_SHA256_PIN = "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
 MANIFEST_SCHEMA = "webenvoy.camoufox-native/v1"
+TAB_HANDOFF_MANIFEST_SCHEMA = "webenvoy.camoufox-native/v2"
 ARTIFACT_BUNDLE_IDENTIFIER = "com.webenvoy.camoufox.native504"
 ARTIFACT_BUNDLE_NAME = "WebEnvoy Camoufox Native Test"
+TAB_HANDOFF_ARTIFACT_BUNDLE_IDENTIFIER = "com.webenvoy.camoufox.native510"
+TAB_HANDOFF_ARTIFACT_BUNDLE_NAME = "WebEnvoy Camoufox Native Tab Handoff Test"
+SOURCE_CHROME_CSS_SHA256_PIN = "8edbf68d8b73d2e59bcbaa37560ebfdc145888b37c98628eda6bc3e5f54359ab"
+TAB_HANDOFF_CSS_AFTER_SHA256_PIN = "7e7f9e13bfb872344f81934fde84464e1791b03b3831b6e6a467e7300662d6eb"
+TAB_HANDOFF_CSS_PATH = "Contents/Resources/chrome.css"
 PATCHED_ENTRIES = frozenset({
     "chrome/juggler/content/protocol/Protocol.js",
     "chrome/juggler/content/protocol/BrowserHandler.js",
@@ -99,13 +105,11 @@ def verify_artifact(app: Path) -> tuple[Path, Path, str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValidationError("native artifact manifest is unreadable") from error
-    if (
-        not isinstance(manifest, dict)
-        or manifest.get("schema") != MANIFEST_SCHEMA
-        or manifest.get("test_only") is not True
-        or manifest.get("distribution_or_production_use_authorized") is not False
-        or manifest.get("patch_id") != "managed-native-snapshot"
-    ):
+    if not isinstance(manifest, dict) or manifest.get("test_only") is not True or manifest.get("distribution_or_production_use_authorized") is not False:
+        raise ValidationError("native artifact manifest is not an eligible test artifact")
+    variant = manifest.get("schema") == TAB_HANDOFF_MANIFEST_SCHEMA and manifest.get("patch_id") == "managed-native-tab-handoff"
+    legacy = manifest.get("schema") == MANIFEST_SCHEMA and manifest.get("patch_id") == "managed-native-snapshot"
+    if not variant and not legacy:
         raise ValidationError("native artifact manifest is not an eligible test artifact")
     patched_entries = manifest.get("patched_entries")
     if not isinstance(patched_entries, dict) or frozenset(patched_entries) != PATCHED_ENTRIES:
@@ -114,13 +118,17 @@ def verify_artifact(app: Path) -> tuple[Path, Path, str]:
     if not isinstance(provider, dict) or provider.get("camoufox_version") != CAMOUFOX_VERSION_PIN or provider.get("browser_version") != BROWSER_VERSION_PIN:
         raise ValidationError("native artifact provider pins do not match")
     identity = manifest.get("identity")
-    if not isinstance(identity, dict) or identity.get("bundle_identifier") != ARTIFACT_BUNDLE_IDENTIFIER or identity.get("bundle_name") != ARTIFACT_BUNDLE_NAME:
+    expected_identity = (
+        TAB_HANDOFF_ARTIFACT_BUNDLE_IDENTIFIER,
+        TAB_HANDOFF_ARTIFACT_BUNDLE_NAME,
+    ) if variant else (ARTIFACT_BUNDLE_IDENTIFIER, ARTIFACT_BUNDLE_NAME)
+    if not isinstance(identity, dict) or identity.get("bundle_identifier") != expected_identity[0] or identity.get("bundle_name") != expected_identity[1]:
         raise ValidationError("native artifact app identity is not fixed")
     try:
         info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
         raise ValidationError("native artifact Info.plist is unreadable") from error
-    if info.get("CFBundleIdentifier") != ARTIFACT_BUNDLE_IDENTIFIER or info.get("CFBundleName") != ARTIFACT_BUNDLE_NAME:
+    if info.get("CFBundleIdentifier") != expected_identity[0] or info.get("CFBundleName") != expected_identity[1]:
         raise ValidationError("native artifact Info.plist identity does not match")
     output = manifest.get("output")
     if not isinstance(output, dict) or output.get("executable") != str(executable):
@@ -132,9 +140,24 @@ def verify_artifact(app: Path) -> tuple[Path, Path, str]:
     regular(properties, "artifact properties.json")
     regular(adjacent_properties, "artifact adjacent properties.json")
     application_ini = resources / "application.ini"
+    chrome_css = app / TAB_HANDOFF_CSS_PATH
     regular(application_ini, "artifact application.ini")
-    if output.get("omni_sha256") != sha256(omni) or output.get("properties_sha256") != sha256(properties) or output.get("properties_sha256") != PROPERTIES_SHA256_PIN or output.get("adjacent_properties_sha256") != sha256(adjacent_properties) or adjacent_properties.read_bytes() != properties.read_bytes() or output.get("executable_sha256") != sha256(executable) or output.get("info_plist_sha256") != sha256(app / "Contents" / "Info.plist") or output.get("application_ini_sha256") != sha256(application_ini):
+    if variant:
+        regular(chrome_css, "artifact chrome.css")
+    if output.get("omni_sha256") != sha256(omni) or output.get("properties_sha256") != sha256(properties) or output.get("properties_sha256") != PROPERTIES_SHA256_PIN or output.get("adjacent_properties_sha256") != sha256(adjacent_properties) or adjacent_properties.read_bytes() != properties.read_bytes() or output.get("executable_sha256") != sha256(executable) or output.get("info_plist_sha256") != sha256(app / "Contents/Info.plist") or output.get("application_ini_sha256") != sha256(application_ini) or (variant and output.get("chrome_css_sha256") != sha256(chrome_css)) or (not variant and "chrome_css_sha256" in output):
         raise ValidationError("native artifact output integrity does not match its manifest")
+    if variant:
+        source = manifest.get("source")
+        if not isinstance(source, dict) or source.get("chrome_css") != SOURCE_CHROME_CSS_SHA256_PIN:
+            raise ValidationError("native artifact source pins do not match")
+        assets = manifest.get("patched_assets")
+        if not isinstance(assets, dict) or set(assets) != {TAB_HANDOFF_CSS_PATH}:
+            raise ValidationError("native artifact CSS patch manifest is not qualified")
+        css_patch = assets[TAB_HANDOFF_CSS_PATH]
+        if not isinstance(css_patch, dict) or css_patch.get("before_sha256") != SOURCE_CHROME_CSS_SHA256_PIN or css_patch.get("after_sha256") != TAB_HANDOFF_CSS_AFTER_SHA256_PIN or css_patch["after_sha256"] != sha256(chrome_css):
+            raise ValidationError("native artifact CSS patch manifest is not qualified")
+    elif "patched_assets" in manifest:
+        raise ValidationError("native artifact CSS patch manifest is not qualified")
     if not any(line.strip() == f"Version={BROWSER_VERSION_PIN}" for line in application_ini.read_text(encoding="utf-8").splitlines()):
         raise ValidationError("native artifact application version does not match")
     return executable, manifest_path, sha256(manifest_path)
