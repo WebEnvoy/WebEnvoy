@@ -167,9 +167,36 @@ def require_page_path(response: dict[str, Any], page: dict[str, Any], expected_p
 
 def require_denied_navigation(response: dict[str, Any], page: dict[str, Any], expected_path: str, error_class: str) -> None:
     path_matches, _ = page_path_observation(page, expected_path)
-    if response.get("failure_class") == "navigation_origin_denied" and page.get("status") == "failed" and path_matches:
+    failure_page = response.get("page")
+    listed_ref = page_ref(page)
+    if (response.get("failure_class") == "navigation_origin_denied"
+            and isinstance(failure_page, dict)
+            and failure_page.get("status") == "failed"
+            and failure_page.get("provider_page_ref") == listed_ref
+            and path_matches):
         return
     raise CheckFailure(error_class, page_failure_observation(page, response, expected_path))
+
+
+def self_check() -> dict[str, Any]:
+    listed = {"provider_page_ref": "provider:page-a", "current_url": "https://127.0.0.1:60001/query", "status": "ready"}
+    denied = {
+        "failure_class": "navigation_origin_denied",
+        "page": {**listed, "status": "failed"},
+        "pages": [listed],
+    }
+    require_denied_navigation(denied, listed, "/query", "self_check_failed")
+    rejected = {
+        "wrong_ref": {**denied, "page": {**denied["page"], "provider_page_ref": "provider:other"}},
+        "missing_failure": {key: value for key, value in denied.items() if key != "failure_class"},
+    }
+    for candidate in rejected.values():
+        try:
+            require_denied_navigation(candidate, listed, "/query", "self_check_failed")
+        except CheckFailure:
+            continue
+        raise CheckFailure("self_check_failed")
+    return {"status": "verified", "checks": {"top_level_failed_list_ready": True, "wrong_ref_rejected": True, "missing_failure_rejected": True}}
 
 
 def driver_request(bridge: Any, operation: str, **payload: Any) -> dict[str, Any]:
@@ -416,15 +443,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--artifact", type=Path, required=True, help="explicit test-only Camoufox.app")
-    parser.add_argument("--profile", type=Path, required=True, help="explicit retained Profile under a temporary root")
-    parser.add_argument("--s1-origin", required=True, help="explicit http://127.0.0.1:<port> S1 origin")
-    parser.add_argument("--s2-origin", required=True, help="explicit http://127.0.0.1:<port> S2 origin")
-    parser.add_argument("--s3-origin", required=True, help="explicit http://127.0.0.1:<port> S3 origin")
+    parser.add_argument("--artifact", type=Path, help="explicit test-only Camoufox.app")
+    parser.add_argument("--profile", type=Path, help="explicit retained Profile under a temporary root")
+    parser.add_argument("--s1-origin", help="explicit http://127.0.0.1:<port> S1 origin")
+    parser.add_argument("--s2-origin", help="explicit http://127.0.0.1:<port> S2 origin")
+    parser.add_argument("--s3-origin", help="explicit http://127.0.0.1:<port> S3 origin")
     parser.add_argument("--python", type=Path, help="qualified Python executable; defaults to this interpreter")
     parser.add_argument("--headed", action="store_true", help="run the explicit artifact headed")
     parser.add_argument("--timeout-ms", type=int, default=15000)
+    parser.add_argument("--self-check", action="store_true", help="verify denied-navigation response binding without launching")
     args = parser.parse_args()
+    if args.self_check:
+        print(json.dumps(self_check(), ensure_ascii=False, sort_keys=True))
+        return 0
+    for option, value in (("--artifact", args.artifact), ("--profile", args.profile), ("--s1-origin", args.s1_origin), ("--s2-origin", args.s2_origin), ("--s3-origin", args.s3_origin)):
+        if value is None:
+            parser.error(f"{option} is required unless --self-check is used")
     if not 1000 <= args.timeout_ms <= 30000:
         parser.error("--timeout-ms must be between 1000 and 30000")
     result = run(args)
