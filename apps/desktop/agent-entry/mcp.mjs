@@ -18,7 +18,11 @@ async function call(name, args) {
   await verifyBundle();
   if (name === 'webenvoy_skill') return { skill: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8') };
   const status = await ensureRuntime(client.data_dir);
-  if (name === 'webenvoy_status') return status;
+  if (name === 'webenvoy_status') {
+    const publicStatus = { ...status };
+    delete publicStatus.camoufoxArtifact;
+    return publicStatus;
+  }
   const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
   if (name === 'webenvoy_connect') { const result = await request('/agent-connections', {}); connection = result.connection; return result; }
   if (name === 'webenvoy_query') {
