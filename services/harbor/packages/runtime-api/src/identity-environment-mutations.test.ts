@@ -102,6 +102,16 @@ test("resolves create selection once as explicit over user default and otherwise
   assert.deepEqual(unavailableManager.mutate(unavailableRequest), unavailable, "same key keeps the unavailable result");
   assert.equal(unavailableManager.mutate({ ...unavailableRequest, idempotency_key: "selection-after-install" }).status, "completed");
 
+  const unsupportedDefault = new LocalIdentityEnvironmentManager({
+    provider_detection: testProviderDetection,
+    resolve_user_creation_default_provider_id: () => "future_browser",
+  }).mutate({
+    operation: "create",
+    idempotency_key: "selection-unsupported-default",
+    identity_environment: { site: createMutationInput().site },
+  });
+  assert.equal(unsupportedDefault.failure?.code, "provider_unavailable");
+
   const defaultManager = new LocalIdentityEnvironmentManager({ provider_detection: testProviderDetection, resolve_user_creation_default_provider_id: () => "chrome_official" });
   const fromDefault = defaultManager.mutate({
     operation: "create",

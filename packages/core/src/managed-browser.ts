@@ -122,12 +122,12 @@ function publicProfile(value: unknown): ObjectValue {
   return { profile_ref: text(refs.profile_ref), identity_environment_ref: text(profile.identity_environment_ref), site: profile.site,
     status: profile.status, account_bindings: profile.account_bindings ?? [], environment_summary: profile.environment_summary };
 }
-function publicProviderSelection(value: unknown): ObjectValue | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+function publicProviderSelection(value: unknown): ObjectValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_browser_provider_selection_invalid");
   const selection = value as ObjectValue;
   if (selection.schema_version !== "harbor-provider-selection/v1" ||
     !["explicit_request", "user_default"].includes(String(selection.source)) ||
-    !["cloakbrowser", "chrome_official", "camoufox"].includes(String(selection.selected_provider_id))) return undefined;
+    !["cloakbrowser", "chrome_official", "camoufox"].includes(String(selection.selected_provider_id))) return fail("managed_browser_provider_selection_invalid");
   return { schema_version: selection.schema_version, source: selection.source, selected_provider_id: selection.selected_provider_id };
 }
 function publicSession(value: unknown): ObjectValue {
@@ -238,7 +238,7 @@ export function createManagedBrowserService(options: {
       const profile = publicProfile(created.record);
       const providerSelection = publicProviderSelection(created.provider_selection);
       await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
-      return { profile, ...(providerSelection ? { provider_selection: providerSelection } : {}), authorization_decision_ref: access.decision_ref };
+      return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
     }
     const list = await harbor("/runtime/identity-environments");
     if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
@@ -500,7 +500,11 @@ export function createManagedBrowserService(options: {
             const profile = publicProfile(receipt.record);
             const providerSelection = publicProviderSelection(receipt.provider_selection);
             await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: run.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
-            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, ...(providerSelection ? { provider_selection: providerSelection } : {}) } } });
+            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, provider_selection: providerSelection } } });
+          } else if (receipt.status === "rejected") {
+            const failure = object(receipt.failure);
+            text(failure.code);
+            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { receipt } } });
           }
           return response((await store.getRunRecord(runId))!);
         });

@@ -202,7 +202,7 @@ export interface IdentityEnvironmentMutationConflict {
 
 export interface IdentityEnvironmentMutationOptions {
   provider_detection?: BrowserProviderDetectionInput;
-  resolve_user_creation_default_provider_id?: () => BrowserProviderId | undefined;
+  resolve_user_creation_default_provider_id?: () => string | undefined;
   validate_proxy?: (proxy_ref: string) => "reachable" | "unreachable" | "incompatible";
   resolve_proxy?: (proxy_ref: string) => string | null;
   delete_local_material?: (refs: IdentityEnvironmentLocalMaterialRefs) => "deleted" | "unknown" | "failed";

@@ -2376,7 +2376,7 @@ test("captures snapshot, refmap, and evidence refs without raw page payloads", a
 });
 
 test("captures live page screenshot refs and artifact facts without raw screenshot bytes", async () => {
-  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"), { provider_detection: providerFixture({ [cloakPath]: { executable: true } }) });
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
       requested_provider_id: "cloakbrowser",
@@ -2432,7 +2432,7 @@ test("captures live page refs without screenshot evidence when screenshot captur
         retryable: true
       })
     };
-  });
+  }, { provider_detection: providerFixture({ [cloakPath]: { executable: true } }) });
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
       requested_provider_id: "cloakbrowser",

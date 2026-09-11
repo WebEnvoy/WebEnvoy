@@ -66,10 +66,9 @@ export class BrowserProviderPreferenceManager {
     return snapshot(this.state.user_creation_default, { ...this.options.provider_detection, ...input });
   }
 
-  configuredProviderId(): BrowserProviderId | undefined {
+  configuredProviderId(): string | undefined {
     this.load();
-    const providerId = this.state.user_creation_default?.provider_id;
-    return isProviderId(providerId) ? providerId : undefined;
+    return this.state.user_creation_default?.provider_id;
   }
 
   mutationResult(idempotencyKey: string): BrowserProviderPreferenceMutationResult | null {
@@ -228,8 +227,10 @@ function rejected(
   return { schema_version: HARBOR_BROWSER_PROVIDER_PREFERENCE_MUTATION_SCHEMA, operation, status: "rejected", preference, failure: { code, retryable } };
 }
 
-function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+function hash(request: BrowserProviderPreferenceMutationRequest): string {
+  return createHash("sha256").update(JSON.stringify(request.operation === "set"
+    ? [request.operation, request.idempotency_key, request.provider_id]
+    : [request.operation, request.idempotency_key])).digest("hex");
 }
 
 function clone<T>(value: T): T {

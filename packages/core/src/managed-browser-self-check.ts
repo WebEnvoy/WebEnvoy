@@ -19,7 +19,7 @@ let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
-let dropResponse = false;
+let dropResponse = false, omitProviderSelection = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
 const receipts = new Map<string, unknown>();
@@ -71,12 +71,13 @@ const server = createServer((req, res) => { void (async () => {
     if (!selectedProvider) {
       value = { status: "rejected", failure: { code: "provider_selection_required" } };
       receipts.set(input.idempotency_key, value);
+      if (dropResponse) { req.socket.destroy(); return; }
       res.statusCode = 409;
       res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); return;
     }
     creates++;
     const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, site: { origin: "https://example.com" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
-    profiles.push(record); value = { status: "completed", record, provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } };
+    profiles.push(record); value = { status: "completed", record, ...(omitProviderSelection ? {} : { provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } }) };
     receipts.set(input.idempotency_key, value);
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
@@ -291,6 +292,35 @@ try {
   const noDefaultGrant = await accessStore.createGrant({ idempotency_key: "no-default-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
   const noDefault = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "dynamic-no-default", grant_id: noDefaultGrant.grant_id });
   assert.equal(noDefault.failure?.code, "provider_selection_required");
+
+  const rejectedRecoveryGrant = await accessStore.createGrant({ idempotency_key: "rejected-recovery-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
+  dropResponse = true;
+  const lostRejection = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "lost-selection-rejection", grant_id: rejectedRecoveryGrant.grant_id });
+  dropResponse = false;
+  assert.equal(lostRejection.status, "unknown_outcome");
+  const reconciledRejection = await service.query(credentialHash, lostRejection.run_id);
+  assert.equal(reconciledRejection.status, "unknown_outcome", "query keeps the original unknown history");
+  assert.equal(reconciledRejection.reconciliation, "completed");
+  assert.equal((reconciledRejection.result as { receipt: { failure: { code: string } } }).receipt.failure.code, "provider_selection_required");
+  browserPreference = "chrome_official";
+  assert.equal((await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "create-after-rejected-reconciliation", grant_id: rejectedRecoveryGrant.grant_id })).status, "succeeded");
+
+  const invalidSelectionGrant = await accessStore.createGrant({ idempotency_key: "invalid-selection-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
+  omitProviderSelection = true;
+  const invalidSelection = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "missing-provider-selection", grant_id: invalidSelectionGrant.grant_id });
+  omitProviderSelection = false;
+  assert.equal(invalidSelection.failure?.code, "managed_browser_provider_selection_invalid");
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === invalidSelectionGrant.grant_id)?.created_profile_refs.length, 0);
+
+  const invalidSelectionQueryGrant = await accessStore.createGrant({ idempotency_key: "invalid-selection-query-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
+  omitProviderSelection = true;
+  dropResponse = true;
+  const lostInvalidSelection = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "lost-missing-provider-selection", grant_id: invalidSelectionQueryGrant.grant_id });
+  omitProviderSelection = false;
+  dropResponse = false;
+  assert.equal(lostInvalidSelection.status, "unknown_outcome");
+  await assert.rejects(service.query(credentialHash, lostInvalidSelection.run_id), /managed_browser_provider_selection_invalid/);
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === invalidSelectionQueryGrant.grant_id)?.created_profile_refs.length, 0);
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });

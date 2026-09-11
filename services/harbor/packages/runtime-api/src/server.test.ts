@@ -4,7 +4,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
-import { createFixtureLauncher, HarborRuntime, type LocalProviderLauncher, type LocalProviderLaunchInput } from "./index.js";
+import { createFixtureLauncher, HarborRuntime as ProductionHarborRuntime, type LocalProviderLauncher, type LocalProviderLaunchInput } from "./index.js";
 import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
 import { waitForXiaohongshuSiteResourceReadiness } from "./local-provider-launcher.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe, type ReadOperationProbe, type SiteResourceProbe } from "./read-operation-probe-trust.js";
@@ -16,6 +16,28 @@ const identityAliases = new Map<string, string>();
 const identityEnvironmentOwners = new Map<string, HarborRuntime>();
 process.env.HARBOR_PROFILE_STORAGE_ROOT = testProfileRoot;
 after(() => rmSync(testProfileRoot, { recursive: true, force: true }));
+
+const fixtureCloakPath = "/fixture/CloakBrowser";
+class HarborRuntime extends ProductionHarborRuntime {
+  constructor(
+    launcher?: ConstructorParameters<typeof ProductionHarborRuntime>[0],
+    identityEnvironmentOptions: ConstructorParameters<typeof ProductionHarborRuntime>[1] = {},
+    providerLifecycleOptions: ConstructorParameters<typeof ProductionHarborRuntime>[2] = {},
+  ) {
+    super(launcher, {
+      provider_detection: {
+        platform: "darwin",
+        arch: "arm64",
+        home_dir: "/Users/test",
+        env: { HARBOR_CLOAKBROWSER_PATH: fixtureCloakPath },
+        path_exists: (path) => path === fixtureCloakPath,
+        is_executable: (path) => path === fixtureCloakPath,
+        read_text: () => null,
+      },
+      ...identityEnvironmentOptions,
+    }, providerLifecycleOptions);
+  }
+}
 
 async function startHarborRuntimeServer(options: Parameters<typeof startUnconfiguredHarborRuntimeServer>[0] = {}) {
   const running = await startUnconfiguredHarborRuntimeServer({

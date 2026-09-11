@@ -1,6 +1,5 @@
 import { hasManagedBindingConflict } from "./managed-observation.js";
 import { boundedEnvironmentUpdate } from "./profile-environment.js";
-import type { BrowserProviderId } from "./provider-management.js";
 import { createHash } from "node:crypto";
 import { createIdentityConsistencyFacts } from "./identity-consistency.js";
 import {
@@ -144,7 +143,7 @@ export function executeIdentityEnvironmentMutation(
 export function materializeIdentityEnvironmentMutation(
   request: IdentityEnvironmentMutationRequest,
   providerDetection: IdentityEnvironmentMutationOptions["provider_detection"] = {},
-  userCreationDefaultProviderId?: BrowserProviderId
+  userCreationDefaultProviderId?: string
 ): MaterializedIdentityEnvironmentMutationRequest {
   if (request.operation === "create" || request.operation === "import") {
     const {

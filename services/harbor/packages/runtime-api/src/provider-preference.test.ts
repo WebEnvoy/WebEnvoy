@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -32,6 +32,7 @@ test("persists an explicit creation default without conflating the project recom
     assert.equal(set.preference.user_creation_default.provider_id, "chrome_official");
     assert.equal(statSync(persistence_path).mode & 0o777, 0o600);
     assert.deepEqual(manager.mutate({ operation: "set", idempotency_key: "set-default", provider_id: "chrome_official" }), set);
+    assert.deepEqual(manager.mutate({ provider_id: "chrome_official", idempotency_key: "set-default", operation: "set" }), set);
     assert.equal(manager.mutate({ operation: "clear", idempotency_key: "set-default" }).failure?.code, "idempotency_conflict");
 
     const reloaded = new BrowserProviderPreferenceManager({ persistence_path, provider_detection: available });
@@ -39,6 +40,24 @@ test("persists an explicit creation default without conflating the project recom
     assert.equal(reloaded.mutationResult("set-default")?.status, "completed");
     assert.equal(reloaded.mutate({ operation: "clear", idempotency_key: "clear-default" }).status, "completed");
     assert.equal(reloaded.read().user_creation_default.availability, "unset");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("keeps an unsupported persisted default available to creation validation", () => {
+  const directory = mkdtempSync(join(tmpdir(), "harbor-provider-preference-"));
+  const persistence_path = join(directory, "preference.json");
+  try {
+    const manager = new BrowserProviderPreferenceManager({ persistence_path, provider_detection: available });
+    manager.mutate({ operation: "set", idempotency_key: "set-known", provider_id: "chrome_official" });
+    const state = JSON.parse(readFileSync(persistence_path, "utf8"));
+    state.user_creation_default.provider_id = "future_browser";
+    writeFileSync(persistence_path, JSON.stringify(state), { mode: 0o600 });
+
+    const reloaded = new BrowserProviderPreferenceManager({ persistence_path, provider_detection: available });
+    assert.equal(reloaded.read().user_creation_default.availability, "unsupported");
+    assert.equal(reloaded.configuredProviderId(), "future_browser");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

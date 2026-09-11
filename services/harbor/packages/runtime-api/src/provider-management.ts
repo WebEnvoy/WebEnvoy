@@ -128,7 +128,7 @@ export interface IdentityEnvironmentProviderBindingInput extends BrowserProvider
   execution_identity_ref?: string;
   profile_ref?: string;
   requested_provider_id?: BrowserProviderId;
-  user_creation_default_provider_id?: BrowserProviderId;
+  user_creation_default_provider_id?: string;
 }
 
 export interface IdentityEnvironmentProviderBinding {
@@ -228,6 +228,11 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
   if (requested && !isLaunchable(requested)) {
     return binding(input, null, null, fromUserDefault ? "user_default_unavailable" : "requested_provider_unavailable", true, [
       `${requested.display_name} 当前不可启动；Harbor 不会静默替换用户指定的 provider。`
+    ]);
+  }
+  if (selectedId !== undefined) {
+    return binding(input, null, null, fromUserDefault ? "user_default_unavailable" : "requested_provider_unavailable", true, [
+      `Provider ${selectedId} 当前不受支持；Harbor 不会静默替换用户指定的 provider。`
     ]);
   }
   const anyLaunchable = catalog.providers.some(isLaunchable);
