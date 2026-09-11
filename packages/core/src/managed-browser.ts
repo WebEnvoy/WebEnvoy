@@ -29,6 +29,7 @@ class InteractionFailure extends ManagedAccessError {
 class PageFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_page_outcome_unknown"); }
 }
+class CreationReceiptFailure extends ManagedAccessError {}
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
 function object(value: unknown): ObjectValue {
@@ -235,10 +236,14 @@ export function createManagedBrowserService(options: {
       const created = await harbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
         identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
       if (created.status !== "completed") return fail("managed_browser_creation_unknown");
-      const profile = publicProfile(created.record);
-      const providerSelection = publicProviderSelection(created.provider_selection);
-      await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
-      return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
+      try {
+        const profile = publicProfile(created.record);
+        const providerSelection = publicProviderSelection(created.provider_selection);
+        await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
+        return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
+      } catch (error) {
+        throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown");
+      }
     }
     const list = await harbor("/runtime/identity-environments");
     if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
@@ -396,7 +401,7 @@ export function createManagedBrowserService(options: {
           const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation);
           const known = dispatchAware
             ? (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched"
-            : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown";
+            : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown" && !(error instanceof CreationReceiptFailure);
           if (dispatchAware) await store.updateRunRecord(runId, { public_result_summary: {
             ...current.public_result_summary, dispatch_state: known ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
           } });
@@ -497,10 +502,14 @@ export function createManagedBrowserService(options: {
           // A read-only receipt lookup never reissues the original creation.
           const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
           if (receipt.status === "completed") {
-            const profile = publicProfile(receipt.record);
-            const providerSelection = publicProviderSelection(receipt.provider_selection);
-            await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: run.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
-            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, provider_selection: providerSelection } } });
+            try {
+              const profile = publicProfile(receipt.record);
+              const providerSelection = publicProviderSelection(receipt.provider_selection);
+              await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: run.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
+              await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, provider_selection: providerSelection } } });
+            } catch (error) {
+              await store.updateRunRecord(runId, { failure: { category: "write_outcome", code: error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown", phase: "query", recovery_hint: "query_operation_without_replay" } });
+            }
           } else if (receipt.status === "rejected") {
             const failure = object(receipt.failure);
             text(failure.code);

@@ -17,12 +17,16 @@ let nextFailure: IdentityEnvironmentMutationFailureCode | null = null;
 let offline = false;
 let identityOffline = false;
 let unknownMutationResult = false;
+const providerPreference = { schema_version: "harbor-browser-provider-preference/v1", project_recommendation: { provider_id: "cloakbrowser", source: "project_policy" }, user_creation_default: { provider_id: "cloakbrowser", availability: "available", unavailable_reason: null, updated_at: "2026-07-22T00:00:00Z" } } as const;
 
 installOwnerMock();
 
 function Harness() {
   const [generation, setGeneration] = useState(0);
-  const initialState: HarborIdentityLoadState = { status: "ready", fetchedAt: "2026-07-22T00:00:00Z", summary: "ready", identities: [], providers: providerCatalog().providers };
+  const initialState: HarborIdentityLoadState = {
+    status: "ready", fetchedAt: "2026-07-22T00:00:00Z", summary: "ready", identities: [], providers: providerCatalog().providers,
+    providerPreference
+  };
   return <main className="identity-harness"><header className="shell-topbar production-topbar"><div className="topbar-center-surface"><h2>账号身份</h2><div id="identity-topbar-actions" className="prototype-center-actions" /></div></header><button hidden data-test-offline type="button" onClick={() => { offline = true; }}>offline</button><button hidden data-test-identity-offline type="button" onClick={() => { identityOffline = true; }}>identity-offline</button><button hidden data-test-empty type="button" onClick={() => { offline = false; identityOffline = false; facts = []; setGeneration((value) => value + 1); }}>empty</button><IdentityEnvironmentsPage key={generation} harborEndpoint="http://127.0.0.1:8790" initialState={initialState} runtimeSupervisorState={runtime} tasks={tasks} onHarborStateChange={() => {}} onOpenLibrary={() => {}} onOpenSettings={() => {}} /></main>;
 }
 
@@ -30,6 +34,17 @@ createRoot(document.getElementById("root")!).render(<Harness />);
 
 window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelectorAll(".identity-catalog-row").length === 2, "identity catalog");
+  if (mode === "provider-default") {
+    clickButton("创建账号身份");
+    await waitUntil(() => document.querySelector(".identity-editor") != null, "provider default create form");
+    if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "cloakbrowser") throw new Error("Create did not use the saved creation default.");
+    document.querySelector<HTMLButtonElement>(".identity-editor-actions button:not(.primary)")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after provider default create");
+    clickButton("导入");
+    await waitUntil(() => document.querySelector(".identity-editor") != null, "provider default import form");
+    if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "") throw new Error("Import inherited the creation-only default.");
+    return { creationDefault: true, importExplicit: true };
+  }
   if (mode === "narrow") {
     document.querySelector<HTMLButtonElement>(".identity-catalog-row")?.click();
     await waitUntil(() => document.querySelector(".identity-detail-title") != null, "narrow identity detail");
@@ -104,6 +119,7 @@ window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after edit");
   clickButton("创建账号身份");
   await waitUntil(() => document.querySelector(".identity-editor") != null, "create identity form");
+  if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "cloakbrowser") throw new Error("Create did not use the saved creation default.");
   fillInput("accountIdentifier", "新建运营号");
   document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
   await waitUntil(() => document.body.textContent?.includes("账号身份已创建") === true, "identity create");
@@ -111,6 +127,8 @@ window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after create");
   clickButton("导入");
   await waitUntil(() => document.querySelector(".identity-editor") != null, "import identity form");
+  if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "") throw new Error("Import inherited the creation-only default.");
+  setSelect("浏览器 Provider", "chrome_official");
   fillInput("accountIdentifier", "导入运营号");
   fillInput("importSourceRef", "import-source-public");
   document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
@@ -168,6 +186,7 @@ function installOwnerMock() {
       requests.push(structuredClone(request));
       if (offline) return { ok: false, status: 503, error: "owner unavailable" };
       if (request.path === "/runtime/browser-providers") return { ok: true, body: providerCatalog() };
+      if (request.path === "/runtime/browser-provider-preference") return { ok: true, body: providerPreference };
       if (identityOffline && request.path.includes("identity-environments")) return { ok: false, status: 503, error: "identity owner unavailable" };
       if (request.path === "/runtime/identity-environments") return { ok: true, body: { items: facts } };
       if (request.path === "/runtime/identity-environment-mutations") return mutationResponse(request);
@@ -231,4 +250,4 @@ async function twoFrames() { await nextFrame(); await nextFrame(); }
 async function waitUntil(predicate: () => boolean, label: string) { for (let attempt = 0; attempt < 120; attempt += 1) { if (predicate()) return; await nextFrame(); } const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".identity-catalog-header button, .identity-empty button")).map((button) => `${button.textContent}:${button.disabled}`); throw new Error(`Timed out waiting for ${label}: ${document.body.textContent?.slice(-500)} buttons=${buttons.join("|")}.`); }
 function assertNoOverflow(label: string) { const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth; if (overflow > 1) throw new Error(`${label} overflowed by ${overflow}px.`); }
 
-declare global { interface Window { __runIdentityDomSmoke: (mode: "desktop" | "narrow") => Promise<unknown>; } }
+declare global { interface Window { __runIdentityDomSmoke: (mode: "desktop" | "narrow" | "provider-default") => Promise<unknown>; } }

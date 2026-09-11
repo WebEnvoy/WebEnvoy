@@ -126,6 +126,13 @@ async function run() {
     console.log(JSON.stringify(result));
     return;
   }
+  if (process.env.WEBENVOY_DOM_FOCUS === "identity") {
+    await withTimeout(window.loadURL(`${baseUrl}/tests/renderer/identity-dom.html`), "Identity desktop harness load");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const result = await runRendererCheck("window.__runIdentityDomSmoke('provider-default')", "Identity provider default DOM checks");
+    console.log(JSON.stringify(result));
+    return;
+  }
 
   stage("running desktop checks");
   const desktop = await withTimeout(

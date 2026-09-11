@@ -18,6 +18,15 @@ process.env.HARBOR_PROFILE_STORAGE_ROOT = testProfileRoot;
 after(() => rmSync(testProfileRoot, { recursive: true, force: true }));
 
 const fixtureCloakPath = "/fixture/CloakBrowser";
+const fixtureProviderDetection = {
+  platform: "darwin" as const,
+  arch: "arm64",
+  home_dir: "/Users/test",
+  env: { HARBOR_CLOAKBROWSER_PATH: fixtureCloakPath },
+  path_exists: (path: string) => path === fixtureCloakPath,
+  is_executable: (path: string) => path === fixtureCloakPath,
+  read_text: () => null,
+};
 class HarborRuntime extends ProductionHarborRuntime {
   constructor(
     launcher?: ConstructorParameters<typeof ProductionHarborRuntime>[0],
@@ -25,17 +34,16 @@ class HarborRuntime extends ProductionHarborRuntime {
     providerLifecycleOptions: ConstructorParameters<typeof ProductionHarborRuntime>[2] = {},
   ) {
     super(launcher, {
-      provider_detection: {
-        platform: "darwin",
-        arch: "arm64",
-        home_dir: "/Users/test",
-        env: { HARBOR_CLOAKBROWSER_PATH: fixtureCloakPath },
-        path_exists: (path) => path === fixtureCloakPath,
-        is_executable: (path) => path === fixtureCloakPath,
-        read_text: () => null,
-      },
+      provider_detection: fixtureProviderDetection,
       ...identityEnvironmentOptions,
     }, providerLifecycleOptions);
+  }
+
+  override openIdentityEnvironmentSession(input: Parameters<ProductionHarborRuntime["openIdentityEnvironmentSession"]>[0]) {
+    return super.openIdentityEnvironmentSession({
+      ...input,
+      identity_environment: { ...fixtureProviderDetection, ...input.identity_environment },
+    });
   }
 }
 

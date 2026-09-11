@@ -309,8 +309,13 @@ try {
   omitProviderSelection = true;
   const invalidSelection = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "missing-provider-selection", grant_id: invalidSelectionGrant.grant_id });
   omitProviderSelection = false;
+  assert.equal(invalidSelection.status, "unknown_outcome");
   assert.equal(invalidSelection.failure?.code, "managed_browser_provider_selection_invalid");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === invalidSelectionGrant.grant_id)?.created_profile_refs.length, 0);
+  const invalidSelectionCreates = creates;
+  const blockedAfterInvalidSelection = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "blocked-after-missing-provider-selection", grant_id: invalidSelectionGrant.grant_id });
+  assert.equal(blockedAfterInvalidSelection.failure?.code, "managed_browser_creation_reconciliation_required");
+  assert.equal(creates, invalidSelectionCreates);
 
   const invalidSelectionQueryGrant = await accessStore.createGrant({ idempotency_key: "invalid-selection-query-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
   omitProviderSelection = true;
@@ -319,7 +324,11 @@ try {
   omitProviderSelection = false;
   dropResponse = false;
   assert.equal(lostInvalidSelection.status, "unknown_outcome");
-  await assert.rejects(service.query(credentialHash, lostInvalidSelection.run_id), /managed_browser_provider_selection_invalid/);
+  const queriedInvalidSelection = await service.query(credentialHash, lostInvalidSelection.run_id);
+  assert.equal(queriedInvalidSelection.status, "unknown_outcome");
+  assert.equal(queriedInvalidSelection.failure?.code, "managed_browser_provider_selection_invalid");
+  const blockedAfterInvalidSelectionQuery = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "blocked-after-query-missing-provider-selection", grant_id: invalidSelectionQueryGrant.grant_id });
+  assert.equal(blockedAfterInvalidSelectionQuery.failure?.code, "managed_browser_creation_reconciliation_required");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === invalidSelectionQueryGrant.grant_id)?.created_profile_refs.length, 0);
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
