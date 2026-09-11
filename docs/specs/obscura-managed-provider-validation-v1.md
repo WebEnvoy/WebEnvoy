@@ -28,7 +28,7 @@
 - 固定 `OBSCURA_PROFILE=0`、`OBSCURA_ROTATE_PROFILE=0`；timezone 和已解析 proxy 由 Harbor 注入专用进程，凭据不进入命令行。
 - 固定构建的 locale 只能是其原生 `en-US`；正式创建入口只接受这个值，其他 language 以 `unsupported_configuration` 局部拒绝，不伪装为已应用。
 - `openUrl`、同现场控件 snapshot、点击、显式 focus 后文本输入、按键、滚动、固定观察和截图复用现有 Profile／Instance／ControlLease／operation／receipt 边界。snapshot 只投影有界的标题／段落／status 文本并逐项丢弃凭据特征；既有 input value、Cookie、token 与完整 DOM 不导出。
-- Viewer 通过 Harbor owner-only frame/input 路由复用同一 WebSocket、target 和 session；独立 owner Viewer token 只交给 App 主进程，Core 与 Plugin bearer 均不能调用。只读取帧不取得 ControlLease，输入要求当前 user-held lease、`viewer_ref`、绑定画面及 Page/DOM 代际的 `frame_ref` 和幂等 `operation_ref`；文本目标在派发前以当前页面 hit-test 复核。PNG 单帧不超过 2 MiB／4096×4096，不落盘、不进入 Run／Plugin；输入、接管、导航、页面变化或 Driver 丢失使旧帧失效。
+- Viewer 通过 Harbor owner-only frame/input 路由复用同一 WebSocket、target 和 session；独立 owner Viewer token 只交给 App 主进程，Core 与 Plugin bearer 均不能调用。任意页面只读取帧不取得 ControlLease；坐标输入当前只在显式开启 private-network 的 `127.0.0.1` 受控验证 origin 内可用，并要求 user-held lease、`viewer_ref`、绑定画面及 Page/DOM 代际的 `frame_ref` 和幂等 `operation_ref`。作者脚本前安装的不可替换随机 bridge 及其全局根持有代际与原始 hit-test，文本目标在首次可能产生副作用前复核并把响应丢失保留为 `dispatched`。PNG 单帧不超过 2 MiB／4096×4096，不落盘、不进入 Run／Plugin；输入、接管、导航、页面变化或 Driver 丢失使旧帧失效。固定 Obscura 的 JS-mediated hit-test 不能证明 CSSOM／animation 或子 frame 的无像素变化，因此公共／不受信页面保持 read-only，不能把受控 Viewer 证据写成正式站点人工操作已通过。
 - 上层 Agent、App 或 Viewer 断开不关闭底层 WebSocket。底层连接或进程丢失时 Provider context 和全部页面死亡；Runtime 必须使旧 Instance／Page／observation／target ref 失效。
 - 恢复路径是停止专用进程、从同 Profile 显式创建新 Instance。已派发但未确认的写入保持 `unknown_outcome`，禁止自动重放。
 
@@ -77,7 +77,7 @@ no-release Agent 包可在打包时显式提供固定二进制；打包器先校
 
 - `live_verified`：同一 Harbor-held target 上 owner frame、坐标点击、滚动、显式 focus 后中文 `Input.insertText` 与受限公开文本回读成功；既有 input value、Cookie、token 与完整 DOM 不导出。
 - `live_verified`／缺口：鼠标点击输入框不产生默认 focus；没有 `Input.imeSetComposition`，合成中文文本不能冒充真实中文 IME。
-- `live_verified` 实现路径：`viewer_entry` 为 interactive，App 的既有 Run Instance 面板读取原实例帧并只在 user-held ControlLease 下发送输入；自动化已证明 Agent 输入在人工持有时拒绝、交还后必须重新 snapshot。真实人类画面可用性与 macOS 中文输入法组词仍待集中人工验收，不能用 `Input.insertText` 冒充真人 IME。
+- `live_verified` 实现路径：受控 loopback 的 `viewer_entry` 为 interactive，App 的既有 Run Instance 面板读取原实例帧并只在 user-held ControlLease 下发送输入；自动化已证明 Agent 输入在人工持有时拒绝、交还后必须重新 snapshot。其他 origin 当前为 read-only；真实人类画面可用性与 macOS 中文输入法组词仍待集中人工验收，不能用 `Input.insertText` 冒充真人 IME。
 - `live_verified`：关闭底层 WebSocket 后 target 列表为空；因此旧帧和引用必须失效。
 - `plugin_verified`：MCP client 断开时 Harbor 所持其他现场继续存在；新连接可查询旧 Run。Viewer 面板关闭后的真实 App 行为仍待人工证据。
 
@@ -111,8 +111,8 @@ no-release Agent 包可在打包时显式提供固定二进制；打包器先校
 缺口按 owner 分类：
 
 1. WebEnvoy：用户默认偏好、Viewer 人工验收、真实 Agent 消费、完整 Runtime 能力矩阵。
-2. Driver：连接丢失后的显式进程重建、更多能力适配、完整环境 readback、上传安全边界。
-3. 固定 Obscura：非 checkpoint storage、不支持 popup/dialog/download、click-focus 和 IME、unsigned/unreleased 分发。
+2. Driver：公共／不受信页面的原生命中绑定或等价安全输入、连接丢失后的显式进程重建、更多能力适配、完整环境 readback、上传安全边界。
+3. 固定 Obscura：JS-mediated hit-test、非 checkpoint storage、不支持 popup/dialog/download、click-focus 和 IME、unsigned/unreleased 分发。
 4. 网站：尚未进入任何真实站点兼容结论。
 5. 证据／授权：真实账号、人工操作、真实写入和正式安装路径均待授权或待环境。
 

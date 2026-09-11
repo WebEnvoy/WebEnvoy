@@ -932,6 +932,31 @@ test("transfers a held Core session to the user only through the exact handoff e
   }
 });
 
+test("refuses handoff when the available Viewer is read-only", async () => {
+  const fixture = createFixtureLauncher("ready");
+  const runtime = new HarborRuntime(async input => {
+    const launch = await fixture(input);
+    return launch.status === "ready" ? {
+      ...launch,
+      viewer_entry: { availability: "available", access_mode: "read_only", transport: "remote_browser_viewer", input_capabilities: [] }
+    } : launch;
+  });
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const session = await runtime.createSession({ headless: false, control_owner: "core_task", holder_ref: "run-read-only" });
+    const response = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}/handoff`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested" })
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).failure_class, "viewer_unavailable");
+    assert.equal(runtime.getSession(session.runtime_session_ref)?.control_owner, "core_task");
+  } finally {
+    await running.close();
+  }
+});
+
 test("never reuses a released headless user-action session for manual visibility but preserves headed Core handoff", async () => {
   const launches: LocalProviderLaunchInput[] = [];
   const closes: string[] = [];

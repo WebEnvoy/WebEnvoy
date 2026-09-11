@@ -36,6 +36,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
       throw new Error(`Obscura binary is not the validated ${OBSCURA_VALIDATED_COMMIT} build.`);
     }
     const managedStorage = storage.persistent ? await readManagedLocalStorage(storage.profileDir) : new Map<string, Array<[string, string]>>();
+    const viewerInputOrigin = process.env.HARBOR_OBSCURA_ALLOW_PRIVATE_NETWORK === "1" && input.identity_environment?.site_binding.site_id === "controlled-obscura" && new URL(input.url).hostname === "127.0.0.1" ? new URL(input.url).origin : null;
     const port = await unusedLoopbackPort();
     const args = ["serve", "--host", "127.0.0.1", "--port", String(port), "--storage-dir", storage.profileDir, "--max-connections", "1"];
     if (process.env.HARBOR_OBSCURA_ALLOW_PRIVATE_NETWORK === "1") args.push("--allow-private-network");
@@ -67,9 +68,10 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
     let snapshot: SnapshotState | null = null;
     let preloadId: string | undefined;
     let lastViewerFrame: LocalProviderViewerFrame | undefined;
+    const viewerBridgeKey = randomUUID();
     const refreshStoragePreload = async () => {
       if (preloadId) await client!.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: preloadId }, sessionId);
-      const added = await client!.send("Page.addScriptToEvaluateOnNewDocument", { source: storagePreloadExpression(managedStorage) }, sessionId);
+      const added = await client!.send("Page.addScriptToEvaluateOnNewDocument", { source: `${storagePreloadExpression(managedStorage)};${viewerBridgePreloadExpression(viewerBridgeKey)}` }, sessionId);
       preloadId = stringField(added, "identifier");
     };
     const checkpointStorage = async () => {
@@ -108,7 +110,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
       driver_ref: opaqueRef("driver"),
       driver_kind: "chromium_cdp",
       cdp_ref: opaqueRef("cdp"),
-      viewer_entry: { availability: "available", access_mode: "interactive", transport: "remote_browser_viewer", input_capabilities: ["keyboard_mouse"] },
+      viewer_entry: { availability: "available", access_mode: viewerInputOrigin ? "interactive" : "read_only", transport: "remote_browser_viewer", input_capabilities: viewerInputOrigin ? ["keyboard_mouse"] : [] },
       page,
       facts,
       openUrl: navigate,
@@ -131,21 +133,22 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
           return { status: dispatched ? "unknown_outcome" : "unavailable", dispatch_state: dispatched ? "dispatched" : "not_dispatched", failure_class: "managed_interaction_driver_unavailable" };
         }
       }),
-      captureScreenshot: async () => screenshot(client!, sessionId),
+      captureScreenshot: async () => screenshot(client!, sessionId, viewerBridgeKey),
       captureViewerFrame: async () => {
-        lastViewerFrame = await viewerFrame(client!, sessionId, lastViewerFrame);
+        lastViewerFrame = await viewerFrame(client!, sessionId, viewerBridgeKey, lastViewerFrame);
         return lastViewerFrame;
       },
-      viewerInput: async action => {
+      viewerInput: viewerInputOrigin ? async action => {
         if (!lastViewerFrame || action.frame_ref !== lastViewerFrame.frame_ref) return viewerRefused("viewer_frame_stale");
         let dispatched = false;
         try {
-          const currentFrame = await viewerFrame(client!, sessionId, lastViewerFrame);
+          if (await viewerCurrentOrigin(client!, sessionId, viewerBridgeKey) !== viewerInputOrigin) return viewerRefused("viewer_navigation_refused");
+          const currentFrame = await viewerFrame(client!, sessionId, viewerBridgeKey, lastViewerFrame);
           lastViewerFrame = currentFrame;
           if (action.frame_ref !== currentFrame.frame_ref) return viewerRefused("viewer_frame_stale");
           if (action.action === "navigate") {
             const url = safeViewerUrl(action.url);
-            if (!url) return viewerRefused("viewer_navigation_refused");
+            if (!url || new URL(url).origin !== viewerInputOrigin) return viewerRefused("viewer_navigation_refused");
             dispatched = true;
             await navigate(url);
           } else {
@@ -156,10 +159,8 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
               await client!.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: action.x, y: action.y, button: "left", clickCount: 1 }, sessionId);
             } else if (action.action === "input") {
               if (!viewerPoint(action, lastViewerFrame) || !action.text || action.text.length > 2048) return viewerRefused("viewer_input_refused");
-              const nodeId = await viewerControlAtPoint(client!, sessionId, action.x, action.y);
-              if (!nodeId) return viewerRefused("viewer_input_target_unavailable");
-              await focusControl(client!, sessionId, nodeId);
               dispatched = true;
+              if (!await viewerFocusAtPoint(client!, sessionId, viewerBridgeKey, action.x, action.y)) return viewerRefused("viewer_input_target_unavailable");
               await client!.send("Input.insertText", { text: action.text }, sessionId);
               await dispatchInputEvent(client!, sessionId);
             } else if (action.action === "press") {
@@ -175,7 +176,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
             await checkpointStorage();
             await refreshStoragePreload();
           }
-          const frame = await viewerFrame(client!, sessionId, lastViewerFrame);
+          const frame = await viewerFrame(client!, sessionId, viewerBridgeKey, lastViewerFrame);
           lastViewerFrame = frame;
           return { status: "completed", dispatch_state: "dispatched", frame, page: await pageFacts(client!, sessionId, action.action === "navigate" ? action.url : "viewer_input") };
         } catch (cause) {
@@ -183,7 +184,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
           if (cause instanceof ObscuraTransportError) throw cause;
           return { status: dispatched ? "unknown_outcome" : "unavailable", dispatch_state: dispatched ? "dispatched" : "not_dispatched", failure_class: "viewer_input_driver_unavailable" };
         }
-      },
+      } : undefined,
       driverLost,
       close: async () => {
         if (closed) return;
@@ -340,6 +341,10 @@ function storagePreloadExpression(storage: ManagedLocalStorage): string {
   return `(()=>{const entries=${JSON.stringify(origins)}[location.origin];if(!entries)return;localStorage.clear();for(const [key,value] of entries)localStorage.setItem(key,value);})()`;
 }
 
+function viewerBridgePreloadExpression(key: string): string {
+  return `(()=>{const root=globalThis,key=${JSON.stringify(key)},pageDocument=document;if(Object.prototype.hasOwnProperty.call(root,key))return;Object.defineProperty(root,'globalThis',{configurable:false,writable:false,value:root});const at=Document.prototype.elementFromPoint.bind(pageDocument),focus=Function.prototype.call.bind(Element.prototype.focus),matches=Function.prototype.call.bind(Element.prototype.matches),documentKey=location.href+'|'+performance.timeOrigin;let generation=0;const observer=new MutationObserver(()=>generation++),takeRecords=observer.takeRecords.bind(observer);observer.observe(pageDocument,{subtree:true,childList:true,attributes:true,characterData:true});Object.defineProperty(root,key,{configurable:false,writable:false,value:Object.freeze({origin(){return pageDocument.location.origin},frame(){if(takeRecords().length)generation++;return{width:innerWidth,height:innerHeight,document_key:documentKey+'|'+generation}},focus(x,y){const el=at(x,y);if(!el||!matches(el,'input:not([disabled]),textarea:not([disabled]),[contenteditable=true]'))return false;focus(el);return true}})})})()`;
+}
+
 async function readManagedLocalStorage(profileDir: string): Promise<ManagedLocalStorage> {
   const path = join(profileDir, OBSCURA_STORAGE_FILE);
   let bytes: Buffer;
@@ -426,21 +431,16 @@ async function pageFacts(client: ObscuraCdpClient, sessionId: string, requested:
   return { current_url: current, title: obscuraPublicText(value?.title, 256) || null, status: current && ["interactive", "complete"].includes(String(value.ready)) ? "ready" : "unknown", facts: [{ key: "page.requested_url", source: "configured", value: requested }, { key: "page.status", source: "observed", value: current ? "ready" : "unknown" }] };
 }
 
-async function screenshot(client: ObscuraCdpClient, sessionId: string): Promise<LocalProviderScreenshotFacts> {
-  const frame = await viewerFrame(client, sessionId);
+async function screenshot(client: ObscuraCdpClient, sessionId: string, viewerBridgeKey: string): Promise<LocalProviderScreenshotFacts> {
+  const frame = await viewerFrame(client, sessionId, viewerBridgeKey);
   const evidence_ref = opaqueRef("validation");
   return { screenshot_ref: opaqueRef("screenshot"), mime_type: "image/png", byte_length: frame.byte_length, sha256: frame.sha256, captured_at: frame.captured_at, facts: [{ key: "screenshot.capture", source: "validation_evidence", value: "ready", evidence_ref }] };
 }
 
-async function viewerFrame(client: ObscuraCdpClient, sessionId: string, previous?: LocalProviderViewerFrame): Promise<LocalProviderViewerFrame> {
+async function viewerFrame(client: ObscuraCdpClient, sessionId: string, viewerBridgeKey: string, previous?: LocalProviderViewerFrame): Promise<LocalProviderViewerFrame> {
   const [shot, metrics] = await Promise.all([
     client.send("Page.captureScreenshot", { format: "png" }, sessionId),
-    client.send("Runtime.evaluate", { expression: `(() => {
-      const key=Symbol.for('webenvoy.viewerDocumentState');let state=window[key];
-      if(!state){state={generation:0};state.observer=new MutationObserver(()=>state.generation++);state.observer.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});window[key]=state}
-      else if(state.observer.takeRecords().length)state.generation++;
-      return {width:innerWidth,height:innerHeight,document_key:location.href+'|'+performance.timeOrigin+'|'+state.generation};
-    })()`, returnByValue: true }, sessionId)
+    client.send("Runtime.evaluate", { expression: `globalThis[${JSON.stringify(viewerBridgeKey)}].frame()`, returnByValue: true }, sessionId)
   ]);
   const data = stringField(shot, "data");
   const bytes = Buffer.from(data, "base64");
@@ -459,10 +459,14 @@ async function viewerFrame(client: ObscuraCdpClient, sessionId: string, previous
   return frame;
 }
 
-async function viewerControlAtPoint(client: ObscuraCdpClient, sessionId: string, x: number, y: number): Promise<number | null> {
-  const result = await client.send("Runtime.evaluate", { expression: `(()=>{let el=document.elementFromPoint(${JSON.stringify(x)},${JSON.stringify(y)});while(el&&!el.matches('input:not([disabled]),textarea:not([disabled]),[contenteditable=true]'))el=el.parentElement;return Number(el?._nid)||null})()`, returnByValue: true }, sessionId);
-  const nodeId = Number(remoteValue(result));
-  return Number.isSafeInteger(nodeId) && nodeId > 0 ? nodeId : null;
+async function viewerFocusAtPoint(client: ObscuraCdpClient, sessionId: string, viewerBridgeKey: string, x: number, y: number): Promise<boolean> {
+  const result = await client.send("Runtime.evaluate", { expression: `globalThis[${JSON.stringify(viewerBridgeKey)}].focus(${JSON.stringify(x)},${JSON.stringify(y)})`, returnByValue: true }, sessionId);
+  return remoteValue(result) === true;
+}
+
+async function viewerCurrentOrigin(client: ObscuraCdpClient, sessionId: string, viewerBridgeKey: string): Promise<string | null> {
+  const result = await client.send("Runtime.evaluate", { expression: `globalThis[${JSON.stringify(viewerBridgeKey)}].origin()`, returnByValue: true }, sessionId);
+  return typeof remoteValue(result) === "string" ? remoteValue(result) as string : null;
 }
 
 function viewerPoint(input: { x: number; y: number }, frame: LocalProviderViewerFrame): boolean {

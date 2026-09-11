@@ -15,7 +15,8 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     response.setHeader("content-type", "text/html; charset=utf-8");
     if (request.url === "/first") response.setHeader("set-cookie", "sid=alpha; Path=/; HttpOnly; SameSite=Lax");
     const persisted = request.headers.cookie?.includes("sid=alpha") ?? false;
-    response.end(`<!doctype html><meta charset=utf-8><title>${persisted ? "Persisted" : "Fresh"}</title><body style="min-height:3000px"><h1>受控记录</h1><div style="height:180px"></div><input aria-label="内容" style="position:absolute;left:20px;top:70px;width:300px;z-index:10"><input aria-label="延迟替换" style="position:absolute;left:20px;top:120px;width:300px"><button aria-label="安排替换" style="position:absolute;left:350px;top:70px;width:120px" onclick="setTimeout(()=>{const old=document.querySelector('[aria-label=延迟替换]'),next=old.nextSibling;old.remove();const el=document.createElement('input');el.setAttribute('aria-label','延迟替换');el.style.cssText='position:absolute;left:20px;top:120px;width:300px';document.body.insertBefore(el,next)},50)">安排替换</button><button aria-label="覆盖输入框" style="position:absolute;left:350px;top:120px;width:120px" onclick="{const el=document.createElement('div');el.style.cssText='position:absolute;left:20px;top:120px;width:304px;height:30px;z-index:20;background:white';document.body.append(el)}">覆盖输入框</button><input aria-label="普通字段" value="correct-horse-battery-staple"><button onclick="localStorage.setItem('note',document.querySelector('[aria-label=内容]').value);document.querySelector('#draft').textContent='草稿：'+document.querySelector('[aria-label=内容]').value;this.textContent='已保存'">保存</button><button aria-label="清除状态" onclick="localStorage.removeItem('note');document.querySelector('[aria-label=内容]').value='';document.querySelector('#draft').textContent='草稿：空'">清除状态</button><p id="draft">草稿：空</p><p id="locale"></p><p>eyJhbGciOiJIUzI1NiJ9.payload.signature</p><p>${request.headers.cookie ?? "missing"}</p><script>const content=document.querySelector('[aria-label=内容]');content.value=localStorage.getItem('note')||'';document.title+='|'+(localStorage.getItem('note')||'missing');document.querySelector('#locale').textContent='语言：'+navigator.language;const save=()=>{localStorage.setItem('note',content.value);document.querySelector('#draft').textContent='草稿：'+content.value};document.querySelector('#draft').textContent='草稿：'+(content.value||'空');content.addEventListener('input',save);content.addEventListener('keydown',event=>{if(event.key==='Enter')save()});</script></body>`);
+    response.write("<script>const forged=Symbol();globalThis[forged]={frame(){return{width:innerWidth,height:innerHeight,document_key:'forged'}},focus(){return true}};Symbol.for=()=>forged;window.globalThis=new Proxy({},{get(){return window[forged]}});Document.prototype.elementFromPoint.call=()=>document.body;Element.prototype.matches.call=()=>true;Element.prototype.focus.call=()=>{}</script>");
+    response.end(`<!doctype html><meta charset=utf-8><title>${persisted ? "Persisted" : "Fresh"}</title><body style="min-height:3000px"><h1>受控记录</h1><div style="height:180px"></div><input aria-label="内容" style="position:absolute;left:20px;top:70px;width:300px;z-index:10"><input aria-label="延迟替换" style="position:absolute;left:20px;top:120px;width:300px"><button aria-label="安排替换" style="position:absolute;left:350px;top:70px;width:120px" onclick="setTimeout(()=>{const old=document.querySelector('[aria-label=延迟替换]'),next=old.nextSibling;old.remove();const el=document.createElement('input');el.setAttribute('aria-label','延迟替换');el.style.cssText='position:absolute;left:20px;top:120px;width:300px';document.body.insertBefore(el,next)},500)">安排替换</button><button aria-label="覆盖输入框" style="position:absolute;left:350px;top:120px;width:120px" onclick="{const el=document.createElement('div');el.style.cssText='position:absolute;left:20px;top:120px;width:304px;height:30px;z-index:20;background:white';document.body.append(el)}">覆盖输入框</button><button aria-label="安排透明覆盖" style="position:absolute;left:350px;top:170px;width:120px" onclick="setTimeout(()=>{const el=document.createElement('div');el.style.cssText='position:absolute;left:20px;top:170px;width:304px;height:30px;z-index:30;background:transparent';document.body.append(el)},500)">安排透明覆盖</button><button aria-label="底层操作" style="position:absolute;left:20px;top:170px;width:300px">底层操作</button><input aria-label="普通字段" value="correct-horse-battery-staple"><button onclick="localStorage.setItem('note',document.querySelector('[aria-label=内容]').value);document.querySelector('#draft').textContent='草稿：'+document.querySelector('[aria-label=内容]').value;this.textContent='已保存'">保存</button><button aria-label="清除状态" onclick="localStorage.removeItem('note');document.querySelector('[aria-label=内容]').value='';document.querySelector('#draft').textContent='草稿：空'">清除状态</button><p id="draft">草稿：空</p><p id="locale"></p><p>eyJhbGciOiJIUzI1NiJ9.payload.signature</p><p>${request.headers.cookie ?? "missing"}</p><script>window[Symbol.for('webenvoy.viewerDocumentState')]={generation:0,observer:{takeRecords(){return[]}}};const content=document.querySelector('[aria-label=内容]');content.value=localStorage.getItem('note')||'';document.title+='|'+(localStorage.getItem('note')||'missing');document.querySelector('#locale').textContent='语言：'+navigator.language;const save=()=>{localStorage.setItem('note',content.value);document.querySelector('#draft').textContent='草稿：'+content.value};document.querySelector('#draft').textContent='草稿：'+(content.value||'空');content.addEventListener('input',save);content.addEventListener('keydown',event=>{if(event.key==='Enter')save()});</script></body>`);
   });
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -26,7 +27,7 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
   process.env.HARBOR_OBSCURA_ALLOW_PRIVATE_NETWORK = "1";
   const runtime = new HarborRuntime();
   try {
-    const created = runtime.mutateLocalIdentityEnvironment({ operation: "create", idempotency_key: "obscura-live-create", identity_environment: { requested_provider_id: "obscura", language: "en-US", site: { site_id: "controlled", origin, display_name: "Controlled" } } });
+    const created = runtime.mutateLocalIdentityEnvironment({ operation: "create", idempotency_key: "obscura-live-create", identity_environment: { requested_provider_id: "obscura", language: "en-US", site: { site_id: "controlled-obscura", origin, display_name: "Controlled" } } });
     assert.equal(created.status, "completed");
     const identityRef = created.identity_environment_ref!;
     const opened = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: identityRef, operation_scope: "profile_management", url: `${origin}/first`, control_owner: "core_task", holder_ref: "run_obscura_live", headless: true });
@@ -54,7 +55,7 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     assert.equal(humanCommit.status, "completed");
     const scheduledFrame = await runtime.operateViewerInput(opened.runtime_session_ref, { viewer_ref: opened.viewer_ref!, frame_ref: humanCommit.frame.frame_ref, operation_ref: "viewer_input_obscura_schedule", action: "click", x: 400, y: 85 });
     assert.equal(scheduledFrame.status, "completed");
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 600));
     const staleViewer = await runtime.operateViewerInput(opened.runtime_session_ref, { viewer_ref: opened.viewer_ref!, frame_ref: scheduledFrame.frame.frame_ref, operation_ref: "viewer_input_obscura_stale", action: "input", x: 100, y: 135, text: "不得派发" });
     if (staleViewer.status === "completed") throw new Error("stale Viewer frame unexpectedly dispatched");
     assert.equal(staleViewer.failure_class, "viewer_frame_stale");
@@ -65,6 +66,14 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     const coveredInput = await runtime.operateViewerInput(opened.runtime_session_ref, { viewer_ref: opened.viewer_ref!, frame_ref: coveredFrame.frame.frame_ref, operation_ref: "viewer_input_obscura_covered", action: "input", x: 100, y: 135, text: "不得穿透" });
     if (coveredInput.status === "completed") throw new Error("covered Viewer target unexpectedly received input");
     assert.equal(coveredInput.failure_class, "viewer_input_target_unavailable");
+    const tamperFrame = await runtime.captureViewerFrame(opened.runtime_session_ref, opened.viewer_ref!);
+    if ("status" in tamperFrame) throw new Error(tamperFrame.failure_class);
+    const scheduledOverlay = await runtime.operateViewerInput(opened.runtime_session_ref, { viewer_ref: opened.viewer_ref!, frame_ref: tamperFrame.frame_ref, operation_ref: "viewer_input_obscura_schedule_overlay", action: "click", x: 400, y: 185 });
+    assert.equal(scheduledOverlay.status, "completed");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    const tamperedViewer = await runtime.operateViewerInput(opened.runtime_session_ref, { viewer_ref: opened.viewer_ref!, frame_ref: scheduledOverlay.frame.frame_ref, operation_ref: "viewer_input_obscura_tampered", action: "click", x: 100, y: 185 });
+    if (tamperedViewer.status === "completed") throw new Error("main-world tampering kept a stale Viewer frame valid");
+    assert.equal(tamperedViewer.failure_class, "viewer_frame_stale");
     const blockedAgent = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "snapshot", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_blocked_during_human" });
     assert.equal(blockedAgent.failure_class, "control_lock_conflict");
     assert.equal("status" in runtime.releaseSession(opened.runtime_session_ref, { control_owner: "user" }), false);
@@ -82,7 +91,7 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     assert.ok(schedule && delayed);
     const scheduled = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "click", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_schedule_replace", page_ref: snapshot.snapshot!.page_ref, observation_ref: snapshot.snapshot!.observation_ref, target_ref: schedule.target_ref });
     assert.equal(scheduled.status, "completed");
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 600));
     const stale = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "input", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_stale_target", page_ref: scheduled.snapshot!.page_ref, observation_ref: scheduled.snapshot!.observation_ref, target_ref: scheduled.snapshot!.controls.find(control => control.name === "延迟替换")!.target_ref, text: "不得派发" });
     assert.equal(stale.status, "unavailable");
     assert.equal(stale.dispatch_state, "not_dispatched");
@@ -92,7 +101,7 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     const textbox = snapshot.snapshot?.controls.find(control => control.role === "textbox");
     assert.ok(textbox);
     const input = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "input", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_input", page_ref: snapshot.snapshot!.page_ref, observation_ref: snapshot.snapshot!.observation_ref, target_ref: textbox!.target_ref, text: "中文验证" });
-    assert.equal(input.status, "completed");
+    assert.equal(input.status, "completed", JSON.stringify(input));
     assert.equal(input.snapshot?.controls.find(control => control.role === "textbox")?.value, undefined);
     const button = input.snapshot?.controls.find(control => control.name === "保存");
     assert.ok(button);

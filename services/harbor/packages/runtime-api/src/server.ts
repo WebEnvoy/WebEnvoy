@@ -547,7 +547,7 @@ async function routeSession(
       writeJson(response, 409, { status: "unavailable", failure_class: "session_locked", message: "Runtime Session control owner changed before handoff.", retryable: true });
       return;
     }
-    if (current.availability.viewer !== "available") {
+    if (current.availability.viewer !== "available" || current.viewer_entry?.access_mode !== "interactive" || !current.viewer_entry.input_capabilities.includes("keyboard_mouse")) {
       writeJson(response, 409, { status: "unavailable", failure_class: "viewer_unavailable", message: "Runtime Session has no interactive local viewer.", retryable: false });
       return;
     }

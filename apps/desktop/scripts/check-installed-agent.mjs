@@ -44,7 +44,7 @@ try {
   assert.equal(submitted.ok, true);
   const bundle = await verifyBundle();
   if (bundle.obscura.state === 'verified' && bundle.obscura.validation_private_network) {
-    connector = await runObscuraLiveCheck({ connector, owner, first, ownerCall });
+    connector = await runObscuraLiveCheck({ connector, owner, first, ownerCall, appConnection });
     liveObscura = true;
   }
   await connector.close();
@@ -97,7 +97,7 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 
-async function runObscuraLiveCheck({ connector, owner, first, ownerCall }) {
+async function runObscuraLiveCheck({ connector, owner, first, ownerCall, appConnection }) {
   const recordPath = join(directory, 'controlled-record.json');
   let obscuraPid;
   const controlled = createServer(async (req, res) => {
@@ -114,8 +114,8 @@ async function runObscuraLiveCheck({ connector, owner, first, ownerCall }) {
       }
       const record = JSON.parse(await readFile(recordPath, 'utf8'));
       res.setHeader('content-type', 'text/html; charset=utf-8');
-      res.end(`<!doctype html><meta charset=utf-8><title>Obscura</title><input aria-label="内容"><button id="save">保存</button><button id="drop">保存并丢失响应</button><p id="draft"></p><p id="status">记录：${record.text || '空'} 版本:${record.version} 写入:${record.writes}</p><script>
-const input=document.querySelector('input'),draft=document.querySelector('#draft'),status=document.querySelector('#status');input.value=localStorage.getItem('draft')||'';draft.textContent='草稿：'+(input.value||'空');document.title+='|'+(localStorage.getItem('draft')||'missing');input.addEventListener('input',()=>{localStorage.setItem('draft',input.value);draft.textContent='草稿：'+input.value});document.querySelector('#save').onclick=async()=>{const r=await fetch('/save',{method:'POST',body:input.value});const v=await r.json();status.textContent='记录：'+v.text+' 版本:'+v.version+' 写入:'+v.writes};document.querySelector('#drop').onmousedown=()=>{fetch('/save',{method:'POST',headers:{'x-webenvoy-drop-response':'1'},body:input.value});const end=Date.now()+5000;while(Date.now()<end){}};
+      res.end(`<!doctype html><meta charset=utf-8><title>Obscura</title><input aria-label="内容" style="position:absolute;left:20px;top:70px;width:300px"><button id="save">保存</button><button id="drop">保存并丢失响应</button><button id="viewer" style="position:absolute;left:350px;top:120px;width:120px">Viewer 验证</button><p id="viewer-status">Viewer：待验证</p><p id="draft"></p><p id="status">记录：${record.text || '空'} 版本:${record.version} 写入:${record.writes}</p><script>
+const input=document.querySelector('input'),draft=document.querySelector('#draft'),status=document.querySelector('#status');input.value=localStorage.getItem('draft')||'';draft.textContent='草稿：'+(input.value||'空');document.title+='|'+(localStorage.getItem('draft')||'missing');input.addEventListener('input',()=>{localStorage.setItem('draft',input.value);draft.textContent='草稿：'+input.value});document.querySelector('#viewer').onclick=()=>document.querySelector('#viewer-status').textContent='Viewer：已输入';document.querySelector('#save').onclick=async()=>{const r=await fetch('/save',{method:'POST',body:input.value});const v=await r.json();status.textContent='记录：'+v.text+' 版本:'+v.version+' 写入:'+v.writes};document.querySelector('#drop').onmousedown=()=>{fetch('/save',{method:'POST',headers:{'x-webenvoy-drop-response':'1'},body:input.value});const end=Date.now()+5000;while(Date.now()<end){}};
 </script>`);
     } catch { res.statusCode = 500; res.end('failed'); }
   });
@@ -136,7 +136,26 @@ const input=document.querySelector('input'),draft=document.querySelector('#draft
     const start = await connector.call('webenvoy_operation', { idempotency_key: 'obscura-live-start', grant_id: grant.grant.grant_id, operation: 'instance.start', profile_ref: profileRef, origin, url: origin + '/', task_scope: scope([profileRef]) });
     assert.equal(start.status, 'succeeded', JSON.stringify(start));
     let sessionRef = start.result.session.runtime_session_ref;
+    const supervisorToken = appConnection.getHarborManualAuthSupervisorToken(first.harborEndpoint);
+    const viewerToken = appConnection.getHarborOwnerViewerToken(first.harborEndpoint);
+    assert(supervisorToken && viewerToken);
+    const runtimeSession = await (await fetch(`${first.harborEndpoint}/runtime/sessions/${sessionRef}`)).json();
+    assert.equal(runtimeSession.viewer_entry.access_mode, 'interactive');
+    const harborCall = async (path, token, body) => {
+      const response = await fetch(first.harborEndpoint + path, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const result = await response.json();
+      assert.equal(response.ok, true, JSON.stringify(result));
+      return result;
+    };
+    const originalHolder = start.result.session.control_lock.holder_ref;
+    const handedOff = await harborCall(`/runtime/sessions/${sessionRef}/handoff`, supervisorToken, { control_owner: 'user', expected_control_owner: 'core_task', handoff_reason: 'user_requested', holder_ref: originalHolder });
+    const frame = await harborCall(`/runtime/sessions/${sessionRef}/viewer-frame`, viewerToken, { viewer_ref: handedOff.viewer_ref });
+    const viewerInput = await harborCall(`/runtime/sessions/${sessionRef}/viewer-input`, viewerToken, { viewer_ref: handedOff.viewer_ref, frame_ref: frame.frame_ref, operation_ref: 'installed_obscura_viewer_input', action: 'click', x: 400, y: 135 });
+    assert.equal(viewerInput.status, 'completed');
+    await harborCall(`/runtime/sessions/${sessionRef}/release`, supervisorToken, { control_owner: 'user' });
+    await harborCall(`/runtime/sessions/${sessionRef}/lock`, supervisorToken, { control_owner: 'core_task', holder_ref: originalHolder });
     let snapshot = await operation('obscura-live-snapshot', 'instance.snapshot', { runtime_session_ref: sessionRef });
+    assert.match(snapshot.result.snapshot.text, /Viewer：已输入/);
     let textbox = snapshot.result.snapshot.controls.find(control => control.role === 'textbox');
     let input = await operation('obscura-live-input', 'instance.input', { runtime_session_ref: sessionRef, page_ref: snapshot.result.snapshot.page_ref, observation_ref: snapshot.result.snapshot.observation_ref, target_ref: textbox.target_ref, text: '已安装链路' });
     let save = input.result.snapshot.controls.find(control => control.name === '保存');
