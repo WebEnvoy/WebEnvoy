@@ -227,8 +227,29 @@ export function IdentityEnvironmentsPage({
     sessionGateRef.current.invalidate();
     setSessionBusy(action);
     const fallback = sessionOverrides[selected.id] ?? selected.browser.session;
-    const result = await request();
-    setSessionOverrides((current) => ({ ...current, [selected.id]: projectHarborSession(result as Parameters<typeof projectHarborSession>[0], fallback) }));
+    let result: unknown;
+    try {
+      result = await request();
+    } catch {
+      setMessage(action === "takeover" || action === "release" ? "控制权操作未确认；请刷新实例状态后重试。" : "实例操作未确认；请刷新实例状态后重试。");
+      setSessionBusy("");
+      return;
+    }
+    if (isUnavailableSessionResult(result)) {
+      setMessage(action === "takeover" || action === "release" ? "控制权操作未确认；请刷新实例状态后重试。" : "实例操作未确认；请刷新实例状态后重试。");
+      setSessionBusy("");
+      return;
+    }
+    let projected: BrowserSessionProjection;
+    try {
+      projected = projectHarborSession(result as Parameters<typeof projectHarborSession>[0], fallback);
+    } catch {
+      setMessage(action === "takeover" || action === "release" ? "控制权操作未确认；请刷新实例状态后重试。" : "实例操作未确认；请刷新实例状态后重试。");
+      setSessionBusy("");
+      return;
+    }
+    setSessionOverrides((current) => ({ ...current, [selected.id]: projected }));
+    setMessage("");
     setSessionBusy("");
   }
 
@@ -298,7 +319,7 @@ export function IdentityEnvironmentsPage({
       onOpenSettings={onOpenSettings}
       onRelease={() => void updateSession("release", () => releaseHarborSession(harborEndpoint, session.browserSessionRef))}
       onStop={() => void updateSession("stop", () => stopHarborSession(harborEndpoint, session.browserSessionRef))}
-      onTakeover={() => void updateSession("takeover", () => lockHarborSession(harborEndpoint, session.browserSessionRef, session.controller === "Core 任务运行"))}
+      onTakeover={() => void updateSession("takeover", () => lockHarborSession(harborEndpoint, session.browserSessionRef))}
       onRemove={() => setConfirmOperation("remove")}
       onDelete={() => setConfirmOperation("delete")}
     />
@@ -407,4 +428,8 @@ function normalizeViewport(value: string) { return value.replace(/\s*[x×]\s*/i,
 
 function avatarLabel(identity: IdentityEnvironmentProjection) {
   return identity.accountLabel.trim().slice(0, 2).toUpperCase() || identity.siteName.slice(0, 1);
+}
+
+function isUnavailableSessionResult(value: unknown): value is { status: "unavailable" } {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && "status" in value && value.status === "unavailable";
 }
