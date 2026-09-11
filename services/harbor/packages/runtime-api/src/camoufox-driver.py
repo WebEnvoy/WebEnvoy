@@ -41,6 +41,7 @@ PAGE_STATE_BY_OBJECT: dict[int, str] = {}
 MAX_PAGE_TOMBSTONES = 64
 NATIVE_RELATION_EPOCH: str | None = None
 NATIVE_RELATION_SAMPLE_SEQUENCE = 0
+NATIVE_RELATION_REVISION = 0
 NATIVE_RELATION_INVALID = False
 NATIVE_REQUEST_DENIED_BY_TARGET: dict[str, str] = {}
 NATIVE_REQUEST_DENIED_LIMIT = 64
@@ -374,6 +375,12 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
     public_requested_ref = request.get("page_ref")
     target_state = page_by_provider_ref(provider_requested_ref) if isinstance(provider_requested_ref, str) else page_state_for(PAGE)
     target_page = target_state.get("page") if target_state else PAGE
+    if NATIVE_PLAYWRIGHT_ADAPTER is not None and target_state is None:
+        return {"status": "unavailable", "failure_class": "page_relation_unavailable", "message": "The requested Page relation is unavailable.", "retryable": True}
+    try:
+        relation_token = native_read_relation(target_page, target_state) if target_state is not None else None
+    except NativeRelationReadError:
+        return {"status": "unavailable", "failure_class": "page_relation_unavailable", "message": "The requested Page relation is unavailable.", "retryable": True}
     target_ref = (target_state or {}).get("diagnostic_page_ref") or public_requested_ref or provider_page_ref(PAGE) or DIAGNOSTIC_PAGE_REF
     target_generation = int((target_state or {}).get("document_generation", DIAGNOSTIC_DOCUMENT_GENERATION))
     try:
@@ -387,9 +394,22 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
     target_generation = int((target_state or {}).get("document_generation", target_generation))
     origin = request.get("origin")
     current = diagnostics_url(str(target_page.url))
+    def relation_failure() -> dict[str, Any] | None:
+        try:
+            native_read_relation(target_page, target_state, relation_token) if target_state is not None else None
+        except NativeRelationReadError:
+            return {"status": "unavailable", "failure_class": "page_relation_unavailable", "message": "The requested Page relation changed during the read.", "retryable": True}
+        return None
+
     if not isinstance(origin, str) or not current or current[1] != origin:
+        failure = relation_failure()
+        if failure:
+            return failure
         return {"status": "unavailable", "failure_class": "wrong_page", "message": "The requested page origin does not match the requested origin.", "retryable": False}
     if public_requested_ref is not None and public_requested_ref != target_ref:
+        failure = relation_failure()
+        if failure:
+            return failure
         return {"status": "unavailable", "failure_class": "stale_page", "message": "The requested Page binding is stale.", "retryable": False}
     cursor = request.get("cursor")
     after = parse_diagnostic_cursor(cursor, target_ref, target_generation) if cursor is not None else None
@@ -397,6 +417,9 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
     page_events = page_events[-128:]
     oldest = page_events[0]["_cursor"] if page_events else DIAGNOSTIC_CURSOR + 1
     if cursor is not None and (after is None or after > DIAGNOSTIC_CURSOR or after < oldest - 1):
+        failure = relation_failure()
+        if failure:
+            return failure
         return {"status": "unavailable", "failure_class": "cursor_stale", "message": "The diagnostics cursor is invalid or no longer retained for this Instance Page generation.", "retryable": True}
     if after is None:
         after = oldest - 1
@@ -412,6 +435,9 @@ def diagnostics_read(request: dict[str, Any]) -> dict[str, Any]:
         else:
             network.append(public)
     last = events[-1]["_cursor"] if events else after
+    failure = relation_failure()
+    if failure:
+        return failure
     return {"status": "completed", "page_ref": target_ref, "document_generation": target_generation, "page": {"current_url": current[0], "title": title, "status": "ready"}, "cursor": diagnostic_cursor(after, target_ref, target_generation), "next_cursor": diagnostic_cursor(last, target_ref, target_generation), "truncated": (oldest > 1 and after == oldest - 1) or len(retained) > len(events), "observed_at": diagnostics_now(), "network": network, "console": console}
 
 
@@ -963,6 +989,39 @@ def page_state_for(page: Any) -> dict[str, Any] | None:
     return PAGE_STATES.get(ref) if ref else None
 
 
+class NativeRelationReadError(RuntimeError):
+    pass
+
+
+def native_relation_token(page: Any, state: dict[str, Any]) -> tuple[int, Any, Any, Any, Any, int]:
+    """Return the private identity/location tuple for one relation-bound read."""
+    return (
+        id(page),
+        state.get("native_target_id"),
+        state.get("native_browsing_context_id"),
+        state.get("native_tab_id"),
+        state.get("native_window_id"),
+        NATIVE_RELATION_REVISION,
+    )
+
+
+def native_read_relation(page: Any, state: dict[str, Any], previous: tuple[int, Any, Any, Any, Any, int] | None = None) -> tuple[int, Any, Any, Any, Any, int] | None:
+    """Refresh and optionally compare one exact private relation binding."""
+    if NATIVE_PLAYWRIGHT_ADAPTER is None:
+        return previous
+    try:
+        refresh_native_selected_page()
+    except Exception as error:
+        raise NativeRelationReadError("Native Page relation is unavailable during the read.") from error
+    current = page_state_for(page)
+    if current is not state or current.get("closed") or current.get("page") is not page:
+        raise NativeRelationReadError("Native Page relation changed during the read.")
+    token = native_relation_token(page, current)
+    if previous is not None and token != previous:
+        raise NativeRelationReadError("Native Page relation changed during the read.")
+    return token
+
+
 def provider_page_ref(page: Any) -> str | None:
     state = page_state_for(page)
     return state.get("provider_page_ref") if state else None
@@ -1120,7 +1179,7 @@ def install_page_context_handler() -> None:
 
 
 def reset_provider_pages() -> None:
-    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID, NATIVE_REQUEST_DENIED_BY_TARGET, INTERACTION_DENIED
+    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_REVISION, NATIVE_RELATION_INVALID, NATIVE_REQUEST_DENIED_BY_TARGET, INTERACTION_DENIED
     if PAGE_NAVIGATION_CONTEXT_GUARD is not None and CONTEXT is not None:
         with contextlib.suppress(Exception):
             CONTEXT.unroute("**/*", PAGE_NAVIGATION_CONTEXT_GUARD)
@@ -1137,6 +1196,7 @@ def reset_provider_pages() -> None:
     PAGE_NAVIGATION_CONTEXT_GUARD = None
     NATIVE_RELATION_EPOCH = None
     NATIVE_RELATION_SAMPLE_SEQUENCE = 0
+    NATIVE_RELATION_REVISION = 0
     NATIVE_RELATION_INVALID = False
     NATIVE_REQUEST_DENIED_BY_TARGET.clear()
 
@@ -1934,7 +1994,7 @@ def page_navigation_state(page: Any) -> dict[str, Any]:
 
 def refresh_native_selected_page() -> None:
     """Reconcile active state from the provider's native window selection."""
-    global PAGE, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID
+    global PAGE, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_REVISION, NATIVE_RELATION_INVALID
     if NATIVE_PLAYWRIGHT_ADAPTER is None or CONTEXT is None:
         return
     if NATIVE_RELATION_INVALID:
@@ -2044,6 +2104,7 @@ def refresh_native_selected_page() -> None:
     # Commit only after the full bidirectional relation and freshness checks
     # pass. This preserves the last trusted native identities on any failure.
     if handoff_states:
+        NATIVE_RELATION_REVISION += 1
         discard_interaction_snapshot()
         for state in handoff_states:
             state["diagnostic_page_ref"] = f"page_{uuid.uuid4().hex}"
@@ -2324,25 +2385,37 @@ def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
     assert state is not None
     page = state["page"]
     target = request.get("url")
-    with contextlib.redirect_stdout(sys.stderr):
-        if target is not None:
-            if not isinstance(target, str) or public_origin(target) != expected:
-                return {"failure_class": "managed_public_origin_denied"}
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            relation_token = native_read_relation(page, state)
+
+            def refresh_read_relation() -> None:
+                native_read_relation(page, state, relation_token)
+
+            if target is not None:
+                if not isinstance(target, str) or public_origin(target) != expected:
+                    return {"failure_class": "managed_public_origin_denied"}
+                install_public_navigation_guard(expected, page)
+                try:
+                    page.goto(target, wait_until="domcontentloaded", timeout=15_000)
+                except Exception:
+                    failure = public_navigation_failure(page)
+                    if failure:
+                        page_facts_result = facts_for_page(page)
+                        refresh_read_relation()
+                        return {"failure_class": failure, "page": page_facts_result}
+                    raise
+            if public_origin(str(page.url)) != expected:
+                page_facts_result = facts_for_page(page)
+                refresh_read_relation()
+                return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": page_facts_result}
+            if target is not None:
+                page_facts_result = facts_for_page(page)
+                refresh_read_relation()
+                return {"page": page_facts_result}
             install_public_navigation_guard(expected, page)
-            try:
-                page.goto(target, wait_until="domcontentloaded", timeout=15_000)
-            except Exception:
-                failure = public_navigation_failure(page)
-                if failure:
-                    return {"failure_class": failure, "page": facts_for_page(page)}
-                raise
-        if public_origin(str(page.url)) != expected:
-            return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": facts_for_page(page)}
-        if target is not None:
-            return {"page": facts_for_page(page)}
-        install_public_navigation_guard(expected, page)
-        # Fixed read-only expression. No selectors, expressions or script from an Agent.
-        observed = page.evaluate("""mw:(expected => {
+            # Fixed read-only expression. No selectors, expressions or script from an Agent.
+            observed = page.evaluate("""mw:(expected => {
           if (location.origin !== expected) return null;
           const root = document.querySelector('main, article') || document.body;
           if (!root) return null;
@@ -2359,13 +2432,19 @@ def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
             if (length > 4096) { truncated = true; break; }
           }
           return { text: parts.join(' ').slice(0, 4096), truncated };
-        })""", expected)
-        if public_origin(str(page.url)) != expected or not isinstance(observed, dict):
-            return {"failure_class": "managed_public_origin_denied"}
-        text = public_text(observed.get("text"), 4096)
-        if not text:
-            return {"failure_class": "managed_public_content_unavailable"}
-        return {"page": facts_for_page(page), "text": text, "truncated": observed.get("truncated") is True}
+            })""", expected)
+            if public_origin(str(page.url)) != expected or not isinstance(observed, dict):
+                refresh_read_relation()
+                return {"failure_class": "managed_public_origin_denied"}
+            text = public_text(observed.get("text"), 4096)
+            if not text:
+                refresh_read_relation()
+                return {"failure_class": "managed_public_content_unavailable"}
+            page_facts_result = facts_for_page(page)
+            refresh_read_relation()
+            return {"page": page_facts_result, "text": text, "truncated": observed.get("truncated") is True}
+    except NativeRelationReadError:
+        return {"failure_class": "managed_public_page_unavailable"}
 
 
 def managed_observe(request: dict[str, Any]) -> Any:
@@ -2378,16 +2457,21 @@ def managed_observe(request: dict[str, Any]) -> Any:
         raise ValueError(selection_failure)
     assert state is not None
     page = state["page"]
-    if expected is not None and public_origin(str(page.url)) != expected:
-        raise ValueError("managed_observation_origin_denied")
     expression = request.get("expression")
     if not isinstance(expression, str) or not expression:
         raise ValueError("managed_observation_expression_invalid")
-    with contextlib.redirect_stdout(sys.stderr):
-        observation = page.evaluate("mw:" + expression)
-    if expected is not None and public_origin(str(page.url)) != expected:
-        raise ValueError("managed_observation_origin_denied")
-    return observation
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            relation_token = native_read_relation(page, state)
+            if expected is not None and public_origin(str(page.url)) != expected:
+                raise ValueError("managed_observation_origin_denied")
+            observation = page.evaluate("mw:" + expression)
+            if expected is not None and public_origin(str(page.url)) != expected:
+                raise ValueError("managed_observation_origin_denied")
+            native_read_relation(page, state, relation_token)
+            return observation
+    except NativeRelationReadError:
+        raise ValueError("managed_observation_relation_unavailable") from None
 
 
 # This handle is never installed on window. The observer and ElementHandles stay
@@ -2728,6 +2812,8 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                 if current_state is None or current_state.get("closed") or current_state.get("native_active") is not True:
                     return refused("managed_interaction_page_not_active")
 
+            expected_interaction_state: dict[str, Any] | None = None
+
             def native_dispatch_failure() -> str | None:
                 if NATIVE_PLAYWRIGHT_ADAPTER is None:
                     return None
@@ -2738,6 +2824,14 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                 state = page_state_for(controlled_page)
                 if PAGE is not controlled_page or state is None or state.get("closed") or state.get("native_active") is not True:
                     return "managed_interaction_page_not_active"
+                if expected_interaction_state is not None:
+                    if (
+                        INTERACTION_STATE is not expected_interaction_state
+                        or expected_interaction_state.get("page_ref") != request.get("page_ref")
+                        or expected_interaction_state.get("observation_ref") != request.get("observation_ref")
+                        or expected_interaction_state.get("generation") != generation
+                    ):
+                        return "managed_interaction_stale_target"
                 return None
 
             failure = interaction_surface(expected)
@@ -2751,6 +2845,7 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                 state = INTERACTION_STATE
                 if state is None or request.get("page_ref") != state["page_ref"] or request.get("observation_ref") != state["observation_ref"] or generation != state["generation"]:
                     return refused("managed_interaction_stale_target")
+                expected_interaction_state = state
                 if request.get("target_ref") is not None:
                     target = state["targets"].get(request["target_ref"])
                     if target is None:
@@ -2849,12 +2944,9 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                         return refused("managed_interaction_wait_timeout")
                     PAGE.wait_for_timeout(min(50, max(1, (deadline-time.monotonic())*1000)))
             if NATIVE_PLAYWRIGHT_ADAPTER is not None:
-                try:
-                    refresh_native_selected_page()
-                except Exception:
-                    return refused("managed_interaction_relation_unavailable")
-                if PAGE is not controlled_page:
-                    return refused("managed_interaction_page_not_active")
+                failure = native_dispatch_failure()
+                if failure:
+                    return refused(failure)
             failure = interaction_surface(expected) or INTERACTION_DENIED or page_navigation_failure(controlled_page)
             if failure:
                 return refused(failure)
