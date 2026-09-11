@@ -62,6 +62,11 @@ function pageBody(service, path) {
       <p><a id="history-link" href="/history?step=link#${lower}-link">History link</a></p>`,
     script: `
       console.info("phase1-${lower}-console");
+      if (${service === "S2"}) {
+        const queryPhase1 = location.pathname === "/query" && new URLSearchParams(location.search).get("phase") === "1";
+        const fragmentS2 = location.pathname === "/query" && location.hash === "#s2-fragment";
+        if (queryPhase1 && fragmentS2) document.title = "S2 Phase 1 Page marker-q1-f1";
+      }
       fetch("/__phase1/network/${lower}", { cache: "no-store" }).catch(() => {});
       document.querySelector("#count-button").addEventListener("click", async () => {
         const value = document.querySelector("#safe-input").value;

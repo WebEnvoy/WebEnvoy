@@ -115,6 +115,12 @@ def page_path(page: dict[str, Any]) -> tuple[str, str, str]:
     return parsed.path, parsed.query, parsed.fragment
 
 
+def query_fragment_marker(page: dict[str, Any]) -> bool:
+    # Test-only evidence: the Driver intentionally redacts query/fragment from
+    # current_url, so the fixture exposes only fixed boolean state in its title.
+    return page.get("title") == "S2 Phase 1 Page marker-q1-f1"
+
+
 def driver_request(bridge: Any, operation: str, **payload: Any) -> dict[str, Any]:
     response = bridge.request(operation, **payload)
     require(isinstance(response, dict), "driver_response_invalid")
@@ -277,15 +283,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         query_url = f"{s2}/query?phase=1#s2-fragment"
         queried = page_operation(bridge, "navigate_page", b_ref, authorized, action="navigate", url=query_url, timeout_ms=args.timeout_ms)
         b_query = find_page(pages_of(queried), b_ref)
-        query_path, query, fragment = page_path(b_query)
-        require(b_query.get("status") == "ready" and query_path == "/query" and query and fragment == "s2-fragment", "query_fragment_navigation_failed")
+        query_path, _, _ = page_path(b_query)
+        require(b_query.get("status") == "ready" and query_path == "/query" and query_fragment_marker(b_query), "query_fragment_navigation_failed")
         append_step(steps, "query_fragment", "completed", ref=b_ref)
 
         current_step = "reload"
         reloaded = page_operation(bridge, "navigate_page", b_ref, authorized, action="reload", timeout_ms=args.timeout_ms)
         b_reload = find_page(pages_of(reloaded), b_ref)
-        reload_path, reload_query, reload_fragment = page_path(b_reload)
-        require(b_reload.get("status") == "ready" and reload_path == query_path and reload_query and reload_fragment == fragment, "reload_failed")
+        reload_path, _, _ = page_path(b_reload)
+        require(b_reload.get("status") == "ready" and reload_path == query_path and query_fragment_marker(b_reload), "reload_failed")
         append_step(steps, "reload", "completed", ref=b_ref)
 
         current_step = "back"
@@ -297,8 +303,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "forward"
         forwarded = page_operation(bridge, "navigate_page", b_ref, authorized, action="forward", timeout_ms=args.timeout_ms)
         b_forward = find_page(pages_of(forwarded), b_ref)
-        forward_path, forward_query, forward_fragment = page_path(b_forward)
-        require(b_forward.get("status") == "ready" and forward_path == query_path and forward_query and forward_fragment == fragment, "forward_failed")
+        forward_path, _, _ = page_path(b_forward)
+        require(b_forward.get("status") == "ready" and forward_path == query_path and query_fragment_marker(b_forward), "forward_failed")
         append_step(steps, "forward", "completed", ref=b_ref)
 
         current_step = "s3_counter_baseline"
