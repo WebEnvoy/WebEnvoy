@@ -11,7 +11,7 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
   const input = value as Record<string, unknown>;
   const common = ["action", "expected_origin", "authorized_origins", "controlled_origin", "holder_ref", "operation_ref"];
   const byAction: Record<string, string[]> = {
-    snapshot: [], click: ["page_ref", "observation_ref", "target_ref"],
+    snapshot: ["page_ref"], click: ["page_ref", "observation_ref", "target_ref"],
     input: ["page_ref", "observation_ref", "target_ref", "text"],
     press: ["page_ref", "observation_ref", "target_ref", "key"],
     scroll: ["page_ref", "observation_ref", "delta_y"],

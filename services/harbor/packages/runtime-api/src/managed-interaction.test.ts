@@ -54,6 +54,18 @@ function refused(result: ManagedInteractionResult, failure: string) {
   assert.equal(result.failure_class, failure);
 }
 
+test("Core snapshot page_ref is accepted and stale Page refs are refused before Provider dispatch", async () => {
+  const f = await setup();
+  try {
+    const observed = await f.snapshot();
+    const accepted = await f.runtime.operateManagedInteraction(f.a, f.request("snapshot", { page_ref: observed.page_ref }));
+    assert.equal(accepted.status, "completed");
+    const callsBeforeStale = f.calls.length;
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot", { page_ref: "page:wrong" })), "managed_interaction_observation_stale");
+    assert.equal(f.calls.length, callsBeforeStale);
+  } finally { await f.close(); }
+});
+
 test("fixture HTTP interaction rejects unprivileged callers and malformed scope/actions without dispatch; receipts require supervisor", async () => {
   const f = await setup();
   const token = Buffer.alloc(32, 23).toString("base64url");
