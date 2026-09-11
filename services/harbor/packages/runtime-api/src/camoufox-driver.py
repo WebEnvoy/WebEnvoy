@@ -1159,13 +1159,13 @@ def set_active_provider_page(page: Any) -> dict[str, Any]:
 
 
 def context_page_created(page: Any) -> None:
-    if page.is_closed():
-        return
     opener = None
     with contextlib.suppress(Exception):
         opener = page.opener
         if callable(opener):
             opener = opener()
+    if page.is_closed():
+        return
     register_provider_page(page, opener)
     with contextlib.suppress(Exception):
         attach_diagnostics(page)

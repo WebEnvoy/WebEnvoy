@@ -492,6 +492,15 @@ closed_context_page = RelationPage("closed-context")
 closed_context_page.is_closed = lambda: True
 DRIVER.context_page_created(closed_context_page)
 assert not DRIVER.PAGE_STATES and id(closed_context_page) not in DRIVER.PAGE_STATE_BY_OBJECT
+opener_race_page = RelationPage("opener-race")
+
+def close_during_opener() -> None:
+    opener_race_page.is_closed = lambda: True
+
+opener_race_page.opener = close_during_opener
+assert not opener_race_page.is_closed()
+DRIVER.context_page_created(opener_race_page)
+assert DRIVER.page_state_for(opener_race_page) is None
 open_context_page = RelationPage("open-context")
 DRIVER.context_page_created(open_context_page)
 assert DRIVER.page_state_for(open_context_page) is not None
