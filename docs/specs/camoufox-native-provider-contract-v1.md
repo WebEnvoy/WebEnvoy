@@ -8,7 +8,7 @@
 > 上位语义：[Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md)、[Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)
 > 架构依据：[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 
-本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代 #504 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
+本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation，以及一个固定的 Page reload 适配。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代 #504 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
 
 ## 1. 范围、owner 和边界
 
@@ -16,7 +16,7 @@
 
 ```text
 qualified Camoufox source app
-        │  read-only copy + exact three-entry patch
+        │  read-only copy + exact four-entry patch
         ▼
 independent native test artifact + manifest
         │
@@ -78,10 +78,11 @@ Builder 产生的 manifest schema 是 `webenvoy.camoufox-native/v1`，并且必�
 1. 来源 app、`Info.plist`、executable、Resources、`application.ini`、`properties.json` 和 `omni.ja` 都是 regular file/directory；来源不能是 symlink。
 2. 来源浏览器严格是 Camoufox `0.5.6`、browser `152.0.4-beta.30`，并匹配 builder 中固定的 source hash 集。
 3. 输出目录此前不存在，且与来源目录分离；builder 使用独立 copy，不在来源 app 内写入、删除或替换文件。
-4. 只在 `omni.ja` 的三个精确 entry 上执行 anchored textual patch：
+4. 只在 `omni.ja` 的四个精确 entry 上执行 anchored textual patch：
    - `chrome/juggler/content/protocol/Protocol.js`
    - `chrome/juggler/content/protocol/BrowserHandler.js`
    - `chrome/juggler/content/TargetRegistry.js`
+   - `chrome/juggler/content/protocol/PageHandler.js`
 5. 输出 app 的 bundle identifier/name 被改为上面的 test identity；Resources 中的 `properties.json` 另外复制到 `Contents/MacOS/properties.json`，且两份内容必须相同。
 6. manifest 的 `test_only` 必须为 `true`，`distribution_or_production_use_authorized` 必须为 `false`，`patch_id` 必须精确匹配；builder 会拒绝缺失/anchor 不唯一/source hash 不匹配，installed-binding preflight 会拒绝 manifest/output hash/版本不兼容。这个 preflight 是构件绑定门槛，不应被误读为 Python Driver 自己解析 manifest。
 
@@ -137,7 +138,7 @@ There is no in-process native swap, automatic downgrade, Provider switch, Profil
 
 ## 4. Private protocol schema
 
-The patched Juggler Browser domain declares exactly three private methods. `browserContextId` is dispatcher-internal. The optional `timeout` declaration exists only for Playwright's internal progress/deadline plumbing; Harbor callers cannot provide it as a user setting, it is not persisted, and the native handlers do not use an arbitrary caller timeout. The adapter obtains the normal BrowserContext timeout calculator from the private Playwright context.
+The patched Juggler Browser domain declares exactly three private methods. The patched Page domain also uses a fixed native reload implementation: it reloads the target's live `BrowsingContext` directly and does not call `activateAndRun` or the browser `Browser:Reload` command. `browserContextId` is dispatcher-internal. The optional `timeout` declaration exists only for Playwright's internal progress/deadline plumbing; Harbor callers cannot provide it as a user setting, it is not persisted, and the native handlers do not use an arbitrary caller timeout. The adapter obtains the normal BrowserContext timeout calculator from the private Playwright context.
 
 ### 4.1 `Browser.getWebEnvoyNativeSnapshot`
 
@@ -215,6 +216,17 @@ safeTargetId: string             # exact input safeTargetId
 ```
 
 The operation owns no last-Page policy and is only the private primitive for a proven same-window safe return. Harbor decides whether a public close is allowed before calling it.
+
+### 4.4 `Page.reload` artifact adapter
+
+The artifact's `PageHandler.js` replaces the stock Juggler reload body with a
+direct call to the target's live `linkedBrowser().browsingContext.reload()`
+using `Ci.nsIWebNavigation.LOAD_FLAGS_NONE`. It preserves Playwright's existing
+navigation wait and lifecycle-event handling, but does not call
+`PageTarget.activateAndRun()` or `Browser:Reload`. This keeps reload bound to the
+already-validated target/tab relation and avoids the Camoufox browser command's
+remoteness/history side effect. The patch is test-artifact-only; the installed
+Camoufox app is never modified.
 
 ## 5. Snapshot and Page mapping semantics
 
@@ -314,7 +326,7 @@ Timeouts are bounded by the private Playwright BrowserContext timeout policy. Th
 
 ### 7.1 Legacy and rollback compatibility
 
-The v1 reader is exact-major-version compatible only. A legacy stack without these three native methods is not a v1-compatible runtime: the current strict Driver launch/operation must reject it rather than advertise an active single-Page fallback. Historical single-Page behavior may explain an older stack's past capability, but is not an active #504 promise and cannot satisfy v1 multi-Page active mapping, background creation or safe-return close. Harbor must not invent a compatibility mapping.
+The v1 reader is exact-major-version compatible only. A legacy stack without these three native methods and the fixed Page reload patch is not a v1-compatible runtime: the current strict Driver launch/operation must reject it rather than advertise an active single-Page fallback. Historical single-Page behavior may explain an older stack's past capability, but is not an active #504 promise and cannot satisfy v1 multi-Page active mapping, background creation or safe-return close. Harbor must not invent a compatibility mapping.
 
 An owner may roll back before launch by selecting a matching legacy artifact/driver pair. Rollback is outside the running v1 protocol, leaves Profile/source/site-packages unchanged, and does not convert an incomplete v1 live operation into success. A future v2 requires a new versioned contract and an explicit compatible builder/adapter pair.
 

@@ -2,7 +2,7 @@
 """Build a pinned, test-only Camoufox artifact for Harbor phase-1 validation.
 
 The source app and existing Profiles are never modified.  The output is a
-separate app with exactly three Juggler entries patched in omni.ja and a
+separate app with exactly four Juggler entries patched in omni.ja and a
 provenance manifest that explicitly denies production/distribution use.
 """
 
@@ -33,6 +33,7 @@ PATCHED_ENTRIES = (
     "chrome/juggler/content/protocol/Protocol.js",
     "chrome/juggler/content/protocol/BrowserHandler.js",
     "chrome/juggler/content/TargetRegistry.js",
+    "chrome/juggler/content/protocol/PageHandler.js",
 )
 
 
@@ -418,6 +419,43 @@ def patch_target_registry(source: str) -> str:
     return source.replace(method_anchor, method_anchor + methods, 1)
 
 
+def patch_page_handler(source: str) -> str:
+    anchor = """  async ['Page.reload']() {
+    await this._pageTarget.activateAndRun(() => {
+      const browser = this._pageTarget._tab.linkedBrowser;
+      // Camoufox: Firefox 146's Browser:Reload command is a no-op on about:blank
+      // (no history entry to reload). Fall back to a forced reloadWithFlags via
+      // browsingContext so the load event still fires and init scripts run.
+      try {
+        const uri = browser.currentURI?.spec;
+        if (uri === 'about:blank' || !uri) {
+          const bc = browser.browsingContext;
+          if (bc && typeof bc.reload === 'function') {
+            const Ci = Components.interfaces;
+            bc.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE);
+            return;
+          }
+        }
+      } catch (e) {
+        dump(`juggler: reload-fallback failed: ${e}\\n`);
+      }
+      const doc = browser.ownerDocument;
+      doc.getElementById('Browser:Reload').doCommand();
+    });
+  }
+"""
+    replacement = """  async ['Page.reload']() {
+    const browsingContext = this._pageTarget.linkedBrowser().browsingContext;
+    if (!browsingContext || typeof browsingContext.reload !== 'function')
+      throw new Error('Page reload has no live BrowsingContext');
+    browsingContext.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE);
+  }
+"""
+    if source.count(anchor) != 1:
+        raise BuildError("PageHandler.js Page.reload anchor is not unique")
+    return source.replace(anchor, replacement, 1)
+
+
 def patch_entries(omni: Path) -> tuple[Path, dict[str, str], dict[str, str]]:
     if sha256(omni) != SOURCE_OMNI_SHA256_PIN:
         raise BuildError("source omni.ja changed before patching")
@@ -427,7 +465,7 @@ def patch_entries(omni: Path) -> tuple[Path, dict[str, str], dict[str, str]]:
             raise BuildError("source omni.ja is missing a pinned Juggler entry")
         payloads = {name: archive.read(name) for name in members}
         before = {name: hashlib.sha256(payloads[name]).hexdigest() for name in PATCHED_ENTRIES}
-        patchers = (patch_protocol, patch_browser_handler, patch_target_registry)
+        patchers = (patch_protocol, patch_browser_handler, patch_target_registry, patch_page_handler)
         for name, patcher in zip(PATCHED_ENTRIES, patchers):
             payloads[name] = patcher(payloads[name].decode("utf-8")).encode("utf-8")
         after = {name: hashlib.sha256(payloads[name]).hexdigest() for name in PATCHED_ENTRIES}
@@ -547,7 +585,7 @@ def self_check(source: Path) -> dict[str, object]:
     executable, hashes = check_source(source)
     with zipfile.ZipFile(source / "Contents" / "Resources" / "omni.ja") as archive:
         values = {name: archive.read(name).decode("utf-8") for name in PATCHED_ENTRIES}
-    patched = (patch_protocol(values[PATCHED_ENTRIES[0]]), patch_browser_handler(values[PATCHED_ENTRIES[1]]), patch_target_registry(values[PATCHED_ENTRIES[2]]))
+    patched = (patch_protocol(values[PATCHED_ENTRIES[0]]), patch_browser_handler(values[PATCHED_ENTRIES[1]]), patch_target_registry(values[PATCHED_ENTRIES[2]]), patch_page_handler(values[PATCHED_ENTRIES[3]]))
     checks = {
         "protocol_snapshot": "getWebEnvoyNativeSnapshot" in patched[0],
         "protocol_background_page": "newPageInWindow" in patched[0],
@@ -558,6 +596,7 @@ def self_check(source: Path) -> dict[str, object]:
         "registry_background_page": "TabManager.addTab" in patched[2],
         "registry_safe_return_close": "closePageWithSafeReturn" in patched[2] and "selectedTab" in patched[2] and "TabManager.removeTab" in patched[2],
         "registry_native_context_ownership": "_userContextIdToBrowserContext.get(tab.userContextId)" in patched[2],
+        "page_reload_uses_browsing_context": "browsingContext.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE)" in patched[3] and "activateAndRun" not in patched[3].split("  async ['Page.reload']()", 1)[1].split("  async ['Page.describeNode']", 1)[0],
         "source_unchanged": sha256(source / "Contents" / "Resources" / "omni.ja") == SOURCE_OMNI_SHA256_PIN,
         "existing_output_parent_traversal_safe": output_path_safety_check(),
     }

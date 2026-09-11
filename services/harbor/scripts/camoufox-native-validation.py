@@ -30,6 +30,12 @@ PROPERTIES_SHA256_PIN = "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a354
 MANIFEST_SCHEMA = "webenvoy.camoufox-native/v1"
 ARTIFACT_BUNDLE_IDENTIFIER = "com.webenvoy.camoufox.native504"
 ARTIFACT_BUNDLE_NAME = "WebEnvoy Camoufox Native Test"
+PATCHED_ENTRIES = frozenset({
+    "chrome/juggler/content/protocol/Protocol.js",
+    "chrome/juggler/content/protocol/BrowserHandler.js",
+    "chrome/juggler/content/TargetRegistry.js",
+    "chrome/juggler/content/protocol/PageHandler.js",
+})
 MAX_RESPONSE_BYTES = 256 * 1024
 
 
@@ -101,6 +107,9 @@ def verify_artifact(app: Path) -> tuple[Path, Path, str]:
         or manifest.get("patch_id") != "managed-native-snapshot"
     ):
         raise ValidationError("native artifact manifest is not an eligible test artifact")
+    patched_entries = manifest.get("patched_entries")
+    if not isinstance(patched_entries, dict) or frozenset(patched_entries) != PATCHED_ENTRIES:
+        raise ValidationError("native artifact patched entry set is not qualified")
     provider = manifest.get("provider")
     if not isinstance(provider, dict) or provider.get("camoufox_version") != CAMOUFOX_VERSION_PIN or provider.get("browser_version") != BROWSER_VERSION_PIN:
         raise ValidationError("native artifact provider pins do not match")
@@ -270,6 +279,12 @@ class Bridge:
                 self.request("close")
             except BaseException:
                 self.process.terminate()
+            finally:
+                if self.process.stdin is not None:
+                    try:
+                        self.process.stdin.close()
+                    except (OSError, ValueError):
+                        pass
         try:
             self.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
