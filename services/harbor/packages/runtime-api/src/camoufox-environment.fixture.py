@@ -593,3 +593,82 @@ DRIVER.PAGE = None
 DRIVER.CONTEXT = None
 DRIVER.reset_provider_pages()
 print("camoufox per-Page/opener interaction guard fixture passed")
+
+# Managed public reads and observations must use the exact private Page binding
+# supplied by Harbor.  The active Page is deliberately a different window.
+class PublicPage:
+    def __init__(self, url: str, text: str) -> None:
+        self.url, self.text, self.routes, self.evaluations = url, text, [], 0
+        self.main_frame = object()
+
+    def title(self) -> str:
+        return self.text[:64]
+
+    def evaluate(self, expression: str, *_args):
+        assert expression.startswith("mw:")
+        self.evaluations += 1
+        if "location.origin !== expected" in expression:
+            return {"text": self.text, "truncated": False}
+        return {"current_url": self.url, "title": self.title(), "ready_state": "complete", "stable_id": None}
+
+    def route(self, _pattern, handler) -> None:
+        self.routes.append(handler)
+
+    def unroute(self, _pattern, handler) -> None:
+        if handler in self.routes:
+            self.routes.remove(handler)
+
+    def is_closed(self) -> bool:
+        return False
+
+    def goto(self, url: str, **_kwargs) -> None:
+        self.url = url
+
+
+DRIVER.reset_provider_pages()
+active_public_page = PublicPage("https://one.example/active", "active text")
+background_public_page = PublicPage("https://two.example/background", "background text")
+DRIVER.PAGE = active_public_page
+active_public_state = DRIVER.register_provider_page(active_public_page)
+background_public_state = DRIVER.register_provider_page(background_public_page)
+background_ref = background_public_state["provider_page_ref"]
+public_result = DRIVER.managed_public_page({
+    "provider_page_ref": background_ref,
+    "expected_origin": "https://two.example",
+})
+assert public_result["text"] == "background text"
+assert public_result["page"]["current_url"] == "https://two.example/background"
+assert active_public_page.evaluations == 0
+assert DRIVER.managed_public_page({
+    "provider_page_ref": background_ref,
+    "expected_origin": "https://one.example",
+})["failure_class"] == "managed_public_origin_denied"
+assert background_public_page.evaluations == 1
+assert DRIVER.managed_public_page({"expected_origin": "https://one.example"})["failure_class"] == "page_selection_required"
+assert active_public_page.evaluations == 0
+observation = DRIVER.managed_observe({
+    "provider_page_ref": background_ref,
+    "expected_origin": "https://two.example",
+    "expression": "(() => ({ current_url: location.href }))()",
+})
+assert observation["current_url"] == "https://two.example/background"
+try:
+    DRIVER.managed_observe({
+        "provider_page_ref": background_ref,
+        "expected_origin": "https://one.example",
+        "expression": "(() => ({}))()",
+    })
+except ValueError as error:
+    assert "managed_observation_origin_denied" in str(error)
+else:
+    raise AssertionError("wrong-origin managed observation was accepted")
+background_public_state["closed"] = True
+assert DRIVER.managed_public_page({
+    "provider_page_ref": background_ref,
+    "expected_origin": "https://two.example",
+})["failure_class"] == "managed_public_page_unavailable"
+DRIVER.clear_public_navigation_guard()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.reset_provider_pages()
+print("camoufox managed Page binding fixture passed")

@@ -48,9 +48,9 @@ EXECUTABLE_PATH = ""
 LAUNCH_EXECUTABLE_PATH = ""
 LAUNCH_LAYOUT_DIR = ""
 PROPERTIES_SOURCE = "adjacent"
-PUBLIC_NAVIGATION_GUARD: Any = None
-PUBLIC_NAVIGATION_ORIGIN = ""
-PUBLIC_NAVIGATION_DENIED: str | None = None
+PUBLIC_NAVIGATION_GUARDS: dict[str, Any] = {}
+PUBLIC_NAVIGATION_ALLOWED_ORIGINS: dict[str, str] = {}
+PUBLIC_NAVIGATION_DENIED: dict[str, str] = {}
 PAGE_NAVIGATION_GUARDS: dict[str, Any] = {}
 PAGE_NAVIGATION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
 PAGE_NAVIGATION_DENIED: dict[str, str] = {}
@@ -58,6 +58,7 @@ PAGE_NAVIGATION_CONTEXT_GUARD: Any = None
 INTERACTION_GUARD: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
 PAGE_INTERACTION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
+INTERACTION_DENIED: str | None = None
 
 
 def native_playwright_adapter_module() -> Any:
@@ -1046,10 +1047,16 @@ def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
         guard = PAGE_NAVIGATION_GUARDS.pop(ref, None)
         PAGE_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
         PAGE_NAVIGATION_DENIED.pop(ref, None)
+        public_guard = PUBLIC_NAVIGATION_GUARDS.pop(ref, None)
+        PUBLIC_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
+        PUBLIC_NAVIGATION_DENIED.pop(ref, None)
         PAGE_INTERACTION_ALLOWED_ORIGINS.pop(ref, None)
         if guard is not None:
             with contextlib.suppress(Exception):
                 page.unroute("**/*", guard)
+        if public_guard is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", public_guard)
         if page is PAGE:
             # Native close is not an activation signal. Leave active unset
             # until a provider focus event or an explicit page.activate.
@@ -1105,7 +1112,7 @@ def install_page_context_handler() -> None:
 
 
 def reset_provider_pages() -> None:
-    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID
+    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID, INTERACTION_DENIED
     if PAGE_NAVIGATION_CONTEXT_GUARD is not None and CONTEXT is not None:
         with contextlib.suppress(Exception):
             CONTEXT.unroute("**/*", PAGE_NAVIGATION_CONTEXT_GUARD)
@@ -1114,7 +1121,11 @@ def reset_provider_pages() -> None:
     PAGE_NAVIGATION_GUARDS.clear()
     PAGE_NAVIGATION_ALLOWED_ORIGINS.clear()
     PAGE_NAVIGATION_DENIED.clear()
+    PUBLIC_NAVIGATION_GUARDS.clear()
+    PUBLIC_NAVIGATION_ALLOWED_ORIGINS.clear()
+    PUBLIC_NAVIGATION_DENIED.clear()
     PAGE_INTERACTION_ALLOWED_ORIGINS.clear()
+    INTERACTION_DENIED = None
     PAGE_CONTEXT_HANDLER = None
     PAGE_NAVIGATION_CONTEXT_GUARD = None
     NATIVE_RELATION_EPOCH = None
@@ -1124,6 +1135,37 @@ def reset_provider_pages() -> None:
 
 def page_by_provider_ref(ref: Any) -> dict[str, Any] | None:
     return PAGE_STATES.get(ref) if isinstance(ref, str) else None
+
+
+def managed_page_state(request: dict[str, Any], selection_failure: str, unavailable_failure: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve a managed operation to one exact Page binding.
+
+    An explicit Provider handle is authoritative.  The legacy omitted-handle
+    path is kept only for a single Page; an active global Page never selects
+    one of several live Pages.
+    """
+    requested_ref = request.get("provider_page_ref")
+    if requested_ref is not None:
+        state = page_by_provider_ref(requested_ref)
+        if state is None or state.get("closed") or state.get("page") is None:
+            return None, unavailable_failure
+        page = state["page"]
+        with contextlib.suppress(Exception):
+            if page.is_closed():
+                return None, unavailable_failure
+        return state, None
+
+    live = [state for state in PAGE_STATES.values() if not state.get("closed") and state.get("page") is not None]
+    if len(live) > 1:
+        return None, selection_failure
+    if live:
+        return live[0], None
+    if PAGE is None:
+        return None, unavailable_failure
+    state = page_state_for(PAGE) or register_provider_page(PAGE)
+    if state.get("closed"):
+        return None, unavailable_failure
+    return state, None
 
 
 def xhs_probe_expression() -> str:
@@ -1979,79 +2021,120 @@ def navigate_page(request: dict[str, Any]) -> dict[str, Any]:
     return {"page": page_navigation_state(page), "pages": all_page_states(), **({"failure_class": failure} if failure else {})}
 
 
-def install_public_navigation_guard(expected_origin: str) -> None:
-    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
-    PUBLIC_NAVIGATION_ORIGIN = expected_origin
-    PUBLIC_NAVIGATION_DENIED = None
-    if PUBLIC_NAVIGATION_GUARD is not None:
+def install_public_navigation_guard(expected_origin: str, page: Any = None) -> None:
+    """Install a single-origin guard on one exact Page object."""
+    page = PAGE if page is None else page
+    if page is None:
+        raise RuntimeError("Camoufox Driver has no Page for public navigation.")
+    state = page_state_for(page) or register_provider_page(page)
+    page_ref = state["provider_page_ref"]
+    previous = PUBLIC_NAVIGATION_GUARDS.get(page_ref)
+    previous_origin = PUBLIC_NAVIGATION_ALLOWED_ORIGINS.get(page_ref)
+    PUBLIC_NAVIGATION_ALLOWED_ORIGINS[page_ref] = expected_origin
+    PUBLIC_NAVIGATION_DENIED.pop(page_ref, None)
+    if previous is not None and previous_origin == expected_origin:
         return
+    if previous is not None:
+        with contextlib.suppress(Exception):
+            page.unroute("**/*", previous)
+
     def guard(route: Any) -> None:
-        global PUBLIC_NAVIGATION_DENIED
         request = route.request
-        if not request.is_navigation_request() or request.frame != PAGE.main_frame:
-            route.continue_()
-            return
-        if public_origin(request.url) != PUBLIC_NAVIGATION_ORIGIN or request.method != "GET":
-            PUBLIC_NAVIGATION_DENIED = "managed_public_navigation_blocked"
-            route.abort("blockedbyclient")
-            return
-        # Playwright does not route redirected requests individually. Intercept
-        # this original Page navigation response without following ANY redirect,
-        # then render it in the same Page. Never export the response body.
-        response = None
         try:
-            response = route.fetch(max_redirects=0, timeout=15_000)
-            if 300 <= response.status < 400:
-                PUBLIC_NAVIGATION_DENIED = "managed_public_redirect_blocked"
+            if not request.is_navigation_request():
+                route.continue_()
+                return
+            # A Page route is already scoped by Playwright to this Page.  Use
+            # the resolved relation when available, but retain the closure's
+            # Page for the pre-initialization navigation race.
+            request_page_object = request_page_with_fallback(request, False)
+            if request_page_object is not None and request_page_object is not page:
+                route.continue_()
+                return
+            frame = None
+            with contextlib.suppress(Exception):
+                frame = request.frame
+            if frame is not None and frame is not page.main_frame:
+                route.continue_()
+                return
+            request_origin = public_origin(str(getattr(request, "url", "")))
+            if request_origin != expected_origin or request.method != "GET":
+                PUBLIC_NAVIGATION_DENIED[page_ref] = "managed_public_navigation_blocked"
                 route.abort("blockedbyclient")
-            else:
-                route.fulfill(response=response)
+                return
+            # Playwright does not route redirected requests individually. Intercept
+            # this original Page navigation response without following ANY redirect,
+            # then render it in the same Page. Never export the response body.
+            response = None
+            try:
+                response = route.fetch(max_redirects=0, timeout=15_000)
+                if 300 <= response.status < 400:
+                    PUBLIC_NAVIGATION_DENIED[page_ref] = "managed_public_redirect_blocked"
+                    route.abort("blockedbyclient")
+                else:
+                    route.fulfill(response=response)
+            except Exception:
+                PUBLIC_NAVIGATION_DENIED[page_ref] = "managed_public_navigation_unavailable"
+                route.abort("failed")
+            finally:
+                if response is not None:
+                    response.dispose()
         except Exception:
-            PUBLIC_NAVIGATION_DENIED = "managed_public_navigation_unavailable"
-            route.abort("failed")
-        finally:
-            if response is not None:
-                response.dispose()
-    PUBLIC_NAVIGATION_GUARD = guard
-    PAGE.route("**/*", guard)
+            PUBLIC_NAVIGATION_DENIED[page_ref] = "managed_public_navigation_unavailable"
+            with contextlib.suppress(Exception):
+                route.abort("failed")
+    PUBLIC_NAVIGATION_GUARDS[page_ref] = guard
+    page.route("**/*", guard)
+
+
+def public_navigation_failure(page: Any) -> str | None:
+    ref = provider_page_ref(page)
+    return PUBLIC_NAVIGATION_DENIED.get(ref) if ref else None
 
 
 def clear_public_navigation_guard() -> dict[str, Any]:
-    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
-    if PUBLIC_NAVIGATION_GUARD is not None and PAGE is not None:
-        PAGE.unroute("**/*", PUBLIC_NAVIGATION_GUARD)
+    for page_ref, guard in list(PUBLIC_NAVIGATION_GUARDS.items()):
+        state = PAGE_STATES.get(page_ref)
+        page = state.get("page") if state else None
+        if page is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", guard)
+    PUBLIC_NAVIGATION_GUARDS.clear()
+    PUBLIC_NAVIGATION_ALLOWED_ORIGINS.clear()
+    PUBLIC_NAVIGATION_DENIED.clear()
     clear_interaction_guard()
-    PUBLIC_NAVIGATION_GUARD = None
-    PUBLIC_NAVIGATION_ORIGIN = ""
-    PUBLIC_NAVIGATION_DENIED = None
     return {"cleared": True}
 
 
 def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
-    if PAGE is None:
-        raise RuntimeError("Camoufox Driver has no active page.")
     expected = request.get("expected_origin")
     if not isinstance(expected, str) or public_origin(expected) != expected:
         return {"failure_class": "managed_public_origin_denied"}
+    state, selection_failure = managed_page_state(request, "page_selection_required", "managed_public_page_unavailable")
+    if selection_failure:
+        return {"failure_class": selection_failure}
+    assert state is not None
+    page = state["page"]
     target = request.get("url")
     with contextlib.redirect_stdout(sys.stderr):
         if target is not None:
             if not isinstance(target, str) or public_origin(target) != expected:
                 return {"failure_class": "managed_public_origin_denied"}
-            install_public_navigation_guard(expected)
+            install_public_navigation_guard(expected, page)
             try:
-                PAGE.goto(target, wait_until="domcontentloaded", timeout=15_000)
+                page.goto(target, wait_until="domcontentloaded", timeout=15_000)
             except Exception:
-                if PUBLIC_NAVIGATION_DENIED:
-                    return {"failure_class": PUBLIC_NAVIGATION_DENIED, "page": page_facts()}
+                failure = public_navigation_failure(page)
+                if failure:
+                    return {"failure_class": failure, "page": facts_for_page(page)}
                 raise
-        if public_origin(str(PAGE.url)) != expected:
-            return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": page_facts()}
+        if public_origin(str(page.url)) != expected:
+            return {"failure_class": "managed_public_navigation_redirected" if target is not None else "managed_public_origin_denied", "page": facts_for_page(page)}
         if target is not None:
-            return {"page": page_facts()}
-        install_public_navigation_guard(expected)
+            return {"page": facts_for_page(page)}
+        install_public_navigation_guard(expected, page)
         # Fixed read-only expression. No selectors, expressions or script from an Agent.
-        observed = PAGE.evaluate("""mw:(expected => {
+        observed = page.evaluate("""mw:(expected => {
           if (location.origin !== expected) return null;
           const root = document.querySelector('main, article') || document.body;
           if (!root) return null;
@@ -2069,12 +2152,34 @@ def managed_public_page(request: dict[str, Any]) -> dict[str, Any]:
           }
           return { text: parts.join(' ').slice(0, 4096), truncated };
         })""", expected)
-        if public_origin(str(PAGE.url)) != expected or not isinstance(observed, dict):
+        if public_origin(str(page.url)) != expected or not isinstance(observed, dict):
             return {"failure_class": "managed_public_origin_denied"}
         text = public_text(observed.get("text"), 4096)
         if not text:
             return {"failure_class": "managed_public_content_unavailable"}
-        return {"page": page_facts(), "text": text, "truncated": observed.get("truncated") is True}
+        return {"page": facts_for_page(page), "text": text, "truncated": observed.get("truncated") is True}
+
+
+def managed_observe(request: dict[str, Any]) -> Any:
+    expected = request.get("expected_origin")
+    if expected is not None:
+        if not isinstance(expected, str) or public_origin(expected) != expected:
+            raise ValueError("managed_observation_origin_denied")
+    state, selection_failure = managed_page_state(request, "page_selection_required", "managed_observation_unavailable")
+    if selection_failure:
+        raise ValueError(selection_failure)
+    assert state is not None
+    page = state["page"]
+    if expected is not None and public_origin(str(page.url)) != expected:
+        raise ValueError("managed_observation_origin_denied")
+    expression = request.get("expression")
+    if not isinstance(expression, str) or not expression:
+        raise ValueError("managed_observation_expression_invalid")
+    with contextlib.redirect_stdout(sys.stderr):
+        observation = page.evaluate("mw:" + expression)
+    if expected is not None and public_origin(str(page.url)) != expected:
+        raise ValueError("managed_observation_origin_denied")
+    return observation
 
 
 # This handle is never installed on window. The observer and ElementHandles stay
@@ -2164,7 +2269,7 @@ def discard_interaction_snapshot() -> None:
 
 
 def clear_interaction_guard() -> None:
-    global INTERACTION_GUARD
+    global INTERACTION_GUARD, INTERACTION_DENIED
     if INTERACTION_GUARD is not None:
         if PAGE is not None:
             with contextlib.suppress(Exception):
@@ -2173,23 +2278,26 @@ def clear_interaction_guard() -> None:
             with contextlib.suppress(Exception):
                 CONTEXT.unroute("**/*", INTERACTION_GUARD)
     INTERACTION_GUARD = None
+    INTERACTION_DENIED = None
     discard_interaction_snapshot()
 
 
 def detach_public_navigation_guard_for_interaction() -> None:
-    """Remove the single-origin management guard before a multi-origin action."""
-    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
-    if PUBLIC_NAVIGATION_GUARD is not None and PAGE is not None:
-        with contextlib.suppress(Exception):
-            PAGE.unroute("**/*", PUBLIC_NAVIGATION_GUARD)
-    PUBLIC_NAVIGATION_GUARD = None
-    PUBLIC_NAVIGATION_ORIGIN = ""
-    PUBLIC_NAVIGATION_DENIED = None
+    """Remove public-page guards before a multi-origin interaction."""
+    for page_ref, guard in list(PUBLIC_NAVIGATION_GUARDS.items()):
+        state = PAGE_STATES.get(page_ref)
+        page = state.get("page") if state else None
+        if page is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", guard)
+    PUBLIC_NAVIGATION_GUARDS.clear()
+    PUBLIC_NAVIGATION_ALLOWED_ORIGINS.clear()
+    PUBLIC_NAVIGATION_DENIED.clear()
 
 
 def install_interaction_guard(expected: str, authorized_origins: Any = None) -> None:
     """Guard every request by its Page's own or opener-inherited origin set."""
-    global INTERACTION_GUARD, PUBLIC_NAVIGATION_DENIED
+    global INTERACTION_GUARD, INTERACTION_DENIED
     if not valid_public_origin(expected):
         raise ValueError("Managed interaction expected origin is invalid.")
     active_state = ensure_provider_page(PAGE)
@@ -2219,7 +2327,7 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
         return
 
     def guard(route: Any) -> None:
-        global PUBLIC_NAVIGATION_DENIED
+        global INTERACTION_DENIED
         request = route.request
         try:
             # Do not fall back to PAGE here: an unresolved request relation
@@ -2232,7 +2340,7 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
                 # opener; an unrelated unknown Page remains outside scope.
                 target_state = ensure_provider_page(target_page)
             if target_state is None:
-                PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
+                INTERACTION_DENIED = "managed_interaction_window_unsupported"
                 route.abort("blockedbyclient")
                 return
             target_ref = target_state["provider_page_ref"]
@@ -2242,17 +2350,17 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
                 # compatibility branch. Managed calls pre-bind active scope.
                 allowed_for_page = {expected}
             if allowed_for_page is None:
-                PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
+                INTERACTION_DENIED = "managed_interaction_window_unsupported"
                 route.abort("blockedbyclient")
                 return
             request_origin = public_origin(str(getattr(request, "url", "")))
             if request_origin not in allowed_for_page:
-                PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+                INTERACTION_DENIED = "managed_interaction_request_blocked"
                 PAGE_NAVIGATION_DENIED[target_ref] = "managed_interaction_request_blocked"
                 route.abort("blockedbyclient")
                 return
         except Exception:
-            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+            INTERACTION_DENIED = "managed_interaction_request_blocked"
             route.abort("blockedbyclient")
             return
         # The controlled Page and a Provider-registered background popup may
@@ -2263,11 +2371,11 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
             response = route.fetch(max_redirects=0, timeout=10_000)
             if 300 <= response.status < 400:
                 if not follow_authorized_redirect(route, response, request, allowed_for_page, "managed_interaction_redirect_blocked"):
-                    PUBLIC_NAVIGATION_DENIED = "managed_interaction_redirect_blocked"
+                    INTERACTION_DENIED = "managed_interaction_redirect_blocked"
             else:
                 route.fulfill(response=response)
         except Exception:
-            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+            INTERACTION_DENIED = "managed_interaction_request_blocked"
             route.abort("failed")
         finally:
             if response is not None:
@@ -2501,7 +2609,7 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                     return refused("managed_interaction_relation_unavailable")
                 if PAGE is not controlled_page:
                     return refused("managed_interaction_page_not_active")
-            failure = interaction_surface(expected) or PUBLIC_NAVIGATION_DENIED or page_navigation_failure(controlled_page)
+            failure = interaction_surface(expected) or INTERACTION_DENIED or page_navigation_failure(controlled_page)
             if failure:
                 return refused(failure)
             snapshot = interaction_snapshot(generation)
@@ -2760,13 +2868,9 @@ def main() -> None:
             elif op == "managed_interaction":
                 send(message_id, "ok", result=managed_interaction(request))
             elif op == "managed_observe":
-                if PAGE is None:
-                    raise RuntimeError("Camoufox Driver has no active page.")
                 # Private pipe command; the expression is fixed by the Harbor adapter,
                 # never accepted from the public HTTP API.
-                with contextlib.redirect_stdout(sys.stderr):
-                    observation = PAGE.evaluate("mw:" + request["expression"])
-                send(message_id, "ok", observation=observation)
+                send(message_id, "ok", observation=managed_observe(request))
             elif op == "diagnostics_read":
                 send(message_id, "ok", diagnostics=diagnostics_read(request))
             elif op == "environment_read":
