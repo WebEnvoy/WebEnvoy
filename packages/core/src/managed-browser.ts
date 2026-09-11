@@ -17,11 +17,16 @@ type EnvironmentConfiguration = { timezone?: string; language?: string; viewport
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
   page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
+const isPageMutation = (operation: string) => (managedPageOperations as readonly string[]).includes(operation) && operation !== "page.list";
+const isObservation = (operation: string) => ["instance.observe", "instance.read", "instance.snapshot", "instance.wait"].includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
 const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
 const isRecovery = (operation: string) => ["recovery.inspect", "recovery.request", "recovery.status"].includes(operation);
 class InteractionFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_interaction_outcome_unknown"); }
+}
+class PageFailure extends ManagedAccessError {
+  constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_page_outcome_unknown"); }
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
@@ -71,7 +76,7 @@ function parse(value: unknown): Request {
   } else if (isInteraction(String(input.operation))) {
     if (input.cursor !== undefined || input.limit !== undefined) return fail("managed_browser_invalid_input");
     const action = String(input.operation).slice("instance.".length);
-    const fields: Record<string, string[]> = { snapshot: [], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
+    const fields: Record<string, string[]> = { snapshot: ["page_ref"], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
     const all = ["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "account_ref", "account_system_ref", "url", "template_ref"];
     if (all.some(key => input[key] !== undefined && !fields[action]!.includes(key))) return fail("managed_browser_invalid_input");
     if (action !== "snapshot") { text(input.page_ref); text(input.observation_ref); }
@@ -97,7 +102,7 @@ function parse(value: unknown): Request {
     if (input.operation === "recovery.status") text(input.operation_ref);
     if (input.backup_ref !== undefined && input.operation !== "recovery.request") return fail("managed_browser_invalid_input");
     if (input.backup_ref !== undefined) text(input.backup_ref);
-  } else if (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined) ||
+  } else if (!["instance.navigate", "instance.read"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
@@ -129,14 +134,14 @@ export function createManagedBrowserService(options: {
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-operation-locks");
-  async function harbor(path: string, body?: ObjectValue, interactionReceipt = false): Promise<ObjectValue> {
+  async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page"): Promise<ObjectValue> {
     const result = await fetch(new URL(path, options.harborBaseUrl), { method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(70_000) });
     const value = object(await result.json());
-    if (interactionReceipt) {
+    if (receiptKind !== undefined) {
       if (["completed", "unavailable", "unknown_outcome"].includes(String(value.status)) && ["not_dispatched", "dispatched"].includes(String(value.dispatch_state))) return value;
-      throw new Error("managed_interaction_receipt_unavailable");
+      throw new Error(`managed_${receiptKind}_receipt_unavailable`);
     }
     if (!result.ok || value.status === "unavailable" || value.status === "failed" || value.lifecycle_state === "failed") {
       const failure = value.failure && typeof value.failure === "object" ? object(value.failure) : {};
@@ -217,7 +222,8 @@ export function createManagedBrowserService(options: {
       idempotency_key: runId, configuration: input.configuration!
     });
     const active = await harbor(`/runtime/identity-environments/${identity}/session`);
-    let session = active.runtime_session === null ? undefined : object(active.runtime_session);
+    const activeSession = active.runtime_session === null ? undefined : object(active.runtime_session);
+    let session = activeSession;
     if (input.operation === "instance.start" && !session) {
       await check();
       session = await harbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
@@ -226,18 +232,40 @@ export function createManagedBrowserService(options: {
     }
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
-    const ref = encodeURIComponent(text(session.runtime_session_ref));
-    if ((managedPageOperations as readonly string[]).includes(input.operation)) {
+    let leaseSession: ObjectValue = session;
+    const ref = encodeURIComponent(text(leaseSession.runtime_session_ref));
+    const acquireControlLease = async () => {
       await check();
-      return await harbor(`/runtime/sessions/${ref}/pages`, {
-        operation: input.operation,
-        ...(input.operation === "page.list" ? {} : { holder_ref: holder, operation_ref: runId, idempotency_key: runId }),
-        ...(input.page_id ? { page_id: input.page_id } : {}),
-        ...(input.page_ref ? { page_ref: input.page_ref } : {}),
-        ...(input.document_generation ? { document_generation: input.document_generation } : {}),
-        ...(input.url ? { url: input.url } : {}),
-        authorized_origins: access.authorized_origins
-      });
+      const lease = object(leaseSession.control_lock);
+      // A user-held Instance is never implicitly taken over by an Agent Page action.
+      if (leaseSession.control_owner === "user" && lease.state === "held") return fail("control_lock_conflict");
+      if (leaseSession.control_owner !== "core_task" || lease.state !== "held" || lease.holder_ref !== holder) {
+        leaseSession = await harbor(`/runtime/sessions/${ref}/lock`, { control_owner: "core_task", holder_ref: holder });
+        session = leaseSession;
+      }
+      const acquired = object(leaseSession.control_lock);
+      if (leaseSession.control_owner !== "core_task" || acquired.state !== "held" || acquired.holder_ref !== holder) return fail("control_lock_conflict");
+      return await check();
+    };
+    if ((managedPageOperations as readonly string[]).includes(input.operation)) {
+      if (input.operation === "page.list") {
+        const pageAccess = await check();
+        return await harbor(`/runtime/sessions/${ref}/pages`, {
+          operation: input.operation,
+          authorized_origins: pageAccess.authorized_origins
+        });
+      }
+      const pageAccess = await acquireControlLease();
+      const run = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
+      const result = await harbor(`/runtime/sessions/${ref}/pages`, {
+        operation: input.operation, holder_ref: holder, operation_ref: runId, idempotency_key: runId,
+        ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        ...(input.document_generation ? { document_generation: input.document_generation } : {}), ...(input.url ? { url: input.url } : {}),
+        authorized_origins: pageAccess.authorized_origins
+      }, "page");
+      if (result.status !== "completed") throw new PageFailure(result);
+      return result;
     }
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
@@ -248,12 +276,8 @@ export function createManagedBrowserService(options: {
         ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
       });
     }
-    await check();
-    const lease = object(session.control_lock);
-    if (session.control_owner !== "core_task" || lease.state !== "held" || lease.holder_ref !== holder) {
-      session = await harbor(`/runtime/sessions/${ref}/lock`, { control_owner: "core_task", holder_ref: holder });
-    }
-    await check();
+    if (!isObservation(input.operation)) await acquireControlLease();
+    else await check();
     if (input.operation === "instance.stop") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/stop`, { control_owner: "core_task", holder_ref: holder })) };
     if (input.operation === "instance.handoff") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/handoff`, { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: holder })) };
     if (isInteraction(input.operation)) {
@@ -264,7 +288,7 @@ export function createManagedBrowserService(options: {
         holder_ref: holder, operation_ref: runId, expected_origin: input.origin, controlled_origin: input.origin,
         action: input.operation.slice("instance.".length),
         ...Object.fromEntries(["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
-      }, true);
+      }, "interaction");
       if (result.status !== "completed") throw new InteractionFailure(result);
       return result;
     }
@@ -272,7 +296,9 @@ export function createManagedBrowserService(options: {
       await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
       await check();
       const result = await harbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
-        holder_ref: holder, expected_origin: input.origin, ...(input.url ? { url: input.url } : {}) });
+        holder_ref: holder, expected_origin: input.origin, ...(input.page_id ? { page_id: input.page_id } : {}),
+        ...(input.page_ref ? { page_ref: input.page_ref } : {}), ...(input.document_generation ? { document_generation: input.document_generation } : {}),
+        ...(input.url ? { url: input.url } : {}) });
       return { session: publicSession(result.session), ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }), observed_at: result.observed_at };
     }
     const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder });
@@ -312,20 +338,25 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(isInteraction(input.operation) || isEnvironment(input.operation) ? { ...(isInteraction(input.operation) ? { runtime_session_ref: input.runtime_session_ref } : {}), profile_ref: input.profile_ref, origin: input.origin, ...(isInteraction(input.operation) ? { dispatch_state: "not_dispatched" } : {}) } : {}) };
+          ...(isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) ? {
+            ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { runtime_session_ref: input.runtime_session_ref } : {}),
+            profile_ref: input.profile_ref, origin: input.origin,
+            ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { dispatch_state: "not_dispatched" } : {})
+          } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation)) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: (["profile.create", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation)) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
-          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) ? { dispatch_state: result.dispatch_state } : {}), result } });
+          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { dispatch_state: result.dispatch_state } : {}), result } });
         } catch (error) {
           const current = (await store.getRunRecord(runId))!;
-          const receipt = error instanceof InteractionFailure ? error.receipt : undefined;
-          const known = isInteraction(input.operation)
+          const receipt = error instanceof InteractionFailure || error instanceof PageFailure ? error.receipt : undefined;
+          const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation);
+          const known = dispatchAware
             ? (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched"
             : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown";
-          if (isInteraction(input.operation)) await store.updateRunRecord(runId, { public_result_summary: {
+          if (dispatchAware) await store.updateRunRecord(runId, { public_result_summary: {
             ...current.public_result_summary, dispatch_state: known ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
           } });
           await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
@@ -372,11 +403,29 @@ export function createManagedBrowserService(options: {
             status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
           });
           try {
-            const receipt = await harbor(`/runtime/managed-interactions/${encodeURIComponent(runId)}`, undefined, true);
+            const receipt = await harbor(`/runtime/managed-interactions/${encodeURIComponent(runId)}`, undefined, "interaction");
             if (receipt.operation_ref !== runId || receipt.runtime_session_ref !== current.public_result_summary?.runtime_session_ref) throw new Error("receipt_mismatch");
             await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt,
               ...(receipt.status === "completed" ? { reconciliation: "completed" } : receipt.dispatch_state === "not_dispatched" ? { reconciliation: "not_dispatched" } : {}) } });
           } catch { /* Missing Runtime receipt never proves the original input did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && isPageMutation(String(run.public_result_summary?.operation)) && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.profile_ref))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.status === "succeeded" || current.public_result_summary?.reconciliation) return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            // The Runtime receipt is a read-only lookup of the original operation.
+            const receipt = await harbor(`/runtime/managed-pages/${encodeURIComponent(runId)}`, undefined, "page");
+            if (receipt.operation_ref !== runId || receipt.runtime_session_ref !== current.public_result_summary?.runtime_session_ref) throw new Error("receipt_mismatch");
+            await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt,
+              ...(receipt.status === "completed" ? { reconciliation: "completed" } : receipt.dispatch_state === "not_dispatched" ? { reconciliation: "not_dispatched" } : {}) } });
+          } catch { /* Missing Runtime receipt never proves the original Page action did not occur. */ }
           return response((await store.getRunRecord(runId))!);
         });
       }
