@@ -63,6 +63,8 @@ test("Core snapshot page_ref is accepted and stale Page refs are refused before 
     const callsBeforeStale = f.calls.length;
     refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot", { page_ref: "page:wrong" })), "managed_interaction_observation_stale");
     assert.equal(f.calls.length, callsBeforeStale);
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot", { page_ref: "p".repeat(257) })), "managed_interaction_invalid_input");
+    assert.equal(f.calls.length, callsBeforeStale);
   } finally { await f.close(); }
 });
 

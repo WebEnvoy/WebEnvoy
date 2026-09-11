@@ -30,6 +30,7 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
   // Core's fresh intersection is authoritative. The expected origin must be
   // a member of it; never widen an explicitly supplied set for compatibility.
   if (!authorizedOrigins || !authorizedOrigins.includes(input.expected_origin)) return null;
+  if (input.page_ref !== undefined && !boundedManagedRef(input.page_ref)) return null;
   if (input.action !== "snapshot" && (!boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref))) return null;
   if (["click", "input", "press"].includes(input.action) && !boundedManagedRef(input.target_ref)) return null;
   if (input.action === "input" && (typeof input.text !== "string" || input.text.length > 512 || /[\u0000-\u001f\u007f]/.test(input.text))) return null;
