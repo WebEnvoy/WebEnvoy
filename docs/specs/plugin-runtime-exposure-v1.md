@@ -15,6 +15,7 @@
 | Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation`：`instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics`；详见 [Network V1](network-runtime-contract-v1.md) 与 [Console V1](console-runtime-contract-v1.md)。 |
 | Profile environment facts / bounded configuration update | `webenvoy_operation`：`environment.read`、`environment.update` | 既有同名 `allowed_operations`；字段与失败语义由 [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) 维护。 |
+| Provider preference and create selection | `webenvoy_operation`：`provider.preference.read`、`provider.preference.set`、`provider.preference.clear`；动态模板的 `profile.create` 可带 `provider_id` | 每项需同名 `allowed_operations`；固定模板拒绝请求级 Provider；详见 [Provider Selection V1](provider-selection-v1.md)。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
 
@@ -61,6 +62,8 @@ Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它
 
 `environment.read` / `environment.update` 复用既有 `webenvoy_operation`。update 额外要求非空 `configuration`，只接受 timezone/language/viewport（各 1–128 字符）；不接受 Instance/Page/cursor、脚本、Provider/proxy/seed 参数。返回 `harbor-profile-environment/v1` 的 configured/effective/pending/observed/drift/provider/support/last_verified_at；保存不热改活动 Instance，不隐式重启。更新响应丢失后 query 原 key，只查询 mutation receipt 和当前环境事实，不再次提交更新；首次 readback/跨 restart 与未验证项必须区分，unknown 不等于 verified。
 
+Provider preference 三项 operation 使用 browser task scope，但 `profile_refs`、`origins` 必须为空；set 必须且仅带一个受支持 `provider_id`，read/clear 不带 Provider。动态创建模板 `provider_id=null` 时，`profile.create` 可选带一次性 `provider_id`；省略时由 Harbor 使用用户新建默认，二者都没有则返回 `provider_selection_required`。旧固定模板仍只使用模板 Provider，任何请求级字段即冲突。Plugin 不直接调用 Harbor，set/clear 响应丢失后 `webenvoy_query` 只读原 receipt。
+
 MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。#519 的静态 source/version/hash 事实可以在 status/diagnostics 中回读，但在实际安装和真实 Agent 通过前只能记为 validation/fixture evidence，不能冒称 live/plugin verified。
 
 恢复投影只允许 `recovery.inspect`、`recovery.request`、`recovery.status`。inspect 返回安全摘要；request 创建待 owner 决定的 plan/operation，不自动 stop、覆盖或确认；status 只查询原 operation/receipt。Plugin 永远不能调用 owner-only 的 backup/plan/apply，不能携带 owner token。plan 的 Profile、当前材料指纹、backup ref、范围与有效期由 Core 持久化；目标/材料/归属变化或活动 Instance 会使后续确认失效。
@@ -72,6 +75,8 @@ MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。
 Core 只接受一个当前有效的 Principal/Connection/Grant。对浏览器 Page、navigation、interaction 和 diagnostics，effective origins 是 `Grant.allowed_origins ∩ ProfilePolicy.allowed_origins ∩ task_scope.origins`；请求的精确 `origin` 必须属于该交集。Core 不合并多个 Grant、多个 Profile 的 scope 或 Agent 自带 allowlist。对 SKILL 另取 `skill_scope={skill_refs,source_refs}`、task scope、批准清单和 compatibility 的交集。旧 Grant 缺少 `skill_scope` 时没有 SKILL 权限；不得以网页 Profile、origin、账号绑定或通用浏览器 Grant 推导 SKILL 权限，也不得以 SKILL 权限推导网页操作权。版本升级、旧 Grant 读取和旧严格 reader 的拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。
 
 既有 `webenvoy_operation` 的 browser/environment task scope 继续使用 `operations`、`profile_refs`、`origins`，其授权和 Web scope 不因 SKILL 工具改变。SKILL 请求不携带网页范围；同一个连接仍须先通过 `webenvoy_connect`，撤销/过期在每次新管理或 read 前重新检查。
+
+偏好 read/set/clear 同样要求单一有效 Principal、Connection、Grant 和 task scope 中的同名 operation；旧 Grant、Profile create、browser operation 或模板引用均不能推出偏好修改权。其资源 target 为 `provider_preference`，owner requirement 为 `harbor://browser-provider-preference`。
 
 `webenvoy_status`、bootstrap、合法 `connect`、Profile 管理和无网站 SKILL 的通用浏览器能力不得被可选 SKILL 清单缺失、内容损坏或不兼容阻断。未获授权的资产、修订和来源不能出现在 list、inspect、错误或结果中；错误不得泄露本地 data root、物化路径、凭据或正文。
 

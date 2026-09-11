@@ -34,21 +34,49 @@ let recoveryExpectedProfileRef: string | undefined;
 let afterCreate: (() => Promise<void>) | undefined;
 let afterProfileList: (() => Promise<void>) | undefined;
 let principalId: string | undefined;
+let browserPreference: string | null = null, preferenceMutations = 0, dropPreferenceResponse = false;
+const preferenceReceipts = new Map<string, unknown>();
+const requestedProviders: Array<string | undefined> = [];
+const preferenceSnapshot = (providerId: string | null) => ({
+  schema_version: "harbor-browser-provider-preference/v1",
+  project_recommendation: { provider_id: "camoufox", availability: "available", unavailable_reason: null },
+  user_creation_default: { provider_id: providerId, availability: providerId ? "available" : "unset", unavailable_reason: null, updated_at: providerId ? new Date().toISOString() : null }
+});
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
+      ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
+  else if (req.url === "/runtime/browser-provider-preference") {
+    if (req.method === "POST") {
+      let body = ""; for await (const chunk of req) body += chunk;
+      const input = JSON.parse(body) as { operation: "set" | "clear"; idempotency_key: string; provider_id?: string };
+      preferenceMutations++;
+      browserPreference = input.operation === "set" ? input.provider_id! : null;
+      value = { schema_version: "harbor-browser-provider-preference-mutation/v1", operation: input.operation, status: "completed", preference: preferenceSnapshot(browserPreference), failure: null };
+      preferenceReceipts.set(input.idempotency_key, value);
+      if (dropPreferenceResponse) { req.socket.destroy(); return; }
+    } else value = preferenceSnapshot(browserPreference);
+  }
+  else if (req.url?.startsWith("/runtime/browser-provider-preference-mutations/")) value = preferenceReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else if (req.url === "/runtime/identity-environment-mutations") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
-    assert.equal(input.identity_environment.requested_provider_id, "camoufox");
+    requestedProviders.push(input.identity_environment.requested_provider_id);
+    const selectedProvider = input.identity_environment.requested_provider_id ?? browserPreference;
+    if (!selectedProvider) {
+      value = { status: "rejected", failure: { code: "provider_selection_required" } };
+      receipts.set(input.idempotency_key, value);
+      res.statusCode = 409;
+      res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); return;
+    }
     creates++;
-    const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, site: { origin: "https://example.com" }, status: { readiness: "ready" }, account_bindings: [] };
-    profiles.push(record); value = { status: "completed", record };
+    const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, site: { origin: "https://example.com" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
+    profiles.push(record); value = { status: "completed", record, provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } };
     receipts.set(input.idempotency_key, value);
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
@@ -196,10 +224,14 @@ try {
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.deepEqual(await service.submit(credentialHash, request), first);
   assert.equal(creates, 1);
+  assert.equal(requestedProviders[0], "camoufox");
   await assert.rejects(service.submit(credentialHash, { ...request, template_ref: "template:wider" }), /idempotency_conflict/);
   const listed = await service.submit(credentialHash, { ...request, idempotency_key: "list", operation: "profile.list", template_ref: undefined });
   assert.equal(listed.ok, true, JSON.stringify(listed));
   assert.equal((listed.result as { profiles: unknown[] }).profiles.length, 1);
+  const fixedConflict = await service.submit(credentialHash, { ...request, idempotency_key: "fixed-conflict", provider_id: "chrome_official" });
+  assert.equal(fixedConflict.failure?.code, "managed_browser_template_provider_conflict");
+  assert.equal(creates, 1);
   await assert.rejects(service.submit(credentialHash, { ...request, idempotency_key: "elevate", operation: "instance.start", template_ref: undefined, profile_ref: "profile:1", origin: "https://example.com" }), /managed_access_denied/);
   afterCreate = async () => { await accessStore.revokeGrant({ idempotency_key: "revoke-in-flight", grant_id: grant.grant_id }); };
   const second = await service.submit(credentialHash, { ...request, idempotency_key: "create-two" });
@@ -225,6 +257,40 @@ try {
   assert.equal((reconciled.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:3");
   assert.equal(creates, 3, "receipt query must not replay creation");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === recoveryGrant.grant_id)?.created_profile_refs.length, 1);
+  const preferenceOperations = ["provider.preference.read", "provider.preference.set", "provider.preference.clear"] as const;
+  const preferenceGrant = await accessStore.createGrant({ idempotency_key: "preference-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...preferenceOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const preferenceRequest = { idempotency_key: "preference-read", connection_id: connection.connection_id, grant_id: preferenceGrant.grant_id, operation: "provider.preference.read" as const, task_scope: { operations: [...preferenceOperations], profile_refs: [], origins: [] } };
+  const readPreference = await service.submit(credentialHash, preferenceRequest);
+  assert.equal(readPreference.status, "succeeded", JSON.stringify(readPreference));
+  await assert.rejects(service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-bad-scope", task_scope: { ...preferenceRequest.task_scope, origins: ["https://example.com"] } }), /managed_access_denied/);
+  const setPreference = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-set", operation: "provider.preference.set" as const, provider_id: "chrome_official" as const });
+  assert.equal(setPreference.status, "succeeded", JSON.stringify(setPreference));
+  assert.equal(browserPreference, "chrome_official");
+
+  const dynamicTemplate = { ...grant.creation_template!, template_ref: "template:dynamic", provider_id: null };
+  const dynamicGrant = await accessStore.createGrant({ idempotency_key: "dynamic-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: dynamicTemplate });
+  const dynamicRequest = { ...request, idempotency_key: "dynamic-default", grant_id: dynamicGrant.grant_id, template_ref: dynamicTemplate.template_ref, provider_id: undefined, task_scope: { operations: ["profile.create" as const], profile_refs: [], origins: ["https://example.com"] } };
+  const dynamicDefault = await service.submit(credentialHash, dynamicRequest);
+  assert.equal(dynamicDefault.status, "succeeded", JSON.stringify(dynamicDefault));
+  assert.equal((dynamicDefault.result as { profile: { environment_summary: { provider_id: string } } }).profile.environment_summary.provider_id, "chrome_official");
+  assert.equal((dynamicDefault.result as { provider_selection: { source: string } }).provider_selection.source, "user_default");
+  assert.equal(requestedProviders.at(-1), undefined, "dynamic omission leaves Harbor to snapshot the user default");
+  const dynamicExplicit = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "dynamic-explicit", provider_id: "camoufox" as const });
+  assert.equal((dynamicExplicit.result as { profile: { environment_summary: { provider_id: string } } }).profile.environment_summary.provider_id, "camoufox");
+  assert.equal((dynamicExplicit.result as { provider_selection: { source: string } }).provider_selection.source, "explicit_request");
+
+  dropPreferenceResponse = true;
+  const lostPreference = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-lost", operation: "provider.preference.clear" as const });
+  dropPreferenceResponse = false;
+  assert.equal(lostPreference.status, "unknown_outcome");
+  const preferenceMutationCount = preferenceMutations;
+  const queriedPreference = await service.query(credentialHash, lostPreference.run_id);
+  assert.equal(queriedPreference.status, "unknown_outcome");
+  assert.equal(queriedPreference.result !== undefined, true);
+  assert.equal(preferenceMutations, preferenceMutationCount, "preference receipt query must not replay the write");
+  const noDefaultGrant = await accessStore.createGrant({ idempotency_key: "no-default-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: dynamicTemplate });
+  const noDefault = await service.submit(credentialHash, { ...dynamicRequest, idempotency_key: "dynamic-no-default", grant_id: noDefaultGrant.grant_id });
+  assert.equal(noDefault.failure?.code, "provider_selection_required");
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });

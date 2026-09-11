@@ -104,6 +104,8 @@ export interface BrowserProviderStatus {
   display_name: string;
   role: BrowserProviderRole;
   selectable: true;
+  project_recommended: boolean;
+  /** @deprecated Project recommendation is not an automatic creation default. */
   default_for_identity_environment: boolean;
   management_mode: "managed" | "system" | "external";
   install: BrowserProviderInstallFacts;
@@ -126,6 +128,7 @@ export interface IdentityEnvironmentProviderBindingInput extends BrowserProvider
   execution_identity_ref?: string;
   profile_ref?: string;
   requested_provider_id?: BrowserProviderId;
+  user_creation_default_provider_id?: BrowserProviderId;
 }
 
 export interface IdentityEnvironmentProviderBinding {
@@ -135,10 +138,11 @@ export interface IdentityEnvironmentProviderBinding {
   selected_provider_id: BrowserProviderId | null;
   fallback_provider_id: BrowserProviderId | null;
   selection_reason:
-    | "cloakbrowser_default"
-    | "chrome_restricted_fallback"
     | "requested_provider_available"
     | "requested_provider_unavailable"
+    | "user_default_available"
+    | "user_default_unavailable"
+    | "selection_required"
     | "no_launchable_provider";
   requires_user_notice: boolean;
   selected_provider: BrowserProviderStatus | null;
@@ -204,9 +208,9 @@ export function resolveCamoufoxOverride(env: Record<string, string | undefined>)
 
 export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmentProviderBindingInput = {}): IdentityEnvironmentProviderBinding {
   const catalog = detectBrowserProviders(input);
-  const cloak = catalog.providers.find((provider) => provider.provider_id === "cloakbrowser")!;
-  const chrome = catalog.providers.find((provider) => provider.provider_id === "chrome_official")!;
-  const requested = input.requested_provider_id ? catalog.providers.find((provider) => provider.provider_id === input.requested_provider_id) ?? null : null;
+  const selectedId = input.requested_provider_id ?? input.user_creation_default_provider_id;
+  const requested = selectedId ? catalog.providers.find((provider) => provider.provider_id === selectedId) ?? null : null;
+  const fromUserDefault = input.requested_provider_id === undefined && input.user_creation_default_provider_id !== undefined;
 
   if (requested?.provider_id === "camoufox") {
     if (isLaunchable(requested) && requested.install.source === "official_release") {
@@ -219,21 +223,16 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
     ]);
   }
   if (requested && isLaunchable(requested)) {
-    return binding(input, requested, null, "requested_provider_available", requested.provider_id === "chrome_official");
+    return binding(input, requested, null, fromUserDefault ? "user_default_available" : "requested_provider_available", requested.provider_id === "chrome_official");
   }
   if (requested && !isLaunchable(requested)) {
-    return binding(input, null, chrome.provider_id, "requested_provider_unavailable", true, [
+    return binding(input, null, null, fromUserDefault ? "user_default_unavailable" : "requested_provider_unavailable", true, [
       `${requested.display_name} 当前不可启动；Harbor 不会静默替换用户指定的 provider。`
     ]);
   }
-  if (isLaunchable(cloak)) return binding(input, cloak, null, "cloakbrowser_default", false);
-  if (isLaunchable(chrome)) {
-    return binding(input, chrome, chrome.provider_id, "chrome_restricted_fallback", true, [
-      "CloakBrowser 缺失或不可启动；官方 Chrome 只能作为受限后备。",
-      "Chrome 不提供原生指纹控制，也不能提供完整身份环境一致性。"
-    ]);
-  }
-  return binding(input, null, null, "no_launchable_provider", true);
+  const anyLaunchable = catalog.providers.some(isLaunchable);
+  return binding(input, null, null, anyLaunchable ? "selection_required" : "no_launchable_provider", true,
+    anyLaunchable ? ["创建 Profile 前必须明确选择 Provider；项目推荐不会被静默用作默认。"] : []);
 }
 
 export function getDefaultBrowserProviderExecutable(input: BrowserProviderDetectionInput = {}): string {
@@ -293,13 +292,14 @@ function providerStatus(
   install: BrowserProviderInstallFacts,
   managementMode: BrowserProviderStatus["management_mode"]
 ): BrowserProviderStatus {
-  const defaultForIdentity = role === "primary";
+  const projectRecommended = role === "primary";
   return {
     provider_id,
     display_name,
     role,
     selectable: true,
-    default_for_identity_environment: defaultForIdentity,
+    project_recommended: projectRecommended,
+    default_for_identity_environment: false,
     management_mode: managementMode,
     install,
     capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities(install.source === "official_release") : chromeCapabilities(),
@@ -459,7 +459,9 @@ function binding(
     selected_provider: selected,
     warnings,
     diagnostics,
-    unavailable_reason: selected ? null : "当前没有可启动的 CloakBrowser、官方 Chrome 或 Camoufox provider。"
+    unavailable_reason: selected ? null : selection_reason === "selection_required"
+      ? "创建 Profile 前需要明确选择可用 Provider。"
+      : "当前没有可启动的 CloakBrowser、官方 Chrome 或 Camoufox provider。"
   };
 }
 

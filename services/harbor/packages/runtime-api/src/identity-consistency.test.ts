@@ -22,6 +22,7 @@ test("returns identity environment consistency facts for Core and App", () => {
   const facts = runtime.getIdentityConsistencyFacts({
     identity_environment: {
       ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-consistency",
       execution_identity_ref: "execution-identity_xhs-consistency",
       profile_ref: "profile_xhs-consistency",
@@ -74,6 +75,7 @@ test("reports Chrome fallback, drift, login loss, and site risk without bypass p
   const facts = runtime.getIdentityConsistencyFacts({
     identity_environment: {
       ...providerFixture({ [chromePath]: { executable: true } }),
+      requested_provider_id: "chrome_official",
       identity_environment_ref: "identity-env_boss-consistency",
       execution_identity_ref: "execution-identity_boss-consistency",
       profile_ref: "profile_boss-consistency",

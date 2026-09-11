@@ -44,6 +44,12 @@ import {
   type IdentityEnvironmentProviderBinding,
   type IdentityEnvironmentProviderBindingInput
 } from "./provider-management.js";
+import {
+  BrowserProviderPreferenceManager,
+  resolveBrowserProviderPreferenceStorePath,
+  type BrowserProviderPreferenceMutationResult,
+  type BrowserProviderPreferenceSnapshot
+} from "./provider-preference.js";
 import { opaqueRef } from "./refs.js";
 import { boundedEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
 import { withProfileBackedLocalMaterial } from "./profile-backed-local-material.js";
@@ -186,6 +192,17 @@ export {
   HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA
 } from "./provider-management.js";
+export {
+  BrowserProviderPreferenceManager,
+  HARBOR_BROWSER_PROVIDER_PREFERENCE_MUTATION_SCHEMA,
+  HARBOR_BROWSER_PROVIDER_PREFERENCE_SCHEMA,
+  resolveBrowserProviderPreferenceStorePath
+} from "./provider-preference.js";
+export type {
+  BrowserProviderPreferenceMutationRequest,
+  BrowserProviderPreferenceMutationResult,
+  BrowserProviderPreferenceSnapshot
+} from "./provider-preference.js";
 export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
 export {
   CAMOUFOX_UPSTREAM_PINS,
@@ -463,6 +480,7 @@ export class HarborRuntime {
   private readonly detailReadTargets = new DetailReadTargetStore();
   private readonly viewerControls = new ViewerControlStore();
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
+  private readonly browserProviderPreference: BrowserProviderPreferenceManager;
   private readonly runtimeSessions: RuntimeSessionStore;
   private readonly providerLifecycle: ManagedProviderLifecycle;
   private readonly profileRecovery: ProfileRecoveryManager;
@@ -473,7 +491,16 @@ export class HarborRuntime {
     providerLifecycleOptions: ManagedProviderLifecycleOptions = {}
   ) {
     const ownerOptions = withProfileBackedLocalMaterial(identityEnvironmentOptions);
-    this.identityEnvironments = new LocalIdentityEnvironmentManager(ownerOptions);
+    this.browserProviderPreference = new BrowserProviderPreferenceManager({
+      ...(identityEnvironmentOptions.persistence_path ? {
+        persistence_path: resolveBrowserProviderPreferenceStorePath(identityEnvironmentOptions.persistence_path)
+      } : {}),
+      provider_detection: identityEnvironmentOptions.provider_detection
+    });
+    this.identityEnvironments = new LocalIdentityEnvironmentManager({
+      ...ownerOptions,
+      resolve_user_creation_default_provider_id: () => this.browserProviderPreference.configuredProviderId()
+    });
     this.runtimeSessions = new RuntimeSessionStore(this.viewerControls, launcher, {
       resolve_proxy: ownerOptions.resolve_proxy,
       on_session_closed: (runtimeSessionRef) => {
@@ -731,6 +758,18 @@ export class HarborRuntime {
 
   getBrowserProviderStatus(input: BrowserProviderDetectionInput = {}): BrowserProviderCatalog {
     return detectBrowserProviders(input);
+  }
+
+  getBrowserProviderPreference(input: BrowserProviderDetectionInput = {}): BrowserProviderPreferenceSnapshot {
+    return this.browserProviderPreference.read(input);
+  }
+
+  mutateBrowserProviderPreference(input: unknown): BrowserProviderPreferenceMutationResult {
+    return this.browserProviderPreference.mutate(input);
+  }
+
+  getBrowserProviderPreferenceMutationResult(idempotencyKey: string): BrowserProviderPreferenceMutationResult | null {
+    return this.browserProviderPreference.mutationResult(idempotencyKey);
   }
 
   getManagedProviderLifecycle(): ManagedProviderLifecycleStatus {

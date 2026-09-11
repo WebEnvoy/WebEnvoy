@@ -590,3 +590,7 @@ Drift 比较实际应用配置与回读的 timezone/language，以及 Provider-p
 缺失 Profile、非法输入、配置拒绝或持久化失败返回 `{status:"unavailable",failure_class,message,retryable}`，failure_class 复用既有 mutation code；message 为固定有界摘要。活动 Provider 暂不可读时仍可返回已保存 configured 和已知启动快照，但 observation_status=unavailable、observed=null、drift=unknown；不能声称保存失败或启动配置已回读。
 
 本合同新增的是固定操作值和公共读模型。配置仍使用既有 Profile store 和 edit receipt，无重复持久配置状态或第二调度器。旧 Grant 不自动获得新操作；旧 Runtime／Plugin 缺少此版本时明确不可用。兼容升级、迁移及 private bundle 修复仍需 owner 决定，本项不提供任意环境编辑器。
+
+## 19. Provider 选择与新建默认（#516）
+
+项目推荐、用户新建默认、本次显式选择与 Profile 实际 binding 是四个独立事实。环境 `configured.provider_id` 与 Profile `provider_binding` 只表示已创建 Profile 的实际绑定，不是全局偏好；默认变化不得制造 pending Provider 变更或修改任何既有 Profile。完整持久字段、选择顺序、App/Plugin、Grant、幂等、兼容和失败合同见 [Provider Selection and Creation Default V1](provider-selection-v1.md)。

@@ -5,7 +5,7 @@ export type AgentConnection = { connection_id: string; principal_id: string; con
 export type AgentGrant = {
   grant_id: string; principal_id: string; profile_refs: string[]; allowed_operations: string[];
   allowed_origins: string[]; expires_at: string; revoked_at: string | null;
-  creation_template: { template_ref: string; provider_id: string } | null;
+  creation_template: { template_ref: string; provider_id: string | null } | null;
   max_created_profiles: number; created_profile_refs: string[];
 };
 export type AgentAccessState = {
@@ -15,6 +15,7 @@ export type AgentAccessState = {
 
 export const agentOperations = [
   ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
+  ["provider.preference.read", "读取 Provider 新建默认"], ["provider.preference.set", "设置 Provider 新建默认"], ["provider.preference.clear", "清除 Provider 新建默认"],
   ["instance.start", "启动实例"], ["instance.stop", "停止实例"],
   ["instance.observe", "页面与身份事实"], ["instance.diagnostics", "网络与控制台诊断"], ["instance.handoff", "接管与交还"],
   ["environment.read", "读取环境连续性事实"], ["environment.update", "修改时区、语言或视口（重启后生效）"],
@@ -47,7 +48,7 @@ export function createProfilePolicyInput(profileRef: string, input: AgentScopeIn
   return { idempotency_key: key, profile_ref: profileRef, ...selectedScope(input) };
 }
 
-export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "") {
+export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "", templateProviderId: string | null = null) {
   if (!principalId || ![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 和授权时限。");
   const ceiling = selectedScope(input);
   if (!profileRef && ceiling.allowed_origins.length !== 1) throw new Error("创建模板需要一个站点 origin；多个 origin 请先选择已有 Profile。");
@@ -61,7 +62,7 @@ export function createAgentGrantInput(principalId: string, hours: number, key: s
     max_created_profiles: profileRef ? 0 : 2,
     creation_template: profileRef ? null : {
       template_ref: crypto.randomUUID(),
-      provider_id: "camoufox",
+      provider_id: templateProviderId,
       site: { site_id: "generic", origin: ceiling.allowed_origins[0], display_name: "非生产浏览器" },
       language: "zh-CN",
       timezone: "Asia/Shanghai",
@@ -109,7 +110,7 @@ export function projectAgentAccess(value: unknown): AgentAccessState {
         grant_id: text(item.grant_id), principal_id: text(item.principal_id), profile_refs: list(item.profile_refs, text),
         allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text),
         expires_at: date(item.expires_at), revoked_at: revoked(item.revoked_at),
-        creation_template: template === null ? null : { template_ref: text(template.template_ref), provider_id: text(template.provider_id) },
+        creation_template: template === null ? null : { template_ref: text(template.template_ref), provider_id: template.provider_id === null ? null : text(template.provider_id) },
         max_created_profiles: Number(item.max_created_profiles), created_profile_refs: list(item.created_profile_refs, text),
       };
     }),

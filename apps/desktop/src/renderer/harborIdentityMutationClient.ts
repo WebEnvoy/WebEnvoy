@@ -53,6 +53,8 @@ export type IdentityEnvironmentMutationFailureCode =
   | "profile_locked"
   | "profile_storage_exists"
   | "provider_mismatch"
+  | "provider_selection_required"
+  | "provider_unavailable"
   | "proxy_policy_incompatible"
   | "proxy_resolution_unavailable"
   | "proxy_unreachable"
@@ -101,7 +103,8 @@ const loginEffects = new Set(["preserved_unverified", "excluded", "unchanged"]);
 const failureCodes = new Set<IdentityEnvironmentMutationFailureCode>([
   "active_session", "duplicate_identity", "duplicate_import", "idempotency_conflict",
   "identity_environment_missing", "invalid_request", "mutation_failed", "persistence_failed",
-  "profile_locked", "profile_storage_exists", "provider_mismatch", "proxy_policy_incompatible",
+  "profile_locked", "profile_storage_exists", "provider_mismatch", "provider_selection_required",
+  "provider_unavailable", "proxy_policy_incompatible",
   "proxy_resolution_unavailable", "proxy_unreachable", "proxy_validation_unavailable", "repair_required",
   "source_in_use", "source_material_missing", "target_in_use", "local_material_cleanup_failed",
   "local_material_cleanup_unavailable", "local_material_copy_failed", "local_material_copy_unavailable",
@@ -187,6 +190,8 @@ function mutationFailureMessage(code: IdentityEnvironmentMutationFailureCode | u
   if (code === "profile_locked") return "浏览器环境正在使用中，请关闭占用它的窗口后重试。";
   if (code === "duplicate_identity" || code === "duplicate_import") return "该账号身份已经存在，请使用现有身份或更换导入来源。";
   if (code === "identity_environment_missing") return "该账号身份已不存在，请刷新列表。";
+  if (code === "provider_selection_required") return "请选择本次创建使用的 Provider，或先设置新建默认。";
+  if (code === "provider_unavailable") return "所选 Provider 当前不可用，请安装、修复或改选后重试。";
   if (code?.startsWith("proxy_") || code === "provider_mismatch") return "当前代理或 Provider 配置不可用，请修正环境配置后重试。";
   if (code === "repair_required" || code?.startsWith("local_material_")) return "本机数据需要修复，请打开环境依赖并按提示处理。";
   if (code === "unsupported_configuration" || code === "invalid_request") return "当前配置不受支持，请检查填写内容。";

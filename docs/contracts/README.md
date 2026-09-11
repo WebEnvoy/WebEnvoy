@@ -16,8 +16,9 @@ Page/navigation、Network/Console 与已安装 SKILL 的正式 wire/投影合同
 | Camoufox Environment Continuity V1 | [camoufox-environment-continuity-v1.md](../specs/camoufox-environment-continuity-v1.md) | #519 官方固定来源、`launch_options`/`context_options` 完整持久化与精确 replay、popup 受限边界和 #499 历史 continuity/recovery 事实；不暴露私有材料，installed/live evidence 另行记录。 |
 | Camoufox Native Provider Contract V1 | [camoufox-native-provider-contract-v1.md](../specs/camoufox-native-provider-contract-v1.md) | #504/#510 的历史 test-only Camoufox native snapshot、Playwright adapter、固定构件、Page relation、background create、safe-return close、reload 与 v2 native tab-handoff/CSS variant 及兼容/回滚边界；保持 Retired，不代表当前 launch/support。 |
 | Installed Profile Recovery V1 | [installed-profile-recovery-v1.md](../specs/installed-profile-recovery-v1.md) | 已安装更新/重装、长期 Profile 接续、私有 backup/plan/apply、owner 确认、恢复边界和 fail-closed 验收；当前 upstream binding 可接续，历史 Camoufox binding/bundle 仍可校验和恢复但不恢复旧 launchability。 |
+| Provider Selection and Creation Default V1 | [provider-selection-v1.md](../specs/provider-selection-v1.md) | 项目推荐、用户新建默认、本次选择、Profile binding、Harbor preference/selection wire、Plugin/Grant、幂等与兼容边界。 |
 | Managed SKILL Library Lifecycle V1 | [skill-library-lifecycle-v1.md](../specs/skill-library-lifecycle-v1.md) | 可选固定来源 SKILL 的身份、受管 data-root 存储、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与重启持久性。 |
-| Grant Wire Contract V1 (v1.1) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery.inspect/request/status 的 Grant 投影、SKILL `skill_scope` 新维度、v1.1 兼容/旧严格 reader 拒绝边界、单计划确认、撤销/过期与 idempotency 语义。 |
+| Grant Wire Contract V1 (v1.2) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery、SKILL `skill_scope`、Provider preference operation、固定／动态创建模板兼容、旧严格 reader 拒绝、撤销/过期与 idempotency 语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 

@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import type { IdentityEnvironmentProjection } from "./identityEnvironmentFixtures";
-import type { HarborProviderStatus, ProviderId } from "./harborIdentityTypes";
+import type { HarborProviderPreference, HarborProviderStatus, ProviderId } from "./harborIdentityTypes";
 
 export type IdentityManagementMode = "create" | "import" | "edit";
 
@@ -26,6 +26,7 @@ export function IdentityEnvironmentManagementPanel({
   mode,
   onCancel,
   onSubmit,
+  preference,
   providers,
 }: {
   busy: boolean;
@@ -35,10 +36,11 @@ export function IdentityEnvironmentManagementPanel({
   mode: IdentityManagementMode;
   onCancel: () => void;
   onSubmit: (value: IdentityEditorValue) => void;
+  preference: HarborProviderPreference | null;
   providers: HarborProviderStatus[];
 }) {
   const [submitted, setSubmitted] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState(() => providerId(identity, providers));
+  const [selectedProviderId, setSelectedProviderId] = useState<ProviderId | "">(() => providerId(identity, providers, preference));
   const providerSelectRef = useRef<HTMLSelectElement>(null);
   const title = mode === "edit" ? "编辑账号身份" : mode === "import" ? "导入账号身份" : "创建账号身份";
   const provider = providers.find((candidate) => candidate.provider_id === selectedProviderId);
@@ -60,7 +62,7 @@ export function IdentityEnvironmentManagementPanel({
       siteId: field(values, "siteId") === "boss" ? "boss" : "xiaohongshu",
       accountIdentifier: field(values, "accountIdentifier"),
       importSourceRef: field(values, "importSourceRef"),
-      providerId: selectedProviderId,
+      providerId: selectedProviderId as ProviderId,
       proxyMode: proxyModeValue(field(values, "proxyMode")),
       language: field(values, "language"),
       timezone: field(values, "timezone"),
@@ -84,7 +86,7 @@ export function IdentityEnvironmentManagementPanel({
           {mode === "import" ? <label>导入来源<input name="importSourceRef" required maxLength={240} placeholder="Harbor 可读取的导入来源标识" /></label> : null}
         </div> : null}
         <div className="identity-editor-grid">
-          <label>浏览器 Provider<select ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value as ProviderId)}>{providerOptions(providers, selectedProviderId)}</select></label>
+          <label>浏览器 Provider<select required ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value as ProviderId)}>{providerOptions(providers, selectedProviderId, mode === "edit")}</select>{mode !== "edit" && !preference?.user_creation_default.provider_id ? <small>项目推荐：{preference?.project_recommendation.provider_id ?? providers.find((item) => item.role === "primary")?.display_name ?? "未知"}；请选择确认后再创建。</small> : null}{mode !== "edit" && preference?.user_creation_default.availability !== "available" && preference?.user_creation_default.provider_id ? <small>已保存默认 {preference.user_creation_default.provider_id} 当前不可用，请明确选择其他 Provider。</small> : null}</label>
           <label>代理<select name="proxyMode" defaultValue={identity?.environment.proxyRef ? "preserve" : "system"}>{identity?.environment.proxyRef ? <option value="preserve">保留当前代理</option> : null}<option value="system">不使用代理</option><option value="disabled">禁用代理配置</option></select></label>
           {supportsLocale ? <label>语言<input name="language" maxLength={40} defaultValue={known(identity?.environment.language)} placeholder="例如：zh-CN" /></label> : null}
           {supportsTimezone ? <label>时区<input name="timezone" maxLength={80} defaultValue={known(identity?.environment.timezone)} placeholder="例如：Asia/Shanghai" /></label> : null}
@@ -114,20 +116,22 @@ function known(value: string | undefined) {
   return value == null || value === "未知" ? "" : value;
 }
 
-function providerId(identity: IdentityEnvironmentProjection | undefined, providers: HarborProviderStatus[]) {
+function providerId(identity: IdentityEnvironmentProjection | undefined, providers: HarborProviderStatus[], preference: HarborProviderPreference | null): ProviderId | "" {
   if (identity?.admissionFacts?.providerId) return identity.admissionFacts.providerId;
   if (identity?.provider.selected === "Camoufox") return "camoufox";
   if (identity?.provider.selected === "官方 Chrome") return "chrome_official";
   if (identity?.provider.selected === "CloakBrowser") return "cloakbrowser";
-  return providers.find((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable")?.provider_id ?? "cloakbrowser";
+  const saved = preference?.user_creation_default;
+  if (saved?.availability === "available" && providers.some((provider) => provider.provider_id === saved.provider_id)) return saved.provider_id as ProviderId;
+  return "";
 }
 
-function providerOptions(providers: HarborProviderStatus[], selected: ProviderId) {
+function providerOptions(providers: HarborProviderStatus[], selected: ProviderId | "", editing: boolean) {
   const available = providers.filter((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable");
-  const options = available.some((provider) => provider.provider_id === selected)
+  const options = selected && available.some((provider) => provider.provider_id === selected)
     ? available
-    : [{ provider_id: selected, display_name: selected === "camoufox" ? "Camoufox" : selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available];
-  return options.map((provider) => <option key={provider.provider_id} value={provider.provider_id}>{provider.display_name}</option>);
+    : selected && editing ? [{ provider_id: selected, display_name: selected === "camoufox" ? "Camoufox" : selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available] : available;
+  return <><option value="" disabled>请选择 Provider</option>{options.map((provider) => <option key={provider.provider_id} value={provider.provider_id}>{provider.display_name}</option>)}</>;
 }
 
 function supports(provider: HarborProviderStatus | undefined, key: NonNullable<HarborProviderStatus["capabilities"]>[number]["key"]) {

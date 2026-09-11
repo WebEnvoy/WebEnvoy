@@ -1,5 +1,6 @@
 import { hasManagedBindingConflict } from "./managed-observation.js";
 import { boundedEnvironmentUpdate } from "./profile-environment.js";
+import type { BrowserProviderId } from "./provider-management.js";
 import { createHash } from "node:crypto";
 import { createIdentityConsistencyFacts } from "./identity-consistency.js";
 import {
@@ -24,6 +25,7 @@ import type {
   StoredLocalIdentityEnvironmentRecord
 } from "./identity-environment-manager.js";
 import {
+  HARBOR_PROVIDER_SELECTION_SCHEMA,
   type IdentityEnvironmentConfigurationUpdate,
   hasOnlyIdentityEnvironmentBusinessInputKeys,
   type IdentityEnvironmentLocalMaterialRefs,
@@ -105,7 +107,10 @@ export function executeIdentityEnvironmentMutation(
   if (conflict) return rejected(request.operation, requestRef(request), conflict.code, true, conflict.recovery_actions);
   // Metadata-only configuration does not touch the active browser's storage.
   if (activeConfigurationOnly && !receipt && request.operation === "edit" && boundedEnvironmentUpdate(request.configuration)) return edit(request, hash, store, options);
-  const materializedRequest = materializeIdentityEnvironmentMutation(request, options.provider_detection);
+  const userCreationDefaultProviderId = request.operation === "create"
+    ? options.resolve_user_creation_default_provider_id?.()
+    : undefined;
+  const materializedRequest = materializeIdentityEnvironmentMutation(request, options.provider_detection, userCreationDefaultProviderId);
   let ownership;
   try {
     ownership = acquireProfileStorageOwnership(profileStorageRefsForMutation(materializedRequest, store, receipt));
@@ -138,7 +143,8 @@ export function executeIdentityEnvironmentMutation(
 
 export function materializeIdentityEnvironmentMutation(
   request: IdentityEnvironmentMutationRequest,
-  providerDetection: IdentityEnvironmentMutationOptions["provider_detection"] = {}
+  providerDetection: IdentityEnvironmentMutationOptions["provider_detection"] = {},
+  userCreationDefaultProviderId?: BrowserProviderId
 ): MaterializedIdentityEnvironmentMutationRequest {
   if (request.operation === "create" || request.operation === "import") {
     const {
@@ -160,6 +166,9 @@ export function materializeIdentityEnvironmentMutation(
       identity_environment: {
         ...providerDetection,
         ...businessInput,
+        ...(request.operation === "create" && businessInput.requested_provider_id === undefined && userCreationDefaultProviderId !== undefined
+          ? { user_creation_default_provider_id: userCreationDefaultProviderId }
+          : {}),
         ...(request.operation === "import" ? {
           profile_storage_ref: importSourceRef,
           imported_from: importSourceRef
@@ -207,8 +216,25 @@ function createOrImport(
     return rejected(request.operation, ref, "source_material_missing", true, ["locate_source_profile", "retry"]);
   }
   const invalid = validateIdentityEnvironmentConfiguration(request.identity_environment, record.identity_environment, options);
-  if (invalid) return rejected(request.operation, ref, invalid, invalid === "proxy_unreachable", ["revise_configuration", "retry"]);
-  return commitSimple(store, request.idempotency_key, hash, completed(request.operation, store.public_record(record), null, "registered", "created", "unchanged"), new Map(store.records).set(ref, record));
+  if (invalid) {
+    const failure = rejected(request.operation, ref, invalid, invalid === "proxy_unreachable", ["revise_configuration", "retry"]);
+    return invalid === "provider_selection_required" || invalid === "provider_unavailable"
+      ? commitSimple(store, request.idempotency_key, hash, failure, new Map(store.records))
+      : failure;
+  }
+  return commitSimple(store, request.idempotency_key, hash, completed(
+    request.operation,
+    store.public_record(record),
+    null,
+    "registered",
+    "created",
+    "unchanged",
+    request.operation === "create" ? {
+      schema_version: HARBOR_PROVIDER_SELECTION_SCHEMA,
+      source: request.identity_environment.requested_provider_id === undefined ? "user_default" : "explicit_request",
+      selected_provider_id: record.identity_environment.provider_binding.selected_provider_id!
+    } : null
+  ), new Map(store.records).set(ref, record));
 }
 function edit(
   request: Extract<IdentityEnvironmentMutationRequest, { operation: "edit" }>,

@@ -4,9 +4,11 @@ import {
   type HarborIdentityFacts,
   type HarborIdentityLoadState,
   type HarborProviderCatalog,
+  type HarborProviderPreference,
   type HarborRuntimeSession,
   isHarborIdentityFacts,
   isProviderCatalog,
+  isProviderPreference,
   isRecord,
 } from "./harborIdentityTypes";
 import type { BrowserSessionProjection, BrowserTargetProjection, IdentityEnvironmentProjection } from "./identityEnvironmentFixtures";
@@ -22,7 +24,7 @@ export async function fetchHarborIdentityState(
   signal?: AbortSignal,
 ): Promise<HarborIdentityLoadState> {
   const fetchedAt = new Date().toISOString();
-  const [catalogResult, identityResult] = await Promise.all([
+  const [catalogResult, identityResult, preferenceResult] = await Promise.all([
     fetchFirstJson<HarborProviderCatalog>(harborEndpoint, [
       "/runtime/browser-providers",
       "/runtime/browser-provider-status",
@@ -33,12 +35,16 @@ export async function fetchHarborIdentityState(
       "/identity-environments",
       "/runtime/local-identity-environments",
     ], signal),
+    fetchFirstJson<HarborProviderPreference>(harborEndpoint, ["/runtime/browser-provider-preference"], signal),
   ]);
   const catalog = catalogResult.ok && isProviderCatalog(catalogResult.value) && !fixtureOrDemoPayloadReason(catalogResult.value) ? catalogResult.value : null;
   const parsedIdentities = identityResult.ok && !fixtureOrDemoPayloadReason(identityResult.value)
     ? parseIdentityList(identityResult.value, catalog)
     : null;
   const identities = parsedIdentities?.map((item) => projectHarborIdentity(item, catalog, fetchedAt)) ?? [];
+  const providerPreference = preferenceResult.ok && isProviderPreference(preferenceResult.value) && !fixtureOrDemoPayloadReason(preferenceResult.value)
+    ? preferenceResult.value
+    : null;
 
   if (parsedIdentities != null) {
     return {
@@ -47,6 +53,7 @@ export async function fetchHarborIdentityState(
       summary: catalog ? "已读取 Harbor provider/identity public facts。" : "已读取 Harbor identity public facts；provider endpoint 未返回。",
       identities,
       providers: catalog?.providers ?? [],
+      providerPreference,
     };
   }
 
@@ -56,7 +63,56 @@ export async function fetchHarborIdentityState(
     summary: `Harbor identity endpoint 未返回可消费的 owner facts。${identityResult.ok ? "" : ` ${identityResult.error}`}`,
     identities,
     providers: catalog?.providers ?? [],
+    providerPreference,
   };
+}
+
+export async function mutateHarborProviderPreference(
+  harborEndpoint: string,
+  operation: "set" | "clear",
+  providerId?: import("./harborIdentityTypes").ProviderId,
+): Promise<{ ok: boolean; message: string }> {
+  const idempotencyKey = crypto.randomUUID();
+  const path = "/runtime/browser-provider-preference";
+  let payload: unknown;
+  try {
+    payload = await requestOwnerJson(harborEndpoint, path, {
+      method: "POST",
+      body: operation === "set" ? { operation, idempotency_key: idempotencyKey, provider_id: providerId } : { operation, idempotency_key: idempotencyKey },
+      includeErrorBody: true,
+      timeoutMs: 20_000,
+    });
+  } catch {
+    payload = null;
+  }
+  const direct = providerPreferenceMutationBody(payload);
+  if (direct) return { ok: direct.status === "completed", message: direct.status === "completed" ? (operation === "set" ? "已保存新建默认。" : "已清除新建默认。") : providerPreferenceFailure(isRecord(direct.failure) ? direct.failure.code : undefined) };
+  const projectedFailure = isRecord(payload) && payload.ok === false && isRecord(payload.body) && isRecord(payload.body.error)
+    ? payload.body.error.code
+    : undefined;
+  if (projectedFailure !== undefined) return { ok: false, message: providerPreferenceFailure(projectedFailure) };
+  let receipt: unknown;
+  try {
+    receipt = await requestOwnerJson(harborEndpoint, `/runtime/browser-provider-preference-mutations/${encodeURIComponent(idempotencyKey)}`);
+  } catch {
+    receipt = null;
+  }
+  const reconciled = providerPreferenceMutationBody(receipt);
+  if (reconciled?.status === "completed") return { ok: true, message: operation === "set" ? "已确认并保存新建默认。" : "已确认并清除新建默认。" };
+  if (reconciled?.status === "rejected") return { ok: false, message: providerPreferenceFailure(isRecord(reconciled.failure) ? reconciled.failure.code : undefined) };
+  return { ok: false, message: "偏好修改结果未知；未重发原操作，请刷新后核对。" };
+}
+
+function providerPreferenceMutationBody(value: unknown): Record<string, unknown> | null {
+  const candidate = isRecord(value) && value.ok === false && isRecord(value.body) ? value.body : value;
+  return isRecord(candidate) && candidate.schema_version === "harbor-browser-provider-preference-mutation/v1" &&
+    (candidate.status === "completed" || candidate.status === "rejected") ? candidate : null;
+}
+
+function providerPreferenceFailure(code: unknown) {
+  if (code === "provider_unavailable") return "该 Provider 当前不可用；旧默认保持不变。";
+  if (code === "persistence_failed") return "保存失败；旧默认保持不变。";
+  return "偏好修改被拒绝；旧默认保持不变。";
 }
 
 export async function fetchHarborIdentitySession(

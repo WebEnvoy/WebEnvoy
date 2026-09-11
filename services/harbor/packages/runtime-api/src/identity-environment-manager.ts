@@ -1,17 +1,10 @@
 import { hasManagedBindingConflict, type ManagedAccountBinding } from "./managed-observation.js";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateIdentityEnvironmentConfiguration } from "./identity-environment-configuration.js";
 import {
-  closeSync,
-  constants,
   existsSync,
-  fsyncSync,
-  openSync,
   readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type ObservedIdentityEnvironmentFacts } from "./identity-consistency.js";
@@ -36,11 +29,11 @@ import {
   type StoredIdentityEnvironmentRepair
 } from "./identity-environment-mutations.js";
 import {
-  fsyncIdentityEnvironmentStoreDirectory,
   internalIdentityEnvironmentFacts,
   replaceMap,
   secureIdentityEnvironmentStoreDirectory,
-  secureIdentityEnvironmentStoreFile
+  secureIdentityEnvironmentStoreFile,
+  writeSecureJsonFile
 } from "./identity-environment-store.js";
 import { acquireFileOwnership } from "./profile-storage.js";
 
@@ -182,7 +175,11 @@ export class LocalIdentityEnvironmentManager {
     return this.withStoreMutation(() => this.upsert(input, "imported"));
   }
 
-  mutate(request: IdentityEnvironmentMutationRequest, conflict: IdentityEnvironmentMutationConflict | null = null, activeConfigurationOnly = false): IdentityEnvironmentMutationResult {
+  mutate(
+    request: IdentityEnvironmentMutationRequest,
+    conflict: IdentityEnvironmentMutationConflict | null = null,
+    activeConfigurationOnly = false
+  ): IdentityEnvironmentMutationResult {
     const result = this.withStoreMutation(() => executeIdentityEnvironmentMutation(request, {
         records: this.records,
         receipts: this.receipts,
@@ -587,23 +584,7 @@ export class LocalIdentityEnvironmentManager {
     }
     const path = this.persistencePath();
     if (!path) return;
-    secureIdentityEnvironmentStoreDirectory(dirname(path));
-    const tmpPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
-    let fd: number | null = null;
-    try {
-      fd = openSync(tmpPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
-      writeFileSync(fd, JSON.stringify({ schema_version: HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, ...state }, null, 2));
-      fsyncSync(fd);
-      closeSync(fd);
-      fd = null;
-      renameSync(tmpPath, path);
-      secureIdentityEnvironmentStoreFile(path);
-      fsyncIdentityEnvironmentStoreDirectory(dirname(path));
-    } catch (error) {
-      if (fd !== null) closeSync(fd);
-      rmSync(tmpPath, { force: true });
-      throw error;
-    }
+    writeSecureJsonFile(path, { schema_version: HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA, ...state });
   }
 
   private withStoreMutation<T>(action: () => T): T {

@@ -260,7 +260,8 @@ test("detects registered provider status without promoting Camoufox to the defau
   const chrome = catalog.providers[1]!;
   const camoufox = catalog.providers[2]!;
   assert.equal(cloak.role, "primary");
-  assert.equal(cloak.default_for_identity_environment, true);
+  assert.equal(cloak.project_recommended, true);
+  assert.equal(cloak.default_for_identity_environment, false);
   assert.equal(cloak.install.status, "installed");
   assert.equal(cloak.install.version, "145.0.7632.109.2");
   assert.equal(chrome.role, "restricted_fallback");
@@ -272,22 +273,21 @@ test("detects registered provider status without promoting Camoufox to the defau
   assert.equal(camoufox.capabilities.find((capability) => capability.key === "cdp")?.state, "unsupported");
 });
 
-test("binds identity environments to CloakBrowser by default and warns on Chrome fallback", () => {
-  const cloakDefault = bindIdentityEnvironmentDefaultProvider(providerFixture({
+test("requires an explicit or user-default provider without silently using the recommendation", () => {
+  const selectionRequired = bindIdentityEnvironmentDefaultProvider(providerFixture({
     [cloakPath]: { executable: true },
     [chromePath]: { executable: true }
   }));
-  assert.equal(cloakDefault.selected_provider_id, "cloakbrowser");
-  assert.equal(cloakDefault.selection_reason, "cloakbrowser_default");
-  assert.equal(cloakDefault.requires_user_notice, false);
+  assert.equal(selectionRequired.selected_provider_id, null);
+  assert.equal(selectionRequired.selection_reason, "selection_required");
+  assert.equal(selectionRequired.requires_user_notice, true);
 
-  const chromeFallback = bindIdentityEnvironmentDefaultProvider(providerFixture({
-    [chromePath]: { executable: true }
-  }));
-  assert.equal(chromeFallback.selected_provider_id, "chrome_official");
-  assert.equal(chromeFallback.selection_reason, "chrome_restricted_fallback");
-  assert.equal(chromeFallback.requires_user_notice, true);
-  assert.equal(chromeFallback.warnings.some((warning) => warning.includes("受限后备")), true);
+  const userDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    user_creation_default_provider_id: "chrome_official"
+  });
+  assert.equal(userDefault.selected_provider_id, "chrome_official");
+  assert.equal(userDefault.selection_reason, "user_default_available");
 
   const unavailableRequested = bindIdentityEnvironmentDefaultProvider({
     ...providerFixture({ [chromePath]: { executable: true } }),
@@ -363,6 +363,7 @@ test("returns local identity environment facts without protected material", () =
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const facts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [cloakPath]: { executable: true } }),
+    requested_provider_id: "cloakbrowser",
     identity_environment_ref: "identity-env_xhs-alice",
     execution_identity_ref: "execution-identity_xhs-alice",
     profile_ref: "profile_xhs-alice",
@@ -441,6 +442,7 @@ test("manages local xhs and boss identity environments with redacted public outp
     });
     const xhs = runtime.createLocalIdentityEnvironment({
       ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-managed",
       execution_identity_ref: "execution-identity_xhs-managed",
       profile_ref: "profile_xhs-managed",
@@ -469,6 +471,7 @@ test("manages local xhs and boss identity environments with redacted public outp
     });
     const boss = runtime.importLocalIdentityEnvironment({
       ...providerFixture({ [chromePath]: { executable: true } }),
+      requested_provider_id: "chrome_official",
       identity_environment_ref: "identity-env_boss-managed",
       execution_identity_ref: "execution-identity_boss-managed",
       profile_ref: "profile_boss-managed",
@@ -1552,6 +1555,7 @@ test("opens an identity environment session with page and controller facts", asy
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
       ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-open",
       execution_identity_ref: "execution-identity_xhs-open",
       profile_ref: "profile_xhs-open",
@@ -1594,6 +1598,7 @@ test("routes registered inline identity facts through the managed session path",
   const runtime = new HarborRuntime(capturingLauncher(launches));
   runtime.createLocalIdentityEnvironment({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-managed",
     profile_ref: "profile_inline-managed",
@@ -1609,6 +1614,7 @@ test("routes registered inline identity facts through the managed session path",
 
   const mismatchedInlineFacts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-bypass",
     profile_ref: "profile_inline-bypass",
@@ -1633,6 +1639,7 @@ test("routes registered inline identity facts through the managed session path",
 
   const inlineFacts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-managed",
     profile_ref: "profile_inline-managed",
@@ -1662,6 +1669,7 @@ test("reuses, locks, releases, and stops identity environment sessions", async (
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const identity_environment = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [cloakPath]: { executable: true } }),
+    requested_provider_id: "cloakbrowser",
     identity_environment_ref: "identity-env_boss",
     execution_identity_ref: "execution-identity_boss",
     profile_ref: "profile_boss",
@@ -2159,6 +2167,7 @@ test("returns structured failure for invalid target URLs", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const result = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      requested_provider_id: "cloakbrowser",
       site: {
         site_id: "xhs",
         origin: "https://www.xiaohongshu.com"
@@ -2370,6 +2379,7 @@ test("captures live page screenshot refs and artifact facts without raw screensh
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      requested_provider_id: "cloakbrowser",
       site: {
         site_id: "xiaohongshu",
         origin: "https://www.xiaohongshu.com",
@@ -2425,6 +2435,7 @@ test("captures live page refs without screenshot evidence when screenshot captur
   });
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-screenshot-failure",
       execution_identity_ref: "execution-identity_xhs-screenshot-failure",
       profile_ref: "profile_xhs-screenshot-failure",

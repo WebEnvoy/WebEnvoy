@@ -15,13 +15,14 @@ import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string };
+  page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isPageMutation = (operation: string) => (managedPageOperations as readonly string[]).includes(operation) && operation !== "page.list";
 const isObservation = (operation: string) => ["instance.observe", "instance.read", "instance.snapshot", "instance.wait"].includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
 const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
 const isRecovery = (operation: string) => ["recovery.inspect", "recovery.request", "recovery.status"].includes(operation);
+const isProviderPreference = (operation: string) => ["provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(operation);
 class InteractionFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_interaction_outcome_unknown"); }
 }
@@ -49,10 +50,11 @@ function configuration(value: unknown): EnvironmentConfiguration {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref", "provider_id"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
   if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
+  if (input.provider_id !== undefined && !["cloakbrowser", "chrome_official", "camoufox"].includes(String(input.provider_id))) return fail("managed_browser_invalid_input");
   for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return fail("managed_browser_invalid_input");
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
@@ -102,18 +104,31 @@ function parse(value: unknown): Request {
     if (input.operation === "recovery.status") text(input.operation_ref);
     if (input.backup_ref !== undefined && input.operation !== "recovery.request") return fail("managed_browser_invalid_input");
     if (input.backup_ref !== undefined) text(input.backup_ref);
-  } else if (!["instance.navigate", "instance.read", "instance.observe"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
+  } else if (isProviderPreference(String(input.operation))) {
+    if (["profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"].some(key => input[key] !== undefined) ||
+      (input.operation === "provider.preference.set" ? input.provider_id === undefined : input.provider_id !== undefined)) return fail("managed_browser_invalid_input");
+  } else if (input.operation === "profile.create") {
+    if (["profile_ref", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
+  } else if (input.provider_id !== undefined || !["instance.navigate", "instance.read", "instance.observe"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...access } = input;
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
   const profile = object(value), refs = object(profile.refs);
   return { profile_ref: text(refs.profile_ref), identity_environment_ref: text(profile.identity_environment_ref), site: profile.site,
     status: profile.status, account_bindings: profile.account_bindings ?? [], environment_summary: profile.environment_summary };
+}
+function publicProviderSelection(value: unknown): ObjectValue | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const selection = value as ObjectValue;
+  if (selection.schema_version !== "harbor-provider-selection/v1" ||
+    !["explicit_request", "user_default"].includes(String(selection.source)) ||
+    !["cloakbrowser", "chrome_official", "camoufox"].includes(String(selection.selected_provider_id))) return undefined;
+  return { schema_version: selection.schema_version, source: selection.source, selected_provider_id: selection.selected_provider_id };
 }
 function publicSession(value: unknown): ObjectValue {
   const session = object(value);
@@ -155,18 +170,21 @@ export function createManagedBrowserService(options: {
     const catalog = await harbor("/runtime/managed-operation-catalog");
     const version = digest(JSON.stringify(catalog));
     const controlled = isInteraction(input.operation);
+    const preference = isProviderPreference(input.operation);
     const policyOperation = controlled ? isInput(input.operation) ? "controlled-page.interact" : "controlled-page.observe" : input.operation;
     const proof = matchHarborBusinessOperationOwner(catalog, policyOperation, {
       schema_version: "webenvoy.harbor-resource-match.v0", match_ref: `resource-match:${version.slice(0, 32)}`,
       match_version: `sha256:${digest(JSON.stringify({ catalog: version, profile_ref: input.profile_ref, origin: input.origin, policy: access.profile_policy }))}`,
-      matched_requirement_refs: ["harbor://managed-profile", ...(controlled ? ["harbor://controlled-page"] : [])]
+      matched_requirement_refs: preference ? ["harbor://browser-provider-preference"] : ["harbor://managed-profile", ...(controlled ? ["harbor://controlled-page"] : [])]
     });
     if (!proof) return fail("execution_policy_owner_declaration_invalid");
     const evaluation = evaluateExecutionPolicy({ caller: "agent", evaluated_at: new Date().toISOString(),
       action: { action_instance_ref: `managed-action:${runId}`, action_id: policyOperation,
         // The policy owner acts on a Profile. Its exact origin is checked by the
         // access intersection and bound above, including explicitly approved local origins.
-        target: { target_ref: input.profile_ref ?? input.template_ref ?? input.grant_id, target_type: "managed_profile" } },
+        target: preference
+          ? { target_ref: "browser-provider-preference:local", target_type: "provider_preference" }
+          : { target_ref: input.profile_ref ?? input.template_ref ?? input.grant_id, target_type: "managed_profile" } },
       owner_proof: proof, context: { skill_ref: "harbor:managed-browser" },
       policies: await options.executionPolicyConfigStore.resolveSources({ skill_ref: "harbor:managed-browser" }) });
     const decision = await options.authorizationDecisionStore.recordAuthorizationDecision({ idempotency_key: `managed-policy:${runId}`,
@@ -179,6 +197,18 @@ export function createManagedBrowserService(options: {
     const check = () => options.accessStore.checkAccess(hash, accessRequest(input));
     await store.updateRunRecord(runId, { evidence_refs: [access.decision_ref] });
     const holder = access.principal.principal_id;
+    if (isProviderPreference(input.operation)) {
+      await check();
+      if (input.operation === "provider.preference.read") return { preference: await harbor("/runtime/browser-provider-preference"), authorization_decision_ref: access.decision_ref };
+      const preference = await harbor("/runtime/browser-provider-preference", input.operation === "provider.preference.set"
+        ? { operation: "set", idempotency_key: runId, provider_id: input.provider_id! }
+        : { operation: "clear", idempotency_key: runId });
+      if (preference.status !== "completed") {
+        const failure = preference.failure && typeof preference.failure === "object" ? object(preference.failure) : {};
+        return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
+      }
+      return { preference, authorization_decision_ref: access.decision_ref };
+    }
     if (isRecovery(input.operation)) {
       await check();
       if (!options.recoveryService) return fail("recovery_unavailable");
@@ -200,13 +230,15 @@ export function createManagedBrowserService(options: {
         run.public_result_summary?.operation === "profile.create" && ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
       if (unresolved) return fail("managed_browser_creation_reconciliation_required");
       const template = access.creation_template!;
+      if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
       await check();
       const created = await harbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
-        identity_environment: { site: template.site, requested_provider_id: template.provider_id, language: template.language, timezone: template.timezone } });
+        identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
       if (created.status !== "completed") return fail("managed_browser_creation_unknown");
       const profile = publicProfile(created.record);
+      const providerSelection = publicProviderSelection(created.provider_selection);
       await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
-      return { profile, authorization_decision_ref: access.decision_ref };
+      return { profile, ...(providerSelection ? { provider_selection: providerSelection } : {}), authorization_decision_ref: access.decision_ref };
     }
     const list = await harbor("/runtime/identity-environments");
     if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
@@ -339,7 +371,7 @@ export function createManagedBrowserService(options: {
       const runId = `managed-${digest(`${principal.principal_id}:${input.idempotency_key}`)}`;
       const requestHash = digest(JSON.stringify(input));
       await mkdir(directory, { recursive: true, mode: 0o700 });
-      return withFileOwnershipLock(join(directory, `${digest(input.operation === "profile.create" ? input.grant_id : input.profile_ref ?? runId)}.lock`), 5000, async () => {
+      return withFileOwnershipLock(join(directory, `${digest(input.operation === "profile.create" || isProviderPreference(input.operation) ? input.grant_id : input.profile_ref ?? runId)}.lock`), 5000, async () => {
         const previous = await store.getRunRecord(runId);
         if (previous) {
           if (previous.public_result_summary?.request_hash !== requestHash) return fail("managed_browser_idempotency_conflict");
@@ -353,7 +385,7 @@ export function createManagedBrowserService(options: {
             ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { dispatch_state: "not_dispatched" } : {})
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation)) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: (["profile.create", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation)) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
@@ -378,6 +410,22 @@ export function createManagedBrowserService(options: {
       const principal = await options.accessStore.authenticateCredential(credentialHash);
       const run = await store.getRunRecord(runId);
       if (!run || run.public_result_summary?.principal_id !== principal.principal_id) return fail("managed_browser_operation_not_found");
+      if (["provider.preference.set", "provider.preference.clear"].includes(String(run.public_result_summary?.operation)) &&
+        ["running", "admitted", "unknown_outcome"].includes(run.status) && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.grant_id))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.status === "succeeded" || current.public_result_summary?.reconciliation) return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            const receipt = await harbor(`/runtime/browser-provider-preference-mutations/${encodeURIComponent(runId)}`);
+            await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result: { preference: receipt } } });
+          } catch { /* Missing Runtime receipt never proves the original preference write did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
       if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "environment.update" && !run.public_result_summary?.reconciliation) {
         await mkdir(directory, { recursive: true, mode: 0o700 });
         const profileRef = typeof run.public_result_summary?.profile_ref === "string" ? run.public_result_summary.profile_ref : runId;
@@ -450,8 +498,9 @@ export function createManagedBrowserService(options: {
           const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
           if (receipt.status === "completed") {
             const profile = publicProfile(receipt.record);
+            const providerSelection = publicProviderSelection(receipt.provider_selection);
             await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: run.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
-            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile } } });
+            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, ...(providerSelection ? { provider_selection: providerSelection } : {}) } } });
           }
           return response((await store.getRunRecord(runId))!);
         });
