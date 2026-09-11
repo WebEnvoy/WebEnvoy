@@ -179,9 +179,14 @@ const input=document.querySelector('input'),draft=document.querySelector('#draft
     const camoufoxStarted = await connector.call('webenvoy_operation', { idempotency_key: 'camoufox-live-start', grant_id: camoufoxGrant.grant.grant_id, operation: 'instance.start', profile_ref: camoufoxProfileRef, origin, url: origin + '/', task_scope: camoufoxScope });
     assert.equal(camoufoxStarted.status, 'succeeded', JSON.stringify(camoufoxStarted));
     const camoufoxSessionRef = camoufoxStarted.result.session.runtime_session_ref;
-    const camoufoxSnapshot = await camoufoxOperation('camoufox-live-snapshot', 'instance.snapshot');
-    const camoufoxTarget = camoufoxSnapshot.result.snapshot.controls.find(control => control.role === 'textbox');
-    const camoufoxInput = await camoufoxOperation('camoufox-live-input', 'instance.input', { page_ref: camoufoxSnapshot.result.snapshot.page_ref, observation_ref: camoufoxSnapshot.result.snapshot.observation_ref, target_ref: camoufoxTarget.target_ref, text: 'Camoufox并存' });
+    let camoufoxInput;
+    for (let attempt = 0; attempt < 3 && camoufoxInput?.status !== 'succeeded'; attempt++) {
+      const camoufoxSnapshot = await camoufoxOperation(`camoufox-live-snapshot-${attempt}`, 'instance.snapshot');
+      const camoufoxTarget = camoufoxSnapshot.result.snapshot.controls.find(control => control.role === 'textbox');
+      camoufoxInput = await connector.call('webenvoy_operation', { idempotency_key: `camoufox-live-input-${attempt}`, grant_id: camoufoxGrant.grant.grant_id, operation: 'instance.input', profile_ref: camoufoxProfileRef, origin, runtime_session_ref: camoufoxSessionRef, task_scope: camoufoxScope, page_ref: camoufoxSnapshot.result.snapshot.page_ref, observation_ref: camoufoxSnapshot.result.snapshot.observation_ref, target_ref: camoufoxTarget.target_ref, text: 'Camoufox并存' });
+      if (camoufoxInput.status !== 'succeeded') assert.equal(camoufoxInput.result?.failure_class, 'managed_interaction_stale_target', JSON.stringify(camoufoxInput));
+    }
+    assert.equal(camoufoxInput?.status, 'succeeded', JSON.stringify(camoufoxInput));
     assert.match(camoufoxInput.result.snapshot.text, /草稿：Camoufox并存/);
     await soak([...liveSessions, { profileRef: camoufoxProfileRef, sessionRef: camoufoxSessionRef, expected: 'Camoufox并存' }]);
     snapshot = await operation('obscura-live-post-soak-snapshot', 'instance.snapshot', { runtime_session_ref: sessionRef });

@@ -70,7 +70,8 @@ no-release Agent 包可在打包时显式提供固定二进制；打包器先校
 
 - `plugin_verified`：同一隔离安装中三个 Obscura Profile 以三个合成草稿并行运行，snapshot 分别回读且不串用；重复 start 回到同一 `runtime_session_ref`，没有建立第二主 Instance。
 - `plugin_verified`：同一安装同时启动本机既有 Camoufox Profile 并完成独立输入回读，证明新增 Obscura 没有替换另一 Provider。
-- 待证据：下载／代理隔离和 30 分钟资源样本。未执行这些项目不能推断不适配。
+- `plugin_verified`／原型样本：no-release 包 `774c943fa7ec26b34ad3f25bfaea28eab17a7df2` 在 macOS arm64 上保持上述四个 Profile 连续运行 1,800,002 ms；30 个每分钟样本全部精确回读、`errors=0`、进程树数量恒为 16。整棵安装 Runtime 进程树 RSS 为 590,368–1,743,392 KiB（均值 771,727 KiB）；每轮四次 snapshot 合计 915–1,651 ms（均值 1,030 ms）。该冷启动后下降的单次窗口不构成长期稳定、容量或优于其他浏览器的承诺。
+- 待证据：下载与代理隔离。未执行这些项目不能推断不适配。
 
 ### C. 人工使用、同现场与接管
 
@@ -105,7 +106,7 @@ no-release Agent 包可在打包时显式提供固定二进制；打包器先校
 
 结论：**继续验证／待证据，不进入正式可安装支持**。
 
-已成立的是：固定 main render build 在 macOS arm64 上可由 Harbor 和隔离安装 Plugin 正式路径显式选择；三个独立 Obscura Profile、一个 Camoufox Profile、同现场 owner Viewer 实现、Cookie／受限 localStorage 重启连续、受控保存与 dispatched unknown 不重放已有实证。核心底线尚未全部成立：真人 Viewer／中文 IME、完整 storage、文件类能力、30 分钟样本、真实 Codex Agent 和真实站点仍缺证据；unsigned/unreleased 分发也是正式可选阻断。
+已成立的是：固定 main render build 在 macOS arm64 上可由 Harbor 和隔离安装 Plugin 正式路径显式选择；三个独立 Obscura Profile、一个 Camoufox Profile、30 分钟有界样本、同现场 owner Viewer 实现、Cookie／受限 localStorage 重启连续、受控保存与 dispatched unknown 不重放已有实证。核心底线尚未全部成立：真人 Viewer／中文 IME、完整 storage、文件类能力、真实 Codex Agent 和真实站点仍缺证据；unsigned/unreleased 分发也是正式可选阻断。
 
 缺口按 owner 分类：
 
