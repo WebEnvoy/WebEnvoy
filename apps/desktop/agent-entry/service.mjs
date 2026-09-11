@@ -22,7 +22,7 @@ let supervisor, ownerToken;
 const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const server = createServer(async (req, res) => {
   try {
-    if (state.ready && (!supervisor.getCoreRuntimeSupervisorToken(state.coreEndpoint) || !supervisor.getHarborRuntimeSupervisorToken(state.harborEndpoint))) state = { ...state, ready: false, error: 'runtime_child_exited' };
+    if (state.ready && (!supervisor.getCoreRuntimeSupervisorToken(state.coreEndpoint) || !supervisor.getHarborRuntimeSupervisorToken(state.harborEndpoint) || !supervisor.getHarborOwnerViewerToken(state.harborEndpoint))) state = { ...state, ready: false, error: 'runtime_child_exited' };
     if (req.url === '/status' && req.method === 'GET') return send(res, 200, state);
     if (req.url === '/stop' && req.method === 'POST' && ownerToken && req.headers.authorization === `Bearer ${ownerToken}`) {
       send(res, 200, { stopped: true }); return shutdown();
@@ -73,7 +73,7 @@ try {
     if (url.hostname !== '127.0.0.1' || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) throw new Error('installation_endpoint_invalid');
   }
   // The installed service never inherits development stores, launch wrappers, fixture providers or private resolvers.
-  for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
+  for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_|OBSCURA_)/.test(key)) delete process.env[key];
   Object.assign(process.env, {
     WEBENVOY_RUNTIME_DATA_DIR: dataDir,
     WEBENVOY_SKILL_ASSETS_PATH: join(root, 'agent-entry/skill-assets'),
@@ -82,6 +82,8 @@ try {
     WEBENVOY_CORE_RUNTIME_COMMAND: '', WEBENVOY_CORE_RUNTIME_PATH: '', WEBENVOY_CORE_RUNTIME_CWD: '',
     WEBENVOY_HARBOR_RUNTIME_COMMAND: '', WEBENVOY_HARBOR_RUNTIME_PATH: '', WEBENVOY_HARBOR_RUNTIME_CWD: '',
     WEBENVOY_DISABLE_PACKAGED_RUNTIME: '0', HARBOR_RUNTIME_PROVIDER: '',
+    HARBOR_OBSCURA_PATH: assets.obscura.state === 'verified' ? assets.obscura.executable_path : '',
+    ...(assets.obscura.state === 'verified' && assets.obscura.validation_private_network ? { HARBOR_OBSCURA_ALLOW_PRIVATE_NETWORK: '1' } : {}),
   });
   const { createRuntimeSupervisor } = await import('../dist-electron/runtimeSupervisor.js');
   supervisor = createRuntimeSupervisor({ dataDir });
@@ -95,8 +97,9 @@ try {
   }
   if (!snapshot.services.every(s => s.health.state === 'ready' && s.pid && s.readyAnnounced)) throw new Error('runtime_start_timeout');
   ownerToken = supervisor.getCoreRuntimeSupervisorToken(config.coreEndpoint);
+  const viewerToken = supervisor.getHarborOwnerViewerToken(config.harborEndpoint);
   // Only App/owner launcher reads this file; it is never sent through the MCP proxy.
-  await writeFile(join(dataDir, 'owner.json'), JSON.stringify({ runtime_id: state.runtime_id, ...config, credential: ownerToken }), { mode: 0o600 });
+  await writeFile(join(dataDir, 'owner.json'), JSON.stringify({ runtime_id: state.runtime_id, ...config, credential: ownerToken, viewer_credential: viewerToken }), { mode: 0o600 });
   state = { ...state, ready: true, services: snapshot.services.map(s => ({ id: s.id, pid: s.pid })) };
   setInterval(async () => {
     if (stopping) return;

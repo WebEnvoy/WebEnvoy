@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { fetchRunInstance, projectRunInstance, runControlChangedEvent, type RunInstanceState } from "./runInstanceClient";
 import { requestOwnerJson } from "./ownerApiClient";
 import { SourceField } from "./TaskThreadFields";
@@ -66,6 +66,109 @@ export function RunInstancePanel({ coreEndpoint, harborEndpoint, runId }: { core
       <button type="button" disabled={state.status === "loading"} onClick={() => setRefresh((value) => value + 1)}>刷新现场状态</button>
       {active && instance ? instance.controlOwner === "user" && instance.controlState === "held" ? <button type="button" onClick={() => void control("return")}>交还控制</button> : instance.controlOwner !== "user" ? <button type="button" onClick={() => void control("takeover")}>接管同一实例</button> : null : null}
     </div>
+    {instance?.viewerRef && instance.viewerAvailability === "available" ? <SameInstanceViewer harborEndpoint={harborEndpoint} instance={instance} /> : null}
     {message ? <p role="status">{message}</p> : null}
   </section>;
+}
+
+type ViewerFrame = {
+  schema_version: "harbor-viewer-frame/v1";
+  runtime_session_ref: string;
+  viewer_ref: string;
+  frame_ref: string;
+  mime_type: "image/png";
+  width: number;
+  height: number;
+  byte_length: number;
+  data_base64: string;
+};
+
+function SameInstanceViewer({ harborEndpoint, instance }: { harborEndpoint: string; instance: NonNullable<Extract<RunInstanceState, { status: "ready" }>['instance']> }) {
+  const [frame, setFrame] = useState<ViewerFrame>();
+  const [message, setMessage] = useState("");
+  const [draft, setDraft] = useState("");
+  const [url, setUrl] = useState("");
+  const [lastPoint, setLastPoint] = useState<{ x: number; y: number }>();
+  const [editing, setEditing] = useState(false);
+  const [pendingInput, setPendingInput] = useState<Record<string, unknown>>();
+  const canInput = instance.controlOwner === "user" && instance.controlState === "held";
+  const canSend = canInput && !pendingInput;
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const value = await requestOwnerJson(harborEndpoint, `/runtime/sessions/${encodeURIComponent(instance.runtimeSessionRef)}/viewer-frame`, {
+        method: "POST", body: { viewer_ref: instance.viewerRef }, timeoutMs: 5000,
+      });
+      if (!disposed) {
+        const next = viewerFrame(value, instance.runtimeSessionRef, instance.viewerRef!);
+        if (next) { setFrame(next); setMessage(""); }
+        else setMessage("原实例画面暂不可用；不会因此重建页面。");
+        if (!editing) timer = window.setTimeout(poll, 750);
+      }
+    };
+    void poll();
+    return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [editing, harborEndpoint, instance.runtimeSessionRef, instance.viewerRef]);
+
+  async function send(action: Record<string, unknown>, existing?: Record<string, unknown>) {
+    if (!frame || !canInput) return;
+    const request = existing ?? { ...action, viewer_ref: instance.viewerRef, frame_ref: frame.frame_ref, operation_ref: `viewer:${crypto.randomUUID()}` };
+    setPendingInput(request);
+    const value = await requestOwnerJson(harborEndpoint, `/runtime/sessions/${encodeURIComponent(instance.runtimeSessionRef)}/viewer-input`, {
+      method: "POST",
+      body: request,
+      timeoutMs: 20_000,
+      includeErrorBody: true,
+    });
+    const body = viewerResultBody(value);
+    const next = viewerFrame(body?.frame, instance.runtimeSessionRef, instance.viewerRef!);
+    if (next) { setFrame(next); setPendingInput(undefined); setMessage("输入已由同一 Instance 确认。 "); }
+    else if (body?.dispatch_state === "not_dispatched") { setPendingInput(undefined); setMessage("输入未派发或画面已过期；请刷新后重试。"); }
+    else setMessage("输入结果尚未确认；只能查询原操作，不会用新编号重放。");
+  }
+
+  function click(event: MouseEvent<HTMLImageElement>) {
+    if (!frame || !canSend) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = { x: (event.clientX - bounds.left) * frame.width / bounds.width, y: (event.clientY - bounds.top) * frame.height / bounds.height };
+    setLastPoint(point);
+    void send({ action: "click", ...point });
+  }
+
+  return <section aria-label="同一原实例画面">
+    <h4>同一原实例画面</h4>
+    <p>{canInput ? "你已持有控制权。点击画面定位；中文在下方输入法完成组词后再提交。" : "只读观看不会取得控制权；接管后才可发送输入。"}</p>
+    {frame ? <img src={`data:image/png;base64,${frame.data_base64}`} width={frame.width} height={frame.height} alt="当前原实例页面" onClick={click} onWheel={(event) => { if (canSend) { event.preventDefault(); void send({ action: "scroll", delta_y: Math.max(-2000, Math.min(2000, Math.round(event.deltaY))) || 1 }); } }} style={{ display: "block", maxWidth: "100%", height: "auto", border: "1px solid currentColor", cursor: canSend ? "crosshair" : "default" }} /> : <p role="status">正在读取原实例画面…</p>}
+    {canInput ? <>
+      <div className="single-action-actions">
+        <input aria-label="向当前画面焦点输入" value={draft} onFocus={() => setEditing(true)} onBlur={() => setEditing(false)} onChange={(event) => setDraft(event.target.value)} placeholder="可使用中文输入法组词" />
+        <button type="button" disabled={!canSend || !draft || !lastPoint} onMouseDown={(event) => event.preventDefault()} onClick={() => { void send({ action: "input", ...lastPoint, text: draft }); setEditing(false); }}>输入到所点控件</button>
+        <button type="button" disabled={!canSend || !frame} onClick={() => void send({ action: "press", key: "Enter" })}>Enter</button>
+      </div>
+      <div className="single-action-actions">
+        <input aria-label="导航网址" value={url} onFocus={() => setEditing(true)} onBlur={() => setEditing(false)} onChange={(event) => setUrl(event.target.value)} placeholder="https://…" />
+        <button type="button" disabled={!canSend || !url} onMouseDown={(event) => event.preventDefault()} onClick={() => { void send({ action: "navigate", url }); setEditing(false); }}>在同一实例导航</button>
+      </div>
+      {pendingInput ? <button type="button" onClick={() => void send({}, pendingInput)}>查询上次输入结果（不重放）</button> : null}
+    </> : null}
+    {message ? <p role="status">{message}</p> : null}
+  </section>;
+}
+
+function viewerFrame(value: unknown, sessionRef: string, viewerRef: string): ViewerFrame | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const frame = value as Partial<ViewerFrame>;
+  if (frame.schema_version !== "harbor-viewer-frame/v1" || frame.runtime_session_ref !== sessionRef || frame.viewer_ref !== viewerRef || frame.mime_type !== "image/png" ||
+    typeof frame.frame_ref !== "string" || typeof frame.data_base64 !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(frame.data_base64) || frame.data_base64.length > 2_800_000 ||
+    !Number.isSafeInteger(frame.width) || frame.width! < 1 || frame.width! > 4096 || !Number.isSafeInteger(frame.height) || frame.height! < 1 || frame.height! > 4096 ||
+    !Number.isSafeInteger(frame.byte_length) || frame.byte_length! < 1 || frame.byte_length! > 2 * 1024 * 1024) return undefined;
+  return frame as ViewerFrame;
+}
+
+function viewerResultBody(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return record.ok === false && record.body && typeof record.body === "object" && !Array.isArray(record.body) ? record.body as Record<string, unknown> : record;
 }

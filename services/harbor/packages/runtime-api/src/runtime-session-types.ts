@@ -52,6 +52,29 @@ export interface LocalProviderScreenshotFacts {
   facts: RuntimeFact[];
 }
 
+export interface LocalProviderViewerFrame {
+  schema_version: "harbor-viewer-frame/v1";
+  frame_ref: string;
+  mime_type: "image/png";
+  width: number;
+  height: number;
+  byte_length: number;
+  sha256: string;
+  captured_at: string;
+  data_base64: string;
+}
+
+export type LocalProviderViewerInput =
+  | { action: "click"; frame_ref: string; x: number; y: number }
+  | { action: "input"; frame_ref: string; x: number; y: number; text: string }
+  | { action: "press"; frame_ref: string; key: "Enter" | "Tab" | "Backspace" | "Delete" | "Escape" }
+  | { action: "scroll"; frame_ref: string; delta_y: number }
+  | { action: "navigate"; frame_ref: string; url: string };
+
+export type LocalProviderViewerInputResult =
+  | { status: "completed"; dispatch_state: "dispatched"; frame: LocalProviderViewerFrame; page: LocalProviderPageFacts }
+  | { status: "unavailable" | "unknown_outcome"; dispatch_state: "not_dispatched" | "dispatched"; failure_class: string };
+
 export interface RuntimeViewerEntry {
   availability: ViewerAvailability;
   access_mode: ViewerAccessMode;
@@ -752,6 +775,8 @@ export type LocalProviderLaunchResult =
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
       executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
       captureScreenshot: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
+      captureViewerFrame?: () => Promise<LocalProviderViewerFrame>;
+      viewerInput?: (input: LocalProviderViewerInput) => Promise<LocalProviderViewerInputResult>;
       /** Resolves when the owned transport dies unexpectedly, including while idle. */
       driverLost?: Promise<void>;
       close: () => Promise<void>;

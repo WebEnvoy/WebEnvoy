@@ -59,6 +59,25 @@ test("serves readiness and provider facts as JSON", async () => {
   }
 });
 
+test("keeps owner Viewer routes outside the Core supervisor bearer", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const ownerToken = Buffer.alloc(32, 9).toString("base64url");
+  const running = await startHarborRuntimeServer({ port: 0, runtime, owner_viewer_supervisor_token: ownerToken });
+  const url = `${running.url}/runtime/sessions/session_missing/viewer-frame`;
+  const request = (authorization?: string) => fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(authorization ? { authorization } : {}) },
+    body: JSON.stringify({ viewer_ref: "viewer_missing" })
+  });
+  try {
+    assert.equal((await request()).status, 403);
+    assert.equal((await request(`Bearer ${supervisorToken()}`)).status, 403);
+    assert.equal((await request(`Bearer ${ownerToken}`)).status, 409);
+  } finally {
+    await running.close();
+  }
+});
+
 test("serves canonical owner runtime facts separately from legacy business adapters", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const running = await startHarborRuntimeServer({ port: 0, runtime });

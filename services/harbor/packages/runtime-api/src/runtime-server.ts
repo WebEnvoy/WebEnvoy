@@ -12,7 +12,8 @@ const running = await startHarborRuntimeServer({
   host,
   port,
   runtime,
-  manual_authentication_supervisor_token: process.env.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN
+  manual_authentication_supervisor_token: process.env.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN,
+  owner_viewer_supervisor_token: process.env.HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN
 });
 
 console.log(JSON.stringify({

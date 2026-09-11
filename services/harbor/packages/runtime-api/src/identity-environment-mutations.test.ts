@@ -139,6 +139,14 @@ test("allocates owner refs and rejects provider metadata that conflicts with the
   assert.equal(mismatch.failure?.code, "invalid_request");
 });
 
+test("accepts only Obscura's fixed en-US locale during Profile creation", () => {
+  const detection = { ...testProviderDetection, env: { HARBOR_OBSCURA_PATH: "/obscura" }, path_exists: (path: string) => path === "/obscura", is_executable: (path: string) => path === "/obscura" };
+  const manager = new LocalIdentityEnvironmentManager({ provider_detection: detection });
+  const create = (language: string, key: string): IdentityEnvironmentMutationRequest => ({ operation: "create", idempotency_key: key, identity_environment: { requested_provider_id: "obscura", language, site: { site_id: "controlled", origin: "https://example.com" } } });
+  assert.equal(manager.mutate(create("en-US", "obscura-en-us")).status, "completed");
+  assert.equal(manager.mutate(create("zh-CN", "obscura-zh-cn")).failure?.code, "unsupported_configuration");
+});
+
 test("derives internal import ownership only from the Harbor import source ref", () => {
   const root = tempDir("import-source-boundary");
   const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;

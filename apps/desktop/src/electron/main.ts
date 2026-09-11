@@ -16,12 +16,14 @@ import {
 } from "./manualAuthenticationCompletion.js";
 import {
   ownerSupervisorAuthorizationHeader,
+  isHarborOwnerViewerRequest,
   isHarborSupervisorProtectedRequest,
   ownerApiProductionPostBlockReason,
   ownerApiTimeoutMs,
   parseOwnerApiRequest,
   projectHarborIdentityMutationErrorBody,
   projectOwnerApiError,
+  projectViewerInputErrorBody,
   type OwnerApiJsonRequest,
 } from "./ownerApiRequest.js";
 import { registerWorkbenchIpc } from "./workbenchIpc.js";
@@ -607,7 +609,13 @@ async function requestOwnerApiJson(request: OwnerApiJsonRequest) {
   const supervisorToken = isHarborSupervisorProtectedRequest(parsed)
     ? runtimeSupervisor.getHarborRuntimeSupervisorToken(parsed.base)
     : undefined;
-  const supervisorAuthorization = ownerSupervisorAuthorizationHeader(parsed, runtimeSupervisor.getCoreRuntimeSupervisorToken(parsed.base), supervisorToken);
+  const ownerViewerRequest = isHarborOwnerViewerRequest(parsed);
+  const ownerViewerToken = ownerViewerRequest
+    ? runtimeSupervisor.getHarborOwnerViewerToken(parsed.base)
+    : undefined;
+  const supervisorAuthorization = ownerViewerRequest
+    ? ownerViewerToken ? `Bearer ${ownerViewerToken}` : undefined
+    : ownerSupervisorAuthorizationHeader(parsed, runtimeSupervisor.getCoreRuntimeSupervisorToken(parsed.base), supervisorToken);
   if (isHarborSupervisorProtectedRequest(parsed) && !supervisorAuthorization) {
     return { ok: false, error: "Protected Harbor owner API request requires the supervised runtime." };
   }
@@ -631,12 +639,13 @@ async function requestOwnerApiJson(request: OwnerApiJsonRequest) {
     if (!response.ok) {
       const projectedError = projectOwnerApiError(json);
       const identityMutationError = projectHarborIdentityMutationErrorBody(parsed.path, json);
+      const viewerInputError = projectViewerInputErrorBody(parsed.path, json);
       return {
         ok: false,
         status: response.status,
         error: `${parsed.path} returned ${response.status}`,
-        ...(identityMutationError !== undefined
-          ? { body: identityMutationError }
+        ...(identityMutationError !== undefined || viewerInputError !== undefined
+          ? { body: identityMutationError ?? viewerInputError }
           : projectedError == null ? {} : { body: { error: projectedError } }),
       };
     }

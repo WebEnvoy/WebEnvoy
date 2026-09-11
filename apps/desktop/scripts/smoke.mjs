@@ -179,10 +179,12 @@ function readGitObject(revision, cwd) {
 }
 
 const sharedSupervisorToken = "smoke-shared-runtime-supervisor-token";
+const ownerViewerToken = "smoke-owner-viewer-token";
 const parentTokenEnvironment = {
   SAFE_PARENT_VALUE: "kept",
   HARBOR_RUNTIME_SUPERVISOR_TOKEN: "parent-runtime-token-must-not-win",
   HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: "parent-manual-token-must-not-win",
+  HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN: "parent-viewer-token-must-not-win",
 };
 const harborChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "harbor",
@@ -190,6 +192,7 @@ const harborChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnv
   { HARBOR_RUNTIME_PORT: "8788", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
+  ownerViewerToken,
 );
 const coreChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvironment(
   "core",
@@ -197,12 +200,15 @@ const coreChildEnvironment = runtimeSupervisorModule.runtimeSupervisorChildEnvir
   { PORT: "8787", HARBOR_MEDIA_REF_RESOLVER_URL: "http://127.0.0.1:48123/internal/media/resolve", HARBOR_MEDIA_REF_RESOLVER_TOKEN: "resolver-token" },
   sharedSupervisorToken,
   parentTokenEnvironment,
+  ownerViewerToken,
 );
 if (
   harborChildEnvironment.HARBOR_RUNTIME_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   coreChildEnvironment.HARBOR_RUNTIME_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   harborChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== sharedSupervisorToken ||
   coreChildEnvironment.HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN !== undefined ||
+  harborChildEnvironment.HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN !== ownerViewerToken ||
+  coreChildEnvironment.HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN !== undefined ||
   harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== "http://127.0.0.1:48123/internal/media/resolve" ||
   harborChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_TOKEN !== "resolver-token" ||
   coreChildEnvironment.HARBOR_MEDIA_REF_RESOLVER_URL !== undefined ||
@@ -451,9 +457,11 @@ if (!preloadSource.includes("completeHarborManualAuthentication")) {
 if (
   preloadSource.includes("HARBOR_RUNTIME_SUPERVISOR_TOKEN") ||
   preloadSource.includes("HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN") ||
+  preloadSource.includes("HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN") ||
   preloadSource.includes("Authorization") ||
   rendererAssets.includes("HARBOR_RUNTIME_SUPERVISOR_TOKEN") ||
   rendererAssets.includes("HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN") ||
+  rendererAssets.includes("HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN") ||
   rendererAssets.includes(sharedSupervisorToken)
 ) {
   throw new Error("Manual authentication smoke failed: supervisor token or authorization plumbing reached preload or renderer assets.");

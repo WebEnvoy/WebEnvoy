@@ -16,11 +16,12 @@ export async function connectInstalledRuntime(directory: string) {
   });
   const initial = await readStatus();
   const owner = JSON.parse(await readFile(join(directory, 'owner.json'), 'utf8'));
-  if (!initial.ready || owner.runtime_id !== initial.runtime_id || !/^[A-Za-z0-9_-]{32,512}$/.test(owner.credential)) throw new Error('Installed Runtime is unavailable or ownership does not match');
+  if (!initial.ready || owner.runtime_id !== initial.runtime_id || !/^[A-Za-z0-9_-]{32,512}$/.test(owner.credential) || !/^[A-Za-z0-9_-]{43}$/.test(owner.viewer_credential)) throw new Error('Installed Runtime is unavailable or ownership does not match');
   for (const key of ['coreEndpoint', 'harborEndpoint'] as const) {
     if (owner[key] !== initial[key] || !/^http:\/\/127\.0\.0\.1:\d+$/.test(initial[key])) throw new Error('Installed Runtime endpoint mismatch');
   }
   const token = (endpoint: string) => [initial.coreEndpoint, initial.harborEndpoint].some(configured => new URL(endpoint).href === new URL(configured).href) ? owner.credential as string : undefined;
+  const viewerToken = (endpoint: string) => new URL(endpoint).href === new URL(initial.harborEndpoint).href ? owner.viewer_credential as string : undefined;
   return {
     config: { coreEndpoint: initial.coreEndpoint, harborEndpoint: initial.harborEndpoint },
     async readState(_config: RuntimeEndpointConfig): Promise<RuntimeSupervisorState> {
@@ -35,5 +36,6 @@ export async function connectInstalledRuntime(directory: string) {
     getCoreRuntimeSupervisorToken: token,
     getHarborRuntimeSupervisorToken: token,
     getHarborManualAuthSupervisorToken: token,
+    getHarborOwnerViewerToken: viewerToken,
   };
 }

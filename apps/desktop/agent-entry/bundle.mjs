@@ -4,6 +4,8 @@ import { join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const sha = value => createHash('sha256').update(value).digest('hex');
+export const obscuraValidatedCommit = '01e1caa33360f6c02643457307894ec885e82eef';
+export const obscuraValidatedSha256 = 'd05336b807fde6b27221af3f1427550666d1f855166c3cc94be537a08b4ba98d';
 export const recoveryOperationRef = (kind, idempotencyKey) => `recovery:${sha(`${kind}:${idempotencyKey}`).slice(0, 64)}`;
 export async function files(directory, prefix = '') {
   const out = {};
@@ -29,6 +31,13 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
     const path = join(bundleRoot, name);
     if (!(await lstat(path)).isFile() || sha(await readFile(path)) !== hash) throw new Error(`asset_integrity_failed: ${name}; reinstall the matching bundle`);
   }
+  let obscura = { state: 'unavailable' };
+  if (manifest.providers?.obscura !== undefined) {
+    const provider = manifest.providers.obscura;
+    const providerPath = 'agent-entry/providers/obscura';
+    if (!provider || Object.keys(provider).sort().join(',') !== 'commit,path,sha256,validation_private_network' || provider.path !== providerPath || provider.commit !== obscuraValidatedCommit || provider.sha256 !== obscuraValidatedSha256 || typeof provider.validation_private_network !== 'boolean' || manifest.files[providerPath] !== obscuraValidatedSha256) throw new Error('obscura_asset_manifest_invalid');
+    obscura = { state: 'verified', executable_path: join(bundleRoot, providerPath), validation_private_network: provider.validation_private_network };
+  }
   let optionalUnavailable = 0, optionalSkillUnavailable = 0;
   for (const [name, hash] of Object.entries(manifest.optional_files ?? {})) {
     if (!(name.startsWith('dist-electron/lode/') || name.startsWith('agent-entry/skill-assets/')) || name.includes('..')) throw new Error('asset_manifest_invalid');
@@ -38,5 +47,5 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
       if (sha(await readFile(join(bundleRoot, name))) !== hash) name.startsWith('agent-entry/skill-assets/') ? optionalSkillUnavailable++ : optionalUnavailable++;
     } catch { name.startsWith('agent-entry/skill-assets/') ? optionalSkillUnavailable++ : optionalUnavailable++; }
   }
-  return { host: { node: process.versions.node, electron: process.versions.electron ?? null, executable_integrity: process.versions.electron ? 'verified' : 'not_checked_by_node_helper' }, optional_website_assets: optionalUnavailable ? { state: 'unavailable', affected_files: optionalUnavailable } : { state: 'verified' }, optional_skill_assets: optionalSkillUnavailable ? { state: 'unavailable', affected_files: optionalSkillUnavailable } : { state: 'verified' }, version: manifest.version, skill_version: manifest.skill_version, workspace: manifest.workspace, lode: manifest.lode, integrity: 'verified', digest: sha(JSON.stringify(manifest)) };
+  return { host: { node: process.versions.node, electron: process.versions.electron ?? null, executable_integrity: process.versions.electron ? 'verified' : 'not_checked_by_node_helper' }, optional_website_assets: optionalUnavailable ? { state: 'unavailable', affected_files: optionalUnavailable } : { state: 'verified' }, optional_skill_assets: optionalSkillUnavailable ? { state: 'unavailable', affected_files: optionalSkillUnavailable } : { state: 'verified' }, obscura, version: manifest.version, skill_version: manifest.skill_version, workspace: manifest.workspace, lode: manifest.lode, integrity: 'verified', digest: sha(JSON.stringify(manifest)) };
 }

@@ -4,6 +4,7 @@ export function ownerApiResponseMaxBytes(path: string) {
   const pathname = path.split("?", 1)[0] ?? path;
   if (pathname === "/identity-compatibility-preview") return 64 * kibibyte;
   if (pathname === "/threads") return 2 * 1024 * kibibyte;
+  if (/^\/runtime\/sessions\/[^/]+\/viewer-(?:frame|input)$/.test(pathname)) return 3 * 1024 * kibibyte;
   if (/^\/runs\/[^/]+\/result$/.test(pathname)) return 2 * 1024 * kibibyte;
   if (/^\/runs\/[^/]+(?:\/[^/]+)?$/.test(pathname)) return 512 * kibibyte;
   if (pathname.includes("identity-environment") || pathname.includes("browser-provider")) return 1024 * kibibyte;

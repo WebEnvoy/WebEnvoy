@@ -158,6 +158,7 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
   const processSnapshots = new Map<RuntimeServiceId, ProcessSnapshot>();
   const runtimeDataDir = options.dataDir ?? process.env.WEBENVOY_RUNTIME_DATA_DIR;
   const supervisorToken = randomBytes(32).toString("base64url");
+  const ownerViewerToken = randomBytes(32).toString("base64url");
   const mediaResolverToken = options.protectedWorkbenchStore ? randomBytes(32).toString("base64url") : undefined;
   const mediaResolver = options.protectedWorkbenchStore
     ? createProtectedMediaRefResolver(options.protectedWorkbenchStore, mediaResolverToken)
@@ -178,7 +179,7 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
       const mediaResolverConfig = await mediaResolverConfigPromise;
       const services = await Promise.all(
         (["core", "harbor"] as const).map((id) =>
-          readServiceState(id, config, checkedAt, processSnapshots, lodeAssets, runtimeDataDir, supervisorToken, mediaResolverConfig),
+          readServiceState(id, config, checkedAt, processSnapshots, lodeAssets, runtimeDataDir, supervisorToken, ownerViewerToken, mediaResolverConfig),
         ),
       );
       const readiness = summarizeRuntimeReadiness(services, lodeAssets);
@@ -200,6 +201,7 @@ export function createRuntimeSupervisor(options: RuntimeSupervisorOptions = {}) 
     getCoreRuntimeSupervisorToken: (endpoint: string) => getSupervisorToken("core", endpoint),
     getHarborRuntimeSupervisorToken: (endpoint: string) => getSupervisorToken("harbor", endpoint),
     getHarborManualAuthSupervisorToken: (endpoint: string) => getSupervisorToken("harbor", endpoint),
+    getHarborOwnerViewerToken: (endpoint: string) => getSupervisorToken("harbor", endpoint) ? ownerViewerToken : undefined,
   };
 }
 
@@ -211,6 +213,7 @@ async function readServiceState(
   lodeAssets: LodeAssetBundleState,
   runtimeDataDir: string | undefined,
   supervisorToken: string,
+  ownerViewerToken: string,
   mediaResolverConfig: ProtectedMediaResolverConfig | undefined,
 ): Promise<RuntimeServiceState> {
   const endpoint = endpointFor(id, config);
@@ -223,6 +226,7 @@ async function readServiceState(
     endpoint,
     supervisorToken,
     mediaResolverConfig?.token,
+    ownerViewerToken,
   );
   let health = await probeFirst(endpoint, serviceHealthPaths[id]);
   if (id === "harbor" && process.env.HARBOR_RUNTIME_PROVIDER === "fixture") {
@@ -263,6 +267,7 @@ function ensureProcess(
   endpoint?: string,
   supervisorToken?: string,
   mediaResolverToken?: string,
+  ownerViewerToken?: string,
 ): ProcessSnapshot {
   const current = processSnapshots.get(id);
   if (current?.child && current.endpoint === endpoint && current.processState !== "exited" && current.processState !== "failed") {
@@ -282,7 +287,7 @@ function ensureProcess(
   try {
     const child = spawn(launch.command, launch.args ?? [], {
       cwd: launch.cwd,
-      env: runtimeSupervisorChildEnvironment(id, launch.source, extraEnv, supervisorToken),
+      env: runtimeSupervisorChildEnvironment(id, launch.source, extraEnv, supervisorToken, process.env, ownerViewerToken),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -291,8 +296,8 @@ function ensureProcess(
       endpoint,
       processState: "starting",
       supervisorToken,
-      outputRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken),
-      errorRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken),
+      outputRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken, ownerViewerToken),
+      errorRedactor: createRuntimeOutputRedactor(supervisorToken, mediaResolverToken, ownerViewerToken),
     };
     processSnapshots.set(id, snapshot);
     child.on("spawn", () => {
@@ -337,17 +342,20 @@ export function runtimeSupervisorChildEnvironment(
   extraEnv: NodeJS.ProcessEnv,
   supervisorToken: string | undefined,
   parentEnvironment: NodeJS.ProcessEnv = process.env,
+  ownerViewerToken?: string,
 ): NodeJS.ProcessEnv {
   const {
     WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredCoreSupervisorToken,
     HARBOR_RUNTIME_SUPERVISOR_TOKEN: _ignoredRuntimeSupervisorToken,
     HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: _ignoredManualAuthSupervisorToken,
+    HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN: _ignoredOwnerViewerSupervisorToken,
     HARBOR_MEDIA_REF_RESOLVER_URL: _ignoredMediaResolverUrl,
     HARBOR_MEDIA_REF_RESOLVER_TOKEN: _ignoredMediaResolverToken,
     ...parentEnv
   } = parentEnvironment;
   const {
     WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredServiceCoreSupervisorToken,
+    HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN: _ignoredServiceOwnerViewerSupervisorToken,
     HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl,
     HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverToken,
     ...serviceEnv
@@ -359,6 +367,7 @@ export function runtimeSupervisorChildEnvironment(
     ...(supervisorToken ? { HARBOR_RUNTIME_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "core" && supervisorToken ? { WEBENVOY_CORE_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "harbor" && supervisorToken ? { HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: supervisorToken } : {}),
+    ...(id === "harbor" && ownerViewerToken ? { HARBOR_OWNER_VIEWER_SUPERVISOR_TOKEN: ownerViewerToken } : {}),
     ...(id === "harbor"
       ? {
           ...(mediaResolverUrl ? { HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl } : {}),

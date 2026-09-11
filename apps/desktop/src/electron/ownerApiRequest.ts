@@ -122,7 +122,19 @@ export function isHarborSupervisorProtectedRequest(request: Extract<ParsedOwnerA
   ].includes(pathname)) {
     return true;
   }
-  return /^\/(?:runtime\/)?sessions\/[^/]+\/(?:handoff|lock|release|stop|read-operations|snapshot)$/.test(pathname);
+  return /^\/(?:runtime\/)?sessions\/[^/]+\/(?:handoff|lock|release|stop|read-operations|snapshot|viewer-frame|viewer-input)$/.test(pathname);
+}
+
+export function isHarborOwnerViewerRequest(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
+  return request.method === "POST" && /^\/runtime\/sessions\/[^/]+\/viewer-(?:frame|input)$/.test(new URL(request.url).pathname);
+}
+
+export function projectViewerInputErrorBody(path: string, value: unknown) {
+  if (!/^\/runtime\/sessions\/[^/]+\/viewer-input$/.test(new URL(path, "http://local").pathname) || !value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const body = value as Record<string, unknown>;
+  if (!["unavailable", "unknown_outcome"].includes(String(body.status)) || !["not_dispatched", "dispatched"].includes(String(body.dispatch_state))) return undefined;
+  const failure_class = typeof body.failure_class === "string" && body.failure_class.length <= 128 && /^[a-z0-9_.-]+$/i.test(body.failure_class) ? body.failure_class : undefined;
+  return failure_class ? { status: body.status, dispatch_state: body.dispatch_state, failure_class } : undefined;
 }
 
 export function harborSupervisorAuthorizationHeader(

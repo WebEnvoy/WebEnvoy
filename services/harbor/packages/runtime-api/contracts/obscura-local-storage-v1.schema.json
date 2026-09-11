@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webenvoy.dev/contracts/harbor/obscura-local-storage-v1.schema.json",
+  "title": "Harbor Obscura managed localStorage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "origins"],
+  "properties": {
+    "schema_version": { "const": "harbor-obscura-local-storage/v1" },
+    "origins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["origin", "entries"],
+        "properties": {
+          "origin": { "type": "string", "format": "uri", "maxLength": 2048 },
+          "entries": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "array",
+              "prefixItems": [
+                { "type": "string", "maxLength": 1024 },
+                { "type": "string", "maxLength": 1048576 }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        }
+      }
+    }
+  }
+}

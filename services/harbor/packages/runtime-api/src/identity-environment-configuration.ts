@@ -71,6 +71,7 @@ export function validateIdentityEnvironmentConfiguration(
 
   const capabilities = facts.provider_binding.selected_provider.capabilities;
   for (const capability of requiredCapabilities(input)) {
+    if (capability === "locale" && facts.provider_binding.selected_provider_id === "obscura" && input.language === "en-US" && input.region === undefined) continue;
     const fact = capabilities.find((item) => item.key === capability);
     if (!fact || !["supported", "limited"].includes(fact.state) || fact.source === "provider_claim") {
       return "unsupported_configuration";

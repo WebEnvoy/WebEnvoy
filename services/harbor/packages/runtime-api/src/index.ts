@@ -84,6 +84,7 @@ import {
   type LocalProviderLauncher,
   type LocalProviderMediaActionInput,
   type LocalProviderMediaActionResult,
+  type LocalProviderViewerInput,
   type OpenIdentityEnvironmentSessionInput,
   type RuntimeSessionControlInput,
   type RuntimeSessionFacts,
@@ -493,6 +494,17 @@ export class HarborRuntime {
 
   getSession(runtime_session_ref: string): RuntimeSessionFacts | null {
     return this.runtimeSessions.getSession(runtime_session_ref);
+  }
+
+  captureViewerFrame(runtime_session_ref: string, viewer_ref: string) {
+    return this.runtimeSessions.captureViewerFrame(runtime_session_ref, viewer_ref);
+  }
+
+  operateViewerInput(runtime_session_ref: string, value: unknown) {
+    const input = viewerInputRequest(value);
+    return input
+      ? this.runtimeSessions.operateViewerInput(runtime_session_ref, input)
+      : { status: "unavailable" as const, dispatch_state: "not_dispatched" as const, failure_class: "viewer_input_invalid" };
   }
 
   async clearManagedPublicPageGuard(runtime_session_ref: string) {
@@ -1679,6 +1691,19 @@ function screenshotArtifact(screenshot: { screenshot_ref: string; mime_type: "im
     byte_length: screenshot.byte_length,
     sha256: screenshot.sha256
   };
+}
+
+function viewerInputRequest(value: unknown): ({ viewer_ref: string; operation_ref: string } & LocalProviderViewerInput) | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (!boundedManagedRef(input.viewer_ref) || !boundedManagedRef(input.operation_ref) || !boundedManagedRef(input.frame_ref) || typeof input.action !== "string") return null;
+  const exact = (keys: string[]) => Object.keys(input).sort().join(",") === keys.sort().join(",");
+  if (input.action === "click" && exact(["action", "frame_ref", "operation_ref", "viewer_ref", "x", "y"]) && Number.isFinite(input.x) && Number.isFinite(input.y)) return input as { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput;
+  if (input.action === "input" && exact(["action", "frame_ref", "operation_ref", "text", "viewer_ref", "x", "y"]) && Number.isFinite(input.x) && Number.isFinite(input.y) && typeof input.text === "string" && input.text.length > 0 && input.text.length <= 2048) return input as { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput;
+  if (input.action === "press" && exact(["action", "frame_ref", "key", "operation_ref", "viewer_ref"]) && ["Enter", "Tab", "Backspace", "Delete", "Escape"].includes(String(input.key))) return input as { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput;
+  if (input.action === "scroll" && exact(["action", "delta_y", "frame_ref", "operation_ref", "viewer_ref"]) && Number.isSafeInteger(input.delta_y) && Number(input.delta_y) !== 0 && Math.abs(Number(input.delta_y)) <= 2000) return input as { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput;
+  if (input.action === "navigate" && exact(["action", "frame_ref", "operation_ref", "url", "viewer_ref"]) && typeof input.url === "string" && input.url.length > 0 && input.url.length <= 2048) return input as { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput;
+  return null;
 }
 
 function sameManagedIdentity(session: RuntimeSessionRecord, identity: LocalIdentityEnvironmentFacts): boolean {

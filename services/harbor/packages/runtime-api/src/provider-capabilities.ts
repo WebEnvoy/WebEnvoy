@@ -68,7 +68,7 @@ export function camoufoxCapabilities(): BrowserProviderCapabilityFact[] {
 
 export function obscuraCapabilities(): BrowserProviderCapabilityFact[] {
   return [
-    capability("persistent_profile", "limited", "validation_evidence", "固定源码构建仅验证 Cookie 跨进程重启持久；localStorage 与 IndexedDB 不持久。"),
+    capability("persistent_profile", "limited", "validation_evidence", "固定源码构建验证 Cookie 与 Harbor checkpoint 的当前 origin localStorage 跨进程重启；IndexedDB 不持久。"),
     capability("independent_user_data_dir", "supported", "configured", "每个 Harbor Profile 使用一个专用 Obscura 进程和独立受管目录。"),
     capability("proxy", "limited", "configured", "Harbor 仅向专用进程注入已解析代理；固定源码提交修复了 render 资源绕过代理的问题。"),
     capability("timezone", "limited", "configured", "Harbor 在 V8 初始化前为专用进程设置固定 IANA timezone，并运行时回读。"),
@@ -77,7 +77,7 @@ export function obscuraCapabilities(): BrowserProviderCapabilityFact[] {
     capability("extensions", "unsupported", "configured", "Obscura 当前不提供扩展管理。"),
     capability("cookie_persistence", "supported", "validation_evidence", "Cookie 在底层连接优雅关闭后写入受管目录，并在专用进程重启时恢复。"),
     capability("cdp", "limited", "validation_evidence", "Harbor 独占一条 loopback CDP WebSocket；raw endpoint 不向 App 或 Plugin 暴露。"),
-    capability("viewer", "limited", "validation_evidence", "截图与受控输入可指向原 target；完整 App viewer 和真实 IME 尚未验证。"),
+    capability("viewer", "limited", "validation_evidence", "owner frame 与受控输入指向原 target；App 路径已实现，真实人类可用性与 IME 尚待验。"),
     capability("snapshot_refs", "limited", "configured", "snapshot ref 仅在 Harbor 持有的底层连接和当前 Page generation 内有效。"),
     capability("evidence_refs", "limited", "configured", "截图摘要可产生 evidence ref；不导出原始页面材料。"),
     capability("native_fingerprint_control", "limited", "provider_claim", "固定 profile 0 且禁用轮换；尚无完整跨表面一致性验证。"),
@@ -116,8 +116,8 @@ export function obscuraLimitations(): string[] {
     "仅支持固定 upstream 提交 01e1caa 的 macOS arm64 render 源码构建；v0.2.2 存在 render transport 安全缺陷，不能用于本接入。",
     "源码构建只有 ad-hoc 签名且 Gatekeeper 拒绝；在签名、固定分发和安装验证完成前不属于正式可安装版本。",
     "底层 WebSocket 断开会销毁现场；Driver 必须使旧 Instance/Page 失效并重启专用进程，不能声称无损恢复。",
-    "仅 Cookie 跨进程重启持久；localStorage、sessionStorage 与 IndexedDB 不持久。",
-    "popup、dialog、下载、完整文件上传、原生窗口和真实中文 IME 尚未成立；这些是局部能力缺口，不把 Provider 永久限定为只读。"
+    "localStorage 仅在受管导航、确认交互和正常关闭 checkpoint；sessionStorage 与 IndexedDB 不持久。",
+    "popup、dialog、下载、完整文件上传和真实中文 IME 尚未成立；这些是局部能力缺口，不把 Provider 永久限定为只读。"
   ];
 }
 

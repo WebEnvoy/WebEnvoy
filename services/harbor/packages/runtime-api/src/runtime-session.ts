@@ -29,6 +29,9 @@ import {
   type LocalProviderReadProbePublicSummary,
   type LocalProviderReadProbeResult,
   type LocalProviderScreenshotFacts,
+  type LocalProviderViewerFrame,
+  type LocalProviderViewerInput,
+  type LocalProviderViewerInputResult,
   type LocalProviderSiteResourceProbeInput,
   type LocalProviderSiteResourceProbeResult,
   type LocalProviderWritePrecheckProbeInput,
@@ -77,6 +80,9 @@ export type {
   LocalProviderReadProbePublicSummary,
   LocalProviderReadProbeResult,
   LocalProviderScreenshotFacts,
+  LocalProviderViewerFrame,
+  LocalProviderViewerInput,
+  LocalProviderViewerInputResult,
   LocalProviderSiteResourceProbeInput,
   LocalProviderSiteResourceReadinessFactKey,
   LocalProviderSiteResourceProbeResult,
@@ -145,8 +151,18 @@ export interface RuntimeSessionRecord {
   probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
   executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
   captureScreenshot?: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
+  captureViewerFrame?: () => Promise<LocalProviderViewerFrame>;
+  viewerInput?: (input: LocalProviderViewerInput) => Promise<LocalProviderViewerInputResult>;
+  viewer_frame?: { frame_ref: string; control_generation: number };
   close?: () => Promise<void>;
 }
+
+type ViewerInputRuntimeResult = LocalProviderViewerInputResult & {
+  operation_ref: string;
+  runtime_session_ref: string;
+  viewer_ref?: string;
+  observed_at: string;
+};
 
 const baselineFacts: RuntimeFact[] = [
   { key: "provider.mode", source: "configured", value: "local_dedicated_profile" },
@@ -158,6 +174,7 @@ const baselineFacts: RuntimeFact[] = [
 export class RuntimeSessionStore {
   private readonly records = new Map<string, RuntimeSessionRecord>();
   private readonly interactionReceipts = new Map<string, { request_hash: string; result: ManagedInteractionResult & { operation_ref: string; runtime_session_ref: string; observed_at: string } }>();
+  private readonly viewerInputReceipts = new Map<string, { request_hash: string; result: ViewerInputRuntimeResult }>();
   private readonly openingIdentityEnvironmentRefs = new Set<string>();
   private readonly openingProfileStorageRefs = new Set<string>();
   private readonly mutatingIdentityEnvironmentRefs = new Set<string>();
@@ -317,6 +334,8 @@ export class RuntimeSessionStore {
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
       executeMediaAction: ready ? launch.executeMediaAction : undefined,
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
+      captureViewerFrame: ready ? launch.captureViewerFrame : undefined,
+      viewerInput: ready ? launch.viewerInput : undefined,
       close: ready ? launch.close : undefined
     });
     if (ready && launch.driverLost) void launch.driverLost.then(() => this.markSessionDriverLost(runtime_session_ref));
@@ -511,6 +530,7 @@ export class RuntimeSessionStore {
     record.facts.control_lock.state = "held";
     record.facts.control_lock.updated_at = now;
     record.control_generation += 1;
+    delete record.viewer_frame;
     record.facts.facts.push({ key: "session.lock", source: "observed", value: record.facts.control_owner });
     return snapshot(record.facts);
   }
@@ -542,6 +562,7 @@ export class RuntimeSessionStore {
       conflict_error: null
     };
     record.control_generation += 1;
+    delete record.viewer_frame;
     record.user_held_session = false;
     record.read_operation_user_release_pending = confirmedReadControllerRelease;
     record.read_operation_user_handoff = false;
@@ -581,6 +602,7 @@ export class RuntimeSessionStore {
     const runtimeSessionRef = record.facts.runtime_session_ref;
     const closingAt = new Date().toISOString();
     record.control_generation += 1;
+    delete record.viewer_frame;
     record.facts.lifecycle_state = "disconnected";
     record.facts.last_seen_at = closingAt;
     record.facts.control_owner = "none";
@@ -669,6 +691,7 @@ export class RuntimeSessionStore {
       conflict_error: null
     };
     record.control_generation += 1;
+    delete record.viewer_frame;
     // Only the server-owned handoff path calls applyHandoff; create/lock input
     // must never be treated as proof that a user held this session.
     record.user_held_session = control.owner === "user" && isInteractiveUserViewer(record.facts);
@@ -722,6 +745,69 @@ export class RuntimeSessionStore {
 
   getManagedInteraction(operation_ref: string) {
     return this.interactionReceipts.get(operation_ref)?.result ?? null;
+  }
+
+  async captureViewerFrame(runtime_session_ref: string, viewer_ref: string) {
+    const record = this.records.get(runtime_session_ref);
+    const refused = (failure_class: string) => ({ status: "unavailable" as const, failure_class, retryable: true });
+    if (!record || !boundedManagedRef(viewer_ref) || record.facts.viewer_ref !== viewer_ref) return refused("viewer_session_missing");
+    if (!["active", "idle", "locked"].includes(record.facts.lifecycle_state) || record.facts.viewer_entry?.availability !== "available" || !record.captureViewerFrame || record.active_provider_interactions) return refused("viewer_unavailable");
+    const generation = record.control_generation;
+    try {
+      const frame = await this.withProviderInteraction(record, record.captureViewerFrame);
+      if (record.control_generation !== generation) return refused("viewer_control_changed");
+      record.viewer_frame = { frame_ref: frame.frame_ref, control_generation: generation };
+      return {
+        ...frame,
+        runtime_session_ref,
+        viewer_ref,
+        privacy_boundary: { audience: "local_owner", retention: "not_retained", raw_browser_state: "not_exposed" }
+      };
+    } catch {
+      delete record.viewer_frame;
+      return refused("viewer_frame_unavailable");
+    }
+  }
+
+  async operateViewerInput(runtime_session_ref: string, input: { viewer_ref: string; operation_ref: string } & LocalProviderViewerInput) {
+    const refused = (failure_class: string, dispatched = false): ViewerInputRuntimeResult => ({
+      status: dispatched ? "unknown_outcome" as const : "unavailable" as const,
+      dispatch_state: dispatched ? "dispatched" as const : "not_dispatched" as const,
+      failure_class,
+      operation_ref: input.operation_ref,
+      runtime_session_ref,
+      observed_at: new Date().toISOString()
+    });
+    if (!boundedManagedRef(input.viewer_ref) || !boundedManagedRef(input.operation_ref)) return refused("viewer_input_invalid");
+    const requestHash = createHash("sha256").update(JSON.stringify([runtime_session_ref, Object.entries(input).sort(([a], [b]) => a.localeCompare(b))])).digest("hex");
+    const previous = this.viewerInputReceipts.get(input.operation_ref);
+    if (previous) return previous.request_hash === requestHash ? previous.result : refused("viewer_input_idempotency_conflict");
+    const record = this.records.get(runtime_session_ref);
+    if (!record || record.facts.viewer_ref !== input.viewer_ref) return refused("viewer_session_missing");
+    if (record.facts.control_owner !== "user" || record.facts.control_lock.owner !== "user" || record.facts.control_lock.state !== "held") return refused("viewer_control_required");
+    if (record.active_provider_interactions || !record.viewerInput || record.facts.viewer_entry?.availability !== "available") return refused("viewer_unavailable");
+    if (!record.viewer_frame || record.viewer_frame.frame_ref !== input.frame_ref || record.viewer_frame.control_generation !== record.control_generation) return refused("viewer_frame_stale");
+    const generation = record.control_generation;
+    const receipt = { request_hash: requestHash, result: refused("viewer_input_in_progress", true) };
+    this.viewerInputReceipts.set(input.operation_ref, receipt);
+    const { viewer_ref: _viewer, operation_ref: _operation, ...action } = input;
+    try {
+      const result = await this.withProviderInteraction(record, () => record.viewerInput!(action));
+      if (record.control_generation !== generation || record.facts.control_owner !== "user") {
+        receipt.result = refused("viewer_control_changed", true);
+      } else if (result.status === "completed") {
+        record.viewer_frame = { frame_ref: result.frame.frame_ref, control_generation: generation };
+        this.applyPageFacts(record, result.page.current_url ?? record.facts.current_page.requested_url, result.page);
+        receipt.result = { ...result, operation_ref: input.operation_ref, runtime_session_ref, viewer_ref: input.viewer_ref, observed_at: new Date().toISOString() };
+      } else {
+        delete record.viewer_frame;
+        receipt.result = { ...result, operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() };
+      }
+    } catch {
+      delete record.viewer_frame;
+      receipt.result = refused("viewer_input_outcome_unknown", true);
+    }
+    return receipt.result;
   }
 
   async operateManagedInteraction(runtime_session_ref: string, input: ManagedInteractionRequest) {
@@ -1072,6 +1158,7 @@ export class RuntimeSessionStore {
       conflict_error: null
     };
     record.control_generation += 1;
+    delete record.viewer_frame;
     record.user_held_session = false;
     record.read_operation_user_handoff = preserveReadOperationHandoff ||
       record.read_operation_user_release_pending && owner === "core_task";
@@ -1088,6 +1175,7 @@ export class RuntimeSessionStore {
   private markDriverLost(record: RuntimeSessionRecord): void {
     const now = new Date().toISOString();
     record.control_generation += 1;
+    delete record.viewer_frame;
     // Keep ownership until explicit close proves that provider resources are gone.
     record.facts.lifecycle_state = "disconnected";
     record.facts.last_seen_at = now;
@@ -1099,6 +1187,8 @@ export class RuntimeSessionStore {
     delete record.publicPage;
     delete record.interaction;
     delete record.interaction_snapshot;
+    delete record.captureViewerFrame;
+    delete record.viewerInput;
     delete record.clearPublicPageGuard;
     delete record.observePage;
     delete record.readDiagnostics;

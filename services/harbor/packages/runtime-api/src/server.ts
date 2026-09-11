@@ -39,6 +39,7 @@ export interface HarborRuntimeServerOptions {
   port?: number;
   runtime?: HarborRuntime;
   manual_authentication_supervisor_token?: string;
+  owner_viewer_supervisor_token?: string;
   provider_lifecycle_idempotency?: ProviderLifecycleIdempotencyOptions;
 }
 
@@ -52,13 +53,14 @@ export interface RunningHarborRuntimeServer {
 
 export function createHarborRuntimeHttpServer(
   runtime = new HarborRuntime(),
-  options: Pick<HarborRuntimeServerOptions, "manual_authentication_supervisor_token" | "provider_lifecycle_idempotency"> = {}
+  options: Pick<HarborRuntimeServerOptions, "manual_authentication_supervisor_token" | "owner_viewer_supervisor_token" | "provider_lifecycle_idempotency"> = {}
 ): Server {
   const manualAuthenticationAuthorizer = new ManualAuthenticationAuthorizer(options.manual_authentication_supervisor_token);
+  const ownerViewerAuthorizer = new ManualAuthenticationAuthorizer(options.owner_viewer_supervisor_token);
   const providerIdempotency = new ProviderLifecycleIdempotencyStore(options.provider_lifecycle_idempotency);
   return createServer(async (request, response) => {
     try {
-      await route(runtime, manualAuthenticationAuthorizer, providerIdempotency, request, response);
+      await route(runtime, manualAuthenticationAuthorizer, ownerViewerAuthorizer, providerIdempotency, request, response);
     } catch (error) {
       const requestError = error instanceof ProviderLifecycleHttpError
         ? error
@@ -103,6 +105,7 @@ export async function startHarborRuntimeServer(options: HarborRuntimeServerOptio
 async function route(
   runtime: HarborRuntime,
   manualAuthenticationAuthorizer: ManualAuthenticationAuthorizer,
+  ownerViewerAuthorizer: ManualAuthenticationAuthorizer,
   providerIdempotency: ProviderLifecycleIdempotencyStore,
   request: IncomingMessage,
   response: ServerResponse
@@ -257,7 +260,7 @@ async function route(
   }
 
   if (parts[0] === "runtime" && (parts[1] === "sessions" || parts[1] === "identity-environment-sessions") && parts[2]) {
-    await routeSession(runtime, manualAuthenticationAuthorizer, parts[2], parts[3], method, request, response);
+    await routeSession(runtime, manualAuthenticationAuthorizer, ownerViewerAuthorizer, parts[2], parts[3], method, request, response);
     return;
   }
 
@@ -298,6 +301,8 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
       "/runtime/sessions/{runtime_session_ref}/diagnostics",
       "/runtime/sessions/{runtime_session_ref}/handoff",
+      "/runtime/sessions/{runtime_session_ref}/viewer-frame",
+      "/runtime/sessions/{runtime_session_ref}/viewer-input",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",
       "/runtime/sessions/{runtime_session_ref}/site-resource-facts",
@@ -315,7 +320,7 @@ function readinessBody(): object {
       raw_network_bodies: "not_exposed",
       network_metadata: "bounded_sanitized_only",
       console_text: "bounded_redacted_only",
-      screenshot_body: "not_exposed",
+      screenshot_body: "local_owner_viewer_only_not_retained",
       hosted_browser: "not_provided",
       external_write_actions: "not_performed"
     }
@@ -407,6 +412,7 @@ async function routeIdentityEnvironment(
 async function routeSession(
   runtime: HarborRuntime,
   manualAuthenticationAuthorizer: ManualAuthenticationAuthorizer,
+  ownerViewerAuthorizer: ManualAuthenticationAuthorizer,
   runtimeSessionRef: string,
   action: string | undefined,
   method: string,
@@ -417,6 +423,22 @@ async function routeSession(
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.operateManagedInteraction(runtimeSessionRef, await readJson<unknown>(request));
     writeJson(response, result.status === "unavailable" ? 409 : 200, result); return;
+  }
+  if (action === "viewer-frame" && method === "POST") {
+    if (!authorizeOwnerViewer(ownerViewerAuthorizer, request, response)) return;
+    const body = await readJson<Record<string, unknown>>(request);
+    if (Object.keys(body).join(",") !== "viewer_ref" || !boundedManagedRef(body.viewer_ref)) throw new BadRequest("Invalid Viewer frame request.");
+    const result = await runtime.captureViewerFrame(runtimeSessionRef, body.viewer_ref);
+    response.setHeader("Cache-Control", "no-store");
+    writeJson(response, "status" in result ? 409 : 200, result);
+    return;
+  }
+  if (action === "viewer-input" && method === "POST") {
+    if (!authorizeOwnerViewer(ownerViewerAuthorizer, request, response)) return;
+    const result = await runtime.operateViewerInput(runtimeSessionRef, await readJson<unknown>(request));
+    response.setHeader("Cache-Control", "no-store");
+    writeJson(response, result.status === "completed" ? 200 : 409, result);
+    return;
   }
   if ((action === "navigate" || action === "read") && method === "POST") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
@@ -552,6 +574,19 @@ function authorizeCoreControl(
   const authorization = manualAuthenticationAuthorizer.authorize(request);
   if (authorization.authorized) return true;
   writeJson(response, authorization.status_code, { failure_class: authorization.failure_class });
+  return false;
+}
+
+function authorizeOwnerViewer(
+  ownerViewerAuthorizer: ManualAuthenticationAuthorizer,
+  request: IncomingMessage,
+  response: ServerResponse
+): boolean {
+  const authorization = ownerViewerAuthorizer.authorize(request);
+  if (authorization.authorized) return true;
+  writeJson(response, authorization.status_code, {
+    failure_class: authorization.status_code === 503 ? "viewer_owner_authorization_unavailable" : "viewer_owner_authorization_required"
+  });
   return false;
 }
 

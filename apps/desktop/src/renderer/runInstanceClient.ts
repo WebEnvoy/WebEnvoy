@@ -13,6 +13,9 @@ export type RunInstance = {
   controlState: string;
   pageStatus: string;
   observedAt: string;
+  viewerRef?: string;
+  viewerAvailability?: string;
+  viewerAccessMode?: string;
 };
 export type RunInstanceState = { status: "loading" } | { status: "unavailable"; summary: string } | { status: "ready"; instance: RunInstance };
 
@@ -38,6 +41,7 @@ export function projectRunInstance(refs: Record<string, unknown>, value: unknown
   const session = record(value);
   const control = record(session?.control_lock);
   const page = record(session?.current_page);
+  const viewer = record(session?.viewer_entry);
   if (!session || session.schema_version !== "harbor-runtime-facts/v0" || fixtureOrDemoPayloadReason(value) ||
       !safeRef(session.runtime_session_ref) || session.runtime_session_ref !== refs.runtime_session_ref ||
       !safeRef(session.profile_ref) || (refs.profile_ref !== undefined && refs.profile_ref !== session.profile_ref) ||
@@ -53,6 +57,9 @@ export function projectRunInstance(refs: Record<string, unknown>, value: unknown
     ...(safeRef(session.execution_identity_ref) ? { executionIdentityRef: session.execution_identity_ref } : {}),
     lifecycle: session.lifecycle_state, controlOwner: session.control_owner, controlState: control.state,
     pageStatus: page.status, observedAt: typeof page.observed_at === "string" ? page.observed_at : "未提供",
+    ...(safeRef(session.viewer_ref) ? { viewerRef: session.viewer_ref } : {}),
+    ...(typeof viewer?.availability === "string" ? { viewerAvailability: viewer.availability } : {}),
+    ...(typeof viewer?.access_mode === "string" ? { viewerAccessMode: viewer.access_mode } : {}),
   } };
 }
 function record(value: unknown): Record<string, unknown> | undefined {

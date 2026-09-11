@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, writeFile, stat, chmod } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import electron from 'electron';
-import { files, sha } from '../agent-entry/bundle.mjs';
+import { files, obscuraValidatedCommit, obscuraValidatedSha256, sha } from '../agent-entry/bundle.mjs';
 const output = resolve(process.argv[2] ?? 'artifacts/WebEnvoy Test.app');
 try { await stat(output); throw new Error('Output already exists; choose a new test installation location'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 if (process.platform !== 'darwin') throw new Error('This test slice supports only the verified macOS platform');
@@ -10,6 +10,16 @@ await cp(resolve(electron, '../../..'), output, { recursive: true, dereference: 
 const appRoot = join(output, 'Contents/Resources/app');
 await mkdir(appRoot, { recursive: true });
 for (const directory of ['dist', 'dist-electron', 'agent-entry']) await cp(resolve(directory), join(appRoot, directory), { recursive: true, dereference: true });
+let providers;
+if (process.env.WEBENVOY_OBSCURA_PACKAGE_SOURCE) {
+  const source = resolve(process.env.WEBENVOY_OBSCURA_PACKAGE_SOURCE);
+  if (sha(await readFile(source)) !== obscuraValidatedSha256) throw new Error(`Obscura package source must be the validated ${obscuraValidatedCommit} build`);
+  const target = join(appRoot, 'agent-entry/providers/obscura');
+  await mkdir(dirname(target), { recursive: true });
+  await cp(source, target);
+  await chmod(target, 0o755);
+  providers = { obscura: { path: 'agent-entry/providers/obscura', commit: obscuraValidatedCommit, sha256: obscuraValidatedSha256, validation_private_network: process.env.WEBENVOY_OBSCURA_VALIDATION_ALLOW_PRIVATE_NETWORK === '1' } };
+}
 await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'webenvoy-installed-test', version: '0.2.0', type: 'module', main: 'dist-electron/main.js' }));
 const launcher = join(output, 'Contents/MacOS/webenvoy');
 await writeFile(launcher, '#!/bin/sh\napp_contents="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"\nELECTRON_RUN_AS_NODE=1 exec "$app_contents/MacOS/Electron" "$app_contents/Resources/app/agent-entry/cli.mjs" "$@"\n');
@@ -20,5 +30,5 @@ const lode = JSON.parse(await readFile(join(appRoot, 'dist-electron/lode/provena
 const allFiles = await files(appRoot);
 const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => (name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json') || name.startsWith('agent-entry/skill-assets/')));
 const requiredFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => !(name in optionalFiles)));
-await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
-console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace }));
+await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', host, workspace, lode, ...(providers ? { providers } : {}), files: requiredFiles, optional_files: optionalFiles }, null, 2));
+console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace, obscura: providers ? 'verified' : 'unavailable' }));

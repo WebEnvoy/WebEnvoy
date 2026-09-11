@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webenvoy.dev/contracts/harbor/viewer-frame-v1.schema.json",
+  "title": "Harbor local owner Viewer frame v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime_session_ref", "viewer_ref", "frame_ref", "mime_type", "width", "height", "byte_length", "sha256", "captured_at", "data_base64", "privacy_boundary"],
+  "properties": {
+    "schema_version": { "const": "harbor-viewer-frame/v1" },
+    "runtime_session_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "viewer_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "frame_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "mime_type": { "const": "image/png" },
+    "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "byte_length": { "type": "integer", "minimum": 1, "maximum": 2097152 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "data_base64": { "type": "string", "pattern": "^[A-Za-z0-9+/]*={0,2}$", "maxLength": 2796204 },
+    "privacy_boundary": {
+      "const": { "audience": "local_owner", "retention": "not_retained", "raw_browser_state": "not_exposed" }
+    }
+  }
+}
