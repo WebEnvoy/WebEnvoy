@@ -1769,10 +1769,11 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     PAGE_NAVIGATION_ALLOWED_ORIGINS[page_ref] = allowed
     PAGE_NAVIGATION_DENIED.pop(page_ref, None)
 
-    # A Page route outranks the active interaction context guard. Keep the
-    # origin scope for later navigation operations, but never install a route
-    # that could bypass the currently active interaction scope.
-    if INTERACTION_GUARD is not None:
+    # A Page route outranks the active interaction context guard only on the
+    # Page currently bound to that interaction. Background Page navigation
+    # still needs its own route while the active interaction is on another
+    # Page; its scope is independent and remains exact to this Page.
+    if INTERACTION_GUARD is not None and page is INTERACTION_GUARD_PAGE:
         previous = PAGE_NAVIGATION_GUARDS.pop(page_ref, None)
         if previous is not None:
             with contextlib.suppress(Exception):
