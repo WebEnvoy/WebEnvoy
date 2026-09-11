@@ -1766,6 +1766,16 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     global PAGE_NAVIGATION_CONTEXT_GUARD
     state = page_state_for(page) or register_provider_page(page)
     page_ref = state["provider_page_ref"]
+    # A completed public read leaves a single-origin Page route installed.
+    # Remove it at this exact Page-operation boundary so history/navigation
+    # uses the latest Core-authorized per-Page scope and can reach every
+    # authorized history target.
+    public_guard = PUBLIC_NAVIGATION_GUARDS.pop(page_ref, None)
+    PUBLIC_NAVIGATION_ALLOWED_ORIGINS.pop(page_ref, None)
+    PUBLIC_NAVIGATION_DENIED.pop(page_ref, None)
+    if public_guard is not None:
+        with contextlib.suppress(Exception):
+            page.unroute("**/*", public_guard)
     allowed = {origin for origin in authorized_origins if isinstance(origin, str) and public_origin(origin) == origin}
     PAGE_NAVIGATION_ALLOWED_ORIGINS[page_ref] = allowed
     PAGE_NAVIGATION_DENIED.pop(page_ref, None)
@@ -2208,7 +2218,9 @@ def install_public_navigation_guard(expected_origin: str, page: Any = None) -> N
         request = route.request
         try:
             if not request.is_navigation_request():
-                route.continue_()
+                # Keep lower Page/Context guards in the chain for resource
+                # requests; ``continue_`` would bypass their latest scope.
+                route.fallback()
                 return
             # A Page route is already scoped by Playwright to this Page. Use
             # the exact relation when available, but retain the closure's
@@ -2221,13 +2233,13 @@ def install_public_navigation_guard(expected_origin: str, page: Any = None) -> N
                 route.abort("failed")
                 return
             if request_page_object is not None and request_page_object is not page:
-                route.continue_()
+                route.fallback()
                 return
             frame = None
             with contextlib.suppress(Exception):
                 frame = request.frame
             if frame is not None and frame is not page.main_frame:
-                route.continue_()
+                route.fallback()
                 return
             request_origin = public_origin(str(getattr(request, "url", "")))
             if request_origin != expected_origin or request.method != "GET":

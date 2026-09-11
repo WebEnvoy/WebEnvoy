@@ -935,7 +935,7 @@ print("camoufox native request relation guard fixture passed")
 class PublicPage:
     def __init__(self, url: str, text: str) -> None:
         self.url, self.text, self.routes, self.evaluations = url, text, [], 0
-        self.main_frame = object()
+        self.main_frame = types.SimpleNamespace(page=self)
 
     def title(self) -> str:
         return self.text[:64]
@@ -959,6 +959,28 @@ class PublicPage:
 
     def goto(self, url: str, **_kwargs) -> None:
         self.url = url
+
+
+class PublicNavigationRoute:
+    def __init__(self, url: str, page: PublicPage, status: int = 200, navigation: bool = True) -> None:
+        self.request = types.SimpleNamespace(
+            url=url, method="GET", frame=page.main_frame, is_navigation_request=lambda: navigation
+        )
+        self.status, self.fetched, self.aborted, self.fulfilled, self.fallbacked = status, 0, False, False, False
+
+    def fetch(self, **kwargs):
+        assert kwargs["max_redirects"] == 0
+        self.fetched += 1
+        return types.SimpleNamespace(status=self.status, dispose=lambda: None)
+
+    def abort(self, *_args) -> None:
+        self.aborted = True
+
+    def fulfill(self, **_kwargs) -> None:
+        self.fulfilled = True
+
+    def fallback(self, **_kwargs) -> None:
+        self.fallbacked = True
 
 
 DRIVER.reset_provider_pages()
@@ -1008,3 +1030,41 @@ DRIVER.PAGE = None
 DRIVER.CONTEXT = None
 DRIVER.reset_provider_pages()
 print("camoufox managed Page binding fixture passed")
+
+# A public instance.read leaves a single-origin Page route behind. The next
+# page navigation must remove that exact target route so history can use the
+# current per-Page navigation scope, while another Page's public guard stays
+# intact.
+DRIVER.reset_provider_pages()
+public_nav_page = PublicPage("https://s2.example/current", "navigation text")
+other_public_page = PublicPage("https://s1.example/current", "other text")
+DRIVER.PAGE = other_public_page
+DRIVER.CONTEXT = GuardContext()
+DRIVER.CONTEXT.pages = [public_nav_page, other_public_page]
+public_nav_state = DRIVER.register_provider_page(public_nav_page)
+other_public_state = DRIVER.register_provider_page(other_public_page)
+public_nav_ref = public_nav_state["provider_page_ref"]
+other_public_ref = other_public_state["provider_page_ref"]
+read_result = DRIVER.managed_public_page({
+    "provider_page_ref": public_nav_ref,
+    "expected_origin": "https://s2.example",
+})
+assert read_result["text"] == "navigation text"
+public_guard = DRIVER.PUBLIC_NAVIGATION_GUARDS[public_nav_ref]
+resource_route = PublicNavigationRoute("https://outside.example/resource", public_nav_page, navigation=False)
+public_guard(resource_route)
+assert resource_route.fallbacked and not resource_route.aborted and resource_route.fetched == 0
+DRIVER.install_public_navigation_guard("https://s1.example", other_public_page)
+assert public_guard in public_nav_page.routes and other_public_ref in DRIVER.PUBLIC_NAVIGATION_GUARDS
+DRIVER.install_page_navigation_guard(public_nav_page, ["https://s1.example", "https://s2.example"])
+assert public_nav_ref not in DRIVER.PUBLIC_NAVIGATION_GUARDS
+assert public_nav_page.routes == [DRIVER.PAGE_NAVIGATION_GUARDS[public_nav_ref]]
+assert other_public_ref in DRIVER.PUBLIC_NAVIGATION_GUARDS and other_public_page.routes
+history_route = PublicNavigationRoute("https://s1.example/history", public_nav_page)
+public_nav_page.routes[0](history_route)
+assert history_route.fulfilled and not history_route.aborted and history_route.fetched == 1
+DRIVER.clear_public_navigation_guard()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.reset_provider_pages()
+print("camoufox public-read navigation handoff fixture passed")
