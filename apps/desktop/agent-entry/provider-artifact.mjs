@@ -161,7 +161,8 @@ export async function verifyCamoufoxArtifact(inputPath) {
     adjacent_properties_sha256: sha(await bytes(adjacentProperties, 'camoufox_artifact_output_missing'))
   };
   for (const key of OUTPUT_HASHES) if (hashField(output, key, 'camoufox_artifact_output_mismatch') !== actual[key]) reject('camoufox_artifact_output_mismatch');
-  if (actual.properties_sha256 !== CAMOUFOX_NATIVE_PINS.properties_sha256 || !Buffer.from(await readFile(properties)).equals(await readFile(adjacentProperties))) reject('camoufox_artifact_output_mismatch');
+  if (actual.executable_sha256 !== CAMOUFOX_NATIVE_PINS.source_executable_sha256 || actual.application_ini_sha256 !== CAMOUFOX_NATIVE_PINS.source_application_ini_sha256 ||
+      actual.properties_sha256 !== CAMOUFOX_NATIVE_PINS.properties_sha256 || !Buffer.from(await readFile(properties)).equals(await readFile(adjacentProperties))) reject('camoufox_artifact_output_mismatch');
   verifyPlistIdentity(await readFile(infoPlist), relativeExecutable);
   const ini = (await readFile(applicationIni)).toString('utf8');
   if (!ini.split(/\r?\n/).some(line => line.trim() === `Version=${CAMOUFOX_NATIVE_PINS.browser_version}`)) reject('camoufox_artifact_browser_version_mismatch');
@@ -205,4 +206,9 @@ export function bindCamoufoxArtifact(installation, binding) {
     return installation;
   }
   return { ...installation, camoufoxArtifact: next };
+}
+
+export function validateCamoufoxArtifactSetup(existingInstallation, configuredArtifact, requestedArtifact) {
+  if (requestedArtifact && existingInstallation && !configuredArtifact) reject('camoufox_artifact_binding_requires_new_data_root');
+  if (configuredArtifact && requestedArtifact && !sameCamoufoxArtifact(configuredArtifact, requestedArtifact)) reject('camoufox_artifact_binding_mismatch');
 }

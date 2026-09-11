@@ -8,7 +8,7 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { bindCamoufoxArtifact, resolveInstalledCamoufoxArtifact, sameCamoufoxArtifact, verifyCamoufoxArtifact } from './provider-artifact.mjs';
+import { bindCamoufoxArtifact, resolveInstalledCamoufoxArtifact, validateCamoufoxArtifactSetup, verifyCamoufoxArtifact } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -23,7 +23,7 @@ if (command === 'setup') {
   const artifactPath = args.includes('--camoufox-artifact') ? required('--camoufox-artifact') : undefined;
   const requestedArtifact = artifactPath ? await verifyCamoufoxArtifact(artifactPath) : null;
   const configuredArtifact = existingInstallation ? await resolveInstalledCamoufoxArtifact(existingInstallation) : null;
-  if (configuredArtifact && requestedArtifact && !sameCamoufoxArtifact(configuredArtifact, requestedArtifact)) throw new Error('camoufox_artifact_binding_mismatch');
+  validateCamoufoxArtifactSetup(existingInstallation, configuredArtifact, requestedArtifact);
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });

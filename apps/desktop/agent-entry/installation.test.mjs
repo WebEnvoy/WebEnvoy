@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, link, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { chmod, copyFile, link, mkdtemp, mkdir, open, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { bindCamoufoxArtifact, CAMOUFOX_NATIVE_PINS, camoufoxArtifactInstallationRecord, resolveInstalledCamoufoxArtifact, sameCamoufoxArtifact, verifyCamoufoxArtifact } from './provider-artifact.mjs';
+import { bindCamoufoxArtifact, CAMOUFOX_NATIVE_PINS, camoufoxArtifactInstallationRecord, resolveInstalledCamoufoxArtifact, sameCamoufoxArtifact, validateCamoufoxArtifactSetup, verifyCamoufoxArtifact } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -68,6 +68,9 @@ test('binds only a verified Camoufox test artifact and strips untrusted service 
     assert.deepEqual(installation.camoufoxArtifact, camoufoxArtifactInstallationRecord(verified));
     assert.equal(sameCamoufoxArtifact(await resolveInstalledCamoufoxArtifact(installation), verified), true);
     assert.throws(() => bindCamoufoxArtifact(installation, { ...verified, executable: join(root, 'different') }), /camoufox_artifact_binding_mismatch/);
+    assert.doesNotThrow(() => validateCamoufoxArtifactSetup(null, null, verified));
+    assert.throws(() => validateCamoufoxArtifactSetup({ coreEndpoint: 'http://127.0.0.1:1', harborEndpoint: 'http://127.0.0.1:2' }, null, verified), /camoufox_artifact_binding_requires_new_data_root/);
+    assert.doesNotThrow(() => validateCamoufoxArtifactSetup(installation, verified, verified));
 
     const environment = installedRuntimeEnvironment({
       parentEnvironment: { PATH: '/usr/bin', WEBENVOY_DEV_STORE: '/tmp/dev', HARBOR_CAMOUFOX_PATH: '/tmp/untrusted', CAMOUFOX_EXECUTABLE: '/tmp/untrusted' },
@@ -87,6 +90,12 @@ test('binds only a verified Camoufox test artifact and strips untrusted service 
     await writeFile(verified.manifest, manifest);
     await writeFile(join(artifact, 'Contents/Info.plist'), infoWithBundleName('Tampered'));
     await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_output_mismatch/);
+    await writeFile(join(artifact, 'Contents/Info.plist'), infoWithBundleName(CAMOUFOX_NATIVE_PINS.bundle_name));
+    await detachAndMutateExecutable(artifact);
+    const forged = JSON.parse(await readFile(verified.manifest, 'utf8'));
+    forged.output.executable_sha256 = await fileSha(verified.executable);
+    await writeFile(verified.manifest, JSON.stringify(forged) + '\n');
+    await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_output_mismatch/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -105,7 +114,7 @@ async function createCamoufoxArtifact(root) {
   for (const [from, to] of sourceFiles) await copyOrLink(join(source, from), join(app, 'Contents', to));
   const info = infoWithBundleName(CAMOUFOX_NATIVE_PINS.bundle_name);
   await writeFile(join(app, 'Contents/Info.plist'), info);
-  await writeFile(join(resources, 'application.ini'), `[App]\nVersion=${CAMOUFOX_NATIVE_PINS.browser_version}\n`);
+  await copyOrLink(join(source, 'Resources/application.ini'), join(resources, 'application.ini'));
   await copyOrLink(join(resources, 'properties.json'), join(macos, 'properties.json'));
   const output = {
     app,
@@ -135,6 +144,18 @@ function infoWithBundleName(name) {
 
 async function copyOrLink(source, target) {
   try { await link(source, target); } catch { await copyFile(source, target); }
+}
+
+async function detachAndMutateExecutable(artifact) {
+  const executable = join(artifact, 'Contents/MacOS/camoufox');
+  await rm(executable);
+  await copyFile('/Applications/Camoufox.app/Contents/MacOS/camoufox', executable);
+  await chmod(executable, 0o755);
+  const handle = await open(executable, 'r+');
+  try {
+    const byte = Buffer.from([0x00]);
+    await handle.write(byte, 0, 1, 0);
+  } finally { await handle.close(); }
 }
 
 async function fileSha(path) {
