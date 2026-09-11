@@ -286,6 +286,10 @@ export function createManagedBrowserService(options: {
       await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
       const result = await harbor(`/runtime/sessions/${ref}/interactions`, {
         holder_ref: holder, operation_ref: runId, expected_origin: input.origin, controlled_origin: input.origin,
+        // Harbor must enforce the Core-checked grant ∩ Profile ∩ task
+        // intersection for every request/redirect, not re-derive trust from
+        // Agent-supplied origin fields.
+        authorized_origins: access.authorized_origins,
         action: input.operation.slice("instance.".length),
         ...Object.fromEntries(["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
       }, "interaction");

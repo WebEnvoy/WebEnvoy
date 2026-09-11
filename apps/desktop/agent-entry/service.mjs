@@ -3,6 +3,8 @@ import { mkdir, readFile, writeFile, unlink, lstat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
+import { resolveInstalledCamoufoxArtifact } from './provider-artifact.mjs';
+import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error('data_directory_required');
@@ -68,21 +70,16 @@ for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, shutdown);
 try {
   const assets = await verifyBundle();
   const config = JSON.parse(await readFile(join(dataDir, 'installation.json'), 'utf8'));
+  const camoufoxArtifact = await resolveInstalledCamoufoxArtifact(config);
   for (const key of ['coreEndpoint', 'harborEndpoint']) {
     const url = new URL(config[key]);
     if (url.hostname !== '127.0.0.1' || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) throw new Error('installation_endpoint_invalid');
   }
-  // The installed service never inherits development stores, launch wrappers, fixture providers or private resolvers.
+  // The installed service never inherits development stores, launch wrappers,
+  // fixture providers or private resolvers. A Camoufox override is accepted
+  // only from the revalidated installation binding above.
   for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
-  Object.assign(process.env, {
-    WEBENVOY_RUNTIME_DATA_DIR: dataDir,
-    WEBENVOY_SKILL_ASSETS_PATH: join(root, 'agent-entry/skill-assets'),
-    HARBOR_PROFILE_STORAGE_ROOT: join(dataDir, 'profiles'),
-    WEBENVOY_LODE_ASSETS_PATH: join(root, 'dist-electron/lode'),
-    WEBENVOY_CORE_RUNTIME_COMMAND: '', WEBENVOY_CORE_RUNTIME_PATH: '', WEBENVOY_CORE_RUNTIME_CWD: '',
-    WEBENVOY_HARBOR_RUNTIME_COMMAND: '', WEBENVOY_HARBOR_RUNTIME_PATH: '', WEBENVOY_HARBOR_RUNTIME_CWD: '',
-    WEBENVOY_DISABLE_PACKAGED_RUNTIME: '0', HARBOR_RUNTIME_PROVIDER: '',
-  });
+  Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxArtifact }));
   const { createRuntimeSupervisor } = await import('../dist-electron/runtimeSupervisor.js');
   supervisor = createRuntimeSupervisor({ dataDir });
   state = { ...state, ...config, assets };

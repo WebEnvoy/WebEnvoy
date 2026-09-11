@@ -139,6 +139,7 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body);
     assert.equal(input.controlled_origin, input.expected_origin);
     assert.equal(input.expected_origin, "http://127.0.0.1:18794");
+    assert.deepEqual(input.authorized_origins, ["http://127.0.0.1:18794"]);
     if (!refuseInteraction) interactions++;
     value = { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
       operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };

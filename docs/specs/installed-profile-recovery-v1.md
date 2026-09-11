@@ -91,6 +91,8 @@ Plugin 只增加 `recovery.inspect`、`recovery.request`、`recovery.status` 投
 
 安装 identity 与原 data root 绑定，并持久化 commit/tree/manifest/完整性证据。新包先通过完整性核验，再复用同一 data root；旧 Runtime 活动或资产 digest 不匹配时拒绝并要求一次明确安全 stop。不得关闭未核对在途任务、强抢人工控制或用两个新 data root 冒充更新。
 
+若安装显式选择 Camoufox native test artifact，安装配置必须在同一 data root 的 `installation.json` 中持久化 `camoufoxArtifact` 绑定（`app`、`executable`、`manifest`、`manifest_sha256`）。绑定只接受固定 `webenvoy.camoufox-native/v1`、`managed-native-snapshot`、Provider/browser/source pins、实际输出文件 hash、派生 app identity 与 `properties.json` 邻接副本均通过核验的独立 test-only artifact；原 `/Applications/Camoufox.app` 和任意 symlink/替换路径都拒绝。已有绑定不可通过重复 setup 改指向其他构件；每次 Runtime 启动都重新核验绑定及 manifest hash，失败则 fail closed。安装服务清除继承的 `WEBENVOY_`、`HARBOR_`、`CAMOUFOX_` 覆盖；仅将这次核验得到的 executable 作为 `HARBOR_CAMOUFOX_PATH` 传给 Harbor。没有该字段的旧 installation 配置继续使用 Harbor 既有默认 Provider 检测，不迁移或改写 Profile 的 executable/provider binding。
+
 卸载只移除本次受管安装、入口和注册，不删除长期数据、Profile、私有身份材料、备份、恢复前副本、Principal、Grant 或 Run。用户手改 host/SKILL 保留原件并报告冲突；不强制覆盖后宣称更新成功。
 
 ## 5. Fail-closed 与连续性
