@@ -126,7 +126,7 @@ class Route:
         self.fetched+=1
         return SimpleNamespace(status=self.status,dispose=lambda:None)
     def fulfill(self,**kwargs):self.fulfilled=True
-popup=object(); m.PAGE_STATES={'popup':{'provider_page_ref':'popup','page':popup,'closed':False}}; m.PAGE_STATE_BY_OBJECT[id(popup)]='popup'
+popup=object(); m.register_provider_page(popup, p)
 for route in [Route('https://other.example/post'),Route('https://example.com/popup',page=object())]:
     m.INTERACTION_GUARD(route);assert route.aborted and route.fetched==0
 background=Route('https://example.com/popup',page=popup);m.INTERACTION_GUARD(background);assert background.fulfilled and not background.aborted
