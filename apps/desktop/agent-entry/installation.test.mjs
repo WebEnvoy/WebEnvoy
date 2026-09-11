@@ -64,6 +64,12 @@ test('binds only a verified Camoufox test artifact and strips untrusted service 
   try {
     const artifact = await createCamoufoxArtifact(root);
     const verified = await verifyCamoufoxArtifact(artifact);
+    const fourEntryManifest = await readFile(verified.manifest, 'utf8');
+    const legacyThreeEntryManifest = JSON.parse(fourEntryManifest);
+    delete legacyThreeEntryManifest.patched_entries['chrome/juggler/content/protocol/PageHandler.js'];
+    await writeFile(verified.manifest, JSON.stringify(legacyThreeEntryManifest) + '\n');
+    await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_patch_manifest_invalid/);
+    await writeFile(verified.manifest, fourEntryManifest);
     const installation = bindCamoufoxArtifact({ coreEndpoint: 'http://127.0.0.1:1', harborEndpoint: 'http://127.0.0.1:2' }, verified);
     assert.deepEqual(installation.camoufoxArtifact, camoufoxArtifactInstallationRecord(verified));
     assert.equal(sameCamoufoxArtifact(await resolveInstalledCamoufoxArtifact(installation), verified), true);
@@ -132,7 +138,7 @@ async function createCamoufoxArtifact(root) {
     output,
     identity: { bundle_identifier: CAMOUFOX_NATIVE_PINS.bundle_identifier, bundle_name: CAMOUFOX_NATIVE_PINS.bundle_name },
     provider: { camoufox_version: CAMOUFOX_NATIVE_PINS.camoufox_version, browser_version: CAMOUFOX_NATIVE_PINS.browser_version },
-    patched_entries: Object.fromEntries(['chrome/juggler/content/protocol/Protocol.js', 'chrome/juggler/content/protocol/BrowserHandler.js', 'chrome/juggler/content/TargetRegistry.js'].map((name, index) => [name, { before_sha256: String(index + 1).padStart(64, '0'), after_sha256: String(index + 4).padStart(64, '0') }]))
+    patched_entries: Object.fromEntries(['chrome/juggler/content/protocol/Protocol.js', 'chrome/juggler/content/protocol/BrowserHandler.js', 'chrome/juggler/content/TargetRegistry.js', 'chrome/juggler/content/protocol/PageHandler.js'].map((name, index) => [name, { before_sha256: String(index + 1).padStart(64, '0'), after_sha256: String(index + 5).padStart(64, '0') }]))
   };
   await writeFile(join(resources, 'webenvoy-native-manifest.json'), JSON.stringify(manifest) + '\n');
   return app;

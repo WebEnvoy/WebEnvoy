@@ -20,7 +20,8 @@ const HASH = /^[a-f0-9]{64}$/;
 const PATCHED_ENTRIES = [
   'chrome/juggler/content/protocol/Protocol.js',
   'chrome/juggler/content/protocol/BrowserHandler.js',
-  'chrome/juggler/content/TargetRegistry.js'
+  'chrome/juggler/content/TargetRegistry.js',
+  'chrome/juggler/content/protocol/PageHandler.js'
 ];
 const SOURCE_HASHES = {
   'omni.ja': CAMOUFOX_NATIVE_PINS.source_omni_sha256,
