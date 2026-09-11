@@ -121,6 +121,39 @@ def query_fragment_marker(page: dict[str, Any]) -> bool:
     return page.get("title") == "S2 Phase 1 Page marker-q1-f1"
 
 
+def query_fragment_observation(page: dict[str, Any], response: dict[str, Any], expected_path: str = "/query") -> str:
+    try:
+        path_matches = page_path(page)[0] == expected_path
+    except CheckFailure:
+        path_matches = False
+    status = page.get("status")
+    title = page.get("title")
+    title_marker = {
+        "S2 Phase 1 Page marker-q1-f1": "query_fragment_marker",
+        "S2 Phase 1 Page": "s2_page",
+        "S2 Phase 1 History": "s2_history",
+        "Same-name Page": "same_name",
+    }.get(title, "other" if isinstance(title, str) else "missing")
+    failure = response.get("failure_class")
+    failure_class = "none" if failure is None else failure if isinstance(failure, str) and 0 < len(failure) <= 64 and failure.replace("_", "").isalnum() else "other"
+    return json.dumps({
+        "status": status if status in {"ready", "failed", "closed", "unknown"} else "other",
+        "title_marker": title_marker,
+        "path_matches": path_matches,
+        "failure_class": failure_class if failure_class else "none",
+    }, separators=(",", ":"), sort_keys=True)
+
+
+def require_query_state(response: dict[str, Any], page: dict[str, Any], expected_path: str, error_class: str) -> None:
+    try:
+        path_matches = page_path(page)[0] == expected_path
+    except CheckFailure:
+        path_matches = False
+    if page.get("status") == "ready" and path_matches and query_fragment_marker(page):
+        return
+    raise CheckFailure(error_class, query_fragment_observation(page, response, expected_path))
+
+
 def driver_request(bridge: Any, operation: str, **payload: Any) -> dict[str, Any]:
     response = bridge.request(operation, **payload)
     require(isinstance(response, dict), "driver_response_invalid")
@@ -283,15 +316,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         query_url = f"{s2}/query?phase=1#s2-fragment"
         queried = page_operation(bridge, "navigate_page", b_ref, authorized, action="navigate", url=query_url, timeout_ms=args.timeout_ms)
         b_query = find_page(pages_of(queried), b_ref)
-        query_path, _, _ = page_path(b_query)
-        require(b_query.get("status") == "ready" and query_path == "/query" and query_fragment_marker(b_query), "query_fragment_navigation_failed")
+        require_query_state(queried, b_query, "/query", "query_fragment_navigation_failed")
         append_step(steps, "query_fragment", "completed", ref=b_ref)
 
         current_step = "reload"
         reloaded = page_operation(bridge, "navigate_page", b_ref, authorized, action="reload", timeout_ms=args.timeout_ms)
         b_reload = find_page(pages_of(reloaded), b_ref)
-        reload_path, _, _ = page_path(b_reload)
-        require(b_reload.get("status") == "ready" and reload_path == query_path and query_fragment_marker(b_reload), "reload_failed")
+        require_query_state(reloaded, b_reload, "/query", "reload_failed")
         append_step(steps, "reload", "completed", ref=b_ref)
 
         current_step = "back"
@@ -303,8 +334,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "forward"
         forwarded = page_operation(bridge, "navigate_page", b_ref, authorized, action="forward", timeout_ms=args.timeout_ms)
         b_forward = find_page(pages_of(forwarded), b_ref)
-        forward_path, _, _ = page_path(b_forward)
-        require(b_forward.get("status") == "ready" and forward_path == query_path and query_fragment_marker(b_forward), "forward_failed")
+        require_query_state(forwarded, b_forward, "/query", "forward_failed")
         append_step(steps, "forward", "completed", ref=b_ref)
 
         current_step = "s3_counter_baseline"
@@ -314,7 +344,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "s3_direct_rejected"
         direct = page_operation(bridge, "navigate_page", b_ref, authorized, action="navigate", url=f"{s3}/direct", timeout_ms=args.timeout_ms)
         direct_page = find_page(pages_of(direct), b_ref)
-        require(direct.get("failure_class") == "navigation_origin_denied" and direct_page.get("status") == "failed" and page_path(direct_page)[0] == query_path, "s3_direct_denial_unproven")
+        require(direct.get("failure_class") == "navigation_origin_denied" and direct_page.get("status") == "failed" and page_path(direct_page)[0] == "/query", "s3_direct_denial_unproven")
         s3_after_direct = service_counter(s3)
         require(s3_after_direct == s3_before, "s3_direct_counter_changed")
         append_step(steps, "s3_direct_rejected", "rejected", count=s3_after_direct["access_count"], ref=b_ref, error_class="navigation_origin_denied")
