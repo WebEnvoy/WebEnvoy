@@ -121,11 +121,17 @@ def query_fragment_marker(page: dict[str, Any]) -> bool:
     return page.get("title") == "S2 Phase 1 Page marker-q1-f1"
 
 
-def query_fragment_observation(page: dict[str, Any], response: dict[str, Any], expected_path: str = "/query") -> str:
+def page_path_observation(page: dict[str, Any], expected_path: str) -> tuple[bool, str]:
     try:
-        path_matches = page_path(page)[0] == expected_path
+        path = page_path(page)[0]
     except CheckFailure:
-        path_matches = False
+        return False, "missing"
+    category = "query" if path == "/query" else "root" if path == "/" else "other"
+    return path == expected_path, category
+
+
+def page_failure_observation(page: dict[str, Any], response: dict[str, Any], expected_path: str) -> str:
+    path_matches, path_category = page_path_observation(page, expected_path)
     status = page.get("status")
     title = page.get("title")
     title_marker = {
@@ -139,19 +145,31 @@ def query_fragment_observation(page: dict[str, Any], response: dict[str, Any], e
     return json.dumps({
         "status": status if status in {"ready", "failed", "closed", "unknown"} else "other",
         "title_marker": title_marker,
+        "path_category": path_category,
         "path_matches": path_matches,
         "failure_class": failure_class if failure_class else "none",
     }, separators=(",", ":"), sort_keys=True)
 
 
 def require_query_state(response: dict[str, Any], page: dict[str, Any], expected_path: str, error_class: str) -> None:
-    try:
-        path_matches = page_path(page)[0] == expected_path
-    except CheckFailure:
-        path_matches = False
+    path_matches, _ = page_path_observation(page, expected_path)
     if page.get("status") == "ready" and path_matches and query_fragment_marker(page):
         return
-    raise CheckFailure(error_class, query_fragment_observation(page, response, expected_path))
+    raise CheckFailure(error_class, page_failure_observation(page, response, expected_path))
+
+
+def require_page_path(response: dict[str, Any], page: dict[str, Any], expected_path: str, error_class: str) -> None:
+    path_matches, _ = page_path_observation(page, expected_path)
+    if page.get("status") == "ready" and path_matches:
+        return
+    raise CheckFailure(error_class, page_failure_observation(page, response, expected_path))
+
+
+def require_denied_navigation(response: dict[str, Any], page: dict[str, Any], expected_path: str, error_class: str) -> None:
+    path_matches, _ = page_path_observation(page, expected_path)
+    if response.get("failure_class") == "navigation_origin_denied" and page.get("status") == "failed" and path_matches:
+        return
+    raise CheckFailure(error_class, page_failure_observation(page, response, expected_path))
 
 
 def driver_request(bridge: Any, operation: str, **payload: Any) -> dict[str, Any]:
@@ -328,7 +346,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "back"
         backed = page_operation(bridge, "navigate_page", b_ref, authorized, action="back", timeout_ms=args.timeout_ms)
         b_back = find_page(pages_of(backed), b_ref)
-        require(b_back.get("status") == "ready" and page_path(b_back)[0] == "/", "back_failed")
+        require_page_path(backed, b_back, "/", "back_failed")
         append_step(steps, "back", "completed", ref=b_ref)
 
         current_step = "forward"
@@ -344,7 +362,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "s3_direct_rejected"
         direct = page_operation(bridge, "navigate_page", b_ref, authorized, action="navigate", url=f"{s3}/direct", timeout_ms=args.timeout_ms)
         direct_page = find_page(pages_of(direct), b_ref)
-        require(direct.get("failure_class") == "navigation_origin_denied" and direct_page.get("status") == "failed" and page_path(direct_page)[0] == "/query", "s3_direct_denial_unproven")
+        require_denied_navigation(direct, direct_page, "/query", "s3_direct_denial_unproven")
         s3_after_direct = service_counter(s3)
         require(s3_after_direct == s3_before, "s3_direct_counter_changed")
         append_step(steps, "s3_direct_rejected", "rejected", count=s3_after_direct["access_count"], ref=b_ref, error_class="navigation_origin_denied")
@@ -352,7 +370,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         current_step = "s3_redirect_rejected"
         redirect = page_operation(bridge, "navigate_page", a_ref, authorized, action="navigate", url=f"{s1}/redirect/s3", timeout_ms=args.timeout_ms)
         redirect_page = find_page(pages_of(redirect), a_ref)
-        require(redirect.get("failure_class") == "navigation_origin_denied" and redirect_page.get("status") == "failed" and page_path(redirect_page)[0] == "/", "s3_redirect_denial_unproven")
+        require_denied_navigation(redirect, redirect_page, "/", "s3_redirect_denial_unproven")
         s3_after_redirect = service_counter(s3)
         require(s3_after_redirect == s3_before, "s3_redirect_counter_changed")
         append_step(steps, "s3_redirect_rejected", "rejected", count=s3_after_redirect["access_count"], ref=a_ref, error_class="navigation_origin_denied")
