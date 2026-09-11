@@ -52,7 +52,7 @@ export function projectHarborIdentity(
     },
     provider: {
       selected,
-      role: selected === "Camoufox" ? "验证 Provider" : selected === "CloakBrowser" ? "默认主力" : selected === "官方 Chrome" ? "受限后备" : "不可启动",
+      role: selected === "Camoufox" || selected === "Obscura" ? "验证 Provider" : selected === "CloakBrowser" ? "工程推荐" : selected === "官方 Chrome" ? "兼容 Provider" : "不可启动",
       state: readiness.state,
       reason: facts.provider_binding.warnings.join("；") || facts.provider_binding.unavailable_reason || facts.provider_binding.selection_reason,
     },
@@ -89,7 +89,7 @@ export function projectHarborIdentity(
     siteBindings: siteBindings(siteId),
     browser: {
       providers: providerList(catalog, facts.provider_binding.selected_provider),
-      defaultProvider: selected === "未可用" ? "CloakBrowser" : selected,
+      selectedProvider: selected,
       targets: isAccountSite(siteId) ? manualBrowserTargets : [{ id: siteId, label: facts.site_binding.display_name, defaultUrl: facts.site_binding.origin, defaultTitle: facts.site_binding.display_name, readiness: "公开浏览" }],
       session: emptySession(selected === "未可用" ? "CloakBrowser" : selected),
       boundary: "App 只发送启动、查看、接管、释放、停止意图；Harbor 拥有 session、controller、viewer 和 provider truth。",
@@ -134,19 +134,18 @@ function providerList(catalog: HarborProviderCatalog | null, fallbackProvider: H
   const mapped = (catalog?.providers ?? (fallbackProvider ? [fallbackProvider] : [])).map(providerProjection);
   if (mapped.length > 0) return mapped;
   return [
-    { name: "CloakBrowser", role: "推荐主力", state: "missing", statusLabel: "待检测", summary: "等待 Harbor provider 检测结果。" },
-    { name: "官方 Chrome", role: "受限后备", state: "restricted", statusLabel: "待检测", summary: "官方 Chrome 只作为受限后备或手动准备环境。" },
+    { name: "CloakBrowser", role: "可选 Provider", state: "missing", statusLabel: "待检测", summary: "等待 Harbor Provider 检测结果。" },
+    { name: "官方 Chrome", role: "可选 Provider", state: "missing", statusLabel: "待检测", summary: "等待 Harbor Provider 检测结果。" },
   ];
 }
 
 function providerProjection(provider: HarborProviderStatus): BrowserProviderProjection {
   const launchable = provider.install.status === "installed" && provider.install.launchability === "launchable";
-  const chrome = provider.provider_id === "chrome_official";
   return {
     name: providerName(provider.provider_id) as BrowserProviderProjection["name"],
-    role: provider.role === "qualification" ? "验证 Provider" : chrome ? "受限后备" : "推荐主力",
-    state: launchable ? (chrome ? "restricted" : "available") : "missing",
-    statusLabel: launchable ? (chrome ? "受限可用" : "可用") : provider.install.status === "missing" ? "未安装" : "不可启动",
+    role: provider.role === "qualification" ? "验证 Provider" : "可选 Provider",
+    state: launchable ? "available" : "missing",
+    statusLabel: launchable ? "可用" : provider.install.status === "missing" ? "未安装" : "不可启动",
     summary: provider.diagnostics?.[0]?.app_summary ?? provider.limitations?.[0] ?? provider.install.reason ?? "Harbor provider 检测已回读。",
     installHint: launchable ? undefined : provider.download_guide?.install_hint,
   };
@@ -179,7 +178,7 @@ function readinessFromFacts(facts: HarborIdentityFacts): { state: IdentityStatus
   }
   return {
     state: facts.provider_binding.requires_user_notice ? "warning" : "ready",
-    label: facts.provider_binding.requires_user_notice ? "受限后备" : "可用于只读任务",
+    label: facts.provider_binding.requires_user_notice ? "可运行（有能力提示）" : "可运行",
     reasons: facts.provider_binding.warnings.length ? facts.provider_binding.warnings : ["Harbor public summary 可用。"],
   };
 }
@@ -219,8 +218,8 @@ function isAccountSite(siteId: string) {
   return ["boss", "zhipin", "xiaohongshu"].includes(siteId);
 }
 
-function providerName(providerId: ProviderId | null): "CloakBrowser" | "官方 Chrome" | "Camoufox" | "未可用" {
-  return providerId === "camoufox" ? "Camoufox" : providerId === "chrome_official" ? "官方 Chrome" : providerId === "cloakbrowser" ? "CloakBrowser" : "未可用";
+function providerName(providerId: ProviderId | null): "CloakBrowser" | "官方 Chrome" | "Camoufox" | "Obscura" | "未可用" {
+  return providerId === "obscura" ? "Obscura" : providerId === "camoufox" ? "Camoufox" : providerId === "chrome_official" ? "官方 Chrome" : providerId === "cloakbrowser" ? "CloakBrowser" : "未可用";
 }
 
 function loginLabel(state: string) {

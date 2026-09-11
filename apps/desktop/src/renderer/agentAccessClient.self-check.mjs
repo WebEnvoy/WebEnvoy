@@ -36,7 +36,7 @@ try {
       const root=createRoot(document.getElementById("root"));
       window.mount=()=>root.render(<AgentAccessPanel endpoint="http://core.invalid"/>);
       window.projected=projectAgentAccess(state);
-      window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false});
+      window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false},"","camoufox");
       window.check.inputs={createAgentGrantInput,createProfilePolicyInput,defaultAgentOperations};
       window.mount();
     `,
@@ -92,7 +92,7 @@ try {
   await evaluate("window.check.releaseRead()");
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(await evaluate(`${button("撤销授权")}.disabled`), true);
-  await evaluate(`window.check.unknown=true;const select=document.querySelector('[name=grant_principal]');select.value='principal:one';select.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await evaluate(`window.check.unknown=true;const select=document.querySelector('[name=grant_principal]');select.value='principal:one';select.dispatchEvent(new Event('change',{bubbles:true}));const provider=document.querySelector('[name=grant_provider]');provider.value='obscura';provider.dispatchEvent(new Event('change',{bubbles:true}));`);
   await waitFor(`!${button("授予所选范围")}.disabled`);
   await evaluate(`const origin=document.querySelectorAll('[name=scope_origin]')[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(origin,'http://127.0.0.1:43129');origin.dispatchEvent(new Event('input',{bubbles:true}));`);
   await waitFor("document.querySelectorAll('[name=scope_origin]')[1].value==='http://127.0.0.1:43129'");

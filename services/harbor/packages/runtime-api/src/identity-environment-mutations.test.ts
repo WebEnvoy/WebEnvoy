@@ -67,6 +67,13 @@ test("persists idempotent receipts and rejects sensitive or conflicting payloads
 
 test("allocates owner refs and rejects provider metadata that conflicts with the selected provider", () => {
   const manager = new LocalIdentityEnvironmentManager({ provider_detection: testProviderDetection });
+  const selectionRequired = manager.mutate({
+    operation: "create",
+    idempotency_key: "provider-selection-required",
+    identity_environment: { site: { site_id: "controlled", origin: "https://example.com" } }
+  });
+  assert.equal(selectionRequired.failure?.code, "provider_mismatch");
+  assert.deepEqual(selectionRequired.failure?.recovery_actions, ["select_provider"]);
   const request: IdentityEnvironmentMutationRequest = {
     operation: "create",
     idempotency_key: "owner-allocated-create",

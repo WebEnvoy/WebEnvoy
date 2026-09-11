@@ -10,6 +10,7 @@ import {
   diagnoseBrowserProviderFailure,
   detectBrowserProviders,
   resolveCamoufoxOverride,
+  resolveObscuraOverride,
   type BrowserProviderDetectionInput,
   type IdentityEnvironmentProviderBinding
 } from "./provider-management.js";
@@ -19,6 +20,7 @@ import {
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
 import { launchCamoufoxProvider } from "./camoufox-driver.js";
+import { launchObscuraProvider } from "./obscura-driver.js";
 import { prepareProfileStorage } from "./profile-storage.js";
 import {
   trustLocalProviderReadProbe,
@@ -102,6 +104,11 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
       browser_path: camoufoxPath,
       provider_id: "camoufox"
     });
+  }
+  if (providerId === "obscura") {
+    const obscuraPath = (persistedBinding ? persistedBinding.selected_provider?.install.path : input.browser_path || resolveObscuraOverride(process.env)) ||
+      (providerBinding?.selected_provider_id === "obscura" ? providerBinding.selected_provider?.install.path : "") || "";
+    return launchObscuraProvider({ ...input, browser_path: obscuraPath, provider_id: "obscura" });
   }
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
@@ -209,7 +216,7 @@ export function selectLocalProviderId(
   configured: string | undefined,
   camoufoxAvailable: boolean
 ): string | undefined {
-  return requested ?? bound ?? (configured === "camoufox" ? "camoufox" : undefined) ?? (camoufoxAvailable ? "camoufox" : undefined);
+  return requested ?? bound ?? (["camoufox", "obscura"].includes(configured ?? "") ? configured : undefined) ?? (camoufoxAvailable ? "camoufox" : undefined);
 }
 
 type WritePrecheckObservation = {
@@ -2579,8 +2586,8 @@ function readyPage(current_url: string, title: string | null): LocalProviderPage
 
 function providerBindingFacts(binding: IdentityEnvironmentProviderBinding | null): RuntimeFact[] {
   const facts: RuntimeFact[] = [
-    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official,camoufox" },
-    { key: "provider.default", source: "configured", value: "cloakbrowser" },
+    { key: "provider.management.registered", source: "configured", value: "cloakbrowser,chrome_official,camoufox,obscura" },
+    { key: "provider.project_recommendation", source: "configured", value: "cloakbrowser" },
     { key: "provider.excluded.chromium", source: "configured", value: "not_user_selectable" },
     { key: "provider.reference.donut_browser", source: "configured", value: "mechanism_reference_only" }
   ];

@@ -1,9 +1,9 @@
 # Profile Environment V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.0
-> 日期：2026-09-09
-> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 版本：1.1
+> 日期：2026-09-11
+> 产品依据：[canonical v1.2](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品归口：[Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471)
 > 首批执行项：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
@@ -24,6 +24,15 @@
 8. 自动化辅助代码、Network 拦截、主世界执行和输入策略不得无意破坏 Provider 原生环境。
 9. Provider 声称支持不等于 WebEnvoy 已验证。
 10. 任务失败不得触发自动换 Provider、代理、指纹或身份环境重试。
+
+### 1.1 用户选择、偏好与绑定
+
+- 显式创建选择优先于用户的新建默认偏好；两者都必须实际可用且获授权。
+- 人类入口在没有用户默认时可以展示可修改的推荐候选，但必须由用户确认。Agent 没有显式 template Provider 且没有用户默认时返回需要选择，不从项目工程顺序或推荐暗推。
+- 显式选择或用户默认不可用时局部拒绝并返回诊断；`fallback_provider_id` 不得表示将偷偷替换选择。
+- 默认偏好只影响后续创建，不迁移旧 Profile，不扩大 Grant，也不授权安装或 Provider 使用。
+- Profile 一经创建永远按实际 binding 启动；跨 Provider 或不兼容版本变化走显式迁移。
+- 项目工程优先级、产品推荐、用户默认偏好和 Profile binding 是四个独立事实。
 
 ## 2. 环境事实模型
 
@@ -363,6 +372,16 @@ Camoufox 是当前第一验证 Provider。WebEnvoy 必须按明确版本组合�
 - 实际验证。
 
 自然交互不能变成随机无意义行为、养号或规避平台安全。
+
+## 11A. Obscura 有界适配要求
+
+Obscura 仅按 [Obscura Managed Provider Validation V1](obscura-managed-provider-validation-v1.md) 的固定提交、平台和 Driver 边界登记为可选受限验证 Provider，不替代 Camoufox、Chrome 或 CloakBrowser，也不预设为只读 Provider。
+
+- 一个受管 Profile 对应一个专用进程、一个独立目录和 Harbor 持有的一条底层 WebSocket。
+- App、Agent 和 Viewer 只能使用 owner API；不得获取 raw CDP endpoint、存储路径或 Obscura MCP。
+- 底层连接丢失时旧 Instance/Page/observation/target ref 全部失效；恢复必须停止旧进程并从同 Profile 显式创建新 Instance，不自动重放写入。
+- Provider 原生持久化当前只证明 Cookie；localStorage、sessionStorage、IndexedDB 必须标为 limited／unsupported，直到存在正式保存回灌合同。
+- `OBSCURA_PROFILE=0` 与禁用 rotation 只固定当前 Provider profile 选择，不能代替完整设备 seed 连续性证明。
 
 ## 12. Provider version 变化
 

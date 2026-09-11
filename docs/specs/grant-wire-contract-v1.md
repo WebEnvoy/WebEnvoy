@@ -29,6 +29,8 @@ SKILL 请求的 `task_scope` 必须恰好包含 `operations`、`skill_refs`、`s
 
 来源 revision 的批准清单和不可变 commit/blob/SHA-256 身份由 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。Grant 不得携带本地路径、正文、Cookie、Token 或 Provider-private 数据；错误、list 和 inspect 也不得泄露这些内容。
 
+既有 `creation_template.provider_id` 是 owner 确认的新 Profile 绑定上限，不是项目默认、安装授权或迁移授权。可信 owner 创建模板时必须显式选择；Plugin 只能提交获准的 template ref，不能替换 Provider。模板 Provider 不可用或未获授权时，相关创建局部拒绝且不改 Grant 或旧 Profile。此规则不新增 Grant wire 字段。
+
 ## Owner 入口与历史
 
 Owner 固定使用本机受信的 `access register`、`access grant`、`access revoke`、`access list` 管理 Principal、Grant 及 `skill_scope`；owner credential 只在本机/owner API 内部读取，不进入 Agent MCP。Agent 不能写自己的 scope，网页操作 Grant 不能替代 owner 授权。

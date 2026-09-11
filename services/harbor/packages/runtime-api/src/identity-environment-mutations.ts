@@ -188,6 +188,9 @@ function createOrImport(
   store: IdentityEnvironmentMutationStore,
   options: IdentityEnvironmentMutationOptions
 ): IdentityEnvironmentMutationResult {
+  if (!request.identity_environment.requested_provider_id) {
+    return rejected(request.operation, null, "provider_mismatch", false, ["select_provider"]);
+  }
   const record = createStoredIdentityRecord(request.identity_environment, request.operation === "create" ? "created" : "imported");
   const ref = record.identity_environment.identity_environment_ref;
   if (request.identity_environment.login_state_reason === "user_confirmed_managed_session") {

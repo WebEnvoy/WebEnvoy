@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-09-06
 - 规范：[WebEnvoy v1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
-- 后续关系：[ADR 0012](0012-runtime-capability-plane-and-plugin-first.md) 部分替代本 ADR 第 1 条中“未被当前消费者使用的 Runtime 基础能力类别可以不定义”的过度实施解释；本 ADR 的纵向交付、模块 owner、SKILL 边界和不预建大型平台等决策继续有效。
+- 后续关系：[ADR 0012](0012-runtime-capability-plane-and-plugin-first.md) 部分替代本 ADR 第 1 条中“未被当前消费者使用的 Runtime 基础能力类别可以不定义”的过度实施解释；[ADR 0013](0013-provider-choice-and-obscura-validation.md) 取代第 3 条的“默认 Provider”与失败后回到 Chrome 解释。本 ADR 的纵向交付、模块 owner、SKILL 边界和不预建大型平台等决策继续有效。
 
 ## 背景
 

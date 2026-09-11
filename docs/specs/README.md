@@ -14,13 +14,14 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Console Runtime Contract V1](console-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 console/page-error levels、文本截断脱敏、source location 和生命周期语义。 |
 | [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md) | [Work Items #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定诊断与已安装 SKILL capability→MCP projection、版本、availability、授权与恢复语义。 |
 | [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md) | [Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499) | 冻结 Camoufox 私有 bundle、精确 replay、版本兼容、fail-closed 和有界 environment readback。 |
+| [Obscura Managed Provider Validation V1](obscura-managed-provider-validation-v1.md) | [Obscura 受管验证 #511](https://github.com/WebEnvoy/WebEnvoy/issues/511) | 固定 Obscura 构建、安全边界、单连接 Driver、实际能力证据、限制与采用门槛。 |
 | [Installed Profile Recovery V1](installed-profile-recovery-v1.md) | [安装 Profile 接续与恢复 #505](https://github.com/WebEnvoy/WebEnvoy/issues/505) | 定义已安装更新/重装的数据 root 接续、受管 Profile backup/plan/apply、owner 确认、撤销/历史保留和 fail-closed 语义。 |
 | [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) | [Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定可选 SKILL 的来源身份、受管 data-root 生命周期、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与恢复语义。 |
 | [Grant Wire Contract V1 (v1.1)](grant-wire-contract-v1.md) | [Work Items #505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定 recovery projection、SKILL `skill_scope` 新维度、版本兼容、旧 Grant 读取与旧严格 reader 拒绝边界、单计划 owner 确认的持久安全语义。 |
 
 ## 使用规则
 
-1. 先读取组织级 [canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
+1. 先读取组织级 [canonical v1.2](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
 2. Spec 定义语义；Issue 定义当前交付切片；verification 只保存实际证据。
 3. 当前实现缺失不能反向缩小 spec；需要缩小 V1 范围时先更新产品决策。
 4. Provider 私有 API、站点 selector、临时测试字段和未经接受的草稿不能进入公共 spec。
@@ -57,3 +58,4 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 - #499：`DO-PROVIDER-PRIVATE-SCHEMA = triggered`；固定版本 Camoufox 的 `launch_options()` 会生成必须由 WebEnvoy 重放的 fingerprint/config/seed 材料，正式私有合同见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 复用既有 operation/Grant 结构，不新增持久维度。
 - #505：`DO-PLUGIN-EXPOSURE = triggered`，恢复 projection 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)；`DO-GRANT-WIRE = triggered`，恢复值与单计划确认见 [Grant Wire Contract V1](grant-wire-contract-v1.md)；`DO-PROVIDER-PRIVATE-SCHEMA = conditional`，仅当改变 Camoufox 私有 bundle/兼容规则时转为 triggered，恢复默认沿用 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。
 - #508：`DO-PLUGIN-EXPOSURE = triggered`，固定 `webenvoy_skills` 与八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)；`DO-GRANT-WIRE = triggered`，`skill_scope`、task scope、旧 Grant 读取和旧严格 reader 拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)；SKILL 生命周期与内容/receipt 见 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)。`DO-NETWORK-CONTRACT`、`DO-CONSOLE-CONTRACT`、`DO-PROVIDER-PRIVATE-SCHEMA`、`DO-APP-IA` 为 `not-triggered`：本项不改变这些边界。
+- #511：`DO-PLUGIN-EXPOSURE = not-triggered`，继续复用一个 `webenvoy_operation`、既有 `profile.create` template 和 Instance operation；`DO-GRANT-WIRE = not-triggered`，`creation_template.provider_id` 已是既有持久字段，本项只让 owner 显式选择其值；`DO-PROVIDER-PRIVATE-SCHEMA = not-triggered`，固定 Obscura 仅由 Provider 在受管目录自持久化 Cookie，WebEnvoy 不新增私有 bundle；`DO-NETWORK-CONTRACT`、`DO-CONSOLE-CONTRACT` = `not-triggered`，本切片不新增公共事件 payload；`DO-APP-IA = not-triggered`，只扩展既有 Grant／Profile Provider 选择控件。若后续由 WebEnvoy 保存并回灌 localStorage／IndexedDB、文件或 Provider 私有 seed，`DO-PROVIDER-PRIVATE-SCHEMA` 自动转为 `triggered`。

@@ -1,6 +1,6 @@
 # Harbor
 
-> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Camoufox 是首个默认 Provider 验证目标，Chrome 是显式兼容 Provider。
+> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 由用户选择，Camoufox 保留首个工程验证范围，Chrome 保留显式兼容选择，其他 Provider 通过有界正式验证进入支持范围。
 
 Harbor 让 Agent 可以长期、稳定、可接管地使用真实浏览器账号。
 
@@ -74,7 +74,7 @@ Runtime API 的 owner-clean 读取入口是 `GET /runtime/sessions/{runtime_sess
 - Profile：浏览器数据、Cookie、storage、扩展、代理、语言、时区和 user_data_dir；
 - Execution Identity：站点账号、登录态、历史状态、风险事件、资源约束和可用通道；
 - Runtime Session：一次可连接、可观察、可接管、可释放的浏览器会话；
-- Browser Drivers：连接 Chrome Official、CloakBrowser、Camoufox、Remote CDP 或其他 provider；
+- Browser Drivers：连接 Chrome Official、CloakBrowser、Camoufox、Obscura 或其他经验证 provider；
 - CDP / VNC / Viewer：让 Agent、上层系统和人类用户连接、观察和接管浏览器；
 - Evidence Store：保存运行证据、错误状态、raw_payload_ref、source_trace 和关键运行事实；
 - Runtime API：向 WebEnvoy Core、Agent、CLI、MCP、SDK 和 WebEnvoy App 暴露稳定能力。

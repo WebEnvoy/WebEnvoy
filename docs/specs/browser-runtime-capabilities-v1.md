@@ -1,9 +1,9 @@
 # Browser Runtime Capabilities V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.0
-> 日期：2026-09-09
-> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 版本：1.1
+> 日期：2026-09-11
+> 产品依据：[canonical v1.2](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品完成归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 
@@ -69,6 +69,8 @@ Capability 是 WebEnvoy 定义的稳定浏览器能力语义，不等同于具�
 - 当前 Provider／平台未实现或无法安全实现；
 - 必须返回准确能力事实；
 - 对 V1 必需能力，仅标记 `unsupported` 不能关闭产品要求；必须补实现、提供等价路径，或通过产品决策缩小支持范围。
+
+支持状态按 `Provider + Driver + 固定版本 + 平台` 记录。某个 Provider 的 `limited`／`unsupported` 不删除公共能力，也不自动拒绝该 Provider 的其他安全能力；同样，用户显式选择不能越过身份隔离、授权、ControlLease、真实结果和 unknown 不重放底线。
 
 ### 2.3 Capability evidence state
 

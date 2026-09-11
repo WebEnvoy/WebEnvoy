@@ -2,9 +2,10 @@
 
 - 状态：Accepted
 - 日期：2026-09-09
-- 产品规范：[WebEnvoy v1.1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+- 产品规范：[WebEnvoy v1.2 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
+- 后续关系：[ADR 0013](0013-provider-choice-and-obscura-validation.md) 固定 Provider 用户选择、推荐／默认／绑定分离与 Obscura 有界验证；本 ADR 的完整能力和 Plugin-first 基线继续有效。
 
 ## 背景
 

@@ -42,8 +42,8 @@ export function createProfilePolicyInput(profileRef: string, input: AgentScopeIn
   return { idempotency_key: key, profile_ref: profileRef, ...selectedScope(input) };
 }
 
-export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "") {
-  if (!principalId || ![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 和授权时限。");
+export function createAgentGrantInput(principalId: string, hours: number, key: string, input: AgentScopeInput, profileRef = "", providerId = "") {
+  if (!principalId || ![1, 24, 168].includes(hours) || !profileRef && !["cloakbrowser", "chrome_official", "camoufox", "obscura"].includes(providerId)) throw new Error("请选择 Agent、Provider 和授权时限。");
   const ceiling = selectedScope(input);
   return {
     idempotency_key: key,
@@ -55,7 +55,7 @@ export function createAgentGrantInput(principalId: string, hours: number, key: s
     max_created_profiles: profileRef ? 0 : 2,
     creation_template: profileRef ? null : {
       template_ref: crypto.randomUUID(),
-      provider_id: "camoufox",
+      provider_id: providerId,
       site: { site_id: "generic", origin: input.origin.trim(), display_name: "非生产浏览器" },
       language: "zh-CN",
       timezone: "Asia/Shanghai",

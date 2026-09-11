@@ -40,7 +40,7 @@ const identity = projectHarborIdentity(facts, catalog, "2026-09-08T00:00:00Z");
 assert.equal(identity.admissionFacts.providerId, "camoufox");
 assert.equal(identity.provider.selected, "Camoufox");
 assert.equal(identity.provider.role, "验证 Provider");
-assert.equal(identity.browser.defaultProvider, "Camoufox");
+assert.equal(identity.browser.selectedProvider, "Camoufox");
 assert.equal(identity.browser.session.provider, "Camoufox");
 assert.equal(identity.browser.providers[0].name, "Camoufox");
 const ownerReady = { ...record, status: { ...record.status, readiness: "ready", blocking_reasons: ["proxy_missing", "fingerprint_missing"] } };

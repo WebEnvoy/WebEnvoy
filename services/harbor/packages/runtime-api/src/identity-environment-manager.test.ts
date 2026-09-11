@@ -15,7 +15,7 @@ test("resolves a persistent identity environment store for the production runtim
 
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-test("user confirmation clears only the authentication gate for a restricted Chrome identity", () => {
+test("user confirmation clears only the authentication gate for an explicit Chrome identity", () => {
   const manager = new LocalIdentityEnvironmentManager();
   const created = manager.create({
     platform: "darwin",
@@ -25,6 +25,7 @@ test("user confirmation clears only the authentication gate for a restricted Chr
     path_exists: (path) => path === chromePath,
     is_executable: (path) => path === chromePath,
     read_text: () => null,
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_chrome-manual-auth",
     execution_identity_ref: "execution-identity_chrome-manual-auth",
     profile_ref: "profile_chrome-manual-auth",
@@ -40,7 +41,7 @@ test("user confirmation clears only the authentication gate for a restricted Chr
     region: "CN-SH",
     language: "zh-CN",
     timezone: "Asia/Shanghai",
-    fingerprint_summary: "chrome_official_restricted_fallback"
+    fingerprint_summary: "chrome_official_compatibility"
   });
   assert.equal(created.status.readiness, "needs_auth");
 

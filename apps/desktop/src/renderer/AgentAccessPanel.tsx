@@ -19,6 +19,7 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
   const [principalId, setPrincipalId] = useState("");
   const [hours, setHours] = useState(24);
   const [profileRef, setProfileRef] = useState("");
+  const [providerId, setProviderId] = useState("");
   const [scope, setScope] = useState<AgentScopeInput>({ origin: "", operations: [...defaultAgentOperations], controlled: false });
   const [policyRef, setPolicyRef] = useState("");
   const [policyScope, setPolicyScope] = useState<AgentScopeInput>({ origin: "", operations: [...defaultAgentOperations], controlled: false });
@@ -144,15 +145,16 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
         <ScopeFields value={policyScope} onChange={setPolicyScope} disabled={disabled} declaration />
         <button className="save-button" type="submit" disabled={disabled || !policyRef}>保存 Profile 权限上限</button>
       </form>
-      <form onSubmit={event => { event.preventDefault(); void mutate("/agent-access/grants", key => createAgentGrantInput(principalId, hours, key, scope, profileRef)); }}>
+      <form onSubmit={event => { event.preventDefault(); void mutate("/agent-access/grants", key => createAgentGrantInput(principalId, hours, key, scope, profileRef, providerId)); }}>
         <h3>授予非生产浏览器权限</h3>
         <p>{agentManagementScope}</p>
         <label className="connection-field"><span>授权 Agent</span><select name="grant_principal" required value={principalId} disabled={disabled} onChange={event => setPrincipalId(event.currentTarget.value)}><option value="">请选择 Agent</option>{activePrincipals.map(item => <option key={item.principal_id} value={item.principal_id}>{item.display_name} · {item.principal_id}</option>)}</select></label>
-        <label className="connection-field"><span>授权 Profile 或创建模板</span><select name="grant_profile" value={profileRef} disabled={disabled} onChange={event => { setProfileRef(event.currentTarget.value); setScope(current => ({ ...current, controlled: false })); }}><option value="">创建最多 2 个新 Camoufox Profile</option>{state?.profile_policies.map(item => <option key={item.profile_ref} value={item.profile_ref}>{item.profile_ref}</option>)}</select></label>
+        <label className="connection-field"><span>授权 Profile 或创建模板</span><select name="grant_profile" value={profileRef} disabled={disabled} onChange={event => { setProfileRef(event.currentTarget.value); setScope(current => ({ ...current, controlled: false })); }}><option value="">创建最多 2 个新 Profile</option>{state?.profile_policies.map(item => <option key={item.profile_ref} value={item.profile_ref}>{item.profile_ref}</option>)}</select></label>
+        {!profileRef && <label className="connection-field"><span>新 Profile Provider</span><select name="grant_provider" required value={providerId} disabled={disabled} onChange={event => setProviderId(event.currentTarget.value)}><option value="">请选择 Provider</option><option value="camoufox">Camoufox（工程已验证范围）</option><option value="obscura">Obscura（受限验证）</option><option value="chrome_official">官方 Chrome（兼容选择）</option><option value="cloakbrowser">CloakBrowser</option></select></label>}
         <p>{profileRef ? "此授权仍受已保存的 Profile 上限约束；受控页面声明须在上方独立保存。" : "新环境使用中文、Asia/Shanghai 时区。所选范围同时作为创建模板权限上限；不包含已有 Profile。"}</p>
         <ScopeFields value={scope} onChange={setScope} disabled={disabled} declaration={!profileRef} />
         <label className="connection-field"><span>授权有效期</span><select value={hours} disabled={disabled} onChange={event => setHours(Number(event.currentTarget.value))}><option value={1}>1 小时</option><option value={24}>24 小时</option><option value={168}>7 天</option></select></label>
-        <button className="save-button" type="submit" disabled={disabled || !activePrincipals.some(item => item.principal_id === principalId)}>授予所选范围</button>
+        <button className="save-button" type="submit" disabled={disabled || !activePrincipals.some(item => item.principal_id === principalId) || !profileRef && !providerId}>授予所选范围</button>
       </form>
       <h3>Agent（Principal）</h3>
       {state?.principals.length === 0 && <p>尚未登记 Agent。</p>}

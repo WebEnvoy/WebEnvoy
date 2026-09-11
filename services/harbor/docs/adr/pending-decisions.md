@@ -1,6 +1,6 @@
 # ADR 待决策索引
 
-> 2026-09-06：[Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 将 Camoufox 定为首个默认 Provider 验证目标、Chrome 定为显式兼容 Provider。下列历史 Provider／合同问题只有在当前或下一批真实路径受阻时才恢复为 blocker。
+> 2026-09-11：[Core ADR 0013](../../../../docs/adr/0013-provider-choice-and-obscura-validation.md) 取代固定默认解释：Provider 由用户选择，Camoufox 保留工程验证事实，Chrome 保留显式兼容选择，Obscura 由 #511 有界验证。下列历史 Provider／合同问题只有在当前或下一批真实路径受阻时才恢复为 blocker。
 
 ## 2026-07-14 Provider 生命周期纠偏
 

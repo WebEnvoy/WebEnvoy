@@ -64,8 +64,9 @@ export interface IdentityConsistencyFacts {
   provider: {
     selected_provider_id: IdentityEnvironmentProviderBinding["selected_provider_id"];
     selected_role: BrowserProviderRole | null;
-    default_provider_id: "cloakbrowser";
-    restricted_fallback_provider_id: "chrome_official";
+    /** Legacy v0 fields retained for readers; selection policy no longer supplies product defaults. */
+    default_provider_id: null;
+    restricted_fallback_provider_id: null;
     selection_reason: IdentityEnvironmentProviderBinding["selection_reason"];
     requires_user_notice: boolean;
     launchability: string | null;
@@ -146,8 +147,8 @@ export function createIdentityConsistencyFacts(input: IdentityConsistencyFactsIn
     provider: {
       selected_provider_id: identityEnvironment.provider_binding.selected_provider_id,
       selected_role: provider?.role ?? null,
-      default_provider_id: "cloakbrowser",
-      restricted_fallback_provider_id: "chrome_official",
+      default_provider_id: null,
+      restricted_fallback_provider_id: null,
       selection_reason: identityEnvironment.provider_binding.selection_reason,
       requires_user_notice: identityEnvironment.provider_binding.requires_user_notice,
       launchability: provider?.install.launchability ?? null,
@@ -155,7 +156,7 @@ export function createIdentityConsistencyFacts(input: IdentityConsistencyFactsIn
       capability_facts: provider?.capabilities ?? [],
       limitations: [
         ...(provider?.limitations ?? []),
-        "官方 Chrome 只作为受限 fallback/dev/manual provider；缺少 CloakBrowser 原生指纹和反检测二进制能力。",
+        "Provider 能力差异由 capability facts 表达，不改变用户的显式 Profile binding。",
         "Harbor 不承诺绕过风控，也不输出平台私有检测策略。"
       ],
       excluded_providers: [
@@ -208,14 +209,13 @@ function providerResource(binding: IdentityEnvironmentProviderBinding): Identity
       note: "没有可启动 provider，Core 不能准入该身份环境。"
     };
   }
-  const chromeFallback = binding.selected_provider.provider_id === "chrome_official";
   return {
     key: "provider",
     state: "satisfied",
     configured: binding.selected_provider.provider_id,
     observed: binding.selected_provider.provider_id,
     source: "derived",
-    note: chromeFallback ? "官方 Chrome 是可用的受限后备；能力限制由 provider facts 单独表达。" : "CloakBrowser 是默认主力 provider。"
+    note: "显式绑定的 Provider 当前可启动；能力与支持限制由 provider facts 单独表达。"
   };
 }
 
@@ -291,7 +291,7 @@ function readinessFor(resources: IdentityConsistencyResourceFact[], riskStates: 
 
 function recoverySuggestions(states: IdentityConsistencyRiskState[]): string[] {
   const suggestions = new Set<string>();
-  if (states.includes("provider_unavailable")) suggestions.add("安装或修复 CloakBrowser；官方 Chrome 只能作为受限后备。");
+  if (states.includes("provider_unavailable")) suggestions.add("安装或修复已绑定 Provider，或由用户显式选择其他可用 Provider；不得静默切换。");
   if (states.includes("login_required")) suggestions.add("通过 App/Viewer 人工恢复登录态。");
   if (states.includes("environment_drift")) suggestions.add("重新核对代理、地区、语言、时区和浏览器指纹摘要。");
   if (states.includes("site_blocked")) suggestions.add("停止自动化并记录站点阻断事实，交由 Core/App 决定恢复路径。");

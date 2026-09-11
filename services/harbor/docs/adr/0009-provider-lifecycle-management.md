@@ -31,8 +31,8 @@ Provider 负责实际浏览器内核、指纹、隔离和自动化能力；Harbo
 | `system` | 检测、定位、版本/架构校验、启动验证、官方安装入口 |
 | `external` | 用户绑定安装或连接信息，Harbor 验证可达性和能力 facts |
 
-本段原定 CloakBrowser 为首个 `managed` provider，现不再有效。V1 以 Camoufox
-作为默认 Provider 的有界验证目标，Chrome 作为显式兼容 Provider；验证结果不预定为
+本段原定 CloakBrowser 为首个 `managed` provider，现不再有效。[Core ADR 0013](../../../../docs/adr/0013-provider-choice-and-obscura-validation.md) 进一步固定 Provider 由用户选择；Camoufox
+只保留首个工程验证范围，Chrome 保留显式兼容选择，Obscura 由 #511 有界验证；验证结果不预定为
 成功。Remote CDP 等未来形态继续按 `external` provider 分类，但不属于当前批次。
 
 ### 生命周期

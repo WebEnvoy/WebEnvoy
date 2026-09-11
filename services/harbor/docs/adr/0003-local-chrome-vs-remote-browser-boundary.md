@@ -1,6 +1,6 @@
 # 0003. 本地 Chrome 与远程浏览器边界
 
-> 2026-09-06：Provider 优先级由 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 继任：Camoufox 是首个默认验证目标，Chrome 是显式兼容 Provider；本 ADR 的所有权与数据边界继续有效。
+> 2026-09-11：Provider 选择由 [Core ADR 0013](../../../../docs/adr/0013-provider-choice-and-obscura-validation.md) 继任：Provider 由用户选择，推荐／默认／Profile binding 分离；本 ADR 的所有权与数据边界继续有效。
 
 ## 状态
 

@@ -7,7 +7,7 @@
 ## 实施原则
 
 - 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。
-- 先验证会推翻设计的页面或 Provider 假设。Camoufox 是首个默认 Provider 验证目标，不是已确认结论；Chrome 是显式兼容 Provider；不得引入 ego-lite／ego-browser 或 Wayfern。
+- 先验证会推翻设计的页面或 Provider 假设。Provider 由用户选择；Camoufox 只保留首个工程验证及已验证范围，Chrome 是显式兼容选择，有界 Work Item 可以验证其他 Provider；不得引入 ego-lite／ego-browser 或 Wayfern。
 - Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
 - Browser Runtime capability 是否存在，与 Plugin 向 Agent 展示哪些工具以及当前 Grant 是否允许调用必须分离；Network、Console、文件、窗口、受控执行、画面等通用能力不得按站点特例散落到 Harbor／Core。
 - V1 实施优先采用 Plugin-first：一个已安装 Plugin 在真实第三方 Agent 中持续消费 Runtime、Profile、账号、环境、SKILL 和结果能力；完整 App 产品化后移，但必要 owner 授权、敏感决定、同实例接管与交还持续可用。

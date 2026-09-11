@@ -13,6 +13,9 @@ import {
   camoufoxCapabilities,
   camoufoxDownloadGuide,
   camoufoxLimitations,
+  obscuraCapabilities,
+  obscuraDownloadGuide,
+  obscuraLimitations,
   cloakCapabilities,
   cloakDownloadGuide,
   cloakLimitations
@@ -21,8 +24,8 @@ import {
 export const HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA = "harbor-browser-provider-status/v0";
 export const HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA = "harbor-identity-provider-binding/v0";
 
-export type BrowserProviderId = "cloakbrowser" | "chrome_official" | "camoufox";
-export type BrowserProviderRole = "primary" | "restricted_fallback" | "qualification";
+export type BrowserProviderId = "cloakbrowser" | "chrome_official" | "camoufox" | "obscura";
+export type BrowserProviderRole = "recommended" | "compatibility" | "qualification" | "primary" | "restricted_fallback";
 export type BrowserProviderInstallStatus = "installed" | "missing" | "path_invalid";
 export type BrowserProviderLaunchability = "launchable" | "not_executable" | "not_checked";
 export type BrowserProviderCapabilityState = "supported" | "limited" | "unsupported" | "provider_claim" | "requires_validation";
@@ -131,6 +134,7 @@ export interface IdentityEnvironmentProviderBinding {
     | "chrome_restricted_fallback"
     | "requested_provider_available"
     | "requested_provider_unavailable"
+    | "selection_required"
     | "no_launchable_provider";
   requires_user_notice: boolean;
   selected_provider: BrowserProviderStatus | null;
@@ -173,9 +177,10 @@ export function detectBrowserProviders(input: BrowserProviderDetectionInput = {}
   return {
     schema_version: HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
     providers: [
-      providerStatus("cloakbrowser", "CloakBrowser", "primary", detectCloakBrowser(ctx), cloakExternal ? "external" : "managed"),
-      providerStatus("chrome_official", "Google Chrome", "restricted_fallback", detectChrome(ctx), "system"),
-      providerStatus("camoufox", "Camoufox", "qualification", detectCamoufox(ctx), "external")
+      providerStatus("cloakbrowser", "CloakBrowser", "recommended", detectCloakBrowser(ctx), cloakExternal ? "external" : "managed"),
+      providerStatus("chrome_official", "Google Chrome", "compatibility", detectChrome(ctx), "system"),
+      providerStatus("camoufox", "Camoufox", "qualification", detectCamoufox(ctx), "external"),
+      providerStatus("obscura", "Obscura", "qualification", detectObscura(ctx), "external")
     ],
     excluded_providers: [
       { provider: "chromium", reason: "Chromium 仅保留为开发/测试内部实现，不进入用户可选 provider 管理。" },
@@ -194,28 +199,24 @@ export function resolveCamoufoxOverride(env: Record<string, string | undefined>)
     .find((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
+export function resolveObscuraOverride(env: Record<string, string | undefined>): string | undefined {
+  return [env.HARBOR_OBSCURA_PATH, env.OBSCURA_BINARY_PATH]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
 export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmentProviderBindingInput = {}): IdentityEnvironmentProviderBinding {
   const catalog = detectBrowserProviders(input);
-  const cloak = catalog.providers.find((provider) => provider.provider_id === "cloakbrowser")!;
-  const chrome = catalog.providers.find((provider) => provider.provider_id === "chrome_official")!;
   const requested = input.requested_provider_id ? catalog.providers.find((provider) => provider.provider_id === input.requested_provider_id) ?? null : null;
 
   if (requested && isLaunchable(requested)) {
-    return binding(input, requested, null, "requested_provider_available", requested.provider_id === "chrome_official");
+    return binding(input, requested, null, "requested_provider_available", requested.role !== "recommended");
   }
   if (requested && !isLaunchable(requested)) {
-    return binding(input, null, chrome.provider_id, "requested_provider_unavailable", true, [
+    return binding(input, null, null, "requested_provider_unavailable", true, [
       `${requested.display_name} 当前不可启动；Harbor 不会静默替换用户指定的 provider。`
     ]);
   }
-  if (isLaunchable(cloak)) return binding(input, cloak, null, "cloakbrowser_default", false);
-  if (isLaunchable(chrome)) {
-    return binding(input, chrome, chrome.provider_id, "chrome_restricted_fallback", true, [
-      "CloakBrowser 缺失或不可启动；官方 Chrome 只能作为受限后备。",
-      "Chrome 不提供原生指纹控制，也不能提供完整身份环境一致性。"
-    ]);
-  }
-  return binding(input, null, null, "no_launchable_provider", true);
+  return binding(input, null, null, "selection_required", true, ["创建 Profile 前必须显式选择 Provider；Harbor 不会暗用项目推荐。"]);
 }
 
 export function getDefaultBrowserProviderExecutable(input: BrowserProviderDetectionInput = {}): string {
@@ -228,7 +229,7 @@ export function diagnoseBrowserProviderFailure(input: {
   path?: string | null;
   message?: string;
 }): BrowserProviderDiagnostic {
-  const name = input.provider_id === "cloakbrowser" ? "CloakBrowser" : input.provider_id === "camoufox" ? "Camoufox" : "官方 Chrome";
+  const name = input.provider_id === "cloakbrowser" ? "CloakBrowser" : input.provider_id === "camoufox" ? "Camoufox" : input.provider_id === "obscura" ? "Obscura" : "官方 Chrome";
   const pathText = input.path ? ` (${input.path})` : "";
   const table: Record<BrowserProviderFailureClass, [string, string, boolean]> = {
     not_installed: [`未检测到 ${name}${pathText}。`, "请从官方来源安装该 provider，然后重新检测。", true],
@@ -275,7 +276,9 @@ function providerStatus(
   install: BrowserProviderInstallFacts,
   managementMode: BrowserProviderStatus["management_mode"]
 ): BrowserProviderStatus {
-  const defaultForIdentity = role === "primary";
+  // Kept as a v0 compatibility field. Product recommendation and user default
+  // are separate owner facts; neither is inferred from this catalog role.
+  const defaultForIdentity = false;
   return {
     provider_id,
     display_name,
@@ -284,13 +287,13 @@ function providerStatus(
     default_for_identity_environment: defaultForIdentity,
     management_mode: managementMode,
     install,
-    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities() : chromeCapabilities(),
-    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations() : chromeLimitations(),
+    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities() : provider_id === "obscura" ? obscuraCapabilities() : chromeCapabilities(),
+    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations() : provider_id === "obscura" ? obscuraLimitations() : chromeLimitations(),
     download_guide: provider_id === "cloakbrowser"
       ? managementMode === "external"
         ? { ...cloakDownloadGuide(), action: "external_management", install_hint: "该覆盖路径由外部管理；请在外部更新或移除覆盖后重新检查。" }
         : cloakDownloadGuide()
-      : provider_id === "camoufox" ? camoufoxDownloadGuide() : chromeDownloadGuide(),
+      : provider_id === "camoufox" ? camoufoxDownloadGuide() : provider_id === "obscura" ? obscuraDownloadGuide() : chromeDownloadGuide(),
     diagnostics: diagnosticsFor(provider_id, install)
   };
 }
@@ -305,6 +308,10 @@ function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
 
 function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
   return detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");
+}
+
+function detectObscura(ctx: DetectionContext): BrowserProviderInstallFacts {
+  return detectPath(ctx, obscuraCandidates(ctx), "未检测到固定 Obscura 可执行文件，且未配置覆盖路径。");
 }
 
 function detectPath(ctx: DetectionContext, candidates: ProviderPathCandidate[], missingReason: string): BrowserProviderInstallFacts {
@@ -394,6 +401,11 @@ function camoufoxCandidates(ctx: DetectionContext): ProviderPathCandidate[] {
   return [{ path: "/opt/camoufox/camoufox", version: null, explicit: false }];
 }
 
+function obscuraCandidates(ctx: DetectionContext): ProviderPathCandidate[] {
+  const override = resolveObscuraOverride(ctx.env);
+  return override ? [{ path: override, version: obscuraVersionFromPath(override), explicit: true }] : [];
+}
+
 function diagnosticsFor(provider_id: BrowserProviderId, install: BrowserProviderInstallFacts): BrowserProviderDiagnostic[] {
   if (install.status === "missing") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "not_installed", path: install.path })];
   if (install.status === "path_invalid") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "path_invalid", path: install.path })];
@@ -422,7 +434,7 @@ function binding(
     selected_provider: selected,
     warnings,
     diagnostics,
-    unavailable_reason: selected ? null : "当前没有可启动的 CloakBrowser、官方 Chrome 或 Camoufox provider。"
+    unavailable_reason: selected ? null : "当前没有可启动的已注册 provider。"
   };
 }
 
@@ -482,6 +494,11 @@ function cloakVersionFromPath(path: string): string | null {
 
 function camoufoxVersionFromPath(path: string): string | null {
   return path.match(/camoufox[-_v]?([0-9]+(?:\.[0-9]+)+(?:-[A-Za-z0-9.]+)?)/i)?.[1] ?? null;
+}
+
+function obscuraVersionFromPath(path: string): string | null {
+  const match = /obscura[-_/](v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/i.exec(path);
+  return match?.[1] ?? null;
 }
 
 function readChromeBundleVersion(ctx: DetectionContext, executablePath: string): string | null {

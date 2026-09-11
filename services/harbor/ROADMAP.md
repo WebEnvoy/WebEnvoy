@@ -2,7 +2,7 @@
 
 ## 当前批
 
-- 有界验证 Camoufox 的受管 Profile、跨重启连续性、有头人工使用、上传下载、目标站点和恢复。
+- 按用户选择分别验证 Provider。Camoufox 保留已交付工程证据；Obscura 以一个 Profile／一个进程／一个受管目录验证跨重启连续性、同现场人工使用、上传下载、目标站点和恢复。
 - 提供最小正式入口所需的 Instance、现场 readback、原生窗口和 ControlLease。
 - 验证失败也形成明确采用／不采用结论，不扩张为多 Provider 框架。
 

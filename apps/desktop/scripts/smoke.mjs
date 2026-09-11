@@ -627,7 +627,7 @@ for (const expectedText of [
   "打开浏览器并登录",
   "接管",
   "已完成，继续",
-  "放弃接管",
+  "交还控制",
   "停止实例",
   "选择技能",
   "代理",
@@ -1264,7 +1264,7 @@ if (ownerPayloadGuardsModule.fixtureOrDemoPayloadReason({
       display_name: "Google Chrome",
       role: "restricted_fallback",
       install: { status: "installed", path: "/Applications/Google Chrome.app", version: "149.0.7827.201", launchability: "launchable", reason: null },
-      limitations: ["仅在 CloakBrowser 缺失或不可用时作为受限后备。"],
+      limitations: ["显式兼容选择；不提供原生指纹控制。"],
       download_guide: { missing_impacts: ["本地 smoke 不能把官方 Chrome 用作备用 runtime。"] },
     },
   ],
@@ -2223,8 +2223,8 @@ for (const source of ["App local-only", "Harbor fixture"]) {
 
 const restrictedChromeIdentity = {
   ...readyXhsIdentity,
-  provider: { ...readyXhsIdentity.provider, selected: "官方 Chrome", role: "受限后备", state: "warning", reason: "official_chrome_fallback" },
-  readiness: { state: "warning", label: "受限后备", reasons: ["official_chrome_fallback"] },
+  provider: { ...readyXhsIdentity.provider, selected: "官方 Chrome", role: "兼容 Provider", state: "warning", reason: "official_chrome_capability_notice" },
+  readiness: { state: "warning", label: "能力提示", reasons: ["official_chrome_capability_notice"] },
   admissionFacts: {
     providerId: "chrome_official",
     providerRole: "restricted_fallback",

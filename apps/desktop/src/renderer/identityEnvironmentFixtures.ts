@@ -15,8 +15,8 @@ export type BrowserTargetProjection = {
 };
 
 export type BrowserProviderProjection = {
-  name: "CloakBrowser" | "官方 Chrome" | "Camoufox";
-  role: "推荐主力" | "受限后备" | "验证 Provider";
+  name: "CloakBrowser" | "官方 Chrome" | "Camoufox" | "Obscura";
+  role: "可选 Provider" | "验证 Provider";
   state: BrowserProviderState;
   statusLabel: string;
   summary: string;
@@ -68,8 +68,8 @@ export type IdentityEnvironmentProjection = {
     warningReasonCodes: string[];
   };
   provider: {
-    selected: "CloakBrowser" | "官方 Chrome" | "Camoufox" | "未可用";
-    role: "默认主力" | "受限后备" | "验证 Provider" | "不可启动";
+    selected: "CloakBrowser" | "官方 Chrome" | "Camoufox" | "Obscura" | "未可用";
+    role: "工程推荐" | "兼容 Provider" | "验证 Provider" | "不可启动";
     state: IdentityStatus;
     reason: string;
   };
@@ -110,7 +110,7 @@ export type IdentityEnvironmentProjection = {
   siteBindings: string[];
   browser: {
     providers: BrowserProviderProjection[];
-    defaultProvider: BrowserProviderProjection["name"];
+    selectedProvider: BrowserProviderProjection["name"] | "未可用";
     targets: BrowserTargetProjection[];
     session: BrowserSessionProjection;
     boundary: string;
@@ -137,23 +137,23 @@ export const manualBrowserTargets: BrowserTargetProjection[] = [
 
 const primaryProvider: BrowserProviderProjection = {
   name: "CloakBrowser",
-  role: "推荐主力",
+  role: "可选 Provider",
   state: "available",
   statusLabel: "可用",
-  summary: "完整身份环境优先使用 CloakBrowser；Harbor 拥有检测、启动和能力矩阵事实。",
+  summary: "CloakBrowser 的能力和限制由 Harbor 检测与实际证据表达。",
 };
 
 const restrictedChromeProvider: BrowserProviderProjection = {
   name: "官方 Chrome",
-  role: "受限后备",
-  state: "restricted",
-  statusLabel: "受限",
-  summary: "仅用于 fallback/dev/manual，不声明完整身份一致性或原生指纹能力。",
+  role: "可选 Provider",
+  state: "available",
+  statusLabel: "可用",
+  summary: "显式兼容选择；不声明完整身份一致性或原生指纹能力。",
 };
 
 const missingCloakProvider: BrowserProviderProjection = {
   name: "CloakBrowser",
-  role: "推荐主力",
+  role: "可选 Provider",
   state: "missing",
   statusLabel: "未安装",
   summary: "缺少 CloakBrowser 会影响身份一致性和真实任务运行。",
@@ -175,9 +175,9 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     profileRef: "harbor://profile/xhs-ops-a",
     provider: {
       selected: "CloakBrowser",
-      role: "默认主力",
+      role: "工程推荐",
       state: "ready",
-      reason: "Harbor 默认选择 CloakBrowser；官方 Chrome 仅作 fallback/dev/manual。",
+      reason: "该既有 Profile 显式绑定 CloakBrowser；项目推荐不等于用户默认。",
     },
     login: {
       state: "已登录",
@@ -216,7 +216,7 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     siteBindings: ["小红书搜索和笔记读取", "小红书发布草稿写前预览"],
     browser: {
       providers: [primaryProvider, restrictedChromeProvider],
-      defaultProvider: "CloakBrowser",
+      selectedProvider: "CloakBrowser",
       targets: manualBrowserTargets,
       session: {
         provider: "CloakBrowser",
@@ -266,9 +266,9 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     profileRef: "harbor://profile/boss-recruiter",
     provider: {
       selected: "CloakBrowser",
-      role: "默认主力",
+      role: "工程推荐",
       state: "warning",
-      reason: "Harbor 选择 CloakBrowser，但现场观测缺少最新登录确认。",
+      reason: "该既有 Profile 显式绑定 CloakBrowser，但现场观测缺少最新登录确认。",
     },
     login: {
       state: "需要人工认证",
@@ -307,7 +307,7 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     siteBindings: ["BOSS 搜索和职位详情读取", "BOSS 打招呼写前预览"],
     browser: {
       providers: [primaryProvider, restrictedChromeProvider],
-      defaultProvider: "CloakBrowser",
+      selectedProvider: "CloakBrowser",
       targets: manualBrowserTargets,
       session: {
         provider: "CloakBrowser",
@@ -357,16 +357,16 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     profileRef: "harbor://profile/local-chrome-dev",
     provider: {
       selected: "官方 Chrome",
-      role: "受限后备",
+      role: "兼容 Provider",
       state: "warning",
-      reason: "CloakBrowser 缺失或不可启动时才使用；不提供原生指纹控制。",
+      reason: "该既有 Profile 显式绑定官方 Chrome；不提供原生指纹控制。",
     },
     login: {
       state: "未知",
       recoveryRequired: true,
       manualAuthenticationState: "需要认证",
       recoveryActions: ["手动登录"],
-      reason: "Chrome fallback/dev/manual 不能证明站点任务身份连续性。",
+      reason: "仍需用当前 Chrome Profile 的真实会话证据证明站点任务身份连续性。",
     },
     environment: {
       proxy: "缺失",
@@ -393,12 +393,12 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
     readiness: {
       state: "blocked",
       label: "不建议运行站点任务",
-      reasons: ["缺少代理", "缺少指纹摘要", "官方 Chrome 只作为 fallback/dev/manual。"],
+      reasons: ["缺少代理", "缺少指纹摘要"],
     },
     siteBindings: ["开发调试", "人工登录准备"],
     browser: {
       providers: [missingCloakProvider, restrictedChromeProvider],
-      defaultProvider: "官方 Chrome",
+      selectedProvider: "官方 Chrome",
       targets: manualBrowserTargets,
       session: {
         provider: "官方 Chrome",
@@ -410,7 +410,7 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
         currentUrl: "未打开",
         title: "无活动页面",
         startedAt: "未启动",
-        message: "可用官方 Chrome 受限后备打开手动浏览，但不具备完整身份环境能力。",
+        message: "可用显式绑定的官方 Chrome 打开手动浏览；能力差异不改变该绑定。",
       },
       boundary:
         "App 只发送启动、查看、接管、释放、停止意图；Harbor 拥有 session、controller、viewer 和 provider truth。",
@@ -420,7 +420,7 @@ export const identityEnvironmentFixtures: IdentityEnvironmentProjection[] = [
         id: "task-entry-local-xhs-read-blocked",
         label: "查看小红书只读任务失败状态",
         taskId: "task-xhs-real-read",
-        inputSummary: "本机 Chrome 只作为 fallback/dev/manual，不建议真实站点任务。",
+        inputSummary: "本机 Chrome 是显式兼容选择；真实站点任务仍需满足当前能力与身份连续性证据。",
         readiness: "缺少完整身份环境时只能查看 fixture projection，不能声明 live-ready。",
         source: "App local-only",
       },

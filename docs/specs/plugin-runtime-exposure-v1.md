@@ -41,6 +41,8 @@
 
 MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。
 
+`profile.create` 不从项目推荐推导 Provider。可信 owner 在创建 Grant 时显式选择 `creation_template.provider_id`；Plugin 只能提交该 template ref，不能替换 Provider。模板 Provider 不可用或未获授权时，相关创建局部拒绝，不得静默改用其他 Provider。已存在 Profile 的 Grant 永远沿用 Profile binding；修改推荐或未来用户默认偏好不改变旧绑定。
+
 恢复投影只允许 `recovery.inspect`、`recovery.request`、`recovery.status`。inspect 返回安全摘要；request 创建待 owner 决定的 plan/operation，不自动 stop、覆盖或确认；status 只查询原 operation/receipt。Plugin 永远不能调用 owner-only 的 backup/plan/apply，不能携带 owner token。plan 的 Profile、当前材料指纹、backup ref、范围与有效期由 Core 持久化；目标/材料/归属变化或活动 Instance 会使后续确认失效。
 
 环境与恢复 operation 复用既有 Grant 数组、持久化与交集模型；环境扩展不新增 Grant wire 维度，恢复值与单计划确认的持久安全语义见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。

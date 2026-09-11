@@ -119,6 +119,7 @@ function providerId(identity: IdentityEnvironmentProjection | undefined, provide
   if (identity?.provider.selected === "Camoufox") return "camoufox";
   if (identity?.provider.selected === "官方 Chrome") return "chrome_official";
   if (identity?.provider.selected === "CloakBrowser") return "cloakbrowser";
+  if (identity?.provider.selected === "Obscura") return "obscura";
   return providers.find((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable")?.provider_id ?? "cloakbrowser";
 }
 
@@ -126,7 +127,7 @@ function providerOptions(providers: HarborProviderStatus[], selected: ProviderId
   const available = providers.filter((provider) => provider.install.status === "installed" && provider.install.launchability === "launchable");
   const options = available.some((provider) => provider.provider_id === selected)
     ? available
-    : [{ provider_id: selected, display_name: selected === "camoufox" ? "Camoufox" : selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available];
+    : [{ provider_id: selected, display_name: selected === "obscura" ? "Obscura" : selected === "camoufox" ? "Camoufox" : selected === "cloakbrowser" ? "CloakBrowser" : "官方 Chrome" } as HarborProviderStatus, ...available];
   return options.map((provider) => <option key={provider.provider_id} value={provider.provider_id}>{provider.display_name}</option>);
 }
 

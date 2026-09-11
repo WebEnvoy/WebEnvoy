@@ -4,7 +4,7 @@
 
 ## 当前批
 
-在最小正式入口中验证一个受管 Profile 的创建、人工登录、关闭重开、Camoufox 有界能力、人工接管和一个低风险真实网站任务。
+在最小正式入口中继续验证用户显式选择的受管 Provider：保留 Camoufox 已验证范围，并以 Obscura 的有界 Work Item 核对 Profile 创建、关闭重开、同现场人工接管和受控网站任务。
 
 - Harbor 验证 Provider 与长期 Profile；Core 复用现有授权、锁、Run、结果和恢复；Desktop 提供必要入口与接管。
 - 一个小型网站 SKILL 尽早作为真实消费者，不等待完整对象、合同或 UI。

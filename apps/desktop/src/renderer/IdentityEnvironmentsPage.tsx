@@ -389,7 +389,7 @@ function businessInput(value: IdentityEditorValue): IdentityEnvironmentBusinessI
 
 function configuration(value: IdentityEditorValue, identity: IdentityEnvironmentProjection) {
   const update: IdentityEnvironmentConfigurationUpdate = {};
-  const currentProvider = identity.admissionFacts?.providerId ?? (identity.provider.selected === "Camoufox" ? "camoufox" : identity.provider.selected === "官方 Chrome" ? "chrome_official" : "cloakbrowser");
+  const currentProvider = identity.admissionFacts?.providerId ?? (identity.provider.selected === "Obscura" ? "obscura" : identity.provider.selected === "Camoufox" ? "camoufox" : identity.provider.selected === "官方 Chrome" ? "chrome_official" : "cloakbrowser");
   if (value.providerId !== currentProvider) update.provider_id = value.providerId;
   if (value.proxyMode !== "preserve") {
     update.proxy_ref = null;

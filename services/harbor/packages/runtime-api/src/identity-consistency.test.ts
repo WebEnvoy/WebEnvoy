@@ -23,6 +23,7 @@ test("returns identity environment consistency facts for Core and App", () => {
     identity_environment: {
       ...providerFixture({ [cloakPath]: { executable: true } }),
       identity_environment_ref: "identity-env_xhs-consistency",
+      requested_provider_id: "cloakbrowser",
       execution_identity_ref: "execution-identity_xhs-consistency",
       profile_ref: "profile_xhs-consistency",
       site: {
@@ -51,8 +52,8 @@ test("returns identity environment consistency facts for Core and App", () => {
 
   assert.equal(facts.schema_version, "harbor-identity-consistency-facts/v0");
   assert.equal(facts.provider.selected_provider_id, "cloakbrowser");
-  assert.equal(facts.provider.default_provider_id, "cloakbrowser");
-  assert.equal(facts.provider.restricted_fallback_provider_id, "chrome_official");
+  assert.equal(facts.provider.default_provider_id, null);
+  assert.equal(facts.provider.restricted_fallback_provider_id, null);
   assert.equal(facts.provider.excluded_providers.some((provider) => provider.provider === "chromium"), true);
   assert.equal(facts.provider.excluded_providers.some((provider) => provider.provider === "donut_browser"), true);
   assert.equal(facts.resources.find((resource) => resource.key === "proxy")?.state, "satisfied");
@@ -69,12 +70,13 @@ test("returns identity environment consistency facts for Core and App", () => {
   assert.equal(publicJson.includes("vnc://"), false);
 });
 
-test("reports Chrome fallback, drift, login loss, and site risk without bypass promises", () => {
+test("reports an explicit Chrome choice, drift, login loss, and site risk without bypass promises", () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const facts = runtime.getIdentityConsistencyFacts({
     identity_environment: {
       ...providerFixture({ [chromePath]: { executable: true } }),
       identity_environment_ref: "identity-env_boss-consistency",
+      requested_provider_id: "chrome_official",
       execution_identity_ref: "execution-identity_boss-consistency",
       profile_ref: "profile_boss-consistency",
       site: {
@@ -101,7 +103,7 @@ test("reports Chrome fallback, drift, login loss, and site risk without bypass p
   });
 
   assert.equal(facts.provider.selected_provider_id, "chrome_official");
-  assert.equal(facts.provider.selected_role, "restricted_fallback");
+  assert.equal(facts.provider.selected_role, "compatibility");
   assert.equal(facts.provider.requires_user_notice, true);
   assert.equal(facts.resources.find((resource) => resource.key === "provider")?.state, "satisfied");
   assert.equal(facts.resources.find((resource) => resource.key === "fingerprint")?.state, "missing");

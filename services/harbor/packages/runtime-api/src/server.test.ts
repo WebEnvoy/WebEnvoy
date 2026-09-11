@@ -44,7 +44,7 @@ test("serves readiness and provider facts as JSON", async () => {
 
     const providers = await getJson(`${running.url}/runtime/browser-providers`);
     assert.equal(providers.schema_version, "harbor-browser-provider-status/v0");
-    assert.equal(providers.providers.length, 3);
+    assert.equal(providers.providers.length, 4);
 
     const alias = await getJson(`${running.url}/runtime/browser-provider-status`);
     assert.deepEqual(alias, providers);
@@ -558,6 +558,7 @@ test("serves site resource facts failures without raw browser material", async (
 
     const session = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_challenge-test",
         execution_identity_ref: "execution-identity_challenge-test",
         profile_ref: "profile_challenge-test",
@@ -1517,6 +1518,7 @@ test("rejects missing, unmanaged, closed, and failed sessions without changing i
 
     const unmanaged = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_inline-unmanaged",
         execution_identity_ref: "execution-identity_inline-unmanaged",
         profile_ref: "profile_inline-unmanaged",
@@ -1610,6 +1612,7 @@ test("ignores caller-supplied owner refs when creating identities through the co
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": "same-profile-b", ...manualAuthHeaders() },
       body: JSON.stringify({
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_same-profile-b",
         execution_identity_ref: "identity-env_same-profile-b:execution",
         profile_ref: "profile_same-profile",
@@ -2513,7 +2516,10 @@ async function postJson(url: string, body: unknown): Promise<any> {
 
 async function postIdentityEnvironment(url: string, body: Record<string, unknown>): Promise<any> {
   const stateKeys = ["login_state", "login_state_reason", "storage_state", "manual_authentication_state"] as const;
-  const businessInput = Object.fromEntries(Object.entries(body).filter(([key]) => !stateKeys.includes(key as typeof stateKeys[number])));
+  const businessInput = {
+    requested_provider_id: "cloakbrowser",
+    ...Object.fromEntries(Object.entries(body).filter(([key]) => !stateKeys.includes(key as typeof stateKeys[number])))
+  };
   const stateUpdate = Object.fromEntries(stateKeys.flatMap((key) => Object.hasOwn(body, key) ? [[key, body[key]]] : []));
   const result = await postJson(url, businessInput);
   if (Object.keys(stateUpdate).length === 0) return result;
