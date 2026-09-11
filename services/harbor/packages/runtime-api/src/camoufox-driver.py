@@ -60,7 +60,10 @@ PAGE_NAVIGATION_CONTEXT_GUARD: Any = None
 INTERACTION_GUARD: Any = None
 INTERACTION_GUARD_PAGE: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
-PAGE_INTERACTION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
+# Navigation and interaction handlers must consume the same most-recent
+# per-Page grant. Keep the old interaction name as an alias for callers that
+# pre-bind that scope before installing the guard.
+PAGE_INTERACTION_ALLOWED_ORIGINS: dict[str, set[str]] = PAGE_NAVIGATION_ALLOWED_ORIGINS
 INTERACTION_DENIED: str | None = None
 
 
@@ -1056,7 +1059,6 @@ def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
         public_guard = PUBLIC_NAVIGATION_GUARDS.pop(ref, None)
         PUBLIC_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
         PUBLIC_NAVIGATION_DENIED.pop(ref, None)
-        PAGE_INTERACTION_ALLOWED_ORIGINS.pop(ref, None)
         if guard is not None:
             with contextlib.suppress(Exception):
                 page.unroute("**/*", guard)
@@ -1130,7 +1132,6 @@ def reset_provider_pages() -> None:
     PUBLIC_NAVIGATION_GUARDS.clear()
     PUBLIC_NAVIGATION_ALLOWED_ORIGINS.clear()
     PUBLIC_NAVIGATION_DENIED.clear()
-    PAGE_INTERACTION_ALLOWED_ORIGINS.clear()
     INTERACTION_DENIED = None
     PAGE_CONTEXT_HANDLER = None
     PAGE_NAVIGATION_CONTEXT_GUARD = None
@@ -1774,10 +1775,8 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     # still needs its own route while the active interaction is on another
     # Page; its scope is independent and remains exact to this Page.
     if INTERACTION_GUARD is not None and page is INTERACTION_GUARD_PAGE:
-        # A formal navigation on the interaction-bound Page is still a new
-        # Core-authorized operation. Replace the interaction scope so the
-        # already-attached handler evaluates this latest exact-page grant.
-        PAGE_INTERACTION_ALLOWED_ORIGINS[page_ref] = set(allowed)
+        # The shared per-Page map above is the latest Core-authorized scope;
+        # the already-attached interaction handler evaluates it directly.
         previous = PAGE_NAVIGATION_GUARDS.pop(page_ref, None)
         if previous is not None:
             with contextlib.suppress(Exception):

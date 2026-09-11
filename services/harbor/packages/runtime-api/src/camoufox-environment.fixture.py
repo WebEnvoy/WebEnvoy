@@ -679,10 +679,10 @@ page_a.routes[0](input_route)
 assert input_route.fulfilled and not input_route.aborted and input_route.fetched == 1
 
 # Opening B installs a real Page navigation route even though interaction is
-# still live on A. No interaction scope is injected for B.
+# still live on A. B keeps the exact scope from this navigation operation.
 DRIVER.install_page_navigation_guard(page_b, ["https://s1.example", "https://s2.example"])
 assert page_b.routes and page_b.routes[0] is DRIVER.PAGE_NAVIGATION_GUARDS[page_b_state["provider_page_ref"]]
-assert page_b_state["provider_page_ref"] not in DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS
+assert DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] == {"https://s1.example", "https://s2.example"}
 
 opened_route = GuardRoute("https://s2.example/opened", page_b)
 page_b.routes[0](opened_route)
@@ -702,7 +702,7 @@ assert active_navigation_route.fulfilled and not active_navigation_route.aborted
 # the earlier broad scope. The live interaction route on A is untouched.
 DRIVER.install_page_navigation_guard(page_b, ["https://s2.example"])
 assert page_a.routes == [interaction_guard]
-assert page_b_state["provider_page_ref"] not in DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS
+assert DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] == {"https://s2.example"}
 blocked_route = GuardRoute("https://s1.example/blocked", page_b)
 page_b.routes[0](blocked_route)
 assert blocked_route.aborted and blocked_route.fetched == 0
@@ -731,6 +731,58 @@ DRIVER.PAGE = None
 DRIVER.CONTEXT = None
 DRIVER.reset_provider_pages()
 print("camoufox background navigation and interaction route fixture passed")
+
+# The reverse order keeps a background navigation scope when a later
+# interaction starts on A. The Context navigation handler is registered
+# before the interaction handler and therefore must read the same latest
+# per-Page scope, not an old or missing second map.
+DRIVER.reset_provider_pages()
+assert DRIVER.PAGE_NAVIGATION_ALLOWED_ORIGINS is DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS
+page_a = GuardPage("reverse-a")
+page_b = GuardPage("reverse-b")
+DRIVER.PAGE = page_a
+DRIVER.CONTEXT = GuardContext()
+DRIVER.CONTEXT.pages = [page_a, page_b]
+DRIVER.register_provider_page(page_a)
+page_b_state = DRIVER.register_provider_page(page_b)
+DRIVER.install_page_navigation_guard(page_b, ["https://s2.example"])
+assert DRIVER.PAGE_NAVIGATION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] == {"https://s2.example"}
+DRIVER.install_interaction_guard("https://s1.example", ["https://s1.example"])
+assert page_b.routes == []
+assert DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] == {"https://s2.example"}
+background_context_route = GuardRoute("https://s2.example/background", page_b)
+DRIVER.CONTEXT.routes[-1](background_context_route)
+assert background_context_route.fulfilled and not background_context_route.aborted and background_context_route.fetched == 1
+background_blocked_route = GuardRoute("https://s1.example/background", page_b)
+DRIVER.CONTEXT.routes[-1](background_blocked_route)
+assert background_blocked_route.aborted and background_blocked_route.fetched == 0
+
+# A formal navigation on A widens only A's current scope, then the next
+# interaction narrows A again. Both Context handlers must consume that latest
+# A scope, so the old navigation grant cannot reopen S1 in the background.
+DRIVER.install_page_navigation_guard(page_a, ["https://s1.example", "https://s2.example"])
+DRIVER.install_interaction_guard("https://s2.example", ["https://s2.example"])
+assert DRIVER.PAGE_NAVIGATION_ALLOWED_ORIGINS[DRIVER.provider_page_ref(page_a)] == {"https://s2.example"}
+
+# A new interaction on B replaces, rather than broadens, its old navigation
+# scope; the same Context handler now rejects S1 even after A's interaction.
+DRIVER.PAGE = page_b
+DRIVER.install_interaction_guard("https://s2.example", ["https://s2.example"])
+assert page_a.routes == [] and page_b.routes == [DRIVER.INTERACTION_GUARD]
+assert DRIVER.PAGE_NAVIGATION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] == {"https://s2.example"}
+interaction_narrow_blocked = GuardRoute("https://s1.example/narrow", page_b)
+page_b.routes[0](interaction_narrow_blocked)
+assert interaction_narrow_blocked.aborted and interaction_narrow_blocked.fetched == 0
+
+for context_handler in DRIVER.CONTEXT.routes:
+    stale_navigation_route = GuardRoute("https://s1.example/stale", page_a)
+    context_handler(stale_navigation_route)
+    assert stale_navigation_route.aborted and stale_navigation_route.fetched == 0
+DRIVER.clear_interaction_guard()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.reset_provider_pages()
+print("camoufox reverse-order scope fixture passed")
 
 # Native request relations must keep the context navigation and interaction
 # guards on the exact target. A known opener may authorize an unregistered
