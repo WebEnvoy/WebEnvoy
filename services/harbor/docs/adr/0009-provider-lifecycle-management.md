@@ -1,6 +1,6 @@
 # 0009. 本机 Browser Provider 生命周期管理
 
-> 2026-09-06：Provider 生命周期的所有权与数据保护边界保留；首选 Provider、横向扩张和自动修复优先级已被 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 替代。
+> 2026-09-12：Provider 生命周期的所有权与数据保护边界保留；首选 Provider、横向扩张和自动修复优先级先被 [Core ADR 0011](../../../../docs/adr/0011-v1-managed-browser-and-skill-delivery.md) 替代，又由 [Core ADR 0012 的 Qualification Gate 修订](../../../../docs/adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订) 收紧。本 ADR 不授权 Harbor 为 Provider 实现或长期补偿浏览器核心能力。
 
 ## 状态
 
@@ -31,9 +31,9 @@ Provider 负责实际浏览器内核、指纹、隔离和自动化能力；Harbo
 | `system` | 检测、定位、版本/架构校验、启动验证、官方安装入口 |
 | `external` | 用户绑定安装或连接信息，Harbor 验证可达性和能力 facts |
 
-本段原定 CloakBrowser 为首个 `managed` provider，现不再有效。V1 以 Camoufox
-作为默认 Provider 的有界验证目标，Chrome 作为显式兼容 Provider；验证结果不预定为
-成功。Remote CDP 等未来形态继续按 `external` provider 分类，但不属于当前批次。
+本段原定 CloakBrowser 为首个 `managed` provider，又曾将 Camoufox 写为默认
+Provider 的验证目标，均已被后续决策替代。具体 Provider 必须先通过 Qualification
+Gate；Remote CDP 等未来形态仍按 `external` provider 分类，但不属于当前批次。
 
 ### 生命周期
 
