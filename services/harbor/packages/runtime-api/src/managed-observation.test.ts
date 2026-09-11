@@ -151,6 +151,23 @@ test("in-flight observation cannot publish after stop or permit concurrent takeo
   assert.equal((await observing as { failure_class?: string }).failure_class, "control_changed");
 });
 
+test("observation driver loss invalidates the old Instance and Page refs", async () => {
+  let attempts = 0;
+  const runtime = new HarborRuntime(controlledLauncher({ id: null, opens: 0, observe: async () => { attempts++; throw new Error("private transport detail"); } }));
+  runtime.createLocalIdentityEnvironment(identityInput("identity:lost", "profile:lost"));
+  const session = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:lost", url: "https://example.com/", control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+  if ("status" in session) throw new Error("session unavailable");
+  try {
+    const result = await runtime.observeManagedSession(session.runtime_session_ref, { holder_ref: "principal:one" });
+    assert.equal(result.status, "unavailable");
+    assert.equal(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "disconnected");
+    assert.equal(runtime.getSession(session.runtime_session_ref)?.current_error?.code, "session_lost");
+    assert.equal((await runtime.observeManagedSession(session.runtime_session_ref, { holder_ref: "principal:one" })).status, "unavailable");
+    assert.equal(attempts, 1);
+    assert.equal(JSON.stringify(result).includes("private transport detail"), false);
+  } finally { await runtime.stopSession(session.runtime_session_ref); }
+});
+
 
 test("the shared fixed expression requires visible creator labels to match the authenticated stable ID", () => {
   const element = { getBoundingClientRect: () => ({ width: 10, height: 10 }) };

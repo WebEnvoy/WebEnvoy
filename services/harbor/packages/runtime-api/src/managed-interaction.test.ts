@@ -174,7 +174,7 @@ for (const lost of [false, true]) test(`fixture in-flight interaction blocks han
   } finally { finish(); await f.close(); }
 });
 
-test("fixture dispatched exception preserves unknown receipt and requires a fresh snapshot without replaying input", async () => {
+test("fixture dispatched exception preserves unknown receipt, poisons the session and never replays input", async () => {
   const f = await setup(async action => { if (action.action === "input") throw new Error("private fixture driver error"); });
   const token = Buffer.alloc(32, 29).toString("base64url");
   const server = await startHarborRuntimeServer({ port: 0, runtime: f.runtime, manual_authentication_supervisor_token: token });
@@ -185,6 +185,8 @@ test("fixture dispatched exception preserves unknown receipt and requires a fres
     assert.equal(result.status, "unknown_outcome");
     assert.equal(result.dispatch_state, "dispatched");
     assert.equal(result.failure_class, "managed_interaction_outcome_unknown");
+    assert.equal(f.runtime.getSession(f.a)?.lifecycle_state, "disconnected");
+    assert.equal(f.runtime.getSession(f.a)?.current_error?.code, "session_lost");
     for (let attempt = 0; attempt < 3; attempt++) {
       assert.deepEqual(f.runtime.getManagedInteraction(input.operation_ref), result);
       const receipt = await fetch(`${server.url}/runtime/managed-interactions/${encodeURIComponent(input.operation_ref)}`, { headers: { authorization: `Bearer ${token}` } });
@@ -192,9 +194,7 @@ test("fixture dispatched exception preserves unknown receipt and requires a fres
       assert.deepEqual(await receipt.json(), result);
       assert.deepEqual(await f.runtime.operateManagedInteraction(f.a, input), result);
     }
-    refused(await f.runtime.operateManagedInteraction(f.a, f.request("click", { ...observed, target_ref: "target:field" })), "managed_interaction_observation_stale");
-    const fresh = await f.snapshot();
-    assert.notEqual(fresh.observation_ref, observed.observation_ref);
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("click", { ...observed, target_ref: "target:field" })), "control_lock_conflict");
     assert.equal(f.calls.filter(call => call.input.action === "input").length, 1);
   } finally { await server.close(); await f.close(); }
 });

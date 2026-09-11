@@ -11,7 +11,7 @@ import type { LocalProviderLaunchInput, LocalProviderLaunchResult, LocalProvider
 export const OBSCURA_VALIDATED_COMMIT = "01e1caa33360f6c02643457307894ec885e82eef";
 export const OBSCURA_VALIDATED_SHA256 = "d05336b807fde6b27221af3f1427550666d1f855166c3cc94be537a08b4ba98d";
 
-type Control = { target_ref: string; role: string; name: string; enabled: boolean; value?: string; index: number };
+type Control = { target_ref: string; role: string; name: string; enabled: boolean; value?: string; node_id: number };
 type SnapshotState = { page_ref: string; observation_ref: string; document_key: string; controls: Control[] };
 
 export async function launchObscuraProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
@@ -90,7 +90,8 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
           const result = await interact(client!, sessionId, action, snapshot);
           snapshot = result.next;
           return result.result;
-        } catch {
+        } catch (cause) {
+          if (cause instanceof ObscuraTransportError) throw cause;
           const dispatched = ["click", "input", "press", "scroll"].includes(action.action);
           return { status: dispatched ? "unknown_outcome" : "unavailable", dispatch_state: dispatched ? "dispatched" : "not_dispatched", failure_class: "managed_interaction_driver_unavailable" };
         }
@@ -124,18 +125,18 @@ async function interact(client: ObscuraCdpClient, sessionId: string, input: Mana
     if (["click", "input", "press"].includes(input.action) && !target) return refused("managed_interaction_target_required");
     if (target && !target.enabled) return refused("managed_interaction_target_unavailable");
     if (input.action === "click") {
-      const point = await controlPoint(client, sessionId, target!.index);
+      const point = await controlPoint(client, sessionId, target!.node_id);
       dispatched = true;
       await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 }, sessionId);
       await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 }, sessionId);
     } else if (input.action === "input") {
       if (target!.role !== "textbox" || typeof input.text !== "string" || /password|token|cookie|secret|credential|authorization|验证码|密码|口令|密钥/i.test(input.text)) return refused("managed_interaction_input_refused");
-      await focusControl(client, sessionId, target!.index);
+      await focusControl(client, sessionId, target!.node_id);
       dispatched = true;
       await client.send("Input.insertText", { text: input.text }, sessionId);
     } else if (input.action === "press") {
       if (!input.key) return refused("managed_interaction_key_refused");
-      await focusControl(client, sessionId, target!.index);
+      await focusControl(client, sessionId, target!.node_id);
       dispatched = true;
       await client.send("Input.dispatchKeyEvent", { type: "keyDown", key: input.key }, sessionId);
       await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: input.key }, sessionId);
@@ -152,7 +153,7 @@ async function interact(client: ObscuraCdpClient, sessionId: string, input: Mana
         const next = await snapshotPage(client, sessionId, previous!.page_ref);
         const changed = next.document_key !== previous!.document_key || JSON.stringify(controlShape(next.controls)) !== JSON.stringify(controlShape(previous!.controls));
         const previousTarget = input.target_ref ? previous!.controls.find(item => item.target_ref === input.target_ref) : undefined;
-        const target = previousTarget ? next.controls.find(item => item.index === previousTarget.index) : undefined;
+        const target = previousTarget ? next.controls.find(item => item.node_id === previousTarget.node_id) : undefined;
         if (input.wait_for === "page_changed" ? changed : input.wait_for === "text" ? next.text.includes(input.text ?? "") : target?.enabled) { matched = true; break; }
         await new Promise(resolve => setTimeout(resolve, 50));
       }
@@ -169,37 +170,45 @@ async function snapshotPage(client: ObscuraCdpClient, sessionId: string, pageRef
   const result = await client.send("Runtime.evaluate", { expression: snapshotExpression, returnByValue: true }, sessionId);
   const value = remoteValue(result) as { document_key?: unknown; controls?: unknown; text?: unknown; truncated?: unknown };
   if (typeof value?.document_key !== "string" || !Array.isArray(value.controls) || typeof value.text !== "string" || typeof value.truncated !== "boolean") throw new Error("Invalid Obscura snapshot.");
-  const controls = value.controls.slice(0, 64).map((item, index) => {
+  const controls = value.controls.slice(0, 64).flatMap(item => {
     const control = item as Record<string, unknown>;
-    if (typeof control.role !== "string" || typeof control.name !== "string" || typeof control.enabled !== "boolean") throw new Error("Invalid Obscura control.");
-    return { target_ref: opaqueRef("target"), role: control.role, name: control.name, enabled: control.enabled, ...(typeof control.value === "string" ? { value: control.value } : {}), index: Number.isSafeInteger(control.index) ? Number(control.index) : index };
+    const name = obscuraPublicText(control.name, 160);
+    const node_id = Number(control.node_id);
+    if (typeof control.role !== "string" || typeof control.enabled !== "boolean" || !name || !Number.isSafeInteger(node_id) || node_id <= 0) return [];
+    const value = obscuraPublicText(control.value, 512);
+    return [{ target_ref: opaqueRef("target"), role: control.role, name, enabled: control.enabled, ...(value ? { value } : {}), node_id }];
   });
-  return { page_ref: pageRef ?? opaqueRef("page"), observation_ref: opaqueRef("observation"), document_key: value.document_key, controls, text: value.text, truncated: value.truncated };
+  return { page_ref: pageRef ?? opaqueRef("page"), observation_ref: opaqueRef("observation"), document_key: value.document_key, controls, text: obscuraPublicText(value.text, 4096), truncated: value.truncated };
 }
 
 const snapshotExpression = `(() => {
-  const clean = value => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, 512);
+  const sensitive = /password|passwd|token|cookie|secret|credential|authorization|session|one.time|验证码|密码|口令|密钥/i;
+  const clean = (value, limit) => { const text=String(value||'').replace(/\\s+/g,' ').trim(); return text.length<=limit&&!sensitive.test(text)?text:''; };
   const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
   const role = el => el.matches('input,textarea,[contenteditable=true]') ? 'textbox' : el.matches('button,[role=button]') ? 'button' : el.matches('a[href],[role=link]') ? 'link' : el.getAttribute('role');
   const candidates=[...document.querySelectorAll('input:not([type=password]),textarea,button,a[href],[role],[contenteditable=true]')].filter(visible).slice(0,64);
-  const controls=candidates.map((el,index) => ({index,role:role(el),name:clean(el.getAttribute('aria-label')||el.innerText||el.textContent||el.getAttribute('placeholder')||el.name),enabled:!el.disabled&&el.getAttribute('aria-disabled')!=='true',...(el.matches('input,textarea')?{value:clean(el.value)}:{})})).filter(x => ['textbox','button','link','checkbox','radio','region'].includes(x.role)&&x.name&&!/(password|token|cookie|secret|credential|authorization|验证码|密码|口令|密钥)/i.test(x.name));
-  const text=clean(document.body?.innerText).slice(0,4096);
-  return {document_key:location.href+'|'+performance.timeOrigin,controls,text,truncated:candidates.length>=64||String(document.body?.innerText||'').length>4096};
+  const controls=candidates.map(el => ({node_id:Number(el._nid),role:role(el),name:clean(el.getAttribute('aria-label')||el.innerText||el.textContent||el.getAttribute('placeholder')||el.name,160),enabled:!el.disabled&&el.getAttribute('aria-disabled')!=='true',...(el.matches('input,textarea')?{value:clean(el.value,512)}:{})})).filter(x => ['textbox','button','link','checkbox','radio','region'].includes(x.role)&&x.name&&Number.isSafeInteger(x.node_id)&&x.node_id>0);
+  const parts=[]; let length=0,truncated=candidates.length>=64;
+  if(document.body){const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node,count=0;while((node=walker.nextNode())&&count++<10000){const el=node.parentElement;if(!el||!visible(el)||el.closest('script,style,noscript,input,textarea,select,[contenteditable]'))continue;const text=clean(node.textContent,1024);if(!text)continue;parts.push(text);length+=text.length+1;if(length>4096){truncated=true;break;}}}
+  return {document_key:location.href+'|'+performance.timeOrigin,controls,text:parts.join(' ').slice(0,4096),truncated};
 })()`;
 
-function publicControls(controls: Control[]) { return controls.map(({ index: _index, ...control }) => control); }
+export function obscuraPublicText(value: unknown, limit: number): string {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  return text.length <= limit && !/password|passwd|token|cookie|secret|credential|authorization|session|one.time|验证码|密码|口令|密钥/i.test(text) ? text : "";
+}
+function publicControls(controls: Control[]) { return controls.map(({ node_id: _node, ...control }) => control); }
 function controlShape(controls: Control[]) { return controls.map(({ target_ref: _target, ...control }) => control); }
 
-async function controlPoint(client: ObscuraCdpClient, sessionId: string, index: number): Promise<{ x: number; y: number }> {
-  const result = await client.send("Runtime.evaluate", { expression: `(() => { const el=[...document.querySelectorAll('input:not([type=password]),textarea,button,a[href],[role],[contenteditable=true]')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'})[${index}]; if(!el) return null; const r=el.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`, returnByValue: true }, sessionId);
-  const value = remoteValue(result) as { x?: unknown; y?: unknown };
-  if (typeof value?.x !== "number" || typeof value.y !== "number") throw new Error("Obscura target is unavailable.");
-  return { x: value.x, y: value.y };
+async function controlPoint(client: ObscuraCdpClient, sessionId: string, nodeId: number): Promise<{ x: number; y: number }> {
+  const result = await client.send("DOM.getBoxModel", { nodeId }, sessionId);
+  const content = (result.model as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content) || content.length !== 8 || !content.every(value => typeof value === "number")) throw new Error("Obscura target is unavailable.");
+  return { x: (content[0] + content[2] + content[4] + content[6]) / 4, y: (content[1] + content[3] + content[5] + content[7]) / 4 };
 }
 
-async function focusControl(client: ObscuraCdpClient, sessionId: string, index: number): Promise<void> {
-  const result = await client.send("Runtime.evaluate", { expression: `(() => { const el=[...document.querySelectorAll('input:not([type=password]),textarea,button,a[href],[role],[contenteditable=true]')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'})[${index}]; if(!el) return false; el.focus(); if('select' in el) el.select(); return document.activeElement===el; })()`, returnByValue: true }, sessionId);
-  if (remoteValue(result) !== true) throw new Error("Obscura target could not be focused.");
+async function focusControl(client: ObscuraCdpClient, sessionId: string, nodeId: number): Promise<void> {
+  await client.send("DOM.focus", { nodeId }, sessionId);
 }
 
 async function currentOrigin(client: ObscuraCdpClient, sessionId: string): Promise<string | null> {
@@ -265,6 +274,8 @@ function stringField(value: Record<string, unknown>, key: string): string {
 function safeMessage(value: unknown): string { return value instanceof Error ? value.message.replace(/\s+/g, " ").slice(0, 240) : "unknown error"; }
 function unavailable(code: RuntimeErrorCode, message: string, facts: RuntimeFact[]): LocalProviderLaunchResult { return { status: "unavailable", error: { code, message, retryable: true }, facts: [...facts, { key: "browser.launch", source: "observed", value: code }] }; }
 
+class ObscuraTransportError extends Error {}
+
 class ObscuraCdpClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -279,10 +290,10 @@ class ObscuraCdpClient {
     return new ObscuraCdpClient(ws);
   }
   send(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 20000): Promise<Record<string, unknown>> {
-    if (this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Obscura CDP websocket is unavailable."));
+    if (this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new ObscuraTransportError("Obscura CDP websocket is unavailable."));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Obscura CDP command timed out: ${method}`)); }, timeoutMs);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new ObscuraTransportError(`Obscura CDP command timed out: ${method}`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
@@ -297,5 +308,5 @@ class ObscuraCdpClient {
     if (payload.error) pending.reject(new Error(payload.error.message ?? "Obscura CDP command failed.")); else pending.resolve(payload.result ?? {});
   };
   private readonly lost = () => this.rejectAll("Obscura CDP websocket lost.");
-  private rejectAll(message: string) { for (const [id, pending] of this.pending) { this.pending.delete(id); clearTimeout(pending.timer); pending.reject(new Error(message)); } }
+  private rejectAll(message: string) { for (const [id, pending] of this.pending) { this.pending.delete(id); clearTimeout(pending.timer); pending.reject(new ObscuraTransportError(message)); } }
 }

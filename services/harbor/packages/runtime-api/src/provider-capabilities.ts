@@ -130,7 +130,7 @@ export function cloakDownloadGuide(): BrowserProviderDownloadGuide {
     missing_impacts: [
       "CloakBrowser 不能作为主力 provider 被选择。",
       "原生指纹和反检测 provider claim 不可用。",
-      "身份环境可能后备到官方 Chrome，且一致性能力降低。"
+      "已绑定 CloakBrowser 的身份环境会局部不可用，不会静默改用其他 Provider。"
     ]
   };
 }

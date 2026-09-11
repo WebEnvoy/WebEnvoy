@@ -87,7 +87,7 @@ export function isIdentityEnvironmentConfiguration(value: unknown): value is Ide
   }
   return optionalNullableString(input.proxy_ref) && optionalNullableString(input.proxy_label) &&
     optionalNumber(input.hardware_concurrency) && optionalNumber(input.device_memory_gb) &&
-    optionalEnum(input.provider_id, ["cloakbrowser", "chrome_official", "camoufox"]) &&
+    optionalEnum(input.provider_id, ["cloakbrowser", "chrome_official", "camoufox", "obscura"]) &&
     optionalEnum(input.geoip_mode, ["proxy", "system", "disabled"]) &&
     optionalEnum(input.interaction_preset, ["default", "humanized"]) &&
     optionalEnum(input.fingerprint_strategy, ["provider_default", "stable"]);

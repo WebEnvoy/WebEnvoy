@@ -754,6 +754,7 @@ export class RuntimeSessionStore {
     } catch {
       receipt.result = { ...receipt.result, failure_class: "managed_interaction_outcome_unknown" };
       delete record.interaction_snapshot;
+      if (record.control_generation === generation && ["active", "locked", "idle"].includes(record.facts.lifecycle_state)) this.markDriverLost(record);
     }
     return receipt.result;
   }
@@ -799,7 +800,10 @@ export class RuntimeSessionStore {
         page: { current_url: observed.page.current_url, title: observed.page.title, status: observed.page.status }, account: observed.account };
       record.managed_observations = [...(record.managed_observations ?? []).slice(-15), result];
       return snapshot(result);
-    } catch { return managedUnavailable("managed_observation_unavailable"); }
+    } catch {
+      if (record.control_generation === generation && ["active", "locked", "idle"].includes(record.facts.lifecycle_state)) this.markDriverLost(record);
+      return managedUnavailable("managed_observation_unavailable");
+    }
   }
 
   async readRuntimeDiagnostics(runtime_session_ref: string, input: RuntimeDiagnosticsInput): Promise<RuntimeDiagnosticsResponse> {

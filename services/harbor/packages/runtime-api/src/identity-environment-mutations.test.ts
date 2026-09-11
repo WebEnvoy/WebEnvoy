@@ -72,6 +72,12 @@ test("allocates owner refs and rejects provider metadata that conflicts with the
     idempotency_key: "obscura-http-contract",
     identity_environment: { requested_provider_id: "obscura", site: { site_id: "controlled", origin: "https://example.com" } }
   }), true);
+  assert.equal(isIdentityEnvironmentMutationRequest({
+    operation: "edit",
+    idempotency_key: "obscura-edit-http-contract",
+    identity_environment_ref: "identity-env_obscura",
+    configuration: { provider_id: "obscura" }
+  }), true);
   const manager = new LocalIdentityEnvironmentManager({ provider_detection: testProviderDetection });
   const selectionRequired = manager.mutate({
     operation: "create",
