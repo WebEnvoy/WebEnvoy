@@ -667,14 +667,14 @@ DRIVER.CONTEXT = GuardContext()
 DRIVER.CONTEXT.pages = [page_a, page_b]
 DRIVER.register_provider_page(page_a)
 page_b_state = DRIVER.register_provider_page(page_b)
-DRIVER.install_interaction_guard("https://s1.example", ["https://s1.example", "https://s2.example"])
+DRIVER.install_interaction_guard("https://s1.example", ["https://s1.example"])
 interaction_guard = DRIVER.INTERACTION_GUARD
 assert interaction_guard is not None
 assert page_a.routes == [interaction_guard]
 
 # The initial snapshot/input request remains protected by the interaction
 # route on A.
-input_route = GuardRoute("https://s2.example/input", page_a)
+input_route = GuardRoute("https://s1.example/input", page_a)
 page_a.routes[0](input_route)
 assert input_route.fulfilled and not input_route.aborted and input_route.fetched == 1
 
@@ -687,6 +687,16 @@ assert page_b_state["provider_page_ref"] not in DRIVER.PAGE_INTERACTION_ALLOWED_
 opened_route = GuardRoute("https://s2.example/opened", page_b)
 page_b.routes[0](opened_route)
 assert opened_route.fulfilled and not opened_route.aborted and opened_route.fetched == 1
+
+# A formal navigation on the currently interactive A replaces its scope
+# through the real navigation installer. The existing interaction route must
+# read the new grant rather than the stale snapshot/input scope.
+DRIVER.install_page_navigation_guard(page_a, ["https://s1.example", "https://s2.example"])
+assert page_a.routes == [interaction_guard]
+assert DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS[DRIVER.provider_page_ref(page_a)] == {"https://s1.example", "https://s2.example"}
+active_navigation_route = GuardRoute("https://s2.example/authorized", page_a)
+page_a.routes[0](active_navigation_route)
+assert active_navigation_route.fulfilled and not active_navigation_route.aborted and active_navigation_route.fetched == 1
 
 # A later formal navigation replaces B's scope rather than merging it with
 # the earlier broad scope. The live interaction route on A is untouched.

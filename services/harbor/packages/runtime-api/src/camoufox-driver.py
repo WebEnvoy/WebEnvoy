@@ -1774,6 +1774,10 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     # still needs its own route while the active interaction is on another
     # Page; its scope is independent and remains exact to this Page.
     if INTERACTION_GUARD is not None and page is INTERACTION_GUARD_PAGE:
+        # A formal navigation on the interaction-bound Page is still a new
+        # Core-authorized operation. Replace the interaction scope so the
+        # already-attached handler evaluates this latest exact-page grant.
+        PAGE_INTERACTION_ALLOWED_ORIGINS[page_ref] = set(allowed)
         previous = PAGE_NAVIGATION_GUARDS.pop(page_ref, None)
         if previous is not None:
             with contextlib.suppress(Exception):
