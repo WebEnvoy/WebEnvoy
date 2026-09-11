@@ -42,6 +42,8 @@ MAX_PAGE_TOMBSTONES = 64
 NATIVE_RELATION_EPOCH: str | None = None
 NATIVE_RELATION_SAMPLE_SEQUENCE = 0
 NATIVE_RELATION_INVALID = False
+NATIVE_REQUEST_DENIED_BY_TARGET: dict[str, str] = {}
+NATIVE_REQUEST_DENIED_LIMIT = 64
 PAGE_CONTEXT_HANDLER: Any = None
 PROFILE_DIR = ""
 EXECUTABLE_PATH = ""
@@ -1043,6 +1045,9 @@ def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
         state["closed"] = True
         state["closed_at"] = time.monotonic()
         state["native_close_confirmed"] = False
+        target_id = state.get("native_target_id")
+        if isinstance(target_id, str):
+            NATIVE_REQUEST_DENIED_BY_TARGET.pop(target_id, None)
         PAGE_STATE_BY_OBJECT.pop(id(page), None)
         guard = PAGE_NAVIGATION_GUARDS.pop(ref, None)
         PAGE_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
@@ -1112,7 +1117,7 @@ def install_page_context_handler() -> None:
 
 
 def reset_provider_pages() -> None:
-    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID, INTERACTION_DENIED
+    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID, NATIVE_REQUEST_DENIED_BY_TARGET, INTERACTION_DENIED
     if PAGE_NAVIGATION_CONTEXT_GUARD is not None and CONTEXT is not None:
         with contextlib.suppress(Exception):
             CONTEXT.unroute("**/*", PAGE_NAVIGATION_CONTEXT_GUARD)
@@ -1131,6 +1136,7 @@ def reset_provider_pages() -> None:
     NATIVE_RELATION_EPOCH = None
     NATIVE_RELATION_SAMPLE_SEQUENCE = 0
     NATIVE_RELATION_INVALID = False
+    NATIVE_REQUEST_DENIED_BY_TARGET.clear()
 
 
 def page_by_provider_ref(ref: Any) -> dict[str, Any] | None:
@@ -1535,13 +1541,121 @@ def request_page(request: Any) -> Any:
     return request_page_with_fallback(request, True)
 
 
-def request_page_with_fallback(request: Any, fallback: bool = True) -> Any:
+def request_native_relation(request: Any) -> dict[str, str | None] | None:
+    """Read the fixed adapter relation without asking Request.frame to resolve."""
+    adapter = NATIVE_PLAYWRIGHT_ADAPTER
+    resolver = getattr(adapter, "request_relation", None) if adapter is not None else None
+    if not callable(resolver):
+        return None
+    return resolver(request)
+
+
+def native_context_id() -> str | None:
+    """Read an optional native context id exposed by the qualified adapter."""
+    implementation = getattr(CONTEXT, "_impl_obj", None) if CONTEXT is not None else None
+    value = getattr(implementation, "_browser_context_id", None)
+    return value if isinstance(value, str) and value else None
+
+
+def state_by_native_target(target_id: Any) -> dict[str, Any] | None:
+    """Resolve one live registry state by the adapter's exact target identity."""
+    if not isinstance(target_id, str) or not target_id:
+        return None
+    live = [state for state in PAGE_STATES.values() if not state.get("closed") and state.get("native_target_id") == target_id]
+    closed = [state for state in PAGE_STATES.values() if state.get("closed") and state.get("native_target_id") == target_id]
+    if len(live) > 1 or len(closed) > 1 or (live and closed):
+        raise RuntimeError("Native request target maps to multiple Page states.")
+    if closed:
+        raise RuntimeError("Native request target is closed.")
+    return live[0] if live else None
+
+
+def request_page_binding(request: Any) -> dict[str, Any]:
+    """Return exact request/target/opener relation facts for a route guard.
+
+    A popup can emit its first navigation before Python has received the Page
+    event.  In that window ``request.frame`` is intentionally unavailable.  A
+    qualified adapter relation may still identify the native target and its
+    opener; an opener can supply an existing origin scope, but it never stands
+    in for the popup Page itself.
+    """
+    relation = request_native_relation(request)
+    target_page = None
     with contextlib.suppress(Exception):
         frame = request.frame
-        page = frame.page
-        if page is not None:
-            return page
+        target_page = frame.page
+
+    target_state = page_state_for(target_page) if target_page is not None else None
+    opener_state = None
+    if relation is not None:
+        relation_context_id = relation.get("browser_context_id")
+        expected_context_id = native_context_id()
+        if expected_context_id is not None and relation_context_id not in (None, expected_context_id):
+            raise RuntimeError("Native request context disagrees with the active BrowserContext.")
+        target_by_id = state_by_native_target(relation.get("target_id"))
+        if target_state is not None:
+            known_target = target_state.get("native_target_id")
+            if known_target is not None and known_target != relation.get("target_id"):
+                raise RuntimeError("Native request target disagrees with its Page state.")
+            if target_by_id is not None and target_by_id is not target_state:
+                raise RuntimeError("Native request target maps to a different Page state.")
+            # The client Page object is already the exact target.  Snapshot
+            # reconciliation may not have written its native id yet, so do
+            # not manufacture that identity from a single request.
+            target_by_id = target_state
+        target_state = target_by_id
+        opener_id = relation.get("opener_id")
+        if opener_id is not None:
+            opener_state = state_by_native_target(opener_id)
+        if target_state is not None:
+            expected_opener = target_state.get("opener_provider_page_ref")
+            actual_opener = opener_state.get("provider_page_ref") if opener_state is not None else None
+            if expected_opener is not None and actual_opener != expected_opener:
+                raise RuntimeError("Native request opener disagrees with its Page state.")
+            if expected_opener is None and opener_id is not None and opener_state is None:
+                raise RuntimeError("Native request opener is not a live Page state.")
+            target_page = target_state.get("page")
+        elif opener_state is not None:
+            # Deliberately leave target_page unset: the opener is only an
+            # authorization ancestor while the popup's Page channel is not
+            # ready/registered.
+            target_page = None
+    return {
+        "relation": relation,
+        "target_page": target_page,
+        "target_state": target_state,
+        "opener_state": opener_state,
+    }
+
+
+def request_page_with_fallback(request: Any, fallback: bool = True) -> Any:
+    binding = request_page_binding(request)
+    page = binding.get("target_page")
+    if page is not None:
+        return page
+    # Once the adapter has supplied a relation, falling back to PAGE would
+    # silently authorize a popup against an unrelated active Page.
+    if binding.get("relation") is not None:
+        return None
     return PAGE if fallback else None
+
+
+def mark_request_navigation_denied(binding: dict[str, Any], failure: str) -> None:
+    state = binding.get("target_state")
+    if isinstance(state, dict):
+        ref = state.get("provider_page_ref")
+        if isinstance(ref, str) and ref:
+            PAGE_NAVIGATION_DENIED[ref] = failure
+            return
+    relation = binding.get("relation")
+    target_id = relation.get("target_id") if isinstance(relation, dict) else None
+    if not isinstance(target_id, str) or not target_id:
+        return
+    if target_id not in NATIVE_REQUEST_DENIED_BY_TARGET and len(NATIVE_REQUEST_DENIED_BY_TARGET) >= NATIVE_REQUEST_DENIED_LIMIT:
+        oldest = next(iter(NATIVE_REQUEST_DENIED_BY_TARGET), None)
+        if oldest is not None:
+            NATIVE_REQUEST_DENIED_BY_TARGET.pop(oldest, None)
+    NATIVE_REQUEST_DENIED_BY_TARGET[target_id] = failure
 
 
 def page_opener(page: Any) -> Any:
@@ -1624,27 +1738,23 @@ def follow_authorized_redirect(route: Any, response: Any, request: Any, allowed:
     # A redirect continuation must stay bound to the Page that produced the
     # request. Falling back to the global active Page could attach a redirect
     # failure to an unrelated window when Playwright cannot resolve a frame.
-    page = request_page_with_fallback(request, False)
-    page_ref = provider_page_ref(page)
+    binding = request_page_binding(request)
     if not location or destination_origin not in allowed or request_redirect_hops(request) >= 8:
-        if page_ref:
-            PAGE_NAVIGATION_DENIED[page_ref] = denied
+        mark_request_navigation_denied(binding, denied)
         route.abort("blockedbyclient")
         return False
     implementation = getattr(route, "_impl_obj", None)
     continuation = getattr(implementation, "_redirected_navigation_request", None)
     sync = getattr(route, "_sync", None)
     if not callable(continuation) or not callable(sync):
-        if page_ref:
-            PAGE_NAVIGATION_DENIED[page_ref] = "navigation_guard_unavailable"
+        mark_request_navigation_denied(binding, "navigation_guard_unavailable")
         route.abort("failed")
         return False
     try:
         sync(continuation(location))
         return True
     except Exception:
-        if page_ref:
-            PAGE_NAVIGATION_DENIED[page_ref] = "navigation_guard_unavailable"
+        mark_request_navigation_denied(binding, "navigation_guard_unavailable")
         route.abort("failed")
         return False
 
@@ -1660,7 +1770,19 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
 
     def guard(route: Any) -> None:
         request = route.request
-        request_page_object = request_page_with_fallback(request, False) or page
+        binding = request_page_binding(request)
+        request_page_object = binding.get("target_page")
+        if binding.get("relation") is not None and request_page_object is None:
+            # A Page route must not use its closure-bound Page to authorize an
+            # unregistered popup target. The context guard may authorize it
+            # from a proven opener relation instead.
+            mark_request_navigation_denied(binding, "navigation_guard_unavailable")
+            route.abort("failed")
+            return
+        request_page_object = request_page_object or page
+        if request_page_object is not page:
+            route.continue_()
+            return
         request_origin = public_origin(str(getattr(request, "url", "")))
         request_page_ref = provider_page_ref(request_page_object) or page_ref
         request_allowed = inherited_page_origins(PAGE_NAVIGATION_ALLOWED_ORIGINS, request_page_object)
@@ -1670,7 +1792,7 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
         if request_allowed is None:
             request_allowed = allowed if request_page_object is page else None
         if request_allowed is None or request_origin not in request_allowed:
-            PAGE_NAVIGATION_DENIED[request_page_ref] = "navigation_origin_denied"
+            mark_request_navigation_denied(binding, "navigation_origin_denied")
             route.abort("blockedbyclient")
             return
         response = None
@@ -1682,7 +1804,7 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
             else:
                 route.fulfill(response=response)
         except Exception:
-            PAGE_NAVIGATION_DENIED[request_page_ref] = "navigation_guard_unavailable"
+            mark_request_navigation_denied(binding, "navigation_guard_unavailable")
             with contextlib.suppress(Exception):
                 route.abort("failed")
         finally:
@@ -1701,25 +1823,52 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     if PAGE_NAVIGATION_CONTEXT_GUARD is None and CONTEXT is not None:
         def context_guard(route: Any) -> None:
             request = route.request
-            target_page = request_page_with_fallback(request, False)
-            target_state = page_state_for(target_page)
-            if target_state is None and page_opener(target_page) is not None:
-                # A context route can win the race with Playwright's ``page``
-                # event. Register only when the browser proves an opener; an
-                # unrelated unknown Page remains outside every operation scope.
-                target_state = ensure_provider_page(target_page)
-            target_ref = target_state.get("provider_page_ref") if target_state else None
-            allowed_for_request = inherited_page_origins(PAGE_NAVIGATION_ALLOWED_ORIGINS, target_page) if target_state is not None and target_page is not None else None
+            try:
+                binding = request_page_binding(request)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    route.abort("failed")
+                return
+            relation = binding.get("relation")
+            target_page = binding.get("target_page")
+            target_state = binding.get("target_state")
+            opener_state = binding.get("opener_state")
+            if relation is None:
+                if target_state is None and target_page is None:
+                    # A legacy request with no Page relation is outside this
+                    # context guard; do not turn the guard into a global proxy.
+                    route.continue_()
+                    return
+                if target_state is None and page_opener(target_page) is not None:
+                    # A context route can win the race with Playwright's
+                    # ``page`` event. Register only when the browser proves an
+                    # opener; an unrelated unknown Page remains out of scope.
+                    target_state = ensure_provider_page(target_page)
+            elif target_state is None and opener_state is None:
+                # A native relation with no live target or opener is not a
+                # legacy request. It cannot be authorized or attributed.
+                mark_request_navigation_denied(binding, "navigation_guard_unavailable")
+                route.abort("failed")
+                return
+
+            if relation is not None and target_state is None and opener_state is not None:
+                # The popup target may not have a Page channel yet. The opener
+                # supplies only the inherited scope; it never becomes target.
+                allowed_for_request = inherited_page_origins(
+                    PAGE_NAVIGATION_ALLOWED_ORIGINS, opener_state.get("page")
+                )
+            else:
+                allowed_for_request = inherited_page_origins(
+                    PAGE_NAVIGATION_ALLOWED_ORIGINS, target_page
+                ) if target_state is not None and target_page is not None else None
             request_origin = public_origin(str(getattr(request, "url", "")))
-            failure_ref = target_ref
             if allowed_for_request is None:
                 # The context guard only owns Pages participating in a page
                 # operation (or a popup with a known in-scope opener).
                 route.continue_()
                 return
             if request_origin not in allowed_for_request:
-                if failure_ref:
-                    PAGE_NAVIGATION_DENIED[failure_ref] = "navigation_origin_denied"
+                mark_request_navigation_denied(binding, "navigation_origin_denied")
                 route.abort("blockedbyclient")
                 return
             response = None
@@ -1731,8 +1880,7 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
                 else:
                     route.fulfill(response=response)
             except Exception:
-                if failure_ref:
-                    PAGE_NAVIGATION_DENIED[failure_ref] = "navigation_guard_unavailable"
+                mark_request_navigation_denied(binding, "navigation_guard_unavailable")
                 with contextlib.suppress(Exception):
                     route.abort("failed")
             finally:
@@ -1863,6 +2011,9 @@ def refresh_native_selected_page() -> None:
         state["native_target_id"] = native_facts["target_id"]
         state["native_browsing_context_id"] = native_facts["browsing_context_id"]
         state["native_os_foreground"] = window_foreground.get(native_facts["window_id"])
+        pending_failure = NATIVE_REQUEST_DENIED_BY_TARGET.pop(native_facts["target_id"], None)
+        if pending_failure:
+            PAGE_NAVIGATION_DENIED[state["provider_page_ref"]] = pending_failure
     for candidate in PAGE_STATES.values():
         if candidate.get("closed") and id(candidate) not in mapped_states:
             if candidate.get("native_browsing_context_id"):
@@ -2044,10 +2195,16 @@ def install_public_navigation_guard(expected_origin: str, page: Any = None) -> N
             if not request.is_navigation_request():
                 route.continue_()
                 return
-            # A Page route is already scoped by Playwright to this Page.  Use
-            # the resolved relation when available, but retain the closure's
-            # Page for the pre-initialization navigation race.
-            request_page_object = request_page_with_fallback(request, False)
+            # A Page route is already scoped by Playwright to this Page. Use
+            # the exact relation when available, but retain the closure's
+            # Page only for the legacy no-relation path.
+            binding = request_page_binding(request)
+            request_page_object = binding.get("target_page")
+            if binding.get("relation") is not None and request_page_object is None:
+                PUBLIC_NAVIGATION_DENIED[page_ref] = "managed_public_navigation_unavailable"
+                mark_request_navigation_denied(binding, "navigation_guard_unavailable")
+                route.abort("failed")
+                return
             if request_page_object is not None and request_page_object is not page:
                 route.continue_()
                 return
@@ -2330,33 +2487,49 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
         global INTERACTION_DENIED
         request = route.request
         try:
-            # Do not fall back to PAGE here: an unresolved request relation
-            # could otherwise let a popup inherit the active Page's authority.
-            target_page = request_page_with_fallback(request, False)
-            target_state = page_state_for(target_page)
-            if target_state is None and page_opener(target_page) is not None:
-                # A context route can win the race with Playwright's ``page``
-                # event.  Register only when the browser itself proves an
-                # opener; an unrelated unknown Page remains outside scope.
-                target_state = ensure_provider_page(target_page)
-            if target_state is None:
+            binding = request_page_binding(request)
+            relation = binding.get("relation")
+            target_page = binding.get("target_page")
+            target_state = binding.get("target_state")
+            opener_state = binding.get("opener_state")
+            if relation is None:
+                if target_state is None and page_opener(target_page) is not None:
+                    # A context route can win the race with Playwright's
+                    # ``page`` event. Register only when the browser itself
+                    # proves an opener; unrelated unknown Pages stay out.
+                    target_state = ensure_provider_page(target_page)
+                scope_page = target_page
+            elif target_state is not None:
+                # The relation's target Page is exact; never use the opener
+                # as the request target when this mapping is available.
+                scope_page = target_page
+            elif opener_state is not None:
+                # A popup's first request can precede its Page event. Its
+                # opener supplies authorization only, not a Page registration.
+                scope_page = opener_state.get("page")
+            else:
+                mark_request_navigation_denied(binding, "managed_interaction_window_unsupported")
                 INTERACTION_DENIED = "managed_interaction_window_unsupported"
                 route.abort("blockedbyclient")
                 return
-            target_ref = target_state["provider_page_ref"]
-            allowed_for_page = inherited_page_origins(PAGE_INTERACTION_ALLOWED_ORIGINS, target_page)
+
+            target_ref = target_state["provider_page_ref"] if target_state is not None else None
+            allowed_for_page = inherited_page_origins(PAGE_INTERACTION_ALLOWED_ORIGINS, scope_page)
             if allowed_for_page is None and legacy_unscoped and target_ref in PAGE_STATES:
                 # Only the dependency-free direct helper fixture reaches this
                 # compatibility branch. Managed calls pre-bind active scope.
                 allowed_for_page = {expected}
             if allowed_for_page is None:
+                mark_request_navigation_denied(binding, "managed_interaction_window_unsupported")
                 INTERACTION_DENIED = "managed_interaction_window_unsupported"
                 route.abort("blockedbyclient")
                 return
             request_origin = public_origin(str(getattr(request, "url", "")))
             if request_origin not in allowed_for_page:
+                mark_request_navigation_denied(binding, "managed_interaction_request_blocked")
                 INTERACTION_DENIED = "managed_interaction_request_blocked"
-                PAGE_NAVIGATION_DENIED[target_ref] = "managed_interaction_request_blocked"
+                if target_ref:
+                    PAGE_NAVIGATION_DENIED[target_ref] = "managed_interaction_request_blocked"
                 route.abort("blockedbyclient")
                 return
         except Exception:

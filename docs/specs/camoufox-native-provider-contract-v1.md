@@ -117,11 +117,17 @@ The adapter then:
 
 1. copies the complete driver package into a fresh temporary root;
 2. rejects symlinks and non-file/non-directory entries so the copied tree is closed;
-3. patches only the exact `coreBundle.js` BrowserContext anchor and adds the three fixed adapter methods;
+3. patches only the exact `coreBundle.js` anchors for the BrowserContext methods, Request initializer schema, Firefox target attachment and Request dispatcher relation;
 4. points the current Python transport at the copied `cli.js` without editing installed `site-packages`;
 5. removes the adapter-owned temporary root on install failure and on `close()`.
 
 The Node executable is resolved from the same qualified Playwright driver and must be a regular file. V1 does not expose it, use a second package tree, or claim an independent Node hash beyond the qualified driver closure. The helper source copied into Harbor `dist` is limited to `camoufox-driver.py` and `camoufox-native-playwright.py`; it is not an installed package mutation.
+
+The request-relation patch is part of the same closure: it does not add a second
+transport, a Page dispatcher, or a readiness wait. The copied bundle carries the
+relation field on the existing Playwright request channel before Python reads it;
+the Python adapter reads the normal sync wrapper's private initializer and never
+resolves `Request.frame` to recover the relation.
 
 ### 3.2 Pairing and rollback
 
@@ -228,6 +234,45 @@ already-validated target/tab relation and avoids the Camoufox browser command's
 remoteness/history side effect. The patch is test-artifact-only; the installed
 Camoufox app is never modified.
 
+### 4.5 `Request` initializer relation
+
+The patched Playwright request initializer has one optional private field:
+
+```text
+webenvoyRequestRelation?: {
+  schemaVersion: "webenvoy.native-playwright/request-relation/v1",
+  targetId: non-empty string (maximum 256 characters),
+  openerId?: non-empty string (maximum 256 characters),
+  browserContextId?: non-empty string (maximum 256 characters)
+}
+```
+
+`RequestDispatcher` creates this scalar from the real Firefox target attachment
+facts. It emits the field only when `page.browserContext === scope._context`,
+using the exact target id, `TargetInfo.openerId` and `TargetInfo.browserContextId`;
+it does not call `initializedOrUndefined()`, await Page readiness, or create a
+`PageDispatcher`. This is the pre-initialization path for a popup's first
+navigation, so the relation remains available even when the ordinary
+`Request.frame` property is not.
+
+The Python adapter reads the actual `playwright.sync_api.Request` wrapper through
+`request._impl_obj._initializer`. A missing field is the legacy/no-relation
+case; a present field with an unknown key, unsupported schema, invalid/oversized
+identity, or identical target/opener is rejected. When the active context exposes
+its native context id, a different `browserContextId` is also rejected. The
+driver never infers a relation from URL, title, creation order or a fallback to
+the global active Page.
+
+Navigation and interaction guards consume the same relation. A mapped target is
+authorized against its exact target Page. An unknown target with a live known
+opener may inherit the opener's existing origin scope for that request, but the
+opener is not registered or substituted as the target Page. An unknown/missing
+opener, mismatched target/opener/context, or malformed relation fails closed.
+Policy failures for an unregistered target are retained by target id in a
+bounded 64-entry pending map and transferred to the Page registry only after a
+trusted native snapshot maps that target; closed targets remove their pending
+entry.
+
 ## 5. Snapshot and Page mapping semantics
 
 ### 5.1 Native enumeration
@@ -315,6 +360,9 @@ Old public refs, provider handles and document generations remain stale. A new `
 | Artifact is original installed app, production-authorized, or not the fixed test identity | Installed-binding preflight rejects; do not patch or launch it. The direct Driver path must remain behind that preflight. |
 | Playwright version/hash/anchor mismatch, symlinked closure, or adapter install failure | Reject before native operation; restore only a separately qualified pair; do not edit `site-packages`. |
 | Unknown protocol schema, field type, enum, duplicate identity or unknown active window | Return unavailable/error; no Page state commit. |
+| Request relation missing without a resolvable target | Preserve legacy context-route pass-through for an unqualified request; interaction remains fail-closed when it cannot prove a target. |
+| Request relation target is unknown but its opener is known and in scope | Authorize only from the opener's inherited scope; do not register or substitute the opener as the target Page. |
+| Request relation target/opener/context is unknown or inconsistent | Fail closed; do not fall back to the active Page, URL/title, or a guessed opener. |
 | `selectionStatus = partial`, stale sequence, or epoch change | Fail closed; preserve the last trusted relation. A changed epoch/identity does not trigger remapping. |
 | Same BCID maps to a replacement Page object | Latch native relation invalid and stop using the connection; never close+open or match URL/title. |
 | Background window/context/user-context ownership cannot be proven | Reject creation before adding a tab. |

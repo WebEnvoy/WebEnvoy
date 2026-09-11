@@ -365,6 +365,56 @@ assert channel.calls == [
 ]
 print("camoufox native Playwright Channel fixture passed")
 
+# Exercise the actual sync_api.Request wrapper path used by route callbacks.
+# The relation lives on Request._impl_obj._initializer, not on the wrapper.
+try:
+    from playwright.sync_api import Request as SyncRequest
+except ImportError:
+    SyncRequest = None
+
+
+def sync_request(relation: object | None, **initializer: object) -> object:
+    if SyncRequest is None:
+        raise AssertionError("qualified Playwright is required for the Request wrapper fixture")
+    request = object.__new__(SyncRequest)
+    values = dict(initializer)
+    if relation is not None:
+        values[ADAPTER.NATIVE_REQUEST_RELATION_FIELD] = relation
+    request._impl_obj = types.SimpleNamespace(_initializer=values)
+    return request
+
+
+if SyncRequest is not None:
+    valid_request_relation = {
+        "schemaVersion": ADAPTER.NATIVE_REQUEST_RELATION_SCHEMA,
+        "targetId": "target-a",
+        "openerId": "target-opener",
+        "browserContextId": "context-a",
+    }
+    assert ADAPTER.request_relation(sync_request(valid_request_relation)) == {
+        "target_id": "target-a",
+        "opener_id": "target-opener",
+        "browser_context_id": "context-a",
+    }
+    assert ADAPTER.request_relation(sync_request(None, unrelated="ignored")) is None
+
+    def rejects_relation(relation: object) -> None:
+        try:
+            ADAPTER.request_relation(sync_request(relation))
+        except ADAPTER.NativePlaywrightAdapterError:
+            return
+        raise AssertionError(f"invalid native relation was accepted: {relation!r}")
+
+    rejects_relation({**valid_request_relation, "unexpected": True})
+    rejects_relation({**valid_request_relation, "schemaVersion": "webenvoy.native-playwright/v2"})
+    rejects_relation({**valid_request_relation, "targetId": ""})
+    rejects_relation({**valid_request_relation, "targetId": "t" * (ADAPTER.NATIVE_REQUEST_RELATION_MAX_ID_LENGTH + 1)})
+    rejects_relation({**valid_request_relation, "openerId": "target-a"})
+    rejects_relation({**valid_request_relation, "browserContextId": 17})
+    print("camoufox native Playwright Request wrapper fixture passed")
+else:
+    print("camoufox native Playwright Request wrapper fixture skipped (qualified Playwright unavailable)")
+
 # Native Page relation fixtures are deliberately pure: they exercise the
 # Driver's bidirectional identity checks without starting a browser or
 # reconstructing a Page from URL/title facts.
@@ -593,6 +643,152 @@ DRIVER.PAGE = None
 DRIVER.CONTEXT = None
 DRIVER.reset_provider_pages()
 print("camoufox per-Page/opener interaction guard fixture passed")
+
+# Native request relations must keep the context navigation and interaction
+# guards on the exact target. A known opener may authorize an unregistered
+# popup, but it must never be used as that popup's target Page.
+class NativeRelationRequest:
+    def __init__(self, url: str, relation: dict[str, object], page=None, frame_error: bool = False) -> None:
+        self.url = url
+        self.relation = relation
+        self._impl_obj = types.SimpleNamespace(_initializer={ADAPTER.NATIVE_REQUEST_RELATION_FIELD: relation})
+        if not frame_error:
+            self._frame = types.SimpleNamespace(page=page)
+        else:
+            self._frame_error = True
+
+    @property
+    def frame(self):
+        if getattr(self, "_frame_error", False):
+            raise RuntimeError("Page is not initialized")
+        return self._frame
+
+
+class NativeRelationAdapter:
+    def request_relation(self, request) -> dict[str, str | None] | None:
+        return ADAPTER.request_relation(request)
+
+
+class NativeRelationRoute:
+    def __init__(self, request, status: int = 200) -> None:
+        self.request = request
+        self.status, self.fetched, self.aborted, self.fulfilled = status, 0, False, False
+
+    def fetch(self, **kwargs):
+        assert kwargs["max_redirects"] == 0
+        self.fetched += 1
+        return types.SimpleNamespace(status=self.status, dispose=lambda: None)
+
+    def abort(self, *_args) -> None:
+        self.aborted = True
+
+    def fulfill(self, **_kwargs) -> None:
+        self.fulfilled = True
+
+
+def relation(schema: str = ADAPTER.NATIVE_REQUEST_RELATION_SCHEMA, target: str = "target-popup", opener: str | None = "target-active", context: str | None = "context-a") -> dict[str, object]:
+    return {"schemaVersion": schema, "targetId": target, "openerId": opener, "browserContextId": context}
+
+
+DRIVER.reset_provider_pages()
+active_relation_page = GuardPage("active-relation")
+known_popup_page = GuardPage("known-popup", active_relation_page)
+DRIVER.PAGE = active_relation_page
+DRIVER.CONTEXT = types.SimpleNamespace(
+    browser=object(),
+    pages=[active_relation_page, known_popup_page],
+    _impl_obj=types.SimpleNamespace(_browser_context_id="context-a"),
+    route=lambda _pattern, handler: setattr(DRIVER.CONTEXT, "navigation_guard", handler),
+    unroute=lambda *_args: None,
+)
+active_relation_state = DRIVER.register_provider_page(active_relation_page)
+known_popup_state = DRIVER.register_provider_page(known_popup_page, active_relation_page)
+active_relation_state["native_target_id"] = "target-active"
+known_popup_state["native_target_id"] = "target-known-popup"
+known_popup_state["opener_provider_page_ref"] = active_relation_state["provider_page_ref"]
+DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = NativeRelationAdapter()
+DRIVER.install_page_navigation_guard(active_relation_page, ["https://example.com"])
+navigation_handler = DRIVER.PAGE_NAVIGATION_CONTEXT_GUARD
+assert navigation_handler is not None
+
+mapped_target = NativeRelationRequest(
+    "https://example.com/mapped", relation(target="target-active", opener=None), frame_error=True
+)
+mapped_route = NativeRelationRoute(mapped_target)
+navigation_handler(mapped_route)
+assert mapped_route.fulfilled and not mapped_route.aborted
+
+first_popup = NativeRelationRequest(
+    "https://example.com/popup", relation(), frame_error=True
+)
+first_popup_route = NativeRelationRoute(first_popup)
+navigation_handler(first_popup_route)
+assert first_popup_route.fulfilled and not first_popup_route.aborted
+assert DRIVER.state_by_native_target("target-popup") is None
+
+unknown_opener = NativeRelationRequest(
+    "https://example.com/unknown-opener", relation(target="target-popup-2", opener="missing-opener"), frame_error=True
+)
+unknown_opener_route = NativeRelationRoute(unknown_opener)
+navigation_handler(unknown_opener_route)
+assert unknown_opener_route.aborted and unknown_opener_route.fetched == 0
+
+wrong_target = NativeRelationRequest(
+    "https://example.com/wrong-target", relation(target="target-other", opener=None), page=active_relation_page
+)
+wrong_target_route = NativeRelationRoute(wrong_target)
+navigation_handler(wrong_target_route)
+assert wrong_target_route.aborted and wrong_target_route.fetched == 0
+
+wrong_opener = NativeRelationRequest(
+    "https://example.com/wrong-opener", relation(target="target-known-popup", opener="target-other"), page=known_popup_page
+)
+wrong_opener_route = NativeRelationRoute(wrong_opener)
+navigation_handler(wrong_opener_route)
+assert wrong_opener_route.aborted and wrong_opener_route.fetched == 0
+
+wrong_context = NativeRelationRequest(
+    "https://example.com/wrong-context", relation(target="target-active", opener=None, context="context-b"), page=active_relation_page
+)
+wrong_context_route = NativeRelationRoute(wrong_context)
+navigation_handler(wrong_context_route)
+assert wrong_context_route.aborted and wrong_context_route.fetched == 0
+
+DRIVER.reset_provider_pages()
+DRIVER.PAGE = active_relation_page
+DRIVER.CONTEXT = types.SimpleNamespace(
+    browser=object(),
+    pages=[active_relation_page, known_popup_page],
+    _impl_obj=types.SimpleNamespace(_browser_context_id="context-a"),
+    route=lambda _pattern, handler: setattr(DRIVER.CONTEXT, "interaction_guard", handler),
+    unroute=lambda *_args: None,
+)
+active_relation_state = DRIVER.register_provider_page(active_relation_page)
+known_popup_state = DRIVER.register_provider_page(known_popup_page, active_relation_page)
+active_relation_state["native_target_id"] = "target-active"
+known_popup_state["native_target_id"] = "target-known-popup"
+known_popup_state["opener_provider_page_ref"] = active_relation_state["provider_page_ref"]
+DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = NativeRelationAdapter()
+DRIVER.install_interaction_guard("https://example.com", ["https://example.com", "https://second.example"])
+interaction_handler = DRIVER.INTERACTION_GUARD
+assert interaction_handler is not None
+popup_interaction_route = NativeRelationRoute(NativeRelationRequest(
+    "https://second.example/popup", relation(target="target-popup-3"), frame_error=True
+))
+interaction_handler(popup_interaction_route)
+assert popup_interaction_route.fulfilled and not popup_interaction_route.aborted
+assert DRIVER.state_by_native_target("target-popup-3") is None
+interaction_unknown_opener = NativeRelationRoute(NativeRelationRequest(
+    "https://example.com/unknown-opener", relation(target="target-popup-4", opener="missing-opener"), frame_error=True
+))
+interaction_handler(interaction_unknown_opener)
+assert interaction_unknown_opener.aborted and interaction_unknown_opener.fetched == 0
+DRIVER.clear_interaction_guard()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+DRIVER.reset_provider_pages()
+print("camoufox native request relation guard fixture passed")
 
 # Managed public reads and observations must use the exact private Page binding
 # supplied by Harbor.  The active Page is deliberately a different window.

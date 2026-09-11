@@ -45,6 +45,9 @@ NATIVE_SNAPSHOT_METHOD = "webenvoyNativeSnapshot"
 NATIVE_CREATE_PAGE_METHOD = "webenvoyNativeCreatePage"
 NATIVE_CLOSE_PAGE_METHOD = "webenvoyNativeClosePage"
 NATIVE_SNAPSHOT_SCHEMA = "webenvoy.native-playwright/v1"
+NATIVE_REQUEST_RELATION_FIELD = "webenvoyRequestRelation"
+NATIVE_REQUEST_RELATION_SCHEMA = "webenvoy.native-playwright/request-relation/v1"
+NATIVE_REQUEST_RELATION_MAX_ID_LENGTH = 256
 
 
 class NativePlaywrightAdapterError(RuntimeError):
@@ -180,8 +183,77 @@ def _patched_bundle(source: str) -> str:
       targetId: tString,
       safeTargetId: tString
     });
+    scheme.WebEnvoyRequestRelation = tObject({
+      schemaVersion: tString,
+      targetId: tString,
+      openerId: tOptional(tString),
+      browserContextId: tOptional(tString)
+    });
+"""
+    request_initializer_anchor = """    scheme.RequestInitializer = tObject({
+      frame: tOptional(tChannel([\"Frame\"])),
+      serviceWorker: tOptional(tChannel([\"Worker\"])),
+      url: tString,
+      resourceType: tString,
+      method: tString,
+      postData: tOptional(tBinary),
+      headers: tArray(tType(\"NameValue\")),
+      isNavigationRequest: tBoolean,
+      redirectedFrom: tOptional(tChannel([\"Request\"]))
+    });
+"""
+    ffpage_attach_anchor = """        const ffPage = new FFPage(session2, context2, opener);
+        this._ffPages.set(targetId, ffPage);
+"""
+    ffpage_attach_patch = """        const ffPage = new FFPage(session2, context2, opener);
+        ffPage._webenvoyNativeRequestTargetId = targetId;
+        ffPage._webenvoyNativeRequestOpenerId = typeof openerId === \"string\" && openerId ? openerId : void 0;
+        ffPage._webenvoyNativeRequestContextId = typeof browserContextId === \"string\" && browserContextId ? browserContextId : void 0;
+        this._ffPages.set(targetId, ffPage);
+"""
+    request_dispatcher_anchor = """        const postData = request2.postDataBuffer();
+        const frame = request2.frame();
+        const page = request2.frame()?._page;
+"""
+    request_dispatcher_patch = """        const postData = request2.postDataBuffer();
+        const frame = request2.frame();
+        const page = frame?._page;
+        const relation = page && page.browserContext === scope._context ? (() => {
+          const delegate = page.delegate;
+          const targetId = delegate?._webenvoyNativeRequestTargetId;
+          if (typeof targetId !== \"string\" || !targetId)
+            return void 0;
+          const openerId = delegate?._webenvoyNativeRequestOpenerId;
+          const browserContextId = delegate?._webenvoyNativeRequestContextId;
+          return {
+            schemaVersion: \"webenvoy.native-playwright/request-relation/v1\",
+            targetId,
+            ...(typeof openerId === \"string\" && openerId ? { openerId } : {}),
+            ...(typeof browserContextId === \"string\" && browserContextId ? { browserContextId } : {})
+          };
+        })() : void 0;
+"""
+    request_initializer = """      redirectedFrom: _RequestDispatcher.fromNullable(scope, request2.redirectedFrom())
+"""
+    request_initializer_with_relation = """      redirectedFrom: _RequestDispatcher.fromNullable(scope, request2.redirectedFrom()),
+          webenvoyRequestRelation: relation
 """
     patched = source.replace(validator_anchor, validator_anchor + validators, 1)
+    if source.count(request_initializer_anchor) != 1:
+        raise NativePlaywrightAdapterError("Playwright Request initializer anchor is not unique.")
+    if source.count(ffpage_attach_anchor) != 1:
+        raise NativePlaywrightAdapterError("Playwright Firefox target attach anchor is not unique.")
+    if source.count(request_dispatcher_anchor) != 1:
+        raise NativePlaywrightAdapterError("Playwright Request dispatcher anchor is not unique.")
+    if source.count(request_initializer) != 1:
+        raise NativePlaywrightAdapterError("Playwright Request dispatcher initializer anchor is not unique.")
+    patched = patched.replace(request_initializer_anchor, request_initializer_anchor.replace(
+        "      redirectedFrom: tOptional(tChannel([\"Request\"]))",
+        "      redirectedFrom: tOptional(tChannel([\"Request\"])),\n      webenvoyRequestRelation: tOptional(tType(\"WebEnvoyRequestRelation\"))"
+    ), 1)
+    patched = patched.replace(ffpage_attach_anchor, ffpage_attach_patch, 1)
+    patched = patched.replace(request_dispatcher_anchor, request_dispatcher_patch, 1)
+    patched = patched.replace(request_initializer, request_initializer_with_relation, 1)
     return patched.replace(context_anchor, context_anchor + context_methods, 1)
 
 
@@ -268,6 +340,16 @@ class NativePlaywrightDriver:
     def close_page_with_safe_return(self, context: Any, target_id: str, safe_target_id: str) -> dict[str, str]:
         return close_page_with_safe_return(context, target_id, safe_target_id)
 
+    def request_relation(self, request: Any) -> dict[str, str | None] | None:
+        """Read the fixed relation field from one Request initializer.
+
+        The field is attached by the Node RequestDispatcher while constructing
+        the route/request object.  Reading it locally avoids a nested protocol
+        call from an event handler and never asks Playwright to initialize a
+        popup Page.
+        """
+        return request_relation(request)
+
 
 def install_native_playwright_driver() -> NativePlaywrightDriver:
     root = Path(tempfile.mkdtemp(prefix="webenvoy-playwright-driver-"))
@@ -306,6 +388,43 @@ def _timeout_calculator(context: Any) -> Any:
     if not callable(calculator):
         raise NativePlaywrightAdapterError("Native Playwright context has no bounded timeout calculator.")
     return calculator
+
+
+def _request_relation_id(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > NATIVE_REQUEST_RELATION_MAX_ID_LENGTH:
+        raise NativePlaywrightAdapterError(f"Native request relation has an invalid {label}.")
+    return value
+
+
+def request_relation(request: Any) -> dict[str, str | None] | None:
+    """Parse the private Request initializer relation without resolving a Page.
+
+    ``Request.frame`` is intentionally not touched here: Python Playwright
+    raises for a navigation request emitted before its client Page is ready.
+    A missing field is the legacy/non-Firefox path; a present malformed field
+    is an adapter incompatibility and must fail closed at the Driver boundary.
+    """
+    implementation = getattr(request, "_impl_obj", request)
+    initializer = getattr(implementation, "_initializer", None)
+    if not isinstance(initializer, dict):
+        return None
+    raw = initializer.get(NATIVE_REQUEST_RELATION_FIELD)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) - {"schemaVersion", "targetId", "openerId", "browserContextId"}:
+        raise NativePlaywrightAdapterError("Native request relation returned an invalid schema.")
+    if raw.get("schemaVersion") != NATIVE_REQUEST_RELATION_SCHEMA:
+        raise NativePlaywrightAdapterError("Native request relation returned an unsupported schema.")
+    target_id = _request_relation_id(raw.get("targetId"), "targetId")
+    opener_id = raw.get("openerId")
+    if opener_id is not None:
+        opener_id = _request_relation_id(opener_id, "openerId")
+        if opener_id == target_id:
+            raise NativePlaywrightAdapterError("Native request relation has identical target and opener.")
+    browser_context_id = raw.get("browserContextId")
+    if browser_context_id is not None:
+        browser_context_id = _request_relation_id(browser_context_id, "browserContextId")
+    return {"target_id": target_id, "opener_id": opener_id, "browser_context_id": browser_context_id}
 
 
 def native_snapshot(browser: Any, context: Any) -> dict[str, Any]:
