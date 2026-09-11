@@ -269,9 +269,9 @@ export function createManagedBrowserService(options: {
     }
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
-      await check();
+      const diagnosticsAccess = await check();
       return await harbor(`/runtime/sessions/${ref}/diagnostics`, {
-        origin: input.origin!, authorized_origins: access.authorized_origins, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        origin: input.origin!, authorized_origins: diagnosticsAccess.authorized_origins, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
       });
@@ -281,7 +281,7 @@ export function createManagedBrowserService(options: {
     if (input.operation === "instance.stop") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/stop`, { control_owner: "core_task", holder_ref: holder })) };
     if (input.operation === "instance.handoff") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/handoff`, { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: holder })) };
     if (isInteraction(input.operation)) {
-      await check();
+      const interactionAccess = await check();
       const run = (await store.getRunRecord(runId))!;
       await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
       const result = await harbor(`/runtime/sessions/${ref}/interactions`, {
@@ -289,7 +289,7 @@ export function createManagedBrowserService(options: {
         // Harbor must enforce the Core-checked grant ∩ Profile ∩ task
         // intersection for every request/redirect, not re-derive trust from
         // Agent-supplied origin fields.
-        authorized_origins: access.authorized_origins,
+        authorized_origins: interactionAccess.authorized_origins,
         action: input.operation.slice("instance.".length),
         ...Object.fromEntries(["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
       }, "interaction");

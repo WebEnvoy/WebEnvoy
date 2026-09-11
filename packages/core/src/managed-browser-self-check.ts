@@ -17,9 +17,11 @@ const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
+const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let dropResponse = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
+const forwardedInteractionOrigins: string[][] = [];
 const receipts = new Map<string, unknown>();
 let pageLists = 0, pageMutations = 0, dropPageResponse = false;
 const pageReceipts = new Map<string, Record<string, unknown>>();
@@ -101,6 +103,8 @@ const server = createServer((req, res) => { void (async () => {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
     assert.equal(input.origin, "https://example.com");
+    assert.ok(Array.isArray(input.authorized_origins));
+    forwardedDiagnosticsOrigins.push([...input.authorized_origins]);
     if (input.cursor) { assert.equal(input.page_ref, "page:one"); assert.equal(input.limit, 1); }
     if (dropDiagnosticsResponse) { req.socket.destroy(); return; }
     value = { status: "completed", schema_version: "harbor-runtime-diagnostics/v1", runtime_session_ref: "session:one", profile_ref: "profile:1", page_ref: "page:one", document_generation: 1, page: { current_url: "https://example.com/", title: "Fixture", status: "ready" }, cursor: "cursor:2", next_cursor: "cursor:2", truncated: false, observed_at: new Date().toISOString(), network: [{ event_ref: "event:1", kind: "response", observed_at: new Date().toISOString(), method: "GET", url: "https://example.com/health", origin: "https://example.com", resource_kind: "fetch", status: 503, duration_ms: 4 }], console: [{ event_ref: "event:2", level: "error", observed_at: new Date().toISOString(), page_ref: "page:one", document_generation: 1, text: "fixture error", truncated: false }] };
@@ -150,7 +154,8 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body);
     assert.equal(input.controlled_origin, input.expected_origin);
     assert.equal(input.expected_origin, "http://127.0.0.1:18794");
-    assert.deepEqual(input.authorized_origins, ["http://127.0.0.1:18794"]);
+    assert.ok(Array.isArray(input.authorized_origins));
+    forwardedInteractionOrigins.push([...input.authorized_origins]);
     if (!refuseInteraction) interactions++;
     value = { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
       operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
@@ -251,6 +256,29 @@ try {
   assert.equal((await service.submit(credentialHash, { ...diagnosticRequest, connection_id: diagnosticReconnect.connection_id, idempotency_key: "fresh-diagnostics" })).status, "succeeded");
   assert.equal(navigations, 0, "diagnostic response loss and reconnect never generate a page action");
   assert.equal(lockAttempts, 0);
+  const diagnosticsExtraOrigin = "https://second.example";
+  const diagnosticsScopeOperations = ["instance.diagnostics"];
+  await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-wide", profile_ref: "profile:1",
+    allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com", diagnosticsExtraOrigin] });
+  const diagnosticsScopeGrant = await accessStore.createGrant({ idempotency_key: "diagnostics-scope-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com", diagnosticsExtraOrigin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const diagnosticsScopeRequest = { idempotency_key: "diagnostics-scope", connection_id: connection.connection_id, grant_id: diagnosticsScopeGrant.grant_id,
+    operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one",
+    task_scope: { operations: diagnosticsScopeOperations, profile_refs: ["profile:1"], origins: [diagnosticsExtraOrigin, "https://example.com"] } };
+  afterProfileList = async () => { await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-narrow", profile_ref: "profile:1",
+    allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com"] }); };
+  let diagnosticsScopeResult;
+  try {
+    diagnosticsScopeResult = await service.submit(credentialHash, diagnosticsScopeRequest);
+  } finally {
+    afterProfileList = undefined;
+  }
+  assert.equal(diagnosticsScopeResult.status, "succeeded", JSON.stringify(diagnosticsScopeResult));
+  assert.deepEqual(forwardedDiagnosticsOrigins.at(-1), ["https://example.com"], "diagnostics forwards the latest checked origin scope");
+  await accessStore.revokeGrant({ idempotency_key: "revoke-diagnostics-scope", grant_id: diagnosticsScopeGrant.grant_id });
+  await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-restore", profile_ref: "profile:1",
+    allowed_operations: [...diagnosticsOps, ...browserOps], allowed_origins: ["https://example.com"] });
   await accessStore.revokeGrant({ idempotency_key: "revoke-diagnostics", grant_id: diagnosticsGrant.grant_id });
   await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "revoked-diagnostics" }), /grant_unavailable/);
   managedSession.control_owner = "core_task";
@@ -434,6 +462,26 @@ try {
   assert.equal(queried.reconciliation, "completed");
   assert.equal((queried.result as { snapshot: { text: string } }).snapshot.text, "Ready");
   assert.equal(interactions, 2, "query after revocation does not replay input");
+  const interactionExtraOrigin = "http://127.0.0.1:18795";
+  const interactionScopePolicy = { profile_ref: "profile:1", allowed_operations: interactionOps,
+    allowed_origins: [origin, interactionExtraOrigin], controlled_interaction_origins: [origin, interactionExtraOrigin] };
+  await accessStore.setProfilePolicy({ idempotency_key: "interaction-scope-wide", ...interactionScopePolicy });
+  const interactionScopeGrant = await accessStore.createGrant({ idempotency_key: "interaction-scope-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin, interactionExtraOrigin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const interactionScopeRequest = { ...interactive, idempotency_key: "interaction-scope", grant_id: interactionScopeGrant.grant_id,
+    task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [interactionExtraOrigin, origin] } };
+  afterProfileList = async () => { await accessStore.setProfilePolicy({ idempotency_key: "interaction-scope-narrow", profile_ref: "profile:1",
+    allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] }); };
+  let interactionScopeResult;
+  try {
+    interactionScopeResult = await service.submit(credentialHash, interactionScopeRequest);
+  } finally {
+    afterProfileList = undefined;
+  }
+  assert.equal(interactionScopeResult.status, "succeeded", JSON.stringify(interactionScopeResult));
+  assert.deepEqual(forwardedInteractionOrigins.at(-1), [origin], "interaction forwards the latest checked origin scope");
+  await accessStore.revokeGrant({ idempotency_key: "revoke-interaction-scope", grant_id: interactionScopeGrant.grant_id });
   const recoveryOperations = ["recovery.status"] as const;
   await accessStore.setProfilePolicy({ idempotency_key: "recovery-status-policy", profile_ref: "profile:1", allowed_operations: [...recoveryOperations], allowed_origins: [] });
   const statusGrant = await accessStore.createGrant({ idempotency_key: "recovery-status-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: [...recoveryOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });

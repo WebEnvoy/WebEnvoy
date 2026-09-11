@@ -58,6 +58,7 @@ PAGE_NAVIGATION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
 PAGE_NAVIGATION_DENIED: dict[str, str] = {}
 PAGE_NAVIGATION_CONTEXT_GUARD: Any = None
 INTERACTION_GUARD: Any = None
+INTERACTION_GUARD_PAGE: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
 PAGE_INTERACTION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
 INTERACTION_DENIED: str | None = None
@@ -1768,6 +1769,16 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     PAGE_NAVIGATION_ALLOWED_ORIGINS[page_ref] = allowed
     PAGE_NAVIGATION_DENIED.pop(page_ref, None)
 
+    # A Page route outranks the active interaction context guard. Keep the
+    # origin scope for later navigation operations, but never install a route
+    # that could bypass the currently active interaction scope.
+    if INTERACTION_GUARD is not None:
+        previous = PAGE_NAVIGATION_GUARDS.pop(page_ref, None)
+        if previous is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", previous)
+        return
+
     def guard(route: Any) -> None:
         request = route.request
         binding = request_page_binding(request)
@@ -2426,15 +2437,16 @@ def discard_interaction_snapshot() -> None:
 
 
 def clear_interaction_guard() -> None:
-    global INTERACTION_GUARD, INTERACTION_DENIED
+    global INTERACTION_GUARD, INTERACTION_GUARD_PAGE, INTERACTION_DENIED
     if INTERACTION_GUARD is not None:
-        if PAGE is not None:
+        if INTERACTION_GUARD_PAGE is not None:
             with contextlib.suppress(Exception):
-                PAGE.unroute("**/*", INTERACTION_GUARD)
+                INTERACTION_GUARD_PAGE.unroute("**/*", INTERACTION_GUARD)
         if CONTEXT is not None:
             with contextlib.suppress(Exception):
                 CONTEXT.unroute("**/*", INTERACTION_GUARD)
     INTERACTION_GUARD = None
+    INTERACTION_GUARD_PAGE = None
     INTERACTION_DENIED = None
     discard_interaction_snapshot()
 
@@ -2452,9 +2464,20 @@ def detach_public_navigation_guard_for_interaction() -> None:
     PUBLIC_NAVIGATION_DENIED.clear()
 
 
+def detach_page_navigation_guards_for_interaction() -> None:
+    """Remove Page routes that would outrank the interaction context route."""
+    for page_ref, guard in list(PAGE_NAVIGATION_GUARDS.items()):
+        state = PAGE_STATES.get(page_ref)
+        page = state.get("page") if state else None
+        if page is not None:
+            with contextlib.suppress(Exception):
+                page.unroute("**/*", guard)
+    PAGE_NAVIGATION_GUARDS.clear()
+
+
 def install_interaction_guard(expected: str, authorized_origins: Any = None) -> None:
     """Guard every request by its Page's own or opener-inherited origin set."""
-    global INTERACTION_GUARD, INTERACTION_DENIED
+    global INTERACTION_GUARD, INTERACTION_GUARD_PAGE, INTERACTION_DENIED
     if not valid_public_origin(expected):
         raise ValueError("Managed interaction expected origin is invalid.")
     active_state = ensure_provider_page(PAGE)
@@ -2480,7 +2503,16 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
     # A profile-management guard is intentionally single-origin. Keeping it
     # attached would silently reject an otherwise authorized second origin.
     detach_public_navigation_guard_for_interaction()
+    # Page routes outrank context routes in Playwright. Remove stale page
+    # navigation handlers before the interaction handler is (re)bound.
+    detach_page_navigation_guards_for_interaction()
     if INTERACTION_GUARD is not None:
+        if INTERACTION_GUARD_PAGE is not PAGE:
+            if INTERACTION_GUARD_PAGE is not None:
+                with contextlib.suppress(Exception):
+                    INTERACTION_GUARD_PAGE.unroute("**/*", INTERACTION_GUARD)
+            PAGE.route("**/*", INTERACTION_GUARD)
+            INTERACTION_GUARD_PAGE = PAGE
         return
 
     def guard(route: Any) -> None:
@@ -2554,6 +2586,7 @@ def install_interaction_guard(expected: str, authorized_origins: Any = None) -> 
             if response is not None:
                 response.dispose()
     INTERACTION_GUARD = guard
+    INTERACTION_GUARD_PAGE = PAGE
     CONTEXT.route("**/*", guard)  # Includes the first request of a popup.
     PAGE.route("**/*", guard)
 

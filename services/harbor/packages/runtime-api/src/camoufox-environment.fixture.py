@@ -599,6 +599,18 @@ class GuardPage:
         return False
 
 
+class GuardContext:
+    def __init__(self) -> None:
+        self.routes = []
+
+    def route(self, _pattern, handler) -> None:
+        self.routes.append(handler)
+
+    def unroute(self, _pattern, handler) -> None:
+        if handler in self.routes:
+            self.routes.remove(handler)
+
+
 class GuardRoute:
     def __init__(self, url: str, page: GuardPage, status: int = 200) -> None:
         self.request = types.SimpleNamespace(url=url, frame=types.SimpleNamespace(page=page))
@@ -643,6 +655,50 @@ DRIVER.PAGE = None
 DRIVER.CONTEXT = None
 DRIVER.reset_provider_pages()
 print("camoufox per-Page/opener interaction guard fixture passed")
+
+# A Page navigation route must not outrank a live interaction guard when the
+# active Page changes. This reproduces the A -> B route-precedence race.
+DRIVER.reset_provider_pages()
+page_a = GuardPage("scope-a")
+page_b = GuardPage("scope-b")
+DRIVER.PAGE = page_a
+DRIVER.CONTEXT = GuardContext()
+DRIVER.CONTEXT.pages = [page_a, page_b]
+DRIVER.register_provider_page(page_a)
+page_b_state = DRIVER.register_provider_page(page_b)
+DRIVER.install_interaction_guard("https://s1.example", ["https://s1.example", "https://s2.example"])
+interaction_guard = DRIVER.INTERACTION_GUARD
+assert interaction_guard is not None
+assert page_a.routes == [interaction_guard]
+
+# The navigation caller still runs while the interaction guard is live. It
+# must retain its scope for future use without installing a higher-priority
+# Page route.
+DRIVER.install_page_navigation_guard(page_b, ["https://s1.example", "https://s2.example"])
+assert page_b.routes == []
+DRIVER.PAGE = page_b
+DRIVER.PAGE_INTERACTION_ALLOWED_ORIGINS[page_b_state["provider_page_ref"]] = {"https://s2.example"}
+DRIVER.install_interaction_guard("https://s2.example")
+assert page_a.routes == []
+assert page_b.routes == [interaction_guard]
+
+blocked_route = GuardRoute("https://s1.example/blocked", page_b)
+page_b.routes[0](blocked_route)
+assert blocked_route.aborted and blocked_route.fetched == 0
+allowed_route = GuardRoute("https://s2.example/allowed", page_b)
+page_b.routes[0](allowed_route)
+assert allowed_route.fulfilled and not allowed_route.aborted and allowed_route.fetched == 1
+
+# A later navigation install cannot put the broad Page route back in front of
+# the interaction handler, and cleanup follows the exact bound Page.
+DRIVER.install_page_navigation_guard(page_b, ["https://s1.example", "https://s2.example"])
+assert page_b.routes == [interaction_guard]
+DRIVER.clear_interaction_guard()
+assert page_a.routes == [] and page_b.routes == []
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.reset_provider_pages()
+print("camoufox interaction Page-route precedence fixture passed")
 
 # Native request relations must keep the context navigation and interaction
 # guards on the exact target. A known opener may authorize an unregistered
