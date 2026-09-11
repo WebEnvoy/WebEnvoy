@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 
 const HOST = "127.0.0.1";
 const SERVICES = ["S1", "S2", "S3"];
+const DELAYED_RESPONSE_MS = 3_000;
 const ports = new Map();
 const servers = [];
 const counters = new Map(SERVICES.map(service => [service, {
@@ -115,6 +116,11 @@ function createService(service) {
       return;
     }
     recordAccess(service, url.pathname);
+    if (request.method === "GET" && url.pathname === "/delayed-response") {
+      await new Promise(resolve => setTimeout(resolve, DELAYED_RESPONSE_MS));
+      html(response, pageBody(service, url.pathname));
+      return;
+    }
     if (url.pathname === "/__phase1/network/" + service.toLowerCase() && request.method === "GET") {
       json(response, 200, { schema_version: "webenvoy.phase1-network/v1", service, marker: `${service.toLowerCase()}-network` });
       return;
