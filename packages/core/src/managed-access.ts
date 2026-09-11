@@ -41,7 +41,7 @@ export type ManagedAccessRequest = {
 };
 export type ManagedAccess = {
   principal: ManagedPrincipal; connection: ManagedConnection; grant: ManagedGrant;
-  profile_policy?: ManagedProfilePolicy; creation_template?: ManagedCreationTemplate;
+  profile_policy?: ManagedProfilePolicy; creation_template?: ManagedCreationTemplate; authorized_origins: string[];
 };
 type StoredPrincipal = ManagedPrincipal & { credential_hash: string };
 type State = {
