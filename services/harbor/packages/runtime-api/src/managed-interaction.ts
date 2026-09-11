@@ -3,6 +3,8 @@ import type { LocalProviderPageFacts } from "./runtime-session-types.js";
 export type ManagedInteractionInput = {
   action: "snapshot" | "click" | "input" | "press" | "scroll" | "wait";
   expected_origin: string;
+  /** Core-derived Profile ∩ Grant ∩ task ∩ Runtime origin set. */
+  authorized_origins?: readonly string[];
   control_generation: number;
   page_ref?: string;
   observation_ref?: string;

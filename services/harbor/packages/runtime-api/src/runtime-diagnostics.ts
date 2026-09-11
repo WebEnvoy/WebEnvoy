@@ -76,7 +76,7 @@ export interface RuntimeDiagnosticsResult {
 
 export interface RuntimeDiagnosticsUnavailable {
   status: "unavailable";
-  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "page_selection_required" | "wrong_page" | "stale_page" | "stale_document" | "cursor_stale" | "provider_unavailable";
+  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "page_selection_required" | "wrong_page" | "stale_page" | "stale_document" | "cursor_stale" | "page_relation_unavailable" | "provider_unavailable";
   message: string;
   retryable: boolean;
 }
@@ -159,7 +159,7 @@ export function normalizeRuntimeDiagnostics(value: unknown, context: { runtime_s
   if (!value || typeof value !== "object" || Array.isArray(value)) return diagnosticsUnavailable("provider_unavailable");
   const raw = value as Record<string, unknown>;
   if (raw.status === "unavailable") {
-    const failure = ["invalid_request", "session_missing", "session_not_ready", "page_selection_required", "wrong_page", "stale_page", "stale_document", "cursor_stale", "provider_unavailable"].includes(String(raw.failure_class))
+    const failure = ["invalid_request", "session_missing", "session_not_ready", "page_selection_required", "wrong_page", "stale_page", "stale_document", "cursor_stale", "page_relation_unavailable", "provider_unavailable"].includes(String(raw.failure_class))
       ? raw.failure_class as RuntimeDiagnosticsUnavailable["failure_class"] : "provider_unavailable";
     const message = typeof raw.message === "string" ? safeDiagnosticsText(raw.message).text : undefined;
     return diagnosticsUnavailable(failure, message || undefined, raw.retryable === true);

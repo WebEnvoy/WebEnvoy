@@ -224,7 +224,12 @@ export interface LocalProviderPageController {
   listPages: () => Promise<LocalProviderPageState[]>;
   openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
   activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
-  closePage: (provider_page_ref: string) => Promise<LocalProviderPageState[]>;
+  /**
+   * Close a Page. Providers that can atomically select a caller-supplied safe
+   * return Page should honor the optional second handle and return that Page
+   * as the sole active selection in the resulting list.
+   */
+  closePage: (provider_page_ref: string, safe_return_provider_page_ref?: string) => Promise<LocalProviderPageState[]>;
   navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
 }
 
@@ -645,7 +650,7 @@ export type LocalProviderSiteResourceProbeResult =
     }
   | {
       status: "blocked" | "unavailable" | "unknown";
-      failure_class: "not_logged_in" | "safety_challenge" | "page_not_ready" | "provider_probe_unavailable";
+      failure_class: "not_logged_in" | "safety_challenge" | "page_not_ready" | "page_relation_unavailable" | "provider_probe_unavailable";
       message: string;
       verified_fact_keys: readonly LocalProviderSiteResourceReadinessFactKey[];
       evidence_ref?: string;
@@ -751,7 +756,7 @@ export type LocalProviderReadProbeResult =
     }
   | {
       status: "unavailable";
-      failure_class: "origin_drift" | "not_logged_in" | "safety_challenge" | "page_not_ready" | "network_resource_unavailable" | "evidence_refs_missing" | "fixture_runtime" | "provider_probe_unavailable" | "permission_denied" | "city_unresolved" | "empty_result" | "field_missing" | "site_changed";
+      failure_class: "origin_drift" | "not_logged_in" | "safety_challenge" | "page_not_ready" | "page_relation_unavailable" | "network_resource_unavailable" | "evidence_refs_missing" | "fixture_runtime" | "provider_probe_unavailable" | "permission_denied" | "city_unresolved" | "empty_result" | "field_missing" | "site_changed";
       message: string;
       retryable: boolean;
       page?: LocalProviderPageFacts;

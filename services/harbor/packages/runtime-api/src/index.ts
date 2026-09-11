@@ -93,6 +93,7 @@ import {
   type ManagedPageOperation,
   type ManagedPageFacts,
   type ManagedPageList,
+  type ManagedPageOperationReceipt,
   type ManagedPageUnavailable
 } from "./runtime-session.js";
 import { isRuntimeDriverAvailable, isRuntimeSessionReadable } from "./runtime-session-types.js";
@@ -187,6 +188,10 @@ export {
 } from "./provider-management.js";
 export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
 export { launchCamoufoxProvider } from "./camoufox-driver.js";
+/** Stable plugin-facing operation index; provider-private handles stay internal. */
+export { managedOperationCatalog } from "./managed-observation.js";
+export type { ManagedInteractionInput, ManagedInteractionOperation, ManagedInteractionResult, ManagedInteractionSnapshot } from "./managed-interaction.js";
+export type { ManagedInteractionRequest } from "./managed-interaction-request.js";
 /** @deprecated Use `legacyReadOperation` only for the bounded pre-cutover adapter. */
 export * as legacyReadOperation from "./read-operation.js";
 /** @deprecated Use `legacySiteRuntimeFacts` only for the bounded pre-cutover adapter. */
@@ -197,6 +202,8 @@ export { HARBOR_ALLOWLISTED_READ_OPERATION_SCHEMA, LODE_262_ALLOWLIST_PIN, LODE_
 export { HARBOR_SITE_RESOURCE_FACTS_SCHEMA } from "./site-runtime-facts.js";
 export { HARBOR_PREVIEW_EVIDENCE_STATUS_FIXTURE_SCHEMA, HARBOR_REDACTED_PREVIEW_EXPORT_FIXTURE_SCHEMA, HARBOR_WRITE_PRECHECK_FACTS_SCHEMA } from "./runtime-fixtures.js";
 export { HARBOR_RUNTIME_FACTS_SCHEMA, HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA } from "./runtime-session.js";
+export { HARBOR_PAGE_LIST_SCHEMA, HARBOR_PAGE_NAVIGATION_SCHEMA, MAX_PAGE_OBJECTS, MAX_PAGE_TOMBSTONES, PageRegistry } from "./page-navigation.js";
+export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageOperationReceipt, ManagedPageUnavailable, ManagedPageUnavailableClass } from "./page-navigation.js";
 export { HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA } from "./runtime-diagnostics.js";
 export type {
   DiagnosticsConsoleLevel,
@@ -507,18 +514,30 @@ export class HarborRuntime {
     return this.runtimeSessions.getManagedInteraction(operation_ref);
   }
 
-  async operateManagedPage(runtime_session_ref: string, input: unknown): Promise<ManagedPageFacts | ManagedPageList | ManagedPageUnavailable> {
+  getManagedPageOperation(operation_ref: string) {
+    return this.runtimeSessions.getManagedPageOperation(operation_ref);
+  }
+
+  async operateManagedPage(runtime_session_ref: string, input: unknown): Promise<ManagedPageFacts | ManagedPageList | ManagedPageOperationReceipt | ManagedPageUnavailable> {
+    const invalid = (message: string): ManagedPageUnavailable => ({
+      status: "unavailable",
+      schema_version: "harbor-page-navigation/v1",
+      failure_class: "invalid_request",
+      message,
+      retryable: false,
+      dispatch_state: "not_dispatched"
+    });
     if (!input || typeof input !== "object" || Array.isArray(input)) {
-      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Invalid Page operation request.", retryable: false };
+      return invalid("Invalid Page operation request.");
     }
     const request = input as Record<string, unknown>;
     const operations = ["page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"] as const;
     if (!operations.includes(request.operation as typeof operations[number])) {
-      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Unknown Page operation.", retryable: false };
+      return invalid("Unknown Page operation.");
     }
     const authorized = request.authorized_origins;
     if (!Array.isArray(authorized) || !authorized.every(item => typeof item === "string")) {
-      return { status: "unavailable", schema_version: "harbor-page-navigation/v1", failure_class: "invalid_request", message: "Authorized origin facts are required.", retryable: false };
+      return invalid("Authorized origin facts are required.");
     }
     const inputRecord = {
       operation: request.operation as ManagedPageOperation,

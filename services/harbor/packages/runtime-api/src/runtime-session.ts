@@ -125,8 +125,8 @@ export type {
   RuntimeViewerEntry,
   ValidationRuntimeFacts
 } from "./runtime-session-types.js";
-export { HARBOR_PAGE_LIST_SCHEMA, HARBOR_PAGE_NAVIGATION_SCHEMA, PageRegistry } from "./page-navigation.js";
-export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageOperationReceipt, ManagedPageUnavailable } from "./page-navigation.js";
+export { HARBOR_PAGE_LIST_SCHEMA, HARBOR_PAGE_NAVIGATION_SCHEMA, MAX_PAGE_OBJECTS, MAX_PAGE_TOMBSTONES, PageRegistry } from "./page-navigation.js";
+export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageOperationReceipt, ManagedPageUnavailable, ManagedPageUnavailableClass } from "./page-navigation.js";
 
 export interface RuntimeSessionRecord {
   facts: RuntimeSessionFacts;

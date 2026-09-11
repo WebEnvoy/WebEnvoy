@@ -165,3 +165,72 @@ test("PageRegistry removes an opener reference when the Provider can no longer c
   const refreshed = registry.list(["https://s1.example", "https://s2.example"]).pages.find(item => item.page_id === popup.page_id)!;
   assert.equal(refreshed.opener_page_id, undefined);
 });
+
+test("PageRegistry consumes bounded closed tombstones without reviving the old Page identity", async () => {
+  let states = [
+    page("provider:one", "https://s1.example", true),
+    page("provider:two", "https://s2.example", false)
+  ];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(states),
+    openPage: async () => structuredClone(states[0]!),
+    activatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!),
+    closePage: async ref => { states = states.filter(item => item.provider_page_ref !== ref); return structuredClone(states); },
+    navigatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:test", pageController);
+  await registry.refresh();
+  const before = registry.list(["https://s1.example", "https://s2.example"]).pages.find(item => item.current_url?.startsWith("https://s2"))!;
+
+  states = [
+    states[0]!,
+    { ...states[1]!, status: "closed", active: false }
+  ];
+  await registry.refresh();
+  const afterClose = registry.list(["https://s1.example", "https://s2.example"]);
+  assert.equal(afterClose.pages.some(item => item.page_id === before.page_id), false);
+
+  // A provider handle may not be reused to revive a closed public object.
+  states = [states[0]!, page("provider:two", "https://s2.example/replacement", false)];
+  await registry.refresh();
+  const replacement = registry.list(["https://s1.example", "https://s2.example"]).pages.find(item => item.current_url?.startsWith("https://s2"))!;
+  assert.notEqual(replacement.page_id, before.page_id);
+  assert.notEqual(replacement.page_ref, before.page_ref);
+  const stale = await registry.operate({
+    operation: "page.navigate", page_id: before.page_id, page_ref: before.page_ref,
+    url: "https://s2.example/stale", authorized_origins: ["https://s2.example"]
+  });
+  assert.equal("failure_class" in stale && stale.failure_class, "stale_page");
+});
+
+test("PageRegistry accepts a closed tombstone returned by an explicit close", async () => {
+  let states = [
+    page("provider:one", "https://s1.example", true),
+    page("provider:two", "https://s2.example", false)
+  ];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(states),
+    openPage: async () => structuredClone(states[0]!),
+    activatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!),
+    closePage: async ref => {
+      const closing = states.find(item => item.provider_page_ref === ref);
+      states = [
+        ...states.filter(item => item.provider_page_ref !== ref),
+        ...(closing ? [{ ...closing, status: "closed" as const, active: false }] : [])
+      ];
+      return structuredClone(states);
+    },
+    navigatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:test", pageController);
+  await registry.refresh();
+  const pages = registry.list(["https://s1.example", "https://s2.example"]).pages;
+  const background = pages.find(item => !item.active)!;
+  const result = await registry.operate({
+    operation: "page.close", page_id: background.page_id, page_ref: background.page_ref,
+    authorized_origins: ["https://s1.example", "https://s2.example"]
+  });
+  assert.equal("failure_class" in result, false);
+  assert.equal((result as ManagedPageFacts).page_id, pages.find(item => item.active)!.page_id);
+  assert.equal(registry.list(["https://s1.example", "https://s2.example"]).pages.length, 1);
+});

@@ -14,6 +14,7 @@ import {
   resolveIdentityEnvironmentLaunchConfiguration,
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
+import { MAX_PAGE_OBJECTS, MAX_PAGE_TOMBSTONES, PageNavigationError, pageNavigationFailureClass } from "./page-navigation.js";
 import { opaqueRef } from "./refs.js";
 import { prepareProfileStorage, profileStorageHasExternalLock } from "./profile-storage.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
@@ -271,7 +272,10 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       listPages: async () => parseDriverPages(await driver.request("list_pages", {}, DRIVER_COMMAND_TIMEOUT_MS)),
       openPage: async (url, authorized_origins) => parseDriverPageState(await driver.request("open_page", { ...(url ? { url } : {}), ...(authorized_origins ? { authorized_origins } : {}) }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, input.timeout_ms))),
       activatePage: async (provider_page_ref) => parseDriverPageState(await driver.request("activate_page", { provider_page_ref }, DRIVER_COMMAND_TIMEOUT_MS)),
-      closePage: async (provider_page_ref) => parseDriverPages(await driver.request("close_page", { provider_page_ref }, DRIVER_COMMAND_TIMEOUT_MS)),
+      closePage: async (provider_page_ref, safe_return_provider_page_ref) => parseDriverPages(await driver.request("close_page", {
+        provider_page_ref,
+        ...(safe_return_provider_page_ref ? { safe_return_provider_page_ref } : {})
+      }, DRIVER_COMMAND_TIMEOUT_MS)),
       navigatePage: async (provider_page_ref, action, url, authorized_origins) => parseDriverPageState(await driver.request("navigate_page", { provider_page_ref, action, ...(url ? { url } : {}), ...(authorized_origins ? { authorized_origins } : {}), timeout_ms: input.timeout_ms }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, input.timeout_ms)))
     };
     return {
@@ -290,10 +294,21 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       }),
       clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
       interaction: trustManagedInteractionOperation(async input => {
+        // Runtime normalizes this Core-derived intersection, but keep the
+        // provider adapter safe for legacy direct callers as well. An
+        // explicitly supplied set is authoritative and must contain the
+        // expected origin; only an omitted field gets singleton fallback.
+        const authorized_origins = input.authorized_origins === undefined
+          ? [input.expected_origin]
+          : [...new Set(input.authorized_origins)];
+        if (!authorized_origins.includes(input.expected_origin)) {
+          return { status: "unavailable", dispatch_state: "not_dispatched", failure_class: "managed_interaction_origin_denied" };
+        }
+        const providerInput = { ...input, authorized_origins };
         // After a private command is sent, a lost response cannot prove that an
         // input was not dispatched. Preserve unknown; never retry the command.
         try {
-          const response = await driver.request("managed_interaction", input, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
+          const response = await driver.request("managed_interaction", providerInput, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
           return normalizeManagedInteractionResponse(response.result, input.expected_origin);
         } catch {
           // Keep Runtime's in-flight guard until the failed command's process
@@ -518,6 +533,7 @@ function parseDriverPage(response: Record<string, unknown>): DriverPage {
 }
 
 function parseDriverPageState(response: Record<string, unknown>): LocalProviderPageState {
+  throwOnDriverPageFailure(response);
   const value = response.page && typeof response.page === "object" && !Array.isArray(response.page) ? response.page as Record<string, unknown> : response;
   if (typeof value.provider_page_ref !== "string" || !value.provider_page_ref) throw new CamoufoxDriverProtocolError("Camoufox Driver returned no private Page handle.");
   const parsed = parseDriverPage({ page: value });
@@ -532,8 +548,27 @@ function parseDriverPageState(response: Record<string, unknown>): LocalProviderP
 }
 
 function parseDriverPages(response: Record<string, unknown>): LocalProviderPageState[] {
+  throwOnDriverPageFailure(response);
   if (!Array.isArray(response.pages)) throw new CamoufoxDriverProtocolError("Camoufox Driver returned no Page list.");
-  return response.pages.slice(0, 64).map(item => parseDriverPageState(item as Record<string, unknown>));
+  if (response.pages.length > MAX_PAGE_OBJECTS + MAX_PAGE_TOMBSTONES) {
+    throw new PageNavigationError("page_capacity_exceeded", "Camoufox Driver returned too many Pages.", "not_dispatched");
+  }
+  return response.pages.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new PageNavigationError("page_relation_unavailable", `Camoufox Driver returned an invalid Page at index ${index}.`, "not_dispatched");
+    }
+    return parseDriverPageState(item as Record<string, unknown>);
+  });
+}
+
+function throwOnDriverPageFailure(response: Record<string, unknown>): void {
+  if (typeof response.failure_class !== "string") return;
+  const failure = pageNavigationFailureClass(new Error(response.failure_class));
+  const message = typeof response.message === "string" ? safePublicText(response.message) : response.failure_class;
+  const dispatchState = response.dispatch_state === "dispatched" || response.dispatch_state === "not_dispatched"
+    ? response.dispatch_state
+    : undefined;
+  throw new PageNavigationError(failure, message, dispatchState);
 }
 
 async function probeCamoufoxSiteResource(

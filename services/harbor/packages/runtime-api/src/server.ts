@@ -256,6 +256,23 @@ async function route(
     writeJson(response, result ? 200 : 404, result ?? { status: "unavailable", failure_class: "managed_interaction_receipt_missing" }); return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "managed-pages" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.getManagedPageOperation(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? {
+      status: "unavailable",
+      schema_version: "harbor-page-navigation/v1",
+      failure_class: "unknown_outcome",
+      message: "Page operation receipt was not found.",
+      retryable: true,
+      // A missing receipt is not evidence that the Provider was untouched;
+      // callers must retain the operation reference and reconcile explicitly.
+      dispatch_state: "dispatched",
+      operation_ref: parts[2]
+    });
+    return;
+  }
+
   if (parts[0] === "runtime" && (parts[1] === "sessions" || parts[1] === "identity-environment-sessions") && parts[2]) {
     await routeSession(runtime, manualAuthenticationAuthorizer, parts[2], parts[3], method, request, response);
     return;
@@ -298,6 +315,7 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
       "/runtime/sessions/{runtime_session_ref}/diagnostics",
       "/runtime/sessions/{runtime_session_ref}/pages",
+      "/runtime/managed-pages/{operation_ref}",
       "/runtime/sessions/{runtime_session_ref}/handoff",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",

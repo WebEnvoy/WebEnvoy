@@ -14,6 +14,7 @@ export const MAX_PAGE_EVENTS = 128;
 export const MAX_INSTANCE_EVENTS = 512;
 export const MAX_PENDING_REQUESTS = 256;
 export const MAX_PAGE_OPERATION_RECEIPTS = MAX_PENDING_REQUESTS;
+export const MAX_PAGE_TOMBSTONES = MAX_PAGE_OBJECTS;
 
 export type ManagedPageOperation =
   | "page.list"
@@ -116,6 +117,7 @@ interface PageRecord {
   /** The Provider omitted this object from a valid list, but did not prove a close. */
   present: boolean;
   last_used_at: number;
+  closed_at?: number;
 }
 
 type Receipt = { request_hash: string; result: ManagedPageOperationReceipt };
@@ -297,7 +299,8 @@ export class PageRegistry {
       if (!fallback) return this.unavailable("no_safe_return_page", "The active Page has no safe return Page.", false, input, record);
       markDispatched();
       const states = await this.controller.closePage(record.provider_page_ref, fallback.provider_page_ref);
-      if (states.some(state => state.provider_page_ref === record.provider_page_ref)) {
+      const closedState = states.find(state => state.provider_page_ref === record.provider_page_ref);
+      if (closedState && closedState.status !== "closed") {
         throw new PageNavigationError("page_relation_unavailable", "The Provider did not confirm the active Page close.", "dispatched");
       }
       record.closed = true;
@@ -314,7 +317,8 @@ export class PageRegistry {
     markDispatched();
     const current = this.activePageId ? this.byId.get(this.activePageId) : undefined;
     const states = await this.controller.closePage(record.provider_page_ref, current?.provider_page_ref);
-    if (states.some(state => state.provider_page_ref === record.provider_page_ref)) {
+    const closedState = states.find(state => state.provider_page_ref === record.provider_page_ref);
+    if (closedState && closedState.status !== "closed") {
       throw new PageNavigationError("page_relation_unavailable", "The Provider did not confirm the Page close.", "dispatched");
     }
     record.closed = true;
@@ -362,7 +366,7 @@ export class PageRegistry {
 
   private syncUnchecked(states: LocalProviderPageState[], allowNoActive = false, confirmedClosedProviderRefs: ReadonlySet<string> = new Set()): void {
     if (!Array.isArray(states)) throw new PageNavigationError("page_relation_unavailable", "The Provider Page list is invalid.");
-    if (states.length > MAX_PAGE_OBJECTS) throw new PageNavigationError("page_capacity_exceeded", "The Provider returned more Pages than Harbor can safely track.");
+    if (states.length > MAX_PAGE_OBJECTS + MAX_PAGE_TOMBSTONES) throw new PageNavigationError("page_capacity_exceeded", "The Provider returned more Pages than Harbor can safely track.");
     if (states.length === 0 && [...this.byId.values()].some(record => !record.closed)) {
       throw new PageNavigationError("page_relation_unavailable", "The Provider Page list is empty while tracked Pages remain open.");
     }
@@ -374,14 +378,21 @@ export class PageRegistry {
       refs.add(state.provider_page_ref);
     }
     const newPageCount = [...refs].filter(providerRef => {
+      const state = states.find(candidate => candidate.provider_page_ref === providerRef);
+      if (state?.status === "closed") return false;
       const previous = this.byProvider.get(providerRef);
       return !previous || previous.closed || !previous.present;
     }).length;
     if (this.livePageCount() + newPageCount > MAX_PAGE_OBJECTS) {
       throw new PageNavigationError("page_capacity_exceeded", "The Page Registry cannot retain another Page identity.");
     }
-    const active = states.filter(state => state.active === true);
-    if (states.length > 0 && active.length !== 1 && !(allowNoActive && active.length === 0)) {
+    const openStates = states.filter(state => state.status !== "closed");
+    const closedStates = states.filter(state => state.status === "closed");
+    if (closedStates.some(state => state.active === true)) {
+      throw new PageNavigationError("page_relation_unavailable", "The Provider marked a closed Page as active.");
+    }
+    const active = openStates.filter(state => state.active === true);
+    if (openStates.length > 0 && active.length !== 1 && !(allowNoActive && active.length === 0)) {
       throw new PageNavigationError("page_relation_unavailable", "The Provider Page list did not prove exactly one active Page.");
     }
     const seen = new Set(states.map(state => state.provider_page_ref));
@@ -389,13 +400,30 @@ export class PageRegistry {
     const unconfirmedMissing = missingOpen.filter(page => !confirmedClosedProviderRefs.has(page.provider_page_ref));
     for (const page of missingOpen) {
       page.present = false;
-      if (confirmedClosedProviderRefs.has(page.provider_page_ref)) page.closed = true;
+      if (confirmedClosedProviderRefs.has(page.provider_page_ref)) {
+        page.closed = true;
+        page.closed_at ??= Date.now();
+      }
     }
     if (unconfirmedMissing.length > 0) {
       throw new PageNavigationError("page_relation_unavailable", "The Provider Page list omitted an open Page without a close confirmation.");
     }
     for (const state of states) {
       const previous = this.byProvider.get(state.provider_page_ref);
+      if (state.status === "closed") {
+        const page = previous ?? {
+          page_id: opaqueRef("page_object"), provider_page_ref: state.provider_page_ref, provider_state: state,
+          document_generation: Math.max(1, state.document_generation ?? 1), page_ref: opaqueRef("page"),
+          closed: true, present: false, last_used_at: Date.now(), closed_at: Date.now()
+        } satisfies PageRecord;
+        page.provider_state = state;
+        page.closed = true;
+        page.present = false;
+        page.closed_at ??= Date.now();
+        this.byProvider.set(state.provider_page_ref, page);
+        this.byId.set(page.page_id, page);
+        continue;
+      }
       // An omitted Provider Page is considered lost, not closed. If a later
       // Provider event reuses that private handle, allocate a new public Page
       // identity instead of reviving the old object.
@@ -417,7 +445,9 @@ export class PageRegistry {
       page.provider_state = state;
       page.closed = false;
       page.present = true;
-      page.opener_page_id = state.opener_provider_page_ref ? this.byProvider.get(state.opener_provider_page_ref)?.page_id : undefined;
+      page.closed_at = undefined;
+      const opener = state.opener_provider_page_ref ? this.byProvider.get(state.opener_provider_page_ref) : undefined;
+      page.opener_page_id = opener && !opener.closed && opener.present ? opener.page_id : undefined;
       this.byProvider.set(state.provider_page_ref, page);
       this.byId.set(page.page_id, page);
       if (state.active) {
@@ -436,8 +466,15 @@ export class PageRegistry {
 
   private pruneUnavailableRecords(): void {
     for (const [pageId, page] of this.byId) {
-      if (!page.closed && page.present) continue;
+      if (page.closed || page.present) continue;
       this.byId.delete(pageId);
+      if (this.byProvider.get(page.provider_page_ref) === page) this.byProvider.delete(page.provider_page_ref);
+    }
+    const tombstones = [...this.byId.values()]
+      .filter(page => page.closed)
+      .sort((left, right) => (left.closed_at ?? left.last_used_at) - (right.closed_at ?? right.last_used_at));
+    for (const page of tombstones.slice(0, Math.max(0, tombstones.length - MAX_PAGE_TOMBSTONES))) {
+      this.byId.delete(page.page_id);
       if (this.byProvider.get(page.provider_page_ref) === page) this.byProvider.delete(page.provider_page_ref);
     }
     this.lastUsed = this.lastUsed.filter(pageId => this.byId.has(pageId));

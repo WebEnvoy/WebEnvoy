@@ -85,6 +85,23 @@ test("serves canonical owner runtime facts separately from legacy business adapt
   }
 });
 
+test("does not treat a missing Page operation receipt as not dispatched", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const operationRef = "page-operation-missing";
+    const response = await fetch(`${running.url}/runtime/managed-pages/${operationRef}`, { headers: manualAuthHeaders() });
+    assert.equal(response.status, 404);
+    const body = await response.json() as Record<string, unknown>;
+    assert.equal(body.status, "unavailable");
+    assert.equal(body.failure_class, "unknown_outcome");
+    assert.equal(body.dispatch_state, "dispatched");
+    assert.equal(body.operation_ref, operationRef);
+  } finally {
+    await running.close();
+  }
+});
+
 test("redacts provider error details from canonical runtime facts", async () => {
   const leakedMessage = "Authorization: Bearer secret-token /private/path/profile";
   const runtime = new HarborRuntime(async (input) => ({
