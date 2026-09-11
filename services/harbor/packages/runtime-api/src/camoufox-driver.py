@@ -1103,7 +1103,7 @@ def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
         except Exception:
             pass
 
-    def on_close() -> None:
+    def on_close(_closed_page: Any = None) -> None:
         global PAGE
         state["closed"] = True
         state["closed_at"] = time.monotonic()
