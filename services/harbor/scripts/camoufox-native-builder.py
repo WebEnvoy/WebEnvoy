@@ -250,8 +250,13 @@ def patch_native_tab_handoff_lifecycle(source: str) -> str:
   // No title/URL matching, target recreation, actor rebind, or Page
   // initialization is allowed here.
   _onNativeSwap(event) {
-    const browser = event.target;
-    const other = event.detail;
+    // AsyncTabSwitcher handles these capturing events through
+    // event.originalTarget. event.target may be the retargeted window, which
+    // is never a valid Browser relation for this registry.
+    const browser = event?.originalTarget;
+    const other = event?.detail;
+    if (!browser || typeof browser !== 'object' || !other || typeof other !== 'object' || browser === other)
+      return;
     this._nativeSwaps ??= new WeakMap();
     if (this._nativeSwaps.has(browser))
       return;
@@ -276,13 +281,16 @@ def patch_native_tab_handoff_lifecycle(source: str) -> str:
   }
 
   _onNativeSwapDone(event) {
-    const swap = this._nativeSwaps?.get(event.target);
+    const eventBrowser = event?.originalTarget;
+    if (!eventBrowser || typeof eventBrowser !== 'object')
+      return;
+    const swap = this._nativeSwaps?.get(eventBrowser);
     if (!swap)
       return;
     const {browser, other, first, second, context, otherContext} = swap;
     // A partial, missing, or mismatched swap stays unavailable; never guess
     // which target owns a document after a native move.
-    if (event.detail !== (event.target === browser ? other : browser) ||
+    if (event.detail !== (eventBrowser === browser ? other : browser) ||
         browser.browsingContext !== otherContext || other.browsingContext !== context ||
         first._disposed || second._disposed || first.browserContext() !== second.browserContext())
       return;
@@ -807,6 +815,7 @@ def self_check(source: Path, *, tab_handoff: bool = False) -> dict[str, object]:
         "registry_safe_return_close": "closePageWithSafeReturn" in patched[2] and "selectedTab" in patched[2] and "TabManager.removeTab" in patched[2],
         "registry_native_context_ownership": "_userContextIdToBrowserContext.get(tab.userContextId)" in patched[2],
         "registry_native_tab_adoption": (not tab_handoff) or all(marker in patched[2] for marker in ("_onNativeSwap(event)", "_onNativeSwapDone(event)", "_adoptNativeTab(tab)", "event.detail?.adoptedBy", "target._nativeSwapPending")),
+        "registry_native_swap_original_target": (not tab_handoff) or all(marker in patched[2] for marker in ("const browser = event?.originalTarget;", "const eventBrowser = event?.originalTarget;")),
         "chrome_css_tab_drag_patch": (not tab_handoff) or (TAB_HANDOFF_CSS_BLOCK.count("inherit") == 1 and TAB_HANDOFF_CSS_REPLACEMENT.count("no-drag") == 1 and TAB_HANDOFF_CSS_REPLACEMENT.count("pointer-events: auto") == 1),
         "page_reload_uses_browsing_context": "browsingContext.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE)" in patched[3] and "activateAndRun" not in patched[3].split("  async ['Page.reload']()", 1)[1].split("  async ['Page.describeNode']", 1)[0],
         "source_unchanged": sha256(source / "Contents" / "Resources" / "omni.ja") == SOURCE_OMNI_SHA256_PIN and (not tab_handoff or sha256(source / TAB_HANDOFF_CSS_PATH) == SOURCE_CHROME_CSS_SHA256_PIN),

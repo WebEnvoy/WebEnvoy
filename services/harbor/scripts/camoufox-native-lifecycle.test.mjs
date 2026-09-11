@@ -121,8 +121,8 @@ print(module.patch_target_registry(source.decode("utf-8"), tab_handoff=True), en
       owner,
       real,
       placeholder,
-      start: { target: placeholder.browser, detail: real.browser },
-      end: { target: placeholder.browser, detail: real.browser },
+      start: { target: placeholder.browser.ownerGlobal, originalTarget: placeholder.browser, detail: real.browser },
+      end: { target: placeholder.browser.ownerGlobal, originalTarget: placeholder.browser, detail: real.browser },
       swap() {
         [real.browser.browsingContext, placeholder.browser.browsingContext] = [placeholder.browser.browsingContext, real.browser.browsingContext];
       }
@@ -130,10 +130,12 @@ print(module.patch_target_registry(source.decode("utf-8"), tab_handoff=True), en
   }
 
   const adopted = setup();
+  assert.notEqual(adopted.start.target, adopted.start.originalTarget, "capturing event target is retargeted");
+  assert.equal(adopted.start.originalTarget, adopted.placeholder.browser, "originalTarget retains the exact Browser element");
   const actor = adopted.real.target._actor;
   const channel = adopted.real.target._channel;
   adopted.registry._onNativeSwap(adopted.start);
-  adopted.registry._onNativeSwap({ target: adopted.real.browser, detail: adopted.placeholder.browser });
+  adopted.registry._onNativeSwap({ target: adopted.real.browser.ownerGlobal, originalTarget: adopted.real.browser, detail: adopted.placeholder.browser });
   assert.equal(adopted.real.target._nativeSwapPending, true);
   assert.equal(listenerRemovals, 2, "both real target listeners detach before the swap");
   adopted.swap();
