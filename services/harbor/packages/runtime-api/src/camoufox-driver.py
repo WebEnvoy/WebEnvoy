@@ -2950,9 +2950,18 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
             failure = interaction_surface(expected) or INTERACTION_DENIED or page_navigation_failure(controlled_page)
             if failure:
                 return refused(failure)
+            snapshot_relation = native_read_relation(controlled_page, active_state) if NATIVE_PLAYWRIGHT_ADAPTER is not None else None
+            if expected_interaction_state is not None and INTERACTION_STATE is not expected_interaction_state:
+                return refused("managed_interaction_stale_target")
             snapshot = interaction_snapshot(generation)
+            page_result = page_facts()
+            page_title = public_text(str(PAGE.title()), 256)
+            if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+                native_read_relation(controlled_page, active_state, snapshot_relation)
             return {"status":"completed", "dispatch_state":"dispatched" if dispatched else "not_dispatched",
-                    "page":{**page_facts(), "title":public_text(str(PAGE.title()), 256)}, "snapshot":snapshot}
+                    "page":{**page_result, "title":page_title}, "snapshot":snapshot}
+    except NativeRelationReadError:
+        return refused("managed_interaction_relation_unavailable")
     except InteractionSnapshotError as error:
         return refused("managed_interaction_snapshot_" + str(error))
     except Exception:

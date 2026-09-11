@@ -835,6 +835,128 @@ for interaction_action in ("click", "input", "press", "scroll"):
     run_interaction_handoff_regression(interaction_action)
 print("camoufox native interaction handoff fixtures passed")
 
+# The final interaction response also contains a fresh DOM snapshot and Page
+# title. A native handoff during either read must not publish that old result;
+# after an action, the dispatch state remains unknown rather than being reset.
+class MidReadNodes:
+    def dispose(self) -> None:
+        pass
+
+
+class MidReadHandle(DiscardProbe):
+    def evaluate(self, expression: str, *_args):
+        if "controls:state.controls" in expression:
+            return {"controls": [], "text": "", "truncated": False}
+        if "state => state.dispose()" in expression:
+            return super().evaluate(expression)
+        return True
+
+    def get_property(self, name: str) -> MidReadNodes:
+        assert name == "nodes"
+        return MidReadNodes()
+
+
+class MidReadPage(ReadPage):
+    def __init__(self, name: str, trigger: str) -> None:
+        super().__init__(name)
+        self.trigger = trigger
+        self.adapter = None
+        self.title_triggered = False
+        self.last_snapshot_handle = None
+
+    def evaluate_handle(self, _expression: str) -> MidReadHandle:
+        if self.trigger == "snapshot":
+            assert self.adapter is not None
+            self.adapter.handoff_requested = True
+        self.last_snapshot_handle = MidReadHandle()
+        return self.last_snapshot_handle
+
+    def title(self) -> str:
+        if self.trigger == "title" and not self.title_triggered:
+            assert self.adapter is not None
+            self.title_triggered = True
+            self.adapter.handoff_requested = True
+        return self.name
+
+
+class MidReadAdapter:
+    def __init__(self, page: MidReadPage) -> None:
+        self.page = page
+        self.calls = 0
+        self.handoff_requested = False
+
+    def native_snapshot(self, _browser, _context) -> dict[str, object]:
+        self.calls += 1
+        moved = self.handoff_requested
+        tab = "tab-destination" if moved else "tab-source"
+        window = "window-destination" if moved else "window-source"
+        return native_relation(
+            "mid-read-epoch", self.calls,
+            [(self.page, "target-mid-read", tab, "context-mid-read", window, True)],
+            window,
+        )
+
+
+def run_mid_read_handoff(trigger: str, action: str) -> None:
+    DRIVER.reset_provider_pages()
+    page = MidReadPage(trigger, trigger)
+    DRIVER.PAGE = page
+    DRIVER.CONTEXT = read_context(page)
+    DRIVER.register_provider_page(page)
+    adapter = MidReadAdapter(page)
+    page.adapter = adapter
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = adapter
+    request = {
+        "action": action,
+        "expected_origin": "https://example.com",
+        "authorized_origins": ["https://example.com"],
+        "control_generation": 1,
+        "timeout_ms": 100,
+    }
+    target = None
+    if action == "click":
+        target = InteractionTarget()
+        page_ref = "page_" + "a" * 32
+        observation_ref = "observation_" + "c" * 32
+        DRIVER.INTERACTION_STATE = {
+            "handle": InteractionHandle("button"),
+            "targets": {"target_" + "b" * 32: target},
+            "generation": 1,
+            "page_ref": page_ref,
+            "observation_ref": observation_ref,
+        }
+        request.update({
+            "page_ref": page_ref,
+            "observation_ref": observation_ref,
+            "target_ref": "target_" + "b" * 32,
+        })
+    try:
+        result = DRIVER.managed_interaction(request)
+        expected_status = "unknown_outcome" if action == "click" else "unavailable"
+        expected_dispatch = "dispatched" if action == "click" else "not_dispatched"
+        assert result == {
+            "status": expected_status,
+            "dispatch_state": expected_dispatch,
+            "failure_class": "managed_interaction_relation_unavailable",
+        }
+        assert adapter.calls >= 4
+        if target is not None:
+            assert target.calls == ["click"]
+        assert DRIVER.INTERACTION_STATE is None
+        assert page.last_snapshot_handle is not None
+        assert page.last_snapshot_handle.dispose_calls == 1
+    finally:
+        DRIVER.clear_interaction_guard()
+        DRIVER.PAGE = None
+        DRIVER.CONTEXT = None
+        DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+        DRIVER.reset_provider_pages()
+
+
+run_mid_read_handoff("snapshot", "snapshot")
+run_mid_read_handoff("title", "click")
+print("camoufox native interaction snapshot/title handoff fixtures passed")
+
 # Interaction origin scopes are resolved by Page identity and opener identity,
 # never by the active Page as a global fallback.
 class GuardPage:
