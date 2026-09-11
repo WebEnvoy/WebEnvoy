@@ -19,6 +19,8 @@ Document generation 从 1 开始。一次 committed navigation（包括 reload�
 
 每个 Instance 维护 active Page 和最近明确使用的 Page 顺序。Page list、observe、diagnostics 是 observation-only，不获得或续租 ControlLease；它们仍须通过当前 Session、授权和完整 Page relation 检查，不能在关系不可信时继续读。open、activate、close 与导航改变现场，必须经过既有 Core Run、ControlLease、idempotency 和可查询 receipt。用户持有同一 Instance 的控制权时，这些改变现场的 Agent 操作返回 `control_lock_conflict`，不得隐式接管；观察也不得借机取得或续租该 Lease。
 
+用户交还后，严格处于 `control_owner=none`、`ControlLease.owner=none`、`state=released` 且无 holder 的 Instance 仍可接受 Core 的新 page facts、`instance.observe` 和 `instance.read`；它们保持 observation-only，不取得或续租输入 Lease。需要改变现场时仍须先以新观察为依据，由同一 Core holder 正常取得 Lease；其他 holder 或期间发生控制变化则使观察失效。
+
 Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分配的私有 handle 映射和 provider facts；Driver 不创建或返回另一套 public page identity。只有完整、可信的 Provider list 中 `status: "closed"` 才是原生 Page 已被网页或用户关闭的 close proof。Harbor 将它消费为有界的内部 tombstone：不把 tombstone 放进公开 `pages`，但在最多 `MAX_PAGE_TOMBSTONES` 个条目内保留旧身份，防止 Provider 私有 handle 重现时复活旧 `page_id`/`page_ref`；同一 handle 后续重新出现必须分配新的公共 Page identity。Driver loss 或 list 中单纯缺失一个 live Page 不是 close proof；后者使 relation 失联并返回 `page_relation_unavailable`，而不是猜测 closed。显式 `page.open` 才能创建全新的 Page 对象。
 
 ## 2. Operations

@@ -510,6 +510,8 @@ Runtime 需要管理：
 
 只读 snapshot、network metadata 和 console error 可以不取得 Lease，但不得与活动输入形成不安全竞态。
 
+用户交还后，只有严格处于 `control_owner=none` 且 `ControlLease={owner:none,state:released,holder_ref:null}` 的 Instance 才可接受 Core 的新 snapshot；该读取仍不取得或续租 Lease。需要输入时，Core 必须以新 snapshot 为依据，由同一 Principal 通过正常 acquire 取得输入 Lease；handoff、用户接管、其他 holder 或期间发生的控制变化都会使观察失效。
+
 ### 16.2 Dispatch state
 
 至少区分：

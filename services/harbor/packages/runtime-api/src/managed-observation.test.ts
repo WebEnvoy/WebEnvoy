@@ -66,6 +66,13 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal((await observe() as { failure_class?: string }).failure_class, "control_lock_conflict");
     assert.equal((await runtime.bindManagedAccount("identity:a", input) as { failure_class?: string }).failure_class, "account_observation_required");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
+    const releasedRecord = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(a.runtime_session_ref)!;
+    const releasedGeneration = releasedRecord.control_generation;
+    const releasedObservation = await observe();
+    assert.ok(releasedObservation.status === "completed");
+    assert.equal(releasedRecord.control_generation, releasedGeneration, "observation after handback must remain lease-free");
+    assert.equal(releasedRecord.facts.control_owner, "none");
+    assert.equal(releasedRecord.facts.control_lock.state, "released");
     runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
     const resumed = await observe();
     assert.ok(resumed.status === "completed" && resumed.control_generation > first.control_generation && resumed.runtime_session_ref === first.runtime_session_ref);
@@ -240,6 +247,13 @@ test("bounded public operations keep the exact instance, refuse identity origins
     assert.equal(guardClears, 1);
     assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false)).status, "unavailable");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
+    const releasedRecord = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(a.runtime_session_ref)!;
+    const releasedGeneration = releasedRecord.control_generation;
+    const releasedRead = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
+    assert.ok(releasedRead.status === "completed" && releasedRead.text === "A verifiable public paragraph.");
+    assert.equal(releasedRecord.control_generation, releasedGeneration, "public read after handback must remain lease-free");
+    assert.equal(releasedRecord.facts.control_owner, "none");
+    assert.equal(releasedRecord.facts.control_lock.state, "released");
     runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
     const resumed = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
     assert.ok(resumed.status === "completed" && resumed.session.runtime_session_ref === a.runtime_session_ref);

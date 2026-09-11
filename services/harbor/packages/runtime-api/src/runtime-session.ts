@@ -567,14 +567,17 @@ export class RuntimeSessionStore {
   lockSession(runtime_session_ref: string, input: RuntimeSessionControlInput = {}): RuntimeSessionFacts | RuntimeSessionUnavailable {
     const record = this.records.get(runtime_session_ref);
     if (!record) return unavailableSession("session_missing", error("session_lost", "Runtime Session is missing.", true));
-    const conflict = this.acquireControl(record, input.control_owner ?? "user", input.holder_ref ?? input.control_owner ?? "user");
+    const owner = input.control_owner ?? "user";
+    const holder_ref = input.holder_ref ?? owner;
+    const preserveReleasedSnapshotGeneration = canPreserveReleasedSnapshotGeneration(record, owner, holder_ref);
+    const conflict = this.acquireControl(record, owner, holder_ref);
     if (conflict) return conflict;
     const now = new Date().toISOString();
     record.facts.lifecycle_state = "locked";
     record.facts.last_seen_at = now;
     record.facts.control_lock.state = "held";
     record.facts.control_lock.updated_at = now;
-    bumpControlGeneration(record);
+    if (!preserveReleasedSnapshotGeneration) bumpControlGeneration(record);
     record.facts.facts.push({ key: "session.lock", source: "observed", value: record.facts.control_owner });
     return snapshot(record.facts);
   }
@@ -797,7 +800,9 @@ export class RuntimeSessionStore {
     if (previous) return previous.request_hash === requestHash ? previous.result : refused("managed_interaction_idempotency_conflict");
     const record = this.records.get(runtime_session_ref);
     if (!record) return refused("session_missing");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== input.holder_ref) return refused("control_lock_conflict");
+    const coreLeaseHeld = isCoreLeaseHeld(record, input.holder_ref);
+    const releasedForSnapshot = input.action === "snapshot" && isReleasedControl(record);
+    if (!coreLeaseHeld && !releasedForSnapshot) return refused("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const operation = record.interaction;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedInteractionOperation(operation)) return refused("managed_interaction_provider_unavailable");
@@ -811,7 +816,9 @@ export class RuntimeSessionStore {
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return refused(relationFailure);
     if (record.control_generation !== generation) return refused("managed_interaction_control_changed");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== input.holder_ref) return refused("control_lock_conflict");
+    if (releasedForSnapshot ? !isReleasedControl(record) : !isCoreLeaseHeld(record, input.holder_ref)) {
+      return refused(releasedForSnapshot ? "managed_interaction_control_changed" : "control_lock_conflict");
+    }
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const observed = record.interaction_snapshot;
     let pageBinding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
@@ -842,7 +849,10 @@ export class RuntimeSessionStore {
     } : { ...action, authorized_origins: authorizedOrigins };
     try {
       const result = await this.withProviderInteraction(record, () => operation({ ...providerAction, control_generation: generation }));
-      if (record.control_generation !== generation || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) {
+      const controlUnchanged = releasedForSnapshot
+        ? isReleasedControl(record)
+        : isCoreLeaseHeld(record, input.holder_ref);
+      if (record.control_generation !== generation || !controlUnchanged || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) {
         receipt.result = { ...receipt.result, failure_class: "managed_interaction_control_changed" };
       } else {
         let projected = result;
@@ -877,7 +887,8 @@ export class RuntimeSessionStore {
   async operateManagedPublicPage(runtime_session_ref: string, holder_ref: string, input: ManagedPublicPageInput) {
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    const releasedForRead = input.url === undefined && isReleasedControl(record);
+    if (!isCoreLeaseHeld(record, holder_ref) && !releasedForRead) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const operation = record.publicPage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
@@ -885,7 +896,9 @@ export class RuntimeSessionStore {
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
     if (record.control_generation !== generation) return managedUnavailable("control_changed");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (releasedForRead ? !isReleasedControl(record) : !isCoreLeaseHeld(record, holder_ref)) {
+      return managedUnavailable(releasedForRead ? "control_changed" : "control_lock_conflict");
+    }
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const pageBinding = this.resolveLegacyPageBinding(record, input, input.expected_origin, "managed_public_origin_denied");
     if (pageBinding.failure) return managedUnavailable(pageBinding.failure);
@@ -894,7 +907,10 @@ export class RuntimeSessionStore {
       : input;
     try {
       const result = await this.withProviderInteraction(record, () => operation(providerInput));
-      if (record.control_generation !== generation || record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      const controlUnchanged = releasedForRead
+        ? isReleasedControl(record)
+        : isCoreLeaseHeld(record, holder_ref);
+      if (record.control_generation !== generation || !controlUnchanged || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
       let resultPage = result.page;
       if (resultPage && pageBinding.binding) {
         const current = record.page_registry?.updateProviderPage(pageBinding.binding.provider_page_ref, resultPage) ?? pageBinding.binding;
@@ -917,7 +933,8 @@ export class RuntimeSessionStore {
     const expectedOrigin = typeof input === "string" ? undefined : input.expected_origin;
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    const releasedForObservation = isReleasedControl(record);
+    if (!isCoreLeaseHeld(record, holder_ref) && !releasedForObservation) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
     const observe = record.observePage;
     if (record.execution_surface !== "local_provider" || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
@@ -925,14 +942,19 @@ export class RuntimeSessionStore {
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
     if (record.control_generation !== generation) return managedUnavailable("control_changed");
-    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref) return managedUnavailable("control_lock_conflict");
+    if (releasedForObservation ? !isReleasedControl(record) : !isCoreLeaseHeld(record, holder_ref)) {
+      return managedUnavailable(releasedForObservation ? "control_changed" : "control_lock_conflict");
+    }
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const pageBinding = this.resolveLegacyPageBinding(record, selector, expectedOrigin, "managed_observation_unavailable");
     if (pageBinding.failure) return managedUnavailable(pageBinding.failure);
     const providerInput = pageBinding.binding ? { provider_page_ref: pageBinding.binding.provider_page_ref } : undefined;
     try {
       const observed = await this.withProviderInteraction(record, () => observe(providerInput));
-      if (record.control_generation !== generation || record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" || record.facts.control_lock.holder_ref !== holder_ref || record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
+      const controlUnchanged = releasedForObservation
+        ? isReleasedControl(record)
+        : isCoreLeaseHeld(record, holder_ref);
+      if (record.control_generation !== generation || !controlUnchanged || record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("control_changed");
       if (!observed.page.current_url) return managedUnavailable("page_not_ready");
       let observedPage = observed.page;
       if (pageBinding.binding) {
@@ -1316,6 +1338,7 @@ export class RuntimeSessionStore {
     ) return unavailableSession("session_cleanup_failed", error("session_cleanup_failed", "Runtime Session is not reusable.", true));
     if (hasControlConflict(record, owner, holder_ref)) return lockConflict(record, owner);
     if (record.read_operation_user_release_pending && owner !== "core_task") return lockConflict(record, owner);
+    const preserveReleasedSnapshotGeneration = canPreserveReleasedSnapshotGeneration(record, owner, holder_ref);
     const preserveReadOperationHandoff = record.read_operation_user_handoff &&
       record.facts.control_owner === "core_task" && owner === "core_task" &&
       record.facts.control_lock.state === "held" && record.facts.control_lock.holder_ref === holder_ref;
@@ -1330,7 +1353,7 @@ export class RuntimeSessionStore {
       updated_at: now,
       conflict_error: null
     };
-    bumpControlGeneration(record);
+    if (!preserveReleasedSnapshotGeneration) bumpControlGeneration(record);
     record.user_held_session = false;
     record.read_operation_user_handoff = preserveReadOperationHandoff ||
       record.read_operation_user_release_pending && owner === "core_task";
@@ -1418,6 +1441,21 @@ function lockConflict(record: RuntimeSessionRecord, requestedOwner: ControlOwner
 function hasControlConflict(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {
   return record.facts.control_lock.state === "held" &&
     (record.facts.control_lock.owner !== owner || record.facts.control_lock.holder_ref !== holder_ref);
+}
+
+function isReleasedControl(record: RuntimeSessionRecord): boolean {
+  const lock = record.facts.control_lock;
+  return record.facts.control_owner === "none" && lock.owner === "none" && lock.state === "released" && lock.holder_ref === null;
+}
+
+function isCoreLeaseHeld(record: RuntimeSessionRecord, holder_ref: string): boolean {
+  const lock = record.facts.control_lock;
+  return record.facts.control_owner === "core_task" && lock.owner === "core_task" && lock.state === "held" && lock.holder_ref === holder_ref;
+}
+
+function canPreserveReleasedSnapshotGeneration(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {
+  const observation = record.interaction_snapshot;
+  return owner === "core_task" && isReleasedControl(record) && observation?.holder_ref === holder_ref && observation.control_generation === record.control_generation;
 }
 
 function retainsRuntimeResources(record: RuntimeSessionRecord): boolean {

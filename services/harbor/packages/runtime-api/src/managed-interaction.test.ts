@@ -144,6 +144,107 @@ test("fixture interaction requires matching holder, lease, Page and observation;
   } finally { await f.close(); }
 });
 
+test("handback permits a lease-free snapshot, preserves its generation for the same Core holder, and fences another holder", async () => {
+  const f = await setup();
+  try {
+    const beforeHandback = await f.snapshot();
+    assert.equal("status" in f.runtime.recordHandoff(f.a, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in f.runtime.releaseSession(f.a, { control_owner: "user" }), false);
+    const store = (f.runtime as unknown as { runtimeSessions: RuntimeSessionStore }).runtimeSessions;
+    const record = store.getRecord(f.a)!;
+    const releasedGeneration = record.control_generation;
+    assert.equal(record.facts.control_owner, "none");
+    assert.deepEqual(record.facts.control_lock, { owner: "none", state: "released", holder_ref: null, updated_at: record.facts.control_lock.updated_at, conflict_error: null });
+
+    const afterHandback = await f.snapshot();
+    assert.notEqual(afterHandback.observation_ref, beforeHandback.observation_ref);
+    assert.equal(record.control_generation, releasedGeneration, "read-only snapshot must not claim or bump the lease");
+    assert.equal(record.facts.control_owner, "none");
+    assert.equal(record.facts.control_lock.state, "released");
+
+    const claim = f.runtime.lockSession(f.a, { control_owner: "core_task", holder_ref: holder });
+    assert.ok(!("status" in claim));
+    assert.equal(record.control_generation, releasedGeneration, "same-holder claim must preserve the fresh handback observation");
+    const inputResult = await f.runtime.operateManagedInteraction(f.a, f.request("input", { ...afterHandback, target_ref: "target:field", text: "after-handback" }));
+    assert.equal(inputResult.status, "completed");
+
+    assert.equal("status" in f.runtime.recordHandoff(f.a, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in f.runtime.releaseSession(f.a, { control_owner: "user" }), false);
+    const otherSnapshot = await f.snapshot();
+    const otherGeneration = record.control_generation;
+    const otherClaim = f.runtime.lockSession(f.a, { control_owner: "core_task", holder_ref: "principal:other" });
+    assert.ok(!("status" in otherClaim));
+    assert.ok(record.control_generation > otherGeneration, "a different Core holder must invalidate the released observation");
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("input", { ...otherSnapshot, target_ref: "target:field", text: "stale-holder" })), "control_lock_conflict");
+  } finally { await f.close(); }
+});
+
+test("released snapshot rejects user control and cannot race a Core claim during Provider dispatch", async () => {
+  let started!: () => void;
+  let finish!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const f = await setup(async action => {
+    if (action.action === "snapshot") {
+      started();
+      await gate;
+    }
+  });
+  try {
+    assert.equal("status" in f.runtime.recordHandoff(f.a, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in f.runtime.releaseSession(f.a, { control_owner: "user" }), false);
+    const pending = f.runtime.operateManagedInteraction(f.a, f.request("snapshot"));
+    await entered;
+    const record = (f.runtime as unknown as { runtimeSessions: RuntimeSessionStore }).runtimeSessions.getRecord(f.a)!;
+    assert.equal(record.active_provider_interactions, 1);
+    const claim = f.runtime.lockSession(f.a, { control_owner: "core_task", holder_ref: holder });
+    assert.ok("status" in claim && claim.failure_class === "session_locked");
+    const handoff = f.runtime.recordHandoff(f.a, { control_owner: "user", handoff_reason: "user_requested" });
+    assert.ok("status" in handoff && handoff.failure_class === "session_locked");
+    finish();
+    const result = await pending;
+    assert.equal(result.status, "completed");
+    assert.equal(record.facts.control_owner, "none");
+    assert.equal(record.facts.control_lock.state, "released");
+
+    const userHeld = f.runtime.lockSession(f.a, { control_owner: "user", holder_ref: "manual-user" });
+    assert.ok(!("status" in userHeld));
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot")), "control_lock_conflict");
+  } finally { finish(); await f.close(); }
+});
+
+test("released snapshot rejects a same-holder claim that arrives during Page refresh", async () => {
+  const f = await setup();
+  let releaseRefresh!: () => void;
+  let refreshStarted!: () => void;
+  const refreshGate = new Promise<void>(resolve => { releaseRefresh = resolve; });
+  const refreshReady = new Promise<void>(resolve => { refreshStarted = resolve; });
+  try {
+    assert.equal("status" in f.runtime.recordHandoff(f.a, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in f.runtime.releaseSession(f.a, { control_owner: "user" }), false);
+    await f.snapshot();
+    const record = (f.runtime as unknown as { runtimeSessions: RuntimeSessionStore }).runtimeSessions.getRecord(f.a)!;
+    const pages = record.page_registry!;
+    const originalRefresh = pages.refresh.bind(pages);
+    pages.refresh = async () => {
+      refreshStarted();
+      await refreshGate;
+      await originalRefresh();
+    };
+    const callsBefore = f.calls.length;
+    const pending = f.runtime.operateManagedInteraction(f.a, f.request("snapshot"));
+    await refreshReady;
+    const releasedGeneration = record.control_generation;
+    const claim = f.runtime.lockSession(f.a, { control_owner: "core_task", holder_ref: holder });
+    assert.ok(!("status" in claim));
+    assert.equal(record.control_generation, releasedGeneration, "the matching claim preserves the current generation");
+    releaseRefresh();
+    const result = await pending;
+    refused(result, "managed_interaction_control_changed");
+    assert.equal(f.calls.length, callsBefore, "a snapshot whose released control changed must not reach the Provider");
+  } finally { releaseRefresh?.(); await f.close(); }
+});
+
 for (const lost of [false, true]) test(`fixture in-flight interaction blocks handoff and stale completion cannot overwrite stopped facts (${lost ? "throw" : "response"})`, async () => {
   let started!: () => void, finish!: () => void;
   const entered = new Promise<void>(resolve => { started = resolve; });
