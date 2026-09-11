@@ -1019,7 +1019,12 @@ export class HarborRuntime {
   async captureLiveSnapshot(runtime_session_ref: string, input: CaptureSnapshotInput = {}): Promise<SnapshotCaptureResult> {
     const record = this.runtimeSessions.getRecord(runtime_session_ref);
     if (!record) return this.pageScenes.capture(null, input);
-    const screenshot = await record.captureScreenshot?.();
+    let screenshot;
+    try { screenshot = await record.captureScreenshot?.(); }
+    catch {
+      this.runtimeSessions.markSessionDriverLost(runtime_session_ref);
+      return this.pageScenes.capture(record.facts, input);
+    }
     const screenshot_artifact = screenshot && !("code" in screenshot) ? screenshotArtifact(screenshot) : undefined;
     const evidence_policy = screenshot && "code" in screenshot ? { ...input.evidence_policy, screenshot: "deny" as const } : input.evidence_policy;
     const result = this.pageScenes.capture(record.facts, {

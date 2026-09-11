@@ -26,7 +26,7 @@
 - 只监听 `127.0.0.1`，`--max-connections 1`；生产默认不启用 private network 或 file access。
 - Harbor 持有唯一 browser WebSocket，在其中创建 target、attach session 并复用 `sessionId`。App／Agent 不直连、不拿 endpoint、不调用 Obscura MCP。
 - 固定 `OBSCURA_PROFILE=0`、`OBSCURA_ROTATE_PROFILE=0`；timezone 和已解析 proxy 由 Harbor 注入专用进程，凭据不进入命令行。
-- `openUrl`、同现场 semantic snapshot、点击、显式 focus 后文本输入、按键、滚动、固定观察和截图复用现有 Profile／Instance／ControlLease／operation／receipt 边界。
+- `openUrl`、同现场控件 snapshot、点击、显式 focus 后文本输入、按键、滚动、固定观察和截图复用现有 Profile／Instance／ControlLease／operation／receipt 边界；通用页面文本和既有 input value 因无法可靠区分任意命名的凭据而保持不导出。
 - 上层 Agent、App 或 Viewer 断开不关闭底层 WebSocket。底层连接或进程丢失时 Provider context 和全部页面死亡；Runtime 必须使旧 Instance／Page／observation／target ref 失效。
 - 恢复路径是停止专用进程、从同 Profile 显式创建新 Instance。已派发但未确认的写入保持 `unknown_outcome`，禁止自动重放。
 
@@ -66,14 +66,14 @@
 
 ### C. 人工使用、同现场与接管
 
-- `live_verified`：同一 Harbor-held target 上截图、滚动、点击按钮、显式 focus 后中文 `Input.insertText` 成功；未保存输入状态随同一 target 观察。
+- `live_verified`：同一 Harbor-held target 上截图、滚动、点击按钮、显式 focus 后中文 `Input.insertText` 成功；snapshot 只返回受限控件元数据，不导出通用页面文本或既有 input value。
 - `live_verified`／缺口：鼠标点击输入框不产生默认 focus；没有 `Input.imeSetComposition`，合成中文文本不能冒充真实中文 IME。
 - `unsupported` 当前产品路径：`viewer_entry` 保持 unsupported；尚无正式 App 原现场画面、人工 ControlLease 接管／交还。截图能力不冒充 Viewer 或人机共用通过。
 - `live_verified`：关闭底层 WebSocket 后 target 列表为空；因此旧帧和引用必须失效。上层断连保持连接的 App／Plugin 实测待证据。
 
 ### D. 网站任务主要能力
 
-- `live_verified`：受控 HTTP 页面导航、DOM 观察、点击、中文 insertText、滚动、截图。
+- `live_verified`：受控 HTTP 页面导航、受限控件观察、点击、中文 insertText、滚动、截图；通用 semantic text/value projection 记为 `limited`，待正式敏感内容分类 owner 后再开放。
 - `provider_claim`／待证据：query／fragment、redirect/history、select/state wait、rich text、frame、Shadow DOM、复杂编辑器、Network／Console、受控执行和 permissions。
 - 固定版本明确缺口：popup／dialog 不支持；download no-op；upload 需要同时放开广泛 `--allow-file-access`，当前正式 Driver 不开放。
 - 待证据：正式“编辑→上传→保存→回读”。公共 Runtime 或 Driver 缺口归 #497／#511，不据此把 Obscura 定位成只读。
@@ -81,7 +81,7 @@
 ### E. 断连、unknown 与恢复
 
 - `live_verified`：底层 WebSocket 断开销毁现场；同进程新连接不会读回刚写 Cookie，正确恢复要求重启专用进程。
-- `fixture_verified`：现有 Runtime operation receipt、ControlLease、stale observation 和 dispatched uncertainty 规则继续适用；Driver 输入失败在可能派发后返回 `unknown_outcome`。
+- `fixture_verified`：Driver 的空闲断连信号与截图／交互／观察异常都会使旧 Runtime session、ControlLease、Page／observation／target ref 失效；已派发 interaction receipt 保持 `unknown_outcome` 且不重放。
 - 待证据：正式路径分别注入 Agent、Viewer、底层连接、进程中断，以及“提交已生效、响应前中断”的计数对账；在完成前不能宣称恢复底线全部成立。
 
 ### F. 真实站点与正式安装消费

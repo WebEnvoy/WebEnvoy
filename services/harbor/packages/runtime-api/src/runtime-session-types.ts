@@ -752,6 +752,8 @@ export type LocalProviderLaunchResult =
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
       executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
       captureScreenshot: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
+      /** Resolves when the owned transport dies unexpectedly, including while idle. */
+      driverLost?: Promise<void>;
       close: () => Promise<void>;
     }
   | { status: "unavailable"; error: RuntimeErrorFact; facts: RuntimeFact[] };

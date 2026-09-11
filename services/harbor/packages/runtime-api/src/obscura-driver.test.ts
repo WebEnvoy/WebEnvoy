@@ -1,28 +1,21 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { HarborRuntime } from "./index.js";
-import { obscuraPublicText } from "./obscura-driver.js";
 
 const binary = process.env.HARBOR_OBSCURA_PATH;
-
-test("Obscura semantic projection keeps ordinary text and rejects secret-shaped content", () => {
-  assert.equal(obscuraPublicText("普通字段", 160), "普通字段");
-  for (const value of ["session=alpha", "token=private", "authorization=Bearer private", "harmless field: cookie-secret"]) {
-    assert.equal(obscuraPublicText(value, 512), "");
-  }
-});
 
 test("Obscura runs through managed Profile, Instance, snapshot, input and restart persistence", { skip: !binary }, async () => {
   const root = await mkdtemp(join(tmpdir(), "harbor-obscura-live-"));
   const server = createServer((request, response) => {
     response.setHeader("content-type", "text/html; charset=utf-8");
-    if (request.url === "/first") response.setHeader("set-cookie", "session=alpha; Path=/; HttpOnly; SameSite=Lax");
-    const persisted = request.headers.cookie?.includes("session=alpha") ?? false;
-    response.end(`<!doctype html><meta charset=utf-8><title>${persisted ? "Persisted" : "Fresh"}</title><body style="min-height:3000px"><label>内容 <input aria-label="内容"></label><label>普通字段 <input aria-label="普通字段" value="token=private"></label><input aria-label="延迟替换"><button onclick="this.textContent='已保存'">保存</button><button aria-label="安排替换" onclick="setTimeout(()=>{const el=document.querySelector('[aria-label=延迟替换]');el.replaceWith(el.cloneNode(true))},50)">安排替换</button><p>公开结果</p><p>${request.headers.cookie ?? "cookie=missing"}</p><p>authorization=Bearer private</p></body>`);
+    if (request.url === "/first") response.setHeader("set-cookie", "sid=alpha; Path=/; HttpOnly; SameSite=Lax");
+    const persisted = request.headers.cookie?.includes("sid=alpha") ?? false;
+    response.end(`<!doctype html><meta charset=utf-8><title>${persisted ? "Persisted" : "Fresh"}</title><body style="min-height:3000px"><input aria-label="内容"><input aria-label="普通字段" value="correct-horse-battery-staple"><input aria-label="延迟替换"><button onclick="this.textContent='已保存'">保存</button><button aria-label="安排替换" onclick="setTimeout(()=>{const old=document.querySelector('[aria-label=延迟替换]'),next=old.nextSibling;old.remove();const el=document.createElement('input');el.setAttribute('aria-label','延迟替换');document.body.insertBefore(el,next)},50)">安排替换</button><p>eyJhbGciOiJIUzI1NiJ9.payload.signature</p><p>${request.headers.cookie ?? "missing"}</p></body>`);
   });
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -45,10 +38,11 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
 
     let snapshot = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "snapshot", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_snapshot" });
     assert.equal(snapshot.status, "completed");
-    assert.equal(JSON.stringify(snapshot).includes("token=private"), false);
-    assert.equal(JSON.stringify(snapshot).includes("session=alpha"), false);
-    assert.equal(JSON.stringify(snapshot).includes("Bearer private"), false);
-    assert.match(snapshot.snapshot?.text ?? "", /公开结果/);
+    assert.equal(JSON.stringify(snapshot).includes("correct-horse-battery-staple"), false);
+    assert.equal(JSON.stringify(snapshot).includes("sid=alpha"), false);
+    assert.equal(JSON.stringify(snapshot).includes("eyJhbGciOiJIUzI1NiJ9"), false);
+    assert.equal(snapshot.snapshot?.text, "");
+    assert.equal(snapshot.snapshot?.truncated, true);
     const schedule = snapshot.snapshot?.controls.find(control => control.name === "安排替换");
     const delayed = snapshot.snapshot?.controls.find(control => control.name === "延迟替换");
     assert.ok(schedule && delayed);
@@ -65,7 +59,7 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     assert.ok(textbox);
     const input = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "input", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_input", page_ref: snapshot.snapshot!.page_ref, observation_ref: snapshot.snapshot!.observation_ref, target_ref: textbox!.target_ref, text: "中文验证" });
     assert.equal(input.status, "completed");
-    assert.equal(input.snapshot?.controls.find(control => control.role === "textbox")?.value, "中文验证");
+    assert.equal(input.snapshot?.controls.find(control => control.role === "textbox")?.value, undefined);
     const button = input.snapshot?.controls.find(control => control.role === "button");
     assert.ok(button);
     const clicked = await runtime.operateManagedInteraction(opened.runtime_session_ref, { action: "click", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_live", operation_ref: "operation_obscura_click", page_ref: input.snapshot!.page_ref, observation_ref: input.snapshot!.observation_ref, target_ref: button!.target_ref });
@@ -83,7 +77,16 @@ test("Obscura runs through managed Profile, Instance, snapshot, input and restar
     assert.equal(reopened.current_page.title, "Persisted");
     const persisted = await runtime.operateManagedInteraction(reopened.runtime_session_ref, { action: "snapshot", expected_origin: origin, controlled_origin: origin, holder_ref: "run_obscura_reopen", operation_ref: "operation_obscura_persisted" });
     assert.equal(persisted.status, "completed");
-    assert.equal(JSON.stringify(persisted).includes("session=alpha"), false);
+    assert.equal(JSON.stringify(persisted).includes("sid=alpha"), false);
+    const providerPids = execFileSync("/bin/ps", ["-axo", "pid=,command="], { encoding: "utf8" }).split("\n")
+      .filter(line => line.includes("obscura serve") && line.includes(root)).map(line => Number(line.trim().split(/\s+/, 1)[0])).filter(Number.isSafeInteger);
+    assert.equal(providerPids.length, 1);
+    process.kill(providerPids[0]!, "SIGKILL");
+    const deadline = Date.now() + 2000;
+    while (runtime.getSession(reopened.runtime_session_ref)?.lifecycle_state !== "disconnected" && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(runtime.getSession(reopened.runtime_session_ref)?.lifecycle_state, "disconnected");
+    assert.equal(runtime.getSession(reopened.runtime_session_ref)?.control_owner, "none");
+    assert.equal((await runtime.captureLiveSnapshot(reopened.runtime_session_ref)).status, "unavailable");
   } finally {
     await runtime.close();
     await new Promise<void>(resolve => server.close(() => resolve()));

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { HarborRuntime } from "./index.js";
 import { RuntimeSessionStore } from "./runtime-session.js";
 import { ViewerControlStore } from "./viewer-control.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe, trustLocalProviderWritePrecheckProbe } from "./read-operation-probe-trust.js";
@@ -46,3 +47,38 @@ for (const operation of ["read", "site", "write", "open"] as const) {
     assert.equal(store.isIdentityEnvironmentInUse("identity_test"), false);
   });
 }
+
+test("an idle driver-loss signal invalidates the session without waiting for another request", async () => {
+  let lose!: () => void;
+  const driverLost = new Promise<void>(resolve => { lose = resolve; });
+  const runtime = new HarborRuntime(async () => ({
+    status: "ready", execution_surface: "local_provider", driver_ref: "driver_idle", facts: [], driverLost,
+    viewer_entry: { availability: "unsupported", access_mode: "none", transport: "not_applicable", input_capabilities: [] },
+    page: { current_url: "https://example.com/", title: "Test", status: "ready", facts: [] },
+    openUrl: async () => ({ current_url: "https://example.com/", title: "Test", status: "ready", facts: [] }),
+    captureScreenshot: async () => { throw new Error("not called"); }, close: async () => {}
+  }));
+  const session = await runtime.createSession({ control_owner: "core_task", holder_ref: "principal:test" });
+  lose();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "disconnected");
+  assert.equal(runtime.getSession(session.runtime_session_ref)?.control_owner, "none");
+  assert.equal(runtime.getSession(session.runtime_session_ref)?.current_error?.code, "session_lost");
+  await runtime.stopSession(session.runtime_session_ref);
+});
+
+test("screenshot transport failure returns a bounded unavailable result and invalidates the session", async () => {
+  const runtime = new HarborRuntime(async () => ({
+    status: "ready", execution_surface: "local_provider", driver_ref: "driver_capture", facts: [],
+    viewer_entry: { availability: "unsupported", access_mode: "none", transport: "not_applicable", input_capabilities: [] },
+    page: { current_url: "https://example.com/", title: "Test", status: "ready", facts: [] },
+    openUrl: async () => ({ current_url: "https://example.com/", title: "Test", status: "ready", facts: [] }),
+    captureScreenshot: async () => { throw new Error("private screenshot transport detail"); }, close: async () => {}
+  }));
+  const session = await runtime.createSession({ control_owner: "core_task", holder_ref: "principal:test" });
+  const result = await runtime.captureLiveSnapshot(session.runtime_session_ref);
+  assert.equal(result.status, "unavailable");
+  assert.equal(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "disconnected");
+  assert.equal(JSON.stringify(result).includes("private screenshot transport detail"), false);
+  await runtime.stopSession(session.runtime_session_ref);
+});

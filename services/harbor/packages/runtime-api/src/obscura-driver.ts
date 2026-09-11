@@ -11,13 +11,16 @@ import type { LocalProviderLaunchInput, LocalProviderLaunchResult, LocalProvider
 export const OBSCURA_VALIDATED_COMMIT = "01e1caa33360f6c02643457307894ec885e82eef";
 export const OBSCURA_VALIDATED_SHA256 = "d05336b807fde6b27221af3f1427550666d1f855166c3cc94be537a08b4ba98d";
 
-type Control = { target_ref: string; role: string; name: string; enabled: boolean; value?: string; node_id: number };
+type Control = { target_ref: string; role: string; name: string; enabled: boolean; node_id: number };
 type SnapshotState = { page_ref: string; observation_ref: string; document_key: string; controls: Control[] };
 
 export async function launchObscuraProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const storage = await prepareProfileStorage(input.profile_storage_ref);
   let child: ChildProcess | undefined;
   let client: ObscuraCdpClient | undefined;
+  let closed = false;
+  let reportDriverLost!: () => void;
+  const driverLost = new Promise<void>(resolve => { reportDriverLost = resolve; });
   try {
     if (!input.browser_path) throw new Error("Obscura binary path is missing.");
     const binary = await readFile(input.browser_path);
@@ -42,7 +45,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
       }
     });
     const version = await waitForVersion(port, input.timeout_ms, child);
-    client = await ObscuraCdpClient.connect(version.webSocketDebuggerUrl, input.timeout_ms);
+    client = await ObscuraCdpClient.connect(version.webSocketDebuggerUrl, input.timeout_ms, () => { if (!closed) reportDriverLost(); });
     const created = await client.send("Target.createTarget", { url: "about:blank" });
     const targetId = stringField(created, "targetId");
     const attached = await client.send("Target.attachToTarget", { targetId, flatten: true });
@@ -51,11 +54,12 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
       const [width, height] = configuration.viewport.split("x").map(Number);
       await client.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
     }
-    let closed = false;
+    let interactionContextId = 0;
     let snapshot: SnapshotState | null = null;
     const navigate = async (url: string) => {
       snapshot = null;
       await client!.send("Page.navigate", { url, waitUntil: "load" }, sessionId, input.timeout_ms);
+      interactionContextId = await createInteractionContext(client!, sessionId);
       return pageFacts(client!, sessionId, url);
     };
     const page = await navigate(input.url);
@@ -87,7 +91,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
       }),
       interaction: trustManagedInteractionOperation(async action => {
         try {
-          const result = await interact(client!, sessionId, action, snapshot);
+          const result = await interact(client!, sessionId, interactionContextId, action, snapshot);
           snapshot = result.next;
           return result.result;
         } catch (cause) {
@@ -97,6 +101,7 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
         }
       }),
       captureScreenshot: async () => screenshot(client!, sessionId),
+      driverLost,
       close: async () => {
         if (closed) return;
         closed = true;
@@ -113,13 +118,13 @@ export async function launchObscuraProvider(input: LocalProviderLaunchInput): Pr
   }
 }
 
-async function interact(client: ObscuraCdpClient, sessionId: string, input: ManagedInteractionInput, previous: SnapshotState | null): Promise<{ result: ManagedInteractionResult; next: SnapshotState | null }> {
+async function interact(client: ObscuraCdpClient, sessionId: string, contextId: number, input: ManagedInteractionInput, previous: SnapshotState | null): Promise<{ result: ManagedInteractionResult; next: SnapshotState | null }> {
   const refused = (failure_class: string, dispatched = false) => ({ result: { status: dispatched ? "unknown_outcome" : "unavailable", dispatch_state: dispatched ? "dispatched" : "not_dispatched", failure_class } as ManagedInteractionResult, next: null });
   if (await currentOrigin(client, sessionId) !== input.expected_origin) return refused("managed_public_origin_denied");
   if (input.action !== "snapshot" && (!previous || previous.page_ref !== input.page_ref || previous.observation_ref !== input.observation_ref)) return refused("managed_interaction_stale_target");
   let dispatched = false;
   if (input.action !== "snapshot") {
-    const current = await snapshotPage(client, sessionId, previous!.page_ref);
+    const current = await snapshotPage(client, sessionId, contextId, previous!.page_ref);
     if (current.document_key !== previous!.document_key || JSON.stringify(controlShape(current.controls)) !== JSON.stringify(controlShape(previous!.controls))) return refused("managed_interaction_stale_target");
     const target = input.target_ref ? previous!.controls.find(item => item.target_ref === input.target_ref) : undefined;
     if (["click", "input", "press"].includes(input.action) && !target) return refused("managed_interaction_target_required");
@@ -150,7 +155,7 @@ async function interact(client: ObscuraCdpClient, sessionId: string, input: Mana
       let matched = false;
       while (Date.now() < deadline) {
         if (await currentOrigin(client, sessionId) !== input.expected_origin) return refused("managed_public_origin_denied");
-        const next = await snapshotPage(client, sessionId, previous!.page_ref);
+        const next = await snapshotPage(client, sessionId, contextId, previous!.page_ref);
         const changed = next.document_key !== previous!.document_key || JSON.stringify(controlShape(next.controls)) !== JSON.stringify(controlShape(previous!.controls));
         const previousTarget = input.target_ref ? previous!.controls.find(item => item.target_ref === input.target_ref) : undefined;
         const target = previousTarget ? next.controls.find(item => item.node_id === previousTarget.node_id) : undefined;
@@ -161,13 +166,13 @@ async function interact(client: ObscuraCdpClient, sessionId: string, input: Mana
     }
   }
   if (await currentOrigin(client, sessionId) !== input.expected_origin) return refused("managed_public_origin_denied", dispatched);
-  const next = await snapshotPage(client, sessionId, previous?.page_ref);
+  const next = await snapshotPage(client, sessionId, contextId, previous?.page_ref);
   const page = await pageFacts(client, sessionId, input.expected_origin);
   return { result: { status: "completed", dispatch_state: dispatched ? "dispatched" : "not_dispatched", page, snapshot: { page_ref: next.page_ref, observation_ref: next.observation_ref, controls: publicControls(next.controls), text: next.text, truncated: next.truncated } }, next };
 }
 
-async function snapshotPage(client: ObscuraCdpClient, sessionId: string, pageRef?: string): Promise<SnapshotState & { text: string; truncated: boolean }> {
-  const result = await client.send("Runtime.evaluate", { expression: snapshotExpression, returnByValue: true }, sessionId);
+async function snapshotPage(client: ObscuraCdpClient, sessionId: string, contextId: number, pageRef?: string): Promise<SnapshotState & { text: string; truncated: boolean }> {
+  const result = await client.send("Runtime.evaluate", { expression: snapshotExpression, returnByValue: true, contextId }, sessionId);
   const value = remoteValue(result) as { document_key?: unknown; controls?: unknown; text?: unknown; truncated?: unknown };
   if (typeof value?.document_key !== "string" || !Array.isArray(value.controls) || typeof value.text !== "string" || typeof value.truncated !== "boolean") throw new Error("Invalid Obscura snapshot.");
   const controls = value.controls.slice(0, 64).flatMap(item => {
@@ -175,10 +180,9 @@ async function snapshotPage(client: ObscuraCdpClient, sessionId: string, pageRef
     const name = obscuraPublicText(control.name, 160);
     const node_id = Number(control.node_id);
     if (typeof control.role !== "string" || typeof control.enabled !== "boolean" || !name || !Number.isSafeInteger(node_id) || node_id <= 0) return [];
-    const value = obscuraPublicText(control.value, 512);
-    return [{ target_ref: opaqueRef("target"), role: control.role, name, enabled: control.enabled, ...(value ? { value } : {}), node_id }];
+    return [{ target_ref: opaqueRef("target"), role: control.role, name, enabled: control.enabled, node_id }];
   });
-  return { page_ref: pageRef ?? opaqueRef("page"), observation_ref: opaqueRef("observation"), document_key: value.document_key, controls, text: obscuraPublicText(value.text, 4096), truncated: value.truncated };
+  return { page_ref: pageRef ?? opaqueRef("page"), observation_ref: opaqueRef("observation"), document_key: value.document_key, controls, text: "", truncated: true };
 }
 
 const snapshotExpression = `(() => {
@@ -186,14 +190,15 @@ const snapshotExpression = `(() => {
   const clean = (value, limit) => { const text=String(value||'').replace(/\\s+/g,' ').trim(); return text.length<=limit&&!sensitive.test(text)?text:''; };
   const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
   const role = el => el.matches('input,textarea,[contenteditable=true]') ? 'textbox' : el.matches('button,[role=button]') ? 'button' : el.matches('a[href],[role=link]') ? 'link' : el.getAttribute('role');
+  let state=globalThis.__webenvoySnapshotState;
+  if(!state||state.document!==document){state={document,generation:0};state.observer=new MutationObserver(()=>{state.generation++});state.observer.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});globalThis.__webenvoySnapshotState=state;}
+  else if(state.observer.takeRecords().length)state.generation++;
   const candidates=[...document.querySelectorAll('input:not([type=password]),textarea,button,a[href],[role],[contenteditable=true]')].filter(visible).slice(0,64);
-  const controls=candidates.map(el => ({node_id:Number(el._nid),role:role(el),name:clean(el.getAttribute('aria-label')||el.innerText||el.textContent||el.getAttribute('placeholder')||el.name,160),enabled:!el.disabled&&el.getAttribute('aria-disabled')!=='true',...(el.matches('input,textarea')?{value:clean(el.value,512)}:{})})).filter(x => ['textbox','button','link','checkbox','radio','region'].includes(x.role)&&x.name&&Number.isSafeInteger(x.node_id)&&x.node_id>0);
-  const parts=[]; let length=0,truncated=candidates.length>=64;
-  if(document.body){const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node,count=0;while((node=walker.nextNode())&&count++<10000){const el=node.parentElement;if(!el||!visible(el)||el.closest('script,style,noscript,input,textarea,select,[contenteditable]'))continue;const text=clean(node.textContent,1024);if(!text)continue;parts.push(text);length+=text.length+1;if(length>4096){truncated=true;break;}}}
-  return {document_key:location.href+'|'+performance.timeOrigin,controls,text:parts.join(' ').slice(0,4096),truncated};
+  const controls=candidates.map(el => ({node_id:Number(el._nid),role:role(el),name:clean(el.getAttribute('aria-label')||el.getAttribute('placeholder')||(el.matches('button,a[href]')?el.innerText:''),160),enabled:!el.disabled&&el.getAttribute('aria-disabled')!=='true'})).filter(x => ['textbox','button','link','checkbox','radio','region'].includes(x.role)&&x.name&&Number.isSafeInteger(x.node_id)&&x.node_id>0);
+  return {document_key:location.href+'|'+performance.timeOrigin+'|'+state.generation,controls,text:'',truncated:true};
 })()`;
 
-export function obscuraPublicText(value: unknown, limit: number): string {
+function obscuraPublicText(value: unknown, limit: number): string {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   return text.length <= limit && !/password|passwd|token|cookie|secret|credential|authorization|session|one.time|验证码|密码|口令|密钥/i.test(text) ? text : "";
 }
@@ -216,11 +221,20 @@ async function currentOrigin(client: ObscuraCdpClient, sessionId: string): Promi
   return typeof remoteValue(result) === "string" ? remoteValue(result) as string : null;
 }
 
+async function createInteractionContext(client: ObscuraCdpClient, sessionId: string): Promise<number> {
+  const tree = await client.send("Page.getFrameTree", {}, sessionId);
+  const frameId = (((tree.frameTree as Record<string, unknown> | undefined)?.frame as Record<string, unknown> | undefined)?.id);
+  if (typeof frameId !== "string" || !frameId) throw new Error("Obscura page frame is unavailable.");
+  const world = await client.send("Page.createIsolatedWorld", { frameId, worldName: "webenvoy-managed-interaction" }, sessionId);
+  if (!Number.isSafeInteger(world.executionContextId)) throw new Error("Obscura isolated interaction world is unavailable.");
+  return Number(world.executionContextId);
+}
+
 async function pageFacts(client: ObscuraCdpClient, sessionId: string, requested: string): Promise<LocalProviderPageFacts> {
   const result = await client.send("Runtime.evaluate", { expression: "({url:location.href,title:document.title,ready:document.readyState})", returnByValue: true }, sessionId);
   const value = remoteValue(result) as { url?: unknown; title?: unknown; ready?: unknown };
   const current = typeof value?.url === "string" ? value.url : null;
-  return { current_url: current, title: typeof value?.title === "string" ? value.title.slice(0, 256) : null, status: current && ["interactive", "complete"].includes(String(value.ready)) ? "ready" : "unknown", facts: [{ key: "page.requested_url", source: "configured", value: requested }, { key: "page.status", source: "observed", value: current ? "ready" : "unknown" }] };
+  return { current_url: current, title: obscuraPublicText(value?.title, 256) || null, status: current && ["interactive", "complete"].includes(String(value.ready)) ? "ready" : "unknown", facts: [{ key: "page.requested_url", source: "configured", value: requested }, { key: "page.status", source: "observed", value: current ? "ready" : "unknown" }] };
 }
 
 async function screenshot(client: ObscuraCdpClient, sessionId: string): Promise<LocalProviderScreenshotFacts> {
@@ -258,11 +272,11 @@ async function unusedLoopbackPort(): Promise<number> {
 }
 
 async function stop(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   await Promise.race([
     new Promise<void>(resolve => child.once("exit", () => resolve())),
-    new Promise<void>(resolve => setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); resolve(); }, 2000))
+    new Promise<void>(resolve => setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); resolve(); }, 2000))
   ]);
 }
 
@@ -279,15 +293,16 @@ class ObscuraTransportError extends Error {}
 class ObscuraCdpClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  private constructor(private readonly ws: WebSocket) { ws.addEventListener("message", this.message); ws.addEventListener("close", this.lost); ws.addEventListener("error", this.lost); }
-  static async connect(url: string, timeoutMs: number): Promise<ObscuraCdpClient> {
+  private transportLost = false;
+  private constructor(private readonly ws: WebSocket, private readonly onLost: () => void) { ws.addEventListener("message", this.message); ws.addEventListener("close", this.lost); ws.addEventListener("error", this.lost); }
+  static async connect(url: string, timeoutMs: number, onLost: () => void): Promise<ObscuraCdpClient> {
     const ws = new WebSocket(url);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Obscura CDP websocket timed out.")), timeoutMs);
       ws.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
       ws.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Obscura CDP websocket failed.")); }, { once: true });
     });
-    return new ObscuraCdpClient(ws);
+    return new ObscuraCdpClient(ws, onLost);
   }
   send(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 20000): Promise<Record<string, unknown>> {
     if (this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new ObscuraTransportError("Obscura CDP websocket is unavailable."));
@@ -307,6 +322,6 @@ class ObscuraCdpClient {
     this.pending.delete(payload.id); clearTimeout(pending.timer);
     if (payload.error) pending.reject(new Error(payload.error.message ?? "Obscura CDP command failed.")); else pending.resolve(payload.result ?? {});
   };
-  private readonly lost = () => this.rejectAll("Obscura CDP websocket lost.");
+  private readonly lost = () => { if (this.transportLost) return; this.transportLost = true; this.rejectAll("Obscura CDP websocket lost."); this.onLost(); };
   private rejectAll(message: string) { for (const [id, pending] of this.pending) { this.pending.delete(id); clearTimeout(pending.timer); pending.reject(new ObscuraTransportError(message)); } }
 }

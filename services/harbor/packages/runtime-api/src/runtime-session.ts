@@ -319,8 +319,14 @@ export class RuntimeSessionStore {
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined
     });
+    if (ready && launch.driverLost) void launch.driverLost.then(() => this.markSessionDriverLost(runtime_session_ref));
     if (ready && input.managed_identity_environment) await this.readProfileEnvironment(input.managed_identity_environment);
     return snapshot(facts);
+  }
+
+  markSessionDriverLost(runtime_session_ref: string): void {
+    const record = this.records.get(runtime_session_ref);
+    if (record && ["active", "locked", "idle"].includes(record.facts.lifecycle_state)) this.markDriverLost(record);
   }
 
   async readProfileEnvironment(identity: LocalIdentityEnvironmentFacts) {
