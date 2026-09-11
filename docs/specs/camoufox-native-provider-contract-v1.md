@@ -8,7 +8,7 @@
 > 上位语义：[Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md)、[Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)
 > 架构依据：[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 
-本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不记录当前 live run 的完成状态；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
+本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代 #504 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
 
 ## 1. 范围、owner 和边界
 
@@ -37,6 +37,8 @@ independent native test artifact + manifest
 以下内容永远不得越过 Harbor：`targetId`、`tabId`、`browsingContextId`、`windowId`、`browserContextId`、Juggler endpoint、native protocol method、Profile 路径和构件内部路径。公共 Page facts 继续由 Harbor 的既有 Page contract 投影。
 
 ### 1.2 Design Obligation disposition
+
+以下 disposition 只判断本 Provider-private adapter/artifact 合同是否触发对应设计义务；它不覆盖、缩小或改写 #504 Work Item 的整体 obligations。#504 的公共 Page、生命周期、授权、恢复和独立验收仍由其 owning spec/PR 维护。
 
 | Trigger | disposition | 依据 |
 | --- | --- | --- |
@@ -129,7 +131,7 @@ Rollback is an owner-selected operation performed before a new Driver launch:
 - restore a matching prior artifact and matching driver closure as a pair;
 - leave the installed source app, site-packages and Profile untouched;
 - do not strip the manifest, remove a patch from the source app, or rewrite a running Driver;
-- if the prior stack lacks native relation support, keep multi-Page operations `limited`/`provider_unavailable` and use only the already-supported single-Page path; never emulate native mapping by URL/title or silently open a replacement window.
+- if the selected stack lacks native relation support, reject the v1 launch/operation rather than falling back inside the current Driver; historical single-Page behavior is not an active v1 compatibility guarantee, and native mapping must never be emulated by URL/title or a replacement window.
 
 There is no in-process native swap, automatic downgrade, Provider switch, Profile replacement or random regeneration. A v1 incompatibility is a fail-closed startup/operation result, not permission to fall back to an unqualified relation implementation.
 
@@ -312,7 +314,7 @@ Timeouts are bounded by the private Playwright BrowserContext timeout policy. Th
 
 ### 7.1 Legacy and rollback compatibility
 
-The v1 reader is exact-major-version compatible only. A legacy stack without these three native methods may remain a limited single-Page Provider, but it cannot satisfy v1 multi-Page active mapping, background creation or safe-return close. Harbor must report that capability as unavailable/limited and retain the existing human takeover path; it must not invent a compatibility mapping.
+The v1 reader is exact-major-version compatible only. A legacy stack without these three native methods is not a v1-compatible runtime: the current strict Driver launch/operation must reject it rather than advertise an active single-Page fallback. Historical single-Page behavior may explain an older stack's past capability, but is not an active #504 promise and cannot satisfy v1 multi-Page active mapping, background creation or safe-return close. Harbor must not invent a compatibility mapping.
 
 An owner may roll back before launch by selecting a matching legacy artifact/driver pair. Rollback is outside the running v1 protocol, leaves Profile/source/site-packages unchanged, and does not convert an incomplete v1 live operation into success. A future v2 requires a new versioned contract and an explicit compatible builder/adapter pair.
 
@@ -325,7 +327,5 @@ An owner may roll back before launch by selecting a matching legacy artifact/dri
 - No public timeout contract, automatic retry/replay, Provider switch, proxy switch, Profile replacement or random regeneration.
 - No claim of Windows/Linux compatibility; the qualified builder and artifact in this contract are the pinned macOS Camoufox test path.
 - No claim that fixture, builder self-check or adapter unit checks constitute the installed live #504 acceptance. The exact artifact/profile run, required checks, independent review and Issue readback remain the authoritative evidence.
-
-截至本文编写时，已知 live 对照运行的 query/reload 已通过；history `back` 仍未完成验收：Driver 返回 `ready` 且无 failure，但页面事实仍显示 query marker，而不是预期的 root Page。该状态是待修复的实现/证据问题，不是本合同允许放宽 path、Page identity 或 history 断言的理由；在独立回归通过前不得把 #504 标记为 live complete。
 
 Implementation anchors for this contract are [`camoufox-native-builder.py`](../../services/harbor/scripts/camoufox-native-builder.py), [`camoufox-native-playwright.py`](../../services/harbor/packages/runtime-api/src/camoufox-native-playwright.py), [`camoufox-driver.py`](../../services/harbor/packages/runtime-api/src/camoufox-driver.py), [`copy-camoufox-driver.mjs`](../../services/harbor/scripts/copy-camoufox-driver.mjs) and [`camoufox-native-validation.py`](../../services/harbor/scripts/camoufox-native-validation.py). These files implement the pinned private boundary; they do not replace this specification or turn its current live status into an acceptance claim.
