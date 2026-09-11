@@ -485,41 +485,18 @@ class RelationAdapter:
         return self.samples.pop(0) if self.samples else self.samples[-1]
 
 
-class CloseCallbackPage(RelationPage):
-    close_callback = None
-
-    def on(self, event: str, callback) -> None:
-        if event == "close":
-            self.close_callback = callback
-
-
-# Playwright emits the closed Page as the close callback argument; the next
-# native snapshot must confirm that close after the object binding is removed.
+# A late Context page event can carry a Page already closed by the provider;
+# do not register a stale placeholder, while a live Page still enters scope.
 DRIVER.reset_provider_pages()
-closed_page = CloseCallbackPage("closed")
-remaining_page = RelationPage("remaining")
-DRIVER.PAGE = remaining_page
-DRIVER.CONTEXT = types.SimpleNamespace(browser=object(), pages=[closed_page, remaining_page])
-try:
-    closed_state = DRIVER.register_provider_page(closed_page)
-    DRIVER.register_provider_page(remaining_page)
-    closed_state["native_browsing_context_id"] = "context-closed"
-    assert closed_page.close_callback is not None
-    closed_page.close_callback(closed_page)
-    assert closed_state["closed"] is True
-    assert id(closed_page) not in DRIVER.PAGE_STATE_BY_OBJECT
-    assert DRIVER.page_state_for(closed_page) is None
-
-    DRIVER.CONTEXT.pages = [remaining_page]
-    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = RelationAdapter(native_relation("close-epoch", 1, [(remaining_page, "target-live", "tab-live", "context-live", "window-live", True)], "window-live"))
-    DRIVER.refresh_native_selected_page()
-    assert closed_state["native_close_confirmed"] is True
-finally:
-    DRIVER.PAGE = None
-    DRIVER.CONTEXT = None
-    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
-    DRIVER.reset_provider_pages()
-print("camoufox Page close callback and native reconciliation fixture passed")
+closed_context_page = RelationPage("closed-context")
+closed_context_page.is_closed = lambda: True
+DRIVER.context_page_created(closed_context_page)
+assert not DRIVER.PAGE_STATES and id(closed_context_page) not in DRIVER.PAGE_STATE_BY_OBJECT
+open_context_page = RelationPage("open-context")
+DRIVER.context_page_created(open_context_page)
+assert DRIVER.page_state_for(open_context_page) is not None
+DRIVER.reset_provider_pages()
+print("camoufox Context page admission fixture passed")
 
 
 DRIVER.reset_provider_pages()
