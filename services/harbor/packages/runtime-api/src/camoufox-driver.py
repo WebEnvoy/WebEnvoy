@@ -13,6 +13,7 @@ from collections import deque
 from datetime import datetime, timezone
 import copy
 import importlib.metadata
+import importlib.util
 import hashlib
 import json
 import math
@@ -34,8 +35,13 @@ PLAYWRIGHT: Any = None
 PLAYWRIGHT_TIMEOUT_ERROR: type[BaseException] | None = None
 CONTEXT: Any = None
 PAGE: Any = None
+NATIVE_PLAYWRIGHT_ADAPTER: Any = None
 PAGE_STATES: dict[str, dict[str, Any]] = {}
 PAGE_STATE_BY_OBJECT: dict[int, str] = {}
+MAX_PAGE_TOMBSTONES = 64
+NATIVE_RELATION_EPOCH: str | None = None
+NATIVE_RELATION_SAMPLE_SEQUENCE = 0
+NATIVE_RELATION_INVALID = False
 PAGE_CONTEXT_HANDLER: Any = None
 PROFILE_DIR = ""
 EXECUTABLE_PATH = ""
@@ -51,6 +57,18 @@ PAGE_NAVIGATION_DENIED: dict[str, str] = {}
 PAGE_NAVIGATION_CONTEXT_GUARD: Any = None
 INTERACTION_GUARD: Any = None
 INTERACTION_STATE: dict[str, Any] | None = None
+PAGE_INTERACTION_ALLOWED_ORIGINS: dict[str, set[str]] = {}
+
+
+def native_playwright_adapter_module() -> Any:
+    """Load the adjacent, driver-owned adapter without changing site-packages."""
+    path = Path(__file__).with_name("camoufox-native-playwright.py")
+    spec = importlib.util.spec_from_file_location("webenvoy_camoufox_native_playwright", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Camoufox native Playwright adapter is not installed.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 DIAGNOSTIC_EVENTS: deque[dict[str, Any]] = deque(maxlen=128)
 DIAGNOSTIC_CURSOR = 0
 DIAGNOSTIC_INSTANCE_REF = ""
@@ -151,8 +169,11 @@ def diagnostic_text(value: Any, limit: int = 512) -> tuple[str, bool]:
         return "[redacted]", False
     text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
     text = " ".join(text.split())
-    text = re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", text)
+    # Normalize complete URLs before the generic query scrub.  If the query
+    # is replaced first, the angle bracket in ``<redacted>`` terminates the
+    # URL matcher and leaks the original fragment as a detached suffix.
     text = DIAGNOSTIC_URL_PATTERN.sub(lambda match: (diagnostics_url(match.group(0)) or ("[redacted]", ""))[0], text)
+    text = re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", text)
     return text[:limit], len(text) > limit
 
 
@@ -913,7 +934,13 @@ def facts_for_page(page: Any) -> dict[str, Any]:
         return {"current_url": None, "title": None, "status": "unavailable"}
     current_url: str | None
     try:
-        current_url = safe_text(str(page.url)) if page.url else None
+        raw_url = str(page.url) if page.url else ""
+        safe_url = diagnostics_url(raw_url)
+        # about:blank is the only non-network URL needed before the first
+        # navigation.  Public page facts otherwise use the same complete-URL
+        # sanitizer as diagnostics, so query/fragment removal cannot corrupt
+        # the path or leave an unredacted suffix behind.
+        current_url = safe_url[0] if safe_url else ("about:blank" if raw_url == "about:blank" else None)
     except Exception:
         current_url = None
     try:
@@ -944,12 +971,37 @@ def page_state_facts(state: dict[str, Any]) -> dict[str, Any]:
         **facts,
         "provider_page_ref": state["provider_page_ref"],
         "document_generation": int(state.get("document_generation", 1)),
-        "active": page is PAGE,
+        # Active is a provider fact only after the fixed native snapshot has
+        # marked this exact window selected.  A Python object pointer is not a
+        # focus signal and is intentionally never sufficient on its own.
+        # native_selected is a per-window browser fact. Harbor's public active
+        # Page is the one selected Page in the trusted native active window;
+        # merely being selected in another native window is not enough.
+        "status": "closed" if state.get("closed") else facts["status"],
+        "active": state.get("page") is PAGE and state.get("native_active") is True and not state.get("closed"),
         **({"opener_provider_page_ref": state["opener_provider_page_ref"]} if state.get("opener_provider_page_ref") else {})
     }
 
 
+def _prune_page_tombstones() -> None:
+    tombstones = [state for state in PAGE_STATES.values() if state.get("closed") and state.get("native_close_confirmed")]
+    if len(tombstones) <= MAX_PAGE_TOMBSTONES:
+        return
+    tombstones.sort(key=lambda state: float(state.get("closed_at", 0.0)))
+    for state in tombstones[:-MAX_PAGE_TOMBSTONES]:
+        ref = state.get("provider_page_ref")
+        if isinstance(ref, str):
+            PAGE_STATES.pop(ref, None)
+            PAGE_STATE_BY_OBJECT.pop(id(state.get("page")), None)
+
+
 def all_page_states() -> list[dict[str, Any]]:
+    _prune_page_tombstones()
+    return [page_state_facts(state) for state in PAGE_STATES.values()
+            if not state.get("closed") or state.get("native_close_confirmed")]
+
+
+def live_page_states() -> list[dict[str, Any]]:
     return [page_state_facts(state) for state in PAGE_STATES.values() if not state.get("closed")]
 
 
@@ -988,10 +1040,13 @@ def register_provider_page(page: Any, opener: Any = None) -> dict[str, Any]:
     def on_close() -> None:
         global PAGE
         state["closed"] = True
+        state["closed_at"] = time.monotonic()
+        state["native_close_confirmed"] = False
         PAGE_STATE_BY_OBJECT.pop(id(page), None)
         guard = PAGE_NAVIGATION_GUARDS.pop(ref, None)
         PAGE_NAVIGATION_ALLOWED_ORIGINS.pop(ref, None)
         PAGE_NAVIGATION_DENIED.pop(ref, None)
+        PAGE_INTERACTION_ALLOWED_ORIGINS.pop(ref, None)
         if guard is not None:
             with contextlib.suppress(Exception):
                 page.unroute("**/*", guard)
@@ -1024,8 +1079,8 @@ def set_active_provider_page(page: Any) -> dict[str, Any]:
     # failed bring-to-front must remain an unavailable/unknown activation.
     page.bring_to_front()
     PAGE = page
-    for candidate in PAGE_STATES.values():
-        candidate["active"] = candidate["page"] is page and not candidate.get("closed")
+    if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+        refresh_native_selected_page()
     return page_state_facts(state)
 
 
@@ -1050,7 +1105,7 @@ def install_page_context_handler() -> None:
 
 
 def reset_provider_pages() -> None:
-    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD
+    global PAGE_CONTEXT_HANDLER, PAGE_NAVIGATION_CONTEXT_GUARD, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID
     if PAGE_NAVIGATION_CONTEXT_GUARD is not None and CONTEXT is not None:
         with contextlib.suppress(Exception):
             CONTEXT.unroute("**/*", PAGE_NAVIGATION_CONTEXT_GUARD)
@@ -1059,8 +1114,12 @@ def reset_provider_pages() -> None:
     PAGE_NAVIGATION_GUARDS.clear()
     PAGE_NAVIGATION_ALLOWED_ORIGINS.clear()
     PAGE_NAVIGATION_DENIED.clear()
+    PAGE_INTERACTION_ALLOWED_ORIGINS.clear()
     PAGE_CONTEXT_HANDLER = None
     PAGE_NAVIGATION_CONTEXT_GUARD = None
+    NATIVE_RELATION_EPOCH = None
+    NATIVE_RELATION_SAMPLE_SEQUENCE = 0
+    NATIVE_RELATION_INVALID = False
 
 
 def page_by_provider_ref(ref: Any) -> dict[str, Any] | None:
@@ -1242,7 +1301,7 @@ ENVIRONMENT_READ_EXPRESSION = r"""(async () => {
 
 
 def launch(request: dict[str, Any]) -> dict[str, Any]:
-    global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE, DIAGNOSTIC_EVENTS, DIAGNOSTIC_CURSOR, DIAGNOSTIC_INSTANCE_REF
+    global PLAYWRIGHT, PLAYWRIGHT_TIMEOUT_ERROR, CONTEXT, PAGE, NATIVE_PLAYWRIGHT_ADAPTER, PROFILE_DIR, EXECUTABLE_PATH, LAUNCH_EXECUTABLE_PATH, PROPERTIES_SOURCE, DIAGNOSTIC_EVENTS, DIAGNOSTIC_CURSOR, DIAGNOSTIC_INSTANCE_REF
     PROFILE_DIR = str(Path(str(request.get("profile_dir", ""))).absolute()) if request.get("profile_dir") else ""
     EXECUTABLE_PATH = str(request.get("executable_path", ""))
     if not PROFILE_DIR or not EXECUTABLE_PATH:
@@ -1268,6 +1327,7 @@ def launch(request: dict[str, Any]) -> dict[str, Any]:
     from camoufox import NewBrowser, launch_options
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
     PLAYWRIGHT_TIMEOUT_ERROR = PlaywrightTimeoutError
+    NATIVE_PLAYWRIGHT_ADAPTER = native_playwright_adapter_module().install_native_playwright_driver()
 
     locale = request.get("locale")
     timezone = request.get("timezone")
@@ -1380,8 +1440,33 @@ def open_url(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_origin(value: str) -> str:
-    parsed = urlparse(value)
-    return f"{parsed.scheme}://{parsed.netloc}"
+    try:
+        parsed = urlparse(value)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    except ValueError:
+        return ""
+
+
+def valid_public_origin(value: Any) -> bool:
+    """Accept only an exact credential-free HTTP(S) origin."""
+    if not isinstance(value, str) or not value or public_origin(value) != value:
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc) and not parsed.username and not parsed.password
+    except ValueError:
+        return False
+
+
+def authorized_origin_set(value: Any, expected: str) -> set[str] | None:
+    """Validate Core's already-intersected origin set at the Driver boundary."""
+    if value is None:
+        allowed = {expected}
+    elif isinstance(value, (list, tuple, set)) and 0 < len(value) <= 64 and all(valid_public_origin(origin) for origin in value):
+        allowed = set(value)
+    else:
+        return None
+    return allowed if expected in allowed else set()
 
 
 def navigation_location(response: Any, request_url: str) -> str | None:
@@ -1405,12 +1490,69 @@ def navigation_location(response: Any, request_url: str) -> str | None:
 
 
 def request_page(request: Any) -> Any:
+    return request_page_with_fallback(request, True)
+
+
+def request_page_with_fallback(request: Any, fallback: bool = True) -> Any:
     with contextlib.suppress(Exception):
         frame = request.frame
         page = frame.page
         if page is not None:
             return page
-    return PAGE
+    return PAGE if fallback else None
+
+
+def page_opener(page: Any) -> Any:
+    """Read the provider's opener relation without guessing from URL/title."""
+    if page is None:
+        return None
+    with contextlib.suppress(Exception):
+        opener = getattr(page, "opener", None)
+        if callable(opener):
+            opener = opener()
+        return opener
+    return None
+
+
+def ensure_provider_page(page: Any) -> dict[str, Any] | None:
+    """Register a Page discovered by a context route and retain its opener ref."""
+    if page is None:
+        return None
+    state = page_state_for(page)
+    opener = page_opener(page)
+    if state is None:
+        state = register_provider_page(page, opener)
+    elif opener is not None and not state.get("opener_provider_page_ref"):
+        opener_ref = provider_page_ref(opener)
+        if opener_ref:
+            state["opener_provider_page_ref"] = opener_ref
+    return state
+
+
+def inherited_page_origins(mapping: dict[str, set[str]], page: Any) -> set[str] | None:
+    """Resolve a page's own or opener-inherited origin scope.
+
+    A missing mapping is intentionally different from an empty mapping.  The
+    former means this Page is outside the operation scope; the latter is an
+    explicit deny-all scope.  Opener traversal is bounded and identity based.
+    """
+    state = ensure_provider_page(page)
+    if state is None or state.get("closed"):
+        return None
+    visited: set[str] = set()
+    while state is not None:
+        ref = state.get("provider_page_ref")
+        if not isinstance(ref, str) or not ref or ref in visited:
+            return None
+        visited.add(ref)
+        allowed = mapping.get(ref)
+        if allowed is not None:
+            return allowed
+        opener_ref = state.get("opener_provider_page_ref")
+        state = PAGE_STATES.get(opener_ref) if isinstance(opener_ref, str) else None
+        if state is not None and state.get("closed"):
+            return None
+    return None
 
 
 def request_redirect_hops(request: Any) -> int:
@@ -1437,7 +1579,10 @@ def follow_authorized_redirect(route: Any, response: Any, request: Any, allowed:
     """
     location = navigation_location(response, str(getattr(request, "url", "")))
     destination_origin = public_origin(location) if location else ""
-    page = request_page(request)
+    # A redirect continuation must stay bound to the Page that produced the
+    # request. Falling back to the global active Page could attach a redirect
+    # failure to an unrelated window when Playwright cannot resolve a frame.
+    page = request_page_with_fallback(request, False)
     page_ref = provider_page_ref(page)
     if not location or destination_origin not in allowed or request_redirect_hops(request) >= 8:
         if page_ref:
@@ -1473,9 +1618,16 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
 
     def guard(route: Any) -> None:
         request = route.request
+        request_page_object = request_page_with_fallback(request, False) or page
         request_origin = public_origin(str(getattr(request, "url", "")))
-        request_page_ref = provider_page_ref(request_page(request)) or page_ref
-        if request_origin not in allowed:
+        request_page_ref = provider_page_ref(request_page_object) or page_ref
+        request_allowed = inherited_page_origins(PAGE_NAVIGATION_ALLOWED_ORIGINS, request_page_object)
+        # This handler is attached to one known Page. If Playwright cannot
+        # resolve the frame, the closure-bound Page is the only safe identity;
+        # it is never replaced by the global active Page.
+        if request_allowed is None:
+            request_allowed = allowed if request_page_object is page else None
+        if request_allowed is None or request_origin not in request_allowed:
             PAGE_NAVIGATION_DENIED[request_page_ref] = "navigation_origin_denied"
             route.abort("blockedbyclient")
             return
@@ -1484,7 +1636,7 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
             response = route.fetch(max_redirects=0, timeout=15_000)
             status = int(getattr(response, "status", 0))
             if 300 <= status < 400:
-                follow_authorized_redirect(route, response, request, allowed, "navigation_origin_denied")
+                follow_authorized_redirect(route, response, request, request_allowed, "navigation_origin_denied")
             else:
                 route.fulfill(response=response)
         except Exception:
@@ -1507,16 +1659,20 @@ def install_page_navigation_guard(page: Any, authorized_origins: list[str] | tup
     if PAGE_NAVIGATION_CONTEXT_GUARD is None and CONTEXT is not None:
         def context_guard(route: Any) -> None:
             request = route.request
-            target_page = request_page(request)
-            target_ref = provider_page_ref(target_page)
-            active_ref = provider_page_ref(PAGE)
-            target_allowed = PAGE_NAVIGATION_ALLOWED_ORIGINS.get(target_ref or "")
-            allowed_for_request = target_allowed if target_allowed is not None else PAGE_NAVIGATION_ALLOWED_ORIGINS.get(active_ref or "", set())
+            target_page = request_page_with_fallback(request, False)
+            target_state = page_state_for(target_page)
+            if target_state is None and page_opener(target_page) is not None:
+                # A context route can win the race with Playwright's ``page``
+                # event. Register only when the browser proves an opener; an
+                # unrelated unknown Page remains outside every operation scope.
+                target_state = ensure_provider_page(target_page)
+            target_ref = target_state.get("provider_page_ref") if target_state else None
+            allowed_for_request = inherited_page_origins(PAGE_NAVIGATION_ALLOWED_ORIGINS, target_page) if target_state is not None and target_page is not None else None
             request_origin = public_origin(str(getattr(request, "url", "")))
-            failure_ref = target_ref or active_ref
-            if not allowed_for_request:
-                # The context guard only owns pages participating in a page
-                # operation; unrelated provider traffic stays untouched.
+            failure_ref = target_ref
+            if allowed_for_request is None:
+                # The context guard only owns Pages participating in a page
+                # operation (or a popup with a known in-scope opener).
                 route.continue_()
                 return
             if request_origin not in allowed_for_request:
@@ -1561,7 +1717,134 @@ def page_navigation_state(page: Any) -> dict[str, Any]:
     return facts
 
 
+def refresh_native_selected_page() -> None:
+    """Reconcile active state from the provider's native window selection."""
+    global PAGE, NATIVE_RELATION_EPOCH, NATIVE_RELATION_SAMPLE_SEQUENCE, NATIVE_RELATION_INVALID
+    if NATIVE_PLAYWRIGHT_ADAPTER is None or CONTEXT is None:
+        return
+    if NATIVE_RELATION_INVALID:
+        raise RuntimeError("Native Page relation is permanently unavailable after an identity replacement.")
+    browser = getattr(CONTEXT, "browser", None)
+    selection = NATIVE_PLAYWRIGHT_ADAPTER.native_snapshot(browser, CONTEXT)
+    if not isinstance(selection, dict):
+        raise RuntimeError("Native selected-window snapshot returned no relation.")
+    if selection.get("selection_status") == "partial":
+        raise RuntimeError("Native selected-window snapshot is incomplete.")
+    epoch = selection.get("epoch")
+    sample_sequence = selection.get("sample_sequence")
+    if not isinstance(epoch, str) or not epoch or type(sample_sequence) is not int or sample_sequence < 1:
+        raise RuntimeError("Native selected-window snapshot returned no freshness relation.")
+    if NATIVE_RELATION_EPOCH is not None and epoch != NATIVE_RELATION_EPOCH:
+        raise RuntimeError("Native selected-window snapshot changed its relation epoch.")
+    if sample_sequence <= NATIVE_RELATION_SAMPLE_SEQUENCE:
+        raise RuntimeError("Native selected-window snapshot is stale.")
+    native_pages = selection.get("pages")
+    if not isinstance(native_pages, list):
+        raise RuntimeError("Native selected-window snapshot returned no Page facts.")
+
+    # Resolve every native fact before mutating any state. A BrowserContext can
+    # expose a fresh Page wrapper after a native target replacement; matching by
+    # URL or title would silently turn that replacement into a close+open.
+    previous_by_browsing_context: dict[str, list[dict[str, Any]]] = {}
+    for candidate in PAGE_STATES.values():
+        browsing_context_id = candidate.get("native_browsing_context_id")
+        if isinstance(browsing_context_id, str) and browsing_context_id:
+            previous_by_browsing_context.setdefault(browsing_context_id, []).append(candidate)
+
+    mapped: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    mapped_states: set[int] = set()
+    for native_facts in native_pages:
+        native_page = native_facts.get("page") if isinstance(native_facts, dict) else None
+        state = page_state_for(native_page)
+        if state is None or state.get("closed"):
+            browsing_context_id = native_facts.get("browsing_context_id") if isinstance(native_facts, dict) else None
+            candidates = previous_by_browsing_context.get(browsing_context_id, []) if isinstance(browsing_context_id, str) else []
+            target_id = native_facts.get("target_id") if isinstance(native_facts, dict) else None
+            if candidates and any(candidate.get("page") is not native_page for candidate in candidates):
+                NATIVE_RELATION_INVALID = True
+                raise RuntimeError("Native browsing context moved to a replacement Page object.")
+            if candidates and any(candidate.get("native_target_id") not in (None, target_id) for candidate in candidates):
+                NATIVE_RELATION_INVALID = True
+                raise RuntimeError("Native browsing context moved to a different target or Page object.")
+            raise RuntimeError("Native selected-window snapshot returned an unknown Page relation.")
+        if not all(isinstance(native_facts.get(key), str) and native_facts.get(key) for key in ("target_id", "tab_id", "browsing_context_id", "window_id")):
+            raise RuntimeError("Native selected-window snapshot returned incomplete Page identity.")
+        if id(state) in mapped_states:
+            raise RuntimeError("Native selected-window snapshot mapped one Page more than once.")
+        mapped_states.add(id(state))
+        for prior in previous_by_browsing_context.get(native_facts["browsing_context_id"], []):
+            if prior is state:
+                continue
+            if prior.get("native_target_id") != native_facts["target_id"]:
+                NATIVE_RELATION_INVALID = True
+                raise RuntimeError("Native browsing context moved to a different target or Page object.")
+            raise RuntimeError("Native browsing context is mapped to multiple Page objects.")
+        identity_pairs = (
+            ("native_target_id", "target_id"),
+            ("native_tab_id", "tab_id"),
+            ("native_browsing_context_id", "browsing_context_id"),
+            ("native_window_id", "window_id"),
+        )
+        for state_key, fact_key in identity_pairs:
+            previous = state.get(state_key)
+            if previous is not None and previous != native_facts[fact_key]:
+                NATIVE_RELATION_INVALID = True
+                raise RuntimeError("Native Page identity changed across samples.")
+        mapped.append((state, native_facts))
+
+    open_states = [state for state in PAGE_STATES.values() if not state.get("closed")]
+    if any(id(state) not in mapped_states for state in open_states):
+        raise RuntimeError("Native selected-window snapshot omitted an open Page.")
+
+    window_foreground = {
+        window["window_id"]: window.get("os_foreground")
+        for window in selection.get("windows", [])
+        if isinstance(window, dict) and isinstance(window.get("window_id"), str)
+    }
+    selected_pages = [facts for _, facts in mapped if facts.get("selected") is True]
+    active_window_id = selection.get("active_window_id")
+    active_candidates = [facts for facts in selected_pages if facts.get("window_id") == active_window_id]
+    if active_window_id is not None and len(active_candidates) != 1:
+        raise RuntimeError("Native selected-window snapshot did not prove one active-window Page.")
+
+    # Commit only after the full bidirectional relation and freshness checks
+    # pass. This preserves the last trusted native identities on any failure.
+    for candidate in open_states:
+        candidate["native_selected"] = False
+        candidate["native_active"] = False
+    for state, native_facts in mapped:
+        if state.get("closed"):
+            raise RuntimeError("Native selected-window snapshot retained a closed Page.")
+        state["native_selected"] = native_facts["selected"] is True
+        state["native_window_id"] = native_facts["window_id"]
+        state["native_tab_id"] = native_facts["tab_id"]
+        state["native_target_id"] = native_facts["target_id"]
+        state["native_browsing_context_id"] = native_facts["browsing_context_id"]
+        state["native_os_foreground"] = window_foreground.get(native_facts["window_id"])
+    for candidate in PAGE_STATES.values():
+        if candidate.get("closed") and id(candidate) not in mapped_states:
+            if candidate.get("native_browsing_context_id"):
+                candidate["native_close_confirmed"] = True
+            candidate["native_selected"] = False
+            candidate["native_active"] = False
+    NATIVE_RELATION_EPOCH = epoch
+    NATIVE_RELATION_SAMPLE_SEQUENCE = sample_sequence
+    if active_window_id is not None:
+        active_state = next((state for state, facts in mapped if facts is active_candidates[0]), None)
+        if active_state is None or active_state.get("closed"):
+            raise RuntimeError("Native selected-window snapshot returned an unusable active Page.")
+        active_state["native_active"] = True
+        PAGE = active_candidates[0]["page"]
+    elif PAGE is not None and page_state_for(PAGE) is not None and (page_state_for(PAGE) or {}).get("native_selected") is True:
+        # Another application may be in front; retain the prior task Page
+        # rather than treating OS foreground absence as a browser failure.
+        pass
+    elif not selected_pages:
+        PAGE = None
+
+
 def list_pages() -> dict[str, Any]:
+    refresh_native_selected_page()
     return {"pages": all_page_states()}
 
 
@@ -1571,9 +1854,22 @@ def open_page(request: dict[str, Any]) -> dict[str, Any]:
     url = request.get("url")
     if url is not None and (not isinstance(url, str) or not url):
         raise ValueError("Camoufox Driver open_page URL is invalid.")
+    if NATIVE_PLAYWRIGHT_ADAPTER is None:
+        raise RuntimeError("Camoufox Driver native background Page adapter is unavailable.")
     with contextlib.redirect_stdout(sys.stderr):
-        page = CONTEXT.new_page()
+        # The provider's BrowserContext.newPage opens a new native window and
+        # focuses it. Use only a window identity just reconciled from native
+        # gBrowser tabs, and ask the fixed adapter to add an unfocused tab to
+        # that existing window.
+        refresh_native_selected_page()
+        owner_state = page_state_for(PAGE)
+        window_id = owner_state.get("native_window_id") if owner_state else None
+        if not isinstance(window_id, str) or not window_id:
+            raise RuntimeError("Camoufox Driver has no trusted native window for a background Page.")
+        page = NATIVE_PLAYWRIGHT_ADAPTER.create_background_page(CONTEXT, window_id)
         register_provider_page(page)
+        with contextlib.suppress(Exception):
+            attach_diagnostics(page)
         if isinstance(url, str):
             install_page_navigation_guard(page, request.get("authorized_origins", []))
             try:
@@ -1581,6 +1877,7 @@ def open_page(request: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 if not page_navigation_failure(page):
                     raise
+        refresh_native_selected_page()
     failure = page_navigation_failure(page)
     return {"page": page_navigation_state(page), "pages": all_page_states(), **({"failure_class": failure} if failure else {})}
 
@@ -1599,11 +1896,45 @@ def close_page(request: dict[str, Any]) -> dict[str, Any]:
     if state is None or state.get("closed"):
         raise ValueError("Camoufox Driver Page handle is stale.")
     page = state["page"]
+    safe_return_ref = request.get("safe_return_provider_page_ref")
+    safe_return_state = None
+    if safe_return_ref is not None:
+        if not isinstance(safe_return_ref, str) or not safe_return_ref:
+            raise ValueError("Camoufox Driver safe return Page handle is invalid.")
+        safe_return_state = page_by_provider_ref(safe_return_ref)
+        if safe_return_state is None or safe_return_state.get("closed") or safe_return_state is state:
+            raise ValueError("Camoufox Driver safe return Page handle is stale.")
+        safe_return_page = safe_return_state.get("page")
+        if safe_return_page is None or getattr(safe_return_page, "is_closed", lambda: False)():
+            raise ValueError("Camoufox Driver safe return Page is unavailable.")
     with contextlib.redirect_stdout(sys.stderr):
-        page.close()
+        if safe_return_state is not None:
+            if NATIVE_PLAYWRIGHT_ADAPTER is None or CONTEXT is None:
+                raise RuntimeError("Camoufox Driver native safe-return close is unavailable.")
+            # The native entry validates both target identities against the
+            # same BrowserContext and native window, selects the safe tab via
+            # gBrowser.selectedTab without focusing its OS window, then uses
+            # the browser's real removeTab path with beforeunload semantics.
+            refresh_native_selected_page()
+            target_id = state.get("native_target_id")
+            safe_target_id = safe_return_state.get("native_target_id")
+            if not isinstance(target_id, str) or not target_id or not isinstance(safe_target_id, str) or not safe_target_id:
+                raise RuntimeError("Camoufox Driver native close relation is unavailable.")
+            NATIVE_PLAYWRIGHT_ADAPTER.close_page_with_safe_return(CONTEXT, target_id, safe_target_id)
+        else:
+            page.close()
     # Playwright may not emit close synchronously on a mocked page.
     state["closed"] = True
-    return {"pages": all_page_states()}
+    state["closed_at"] = time.monotonic()
+    state["native_close_confirmed"] = False
+    PAGE_STATE_BY_OBJECT.pop(id(page), None)
+    if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+        refresh_native_selected_page()
+    if safe_return_state is not None:
+        current_safe = page_state_for(safe_return_state["page"])
+        if current_safe is None or current_safe.get("closed") or PAGE is not current_safe.get("page") or current_safe.get("native_active") is not True:
+            raise RuntimeError("Camoufox Driver did not select the safe return Page during close.")
+    return {"pages": live_page_states(), "confirmed_closed_provider_page_refs": [state["provider_page_ref"]]}
 
 
 def navigate_page(request: dict[str, Any]) -> dict[str, Any]:
@@ -1619,6 +1950,15 @@ def navigate_page(request: dict[str, Any]) -> dict[str, Any]:
     state.pop("beforeunload_blocked", None)
     with contextlib.redirect_stdout(sys.stderr):
         try:
+            if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+                # Navigation is a Provider mutation. Reconcile immediately
+                # before dispatch and require the exact Page object still to
+                # own the requested private binding; URL/title or stale native
+                # IDs are not sufficient after a target replacement.
+                refresh_native_selected_page()
+                current_state = page_state_for(page)
+                if current_state is not state or current_state.get("closed"):
+                    raise RuntimeError("Native Page relation unavailable before navigation.")
             if action == "navigate":
                 url = request.get("url")
                 if not isinstance(url, str) or not url:
@@ -1826,28 +2166,89 @@ def discard_interaction_snapshot() -> None:
 def clear_interaction_guard() -> None:
     global INTERACTION_GUARD
     if INTERACTION_GUARD is not None:
-        PAGE.unroute("**/*", INTERACTION_GUARD)
-        CONTEXT.unroute("**/*", INTERACTION_GUARD)
+        if PAGE is not None:
+            with contextlib.suppress(Exception):
+                PAGE.unroute("**/*", INTERACTION_GUARD)
+        if CONTEXT is not None:
+            with contextlib.suppress(Exception):
+                CONTEXT.unroute("**/*", INTERACTION_GUARD)
     INTERACTION_GUARD = None
     discard_interaction_snapshot()
 
 
-def install_interaction_guard(expected: str) -> None:
+def detach_public_navigation_guard_for_interaction() -> None:
+    """Remove the single-origin management guard before a multi-origin action."""
+    global PUBLIC_NAVIGATION_GUARD, PUBLIC_NAVIGATION_ORIGIN, PUBLIC_NAVIGATION_DENIED
+    if PUBLIC_NAVIGATION_GUARD is not None and PAGE is not None:
+        with contextlib.suppress(Exception):
+            PAGE.unroute("**/*", PUBLIC_NAVIGATION_GUARD)
+    PUBLIC_NAVIGATION_GUARD = None
+    PUBLIC_NAVIGATION_ORIGIN = ""
+    PUBLIC_NAVIGATION_DENIED = None
+
+
+def install_interaction_guard(expected: str, authorized_origins: Any = None) -> None:
+    """Guard every request by its Page's own or opener-inherited origin set."""
     global INTERACTION_GUARD, PUBLIC_NAVIGATION_DENIED
-    install_public_navigation_guard(expected)
+    if not valid_public_origin(expected):
+        raise ValueError("Managed interaction expected origin is invalid.")
+    active_state = ensure_provider_page(PAGE)
+    if active_state is None:
+        raise RuntimeError("Managed interaction has no active Page binding.")
+    active_ref = active_state["provider_page_ref"]
+    existing_scope = PAGE_INTERACTION_ALLOWED_ORIGINS.get(active_ref)
+    if authorized_origins is None:
+        # managed_interaction writes Core's explicit intersection before calling
+        # this function.  The fallback keeps the private helper useful for the
+        # legacy dependency-free fixture while never becoming a production
+        # fallback when an operation scope is already present.
+        allowed = existing_scope if existing_scope is not None else {expected}
+        legacy_unscoped = existing_scope is None
+    else:
+        allowed = authorized_origin_set(authorized_origins, expected)
+        if allowed is None or not allowed:
+            raise ValueError("Managed interaction origin scope is invalid.")
+        legacy_unscoped = False
+    PAGE_INTERACTION_ALLOWED_ORIGINS[active_ref] = set(allowed)
+    PAGE_NAVIGATION_DENIED.pop(active_ref, None)
+
+    # A profile-management guard is intentionally single-origin. Keeping it
+    # attached would silently reject an otherwise authorized second origin.
+    detach_public_navigation_guard_for_interaction()
     if INTERACTION_GUARD is not None:
         return
+
     def guard(route: Any) -> None:
         global PUBLIC_NAVIGATION_DENIED
         request = route.request
-        if public_origin(request.url) != PUBLIC_NAVIGATION_ORIGIN:
-            PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
-            route.abort("blockedbyclient")
-            return
         try:
-            target_page = request_page(request)
-            if target_page is not PAGE and page_state_for(target_page) is None:
+            # Do not fall back to PAGE here: an unresolved request relation
+            # could otherwise let a popup inherit the active Page's authority.
+            target_page = request_page_with_fallback(request, False)
+            target_state = page_state_for(target_page)
+            if target_state is None and page_opener(target_page) is not None:
+                # A context route can win the race with Playwright's ``page``
+                # event.  Register only when the browser itself proves an
+                # opener; an unrelated unknown Page remains outside scope.
+                target_state = ensure_provider_page(target_page)
+            if target_state is None:
                 PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
+                route.abort("blockedbyclient")
+                return
+            target_ref = target_state["provider_page_ref"]
+            allowed_for_page = inherited_page_origins(PAGE_INTERACTION_ALLOWED_ORIGINS, target_page)
+            if allowed_for_page is None and legacy_unscoped and target_ref in PAGE_STATES:
+                # Only the dependency-free direct helper fixture reaches this
+                # compatibility branch. Managed calls pre-bind active scope.
+                allowed_for_page = {expected}
+            if allowed_for_page is None:
+                PUBLIC_NAVIGATION_DENIED = "managed_interaction_window_unsupported"
+                route.abort("blockedbyclient")
+                return
+            request_origin = public_origin(str(getattr(request, "url", "")))
+            if request_origin not in allowed_for_page:
+                PUBLIC_NAVIGATION_DENIED = "managed_interaction_request_blocked"
+                PAGE_NAVIGATION_DENIED[target_ref] = "managed_interaction_request_blocked"
                 route.abort("blockedbyclient")
                 return
         except Exception:
@@ -1861,7 +2262,8 @@ def install_interaction_guard(expected: str) -> None:
         try:
             response = route.fetch(max_redirects=0, timeout=10_000)
             if 300 <= response.status < 400:
-                follow_authorized_redirect(route, response, request, {expected}, "managed_public_redirect_blocked")
+                if not follow_authorized_redirect(route, response, request, allowed_for_page, "managed_interaction_redirect_blocked"):
+                    PUBLIC_NAVIGATION_DENIED = "managed_interaction_redirect_blocked"
             else:
                 route.fulfill(response=response)
         except Exception:
@@ -1944,8 +2346,13 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
     action, expected = request.get("action"), request.get("expected_origin")
     generation = request.get("control_generation")
     timeout = request.get("timeout_ms", 5000)
-    if action not in ("snapshot", "click", "input", "press", "scroll", "wait") or not isinstance(expected,str) or public_origin(expected) != expected or type(generation) is not int or generation < 0 or type(timeout) is not int or not 1 <= timeout <= 10000:
+    if action not in ("snapshot", "click", "input", "press", "scroll", "wait") or not valid_public_origin(expected) or type(generation) is not int or generation < 0 or type(timeout) is not int or not 1 <= timeout <= 10000:
         return refused("managed_interaction_invalid_input")
+    allowed_origins = authorized_origin_set(request.get("authorized_origins"), expected)
+    if allowed_origins is None:
+        return refused("managed_interaction_invalid_input")
+    if not allowed_origins:
+        return refused("managed_interaction_origin_denied")
     try:
         with contextlib.redirect_stdout(sys.stderr):
             provider_ref = request.get("provider_page_ref")
@@ -1955,9 +2362,35 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
             # them while Camoufox uses the explicit provider binding.
             if isinstance(provider_ref, str) and (selected is None or selected.get("closed") or selected.get("page") is not PAGE):
                 return refused("managed_interaction_page_not_active")
+            controlled_page = PAGE
+            if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+                try:
+                    refresh_native_selected_page()
+                except Exception:
+                    return refused("managed_interaction_relation_unavailable")
+                if PAGE is not controlled_page:
+                    return refused("managed_interaction_page_not_active")
+                current_state = page_state_for(controlled_page)
+                if current_state is None or current_state.get("closed") or current_state.get("native_active") is not True:
+                    return refused("managed_interaction_page_not_active")
+
+            def native_dispatch_failure() -> str | None:
+                if NATIVE_PLAYWRIGHT_ADAPTER is None:
+                    return None
+                try:
+                    refresh_native_selected_page()
+                except Exception:
+                    return "managed_interaction_relation_unavailable"
+                state = page_state_for(controlled_page)
+                if PAGE is not controlled_page or state is None or state.get("closed") or state.get("native_active") is not True:
+                    return "managed_interaction_page_not_active"
+                return None
+
             failure = interaction_surface(expected)
             if failure:
                 return refused(failure)
+            active_state = page_state_for(controlled_page) or register_provider_page(controlled_page)
+            PAGE_INTERACTION_ALLOWED_ORIGINS[active_state["provider_page_ref"]] = allowed_origins
             install_interaction_guard(expected)
             target = None
             if action != "snapshot":
@@ -1988,14 +2421,23 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                     value = request.get("text")
                     if descriptor["role"] != "textbox" or not isinstance(value,str) or len(value) > 512 or re.search(r"[\x00-\x1f\x7f]|password|token|cookie|secret|credential|authorization|验证码|密码",value,re.I):
                         return refused("managed_interaction_input_refused")
+                    failure = native_dispatch_failure()
+                    if failure:
+                        return refused(failure)
                     dispatched = True
                     target.fill(value, timeout=timeout)
                 elif action == "press":
                     if request.get("key") not in ("Enter","Tab","Escape","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","Backspace","Delete","Space"):
                         return refused("managed_interaction_key_refused")
+                    failure = native_dispatch_failure()
+                    if failure:
+                        return refused(failure)
                     dispatched = True
                     target.press(request["key"], timeout=timeout)
                 else:
+                    failure = native_dispatch_failure()
+                    if failure:
+                        return refused(failure)
                     dispatched = True
                     target.click(timeout=timeout, no_wait_after=True)
             elif action == "scroll":
@@ -2005,14 +2447,23 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                 if target is not None:
                     if not target.is_visible():
                         return refused("managed_interaction_target_unavailable")
+                    failure = native_dispatch_failure()
+                    if failure:
+                        return refused(failure)
                     dispatched = True
                     target.hover(timeout=timeout)
                 else:
                     viewport = PAGE.evaluate("mw:({width:innerWidth,height:innerHeight})")
+                    failure = native_dispatch_failure()
+                    if failure:
+                        return refused(failure)
                     dispatched = True
                     PAGE.mouse.move(viewport["width"]//2, viewport["height"]//2)
                 if not state["handle"].evaluate("state => state.valid()"):
                     return refused("managed_interaction_stale_target")
+                failure = native_dispatch_failure()
+                if failure:
+                    return refused(failure)
                 dispatched = True
                 PAGE.mouse.wheel(0, delta)
                 # Allow the delivered wheel to update layout. The new snapshot,
@@ -2043,7 +2494,14 @@ def managed_interaction(request: dict[str, Any]) -> dict[str, Any]:
                     if time.monotonic() >= deadline:
                         return refused("managed_interaction_wait_timeout")
                     PAGE.wait_for_timeout(min(50, max(1, (deadline-time.monotonic())*1000)))
-            failure = interaction_surface(expected) or PUBLIC_NAVIGATION_DENIED
+            if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+                try:
+                    refresh_native_selected_page()
+                except Exception:
+                    return refused("managed_interaction_relation_unavailable")
+                if PAGE is not controlled_page:
+                    return refused("managed_interaction_page_not_active")
+            failure = interaction_surface(expected) or PUBLIC_NAVIGATION_DENIED or page_navigation_failure(controlled_page)
             if failure:
                 return refused(failure)
             snapshot = interaction_snapshot(generation)
@@ -2246,7 +2704,7 @@ def read_operation_probe(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def close() -> None:
-    global PLAYWRIGHT, CONTEXT, PAGE
+    global PLAYWRIGHT, CONTEXT, PAGE, NATIVE_PLAYWRIGHT_ADAPTER
     try:
         with contextlib.redirect_stdout(sys.stderr):
             try:
@@ -2256,6 +2714,10 @@ def close() -> None:
                 if PLAYWRIGHT is not None:
                     PLAYWRIGHT.stop()
     finally:
+        if NATIVE_PLAYWRIGHT_ADAPTER is not None:
+            with contextlib.suppress(Exception):
+                NATIVE_PLAYWRIGHT_ADAPTER.close()
+        NATIVE_PLAYWRIGHT_ADAPTER = None
         PAGE = None
         CONTEXT = None
         PLAYWRIGHT = None

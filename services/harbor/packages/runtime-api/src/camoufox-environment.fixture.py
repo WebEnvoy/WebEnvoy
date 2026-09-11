@@ -192,11 +192,60 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
     sync = types.ModuleType("playwright.sync_api")
     sync.TimeoutError = TimeoutError
     sync.sync_playwright = lambda: types.SimpleNamespace(start=lambda: types.SimpleNamespace(stop=lambda: None))
+    class NativeAdapter:
+        def install_native_playwright_driver(self):
+            return self
+        def native_snapshot(self, _browser, context):
+            page = context.pages[0]
+            return {
+                "schema_version": "webenvoy.native-playwright/v1",
+                "epoch": "fixture-epoch",
+                "sample_sequence": 1,
+                "selection_status": "complete",
+                "active_window_id": "fixture-window",
+                "windows": [{
+                    "window_id": "fixture-window",
+                    "os_foreground": True,
+                    "selected_tab_id": "fixture-tab",
+                    "pages": [{
+                        "page": page,
+                        "target_id": "fixture-target",
+                        "tab_id": "fixture-tab",
+                        "browsing_context_id": "fixture-context",
+                        "window_id": "fixture-window",
+                        "selected": True,
+                    }],
+                }],
+                "pages": [{
+                    "page": page,
+                    "target_id": "fixture-target",
+                    "tab_id": "fixture-tab",
+                    "browsing_context_id": "fixture-context",
+                    "window_id": "fixture-window",
+                    "selected": True,
+                }],
+                "selected_pages": [{
+                    "page": page,
+                    "target_id": "fixture-target",
+                    "tab_id": "fixture-tab",
+                    "browsing_context_id": "fixture-context",
+                    "window_id": "fixture-window",
+                    "selected": True,
+                }],
+            }
+        def create_background_page(self, context, _window_id):
+            return context.pages[0]
+        def close_page_with_safe_return(self, _context, target_id, safe_target_id):
+            return {"target_id": target_id, "safe_target_id": safe_target_id}
+        def close(self):
+            pass
+    native_adapter = NativeAdapter()
     modules = {"camoufox": camoufox, "camoufox.utils": utils, "playwright": types.ModuleType("playwright"), "playwright.sync_api": sync}
     with patch.dict(DRIVER.sys.modules, modules), patch.object(DRIVER.sys, "version_info", (3, 12)), \
          patch.object(DRIVER.importlib.metadata, "version", side_effect=lambda name: {"camoufox": DRIVER.CAMOUFOX_VERSION_PIN, "playwright": "1.60.0"}[name]), \
          patch.object(DRIVER, "PROPERTIES_SHA256_PIN", hashlib.sha256(b"[]").hexdigest()), \
-         patch.object(DRIVER, "prepare_properties", side_effect=lambda path: (path, "fixture")):
+         patch.object(DRIVER, "prepare_properties", side_effect=lambda path: (path, "fixture")), \
+         patch.object(DRIVER, "native_playwright_adapter_module", return_value=native_adapter):
         request = {"profile_dir": str(profile), "executable_path": str(executable), "timezone": "UTC"}
         fail_browser = True
         raises(lambda: DRIVER.launch(request), "launch failure")
@@ -236,3 +285,311 @@ with tempfile.TemporaryDirectory(prefix="camoufox-launch-replay-") as temporary:
         DRIVER.close()
 
 print("camoufox real launch boundary fixture passed")
+
+# Keep the private adapter's Channel call contract executable in a dependency-
+# free fixture. Playwright 1.60 takes (method, timeout_calculator, params), so
+# passing params in the second position must fail this exact-signature stand-in.
+ADAPTER_PATH = Path(__file__).with_name("camoufox-native-playwright.py")
+ADAPTER_SPEC = importlib.util.spec_from_file_location("webenvoy_camoufox_native_playwright_fixture", ADAPTER_PATH)
+assert ADAPTER_SPEC and ADAPTER_SPEC.loader
+ADAPTER = importlib.util.module_from_spec(ADAPTER_SPEC)
+ADAPTER_SPEC.loader.exec_module(ADAPTER)
+
+
+class ExactChannel:
+    def __init__(self, page_channel) -> None:
+        self.page_channel = page_channel
+        self.calls = []
+
+    def send_return_as_dict(self, method, timeout_calculator, params=None, is_internal=False, title=None):
+        assert callable(timeout_calculator)
+        assert timeout_calculator(None) == 4_000
+        self.calls.append((method, params))
+        if method == ADAPTER.NATIVE_SNAPSHOT_METHOD:
+            return {
+                "schemaVersion": ADAPTER.NATIVE_SNAPSHOT_SCHEMA,
+                "epoch": "fixture-epoch",
+                "sampleSequence": 1,
+                "selectionStatus": "complete",
+                "activeWindowId": "fixture-window",
+                "windows": [{
+                    "windowId": "fixture-window",
+                    "osForeground": True,
+                    "selectedTabId": "fixture-tab",
+                    "pages": [{
+                        "targetId": "fixture-target",
+                        "tabId": "fixture-tab",
+                        "browsingContextId": "fixture-context",
+                        "selected": True,
+                        "page": self.page_channel,
+                    }],
+                }],
+            }
+        if method == ADAPTER.NATIVE_CREATE_PAGE_METHOD:
+            assert params == {"windowId": "fixture-window"}
+            return {
+                "targetId": "fixture-target",
+                "windowId": "fixture-window",
+                "tabId": "fixture-tab",
+                "browsingContextId": "fixture-context",
+                "page": self.page_channel,
+            }
+        if method == ADAPTER.NATIVE_CLOSE_PAGE_METHOD:
+            assert params == {"targetId": "fixture-target", "safeTargetId": "fixture-safe-target"}
+            return {"targetId": "fixture-target", "safeTargetId": "fixture-safe-target"}
+        raise AssertionError(f"unexpected native method: {method}")
+
+
+page_impl = object()
+page_channel = types.SimpleNamespace(_object=page_impl)
+channel = ExactChannel(page_channel)
+context_impl = types.SimpleNamespace(
+    _channel=channel,
+    _timeout_settings=types.SimpleNamespace(timeout=lambda _timeout=None: 4_000),
+)
+context = types.SimpleNamespace(
+    _sync=lambda value: value,
+    _impl_obj=context_impl,
+    pages=[types.SimpleNamespace(_impl_obj=page_impl, is_closed=lambda: False)],
+)
+assert ADAPTER.native_snapshot(object(), context)["sample_sequence"] == 1
+assert ADAPTER.create_background_page(context, "fixture-window") is context.pages[0]
+assert ADAPTER.close_page_with_safe_return(context, "fixture-target", "fixture-safe-target") == {
+    "target_id": "fixture-target",
+    "safe_target_id": "fixture-safe-target",
+}
+assert channel.calls == [
+    (ADAPTER.NATIVE_SNAPSHOT_METHOD, None),
+    (ADAPTER.NATIVE_CREATE_PAGE_METHOD, {"windowId": "fixture-window"}),
+    (ADAPTER.NATIVE_CLOSE_PAGE_METHOD, {"targetId": "fixture-target", "safeTargetId": "fixture-safe-target"}),
+]
+print("camoufox native Playwright Channel fixture passed")
+
+# Native Page relation fixtures are deliberately pure: they exercise the
+# Driver's bidirectional identity checks without starting a browser or
+# reconstructing a Page from URL/title facts.
+class RelationPage:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.url = "about:blank"
+
+    def title(self) -> str:
+        return self.name
+
+    def is_closed(self) -> bool:
+        return False
+
+    def on(self, *_args) -> None:
+        pass
+
+    def bring_to_front(self) -> None:
+        pass
+
+
+def native_relation(epoch: str, sequence: int, pages: list[tuple[RelationPage, str, str, str, str, bool]], active_window_id: str = "window-a") -> dict[str, object]:
+    facts = [
+        {"page": page, "target_id": target, "tab_id": tab, "browsing_context_id": context,
+         "window_id": window, "selected": selected}
+        for page, target, tab, context, window, selected in pages
+    ]
+    return {
+        "epoch": epoch,
+        "sample_sequence": sequence,
+        "selection_status": "complete",
+        "active_window_id": active_window_id,
+        "windows": [{
+            "window_id": "window-a", "os_foreground": True,
+            "pages": [{key: value for key, value in item.items() if key != "page"} for item in facts],
+        }],
+        "pages": facts,
+    }
+
+
+class RelationAdapter:
+    def __init__(self, *samples: dict[str, object]) -> None:
+        self.samples = list(samples)
+        self.calls = 0
+
+    def native_snapshot(self, _browser, _context) -> dict[str, object]:
+        self.calls += 1
+        return self.samples.pop(0) if self.samples else self.samples[-1]
+
+
+DRIVER.reset_provider_pages()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = types.SimpleNamespace(browser=object())
+DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+original_max_tombstones = DRIVER.MAX_PAGE_TOMBSTONES
+try:
+    original = RelationPage("original")
+    DRIVER.CONTEXT.pages = [original]
+    DRIVER.register_provider_page(original)
+    first_sample = native_relation("relation-epoch", 1, [(original, "target-a", "tab-a", "context-a", "window-a", True)])
+    replacement = RelationPage("replacement")
+    replacement_sample = native_relation("relation-epoch", 2, [(replacement, "target-a", "tab-a", "context-a", "window-a", True)])
+    relation_adapter = RelationAdapter(first_sample, replacement_sample)
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = relation_adapter
+    DRIVER.PAGE = original
+    DRIVER.refresh_native_selected_page()
+    original_state = DRIVER.page_state_for(original)
+    assert original_state and original_state["native_target_id"] == "target-a"
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "replacement Page object" in str(error)
+    else:
+        raise AssertionError("replacement Page object was accepted")
+    assert DRIVER.NATIVE_RELATION_INVALID is True
+    assert DRIVER.NATIVE_RELATION_SAMPLE_SEQUENCE == 1
+    assert DRIVER.PAGE is original and original_state["native_target_id"] == "target-a"
+    calls_after_replacement = relation_adapter.calls
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "permanently unavailable" in str(error)
+    else:
+        raise AssertionError("invalid native relation was recoverable without a new binding")
+    assert relation_adapter.calls == calls_after_replacement
+
+    # A malformed or changed second sample must not partially clear the last
+    # trusted active selection or freshness watermark.
+    DRIVER.reset_provider_pages()
+    page_a, page_b = RelationPage("a"), RelationPage("b")
+    DRIVER.CONTEXT.pages = [page_a, page_b]
+    DRIVER.register_provider_page(page_a)
+    DRIVER.register_provider_page(page_b)
+    atomic_first = native_relation("atomic-epoch", 1, [
+        (page_a, "target-a", "tab-a", "context-a", "window-a", True),
+        (page_b, "target-b", "tab-b", "context-b", "window-a", False),
+    ])
+    atomic_changed = native_relation("atomic-epoch", 2, [
+        (page_a, "target-a", "tab-a", "context-a", "window-a", True),
+        (page_b, "target-b-new", "tab-b", "context-b", "window-a", False),
+    ])
+    atomic_adapter = RelationAdapter(atomic_first, atomic_changed)
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = atomic_adapter
+    DRIVER.PAGE = page_a
+    DRIVER.refresh_native_selected_page()
+    before_atomic = (DRIVER.PAGE, DRIVER.NATIVE_RELATION_SAMPLE_SEQUENCE,
+                     DRIVER.page_state_for(page_a).get("native_active"),
+                     DRIVER.page_state_for(page_b).get("native_selected"))
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "identity changed" in str(error)
+    else:
+        raise AssertionError("changed native identity was accepted")
+    after_atomic = (DRIVER.PAGE, DRIVER.NATIVE_RELATION_SAMPLE_SEQUENCE,
+                    DRIVER.page_state_for(page_a).get("native_active"),
+                    DRIVER.page_state_for(page_b).get("native_selected"))
+    assert after_atomic == before_atomic
+
+    stale_adapter = RelationAdapter(native_relation("stale-epoch", 1, [
+        (page_a, "target-a", "tab-a", "context-a", "window-a", True),
+    ]), native_relation("stale-epoch", 1, [
+        (page_a, "target-a", "tab-a", "context-a", "window-a", True),
+    ]))
+    DRIVER.reset_provider_pages()
+    DRIVER.CONTEXT.pages = [page_a]
+    DRIVER.register_provider_page(page_a)
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = stale_adapter
+    DRIVER.PAGE = page_a
+    DRIVER.refresh_native_selected_page()
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "stale" in str(error)
+    else:
+        raise AssertionError("non-monotonic native sample was accepted")
+    assert DRIVER.NATIVE_RELATION_SAMPLE_SEQUENCE == 1
+
+    # Confirmed close tombstones are bounded; an unconfirmed close remains
+    # visible because dropping it would hide an unresolved native relation.
+    DRIVER.reset_provider_pages()
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+    DRIVER.MAX_PAGE_TOMBSTONES = 2
+    tombstone_pages = [RelationPage(f"closed-{index}") for index in range(4)]
+    for index, page in enumerate(tombstone_pages):
+        state = DRIVER.register_provider_page(page)
+        state.update({"closed": True, "closed_at": float(index), "native_close_confirmed": index != 3,
+                      "native_browsing_context_id": f"context-{index}"})
+    visible_tombstones = DRIVER.all_page_states()
+    visible_names = {item["title"] for item in visible_tombstones}
+    assert visible_names == {"closed-1", "closed-2"}
+    assert len([item for item in visible_tombstones if item["status"] == "closed"]) == 2
+    assert any(state["page"].title() == "closed-3" for state in DRIVER.PAGE_STATES.values())
+finally:
+    DRIVER.MAX_PAGE_TOMBSTONES = original_max_tombstones
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+    DRIVER.PAGE = None
+    DRIVER.CONTEXT = None
+    DRIVER.reset_provider_pages()
+
+print("camoufox native Page relation fixtures passed")
+
+# Interaction origin scopes are resolved by Page identity and opener identity,
+# never by the active Page as a global fallback.
+class GuardPage:
+    def __init__(self, name: str, opener=None) -> None:
+        self.name, self.opener = name, opener
+        self.url = "https://example.com/"
+        self.routes = []
+
+    def on(self, *_args) -> None:
+        pass
+
+    def route(self, _pattern, handler) -> None:
+        self.routes.append(handler)
+
+    def unroute(self, _pattern, handler) -> None:
+        if handler in self.routes:
+            self.routes.remove(handler)
+
+    def is_closed(self) -> bool:
+        return False
+
+
+class GuardRoute:
+    def __init__(self, url: str, page: GuardPage, status: int = 200) -> None:
+        self.request = types.SimpleNamespace(url=url, frame=types.SimpleNamespace(page=page))
+        self.status, self.fetched, self.aborted, self.fulfilled = status, 0, False, False
+
+    def fetch(self, **kwargs):
+        assert kwargs["max_redirects"] == 0
+        self.fetched += 1
+        return types.SimpleNamespace(status=self.status, dispose=lambda: None)
+
+    def abort(self, *_args) -> None:
+        self.aborted = True
+
+    def fulfill(self, **_kwargs) -> None:
+        self.fulfilled = True
+
+
+DRIVER.PAGE = GuardPage("active")
+DRIVER.CONTEXT = types.SimpleNamespace(route=lambda _pattern, handler: setattr(DRIVER.CONTEXT, "guard", handler), unroute=lambda *_args: None)
+DRIVER.reset_provider_pages()
+DRIVER.PAGE = GuardPage("active")
+active_page = DRIVER.PAGE
+popup_page = GuardPage("popup", active_page)
+other_page = GuardPage("other")
+DRIVER.CONTEXT.pages = [active_page, popup_page, other_page]
+DRIVER.register_provider_page(active_page)
+DRIVER.register_provider_page(popup_page, active_page)
+DRIVER.register_provider_page(other_page)
+DRIVER.install_interaction_guard("https://example.com", ["https://example.com", "https://second.example"])
+handler = DRIVER.INTERACTION_GUARD
+assert handler is not None
+for page, url in ((active_page, "https://second.example/active"), (popup_page, "https://second.example/popup")):
+    route = GuardRoute(url, page)
+    handler(route)
+    assert route.fulfilled and not route.aborted and route.fetched == 1
+for page, url in ((popup_page, "https://third.example/blocked"), (other_page, "https://second.example/unrelated")):
+    route = GuardRoute(url, page)
+    handler(route)
+    assert route.aborted and not route.fulfilled and route.fetched == 0
+DRIVER.clear_interaction_guard()
+DRIVER.PAGE = None
+DRIVER.CONTEXT = None
+DRIVER.reset_provider_pages()
+print("camoufox per-Page/opener interaction guard fixture passed")
