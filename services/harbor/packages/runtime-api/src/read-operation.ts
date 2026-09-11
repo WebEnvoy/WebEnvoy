@@ -53,6 +53,7 @@ export type ReadOperationFailureClass =
   | "provider_probe_unavailable"
   | "origin_drift"
   | "page_not_ready"
+  | "page_relation_unavailable"
   | "network_resource_unavailable"
   | "permission_denied"
   | "city_unresolved"

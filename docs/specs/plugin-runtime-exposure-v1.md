@@ -10,6 +10,7 @@
 
 | Runtime/管理能力 | MCP 工具与 operation | 授权和结果归口 |
 | --- | --- | --- |
+| Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation`：`instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics`；详见 [Network V1](network-runtime-contract-v1.md) 与 [Console V1](console-runtime-contract-v1.md)。 |
 | Profile environment facts / bounded configuration update | `webenvoy_operation`：`environment.read`、`environment.update` | 既有同名 `allowed_operations`；字段与失败语义由 [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) 维护。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
@@ -35,6 +36,8 @@
 
 ## 既有 Runtime 输入与 availability
 
+`webenvoy_operation` 的 Page 输入为 `idempotency_key`、`grant_id`、对应 `operation`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref`，并按 operation 接受精确 `origin`、受管 `page_id`/`page_ref`、`document_generation` 或同源 URL。兼容的 `instance.navigate`、`instance.read`、`instance.observe` 也消费这组显式 Page binding：多 Page Instance 必须携带 `page_id` 或 `page_ref`，成功结果分别在 `session.current_page` 或 `observation.page` 回显 Harbor 当前绑定；stale、origin 不符或 selector 冲突不得回退到 active/创建顺序的另一张 Page。`page.list` 与诊断是 observation-only，不获取或续租 ControlLease；其余 Page 操作走既有 Run/receipt 和 ControlLease。Plugin 添加当前 `connection_id`；未知输入字段拒绝。页面输入不接受 selector、脚本、header、body 或 raw endpoint 参数。关系异常或原生 selected 页面无法与受管 Page 可靠对应时，Harbor 必须返回结构化 `page_relation_unavailable`（或精确 Provider unavailable），暂停受影响 Instance 的网页派发并保留现场；不得猜测、重放、reload/reopen/rebuild、隐式接管用户控制，或影响其他 Profile。
+
 `webenvoy_operation` 的诊断输入仍为 `idempotency_key`、`grant_id`、`operation=instance.diagnostics`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref` 和精确 `origin`，可选同一 Instance 的 `page_ref`、不透明 `cursor`、`limit`（整数 1–64）。Plugin 添加当前 `connection_id`；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数，结果仍是有界脱敏 metadata。
 
 `environment.read` / `environment.update` 复用既有 `webenvoy_operation`。update 额外要求非空 `configuration`，只接受 timezone/language/viewport（各 1–128 字符）；不接受 Instance/Page/cursor、脚本、Provider/proxy/seed 参数。返回 `harbor-profile-environment/v1` 的 configured/effective/pending/observed/drift/provider/support/last_verified_at；保存不热改活动 Instance，不隐式重启。更新响应丢失后 query 原 key，只查询 mutation receipt 和当前环境事实，不再次提交更新；首次 readback/跨 restart 与未验证项必须区分，unknown 不等于 verified。
@@ -47,7 +50,7 @@ MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。
 
 ## Grant、task scope 与浏览器边界
 
-Core 只接受一个当前有效的 Principal/Connection/Grant，取 `skill_scope={skill_refs,source_refs}`、task scope、批准清单和 compatibility 的交集。旧 Grant 缺少 `skill_scope` 时没有 SKILL 权限；不得以网页 Profile、origin、账号绑定或通用浏览器 Grant 推导 SKILL 权限，也不得以 SKILL 权限推导网页操作权。版本升级、旧 Grant 读取和旧严格 reader 的拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。
+Core 只接受一个当前有效的 Principal/Connection/Grant。对浏览器 Page、navigation、interaction 和 diagnostics，effective origins 是 `Grant.allowed_origins ∩ ProfilePolicy.allowed_origins ∩ task_scope.origins`；请求的精确 `origin` 必须属于该交集。Core 不合并多个 Grant、多个 Profile 的 scope 或 Agent 自带 allowlist。对 SKILL 另取 `skill_scope={skill_refs,source_refs}`、task scope、批准清单和 compatibility 的交集。旧 Grant 缺少 `skill_scope` 时没有 SKILL 权限；不得以网页 Profile、origin、账号绑定或通用浏览器 Grant 推导 SKILL 权限，也不得以 SKILL 权限推导网页操作权。版本升级、旧 Grant 读取和旧严格 reader 的拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。
 
 既有 `webenvoy_operation` 的 browser/environment task scope 继续使用 `operations`、`profile_refs`、`origins`，其授权和 Web scope 不因 SKILL 工具改变。SKILL 请求不携带网页范围；同一个连接仍须先通过 `webenvoy_connect`，撤销/过期在每次新管理或 read 前重新检查。
 
@@ -57,9 +60,11 @@ Core 只接受一个当前有效的 Principal/Connection/Grant，取 `skill_scop
 
 Core 沿用 `{ok, run_id, status, result?, failure?}` 包装。管理操作的成功结果为非内容元数据；`skill.read` 的即时结果额外带通过同一 Buffer 校验的真实 content 与 `webenvoy.skill-read-receipt.v1`。内容不写入 Run Record、持久操作摘要或历史 receipt。
 
-成功诊断的 `result.schema_version` 继续为 `harbor-runtime-diagnostics/v1`；拒绝通过既有 admission error 或失败 Run 的 `failure.code` 传递，不能吞掉 unavailable、stale 或 revoked。Plugin 不重试 operation；断线后重新 connect，按原 `idempotency_key` 或 `run_id` 查询。纯 diagnostic read 只有在仍获授权时才能用新 key 读取当前窗口；查询原 Run 返回历史事实，不把历史 observation 解释为当前 Page 状态。
+成功诊断的 `result.schema_version` 继续为 `harbor-runtime-diagnostics/v1`；Page list 使用 `harbor-page-list/v2`，Page mutation receipt 使用 `harbor-page-navigation/v1`。拒绝通过既有 admission error 或失败 Run 的 `failure.code` 传递，不能吞掉 unavailable、stale、relation loss 或 revoked。Plugin 不重试 operation；断线后重新 connect，按原 `idempotency_key` 或 `run_id` 查询。纯 diagnostic read 只有在仍获授权时才能用新 key 读取当前窗口；查询原 Run 返回历史事实，不把历史 observation 解释为当前 Page 状态。
 
 `webenvoy_query` 只查询原 Run/receipt/摘要，不重放安装、启用、切换、禁用或 read，也不因旧 receipt 返回新的正文。响应丢失时，Plugin 重新 connect 后按原 idempotency key 或 run 查询；idempotency conflict、CAS conflict、`managed_skill_local_modified`、`managed_skill_missing`、`managed_skill_source_corrupt`、unavailable、revoked 和 incompatible 都保持明确失败，不能降级为空成功。
+
+Page mutation 的响应丢失、Harbor receipt 缺失或 Provider 关系无法确认时，Core/Harbor 保留 `unknown_outcome` 与 `dispatch_state: "dispatched"`，再由原 operation/Run 做只读对账；`not_dispatched` 只表示在 Provider dispatch boundary 之前被拒绝。旧 Plugin、旧 Runtime 或未知 schema/version 不认识 Page operation 时必须明确拒绝，不得改投旧 `instance.navigate`、内部 HTTP、CDP/Juggler 或其他 raw Provider path。兼容拒绝不扩大授权、不重放动作。
 
 SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
 

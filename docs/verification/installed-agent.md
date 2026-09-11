@@ -29,7 +29,7 @@ App 只持有 owner 连接。完整退出 App 不停止独立 Runtime 或 Profil
 
 ## 操作边界与恢复
 
-`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例原 PAGE 内导航和读取至多 4096 字符的可见正文；不执行网站 SKILL、任意脚本、CDP 或上传。导航通过原 PAGE 的请求拦截禁用重定向跟随（所有 3xx 拒绝），允许响应仍在同页渲染；持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。本切片 URL 不含查询串、片段或内嵌凭据；每个 Instance 操作须显式传入 origin。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
+`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例选定的 Page 内导航和读取至多 4096 字符的可见正文；`instance.observe` 同样读取并回显选定 Page 的 page facts/identity facts，不产生控件引用。多 Page Instance 必须传入 `page_id` 或 `page_ref`（并在已知时传入 `document_generation`），省略时返回 `page_selection_required`，不会猜测 active/首个 Page。成功结果回显同一 Page 的当前 binding；stale、origin 不符或 Page/Document 不匹配时不回退到其他 Page。不执行网站 SKILL、任意脚本、CDP 或上传。导航通过原 PAGE 的请求拦截禁用重定向跟随（所有 3xx 拒绝），允许响应仍在同页渲染；持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。本切片 URL 不含查询串、片段或内嵌凭据；每个 Instance 操作须显式传入 origin。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
 
 ### 受控页面交互（0.2.0）
 

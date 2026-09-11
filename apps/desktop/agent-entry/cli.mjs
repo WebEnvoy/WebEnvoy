@@ -6,8 +6,9 @@ import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
-import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
+import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
+import { bindCamoufoxArtifact, resolveInstalledCamoufoxArtifact, validateCamoufoxArtifactSetup, verifyCamoufoxArtifact } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -17,6 +18,12 @@ if (command === 'setup') {
   if (dataDir.startsWith(root + '/') || root.startsWith(dataDir + '/') || dataDir === root) throw new Error('Profile data must be separate from installation assets');
   try { const active = await localRequest(dataDir, '/status'); if (active.ready) throw new Error('runtime_active_stop_before_setup'); } catch (error) { if (error.message === 'runtime_active_stop_before_setup' || !['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
   const assets = await verifyBundle();
+  const installationPath = join(dataDir, 'installation.json');
+  const existingInstallation = await readInstallation(installationPath);
+  const artifactPath = args.includes('--camoufox-artifact') ? required('--camoufox-artifact') : undefined;
+  const requestedArtifact = artifactPath ? await verifyCamoufoxArtifact(artifactPath) : null;
+  const configuredArtifact = existingInstallation ? await resolveInstalledCamoufoxArtifact(existingInstallation) : null;
+  validateCamoufoxArtifactSetup(existingInstallation, configuredArtifact, requestedArtifact);
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -29,12 +36,12 @@ if (command === 'setup') {
     client = { data_dir: dataDir, credential: randomBytes(32).toString('base64url') };
     await writeFile(clientPath, JSON.stringify(client), { mode: 0o600, flag: 'wx' });
   }
-  try { await readFile(join(dataDir, 'installation.json')); }
-  catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+  let installation = existingInstallation;
+  if (!installation) {
     const ports = await Promise.all([reservePort(), reservePort()]);
-    await writeFile(join(dataDir, 'installation.json'), JSON.stringify({ coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}` }), { mode: 0o600, flag: 'wx' });
+    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}` };
   }
+  installation = bindCamoufoxArtifact(installation, configuredArtifact ?? requestedArtifact);
   await mkdir(join(hostDir, '.agents/skills/webenvoy-browser'), { recursive: true });
   // A standalone profile file is reviewable; never edit the user's existing Codex configuration.
   const config = hostConfig(root, clientPath, args.includes('--approve-tools'), true);
@@ -55,6 +62,7 @@ if (command === 'setup') {
     files: managedFiles,
     legacyFiles
   });
+  if (!existingInstallation || JSON.stringify(installation) !== JSON.stringify(existingInstallation)) await atomicWrite(installationPath, JSON.stringify(installation));
   console.log(JSON.stringify({ installed: true, credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
 } else if (command === 'access') {
   const action = args[0];
@@ -163,6 +171,18 @@ async function reservePort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
   return port;
+}
+
+async function readInstallation(path) {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('installation_configuration_invalid');
+    return value;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    if (error.message === 'installation_configuration_invalid') throw error;
+    throw new Error('installation_configuration_invalid');
+  }
 }
 
 function required(name) { const value = arg(name); if (!value) throw new Error(`${name}_required`); return value; }

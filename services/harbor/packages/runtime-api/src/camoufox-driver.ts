@@ -14,6 +14,7 @@ import {
   resolveIdentityEnvironmentLaunchConfiguration,
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
+import { MAX_PAGE_OBJECTS, MAX_PAGE_TOMBSTONES, PageNavigationError, pageNavigationFailureClass } from "./page-navigation.js";
 import { opaqueRef } from "./refs.js";
 import { prepareProfileStorage, profileStorageHasExternalLock } from "./profile-storage.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe } from "./read-operation-probe-trust.js";
@@ -21,7 +22,9 @@ import { normalizeRuntimeDiagnostics, trustRuntimeDiagnosticsProbe } from "./run
 import type {
   LocalProviderLaunchInput,
   LocalProviderLaunchResult,
+  LocalProviderPageController,
   LocalProviderPageFacts,
+  LocalProviderPageState,
   LocalProviderReadProbeInput,
   LocalProviderReadProbeResult,
   LocalProviderSiteResourceProbeInput,
@@ -41,10 +44,13 @@ type DriverPage = {
   current_url: string | null;
   title: string | null;
   status: RuntimePageStatus;
+  document_generation?: number;
+  active?: boolean;
 };
 
 type DriverReady = {
   page: DriverPage;
+  pages: LocalProviderPageState[];
   python_version?: string;
   camoufox_version?: string;
   browser_version?: string;
@@ -264,6 +270,16 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       ...configurationFacts(configuration, evidenceRef),
       ...page.facts
     ];
+    const pageController: LocalProviderPageController = {
+      listPages: async () => parseDriverPages(await driver.request("list_pages", {}, DRIVER_COMMAND_TIMEOUT_MS)),
+      openPage: async (url, authorized_origins) => parseDriverPageState(await driver.request("open_page", { ...(url ? { url } : {}), ...(authorized_origins ? { authorized_origins } : {}) }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, input.timeout_ms))),
+      activatePage: async (provider_page_ref) => parseDriverPageState(await driver.request("activate_page", { provider_page_ref }, DRIVER_COMMAND_TIMEOUT_MS)),
+      closePage: async (provider_page_ref, safe_return_provider_page_ref) => parseDriverPages(await driver.request("close_page", {
+        provider_page_ref,
+        ...(safe_return_provider_page_ref ? { safe_return_provider_page_ref } : {})
+      }, DRIVER_COMMAND_TIMEOUT_MS)),
+      navigatePage: async (provider_page_ref, action, url, authorized_origins) => parseDriverPageState(await driver.request("navigate_page", { provider_page_ref, action, ...(url ? { url } : {}), ...(authorized_origins ? { authorized_origins } : {}), timeout_ms: input.timeout_ms }, Math.max(DRIVER_COMMAND_TIMEOUT_MS, input.timeout_ms)))
+    };
     return {
       status: "ready",
       execution_surface: "local_provider",
@@ -271,6 +287,8 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       driver_kind: CAMOUFOX_DRIVER_KIND,
       viewer_entry: camoufoxViewerEntry(input.headless),
       page,
+      pages: ready.pages,
+      pageController,
       facts,
       readEnvironment: trustEnvironmentProbe(async () => {
         try { return normalizeEnvironmentObservation((await driver.request("environment_read", {})).result); }
@@ -278,10 +296,21 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       }),
       clearPublicPageGuard: async () => { await driver.request("clear_public_navigation_guard", {}, DRIVER_COMMAND_TIMEOUT_MS); },
       interaction: trustManagedInteractionOperation(async input => {
+        // Runtime normalizes this Core-derived intersection, but keep the
+        // provider adapter safe for legacy direct callers as well. An
+        // explicitly supplied set is authoritative and must contain the
+        // expected origin; only an omitted field gets singleton fallback.
+        const authorized_origins = input.authorized_origins === undefined
+          ? [input.expected_origin]
+          : [...new Set(input.authorized_origins)];
+        if (!authorized_origins.includes(input.expected_origin)) {
+          return { status: "unavailable", dispatch_state: "not_dispatched", failure_class: "managed_interaction_origin_denied" };
+        }
+        const providerInput = { ...input, authorized_origins };
         // After a private command is sent, a lost response cannot prove that an
         // input was not dispatched. Preserve unknown; never retry the command.
         try {
-          const response = await driver.request("managed_interaction", input, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
+          const response = await driver.request("managed_interaction", providerInput, Math.max(DRIVER_COMMAND_TIMEOUT_MS, 2 * (input.timeout_ms ?? 5000) + 5000));
           return normalizeManagedInteractionResponse(response.result, input.expected_origin);
         } catch {
           // Keep Runtime's in-flight guard until the failed command's process
@@ -293,18 +322,19 @@ export async function launchCamoufoxProvider(input: LocalProviderLaunchInput): P
       }),
       publicPage: trustManagedPublicPageOperation(async input => {
         const result = await driver.request("managed_public_page", input, DRIVER_COMMAND_TIMEOUT_MS);
-        if (result.page) currentUrl = parseDriverPage(result).current_url ?? currentUrl;
-        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(result.page ? { page: pageFacts(parseDriverPage(result)) } : {}) };
-        const page = pageFacts(parseDriverPage(result));
+        const resultPage = result.page ? pageFacts(parseDriverPage(result)) : undefined;
+        if (resultPage) currentUrl = resultPage.current_url ?? currentUrl;
+        if (result.failure_class) return { ...managedUnavailable(["managed_public_origin_denied", "managed_public_navigation_redirected", "managed_public_content_unavailable", "managed_public_navigation_blocked", "managed_public_redirect_blocked", "managed_public_navigation_unavailable"].includes(String(result.failure_class)) ? String(result.failure_class) : "managed_public_page_unavailable"), ...(resultPage ? { page: resultPage } : {}) };
+        const page = resultPage ?? pageFacts(parseDriverPage(result));
         if (typeof result.text === "string") {
           if (result.text.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|(?:token|cookie|password|secret|authorization|credential)\s*[=:]/i.test(result.text)) return managedUnavailable("managed_public_content_unavailable");
           return { status: "completed", page, text: result.text, truncated: result.truncated === true };
         }
         return input.url ? { status: "completed", page } : managedUnavailable("managed_public_content_unavailable");
       }),
-      observePage: trustManagedPageObserver(async () => {
-        const result = await driver.request("managed_observe", { expression: managedPageObservationExpression }, DRIVER_COMMAND_TIMEOUT_MS);
-        return normalizeManagedProviderObservation(result.observation);
+      observePage: trustManagedPageObserver(async input => {
+        const result = await driver.request("managed_observe", { expression: managedPageObservationExpression, ...(input?.provider_page_ref ? { provider_page_ref: input.provider_page_ref } : {}) }, DRIVER_COMMAND_TIMEOUT_MS);
+        return { ...normalizeManagedProviderObservation(result.observation), ...(input?.provider_page_ref ? { provider_page_ref: input.provider_page_ref } : {}) };
       }),
       readDiagnostics: trustRuntimeDiagnosticsProbe(async (diagnostics: RuntimeDiagnosticsInput) => {
         const result = await driver.request("diagnostics_read", { ...diagnostics }, DRIVER_COMMAND_TIMEOUT_MS);
@@ -476,8 +506,14 @@ function parseDriverReady(response: Record<string, unknown>): DriverReady {
     throw new CamoufoxDriverProtocolError("Camoufox Driver returned unqualified runtime or browser versions.");
   }
   const page = parseDriverPage(response);
+  // Older qualified fixtures predate the multi-Page pipe field. Keep the
+  // single Page protocol readable while real providers migrate to `pages`.
+  const pages = Array.isArray(response.pages)
+    ? parseDriverPages(response)
+    : [{ ...page, provider_page_ref: "provider_page_legacy", active: true, facts: [] }];
   return {
     page,
+    pages,
     python_version: stringField(response, "python_version"),
     camoufox_version: stringField(response, "camoufox_version"),
     browser_version: stringField(response, "browser_version"),
@@ -491,12 +527,53 @@ function parseDriverPage(response: Record<string, unknown>): DriverPage {
     throw new CamoufoxDriverProtocolError("Camoufox Driver returned no page facts.");
   }
   const value = page as Record<string, unknown>;
-  const status: RuntimePageStatus = value.status === "ready" ? "ready" : value.status === "unavailable" ? "unavailable" : "unknown";
+  const status: RuntimePageStatus = ["loading", "ready", "failed", "closed", "unavailable", "unknown"].includes(String(value.status)) ? value.status as RuntimePageStatus : "unknown";
   return {
     current_url: typeof value.current_url === "string" ? safePublicText(value.current_url) : null,
     title: typeof value.title === "string" ? safePublicText(value.title) : null,
-    status
+    status,
+    ...(Number.isSafeInteger(value.document_generation) && Number(value.document_generation) >= 1 ? { document_generation: Number(value.document_generation) } : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {})
   };
+}
+
+function parseDriverPageState(response: Record<string, unknown>): LocalProviderPageState {
+  throwOnDriverPageFailure(response);
+  const value = response.page && typeof response.page === "object" && !Array.isArray(response.page) ? response.page as Record<string, unknown> : response;
+  if (typeof value.provider_page_ref !== "string" || !value.provider_page_ref) throw new CamoufoxDriverProtocolError("Camoufox Driver returned no private Page handle.");
+  const parsed = parseDriverPage({ page: value });
+  return {
+    ...parsed,
+    provider_page_ref: value.provider_page_ref,
+    ...(typeof value.opener_provider_page_ref === "string" ? { opener_provider_page_ref: value.opener_provider_page_ref } : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {}),
+    ...(Number.isSafeInteger(value.document_generation) && Number(value.document_generation) >= 1 ? { document_generation: Number(value.document_generation) } : {}),
+    facts: []
+  };
+}
+
+function parseDriverPages(response: Record<string, unknown>): LocalProviderPageState[] {
+  throwOnDriverPageFailure(response);
+  if (!Array.isArray(response.pages)) throw new CamoufoxDriverProtocolError("Camoufox Driver returned no Page list.");
+  if (response.pages.length > MAX_PAGE_OBJECTS + MAX_PAGE_TOMBSTONES) {
+    throw new PageNavigationError("page_capacity_exceeded", "Camoufox Driver returned too many Pages.", "not_dispatched");
+  }
+  return response.pages.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new PageNavigationError("page_relation_unavailable", `Camoufox Driver returned an invalid Page at index ${index}.`, "not_dispatched");
+    }
+    return parseDriverPageState(item as Record<string, unknown>);
+  });
+}
+
+function throwOnDriverPageFailure(response: Record<string, unknown>): void {
+  if (typeof response.failure_class !== "string") return;
+  const failure = pageNavigationFailureClass(new Error(response.failure_class));
+  const message = typeof response.message === "string" ? safePublicText(response.message) : response.failure_class;
+  const dispatchState = response.dispatch_state === "dispatched" || response.dispatch_state === "not_dispatched"
+    ? response.dispatch_state
+    : undefined;
+  throw new PageNavigationError(failure, message, dispatchState);
 }
 
 async function probeCamoufoxSiteResource(
@@ -546,7 +623,9 @@ async function probeCamoufoxSiteResource(
 }
 
 function pageFacts(page: DriverPage): LocalProviderPageFacts {
-  return { current_url: page.current_url, title: page.title, status: page.status, facts: pageFactList(page, opaqueRef("validation")) };
+  return { current_url: page.current_url, title: page.title, status: page.status, facts: pageFactList(page, opaqueRef("validation")),
+    ...(page.document_generation === undefined ? {} : { document_generation: page.document_generation }),
+    ...(page.active === undefined ? {} : { active: page.active }) };
 }
 
 function pageFactList(page: DriverPage, evidenceRef: string): RuntimeFact[] {

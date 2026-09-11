@@ -232,6 +232,8 @@ Agent operating Instance A
 
 接管只影响指定 Instance。观看不自动取得 ControlLease；交还不允许恢复旧页面引用或自动重放未知动作。
 
+交还后严格处于 `control_owner=none`、`ControlLease.owner=none`、`state=released` 且无 holder 的 Instance，仍可接受 Core 的新纯观察（包括 semantic snapshot、页面事实和公开 read），且不取得或续租输入租约。需要输入时，Core 必须先以新观察为依据取得租约；同一 Core holder 的非争用首次取得可沿用该新观察的当前代次，其他 holder 或期间发生控制变化则使观察失效。
+
 完整 App 后置不改变这条路径。可信 owner 入口可以是最小 App surface 或后续其他本地确认入口，但不得把 owner 凭据交给 Agent。
 
 ## 8. Profile 环境与深层能力

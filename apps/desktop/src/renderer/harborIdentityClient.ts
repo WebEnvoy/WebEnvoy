@@ -53,7 +53,7 @@ export async function fetchHarborIdentityState(
   return {
     status: "offline",
     fetchedAt,
-    summary: `Harbor identity endpoint 未返回可消费的 owner facts。${identityResult.error ? ` ${identityResult.error}` : ""}`,
+    summary: `Harbor identity endpoint 未返回可消费的 owner facts。${identityResult.ok ? "" : ` ${identityResult.error}`}`,
     identities,
     providers: catalog?.providers ?? [],
   };
@@ -106,8 +106,12 @@ export async function openHarborIdentitySession(
   return result.ok ? result.value : { status: "unavailable" as const, message: result.error, retryable: false };
 }
 
-export async function lockHarborSession(harborEndpoint: string, sessionRef: string, handoffFromCore = false) {
-  if (handoffFromCore) return postHarborSession(harborEndpoint, [`/runtime/sessions/${encodeURIComponent(sessionRef)}/handoff`], {
+export async function lockHarborSession(harborEndpoint: string, sessionRef: string) {
+  const current = await requestJson<unknown>(harborEndpoint, `/runtime/sessions/${encodeURIComponent(sessionRef)}`, { method: "GET" });
+  if (!current.ok || !isLiveRuntimeSession(current.value, sessionRef)) {
+    return { status: "unavailable" as const, message: "Harbor 未返回可核验的同一实例状态；请刷新实例状态后重试。", retryable: true };
+  }
+  if (current.value.control_owner === "core_task") return postHarborSession(harborEndpoint, [`/runtime/sessions/${encodeURIComponent(sessionRef)}/handoff`], {
     control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested",
   });
   return postHarborSession(harborEndpoint, sessionPaths(sessionRef, "lock"), {
@@ -191,7 +195,7 @@ async function fetchFirstJson<T>(base: string, paths: string[], signal?: AbortSi
     const result = await requestJson<T>(base, path, { method: "GET", signal });
     if (result.ok) return result;
   }
-  return { ok: false as const, error: `无法读取 ${base}` };
+  return { ok: false as const, error: `无法读取 ${base}`, status: undefined };
 }
 
 async function postFirstJson<T>(
@@ -200,14 +204,17 @@ async function postFirstJson<T>(
   body: unknown,
   fallbackError = "Harbor endpoint 未接受会话请求。",
 ) {
+  let lastError = fallbackError;
   for (const path of paths) {
     const result = await requestJson<T>(base, path, {
       method: "POST",
       body: JSON.stringify(body),
     });
     if (result.ok) return result;
+    lastError = result.error;
+    if (result.status !== 404) return result;
   }
-  return { ok: false as const, error: fallbackError };
+  return { ok: false as const, error: lastError };
 }
 
 async function requestJson<T>(base: string, path: string, init: RequestInit, timeoutMs = 2500) {
@@ -218,15 +225,26 @@ async function requestJson<T>(base: string, path: string, init: RequestInit, tim
       timeoutMs,
       signal: init.signal ?? undefined,
     });
-    if (isOkFailure(payload)) return { ok: false as const, error: payload.error };
+    if (isOkFailure(payload)) return {
+      ok: false as const,
+      error: payload.error,
+      ...(typeof payload.status === "number" ? { status: payload.status } : {}),
+    };
     return { ok: true as const, value: payload as T };
   } catch (error) {
-    return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error), status: undefined };
   }
 }
 
-function isOkFailure(value: unknown): value is { ok: false; error: string } {
-  return isRecord(value) && value.ok === false && typeof value.error === "string";
+function isOkFailure(value: unknown): value is { ok: false; error: string; status?: number } {
+  return isRecord(value) && value.ok === false && typeof value.error === "string" &&
+    (value.status === undefined || typeof value.status === "number");
+}
+
+function isLiveRuntimeSession(value: unknown, sessionRef: string): value is Exclude<HarborRuntimeSession, { status: "unavailable" }> {
+  return isRecord(value) && !fixtureOrDemoPayloadReason(value) && value.schema_version === "harbor-runtime-facts/v0" &&
+    value.runtime_session_ref === sessionRef && typeof value.lifecycle_state === "string" && typeof value.control_owner === "string" &&
+    isRecord(value.control_lock) && typeof value.control_lock.state === "string";
 }
 
 function manualAuthenticationCompletionFailure(value: { ok: false; error: string; status?: unknown }) {

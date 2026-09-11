@@ -9,8 +9,10 @@ import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from
 import { LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 import { createMutationInput, identityInput, isolateProfileStorage, testProviderDetection } from "./identity-environment-mutation-test-helpers.js";
 import { trustManagedPublicPageOperation, managedOperationCatalog, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
+import { trustManagedInteractionOperation } from "./managed-interaction.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
+import type { LocalProviderPageController, LocalProviderPageState } from "./runtime-session-types.js";
 
 after(isolateProfileStorage("managed-observation"));
 
@@ -64,6 +66,13 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal((await observe() as { failure_class?: string }).failure_class, "control_lock_conflict");
     assert.equal((await runtime.bindManagedAccount("identity:a", input) as { failure_class?: string }).failure_class, "account_observation_required");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
+    const releasedRecord = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(a.runtime_session_ref)!;
+    const releasedGeneration = releasedRecord.control_generation;
+    const releasedObservation = await observe();
+    assert.ok(releasedObservation.status === "completed");
+    assert.equal(releasedRecord.control_generation, releasedGeneration, "observation after handback must remain lease-free");
+    assert.equal(releasedRecord.facts.control_owner, "none");
+    assert.equal(releasedRecord.facts.control_lock.state, "released");
     runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
     const resumed = await observe();
     assert.ok(resumed.status === "completed" && resumed.control_generation > first.control_generation && resumed.runtime_session_ref === first.runtime_session_ref);
@@ -130,6 +139,15 @@ test("management scope opens persisted unauthenticated profiles without promotin
     assert.deepEqual(receipt, creation);
     assert.deepEqual(await fetch(`${server.url}/runtime/managed-operation-catalog`).then(response => response.json()), managedOperationCatalog);
   } finally { await server.close(); await runtime.stopSession(session.runtime_session_ref); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("managed operation catalog preserves compatibility categories", () => {
+  const categories = new Map(managedOperationCatalog.operations.map(operation => [operation.operation_id, operation.category]));
+  for (const [category, operations] of Object.entries({
+    commit: ["profile.create", "account.bind"],
+    read: ["recovery.inspect", "recovery.status", "page.list"],
+    prepare: ["recovery.request", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"]
+  })) for (const operation of operations) assert.equal(categories.get(operation), category, operation);
 });
 
 
@@ -229,6 +247,13 @@ test("bounded public operations keep the exact instance, refuse identity origins
     assert.equal(guardClears, 1);
     assert.equal((await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false)).status, "unavailable");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
+    const releasedRecord = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(a.runtime_session_ref)!;
+    const releasedGeneration = releasedRecord.control_generation;
+    const releasedRead = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
+    assert.ok(releasedRead.status === "completed" && releasedRead.text === "A verifiable public paragraph.");
+    assert.equal(releasedRecord.control_generation, releasedGeneration, "public read after handback must remain lease-free");
+    assert.equal(releasedRecord.facts.control_owner, "none");
+    assert.equal(releasedRecord.facts.control_lock.state, "released");
     runtime.lockSession(a.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
     const resumed = await runtime.operateManagedPublicPage(a.runtime_session_ref, input, false);
     assert.ok(resumed.status === "completed" && resumed.session.runtime_session_ref === a.runtime_session_ref);
@@ -237,4 +262,157 @@ test("bounded public operations keep the exact instance, refuse identity origins
     assert.equal(runtime.getSession(a.runtime_session_ref)?.current_page.current_url, "https://denied.example/");
     assert.equal("text" in redirected, false);
   } finally { await runtime.stopSession(a.runtime_session_ref); await runtime.stopSession(b.runtime_session_ref); }
+});
+
+test("legacy instance observation and public operations require an explicit Page when same-origin Pages are ambiguous", async () => {
+  const origin = "https://example.com";
+  const calls: { kind: "public" | "observe"; provider_page_ref?: string }[] = [];
+  const pages: LocalProviderPageState[] = [
+    { provider_page_ref: "provider:a", current_url: `${origin}/a`, title: "A", status: "ready", facts: [], active: true, document_generation: 1 },
+    { provider_page_ref: "provider:b", current_url: `${origin}/b`, title: "B", status: "ready", facts: [], active: false, document_generation: 1 }
+  ];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => structuredClone(pages[1]!),
+    activatePage: async provider_page_ref => {
+      for (const page of pages) page.active = page.provider_page_ref === provider_page_ref;
+      return structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!);
+    },
+    closePage: async provider_page_ref => {
+      const index = pages.findIndex(page => page.provider_page_ref === provider_page_ref);
+      if (index >= 0) pages.splice(index, 1);
+      if (!pages.some(page => page.active) && pages[0]) pages[0].active = true;
+      return structuredClone(pages);
+    },
+    navigatePage: async provider_page_ref => structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!)
+  };
+  const launcher: LocalProviderLauncher = async input => {
+    const ready = await createFixtureLauncher("ready")(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    return {
+      ...ready,
+      execution_surface: "local_provider",
+      page: pages[0]!,
+      pages,
+      pageController,
+      publicPage: trustManagedPublicPageOperation(async operation => {
+        calls.push({ kind: "public", provider_page_ref: operation.provider_page_ref });
+        const selected = pages.find(page => page.provider_page_ref === operation.provider_page_ref);
+        if (!selected) return { status: "unavailable", failure_class: "managed_public_page_unavailable", retryable: true };
+        return { status: "completed", page: { current_url: selected.current_url, title: selected.title, status: selected.status, facts: [], document_generation: selected.document_generation } };
+      }),
+      observePage: trustManagedPageObserver(async operation => {
+        calls.push({ kind: "observe", provider_page_ref: operation?.provider_page_ref });
+        const selected = pages.find(page => page.provider_page_ref === operation?.provider_page_ref);
+        if (!selected) throw new Error("provider page missing");
+        return normalizeManagedProviderObservation({ current_url: selected.current_url, title: selected.title, ready_state: "complete", document_generation: selected.document_generation });
+      })
+    };
+  };
+  const runtime = new HarborRuntime(launcher);
+  runtime.createLocalIdentityEnvironment({ ...identityInput("identity:multipage", "profile:multipage"), site: { site_id: "public", origin, display_name: "Public" } });
+  const session = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:multipage", url: `${origin}/a`, control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+  if ("status" in session) throw new Error("session unavailable");
+  try {
+    const listed = await runtime.operateManagedPage(session.runtime_session_ref, { operation: "page.list", authorized_origins: [origin] });
+    assert.equal("status" in listed && listed.status, "completed");
+    if (!("pages" in listed)) throw new Error("page list unavailable");
+    const selected = listed.pages.find(page => page.current_url === `${origin}/b`)!;
+    assert.ok(selected);
+
+    const publicInput = { holder_ref: "principal:one", expected_origin: origin };
+    const ambiguousRead = await runtime.operateManagedPublicPage(session.runtime_session_ref, publicInput, false);
+    assert.equal(ambiguousRead.status, "unavailable");
+    if (ambiguousRead.status === "unavailable") assert.equal(ambiguousRead.failure_class, "page_selection_required");
+    const observeCallsBeforeAmbiguous = calls.length;
+    const ambiguousObserve = await runtime.observeManagedSession(session.runtime_session_ref, { holder_ref: "principal:one", expected_origin: origin });
+    assert.equal(ambiguousObserve.status, "unavailable");
+    if (ambiguousObserve.status === "unavailable") assert.equal(ambiguousObserve.failure_class, "page_selection_required");
+    assert.equal(calls.length, observeCallsBeforeAmbiguous, "ambiguous legacy calls must not reach the Provider");
+
+    const explicit = { ...publicInput, page_id: selected.page_id, page_ref: selected.page_ref, document_generation: selected.document_generation };
+    const read = await runtime.operateManagedPublicPage(session.runtime_session_ref, explicit, false);
+    assert.equal(read.status, "completed");
+    assert.deepEqual(calls.at(-1), { kind: "public", provider_page_ref: "provider:b" });
+    assert.equal(read.status === "completed" ? read.session.current_page.page_ref : undefined, selected.page_ref);
+
+    const observed = await runtime.observeManagedSession(session.runtime_session_ref, explicit);
+    assert.equal(observed.status, "completed");
+    assert.deepEqual(calls.at(-1), { kind: "observe", provider_page_ref: "provider:b" });
+    assert.equal(observed.status === "completed" ? observed.page.page_ref : undefined, selected.page_ref);
+    const stale = await runtime.operateManagedPublicPage(session.runtime_session_ref, { ...publicInput, page_ref: "page:stale" }, false);
+    assert.equal(stale.status, "unavailable");
+    if (stale.status === "unavailable") assert.equal(stale.failure_class, "stale_page");
+  } finally { await runtime.stopSession(session.runtime_session_ref); }
+});
+
+test("legacy observation, public, and interaction paths fence a handoff that occurs during Page refresh", async () => {
+  const origin = "https://example.com";
+  for (const kind of ["public", "observe", "interaction"] as const) {
+    let providerCalls = 0;
+    let releaseRefresh!: () => void;
+    let markRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>(resolve => { markRefreshStarted = resolve; });
+    const refreshReleased = new Promise<void>(resolve => { releaseRefresh = resolve; });
+    let blockRefresh = true;
+    const page: LocalProviderPageState = { provider_page_ref: "provider:race", current_url: `${origin}/race`, title: "Race", status: "ready", facts: [], active: true, document_generation: 1 };
+    const pageController: LocalProviderPageController = {
+      listPages: async () => {
+        if (blockRefresh) {
+          blockRefresh = false;
+          markRefreshStarted();
+          await refreshReleased;
+        }
+        return [structuredClone(page)];
+      },
+      openPage: async () => structuredClone(page),
+      activatePage: async () => structuredClone(page),
+      closePage: async () => [],
+      navigatePage: async () => structuredClone(page)
+    };
+    const launcher: LocalProviderLauncher = async input => {
+      const ready = await createFixtureLauncher("ready")(input);
+      if (ready.status !== "ready") throw new Error("fixture unavailable");
+      return {
+        ...ready,
+        execution_surface: "local_provider",
+        page,
+        pages: [page],
+        pageController,
+        publicPage: trustManagedPublicPageOperation(async operation => {
+          providerCalls++;
+          return { status: "completed", page: { current_url: operation.url ?? page.current_url, title: page.title, status: page.status, facts: [] } };
+        }),
+        observePage: trustManagedPageObserver(async () => {
+          providerCalls++;
+          return normalizeManagedProviderObservation({ current_url: page.current_url, title: page.title, ready_state: "complete" });
+        }),
+        interaction: trustManagedInteractionOperation(async () => {
+          providerCalls++;
+          return { status: "completed", dispatch_state: "dispatched", page: { current_url: page.current_url, title: page.title, status: page.status, facts: [] }, snapshot: { page_ref: "provider:snapshot", observation_ref: "observation:race", controls: [], text: "", truncated: false } };
+        })
+      };
+    };
+    const runtime = new HarborRuntime(launcher);
+    runtime.createLocalIdentityEnvironment({ ...identityInput(`identity:race-${kind}`, `profile:race-${kind}`), site: { site_id: "public", origin, display_name: "Public" } });
+    const session = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: `identity:race-${kind}`, url: `${origin}/race`, control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+    if ("status" in session) throw new Error("session unavailable");
+    const input = { holder_ref: "principal:one", expected_origin: origin };
+    const pending = kind === "public"
+      ? runtime.operateManagedPublicPage(session.runtime_session_ref, input, false)
+      : kind === "observe"
+        ? runtime.observeManagedSession(session.runtime_session_ref, input)
+        : runtime.operateManagedInteraction(session.runtime_session_ref, { holder_ref: "principal:one", operation_ref: "operation:race", action: "snapshot", expected_origin: origin, controlled_origin: origin, authorized_origins: [origin] });
+    await refreshStarted;
+    const handoff = runtime.recordHandoff(session.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested" });
+    assert.equal("status" in handoff, false);
+    assert.equal("status" in runtime.releaseSession(session.runtime_session_ref, { control_owner: "user" }), false);
+    assert.equal("status" in runtime.lockSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" }), false);
+    releaseRefresh();
+    const result = await pending;
+    assert.equal(result.status, "unavailable");
+    if (result.status === "unavailable") assert.equal(result.failure_class, kind === "interaction" ? "managed_interaction_control_changed" : "control_changed");
+    assert.equal(providerCalls, 0, `${kind} Provider operation must not run after a takeover-and-return during refresh`);
+    await runtime.stopSession(session.runtime_session_ref);
+  }
 });

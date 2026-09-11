@@ -256,6 +256,23 @@ async function route(
     writeJson(response, result ? 200 : 404, result ?? { status: "unavailable", failure_class: "managed_interaction_receipt_missing" }); return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "managed-pages" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.getManagedPageOperation(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? {
+      status: "unavailable",
+      schema_version: "harbor-page-navigation/v1",
+      failure_class: "unknown_outcome",
+      message: "Page operation receipt was not found.",
+      retryable: true,
+      // A missing receipt is not evidence that the Provider was untouched;
+      // callers must retain the operation reference and reconcile explicitly.
+      dispatch_state: "dispatched",
+      operation_ref: parts[2]
+    });
+    return;
+  }
+
   if (parts[0] === "runtime" && (parts[1] === "sessions" || parts[1] === "identity-environment-sessions") && parts[2]) {
     await routeSession(runtime, manualAuthenticationAuthorizer, parts[2], parts[3], method, request, response);
     return;
@@ -297,6 +314,8 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}",
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
       "/runtime/sessions/{runtime_session_ref}/diagnostics",
+      "/runtime/sessions/{runtime_session_ref}/pages",
+      "/runtime/managed-pages/{operation_ref}",
       "/runtime/sessions/{runtime_session_ref}/handoff",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",
@@ -413,6 +432,24 @@ async function routeSession(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
+  if (action === "pages" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<Record<string, unknown>>(request, {});
+    const operation = typeof body.operation === "string" ? body.operation : "page.list";
+    const result = await runtime.operateManagedPage(runtimeSessionRef, {
+      operation: operation as import("./page-navigation.js").ManagedPageOperation,
+      operation_ref: typeof body.operation_ref === "string" ? body.operation_ref : undefined,
+      idempotency_key: typeof body.idempotency_key === "string" ? body.idempotency_key : undefined,
+      holder_ref: typeof body.holder_ref === "string" ? body.holder_ref : undefined,
+      page_id: typeof body.page_id === "string" ? body.page_id : undefined,
+      page_ref: typeof body.page_ref === "string" ? body.page_ref : undefined,
+      document_generation: typeof body.document_generation === "number" ? body.document_generation : undefined,
+      url: typeof body.url === "string" ? body.url : undefined,
+      authorized_origins: Array.isArray(body.authorized_origins) && body.authorized_origins.every(item => typeof item === "string") ? body.authorized_origins as string[] : []
+    });
+    writeJson(response, "failure_class" in result ? result.failure_class === "session_missing" ? 404 : 409 : 200, result);
+    return;
+  }
   if (action === "interactions" && method === "POST") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const result = await runtime.operateManagedInteraction(runtimeSessionRef, await readJson<unknown>(request));

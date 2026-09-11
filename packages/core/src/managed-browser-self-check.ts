@@ -17,10 +17,14 @@ const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
+const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let dropResponse = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
+const forwardedInteractionOrigins: string[][] = [];
 const receipts = new Map<string, unknown>();
+let pageLists = 0, pageMutations = 0, dropPageResponse = false;
+const pageReceipts = new Map<string, Record<string, unknown>>();
 let environmentReads = 0, environmentUpdates = 0, dropEnvironmentResponse = false, environmentUnavailable = false;
 let environmentConfigured = { timezone: "UTC", language: "en-US", viewport: "1280x720" };
 let environmentEffective = { ...environmentConfigured };
@@ -29,12 +33,13 @@ const environmentReceipts = new Map<string, Record<string, unknown>>();
 let recoveryExpectedProfileRef: string | undefined;
 let afterCreate: (() => Promise<void>) | undefined;
 let afterProfileList: (() => Promise<void>) | undefined;
+let principalId: string | undefined;
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: operation_id === "environment.update" ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op)).map(operation_id => ({ operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
   else if (req.url === "/runtime/identity-environment-mutations") {
@@ -82,17 +87,62 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body) as { profile_ref?: string };
     value = { schema_version: "harbor-profile-recovery/v1", profile_ref: input.profile_ref, status: "compatible" };
   }
-  else if (req.url === "/runtime/sessions/session%3Aone/observe") { observations++; value = { status: "completed" }; }
+  else if (req.url === "/runtime/sessions/session%3Aone/observe") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    assert.equal(input.holder_ref, principalId);
+    assert.equal(input.expected_origin, "https://example.com");
+    assert.equal(input.page_id, "page-id:one");
+    assert.equal(input.page_ref, "page:one");
+    assert.equal(input.document_generation, 1);
+    observations++;
+    value = { status: "completed", page: { current_url: (managedSession.current_page as { current_url?: string }).current_url, title: "Fixture", status: "ready" } };
+  }
   else if (req.url === "/runtime/sessions/session%3Aone/diagnostics") {
     diagnostics++;
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
     assert.equal(input.origin, "https://example.com");
+    assert.ok(Array.isArray(input.authorized_origins));
+    forwardedDiagnosticsOrigins.push([...input.authorized_origins]);
     if (input.cursor) { assert.equal(input.page_ref, "page:one"); assert.equal(input.limit, 1); }
     if (dropDiagnosticsResponse) { req.socket.destroy(); return; }
     value = { status: "completed", schema_version: "harbor-runtime-diagnostics/v1", runtime_session_ref: "session:one", profile_ref: "profile:1", page_ref: "page:one", document_generation: 1, page: { current_url: "https://example.com/", title: "Fixture", status: "ready" }, cursor: "cursor:2", next_cursor: "cursor:2", truncated: false, observed_at: new Date().toISOString(), network: [{ event_ref: "event:1", kind: "response", observed_at: new Date().toISOString(), method: "GET", url: "https://example.com/health", origin: "https://example.com", resource_kind: "fetch", status: 503, duration_ms: 4 }], console: [{ event_ref: "event:2", level: "error", observed_at: new Date().toISOString(), page_ref: "page:one", document_generation: 1, text: "fixture error", truncated: false }] };
   }
-  else if (req.url === "/runtime/sessions/session%3Aone/lock") { lockAttempts++; value = { ...managedSession, control_owner: "core_task", control_lock: { state: "held", holder_ref: "fixture-agent" } }; }
+  else if (req.url === "/runtime/sessions/session%3Aone/pages") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { operation?: string; operation_ref?: string; page_ref?: string; url?: string };
+    if (input.operation === "page.list") {
+      pageLists++;
+      value = { status: "completed", schema_version: "harbor-page-list/v2", runtime_session_ref: "session:one", active_page_id: "page-id:one", filtered_page_count: 0, observed_at: new Date().toISOString(), pages: [{ page_id: "page-id:one", page_ref: "page:one", document_generation: 1, requested_url: "https://example.com/", current_url: "https://example.com/", origin: "https://example.com", title: "Fixture", status: "ready", active: true, error_reason: null, observed_at: new Date().toISOString() }] };
+    } else {
+      assert.ok(input.operation_ref);
+      if (managedSession.control_owner !== "core_task" || (managedSession.control_lock as { state?: unknown } | undefined)?.state !== "held") value = { status: "unavailable", dispatch_state: "not_dispatched", failure_class: "control_lock_conflict", operation_ref: input.operation_ref, runtime_session_ref: "session:one", observed_at: new Date().toISOString() };
+      else {
+        const previous = pageReceipts.get(input.operation_ref!);
+        if (previous) value = previous;
+        else {
+          pageMutations++;
+          const page = { page_id: "page-id:opened", page_ref: "page:opened", document_generation: 1, requested_url: input.url ?? "https://example.com/", current_url: input.url ?? "https://example.com/", origin: "https://example.com", title: "Opened", status: "ready", active: true, error_reason: null, observed_at: new Date().toISOString() };
+          const receipt = { status: "completed", dispatch_state: "dispatched", operation_ref: input.operation_ref!, runtime_session_ref: "session:one", page, observed_at: new Date().toISOString() };
+          pageReceipts.set(input.operation_ref!, receipt); value = receipt;
+        }
+      }
+      if (dropPageResponse) { req.socket.destroy(); return; }
+    }
+  }
+  else if (req.url?.startsWith("/runtime/managed-pages/")) value = pageReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
+  else if (req.url === "/runtime/sessions/session%3Aone/lock") {
+    lockAttempts++;
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { control_owner?: string; holder_ref?: string };
+    if (managedSession.control_owner === "user" && (managedSession.control_lock as { state?: unknown } | undefined)?.state === "held") value = { status: "unavailable", failure_class: "session_locked", current_error: { code: "session_locked" } };
+    else {
+      managedSession.control_owner = input.control_owner ?? "core_task";
+      managedSession.control_lock = { state: "held", holder_ref: input.holder_ref };
+      value = { ...managedSession };
+    }
+  }
   else if (["/runtime/sessions/session%3Aone/navigate", "/runtime/sessions/session%3Aone/read"].includes(req.url ?? "")) {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
@@ -104,9 +154,11 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body);
     assert.equal(input.controlled_origin, input.expected_origin);
     assert.equal(input.expected_origin, "http://127.0.0.1:18794");
+    assert.ok(Array.isArray(input.authorized_origins));
+    forwardedInteractionOrigins.push([...input.authorized_origins]);
     if (!refuseInteraction) interactions++;
     value = { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
-      operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
+      operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
     receipts.set(input.operation_ref, value);
     if (dropInteractionResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/managed-interactions/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
@@ -134,6 +186,7 @@ try {
     harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
   const credentialHash = createHash("sha256").update("fixture-agent").digest("hex");
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
+  principalId = principal.principal_id;
   const connection = await accessStore.connect(credentialHash);
   const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...managedOperations], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
     creation_template: { template_ref: "template:example", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] } } });
@@ -171,7 +224,7 @@ try {
   assert.equal((reconciled.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:3");
   assert.equal(creates, 3, "receipt query must not replay creation");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === recoveryGrant.grant_id)?.created_profile_refs.length, 1);
-  const browserOps = ["instance.navigate", "instance.read"];
+  const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   managedSession = { runtime_session_ref: "session:one", profile_ref: "profile:1", control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
@@ -203,11 +256,34 @@ try {
   assert.equal((await service.submit(credentialHash, { ...diagnosticRequest, connection_id: diagnosticReconnect.connection_id, idempotency_key: "fresh-diagnostics" })).status, "succeeded");
   assert.equal(navigations, 0, "diagnostic response loss and reconnect never generate a page action");
   assert.equal(lockAttempts, 0);
+  const diagnosticsExtraOrigin = "https://second.example";
+  const diagnosticsScopeOperations = ["instance.diagnostics"];
+  await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-wide", profile_ref: "profile:1",
+    allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com", diagnosticsExtraOrigin] });
+  const diagnosticsScopeGrant = await accessStore.createGrant({ idempotency_key: "diagnostics-scope-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com", diagnosticsExtraOrigin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const diagnosticsScopeRequest = { idempotency_key: "diagnostics-scope", connection_id: connection.connection_id, grant_id: diagnosticsScopeGrant.grant_id,
+    operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one",
+    task_scope: { operations: diagnosticsScopeOperations, profile_refs: ["profile:1"], origins: [diagnosticsExtraOrigin, "https://example.com"] } };
+  afterProfileList = async () => { await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-narrow", profile_ref: "profile:1",
+    allowed_operations: diagnosticsScopeOperations, allowed_origins: ["https://example.com"] }); };
+  let diagnosticsScopeResult;
+  try {
+    diagnosticsScopeResult = await service.submit(credentialHash, diagnosticsScopeRequest);
+  } finally {
+    afterProfileList = undefined;
+  }
+  assert.equal(diagnosticsScopeResult.status, "succeeded", JSON.stringify(diagnosticsScopeResult));
+  assert.deepEqual(forwardedDiagnosticsOrigins.at(-1), ["https://example.com"], "diagnostics forwards the latest checked origin scope");
+  await accessStore.revokeGrant({ idempotency_key: "revoke-diagnostics-scope", grant_id: diagnosticsScopeGrant.grant_id });
+  await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-scope-restore", profile_ref: "profile:1",
+    allowed_operations: [...diagnosticsOps, ...browserOps], allowed_origins: ["https://example.com"] });
   await accessStore.revokeGrant({ idempotency_key: "revoke-diagnostics", grant_id: diagnosticsGrant.grant_id });
   await assert.rejects(service.submit(credentialHash, { ...diagnosticRequest, idempotency_key: "revoked-diagnostics" }), /grant_unavailable/);
   managedSession.control_owner = "core_task";
   managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
-  const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  const navigation = { idempotency_key: "navigate-one", connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.navigate", profile_ref: "profile:1", origin: "https://example.com", url: "https://example.com/one", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1, task_scope: { operations: browserOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
   await assert.rejects(service.submit(credentialHash, { ...navigation, runtime_session_ref: undefined }), /invalid_input/);
   const stale = await service.submit(credentialHash, { ...navigation, idempotency_key: "old-session", runtime_session_ref: "session:old" });
   assert.equal(stale.failure?.code, "managed_browser_session_mismatch");
@@ -221,6 +297,9 @@ try {
   assert.equal(navigations, 1, "query and duplicate submission never replay navigation");
   const content = await service.submit(credentialHash, { ...navigation, idempotency_key: "read-one", operation: "instance.read", url: undefined });
   assert.equal((content.result as { text: string }).text, "Example Domain is for use in documentation examples.");
+  const observed = await service.submit(credentialHash, { ...navigation, idempotency_key: "observe-one", operation: "instance.observe", url: undefined });
+  assert.equal(observed.status, "succeeded", JSON.stringify(observed));
+  assert.equal((observed.result as { observation: { page: { current_url: string } } }).observation.page.current_url, "https://example.com/one");
   for (const denied of [{ ...navigation, profile_ref: "profile:2" }, { ...navigation, origin: "https://denied.example", url: "https://denied.example/" }, { ...navigation, task_scope: { ...navigation.task_scope, operations: ["instance.read"] } }]) {
     await assert.rejects(service.submit(credentialHash, { ...denied, idempotency_key: "denied" }), /managed_access_denied/);
   }
@@ -235,7 +314,7 @@ try {
   await accessStore.setProfilePolicy({ idempotency_key: "no-declaration", ...policy });
   const interactiveGrant = await accessStore.createGrant({ idempotency_key: "controlled-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const interactive = { idempotency_key: "snapshot", connection_id: connection.connection_id, grant_id: interactiveGrant.grant_id,
-    operation: "instance.snapshot", profile_ref: "profile:1", origin, runtime_session_ref: "session:one", task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [origin] } };
+    operation: "instance.snapshot", profile_ref: "profile:1", origin, runtime_session_ref: "session:one", page_ref: "page:one", task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [origin] } };
   await assert.rejects(service.submit(credentialHash, interactive), /controlled_origin_required/);
   await assert.rejects(accessStore.setProfilePolicy({ idempotency_key: "invalid-declaration", ...policy, controlled_interaction_origins: ["http://127.0.0.1:18795"] }), /invalid_input/);
   await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration", ...policy, controlled_interaction_origins: [origin] });
@@ -246,7 +325,57 @@ try {
   assert.equal(deniedPolicy.failure?.code, "managed_browser_policy_refused");
   assert.equal(deniedPolicy.dispatch_state, "not_dispatched");
   assert.equal(interactions, 1);
+  const pageOps = ["page.list", "page.open", "page.navigate"] as const;
+  await accessStore.setProfilePolicy({ idempotency_key: "page-policy", profile_ref: "profile:1", allowed_operations: [...browserOps, ...pageOps], allowed_origins: ["https://example.com"] });
+  const pageGrant = await accessStore.createGrant({ idempotency_key: "page-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: [...pageOps], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const pageRequest = { idempotency_key: "page-list", connection_id: connection.connection_id, grant_id: pageGrant.grant_id, operation: "page.list" as const, profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", task_scope: { operations: [...pageOps], profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  const prepareDeniedPage = await service.submit(credentialHash, { ...pageRequest, idempotency_key: "page-prepare-denied", operation: "page.open" as const, url: "https://example.com/denied" });
+  assert.equal(prepareDeniedPage.status, "failed", JSON.stringify(prepareDeniedPage));
+  assert.equal(prepareDeniedPage.failure?.code, "managed_browser_policy_refused");
+  assert.equal(prepareDeniedPage.dispatch_state, "not_dispatched");
+  assert.equal(pageMutations, 0, "prepare refusal must not reach the Page provider");
   await service.putManagementPolicy({ schema_version: executionPolicyMutationSchemaVersion, idempotency_key: "allow-controlled", expected_source_version: null, modes: { read: "auto", prepare: "auto", commit: "auto" } });
+  managedSession.control_owner = "none";
+  managedSession.control_lock = { state: "released", holder_ref: null };
+  const pageLockAttempts = lockAttempts;
+  const listedPages = await service.submit(credentialHash, pageRequest);
+  assert.equal(listedPages.status, "succeeded", JSON.stringify(listedPages));
+  assert.equal((listedPages.result as { pages: unknown[] }).pages.length, 1);
+  assert.equal(listedPages.dispatch_state, undefined, "page.list remains observation-only");
+  assert.equal(lockAttempts, pageLockAttempts, "page.list must not acquire ControlLease");
+  const pageOpen = { ...pageRequest, idempotency_key: "page-open", operation: "page.open" as const, url: "https://example.com/two" };
+  const openedPage = await service.submit(credentialHash, pageOpen);
+  assert.equal(openedPage.status, "succeeded", JSON.stringify(openedPage));
+  assert.equal(openedPage.dispatch_state, "dispatched");
+  assert.equal(lockAttempts, pageLockAttempts + 1, "page.open acquires the Instance ControlLease after handback");
+  assert.equal(managedSession.control_owner, "core_task");
+  const openedPageFacts = (openedPage.result as { page: { page_ref: string } }).page;
+  const pageNavigate = { ...pageRequest, idempotency_key: "page-navigate", operation: "page.navigate" as const, page_ref: openedPageFacts.page_ref, url: "https://example.com/three" };
+  const navigatedPage = await service.submit(credentialHash, pageNavigate);
+  assert.equal(navigatedPage.status, "succeeded", JSON.stringify(navigatedPage));
+  assert.equal(navigatedPage.dispatch_state, "dispatched");
+  const pageMutationsBeforeLoss = pageMutations;
+  dropPageResponse = true;
+  const lostPage = await service.submit(credentialHash, { ...pageNavigate, idempotency_key: "page-lost" });
+  dropPageResponse = false;
+  assert.equal(lostPage.status, "unknown_outcome", JSON.stringify(lostPage));
+  assert.equal(lostPage.dispatch_state, "dispatched");
+  assert.equal(pageMutations, pageMutationsBeforeLoss + 1);
+  const reconciledPage = await service.query(credentialHash, lostPage.run_id);
+  assert.equal(reconciledPage.status, "unknown_outcome", "page receipt must not rewrite the original unknown history");
+  assert.equal(reconciledPage.reconciliation, "completed");
+  assert.equal((reconciledPage.result as { page: { page_ref: string } }).page.page_ref, openedPageFacts.page_ref);
+  assert.equal(pageMutations, pageMutationsBeforeLoss + 1, "page query must not replay the original mutation");
+  assert.deepEqual(await service.submit(credentialHash, { ...pageNavigate, idempotency_key: "page-lost" }), reconciledPage);
+  managedSession.control_owner = "user";
+  managedSession.control_lock = { state: "held", holder_ref: "human" };
+  const humanPage = await service.submit(credentialHash, { ...pageNavigate, idempotency_key: "page-human-held" });
+  assert.equal(humanPage.status, "failed", JSON.stringify(humanPage));
+  assert.equal(humanPage.failure?.code, "control_lock_conflict");
+  assert.equal(humanPage.dispatch_state, "not_dispatched");
+  assert.equal(pageMutations, pageMutationsBeforeLoss + 1, "human-held Page mutation must not reach the provider");
+  managedSession.control_owner = "core_task";
+  managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
   const environmentOps = ["environment.read", "environment.update"];
   await accessStore.setProfilePolicy({ idempotency_key: "environment-policy", profile_ref: "profile:1", allowed_operations: environmentOps, allowed_origins: ["https://example.com"] });
   const environmentGrant = await accessStore.createGrant({ idempotency_key: "environment-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
@@ -333,6 +462,26 @@ try {
   assert.equal(queried.reconciliation, "completed");
   assert.equal((queried.result as { snapshot: { text: string } }).snapshot.text, "Ready");
   assert.equal(interactions, 2, "query after revocation does not replay input");
+  const interactionExtraOrigin = "http://127.0.0.1:18795";
+  const interactionScopePolicy = { profile_ref: "profile:1", allowed_operations: interactionOps,
+    allowed_origins: [origin, interactionExtraOrigin], controlled_interaction_origins: [origin, interactionExtraOrigin] };
+  await accessStore.setProfilePolicy({ idempotency_key: "interaction-scope-wide", ...interactionScopePolicy });
+  const interactionScopeGrant = await accessStore.createGrant({ idempotency_key: "interaction-scope-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin, interactionExtraOrigin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const interactionScopeRequest = { ...interactive, idempotency_key: "interaction-scope", grant_id: interactionScopeGrant.grant_id,
+    task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [interactionExtraOrigin, origin] } };
+  afterProfileList = async () => { await accessStore.setProfilePolicy({ idempotency_key: "interaction-scope-narrow", profile_ref: "profile:1",
+    allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] }); };
+  let interactionScopeResult;
+  try {
+    interactionScopeResult = await service.submit(credentialHash, interactionScopeRequest);
+  } finally {
+    afterProfileList = undefined;
+  }
+  assert.equal(interactionScopeResult.status, "succeeded", JSON.stringify(interactionScopeResult));
+  assert.deepEqual(forwardedInteractionOrigins.at(-1), [origin], "interaction forwards the latest checked origin scope");
+  await accessStore.revokeGrant({ idempotency_key: "revoke-interaction-scope", grant_id: interactionScopeGrant.grant_id });
   const recoveryOperations = ["recovery.status"] as const;
   await accessStore.setProfilePolicy({ idempotency_key: "recovery-status-policy", profile_ref: "profile:1", allowed_operations: [...recoveryOperations], allowed_origins: [] });
   const statusGrant = await accessStore.createGrant({ idempotency_key: "recovery-status-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: [...recoveryOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });

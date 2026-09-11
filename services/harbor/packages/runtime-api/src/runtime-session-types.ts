@@ -40,7 +40,7 @@ export interface RuntimeErrorFact {
   retryable: boolean;
 }
 
-export type RuntimePageStatus = "ready" | "unavailable" | "unknown";
+export type RuntimePageStatus = "loading" | "ready" | "failed" | "closed" | "unavailable" | "unknown";
 export type RuntimeControlLockState = "held" | "released" | "closed";
 
 export interface LocalProviderScreenshotFacts {
@@ -67,6 +67,13 @@ export interface RuntimePageFacts {
   status: RuntimePageStatus;
   error_reason: RuntimeErrorFact | null;
   observed_at: string;
+  /** v2 stable Page object and current document-bound projection. */
+  page_id?: string;
+  page_ref?: string;
+  document_generation?: number;
+  origin?: string | null;
+  active?: boolean;
+  opener_page_id?: string;
 }
 
 export interface RuntimeControlLockFacts {
@@ -197,6 +204,33 @@ export interface LocalProviderPageFacts {
   status: RuntimePageStatus;
   error?: RuntimeErrorFact;
   facts: RuntimeFact[];
+  page_id?: string;
+  page_ref?: string;
+  document_generation?: number;
+  origin?: string | null;
+  active?: boolean;
+  opener_page_id?: string;
+}
+
+/** Provider-private page handle facts. Harbor maps these to opaque Page refs. */
+export interface LocalProviderPageState extends LocalProviderPageFacts {
+  provider_page_ref: string;
+  opener_provider_page_ref?: string;
+  active?: boolean;
+  document_generation?: number;
+}
+
+export interface LocalProviderPageController {
+  listPages: () => Promise<LocalProviderPageState[]>;
+  openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
+  activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
+  /**
+   * Close a Page. Providers that can atomically select a caller-supplied safe
+   * return Page should honor the optional second handle and return that Page
+   * as the sole active selection in the resulting list.
+   */
+  closePage: (provider_page_ref: string, safe_return_provider_page_ref?: string) => Promise<LocalProviderPageState[]>;
+  navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
 }
 
 export type AllowlistedReadOperationSite = "xiaohongshu" | "boss";
@@ -616,7 +650,7 @@ export type LocalProviderSiteResourceProbeResult =
     }
   | {
       status: "blocked" | "unavailable" | "unknown";
-      failure_class: "not_logged_in" | "safety_challenge" | "page_not_ready" | "provider_probe_unavailable";
+      failure_class: "not_logged_in" | "safety_challenge" | "page_not_ready" | "page_relation_unavailable" | "provider_probe_unavailable";
       message: string;
       verified_fact_keys: readonly LocalProviderSiteResourceReadinessFactKey[];
       evidence_ref?: string;
@@ -722,7 +756,7 @@ export type LocalProviderReadProbeResult =
     }
   | {
       status: "unavailable";
-      failure_class: "origin_drift" | "not_logged_in" | "safety_challenge" | "page_not_ready" | "network_resource_unavailable" | "evidence_refs_missing" | "fixture_runtime" | "provider_probe_unavailable" | "permission_denied" | "city_unresolved" | "empty_result" | "field_missing" | "site_changed";
+      failure_class: "origin_drift" | "not_logged_in" | "safety_challenge" | "page_not_ready" | "page_relation_unavailable" | "network_resource_unavailable" | "evidence_refs_missing" | "fixture_runtime" | "provider_probe_unavailable" | "permission_denied" | "city_unresolved" | "empty_result" | "field_missing" | "site_changed";
       message: string;
       retryable: boolean;
       page?: LocalProviderPageFacts;
@@ -738,13 +772,15 @@ export type LocalProviderLaunchResult =
       cdp_ref?: string;
       viewer_entry: RuntimeViewerEntry;
       page: LocalProviderPageFacts;
+      pages?: LocalProviderPageState[];
+      pageController?: LocalProviderPageController;
       facts: RuntimeFact[];
       execution_surface?: "local_provider" | "fixture";
       openUrl: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
       clearPublicPageGuard?: () => Promise<void>;
       publicPage?: import("./managed-observation.js").ManagedPublicPageOperation;
       interaction?: import("./managed-interaction.js").ManagedInteractionOperation;
-      observePage?: () => Promise<import("./managed-observation.js").ManagedProviderObservation>;
+      observePage?: (input?: import("./managed-observation.js").ManagedProviderPageInput) => Promise<import("./managed-observation.js").ManagedProviderObservation>;
       readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
       readEnvironment?: import("./profile-environment.js").EnvironmentProbe;
       probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;

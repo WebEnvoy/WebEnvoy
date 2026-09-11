@@ -30,7 +30,9 @@ try {
       if(request.path==="/runtime/browser-providers") body=catalog;
       else if(request.path==="/runtime/identity-environments") body={identity_environments:[identity]};
       else if(request.path.endsWith("/session")) body={runtime_session:window.check.session};
+      else if(request.path==="/runtime/sessions/session%3Aoriginal") body=window.check.session;
       else if(request.path.endsWith("/handoff")){window.check.session={...session,control_owner:"user",control_lock:{owner:"user",state:"held"}};body=window.check.session;}
+      else if(request.path.endsWith("/lock")) return {ok:false,status:409,error:"Runtime Session is controlled by agent."};
       else if(request.path.endsWith("/release")){window.check.session={...session,control_owner:"none",control_lock:{owner:"none",state:"released"}};body=window.check.session;}
       else return {ok:false,status:404,error:"unexpected request"};
       return {ok:true,body};
@@ -63,6 +65,20 @@ try {
   await evaluate(`${button("交还控制")}.click()`);
   await waitFor(`${button("接管")} && !${button("接管")}.disabled`);
   assert.equal(await evaluate("window.check.calls.at(-1).path"),"/runtime/sessions/session%3Aoriginal/release");
+  await evaluate("window.check.session={...window.check.original,control_owner:'agent',control_lock:{owner:'agent',state:'held'}}");
+  await evaluate(`${button("接管")}.click()`);
+  await waitFor(`${button("接管")} && ${button("停止实例")} && document.body.textContent.includes('控制权操作未确认')`);
+  assert.equal(await evaluate("window.check.calls.at(-1).path"),"/runtime/sessions/session%3Aoriginal/lock");
+  assert.equal(await evaluate("window.check.calls.filter(x=>x.path.endsWith('/lock')).length"),1,"a refused state-changing control request must not be replayed through a fallback endpoint");
+  assert.equal(await evaluate("document.body.textContent.includes('浏览器当前不可用')"),false,"control refusal must not be projected as browser unavailable");
+  await evaluate(`${button("刷新实例")}.click()`);
+  await waitFor(`${button("接管")} && document.body.textContent.includes('浏览器实例正在运行')`);
+  await evaluate("window.check.session={...window.check.original,control_owner:'core_task',control_lock:{owner:'core_task',state:'held'}}");
+  await evaluate(`${button("接管")}.click()`);
+  await waitFor(`${button("交还控制")} && !${button("交还控制")}.disabled`);
+  assert.equal(await evaluate("window.check.calls.at(-1).path"),"/runtime/sessions/session%3Aoriginal/handoff");
+  assert.equal(await evaluate("window.check.calls.at(-2).path"),"/runtime/sessions/session%3Aoriginal");
+  assert.equal(await evaluate("window.check.calls.at(-1).body.expected_control_owner"),"core_task");
   await evaluate(`window.check.session=null;${button("刷新实例状态")}.click()`);
   await waitFor(`!${button("刷新实例状态")}.disabled && !document.body.textContent.includes('浏览器实例正在运行')`);
   assert.equal(await evaluate(`Boolean(${button("接管")})`),false);

@@ -35,18 +35,44 @@ import * as readline from "node:readline";
 import { writeFileSync } from "node:fs";
 
 let page = { current_url: "about:blank", title: "", status: "ready" };
+const providerPageRef = "provider_page_fixture";
+let pageClosed = false;
+const providerPage = () => ({ ...page, provider_page_ref: providerPageRef, active: true, document_generation: 1, facts: [] });
 const output = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 const rl = readline.createInterface({ input: process.stdin });
 for await (const line of rl) {
   if (!line.trim()) continue;
   const request = JSON.parse(line);
   if (request.op === "launch") {
+    pageClosed = false;
     page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
-    output({ id: request.id, status: "ready", page, python_version: "3.12.1", camoufox_version: "0.5.6", playwright_version: "1.60.0", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
+    output({ id: request.id, status: "ready", page, pages: [providerPage()], python_version: "3.12.1", camoufox_version: "0.5.6", playwright_version: "1.60.0", browser_version: "152.0.4-beta.30", properties_source: "resources_copy" });
   } else if (request.op === "open_url") {
     if (request.url.includes("timeout-test")) await new Promise((resolve) => setTimeout(resolve, 60000));
     page = { current_url: request.url, title: request.operation_scope === "profile_management" ? "Managed navigation" : "Camoufox fixture", status: "ready" };
     output({ id: request.id, status: "ok", page });
+  } else if (request.op === "list_pages") {
+    output({ id: request.id, status: "ok", pages: pageClosed ? [] : [providerPage()] });
+  } else if (request.op === "activate_page") {
+    if (request.provider_page_ref !== providerPageRef || pageClosed) {
+      output({ id: request.id, status: "error", failure_class: "page_not_found", dispatch_state: "not_dispatched", message: "fixture Page is closed" });
+    } else {
+      output({ id: request.id, status: "ok", page: providerPage(), pages: [providerPage()] });
+    }
+  } else if (request.op === "close_page") {
+    if (request.provider_page_ref !== providerPageRef || pageClosed) {
+      output({ id: request.id, status: "error", failure_class: "page_not_found", dispatch_state: "not_dispatched", message: "fixture Page is closed" });
+    } else {
+      pageClosed = true;
+      output({ id: request.id, status: "ok", pages: [], confirmed_closed_provider_page_refs: [providerPageRef] });
+    }
+  } else if (request.op === "navigate_page") {
+    if (request.provider_page_ref !== providerPageRef || pageClosed) {
+      output({ id: request.id, status: "error", failure_class: "page_not_found", dispatch_state: "not_dispatched", message: "fixture Page is closed" });
+    } else {
+      if (request.action === "navigate" && typeof request.url === "string") page = { ...page, current_url: request.url };
+      output({ id: request.id, status: "ok", page: providerPage(), pages: [providerPage()] });
+    }
   } else if (request.op === "managed_interaction") {
     await new Promise(resolve => setTimeout(resolve, 5300));
     writeFileSync(new URL("late-input.json", import.meta.url), JSON.stringify({ pid: process.pid, input_completed: true }));
@@ -211,6 +237,47 @@ print("properties layout passed")
   assert.match(output, /properties layout passed/);
 });
 
+test("fails closed when native Page activation cannot bring the Page to front", () => {
+  const helperPath = join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
+  const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON || "python3";
+  const script = `
+import importlib.util
+spec = importlib.util.spec_from_file_location("camoufox_driver", __import__("sys").argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class FakePage:
+    def __init__(self, name, fails=False):
+        self.name = name
+        self.fails = fails
+    def is_closed(self):
+        return False
+    def bring_to_front(self):
+        if self.fails:
+            raise RuntimeError("native focus unavailable")
+old = FakePage("old")
+candidate = FakePage("candidate", fails=True)
+old_state = module.register_provider_page(old)
+candidate_state = module.register_provider_page(candidate)
+module.PAGE = old
+old_state["active"] = True
+try:
+    module.set_active_provider_page(candidate)
+except RuntimeError as error:
+    assert str(error) == "native focus unavailable"
+else:
+    raise AssertionError("failed native activation was reported as success")
+assert module.PAGE is old
+assert old_state["active"] is True
+assert candidate_state.get("active") is not True
+print("activation failure passed")
+`;
+  const output = execFileSync(pythonPath, ["-c", script, helperPath], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+  assert.match(output, /activation failure passed/);
+});
+
 async function withCamoufoxEnv<T>(callback: () => Promise<T>): Promise<T> {
   const previousPython = process.env.HARBOR_CAMOUFOX_PYTHON;
   const previousHelper = process.env.HARBOR_CAMOUFOX_DRIVER_PATH;
@@ -312,64 +379,68 @@ test("keeps the existing Harbor lifecycle around a Camoufox driver", async () =>
   assert.equal(identity.provider_binding.selected_provider_id, "camoufox");
 
   const runtime = new HarborRuntime();
-  const first = await runtime.openIdentityEnvironmentSession({
-    identity_environment: identity,
-    url: "https://www.xiaohongshu.com/explore",
-    control_owner: "agent",
-    holder_ref: "camoufox-agent",
-    headless: false,
-    timeout_ms: 2_000
-  });
-  assert.equal("status" in first, false);
-  if ("status" in first) return;
-  assert.equal(first.driver_kind, "firefox_juggler");
-  assert.equal(first.availability.driver, "available");
-  assert.equal(first.availability.cdp, "unsupported");
-  const initialDriver = first.driver_ref;
+  try {
+    const first = await runtime.openIdentityEnvironmentSession({
+      identity_environment: identity,
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "agent",
+      holder_ref: "camoufox-agent",
+      headless: false,
+      timeout_ms: 2_000
+    });
+    assert.equal("status" in first, false);
+    if ("status" in first) return;
+    assert.equal(first.driver_kind, "firefox_juggler");
+    assert.equal(first.availability.driver, "available");
+    assert.equal(first.availability.cdp, "unsupported");
+    const initialDriver = first.driver_ref;
 
-  const siteFacts = await runtime.getSiteResourceFacts(first.runtime_session_ref, { site_id: "xiaohongshu", task_kind: "search_notes" });
-  assert.equal("status" in siteFacts, false);
-  if ("status" in siteFacts) return;
-  assert.equal(siteFacts.resource_facts.some((fact) => fact.key === "page.vue_app.ready" && fact.state === "available"), true);
-  const user = runtime.recordHandoff(first.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested", takeover_available: true });
-  assert.equal("status" in user, false);
-  const released = runtime.releaseSession(first.runtime_session_ref, { control_owner: "user" });
-  assert.equal("status" in released, false);
-  if ("status" in released) return;
-  assert.equal(released.lifecycle_state, "idle");
+    const siteFacts = await runtime.getSiteResourceFacts(first.runtime_session_ref, { site_id: "xiaohongshu", task_kind: "search_notes" });
+    assert.equal("status" in siteFacts, false);
+    if ("status" in siteFacts) return;
+    assert.equal(siteFacts.resource_facts.some((fact) => fact.key === "page.vue_app.ready" && fact.state === "available"), true);
+    const user = runtime.recordHandoff(first.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested", takeover_available: true });
+    assert.equal("status" in user, false);
+    const released = runtime.releaseSession(first.runtime_session_ref, { control_owner: "user" });
+    assert.equal("status" in released, false);
+    if ("status" in released) return;
+    assert.equal(released.lifecycle_state, "idle");
 
-  const reconnected = await runtime.openIdentityEnvironmentSession({
-    identity_environment: identity,
-    url: "https://www.xiaohongshu.com/explore",
-    control_owner: "agent",
-    holder_ref: "camoufox-agent-reconnected",
-    headless: false,
-    reuse_existing: true,
-    timeout_ms: 2_000
-  });
-  assert.equal("status" in reconnected, false);
-  if ("status" in reconnected) return;
-  assert.equal(reconnected.runtime_session_ref, first.runtime_session_ref);
-  assert.notEqual(reconnected.driver_ref, undefined);
-  assert.equal(reconnected.current_page.current_url, "https://www.xiaohongshu.com/explore");
-  assert.equal(reconnected.driver_ref, initialDriver);
+    const reconnected = await runtime.openIdentityEnvironmentSession({
+      identity_environment: identity,
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "agent",
+      holder_ref: "camoufox-agent-reconnected",
+      headless: false,
+      reuse_existing: true,
+      timeout_ms: 2_000
+    });
+    assert.equal("status" in reconnected, false);
+    if ("status" in reconnected) return;
+    assert.equal(reconnected.runtime_session_ref, first.runtime_session_ref);
+    assert.notEqual(reconnected.driver_ref, undefined);
+    assert.equal(reconnected.current_page.current_url, "https://www.xiaohongshu.com/explore");
+    assert.equal(reconnected.driver_ref, initialDriver);
 
-  await runtime.closeSession(first.runtime_session_ref);
-  const reopened = await runtime.openIdentityEnvironmentSession({
-    identity_environment: identity,
-    url: "https://www.xiaohongshu.com/explore",
-    control_owner: "agent",
-    holder_ref: "camoufox-agent-reopened",
-    headless: false,
-    reuse_existing: false,
-    timeout_ms: 2_000
-  });
-  assert.equal("status" in reopened, false);
-  if ("status" in reopened) return;
-  assert.notEqual(reopened.runtime_session_ref, first.runtime_session_ref);
-  assert.notEqual(reopened.driver_ref, initialDriver);
-  assert.equal(reopened.driver_kind, "firefox_juggler");
-  await runtime.closeSession(reopened.runtime_session_ref);
+    await runtime.closeSession(first.runtime_session_ref);
+    const reopened = await runtime.openIdentityEnvironmentSession({
+      identity_environment: identity,
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "agent",
+      holder_ref: "camoufox-agent-reopened",
+      headless: false,
+      reuse_existing: false,
+      timeout_ms: 2_000
+    });
+    assert.equal("status" in reopened, false);
+    if ("status" in reopened) return;
+    assert.notEqual(reopened.runtime_session_ref, first.runtime_session_ref);
+    assert.notEqual(reopened.driver_ref, initialDriver);
+    assert.equal(reopened.driver_kind, "firefox_juggler");
+    await runtime.closeSession(reopened.runtime_session_ref);
+  } finally {
+    await runtime.close().catch(() => undefined);
+  }
 }));
 
 test("reopens a persisted Profile for explicit user authentication when identity probing is unsupported", async () => withCamoufoxEnv(async () => {
@@ -385,38 +456,43 @@ test("reopens a persisted Profile for explicit user authentication when identity
     login_state: "manual_auth_required",
     storage_state: "present"
   });
-  const initial = await first.openManagedIdentityEnvironmentSession({
-    identity_environment_ref: identity.identity_environment_ref,
-    url: "https://www.xiaohongshu.com/explore",
-    control_owner: "user",
-    headless: false
-  });
-  assert.equal("status" in initial, false);
-  if ("status" in initial) return;
-  first.recordHandoff(initial.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
-  const confirmed = first.completeManualAuthentication(initial.runtime_session_ref);
-  assert.notEqual(confirmed.status, "unavailable", JSON.stringify(confirmed));
-  if (confirmed.status === "unavailable") return;
-  assert.equal(confirmed.status.login_state, "logged_in");
-  await first.closeSession(initial.runtime_session_ref);
-  await first.close();
+  let restarted: HarborRuntime | undefined;
+  try {
+    const initial = await first.openManagedIdentityEnvironmentSession({
+      identity_environment_ref: identity.identity_environment_ref,
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "user",
+      headless: false
+    });
+    assert.equal("status" in initial, false);
+    if ("status" in initial) return;
+    first.recordHandoff(initial.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
+    const confirmed = first.completeManualAuthentication(initial.runtime_session_ref);
+    assert.notEqual(confirmed.status, "unavailable", JSON.stringify(confirmed));
+    if (confirmed.status === "unavailable") return;
+    assert.equal(confirmed.status.login_state, "logged_in");
+    await first.closeSession(initial.runtime_session_ref);
+    await first.close();
 
-  const restarted = new HarborRuntime(undefined, { persistence_path: persistencePath });
-  const reopened = await restarted.openManagedIdentityEnvironmentSession({
-    identity_environment_ref: identity.identity_environment_ref,
-    url: "https://www.xiaohongshu.com/explore",
-    control_owner: "user",
-    headless: false
-  });
-  assert.equal("status" in reopened, false);
-  if ("status" in reopened) return;
-  assert.equal(restarted.getManagedLocalIdentityEnvironment(identity.identity_environment_ref)?.status.recovery_required, true);
-  restarted.recordHandoff(reopened.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
-  const reconfirmed = restarted.completeManualAuthentication(reopened.runtime_session_ref);
-  assert.notEqual(reconfirmed.status, "unavailable", JSON.stringify(reconfirmed));
-  if (reconfirmed.status === "unavailable") return;
-  assert.equal(reconfirmed.status.login_state, "logged_in");
-  await restarted.close();
+    restarted = new HarborRuntime(undefined, { persistence_path: persistencePath });
+    const reopened = await restarted.openManagedIdentityEnvironmentSession({
+      identity_environment_ref: identity.identity_environment_ref,
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "user",
+      headless: false
+    });
+    assert.equal("status" in reopened, false);
+    if ("status" in reopened) return;
+    assert.equal(restarted.getManagedLocalIdentityEnvironment(identity.identity_environment_ref)?.status.recovery_required, true);
+    restarted.recordHandoff(reopened.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
+    const reconfirmed = restarted.completeManualAuthentication(reopened.runtime_session_ref);
+    assert.notEqual(reconfirmed.status, "unavailable", JSON.stringify(reconfirmed));
+    if (reconfirmed.status === "unavailable") return;
+    assert.equal(reconfirmed.status.login_state, "logged_in");
+  } finally {
+    if (restarted) await restarted.close().catch(() => undefined);
+    await first.close().catch(() => undefined);
+  }
 }));
 
 

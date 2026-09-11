@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
+export const managedPageOperations = ["page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"] as const;
 export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.install", "skill.enable", "skill.read", "skill.update", "skill.rollback", "skill.disable"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedInteractionOperations, ...managedSkillOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedSkillOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
@@ -40,7 +41,7 @@ export type ManagedAccessRequest = {
 };
 export type ManagedAccess = {
   principal: ManagedPrincipal; connection: ManagedConnection; grant: ManagedGrant;
-  profile_policy?: ManagedProfilePolicy; creation_template?: ManagedCreationTemplate;
+  profile_policy?: ManagedProfilePolicy; creation_template?: ManagedCreationTemplate; authorized_origins: string[];
 };
 type StoredPrincipal = ManagedPrincipal & { credential_hash: string };
 type State = {
@@ -298,7 +299,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (!connection) return fail("managed_access_connection_unavailable");
       const grant = activeGrant(state, grantId);
       if (grant.principal_id !== principal.principal_id || !grant.allowed_operations.includes(op) || !task.operations.includes(op)) return fail("managed_access_denied");
-      const result: ManagedAccess = { principal: publicPrincipal(principal), connection, grant };
+      const result: ManagedAccess = { principal: publicPrincipal(principal), connection, grant, authorized_origins: [] };
       if (skillOperation) {
         const taskSkillRefs = task.skill_refs ?? [], taskSourceRefs = task.source_refs ?? [], grantSkillScope = grant.skill_scope;
         if (profileRef !== undefined || targetOrigin !== undefined || templateRef !== undefined || !grantSkillScope) return fail("managed_access_denied");
@@ -318,15 +319,16 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }
       if (templateRef !== undefined) return fail("managed_access_invalid_input");
       if (op === "profile.list" && profileRef === undefined) {
-        return { ...result, grant: { ...grant, profile_refs: grant.profile_refs.filter(ref => task.profile_refs.includes(ref) && state.profile_policies.some(item => item.profile_ref === ref && item.allowed_operations.includes(op))) } };
+        return { ...result, authorized_origins: [...new Set(task.origins.filter(item => grant.allowed_origins.includes(item)))], grant: { ...grant, profile_refs: grant.profile_refs.filter(ref => task.profile_refs.includes(ref) && state.profile_policies.some(item => item.profile_ref === ref && item.allowed_operations.includes(op))) } };
       }
       if (!profileRef || !grant.profile_refs.includes(profileRef) || !task.profile_refs.includes(profileRef)) return fail("managed_access_denied");
       const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
       if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
-      if (targetOrigin !== undefined && (!grant.allowed_origins.includes(targetOrigin) || !profile.allowed_origins.includes(targetOrigin) || !task.origins.includes(targetOrigin))) return fail("managed_access_denied");
-      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", ...managedInteractionOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
+      if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
+      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
-      return { ...result, profile_policy: profile };
+      return { ...result, profile_policy: profile, authorized_origins };
     },
     // The caller coordinates Harbor creation with its existing operation/idempotency owner.
     // This short transaction registers the result; it does not reserve quota before a side effect.

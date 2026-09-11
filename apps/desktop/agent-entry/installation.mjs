@@ -10,7 +10,7 @@ async function readRegular(path) {
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
-async function atomicWrite(path, content) {
+export async function atomicWrite(path, content) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = path + '.' + randomUUID() + '.tmp';
   try {
