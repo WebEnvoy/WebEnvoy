@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, copyFile, link, mkdtemp, mkdir, open, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { bindCamoufoxArtifact, CAMOUFOX_NATIVE_PINS, CAMOUFOX_NATIVE_TAB_HANDOFF_MANIFEST_SCHEMA, CAMOUFOX_NATIVE_TAB_HANDOFF_PATCH_ID, camoufoxArtifactInstallationRecord, resolveInstalledCamoufoxArtifact, sameCamoufoxArtifact, validateCamoufoxArtifactSetup, verifyCamoufoxArtifact } from './provider-artifact.mjs';
+import { classifyCamoufoxBinding } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -46,6 +46,41 @@ test('derives the same recovery operation ref from an idempotency key', () => {
   assert.notEqual(recoveryOperationRef('apply', 'lost-response'), recoveryOperationRef('backup', 'lost-response'));
 });
 
+test('classifies historical Camoufox bindings without resolving or launching them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-camoufox-retirement-test-'));
+  try {
+    const legacy = {
+      coreEndpoint: 'http://127.0.0.1:1',
+      harborEndpoint: 'http://127.0.0.1:2',
+      camoufoxArtifact: {
+        app: join(root, 'missing.app'),
+        executable: join(root, 'missing.app/Contents/MacOS/camoufox'),
+        manifest: join(root, 'missing.app/Contents/Resources/webenvoy-native-manifest.json'),
+        manifest_sha256: 'not-a-real-hash'
+      }
+    };
+    assert.deepEqual(classifyCamoufoxBinding(legacy), { state: 'retired', reason: 'retired_binding' });
+    assert.deepEqual(classifyCamoufoxBinding({ coreEndpoint: 'http://127.0.0.1:1', harborEndpoint: 'http://127.0.0.1:2' }), { state: 'retired', reason: 'unqualified' });
+    assert.throws(() => classifyCamoufoxBinding(null), /installation_configuration_invalid/);
+
+    const environment = installedRuntimeEnvironment({
+      parentEnvironment: { PATH: '/usr/bin', WEBENVOY_DEV_STORE: '/tmp/dev', HARBOR_CAMOUFOX_PATH: '/tmp/untrusted', CAMOUFOX_EXECUTABLE: '/tmp/untrusted' },
+      dataDir: join(root, 'data'), installRoot: join(root, 'install'), camoufoxLaunch: classifyCamoufoxBinding(legacy)
+    });
+    assert.equal(environment.HARBOR_CAMOUFOX_LAUNCH_STATE, 'retired');
+    assert.equal(environment.HARBOR_CAMOUFOX_LAUNCH_REASON, 'retired_binding');
+    assert.equal(environment.HARBOR_CAMOUFOX_PATH, undefined);
+    assert.equal(environment.WEBENVOY_DEV_STORE, undefined);
+    assert.equal(environment.CAMOUFOX_EXECUTABLE, undefined);
+    assert.equal(environment.HARBOR_PROFILE_STORAGE_ROOT, join(root, 'data/profiles'));
+
+    const unqualified = installedRuntimeEnvironment({ parentEnvironment: { HARBOR_CAMOUFOX_PATH: '/tmp/untrusted' }, dataDir: join(root, 'data'), installRoot: join(root, 'install') });
+    assert.equal(unqualified.HARBOR_CAMOUFOX_LAUNCH_STATE, 'retired');
+    assert.equal(unqualified.HARBOR_CAMOUFOX_LAUNCH_REASON, 'unqualified');
+    assert.equal(unqualified.HARBOR_CAMOUFOX_PATH, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('canonicalizes a symlinked previous app before constructing legacy paths', async () => {
   const root = await mkdtemp(join(tmpdir(), 'webenvoy-previous-installation-test-'));
   try {
@@ -55,149 +90,6 @@ test('canonicalizes a symlinked previous app before constructing legacy paths', 
     await writeFile(join(appRoot, 'agent-entry/bundle.mjs'), '');
     const alias = join(root, 'previous-alias.app');
     await symlink(app, alias);
-    assert.equal(await previousRoot(alias), await realpath(appRoot));
+    assert.equal(await previousRoot(alias), await import('node:fs/promises').then(({ realpath }) => realpath(appRoot)));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
-
-test('binds only a verified Camoufox test artifact and strips untrusted service overrides', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'webenvoy-camoufox-binding-test-'));
-  try {
-    const artifact = await createCamoufoxArtifact(root);
-    const verified = await verifyCamoufoxArtifact(artifact);
-    const fourEntryManifest = await readFile(verified.manifest, 'utf8');
-    const legacyThreeEntryManifest = JSON.parse(fourEntryManifest);
-    delete legacyThreeEntryManifest.patched_entries['chrome/juggler/content/protocol/PageHandler.js'];
-    await writeFile(verified.manifest, JSON.stringify(legacyThreeEntryManifest) + '\n');
-    await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_patch_manifest_invalid/);
-    await writeFile(verified.manifest, fourEntryManifest);
-    const tabHandoffArtifact = await createCamoufoxArtifact(root, { tabHandoff: true });
-    const tabHandoff = await verifyCamoufoxArtifact(tabHandoffArtifact);
-    assert.equal(tabHandoff.patch_id, CAMOUFOX_NATIVE_TAB_HANDOFF_PATCH_ID);
-    const tabHandoffManifest = await readFile(tabHandoff.manifest, 'utf8');
-    const forgedTabHandoffManifest = JSON.parse(tabHandoffManifest);
-    forgedTabHandoffManifest.output.chrome_css_sha256 = '0'.repeat(64);
-    await writeFile(tabHandoff.manifest, JSON.stringify(forgedTabHandoffManifest) + '\n');
-    await assert.rejects(verifyCamoufoxArtifact(tabHandoffArtifact), /camoufox_artifact_output_mismatch/);
-    await writeFile(tabHandoff.manifest, tabHandoffManifest);
-    const tabHandoffCssPath = join(tabHandoffArtifact, 'Contents/Resources/chrome.css');
-    const tabHandoffCss = await readFile(tabHandoffCssPath);
-    await writeFile(tabHandoffCssPath, Buffer.concat([tabHandoffCss, Buffer.from('\n')]));
-    await assert.rejects(verifyCamoufoxArtifact(tabHandoffArtifact), /camoufox_artifact_output_mismatch|camoufox_artifact_patch_manifest_invalid/);
-    await writeFile(tabHandoffCssPath, tabHandoffCss);
-    const wrongVersion = JSON.parse(await readFile(tabHandoff.manifest, 'utf8'));
-    wrongVersion.schema = 'webenvoy.camoufox-native/v1';
-    await writeFile(tabHandoff.manifest, JSON.stringify(wrongVersion) + '\n');
-    await assert.rejects(verifyCamoufoxArtifact(tabHandoffArtifact), /camoufox_artifact_manifest_invalid/);
-    const installation = bindCamoufoxArtifact({ coreEndpoint: 'http://127.0.0.1:1', harborEndpoint: 'http://127.0.0.1:2' }, verified);
-    assert.deepEqual(installation.camoufoxArtifact, camoufoxArtifactInstallationRecord(verified));
-    assert.equal(sameCamoufoxArtifact(await resolveInstalledCamoufoxArtifact(installation), verified), true);
-    assert.throws(() => bindCamoufoxArtifact(installation, { ...verified, executable: join(root, 'different') }), /camoufox_artifact_binding_mismatch/);
-    assert.doesNotThrow(() => validateCamoufoxArtifactSetup(null, null, verified));
-    assert.throws(() => validateCamoufoxArtifactSetup({ coreEndpoint: 'http://127.0.0.1:1', harborEndpoint: 'http://127.0.0.1:2' }, null, verified), /camoufox_artifact_binding_requires_new_data_root/);
-    assert.doesNotThrow(() => validateCamoufoxArtifactSetup(installation, verified, verified));
-
-    const environment = installedRuntimeEnvironment({
-      parentEnvironment: { PATH: '/usr/bin', WEBENVOY_DEV_STORE: '/tmp/dev', HARBOR_CAMOUFOX_PATH: '/tmp/untrusted', CAMOUFOX_EXECUTABLE: '/tmp/untrusted' },
-      dataDir: join(root, 'data'), installRoot: join(root, 'install'), camoufoxArtifact: verified
-    });
-    assert.equal(environment.HARBOR_CAMOUFOX_PATH, verified.executable);
-    assert.equal(environment.WEBENVOY_DEV_STORE, undefined);
-    assert.equal(environment.CAMOUFOX_EXECUTABLE, undefined);
-    assert.equal(environment.HARBOR_PROFILE_STORAGE_ROOT, join(root, 'data/profiles'));
-
-    const legacyEnvironment = installedRuntimeEnvironment({ parentEnvironment: { HARBOR_CAMOUFOX_PATH: '/tmp/untrusted' }, dataDir: join(root, 'data'), installRoot: join(root, 'install') });
-    assert.equal(legacyEnvironment.HARBOR_CAMOUFOX_PATH, undefined);
-
-    const manifest = await readFile(verified.manifest);
-    await writeFile(verified.manifest, JSON.stringify({ schema: CAMOUFOX_NATIVE_PINS }), 'utf8');
-    await assert.rejects(resolveInstalledCamoufoxArtifact(installation), /camoufox_artifact_manifest_invalid/);
-    await writeFile(verified.manifest, manifest);
-    await writeFile(join(artifact, 'Contents/Info.plist'), infoWithBundleName('Tampered'));
-    await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_output_mismatch/);
-    await writeFile(join(artifact, 'Contents/Info.plist'), infoWithBundleName(CAMOUFOX_NATIVE_PINS.bundle_name));
-    await detachAndMutateExecutable(artifact);
-    const forged = JSON.parse(await readFile(verified.manifest, 'utf8'));
-    forged.output.executable_sha256 = await fileSha(verified.executable);
-    await writeFile(verified.manifest, JSON.stringify(forged) + '\n');
-    await assert.rejects(verifyCamoufoxArtifact(artifact), /camoufox_artifact_output_mismatch/);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-async function createCamoufoxArtifact(root, { tabHandoff = false } = {}) {
-  const app = join(root, (tabHandoff ? 'WebEnvoy Camoufox Native Tab Handoff Test' : 'WebEnvoy Camoufox Native Test') + '.app');
-  const macos = join(app, 'Contents/MacOS');
-  const resources = join(app, 'Contents/Resources');
-  await mkdir(macos, { recursive: true });
-  await mkdir(resources, { recursive: true });
-  const source = '/Applications/Camoufox.app/Contents';
-  const sourceFiles = [
-    ['Resources/omni.ja', 'Resources/omni.ja'],
-    ['Resources/properties.json', 'Resources/properties.json'],
-    ['MacOS/camoufox', 'MacOS/camoufox']
-  ];
-  if (tabHandoff) sourceFiles.push(['Resources/chrome.css', 'Resources/chrome.css']);
-  for (const [from, to] of sourceFiles) {
-    const sourcePath = join(source, from);
-    const targetPath = join(app, 'Contents', to);
-    // The tab-handoff fixture rewrites chrome.css below; do not hard-link it
-    // back into the pinned installation or mutate the source browser.
-    if (from.endsWith('chrome.css')) await copyFile(sourcePath, targetPath);
-    else await copyOrLink(sourcePath, targetPath);
-  }
-  const info = infoWithBundleName(tabHandoff ? CAMOUFOX_NATIVE_PINS.tab_handoff_bundle_name : CAMOUFOX_NATIVE_PINS.bundle_name, tabHandoff ? CAMOUFOX_NATIVE_PINS.tab_handoff_bundle_identifier : CAMOUFOX_NATIVE_PINS.bundle_identifier);
-  await writeFile(join(app, 'Contents/Info.plist'), info);
-  await copyOrLink(join(source, 'Resources/application.ini'), join(resources, 'application.ini'));
-  await copyOrLink(join(resources, 'properties.json'), join(macos, 'properties.json'));
-  if (tabHandoff) {
-    const cssPath = join(resources, 'chrome.css');
-    const css = await readFile(cssPath, 'utf8');
-    await writeFile(cssPath, css.replace('/* Disable tab dragging and use it for window movement */', '/* Keep blank toolbar space draggable while tabs retain native DnD */').replace('  -moz-window-dragging: inherit !important;', '  -moz-window-dragging: no-drag !important;').replace('  pointer-events: none !important;', '  pointer-events: auto !important;'));
-  }
-  const output = {
-    app,
-    executable: join(macos, 'camoufox'),
-    omni_sha256: await fileSha(join(resources, 'omni.ja')),
-    properties_sha256: await fileSha(join(resources, 'properties.json')),
-    executable_sha256: await fileSha(join(macos, 'camoufox')),
-    info_plist_sha256: await fileSha(join(app, 'Contents/Info.plist')),
-    application_ini_sha256: await fileSha(join(resources, 'application.ini')),
-    adjacent_properties_sha256: await fileSha(join(macos, 'properties.json')),
-    ...(tabHandoff ? { chrome_css_sha256: await fileSha(join(resources, 'chrome.css')) } : {})
-  };
-  const manifest = {
-    schema: tabHandoff ? CAMOUFOX_NATIVE_TAB_HANDOFF_MANIFEST_SCHEMA : 'webenvoy.camoufox-native/v1', patch_id: tabHandoff ? CAMOUFOX_NATIVE_TAB_HANDOFF_PATCH_ID : 'managed-native-snapshot', test_only: true, distribution_or_production_use_authorized: false,
-    source: { app: '/Applications/Camoufox.app', executable: CAMOUFOX_NATIVE_PINS.source_executable_sha256, browser_version: CAMOUFOX_NATIVE_PINS.browser_version, 'omni.ja': CAMOUFOX_NATIVE_PINS.source_omni_sha256, 'properties.json': CAMOUFOX_NATIVE_PINS.properties_sha256, info_plist: CAMOUFOX_NATIVE_PINS.source_info_plist_sha256, application_ini: CAMOUFOX_NATIVE_PINS.source_application_ini_sha256, ...(tabHandoff ? { chrome_css: CAMOUFOX_NATIVE_PINS.source_chrome_css_sha256 } : {}) },
-    output,
-    identity: { bundle_identifier: tabHandoff ? CAMOUFOX_NATIVE_PINS.tab_handoff_bundle_identifier : CAMOUFOX_NATIVE_PINS.bundle_identifier, bundle_name: tabHandoff ? CAMOUFOX_NATIVE_PINS.tab_handoff_bundle_name : CAMOUFOX_NATIVE_PINS.bundle_name },
-    provider: { camoufox_version: CAMOUFOX_NATIVE_PINS.camoufox_version, browser_version: CAMOUFOX_NATIVE_PINS.browser_version },
-    patched_entries: Object.fromEntries(['chrome/juggler/content/protocol/Protocol.js', 'chrome/juggler/content/protocol/BrowserHandler.js', 'chrome/juggler/content/TargetRegistry.js', 'chrome/juggler/content/protocol/PageHandler.js'].map((name, index) => [name, { before_sha256: String(index + 1).padStart(64, '0'), after_sha256: String(index + 5).padStart(64, '0') }]))
-  };
-  if (tabHandoff) manifest.patched_assets = { 'Contents/Resources/chrome.css': { before_sha256: CAMOUFOX_NATIVE_PINS.source_chrome_css_sha256, after_sha256: CAMOUFOX_NATIVE_PINS.tab_handoff_css_sha256 } };
-  await writeFile(join(resources, 'webenvoy-native-manifest.json'), JSON.stringify(manifest) + '\n');
-  return app;
-}
-
-function infoWithBundleName(name, identifier = CAMOUFOX_NATIVE_PINS.bundle_identifier) {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>CFBundleExecutable</key><string>camoufox</string>\n<key>CFBundleIdentifier</key><string>${identifier}</string>\n<key>CFBundleName</key><string>${name}</string>\n</dict></plist>\n`;
-}
-
-async function copyOrLink(source, target) {
-  try { await link(source, target); } catch { await copyFile(source, target); }
-}
-
-async function detachAndMutateExecutable(artifact) {
-  const executable = join(artifact, 'Contents/MacOS/camoufox');
-  await rm(executable);
-  await copyFile('/Applications/Camoufox.app/Contents/MacOS/camoufox', executable);
-  await chmod(executable, 0o755);
-  const handle = await open(executable, 'r+');
-  try {
-    const byte = Buffer.from([0x00]);
-    await handle.write(byte, 0, 1, 0);
-  } finally { await handle.close(); }
-}
-
-async function fileSha(path) {
-  const { sha } = await import('./bundle.mjs');
-  return sha(await readFile(path));
-}

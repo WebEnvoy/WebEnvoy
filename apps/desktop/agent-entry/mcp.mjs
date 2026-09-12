@@ -21,6 +21,11 @@ async function call(name, args) {
   if (name === 'webenvoy_status') {
     const publicStatus = { ...status };
     delete publicStatus.camoufoxArtifact;
+    if (publicStatus.camoufox_launch && publicStatus.camoufox_launch.state === 'retired' && ['retired_binding', 'unqualified'].includes(publicStatus.camoufox_launch.reason)) {
+      publicStatus.camoufox_launch = { state: 'retired', reason: publicStatus.camoufox_launch.reason };
+    } else {
+      delete publicStatus.camoufox_launch;
+    }
     return publicStatus;
   }
   const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
