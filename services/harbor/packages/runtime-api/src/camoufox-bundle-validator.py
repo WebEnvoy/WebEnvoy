@@ -97,7 +97,7 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
         "baseline",
         "baseline_sha256",
     }
-    if not isinstance(bundle, dict) or not required.issubset(bundle) or set(bundle) - required - {"launch_options"}:
+    if not isinstance(bundle, dict) or not required.issubset(bundle) or set(bundle) - required - {"launch_options", "context_options"}:
         raise ValueError("Camoufox environment bundle schema is unsupported or corrupt.")
     if (
         type(bundle["schema_version"]) is not int
@@ -135,6 +135,21 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
             raise ValueError("Camoufox launch options env is corrupt.")
         if not isinstance(options.get("executable_path"), str) or not options["executable_path"] or not isinstance(options.get("headless"), bool):
             raise ValueError("Camoufox launch options are incomplete.")
+
+    if "context_options" in bundle:
+        context_options = bundle["context_options"]
+        if not isinstance(context_options, dict) or set(context_options) - {"viewport"}:
+            raise ValueError("Camoufox context options are unsupported or corrupt.")
+        viewport = context_options.get("viewport")
+        if viewport is not None and (
+            not isinstance(viewport, dict)
+            or set(viewport) != {"width", "height"}
+            or type(viewport["width"]) is not int
+            or type(viewport["height"]) is not int
+            or not 200 <= viewport["width"] <= 16384
+            or not 200 <= viewport["height"] <= 16384
+        ):
+            raise ValueError("Camoufox context viewport is corrupt.")
 
     baseline = bundle["baseline"]
     baseline_hash = bundle["baseline_sha256"]

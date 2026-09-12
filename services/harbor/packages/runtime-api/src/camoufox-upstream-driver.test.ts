@@ -13,7 +13,7 @@ import {
 } from "./camoufox-upstream-driver.js";
 import { bindIdentityEnvironmentDefaultProvider, detectBrowserProviders } from "./provider-management.js";
 
-const sourceSha = "a".repeat(64);
+const sourceSha = CAMOUFOX_UPSTREAM_PINS.source_sha256;
 const pins = {
   HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
   HARBOR_CAMOUFOX_SOURCE_SHA256: sourceSha,
@@ -32,6 +32,7 @@ test("admits only the owner-provided official source and fixed pins", () => {
   });
   assert.equal(readCamoufoxUpstreamSourceFacts({ ...pins, HARBOR_CAMOUFOX_BROWSER_VERSION: "152.0.4" }), null);
   assert.equal(readCamoufoxUpstreamSourceFacts({ ...pins, HARBOR_CAMOUFOX_SOURCE: "unknown" }), null);
+  assert.equal(readCamoufoxUpstreamSourceFacts({ ...pins, HARBOR_CAMOUFOX_SOURCE_SHA256: "a".repeat(64) }), null);
   assert.equal(isOfficialCamoufoxLaunchRequest({ provider_id: "camoufox", browser_path: "/managed/camoufox" }, pins), true);
   assert.equal(isOfficialCamoufoxLaunchRequest({ provider_id: "camoufox", browser_path: "/managed/camoufox" }, { ...pins, HARBOR_CAMOUFOX_SOURCE_SHA256: "bad" }), false);
   assert.equal(hasRetiredCamoufoxBinding({ camoufoxArtifact: { executable: "/old" } }), true);

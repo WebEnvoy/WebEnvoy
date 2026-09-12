@@ -37,6 +37,7 @@ from camoufox_bundle_validator import (
 
 
 PLAYWRIGHT_VERSION_PIN = "1.60.0"
+SOURCE_SHA256_PIN = "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3"
 MAX_EVENTS = 64
 MAX_TEXT = 64 * 1024
 MAX_LINE = 2 * 1024 * 1024
@@ -93,8 +94,7 @@ def safe_text(value: Any, limit: int = MAX_TEXT) -> str:
 def valid_pin(source: dict[str, Any]) -> bool:
     return (
         source.get("source") == "official_release"
-        and isinstance(source.get("source_sha256"), str)
-        and re.fullmatch(r"[a-f0-9]{64}", source["source_sha256"]) is not None
+        and source.get("source_sha256") == SOURCE_SHA256_PIN
         and source.get("camoufox_version") == CAMOUFOX_VERSION_PIN
         and source.get("browser_version") == BROWSER_VERSION_PIN
         and source.get("playwright_version") == PLAYWRIGHT_VERSION_PIN
@@ -123,7 +123,7 @@ def json_safe_options(options: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def write_bundle(profile_dir: str, options: dict[str, Any]) -> dict[str, Any]:
+def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dict[str, Any]) -> dict[str, Any]:
     config = dict(options.get("env") or {})
     bundle = {
         "schema_version": 1,
@@ -137,6 +137,7 @@ def write_bundle(profile_dir: str, options: dict[str, Any]) -> dict[str, Any]:
         "baseline": None,
         "baseline_sha256": None,
         "launch_options": options,
+        "context_options": context_options,
     }
     validate_environment_bundle(bundle)
     path = bundle_path(profile_dir)
@@ -167,10 +168,24 @@ def load_bundle(profile_dir: str) -> dict[str, Any]:
     return bundle
 
 
-def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, Any], dict[str, Any], bool]:
+def parse_viewport(value: Any) -> dict[str, int] | None:
+    if value is None or value == "系统默认":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Camoufox viewport is invalid.")
+    match = re.fullmatch(r"(\d{2,5})x(\d{2,5})", value)
+    if not match or not 200 <= int(match[1]) <= 16384 or not 200 <= int(match[2]) <= 16384:
+        raise ValueError("Camoufox viewport is invalid.")
+    return {"width": int(match[1]), "height": int(match[2])}
+
+
+def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, Any], dict[str, Any], bool, dict[str, Any]]:
     bundle = load_bundle(profile_dir) if Path(profile_dir, ENVIRONMENT_BUNDLE_FILENAME).exists() else None
     if bundle is not None:
-        return deepcopy(bundle["launch_options"]), bundle, True
+        context_options = bundle.get("context_options", {})
+        if not isinstance(context_options, dict):
+            raise ValueError("Camoufox context options are corrupt.")
+        return deepcopy(bundle["launch_options"]), bundle, True, deepcopy(context_options)
     if profile_has_state(profile_dir):
         raise ValueError("Managed Profile has state but no exact Camoufox launch bundle.")
     source = request.get("source")
@@ -182,6 +197,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         config["timezone"] = environment["timezone"]
     locale = environment.get("language") if isinstance(environment.get("language"), str) and environment["language"] else None
     proxy = {"server": environment["proxy_server"]} if isinstance(environment.get("proxy_server"), str) and environment["proxy_server"] else None
+    context_options = {"viewport": viewport} if (viewport := parse_viewport(environment.get("viewport"))) else {}
     options = launch_options(
         browser=f"official/{BROWSER_VERSION_PIN}",
         env={},
@@ -194,8 +210,8 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         proxy=proxy,
     )
     options = json_safe_options(options)
-    bundle = write_bundle(profile_dir, options)
-    return options, bundle, False
+    bundle = write_bundle(profile_dir, options, context_options)
+    return options, bundle, False, context_options
 
 
 def verify_runtime_pins(request: dict[str, Any]) -> str:
@@ -258,9 +274,10 @@ class Driver:
         self.properties_sha256 = verify_runtime_pins(request)
         self.request = request
         self.profile_dir = profile_dir
-        self.options, self.bundle, self.replay = options_for(request, profile_dir)
+        self.options, self.bundle, self.replay, self.context_options = options_for(request, profile_dir)
         self.playwright = sync_playwright().start()
         launch = dict(self.options)
+        launch.update(self.context_options)
         launch["user_data_dir"] = profile_dir
         self.context = self.playwright.firefox.launch_persistent_context(**launch)
         self.pages: dict[str, PageState] = {}
@@ -382,8 +399,18 @@ class Driver:
     def snapshot(self, state: PageState) -> dict[str, Any]:
         raw = state.page.evaluate("""() => {
           const visible = e => { const r=e.getBoundingClientRect(), s=getComputedStyle(e); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
-          const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].filter(visible).slice(0,128);
-          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((e,i) => ({ i, role: e.getAttribute('role') || e.tagName.toLowerCase(), name: (e.getAttribute('aria-label') || e.innerText || e.value || '').trim().slice(0,256), enabled: !e.disabled })) };
+          const implicitRole = e => {
+            const explicit = e.getAttribute('role'); if (explicit) return explicit;
+            if (e.tagName === 'BUTTON' || (e.tagName === 'INPUT' && ['button','submit','reset'].includes(e.type))) return 'button';
+            if (e.tagName === 'A' && e.hasAttribute('href')) return 'link';
+            if (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !['checkbox','radio','file','hidden','button','submit','reset'].includes(e.type))) return 'textbox';
+            if (e.tagName === 'INPUT' && e.type === 'checkbox') return 'checkbox';
+            if (e.tagName === 'INPUT' && e.type === 'radio') return 'radio';
+            if (e.tagName === 'SELECT') return 'combobox';
+            return null;
+          };
+          const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].filter(visible).map(e => ({ e, role: implicitRole(e) })).filter(item => item.role).slice(0,128);
+          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), enabled: !item.e.disabled })) };
         }""")
         controls = []
         state.controls.clear()

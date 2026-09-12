@@ -43,6 +43,7 @@ import type {
 /** The only Camoufox source that Harbor may launch for #519. */
 export const CAMOUFOX_UPSTREAM_PINS = Object.freeze({
   source: "official_release",
+  source_sha256: "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
   camoufox_version: "0.5.6",
   browser_version: "152.0.4-beta.30",
   playwright_version: "1.60.0",
@@ -82,7 +83,7 @@ export function readCamoufoxUpstreamSourceFacts(
   const browser_version = stringFact(binding, "browser_version") ?? env.HARBOR_CAMOUFOX_BROWSER_VERSION;
   const playwright_version = stringFact(binding, "playwright_version") ?? env.HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION;
   if (source !== CAMOUFOX_UPSTREAM_PINS.source ||
-    !source_sha256 || !/^[a-f0-9]{64}$/.test(source_sha256) ||
+    source_sha256 !== CAMOUFOX_UPSTREAM_PINS.source_sha256 ||
     camoufox_version !== CAMOUFOX_UPSTREAM_PINS.camoufox_version ||
     browser_version !== CAMOUFOX_UPSTREAM_PINS.browser_version ||
     playwright_version !== CAMOUFOX_UPSTREAM_PINS.playwright_version) return null;
