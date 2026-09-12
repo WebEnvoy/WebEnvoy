@@ -340,7 +340,7 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
     const initialPage = upstreamPage(launched.page);
     const initialPages = Array.isArray(launched.pages) ? launched.pages.map(upstreamPage) : [initialPage];
     if (!initialPages.some(page => page.provider_page_ref === initialPage.provider_page_ref)) initialPages.unshift(initialPage);
-    const context = { driver, input, source, profileStorage, pages: initialPages, current: initialPage.provider_page_ref };
+    const context = { driver, input, source, profileStorage, pages: initialPages, current: initialPage.provider_page_ref, unattributedRequestRejectionCount: 0 };
     const pageController = createPageController(context);
     const resultBase = {
       status: "ready" as const,
@@ -381,15 +381,23 @@ type DriverContext = {
   profileStorage: Awaited<ReturnType<typeof prepareProfileStorage>>;
   pages: LocalProviderPageState[];
   current: string;
+  unattributedRequestRejectionCount: number;
 };
 
 function createPageController(context: DriverContext): LocalProviderPageController {
   return {
     listPages: async () => {
-      const pages = await context.driver.request("page_list", {});
+      const result = await context.driver.request("page_list", {});
+      const wrapped = object(result);
+      const pages = Array.isArray(result) ? result : wrapped?.pages;
+      const rejectionCount = wrapped?.rejected_unattributed_count;
+      context.unattributedRequestRejectionCount = Number.isSafeInteger(rejectionCount) && Number(rejectionCount) >= 0
+        ? Math.min(Number(rejectionCount), 128)
+        : 0;
       context.pages = Array.isArray(pages) ? pages.map(upstreamPage) : context.pages;
       return context.pages;
     },
+    unattributedRequestRejectionCount: () => context.unattributedRequestRejectionCount,
     openPage: async (url, authorized_origins) => {
       const page = upstreamPage(await context.driver.request("page_open", { url: url ?? null, authorized_origins: authorized_origins ?? [] }));
       context.pages = [...context.pages.filter(item => item.provider_page_ref !== page.provider_page_ref), page];

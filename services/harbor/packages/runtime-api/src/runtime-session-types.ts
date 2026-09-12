@@ -222,6 +222,8 @@ export interface LocalProviderPageState extends LocalProviderPageFacts {
 
 export interface LocalProviderPageController {
   listPages: () => Promise<LocalProviderPageState[]>;
+  /** Instance-level count only; no URL, Page, opener, or request identity is inferred. */
+  unattributedRequestRejectionCount?: () => number;
   openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
   activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
   /**

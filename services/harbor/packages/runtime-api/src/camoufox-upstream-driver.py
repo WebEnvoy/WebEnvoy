@@ -355,6 +355,7 @@ class Driver:
         self.request = request
         self.profile_dir = profile_dir
         self.options, self.bundle, self.replay, self.context_options = options_for(request, profile_dir)
+        self.unattributed_rejection_count = 0
         self.playwright = sync_playwright().start()
         launch = dict(self.options)
         launch.update(self.context_options)
@@ -419,6 +420,7 @@ class Driver:
         try:
             page = request.frame.page
         except PlaywrightError:
+            self.unattributed_rejection_count = min(self.unattributed_rejection_count + 1, MAX_EVENTS)
             route.abort("blockedbyclient")
             return
         state = next((item for item in self.pages.values() if item.page == page), None)
@@ -706,7 +708,7 @@ def viewer_entry(headless: bool) -> dict[str, Any]:
 
 def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     op = request.get("op")
-    if op == "page_list": return driver.list_pages()
+    if op == "page_list": return {"pages": driver.list_pages(), "rejected_unattributed_count": driver.unattributed_rejection_count}
     if op == "page_open":
         origins = list(validated_origins(request.get("authorized_origins")))
         page = driver.context.new_page()

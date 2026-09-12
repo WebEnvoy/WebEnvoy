@@ -94,6 +94,18 @@ test("PageRegistry does not leak unattributed rejection counts across unauthoriz
   assert.equal(registry.list(["https://s1.example"]).rejected_unattributed, undefined);
 });
 
+test("PageRegistry reports a bounded Instance-level rejection without inventing a Page", async () => {
+  const provider = controller([page("provider:one", "https://s1.example/start", true)]);
+  provider.unattributedRequestRejectionCount = () => MAX_SAFE_REJECTION_COUNT;
+  const registry = new PageRegistry("session:test", provider);
+  await registry.refresh();
+  const result = registry.list(["https://s1.example"]);
+  assert.equal(result.rejected_unattributed?.count, 128);
+  assert.equal(result.pages.length, 1);
+});
+
+const MAX_SAFE_REJECTION_COUNT = 10_000;
+
 test("PageRegistry refuses closing the last active Page and returns to a safe Page when possible", async () => {
   const registry = new PageRegistry("session:test", controller([
     page("provider:one", "https://s1.example", true),

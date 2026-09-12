@@ -190,7 +190,10 @@ export class PageRegistry {
     const allowed = new Set(authorizedOrigins);
     const pages = [...this.byId.values()].filter(record => !record.closed && record.present);
     const visible = pages.filter(record => this.visible(record, allowed));
-    const rejectedUnattributedCount = this.rejectedUnattributedCount(pages, allowed);
+    const rejectedUnattributedCount = Math.min(
+      MAX_PAGE_EVENTS,
+      this.rejectedUnattributedCount(pages, allowed) + Math.max(0, this.controller.unattributedRequestRejectionCount?.() ?? 0)
+    );
     return {
       status: "completed",
       schema_version: HARBOR_PAGE_LIST_SCHEMA,

@@ -251,6 +251,7 @@ state = module.PageState("page:1", page, ["https://s1.test"])
 driver.pages = {"page:1": state}
 driver.next_ref = 2
 driver.current = "page:1"
+driver.unattributed_rejection_count = 0
 initial = "https://s1.test/redirect/s2"
 same_origin = "https://s1.test/from-s1/s3"
 route = FakeRoute(FakeRequest(page, initial), {
@@ -282,6 +283,21 @@ assert unknown.fetches == []
 popup_state = next(item for item in driver.pages.values() if item.page is popup)
 assert popup_state.origins == set()
 assert popup_state.relation_rejection is True
+
+class MissingPageRequest:
+    url = "https://s2.test/popup"
+    method = "GET"
+    post_data = None
+    class MissingFrame:
+        @property
+        def page(self): raise module.PlaywrightError("page unavailable")
+    frame = MissingFrame()
+
+unattributed = FakeRoute(MissingPageRequest(), {})
+driver.route(unattributed)
+assert unattributed.aborted == "blockedbyclient"
+assert unattributed.fetches == []
+assert driver.unattributed_rejection_count == 1
 assert popup_state.facts()["facts"] == [
     {"key": "page.relation", "source": "validation_evidence", "value": "unavailable"},
     {"key": "page.initial_request", "source": "validation_evidence", "value": "not_dispatched"},
@@ -352,7 +368,7 @@ for await (const line of rl) {
   const request = JSON.parse(line);
   let result;
   if (request.op === "launch") result = { status: "ready", driver_ref: "fake-upstream", page: page(), pages, viewer_entry: { availability: "unavailable", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [] };
-  else if (request.op === "page_list") result = pages;
+  else if (request.op === "page_list") result = { pages, rejected_unattributed_count: 1 };
   else if (request.op === "observe") result = page();
   else if (request.op === "observe_identity") result = { current_url: "https://example.test/start", title: "Example", ready_state: "complete", stable_id: null, document_generation: 1 };
   else if (request.op === "interact") result = request.action === "snapshot" ? { status: "completed", dispatch_state: "not_dispatched", page: page(), snapshot: { page_ref: "page:1", observation_ref: "observation:1", controls: [], text: "Example", truncated: false } } : { status: "completed", dispatch_state: "dispatched", page: { ...page(), facts: [{ key: "test.authorized_origins", source: "observed", value: (request.authorized_origins ?? []).join(",") }] } };
@@ -371,6 +387,7 @@ for await (const line of rl) {
     if (result.status !== "ready") return;
     assert.equal(result.driver_kind, "playwright_jsonl");
     assert.equal((await result.pageController?.listPages())?.[0]?.provider_page_ref, "page:1");
+    assert.equal(result.pageController?.unattributedRequestRejectionCount?.(), 1);
     assert.equal((await result.observePage?.())?.page.current_url, "https://example.test/start");
     assert.equal((await result.interaction?.({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1 }))?.status, "completed");
     const scopedClick = await result.interaction?.({ action: "click", expected_origin: "https://example.test", authorized_origins: ["https://example.test", "https://s2.test"], control_generation: 1, target_ref: "control:1" });
