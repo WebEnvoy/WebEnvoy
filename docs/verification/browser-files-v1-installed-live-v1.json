@@ -1,0 +1,132 @@
+{
+  "schema_version": "webenvoy.browser-files-installed-live-evidence/v1",
+  "work_item": 523,
+  "recorded_at": "2026-09-12T21:50:18Z",
+  "judgment": "no_release",
+  "verification_input": {
+    "repository": "WebEnvoy/WebEnvoy",
+    "branch": "feat/523-managed-browser-files",
+    "commit": "d1ee7b6f7356f24260bd922891b4813b05b2ef61",
+    "tree": "121abfa964af6c9c6353892f69ce76404fb47442",
+    "provider": {
+      "source_root": "/Users/claw/.webenvoy/providers/camoufox/sources/official-0.5.6-152.0.4-beta.30/",
+      "camoufox": "0.5.6",
+      "browser": "152.0.4-beta.30",
+      "playwright": "1.60.0",
+      "browser_zip_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+      "camoufox_wheel_sha256": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+      "playwright_wheel_sha256": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+    }
+  },
+  "g0": {
+    "status": "pass",
+    "python": "3.12.13",
+    "browser_executable_sha256": "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33",
+    "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+    "png_sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    "csv_sha256": "6d4ddc85515525576304235af892cbec19e7bd2ff8eea3c72018d146dc585da2",
+    "refusal_counts": {
+      "unauthorized_origin_redirect": 1,
+      "unknown_relation": 1,
+      "missing_frame_unattributed": 1
+    },
+    "evidence_types": ["public-api-driver", "formal-request-guard", "dedicated-profile", "controlled-local-origin", "owner-readback"],
+    "evidence_files": [
+      {"path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-g0-2oz8hxvz/g0-evidence.json", "sha256": "f8a04c08b419e06fb69e6ad27d3abcc56057bcb78f7f8bb6721eb0dbd34deb3d"},
+      {"path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-g0-i-lc53jspe/g0-i-evidence.json", "sha256": "bc57206957d06092292d9230eb6d78a9c03b860d1a572974f440d934908bca07"}
+    ]
+  },
+  "installed_live": {
+    "status": "pass",
+    "install_kind": "unsigned_local_packaged_runtime",
+    "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/WebEnvoy 523 Formal v4.app",
+    "data_root": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/data",
+    "controlled_origin": "http://127.0.0.1:61253",
+    "png_sha256": "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
+    "server_metrics_sha256": "f26858fbf869bc427ec72fc5a3f78256d6cfd47bdaf07b93d38d149950eaa492",
+    "server_metrics": {
+      "uploads": 2,
+      "upload_sha256": ["0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3", "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3"],
+      "downloads": 2,
+      "download_sha256": ["c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715", "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715"],
+      "unexpected": []
+    }
+  },
+  "true_agent": {
+    "status": "pass",
+    "plugin_verified": true,
+    "thread_id": "01a09763-c8b6-73a0-ae9a-ad14315c0419",
+    "upload_run_id": "managed-043c7f5c3506391e22b579d0b5bf1408151248b2200f451aa57df021d434639f",
+    "download_run_id": "managed-5782a34815662228ca076ea59a7bb79c9cf46bd0372acf35283c37f75951463b",
+    "download_ref": "attachment:runtime/173125aa-e932-46f8-9734-52eeff3b92c8",
+    "download_bytes": 15,
+    "download_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "owner_export_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "original_run_query_replayed": false,
+    "evidence_file": {
+      "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/real-codex-final-v4-continuation.txt",
+      "sha256": "c6ed3c904922f862a91a123b67ba6d5f7a4e88d0ea51448677b00777d10c86a7"
+    }
+  },
+  "deterministic_installed_acceptance": {
+    "status": "pass",
+    "groups": {
+      "owner_import_minimal_grant_file_upload_download_export": "pass",
+      "handoff_old_target_rejected_fresh_observe_same_page": "pass",
+      "upload_download_dropped_response_query_without_replay": "pass",
+      "context_stop_runtime_restart_persistence": "pass",
+      "scope_isolation_owner_boundaries_and_material_grant_revoke": "pass"
+    },
+    "evidence_files": [
+      {"role": "offline_response_shapes_and_unique_key_selftest", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-selftest-evidence.json", "sha256": "826add95d937ae193114ec51cecd3ec7bc525d607cdf4878a01e637319e37587"},
+      {"role": "handoff_slice", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/handoff-slice-v4-evidence.json", "sha256": "a1e3018289f465ce91714d15110408d4565ca6939a21ec7ef9d67fab4ae1f8c1"},
+      {"role": "corrected_transport_drop_continuation_and_owner_boundaries", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee"},
+      {"role": "context_runtime_restart_persistence_and_grant_revoke", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b"}
+    ]
+  },
+  "first_unexpected": {
+    "classification": "diagnosed_test_harness_or_provider_scheduling_observation",
+    "summary": "External metrics polling did not advance the throttled Page event loop; formal instance.read/snapshot then advanced the existing upload event without replaying the upload.",
+    "upload_replayed": false,
+    "evidence_files": [
+      {"role": "bounded_120s_timeout", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-fifth-upload-metrics-timeout.json", "sha256": "e50267067c0abcbcb5c51bbacfafb49f6304586297fb433fa928c1719166d922"},
+      {"role": "read_snapshot_diagnosis_and_existing_upload_receipt", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/diagnose-upload-drop-v4-evidence.json", "sha256": "741f6e3e8c9f577faf38ca57c294f7b3415fc56e256f97134b318a5cd279572c"}
+    ]
+  },
+  "grant_cleanup": {
+    "status": "pass",
+    "v4_grants_revoked": [
+      "grant:d4847b4d-b75d-4358-8e90-920563fddd86",
+      "grant:28bef3d9-491d-4da7-8283-8e9048590119",
+      "grant:43d681b8-7535-4dc2-be02-943ac73ece8f",
+      "grant:dd81b7b2-6290-4ca6-8517-56b347cb53b3"
+    ],
+    "v3_candidate_grants_revoked": [
+      "grant:f5c9fb66-ad10-44b9-a7ea-e72ec0206b03",
+      "grant:86530f73-e82d-4171-be75-a191aa7c36ac"
+    ],
+    "active_after": [],
+    "runtime_stop": "owner CLI stop for v3/v4 task runtimes; unrelated #418 Electron process untouched"
+  },
+  "verification_commands": [
+    {"command": "pnpm --filter @webenvoy/harbor build", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/harbor typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/harbor test", "result": "pass", "notes": "336 tests: 335 passed, 1 skipped, 0 failed"},
+    {"command": "pnpm typecheck", "result": "pass"},
+    {"command": "pnpm build", "result": "pass"},
+    {"command": "pnpm lint", "result": "pass"},
+    {"command": "pnpm conformance", "result": "pass"},
+    {"command": "make py-compile", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/app typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/app smoke:packaged:runtime", "result": "pass", "notes": "Packaged Core/Harbor health, owner bridge, catalog including file.upload/file.download, fail-closed first-turn boundary, and 720px layout"},
+    {"command": "pnpm --filter @webenvoy/app smoke:packaged:readonly", "result": "pass"}
+  ],
+  "safety_boundary": {
+    "real_account": "not_used",
+    "daily_profile": "not_used",
+    "production_page": "not_opened",
+    "external_business_write": "not_performed",
+    "credentials_cookies_tokens_raw_dom_har": "not_collected",
+    "release_deploy_signing": "not_run"
+  }
+}
