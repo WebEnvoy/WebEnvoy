@@ -96,6 +96,11 @@ camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
+env_calls = []
+def fake_get_env_vars(config_map, user_agent_os, path=None):
+    env_calls.append((config_map, user_agent_os, str(path) if path else None))
+    return {"CAMOU_CONFIG_1": __import__("json").dumps(config_map, ensure_ascii=False, separators=(",", ":"))}
+utils.get_env_vars = fake_get_env_vars
 camoufox.utils = utils
 sys.modules["camoufox"] = camoufox
 sys.modules["camoufox.utils"] = utils
@@ -121,7 +126,8 @@ assert module.SOURCE_SHA256_PIN == "${CAMOUFOX_UPSTREAM_PINS.source_sha256}"
 seen = []
 def fake_launch_options(**kwargs):
     seen.append(kwargs)
-    return {"args": [], "env": {"CAMOU_CONFIG_1": __import__("json").dumps(kwargs["config"], separators=(",", ":"))}, "executable_path": "/managed/camoufox", "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
+    config = {"timezone": kwargs["config"]["timezone"], "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
+    return {"args": [], "env": {**utils.get_env_vars(config, "mac"), "PROVIDER_ENV": "stable"}, "executable_path": "/managed/camoufox", "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
 module.launch_options = fake_launch_options
 profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-options-")
 try:
@@ -130,22 +136,60 @@ try:
     assert seen[0]["config"]["timezone"] == "UTC"
     assert context_options == {"timezone_id": "UTC"}
     assert bundle["context_options"] == {"timezone_id": "UTC"}
-    assert options["env"]["CAMOU_CONFIG_1"] == '{"timezone":"UTC"}'
-    immutable = {key: bundle[key] for key in ("launch_options", "config", "config_sha256", "identity_hash")}
+    assert module.decode_camoufox_config(options) == {"timezone": "UTC", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
+    assert bundle["config"] == module.decode_camoufox_config(options)
+    assert __import__("json").loads(options["env"]["CAMOU_CONFIG_1"])["timezone"] == "UTC"
+    immutable = {key: bundle[key] for key in ("config_sha256", "identity_hash")}
+    immutable_launch = {key: options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")}
+    immutable_config = {key: value for key, value in bundle["config"].items() if key != "timezone"}
     updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
     assert updated_replay is True
     assert updated_context_options == {"timezone_id": "Europe/Paris"}
     assert updated_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
-    assert updated_bundle["launch_options"] == immutable["launch_options"]
-    assert updated_bundle["config"] == immutable["config"]
-    assert updated_bundle["config_sha256"] == immutable["config_sha256"]
+    assert {key: updated_options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")} == immutable_launch
+    assert updated_bundle["config"] != bundle["config"]
+    assert {key: value for key, value in updated_bundle["config"].items() if key != "timezone"} == immutable_config
+    assert updated_bundle["config"]["timezone"] == "Europe/Paris"
+    assert updated_bundle["config_sha256"] != immutable["config_sha256"]
     assert updated_bundle["identity_hash"] == immutable["identity_hash"]
-    assert updated_options == options
+    assert updated_options["env"]["PROVIDER_ENV"] == options["env"]["PROVIDER_ENV"]
+    assert __import__("json").loads(updated_options["env"]["CAMOU_CONFIG_1"])["timezone"] == "Europe/Paris"
+    assert "UTC" not in updated_options["env"]["CAMOU_CONFIG_1"]
+    assert module.decode_camoufox_config(updated_options) == updated_bundle["config"]
+    assert env_calls[-1][0]["timezone"] == "Europe/Paris"
+    assert env_calls[-1][1:] == ("mac", "/managed/camoufox")
+    class EnvironmentPage:
+        url = "https://example.test/"
+        def evaluate(self, expression):
+            return {"language": "en-US", "languages": ["en-US"], "timezone": "Europe/Paris", "viewport": {"width": 800, "height": 600}, "screen": {"width": 800, "height": 600}, "hardware_concurrency": None, "device_memory": None, "webgl_vendor": None, "webgl_renderer": None, "fonts_hash": None, "voices_hash": None, "canvas_hash": None, "audio_hash": None}
+    environment_driver = object.__new__(module.Driver)
+    environment_driver.pages = {"page:1": module.PageState("page:1", EnvironmentPage(), ["https://example.test"])}
+    environment_driver.bundle = bundle
+    initial_environment = environment_driver.environment({"provider_page_ref": "page:1"})
+    environment_driver.bundle = updated_bundle
+    restarted_environment = environment_driver.environment({"provider_page_ref": "page:1"})
+    assert initial_environment["bundle_hash"] == bundle["identity_hash"]
+    assert restarted_environment["bundle_hash"] == updated_bundle["identity_hash"] == initial_environment["bundle_hash"]
     bundle_mtime = os.stat(module.bundle_path(profile)).st_mtime_ns
     _, same_bundle, same_replay, _ = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
     assert same_replay is True
     assert same_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
     assert os.stat(module.bundle_path(profile)).st_mtime_ns == bundle_mtime
+    legacy_profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-legacy-options-")
+    try:
+        legacy_bundle = dict(bundle)
+        legacy_bundle["config"] = dict(options["env"])
+        legacy_bundle["config_sha256"] = module.json_hash(legacy_bundle["config"])
+        legacy_bundle["identity_hash"] = module.json_hash(module.identity_config(legacy_bundle["config"]))
+        module.bundle_path(legacy_profile).write_bytes(module.canonical_json(legacy_bundle) + b"\\n")
+        os.chmod(module.bundle_path(legacy_profile), 0o600)
+        try:
+            module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Asia/Tokyo"}}, legacy_profile)
+            raise AssertionError("legacy raw-env bundle was accepted")
+        except ValueError:
+            pass
+    finally:
+        __import__("shutil").rmtree(legacy_profile)
     try:
         module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Not/AZone"}}, profile)
         raise AssertionError("invalid timezone was accepted")
@@ -172,6 +216,7 @@ camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": __import__("json").dumps(config_map, separators=(",", ":"))}
 camoufox.utils = utils
 sys.modules["camoufox"] = camoufox
 sys.modules["camoufox.utils"] = utils

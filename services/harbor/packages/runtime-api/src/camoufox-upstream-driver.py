@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from camoufox.utils import launch_options
+from camoufox.utils import get_env_vars, launch_options
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Route, TimeoutError, sync_playwright
 
@@ -45,6 +45,7 @@ MAX_TEXT = 64 * 1024
 MAX_LINE = 2 * 1024 * 1024
 MAX_REDIRECT_HOPS = 10
 REDIRECT_STATUSES = frozenset({300, 301, 302, 303, 307, 308})
+CAMOU_CONFIG_CHUNK = re.compile(r"^CAMOU_CONFIG_(\d+)$")
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
 
@@ -162,8 +163,70 @@ def json_safe_options(options: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
+def camoufox_config_chunks(options: dict[str, Any]) -> list[tuple[int, str]]:
+    """Return the complete, ordered config chunks emitted by Camoufox."""
+    environment = options.get("env")
+    if not isinstance(environment, dict):
+        raise ValueError("Camoufox launch options have no environment config.")
+    chunks: list[tuple[int, str]] = []
+    for key, value in environment.items():
+        match = CAMOU_CONFIG_CHUNK.fullmatch(key) if isinstance(key, str) else None
+        if match is None:
+            continue
+        index = int(match[1])
+        if index < 1 or not isinstance(value, str):
+            raise ValueError("Camoufox environment config chunks are corrupt.")
+        chunks.append((index, value))
+    chunks.sort(key=lambda item: item[0])
+    if not chunks or [index for index, _ in chunks] != list(range(1, len(chunks) + 1)):
+        raise ValueError("Camoufox environment config chunks are incomplete.")
+    return chunks
+
+
+def decode_camoufox_config(options: dict[str, Any]) -> dict[str, Any]:
+    """Decode the JSON object produced by the public upstream launch API."""
+    encoded = "".join(value for _, value in camoufox_config_chunks(options))
+    try:
+        config = json.loads(encoded)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("Camoufox environment config is not valid JSON.") from error
+    if not isinstance(config, dict) or not config:
+        raise ValueError("Camoufox environment config is not a non-empty object.")
+    try:
+        canonical_json(config)
+    except (TypeError, ValueError, OverflowError, UnicodeEncodeError) as error:
+        raise ValueError("Camoufox environment config is not valid JSON.") from error
+    return config
+
+
+def replace_camoufox_config(options: dict[str, Any], config: dict[str, Any], user_agent_os: str) -> dict[str, Any]:
+    """Use the pinned public encoder while preserving non-Camoufox env state."""
+    executable_path = options.get("executable_path")
+    environment = options.get("env")
+    if not isinstance(executable_path, str) or not executable_path or not isinstance(environment, dict):
+        raise ValueError("Camoufox launch options are incomplete.")
+    try:
+        generated_environment = get_env_vars(config, user_agent_os, path=Path(executable_path))
+    except (OSError, TypeError, ValueError) as error:
+        raise ValueError("Camoufox public environment config generation failed.") from error
+    if not isinstance(generated_environment, dict):
+        raise ValueError("Camoufox public environment config is corrupt.")
+    generated_chunks = {
+        key: value
+        for key, value in generated_environment.items()
+        if isinstance(key, str) and CAMOU_CONFIG_CHUNK.fullmatch(key)
+    }
+    if not generated_chunks or any(not isinstance(value, str) for value in generated_chunks.values()):
+        raise ValueError("Camoufox public environment config has no valid chunks.")
+    updated_environment = dict(environment)
+    for index, _ in camoufox_config_chunks(options):
+        updated_environment.pop(f"CAMOU_CONFIG_{index}", None)
+    updated_environment.update(generated_chunks)
+    return {**options, "env": updated_environment}
+
+
 def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dict[str, Any]) -> dict[str, Any]:
-    config = dict(options.get("env") or {})
+    config = decode_camoufox_config(options)
     bundle = {
         "schema_version": 1,
         "provider": "camoufox",
@@ -196,18 +259,55 @@ def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dic
 
 
 def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone_id: Any) -> dict[str, Any]:
-    """Atomically update only Harbor-owned context timezone on restart."""
+    """Atomically update the supported timezone in context and CAMOU config."""
     if not isinstance(timezone_id, str) or not timezone_id:
         return bundle
+    timezone_id = validate_timezone_id(timezone_id)
     context_options = bundle.get("context_options", {})
     if not isinstance(context_options, dict):
         raise ValueError("Camoufox context options are corrupt.")
-    if context_options.get("timezone_id") == timezone_id:
-        return bundle
-    timezone_id = validate_timezone_id(timezone_id)
-    updated = {**bundle, "context_options": {**context_options, "timezone_id": timezone_id}}
-    if any(updated[key] != bundle[key] for key in ("launch_options", "config", "config_sha256", "identity_hash")):
+    launch_options = bundle.get("launch_options")
+    if not isinstance(launch_options, dict):
+        raise ValueError("Camoufox environment bundle has no complete launch options.")
+    config = decode_camoufox_config(launch_options)
+    config_timezone = config.get("timezone")
+    if not isinstance(config_timezone, str) or not config_timezone:
+        raise ValueError("Camoufox environment config has no supported timezone field.")
+    validate_timezone_id(config_timezone)
+    stored_config = bundle.get("config")
+    if not isinstance(stored_config, dict):
+        raise ValueError("Camoufox environment bundle config is corrupt.")
+    if stored_config != config:
+        raise ValueError("Camoufox environment bundle config disagrees with launch options.")
+    updated_config = dict(config)
+    updated_config["timezone"] = timezone_id
+    if set(updated_config) != set(config) or any(updated_config[key] != config[key] for key in config if key != "timezone"):
+        raise ValueError("Camoufox timezone update touched immutable config fields.")
+    updated_options = replace_camoufox_config(launch_options, updated_config, "mac") if config_timezone != timezone_id else launch_options
+    if any(updated_options[key] != launch_options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")):
         raise ValueError("Camoufox timezone update touched immutable launch state.")
+    updated_environment = updated_options.get("env")
+    original_environment = launch_options.get("env")
+    if not isinstance(updated_environment, dict) or not isinstance(original_environment, dict):
+        raise ValueError("Camoufox launch options environment is corrupt.")
+    for key, value in original_environment.items():
+        if not CAMOU_CONFIG_CHUNK.fullmatch(key) and updated_environment.get(key) != value:
+            raise ValueError("Camoufox timezone update touched immutable environment state.")
+    if decode_camoufox_config(updated_options) != updated_config:
+        raise ValueError("Camoufox timezone update did not persist the complete config.")
+    if identity_config(updated_config) != identity_config(config):
+        raise ValueError("Camoufox timezone update touched immutable identity state.")
+    updated_context_options = {**context_options, "timezone_id": timezone_id}
+    updated = {
+        **bundle,
+        "config": updated_config,
+        "config_sha256": json_hash(updated_config),
+        "identity_hash": json_hash(identity_config(updated_config)),
+        "launch_options": updated_options,
+        "context_options": updated_context_options,
+    }
+    if config_timezone == timezone_id and context_options.get("timezone_id") == timezone_id:
+        return bundle
     validate_environment_bundle(updated)
     path = bundle_path(profile_dir)
     temporary = path.with_name(f".{path.name}.timezone-{os.getpid()}-{time.time_ns()}")
@@ -229,6 +329,8 @@ def load_bundle(profile_dir: str) -> dict[str, Any]:
     options = bundle.get("launch_options")
     if not isinstance(options, dict):
         raise ValueError("Camoufox environment bundle has no complete launch options.")
+    if bundle.get("config") != decode_camoufox_config(options):
+        raise ValueError("Camoufox environment bundle config disagrees with launch options.")
     return bundle
 
 
@@ -643,7 +745,7 @@ class Driver:
     def environment(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
         observed = state.page.evaluate("""() => ({ language: navigator.language || null, languages: navigator.languages || [], timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null, viewport: { width: innerWidth, height: innerHeight }, screen: { width: screen.width, height: screen.height }, hardware_concurrency: navigator.hardwareConcurrency || null, device_memory: navigator.deviceMemory || null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null })""")
-        bundle_hash = hashlib.sha256(canonical_json(self.bundle)).hexdigest()
+        bundle_hash = self.bundle["identity_hash"]
         return {"status": "completed", "observed_at": now(), "provider": {"camoufox_version": CAMOUFOX_VERSION_PIN, "browser_version": BROWSER_VERSION_PIN, "properties_sha256": PROPERTIES_SHA256_PIN}, "bundle_hash": bundle_hash, "observed": observed, "continuity": {"state": "unknown", "checked_fields": [], "changed_fields": [], "unknown_fields": ["screen", "hardware_concurrency", "webgl_vendor", "webgl_renderer", "canvas_hash", "audio_hash"]}}
 
     def screenshot(self, request: dict[str, Any]) -> dict[str, Any]:
