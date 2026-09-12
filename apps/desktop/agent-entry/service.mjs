@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, unlink, lstat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
-import { resolveInstalledCamoufoxArtifact } from './provider-artifact.mjs';
+import { classifyCamoufoxBinding } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 const dataDir = process.argv[2];
@@ -33,6 +33,7 @@ const server = createServer(async (req, res) => {
     const ownerRoute = (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
       (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
       (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
+      ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
       (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/profile-policies'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url)));
     const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
       (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
@@ -48,7 +49,7 @@ const server = createServer(async (req, res) => {
       chunks.push(value);
     }
     const body = Buffer.concat(chunks).toString('utf8');
-    const upstream = await fetch(state.coreEndpoint + req.url, { method: req.method, headers: { authorization: req.headers.authorization, 'content-type': 'application/json' }, ...(req.method === 'POST' ? { body } : {}), signal: AbortSignal.timeout(85_000) });
+    const upstream = await fetch(state.coreEndpoint + req.url, { method: req.method, headers: { authorization: req.headers.authorization, 'content-type': 'application/json' }, ...(['POST', 'PUT'].includes(req.method) ? { body } : {}), signal: AbortSignal.timeout(85_000) });
     send(res, upstream.status, await upstream.json());
   } catch { send(res, 503, { ok: false, error: { code: 'runtime_unavailable_query_without_replay' } }); }
 });
@@ -70,19 +71,20 @@ for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, shutdown);
 try {
   const assets = await verifyBundle();
   const config = JSON.parse(await readFile(join(dataDir, 'installation.json'), 'utf8'));
-  const camoufoxArtifact = await resolveInstalledCamoufoxArtifact(config);
+  const camoufoxLaunch = classifyCamoufoxBinding(config);
+  const publicConfig = Object.fromEntries(Object.entries(config).filter(([key]) => key !== 'camoufoxArtifact'));
   for (const key of ['coreEndpoint', 'harborEndpoint']) {
     const url = new URL(config[key]);
     if (url.hostname !== '127.0.0.1' || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) throw new Error('installation_endpoint_invalid');
   }
   // The installed service never inherits development stores, launch wrappers,
-  // fixture providers or private resolvers. A Camoufox override is accepted
-  // only from the revalidated installation binding above.
+  // fixture providers or private resolvers. Historical Camoufox bindings are
+  // local evidence only and are never converted into a launch path.
   for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
-  Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxArtifact }));
+  Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxLaunch }));
   const { createRuntimeSupervisor } = await import('../dist-electron/runtimeSupervisor.js');
   supervisor = createRuntimeSupervisor({ dataDir });
-  state = { ...state, ...config, assets };
+  state = { ...state, ...publicConfig, camoufox_launch: camoufoxLaunch, assets };
   let snapshot;
   for (let attempt = 0; attempt < 100; attempt++) {
     snapshot = await supervisor.readState(config);

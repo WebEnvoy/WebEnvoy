@@ -187,7 +187,6 @@ export {
   HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA
 } from "./provider-management.js";
 export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-provider-launcher.js";
-export { launchCamoufoxProvider } from "./camoufox-driver.js";
 /** Stable plugin-facing operation index; provider-private handles stay internal. */
 export { managedOperationCatalog } from "./managed-observation.js";
 export type { ManagedInteractionInput, ManagedInteractionOperation, ManagedInteractionResult, ManagedInteractionSnapshot } from "./managed-interaction.js";

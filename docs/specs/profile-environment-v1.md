@@ -2,8 +2,8 @@
 
 > 状态：V1 规范性语义规格
 > 版本：1.0
-> 日期：2026-09-09
-> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 日期：2026-09-12
+> 产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品归口：[Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471)
 > 首批执行项：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
@@ -11,6 +11,8 @@
 本文定义 WebEnvoy V1 中长期受管 Profile 的 Provider 和设备／网络环境语义。目标是让同一 Profile 跨正常停止、重启和受支持版本变化后，继续表现为**同一个可解释、可验证、可恢复的长期环境**。
 
 本文不承诺不可检测、不封号，也不要求开启 Provider 的所有可选“隐身”功能。
+
+> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收；当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不启动或 fallback。#499 的环境连续性、#504/#510 的 patched/native artifact 与 live 记录仅为历史证据；保留的 Profile／binding／bundle 仍可由 recovery validator 做安全校验，但不能恢复 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
 
 ## 1. 核心原则
 
@@ -314,9 +316,11 @@ drift evaluated
 
 不得以单一“fingerprint id”掩盖内部事实不自洽，也不应向 Agent 暴露完整可复制的敏感环境材料。
 
-## 11. Camoufox 适配要求
+## 11. Camoufox 历史适配基线
 
-Camoufox 是当前第一验证 Provider。WebEnvoy 必须按明确版本组合记录：
+Camoufox 曾是 #499 的第一验证 Provider。该历史矩阵不等于当前资格或启动支持；本轮 #519 B 的上游原版 Camoufox／Playwright 组合未通过 Qualification Gate，当前 Harbor 对其私有 launch binding 返回 `unsupported`，不启动、不 fallback。旧 patched/native Driver、bundle 和 live evidence 只作历史记录。若未来重新评估，必须按 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 另行通过 qualification。
+
+历史 #499 记录按明确版本组合保存：
 
 - Camoufox package version；
 - browser version；
@@ -326,20 +330,20 @@ Camoufox 是当前第一验证 Provider。WebEnvoy 必须按明确版本组合�
 - platform／architecture；
 - capability and limitation facts。
 
-### 11.1 正式启动机制
+### 11.1 历史正式启动机制（非当前支持）
 
-应使用当前已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设。
+历史合同要求使用当时已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设；当前 Harbor 不执行该启动路径。
 
-### 11.2 环境生成与复用
+### 11.2 历史环境生成与复用
 
-[#499](https://github.com/WebEnvoy/WebEnvoy/issues/499) 必须实测确定：
+[#499](https://github.com/WebEnvoy/WebEnvoy/issues/499) 的历史证据记录了：
 
 - Camoufox 自己生成并随 persistent context 复用的事实；
 - WebEnvoy 必须显式生成、持久化和回灌的事实；
 - 每次只能观测、无法精确控制的事实；
 - 当前版本 unsupported／limited 的事实。
 
-在该矩阵完成前，不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定。
+该历史矩阵不能作为当前 #519 B 的资格证据；不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定，也不能以旧结果恢复当前 launchability。
 
 ### 11.3 自动化暴露和辅助能力
 

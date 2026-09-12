@@ -8,7 +8,7 @@
 
 - Provider 候选先通过 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate；必须由 WebEnvoy 补浏览器核心语义时停止采用，不把候选缺口变成 Runtime 新职责。
 - Obscura 仅保留 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 的历史结论，当前愿景内不采用且不再验证；通用 Provider 选择与新建默认由 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 独立交付。
-- 此边界对齐待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20)；不在本仓复制第二份 canonical。
+- 此边界对齐已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21)；不在本仓复制第二份 canonical。
 
 ## 下一批
 

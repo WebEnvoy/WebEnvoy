@@ -1,8 +1,9 @@
 # Harbor Runtime 执行指南
 
-本目录是 monorepo 内的浏览器运行时。先遵循仓库根 `AGENTS.md` 和 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
+本目录是 monorepo 内的浏览器运行时。先遵循仓库根 `AGENTS.md` 和 [canonical v1.4 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
 
 - Harbor 拥有 WebEnvoy 管理的 Profile、ProviderBinding、EnvironmentConfiguration、Instance、页面操作、Viewer、ControlLease 和运行观测；不拥有业务授权、Run 结果或网站知识。
+- [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性尚未验收。当前 Camoufox catalog 状态为 `unsupported`／已退役；Harbor 不启动或 fallback 到该私有 binding。#499/#504/#510 的 patched/native 证据仅作历史记录，保留的 binding、Profile 和 bundle 只允许 recovery validator 校验，不恢复 launchability。
 - Provider 接入必须先通过 [Qualification Gate](../../docs/adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订)。Harbor／Driver 可以适配 Provider 已有协议和管理现场，不实现、模拟或长期补偿缺失的浏览器核心语义。Obscura 在当前愿景内不采用，不再验证或跟踪；历史见 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)。
 - Profile 数据由 WebEnvoy 管理，不挂载外部软件的活动 Profile；Provider 运行中不静默切换，配置区分 configured/effective/pending/drift。
 - Viewer 展示原 Instance；观看和控制分离，人工接管只改变 ControlLease，不自动改写 Run 或夺回控制。

@@ -4,6 +4,8 @@
 
 本规格定义已安装 WebEnvoy 在更换安装资产后继续使用原长期 Profile，以及在受支持损坏时由可信 owner 恢复一个指定私有备份的语义。它只覆盖当前已验证 macOS arm64、本机 Codex、固定且已安装的 Camoufox Provider。它不承诺跨操作系统、跨 Provider、历史任意版本或 Provider 下载/升级迁移。
 
+> **2026-09-12 退役说明（现行事实）**：上段关于“固定且已安装 Camoufox Provider”的描述是本规格的历史 baseline，不是当前启动支持承诺。本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收。Harbor 已退役 Camoufox 私有浏览器／Driver launch binding，不会为新请求绑定、启动或自动切换到 Camoufox；已有旧 binding、Profile、backup/plan/apply 记录和私有 bundle 仍由 recovery 路径保留并按原 schema/hash 做安全检查。纯 stdlib validator 只验证保留 bundle，不能重建 bundle、生成新指纹或使退役 binding 重新可启动。新的 Camoufox 支持路线必须先通过独立 qualification 和新契约。
+
 ## 1. 所有权与数据边界
 
 | 数据 | 唯一 owner | 恢复语义 |
@@ -11,7 +13,7 @@
 | 安装运行时、Lode/runtime/Plugin 资产 | Desktop 安装器 | 只替换可证明由本安装管理且未被用户改动的文件；记录 commit/tree/manifest/文件完整性；不覆盖用户修改的 host/SKILL，报告冲突。 |
 | host 接入配置与 Client credential | Desktop 安装器／owner | 与原 host identity 和 data root 绑定；更新、重装和卸载不生成第二 data root，不删除长期数据。 |
 | Profile 浏览器数据与 Camoufox 私有 bundle | Harbor | 备份和恢复的唯一对象；必须持有既有 Profile ownership lock，检查浏览器活动锁，拒绝 symlink/path traversal。 |
-| Provider 环境配置与私有 bundle | Harbor／Camoufox Driver | 只接受与当前受支持 Provider、版本、properties pin 和环境材料匹配的备份；沿用 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)，不生成新指纹。 |
+| Provider 环境配置与私有 bundle | Harbor／历史 Camoufox Driver binding | 只接受与既有 Provider、版本、properties pin 和环境材料匹配的备份；沿用 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)，不生成新指纹，也不把恢复校验当作新的启动资格。 |
 | Principal、Connection、Grant、撤销与过期 | Core managed-access | 永远使用当前真相；恢复不回滚、复活或扩大任何授权。 |
 | Profile ceiling、安全策略、Account/AccountSystem/BusinessTarget 正式归属 | Core／Harbor 各自 owner | 恢复不覆盖；缺失或不兼容时拒绝并要求重新授权/修复。 |
 | Run、receipt、ExternalOutcome、审计与历史结果 | Core | 永不回滚，历史动作不重放；响应丢失只能 query 原操作。 |
@@ -91,7 +93,7 @@ Plugin 只增加 `recovery.inspect`、`recovery.request`、`recovery.status` 投
 
 安装 identity 与原 data root 绑定，并持久化 commit/tree/manifest/完整性证据。新包先通过完整性核验，再复用同一 data root；旧 Runtime 活动或资产 digest 不匹配时拒绝并要求一次明确安全 stop。不得关闭未核对在途任务、强抢人工控制或用两个新 data root 冒充更新。
 
-若安装显式选择 Camoufox native test artifact，安装配置必须在新 data root 首次 setup 时于 `installation.json` 中持久化 `camoufoxArtifact` 绑定（`app`、`executable`、`manifest`、`manifest_sha256`）。绑定只接受固定 `webenvoy.camoufox-native/v1`、`managed-native-snapshot`、Provider/browser/source pins、实际输出文件 hash、派生 app identity 与 `properties.json` 邻接副本均通过核验的独立 test-only artifact；原 `/Applications/Camoufox.app` 和任意 symlink/替换路径都拒绝。已有绑定不可通过重复 setup 改指向其他构件；已有但未绑定 artifact 的 installation 也不可追加绑定，必须另建隔离 data root，避免把既有 Profile 的默认 Provider 数据切换到 test executable。每次 Runtime 启动都重新核验绑定及 manifest hash，失败则 fail closed。安装服务清除继承的 `WEBENVOY_`、`HARBOR_`、`CAMOUFOX_` 覆盖；仅将这次核验得到的 executable 作为 `HARBOR_CAMOUFOX_PATH` 传给 Harbor。没有该字段的旧 installation 配置继续使用 Harbor 既有默认 Provider 检测，不迁移或改写 Profile 的 executable/provider binding。
+Camoufox native test artifact 的安装绑定条款仅作为历史 #504/#510 记录保留。现行 Harbor 不接受新的 `camoufoxArtifact` launch binding，不把原始 `/Applications/Camoufox.app` 或旧 patched artifact 作为可启动 Provider；旧 `installation.json`、binding 和 Profile 不迁移、不改写，启动时应以退役状态安全拒绝。没有该字段的旧 installation 配置继续使用 Harbor 既有默认 Provider 检测，不迁移或改写 Profile 的 executable/provider binding。
 
 卸载只移除本次受管安装、入口和注册，不删除长期数据、Profile、私有身份材料、备份、恢复前副本、Principal、Grant 或 Run。用户手改 host/SKILL 保留原件并报告冲突；不强制覆盖后宣称更新成功。
 
@@ -99,7 +101,7 @@ Plugin 只增加 `recovery.inspect`、`recovery.request`、`recovery.status` 投
 
 - 无活动 Instance/写者且 Profile ownership lock 和浏览器活动锁验证成功，才可 backup/apply。
 - Profile、backup、plan、environment bundle 的 schema/version/provider/hash/归属不匹配时不覆盖。
-- 旧非空 Profile 缺 Camoufox bundle：只有可信同 Profile、完整兼容 backup 走同一 plan/owner/apply；无则保留原数据并报告 `manual_recovery_required`，禁止自动重建、随机生成或从可见属性反推身份。当前 bundle 损坏、缺失或不兼容时，Harbor 通过已安装的 Camoufox Python Driver 的 `validate_environment_bundle` 私有操作校验备份 bundle；Python Driver 负责 canonical bundle schema、hash 与 Provider pin 校验，TypeScript recovery 层不复制另一套 Camoufox 解析规则。
+- 旧非空 Profile 缺 Camoufox bundle：只有可信同 Profile、完整兼容 backup 走同一 plan/owner/apply；无则保留原数据并报告 `manual_recovery_required`，禁止自动重建、随机生成或从可见属性反推身份。当前 bundle 损坏、缺失或不兼容时，Harbor 通过保留的纯 stdlib `camoufox-bundle-validator.py` 的 `validate_environment_bundle` 私有操作校验备份 bundle；validator 只负责 canonical bundle schema、hash 与历史 Provider pin 校验，不启动 Camoufox、不导入 Camoufox/Playwright、不修改安装或 Profile，TypeScript recovery 层不复制另一套 Camoufox 解析规则。
 - 不切换 Provider、proxy 或 fingerprint，不自动新建 Profile，不把历史 observation 当作当前 verified；环境恢复后必须重新 observation，`unknown` 不等于成功。
 - 活动锁、错 Profile、损坏或不兼容 backup、symlink/path traversal、计划过期、材料变化、恢复中断和普通 Agent apply 都必须拒绝。
 - 响应丢失后 status/query 原 operation/receipt，不再次 apply；历史 Run 和 action count 不增加。

@@ -2,11 +2,13 @@
 
 > 状态：现行 V1 架构基线
 > 日期：2026-09-09
-> 决策依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
+> 决策依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 > 规范依据：[Browser Runtime 能力规格](../specs/browser-runtime-capabilities-v1.md)、[Profile 环境规格](../specs/profile-environment-v1.md)
 > 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 
 本文定义 WebEnvoy Browser Runtime capability plane 的模块关系、所有权、调用路径和不可跨越边界。它不冻结最终 HTTP／MCP 字段、JSON Schema 或 Provider 私有实现。
+
+> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 将 Camoufox 私有 launch binding 标为 `unsupported`／已退役，不启动或 fallback。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录仅作历史证据；保留的 Profile／binding／bundle 只可由 recovery validator 做安全校验，不能恢复 launchability。该状态不改变本架构的公共 capability、Plugin、授权或 recovery 边界。
 
 ## 1. 架构目标
 
@@ -309,6 +311,8 @@ SKILL 可以减少 Agent 看到的工具、调用次数和探索成本；它不�
 - 对结果、权限和恢复的影响。
 
 `unsupported` 对列为 V1 必需的能力不能单独作为完成依据。应实现、提供等价路径，或通过产品决策调整该 Provider／平台支持范围。
+
+当前 Camoufox 的 `unsupported` 是 #519 B Qualification Gate 未通过后的明确产品事实，不是要求 Harbor 通过私有补丁或 Driver 补偿制造等价能力；旧验证记录不改变该状态。
 
 Provider-specific extension 只允许在公共语义无法合理覆盖时存在，并且：
 

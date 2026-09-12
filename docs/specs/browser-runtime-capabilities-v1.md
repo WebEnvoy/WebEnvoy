@@ -3,7 +3,7 @@
 > 状态：V1 规范性语义规格
 > 版本：1.1（规范性语义修订，不改变 wire 枚举）
 > 日期：2026-09-12
-> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以待合并的 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提
+> 产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品完成归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 > 验收衔接：[已安装 Plugin／真实 Agent #474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[完整 V1 证据汇合 #482](https://github.com/WebEnvoy/WebEnvoy/issues/482)
@@ -11,6 +11,8 @@
 本文定义 WebEnvoy V1 Browser Runtime capability plane 的**规范性语义、能力类别、支持状态、权限层次、结果和验收规则**。
 
 本文不是最终 wire schema。具体 HTTP／MCP 字段、JSON Schema、生成类型和 Provider adapter 可以在实现中演进，但不得改变本文的语义和安全边界，除非通过新的 ADR／spec 修订。
+
+> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收；当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不启动、不 fallback。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录仅为历史证据；保留的 Profile／binding／bundle 只可由 recovery validator 校验，不能恢复 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 
 ## 1. 目标
 
@@ -108,6 +110,8 @@ Capability exists
 3. 需要 WebEnvoy 建设或模拟浏览器底层行为的“核心浏览器能力缺失”。
 
 只有前两类可以进入适配或受限支持。核心缺失、需要长期补偿或需要维护浏览器 fork／内核补丁链时停止候选，不反向扩张 Runtime 职责。资格顺序、正常管理工作与具体停止条件由 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订) 统一定义。Obscura 在当前愿景内不采用，历史证据仅由 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 保留，不再验证、等待或监控新版本。
+
+本轮 #519 B 属于第三类：popup 首请求在派发前无法建立可信 Page 归属（详见 [#519 证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），且完整 installed、人工交还和环境连续性尚未验收，故不形成当前 Provider 的 `supported`／`limited` 资格。旧 #499 环境连续性和 #504/#510 native 证据不覆盖这些未验收项，也不能授权 Harbor 以私有 patch 或 Driver 补偿继续接入。
 
 ## 3. 通用调用约束
 

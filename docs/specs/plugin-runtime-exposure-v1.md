@@ -4,6 +4,8 @@
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
+> **2026-09-12 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性尚未验收。Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），Plugin 不启动、不 fallback 或隐藏该事实。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录只作历史证据；recovery validator 只校验保留 bundle，不恢复 launchability。下列工具、operation、授权和 wire 核心字段保持原义。
+
 ## 固定工具与投影
 
 已安装、完整性核验的 Plugin 通过下列固定工具消费 Runtime；Plugin 不建立授权、不直接调用 Harbor/Provider、不把浏览器协议作为回退路径。

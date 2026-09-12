@@ -1,6 +1,8 @@
 # 安装后的单宿主 Agent 入口
 
-安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。支持当前验证的 macOS、Codex MCP 和已有 Camoufox。测试包不签名、不发布，不代表完整发行或多宿主支持。
+安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。本文的 macOS、Codex MCP 和 Camoufox 步骤是历史安装／验收记录，不代表当前 Camoufox launch/support。测试包不签名、不发布，不代表完整发行或多宿主支持。
+
+> **2026-09-12 现行边界**：#519 B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 已退役 Camoufox 私有 launch binding；下文只保留历史流程和证据定位，不能作为新启动、建 Profile 或 fallback 的操作指引。
 
 ## 安装和显式授权
 

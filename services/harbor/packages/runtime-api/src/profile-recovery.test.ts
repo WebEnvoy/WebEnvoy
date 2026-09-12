@@ -9,6 +9,7 @@ import test, { after } from "node:test";
 import { createLocalIdentityEnvironmentFacts } from "./identity-environment.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { ProfileRecoveryError, ProfileRecoveryManager } from "./profile-recovery.js";
+import { detectBrowserProviders } from "./provider-management.js";
 
 const root = mkdtempSync(join(tmpdir(), "harbor-profile-recovery-"));
 process.env.HARBOR_PROFILE_STORAGE_ROOT = join(root, "profiles");
@@ -58,6 +59,24 @@ function camoufoxFixture(ref = `camoufox-${randomSuffix()}`) {
     identity_environment_ref: `${ref}:identity`, execution_identity_ref: `${ref}:execution`, profile_ref: `${ref}:profile`, profile_storage_ref: `${ref}:storage`,
     site: { site_id: "fixture", origin: "https://fixture.invalid", display_name: "Recovery fixture" }, requested_provider_id: "camoufox", storage_state: "present", login_state: "logged_out"
   });
+  // This fixture models a pre-retirement persisted binding. New Camoufox
+  // requests are intentionally unbound, but recovery must still understand
+  // old profiles whose selected provider was Camoufox.
+  const historicalProvider = detectBrowserProviders({
+    platform: "darwin", arch: "arm64", home_dir: "/Users/fixture", env: { HARBOR_CAMOUFOX_PATH: executable },
+    path_exists: path => path === executable,
+    is_executable: path => path === executable,
+    read_text: () => null
+  }).providers.find(provider => provider.provider_id === "camoufox");
+  assert.ok(historicalProvider);
+  facts.provider_binding = {
+    ...facts.provider_binding,
+    selected_provider_id: "camoufox",
+    selected_provider: historicalProvider,
+    fallback_provider_id: null,
+    selection_reason: "requested_provider_available",
+    unavailable_reason: null
+  };
   const profileDir = profileStoragePath(facts.browser_storage.profile_storage_ref);
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   writeFileSync(join(profileDir, "marker.txt"), "before", { mode: 0o600 });
@@ -70,8 +89,8 @@ function camoufoxFixture(ref = `camoufox-${randomSuffix()}`) {
 function randomSuffix(): string { return Math.random().toString(36).slice(2, 10); }
 
 function pythonBundle(): Record<string, unknown> {
-  const helper = join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
-  const script = "import importlib.util,json,sys; spec=importlib.util.spec_from_file_location('camoufox_driver',sys.argv[1]); module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); print(json.dumps(module.build_environment_bundle({'fingerprint.seed':'fixture-seed','timezone':'UTC'}),ensure_ascii=False,separators=(',',':')))";
+  const helper = join(dirname(fileURLToPath(import.meta.url)), "camoufox-bundle-validator.py");
+  const script = "import importlib.util,json,sys; spec=importlib.util.spec_from_file_location('camoufox_bundle_validator',sys.argv[1]); module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); print(json.dumps(module.build_environment_bundle({'fingerprint.seed':'fixture-seed','timezone':'UTC'}),ensure_ascii=False,separators=(',',':')))";
   return JSON.parse(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, helper], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
 }
 
@@ -88,6 +107,23 @@ function makePlan(manager: ProfileRecoveryManager, profileRef: string, backupRef
 function confirmation(key: string, plan: { plan_ref: string }, idempotencyKey = key) {
   return { schema_version: "webenvoy.profile-recovery-confirmation.v1" as const, confirmation_ref: `confirmation:${key}`, plan_ref: plan.plan_ref, confirmed_at: new Date().toISOString(), confirmed_by: "owner" as const, idempotency_key: idempotencyKey, decision: "apply" as const };
 }
+
+test("retained Camoufox bundle validation stays stdlib-only and rejects tampering", () => {
+  const helper = join(dirname(fileURLToPath(import.meta.url)), "camoufox-bundle-validator.py");
+  const source = readFileSync(helper, "utf8");
+  assert.doesNotMatch(source, /^\s*(?:import|from)\s+(?:camoufox|playwright)\b/m);
+  assert.equal(existsSync(join(dirname(helper), "camoufox-driver.py")), false);
+
+  const { facts, bundlePath, manager } = camoufoxFixture(`validator-${randomSuffix()}`);
+  assert.equal(manager.inspect(facts.profile_ref).status, "completed");
+  const original = JSON.parse(readFileSync(bundlePath, "utf8")) as Record<string, unknown>;
+  const config = original.config as Record<string, unknown>;
+  config.timezone = "Europe/Paris";
+  writeFileSync(bundlePath, `${JSON.stringify({ ...original, config })}\n`, { mode: 0o600 });
+  const tampered = manager.inspect(facts.profile_ref);
+  assert.equal(tampered.status, "manual_recovery_required");
+  assert.equal(tampered.failure?.code, "camoufox_bundle_invalid");
+});
 
 test("backs up and applies matching storage while keeping state beside the actual storage ref", () => {
   const { facts, profileDir, manager } = fixture();

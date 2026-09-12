@@ -1,16 +1,16 @@
 # Camoufox Environment Continuity V1
 
-> 状态：#499 provider-private implementation contract
-> 版本：1.1（RGBA Canvas observation baseline）
-> 日期：2026-09-10
+> 状态：Retired（历史 #499 provider-private implementation contract；2026-09-12）
+> 版本：1.1（历史 RGBA Canvas observation baseline）
+> 日期：2026-09-12
 > 归口：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 > 上位语义：[Profile Environment V1](profile-environment-v1.md)
 
-本文只冻结 #499 当前切片需要的 Camoufox 私有持久化和 Driver readback。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。
+本文保留 #499 切片的 Camoufox 私有持久化和 Driver readback 作为历史合同与 recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features；当前 #519 B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收，Harbor 不再启动或 fallback 到该私有 binding。保留 bundle 只能由纯 stdlib validator 校验，不能创建新 bundle、生成新指纹或恢复 launchability；旧 patched/native Driver 和 live 证据均为历史记录。
 
 ## 1. Design Obligation disposition
 
-- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`：pinned Camoufox `launch_options()` 每次会生成 BrowserForge fingerprint、fonts、voices、WebGL 参数以及 `fonts:spacing_seed`、`audio:seed`、`canvas:seed`。这些值不会由 persistent Profile 自动证明为稳定，Driver 必须先保存完整 provider config 再启动。
+- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`（历史）：pinned Camoufox `launch_options()` 每次会生成 BrowserForge fingerprint、fonts、voices、WebGL 参数以及 `fonts:spacing_seed`、`audio:seed`、`canvas:seed`。这些值不会由 persistent Profile 自动证明为稳定，历史 Driver 曾要求先保存完整 provider config 再启动；该路径不属于当前 launch/support。
 - `DO-GRANT-WIRE = not-triggered`：公共授权只在既有 `allowed_operations` 增加 `environment.read/update` 固定值；继续使用 Profile ceiling、Principal Grant 和 task scope，不新增 Grant 字段、scope dimension 或持久授权对象。
 - `DO-PLUGIN-EXPOSURE = triggered`：environment.read/update 已成为 Installed Plugin 的稳定 operation projection；公共配置、授权和 envelope 见 [Profile Environment V1](profile-environment-v1.md)，本文件只负责 Driver-private readback。
 - Network/Console contract：`not-triggered`。本文件不形成 Network/Console 公共 payload。
@@ -58,14 +58,16 @@ The identity hash therefore stays stable when managed timezone/locale/viewport v
 
 The pre-1.1 baseline has no `canvas` member and its `observed.canvas_hash` is a PNG data-URL hash. The only supported observation upgrade adds the `canvas` member on the next safe read, retaining the entire original `observed` map, timestamp, config, seeds and identity hash. It does not compare PNG and RGBA hashes. The new Canvas baseline is `unknown` on that launch (including repeated reads); only a different Driver launch can verify it. This applies to fresh RGBA baselines too. Unknown algorithms fail closed. This is not a Provider/schema migration framework. A pre-1.1 reader rejects the extended baseline before launch; rollback requires the matching private backup, never automatic stripping of metadata or regeneration.
 
-### 2.3 Creation and replay
+### 2.3 Historical creation and replay contract
 
-1. Validate the existing qualified Python/package/browser/properties pins.
+以下步骤仅记录 #499 的历史 Driver 行为，不是当前 Harbor 的启动路径；当前请求在 launch binding gate 处以 `unsupported` 结束。
+
+1. The historical Driver validated the existing qualified Python/package/browser/properties pins.
 2. If the bundle exists, load and validate it before browser launch. A symlink, non-regular file, broad permissions, malformed JSON, wrong shape, hash mismatch, provider mismatch, or unsupported version is a hard failure.
 3. If no bundle exists, only an empty managed Profile may be treated as first creation. A non-empty Profile without its bundle is a continuity failure, not permission to generate a replacement identity.
-4. First creation calls the pinned `launch_options()` once, reconstructs `config` from all `CAMOU_CONFIG_*` chunks, and atomically persists the bundle before `sync_playwright()`/`NewBrowser()` starts. The write uses a same-directory temporary file, flush+fsync, and an atomic no-overwrite directory entry. A failed browser start leaves the bundle available for an exact retry.
-5. Replay passes a deep copy of the complete stored `config` to `launch_options(config=...)`. Pinned `merge_into()`/`set_into()` preserve existing keys, but BrowserForge can introduce optional keys absent on the original draw (observed: `screen.availLeft`). Stored absence is authoritative: replay retains only the original key set plus the explicit dynamic keys above, verifies its identity hash, and re-encodes that exact map with the pinned `get_env_vars()` before browser launch. Newly sampled optional keys never reach the browser; changed or missing original identity fields fail closed. This does not rewrite the bundle or discard a known original value.
-6. Explicit non-empty `timezone` and `locale` inputs override the in-memory config for this launch. Timezone is also passed as native Playwright `timezone_id` through pinned `NewBrowser` to the persistent context. The Driver supplies `firefox_user_prefs["roverfox.s.timezone_0"]` with the same launch value: the pinned default persistent context (userContextId 0) otherwise reuses its old Provider-owned preference before consulting `CAMOU_CONFIG`, overriding the requested timezone on navigation. This is a derived dynamic cache, not identity; update only this exact preference via the normal launch API, never read/edit Profile files or clear other Provider state. Explicit `viewport` updates replace only the window geometry and clamp its existing position/chrome relationship to the stored screen. They do not rewrite the bundle or identity hash. The pinned API's `window=(w,h)` is an outer-window input, so replay does not rely on passing `window` a second time over an existing config.
+4. Historically, first creation called the pinned `launch_options()` once, reconstructed `config` from all `CAMOU_CONFIG_*` chunks, and atomically persisted the bundle before `sync_playwright()`/`NewBrowser()` started. The write used a same-directory temporary file, flush+fsync, and an atomic no-overwrite directory entry. A failed browser start left the bundle available for an exact retry.
+5. Historically, replay passed a deep copy of the complete stored `config` to `launch_options(config=...)`. Pinned `merge_into()`/`set_into()` preserved existing keys, but BrowserForge could introduce optional keys absent on the original draw (observed: `screen.availLeft`). Stored absence was authoritative: replay retained only the original key set plus the explicit dynamic keys above, verified its identity hash, and re-encoded that exact map with the pinned `get_env_vars()` before browser launch. Newly sampled optional keys never reached the browser; changed or missing original identity fields failed closed. This did not rewrite the bundle or discard a known original value.
+6. Historically, explicit non-empty `timezone` and `locale` inputs overrode the in-memory config for that launch. Timezone was also passed as native Playwright `timezone_id` through pinned `NewBrowser` to the persistent context. The Driver supplied `firefox_user_prefs["roverfox.s.timezone_0"]` with the same launch value: the pinned default persistent context (userContextId 0) otherwise reused its old Provider-owned preference before consulting `CAMOU_CONFIG`, overriding the requested timezone on navigation. This was a derived dynamic cache, not identity; the historical path updated only this exact preference via the normal launch API, never read/edited Profile files or cleared other Provider state. Explicit `viewport` updates replaced only the window geometry and clamped its existing position/chrome relationship to the stored screen. They did not rewrite the bundle or identity hash. The pinned API's `window=(w,h)` was an outer-window input, so replay did not rely on passing `window` a second time over an existing config.
 7. Proxy is resolved and passed through the existing Playwright launch option. It is not silently changed, inferred, or stored in this bundle.
 
 No migration platform is part of v1. An unsupported schema/provider/browser/properties version is rejected. The owner repair path is to restore a matching private bundle/Profile backup or perform an explicit Profile repair/recreation through the managed lifecycle; the Driver never invents a new fingerprint, switches Provider, or replaces the Profile.
@@ -79,9 +81,9 @@ No migration platform is part of v1. An unsupported schema/provider/browser/prop
 - Explicit dynamic override failure: the private bundle remains unchanged, so the prior identity can be retried with the prior effective configuration.
 - There is no automatic Provider rollback or identity migration. Only the observation-algorithm extension in §2.2 is automatic; a human/owner restores a matching artifact for a reader rollback.
 
-## 3. `environment_read` private Driver result
+## 3. Historical `environment_read` private Driver result
 
-`environment_read` is a fixed, read-only Driver command. It does not accept an expression, open a page, route a request, read Cookie/account/storage, or make an external network request. It evaluates one fixed `mw:` expression in the active original Page and returns only bounded facts.
+`environment_read` was a fixed, read-only Driver command in the historical #499 path. It did not accept an expression, open a page, route a request, read Cookie/account/storage, or make an external network request. It evaluated one fixed `mw:` expression in the active original Page and returned only bounded facts. Current Harbor retains the result shape only as historical/recovery documentation; it does not launch this Driver.
 
 Successful result shape:
 
@@ -127,7 +129,7 @@ The expression bounds strings/lists and catches unsupported APIs. WebGL uses the
 
 ## 4. Provider facts matrix
 
-The matrix records facts verified from the pinned source and current Driver, not Provider marketing claims. `V1 status` is the state of this #499 slice.
+The matrix records facts historically verified from the pinned source and Driver, not Provider marketing claims. `V1 status` is the state of the historical #499 slice, not current Camoufox launch support.
 
 | Fact | Owner / persistence | Apply or replay path | Readback / V1 status | Boundary |
 | --- | --- | --- | --- | --- |
@@ -139,8 +141,8 @@ The matrix records facts verified from the pinned source and current Driver, not
 | Screen | Provider-generated with BrowserForge and stored in bundle | Full config replay | `screen`; stable-config verified, actual display bounds are observed | Headful display changes can be drift/launch risk; no re-randomization |
 | Proxy reference / server | Harbor/Core configured and resolved outside this bundle | Existing `proxy` Playwright option | Not returned by `environment_read`; not network-verified here | No proxy URL or exit inference is persisted/returned |
 | Network exit | External network observation only | Not applied by this Driver command | Unsupported / no safe readback (`null` outside requested observed shape) | No external request and no live proxy evidence |
-| Geo | Provider geolocation optional path, not passed by current Driver | Unsupported in this slice | Not safely read back | Do not infer geo from locale/timezone |
-| WebRTC | Provider optional `geoip`/prefs path, not enabled by current Driver | Limited/unsupported for #499 | Not included in readback; no claim | Do not claim leak prevention or continuity |
+| Geo | Provider geolocation optional path, not passed by the historical Driver | Unsupported in this slice | Not safely read back | Do not infer geo from locale/timezone |
+| WebRTC | Provider optional `geoip`/prefs path, not enabled by the historical Driver | Limited/unsupported for #499 | Not included in readback; no claim | Do not claim leak prevention or continuity |
 | Hardware concurrency | Provider-generated BrowserForge config, persisted in bundle | Full config replay | `hardware_concurrency`; verified when page exposes it | Manager does not accept a user hardware override in this slice |
 | Device memory | Not generated by current pinned launch path | No control path | `device_memory` or `null`; observed-only/limited | Firefox may not expose `navigator.deviceMemory` |
 | WebGL vendor/renderer | Provider samples a screen-coherent pair and stores config | Full config replay | WebGL context/debug extension or `null`; limited observed verification | Browser sanitization may alter/limit page-visible values |
@@ -157,11 +159,11 @@ The matrix records facts verified from the pinned source and current Driver, not
 | Page evaluation | Harbor fixed helpers use `mw:`; site probe/read operation have fixed expressions | `managed_observe`, site/read probes, environment read | Environment read has no public script parameter | No raw debugger/CDP/Juggler endpoint is exposed |
 | Route/interception | Driver only installs public-navigation/interaction guards for their existing managed scopes | Same-origin GET/redirect blocking; interaction route may fetch with `max_redirects=0` | No route facts in environment_read | These guards can affect managed navigation; environment_read itself does not route or request |
 
-### 4.1 Installed-provider verification boundary
+### 4.1 Historical installed-provider verification boundary
 
-The installed `0.5.6` / `152.0.4-beta.30` live on 2026-09-09 used the same isolated Profile and retained the original bundle across normal Instance restarts and a full Runtime restart. The bounded storage marker, screen, hardware concurrency, WebGL pair, voices hash and audio hash remained unchanged in the observed runs. The pre-1.1 PNG hash changed, but local-page raw RGBA and decoded-PNG RGBA hashes matched across the measured drawings. PNG chunk types included `IHDR,IDAT,deBG,IEND`; this does not prove which chunk caused the difference. The observation correction in §2.2 preserves old evidence while requiring fresh cross-launch RGBA verification, not removal of Canvas comparison.
+The historical installed `0.5.6` / `152.0.4-beta.30` live run on 2026-09-09 used the same isolated Profile and retained the original bundle across normal Instance restarts and a full Runtime restart. The bounded storage marker, screen, hardware concurrency, WebGL pair, voices hash and audio hash remained unchanged in the observed runs. The pre-1.1 PNG hash changed, but local-page raw RGBA and decoded-PNG RGBA hashes matched across the measured drawings. PNG chunk types included `IHDR,IDAT,deBG,IEND`; this does not prove which chunk caused the difference. This is historical evidence only and does not qualify the current upstream combination or reopen the retired launch path.
 
-The qualified `properties.json` declares `canvas:seed`, but declaration and Python replay alone do not establish browser-side use. Read-only inspection did not find that key in the installed XUL binary; this is supporting diagnostic evidence, not proof of every browser implementation path or a settled root cause. The same live found config-only UTC failed browser readback, motivating the native timezone path above. Exact installed commit, public hashes/refs, verification of both fixes and individual lifecycle outcomes belong to the linked PR/Issue live evidence. Neither the measurement correction nor its fixtures alone satisfies #499 acceptance.
+The historical qualified `properties.json` declares `canvas:seed`, but declaration and Python replay alone do not establish browser-side use. Read-only inspection did not find that key in the installed XUL binary; this is supporting diagnostic evidence, not proof of every browser implementation path or a settled root cause. The same historical live found config-only UTC failed browser readback, motivating the native timezone path above. Exact installed commit, public hashes/refs, verification of both fixes and individual lifecycle outcomes belong to the linked PR/Issue live evidence. Neither the measurement correction nor its fixtures alone satisfied #499 acceptance or qualifies the current #519 B candidate.
 
 Pinned-source timezone audit: [`TimezoneManager::GetTimezone`](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/timezone-spoofing.patch) checks stored `timezone_<userContextId>` before config and reapplies it to new documents. [`RoverfoxStorageManager`](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/anti-font-fingerprinting.patch) prefixes keys with `roverfox.s.` and uses Firefox Preferences; [parent-process synchronization](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/cross-process-storage.patch) writes them with `Preferences::SetCString`. This explains why config-only and native-only restart attempts can retain the previous timezone. The launch preference aligns the existing cache; no page init-script, setter exposure or browser binary patch is added.
 

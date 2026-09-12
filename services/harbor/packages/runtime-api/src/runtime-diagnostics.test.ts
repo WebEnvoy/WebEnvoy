@@ -1,29 +1,10 @@
-import { execFile } from "node:child_process";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { normalizeRuntimeDiagnostics, safeDiagnosticsUrl, trustRuntimeDiagnosticsProbe } from "./runtime-diagnostics.js";
 import { startHarborRuntimeServer } from "./server.js";
 
 const origin = "https://example.test";
-const execFileAsync = promisify(execFile);
-
-test("Camoufox diagnostics fixture exercises the real Python listeners", async () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const fixture = [
-    join(here, "camoufox-diagnostics.fixture.py"),
-    join(here, "../../../../packages/runtime-api/src/camoufox-diagnostics.fixture.py"),
-    join(process.cwd(), "packages/runtime-api/src/camoufox-diagnostics.fixture.py")
-  ].find(existsSync);
-  assert.ok(fixture, "diagnostics fixture is missing");
-  const result = await execFileAsync(process.env.HARBOR_CAMOUFOX_PYTHON ?? process.env.PYTHON ?? "python3", ["-B", fixture], { encoding: "utf8" });
-  assert.match(String(result.stdout), /camoufox diagnostics fixture ok/);
-});
-
 test("diagnostics are bounded, redacted, Page-bound, and do not change ControlLease", async () => {
   const launcher: LocalProviderLauncher = async input => {
     const ready = await createFixtureLauncher("ready")(input);

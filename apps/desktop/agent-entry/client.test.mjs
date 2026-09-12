@@ -62,6 +62,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
       harborEndpoint: 'http://127.0.0.1:5678',
       assets: { digest: sha(JSON.stringify(manifest)), version: manifest.version, integrity: 'verified' },
       services: [{ id: 'core', pid: 1 }, { id: 'harbor', pid: 2 }],
+      camoufox_launch: { state: 'retired', reason: 'retired_binding' },
       camoufoxArtifact: { app: '/private/Camoufox Native Test.app', executable: '/private/Camoufox Native Test.app/Contents/MacOS/camoufox', manifest: '/private/Camoufox Native Test.app/Contents/Resources/webenvoy-native-manifest.json', manifest_sha256: 'a'.repeat(64) }
     };
     await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
@@ -84,6 +85,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     assert.equal(publicStatus.ready, true);
     assert.deepEqual(publicStatus.services, status.services);
     assert.equal(publicStatus.assets.digest, status.assets.digest);
+    assert.deepEqual(publicStatus.camoufox_launch, status.camoufox_launch);
     assert.equal(Object.hasOwn(publicStatus, 'camoufoxArtifact'), false);
   } finally {
     if (child) { child.stdin.end(); await new Promise(resolve => child.once('exit', resolve)); }

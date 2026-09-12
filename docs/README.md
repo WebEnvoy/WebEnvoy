@@ -4,7 +4,7 @@
 
 仓内文档不得另立产品方向；它们负责解释架构决策、模块关系、规范性语义、稳定合同和实际验证。
 
-Provider 资格、用户选择和职责边界的组织级修订尚在 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 待合并。本仓的 2026-09-12 ADR／spec 修订以它为前提，不复制另一份 canonical；该 PR 变化时必须先对账。
+Provider 资格、用户选择和职责边界的组织级修订已合并为 [.github#21](https://github.com/WebEnvoy/.github/pull/21)。本仓的 2026-09-12 ADR／spec 修订以 canonical v1.4 为准，不复制另一份 canonical；该规范变化时必须先对账。
 
 ## 权威关系
 

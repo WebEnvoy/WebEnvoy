@@ -8,7 +8,7 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { bindCamoufoxArtifact, resolveInstalledCamoufoxArtifact, validateCamoufoxArtifactSetup, verifyCamoufoxArtifact } from './provider-artifact.mjs';
+import { classifyCamoufoxBinding } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -20,10 +20,7 @@ if (command === 'setup') {
   const assets = await verifyBundle();
   const installationPath = join(dataDir, 'installation.json');
   const existingInstallation = await readInstallation(installationPath);
-  const artifactPath = args.includes('--camoufox-artifact') ? required('--camoufox-artifact') : undefined;
-  const requestedArtifact = artifactPath ? await verifyCamoufoxArtifact(artifactPath) : null;
-  const configuredArtifact = existingInstallation ? await resolveInstalledCamoufoxArtifact(existingInstallation) : null;
-  validateCamoufoxArtifactSetup(existingInstallation, configuredArtifact, requestedArtifact);
+  if (args.includes('--camoufox-artifact')) throw new Error('camoufox_artifact_binding_retired');
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -41,7 +38,6 @@ if (command === 'setup') {
     const ports = await Promise.all([reservePort(), reservePort()]);
     installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}` };
   }
-  installation = bindCamoufoxArtifact(installation, configuredArtifact ?? requestedArtifact);
   await mkdir(join(hostDir, '.agents/skills/webenvoy-browser'), { recursive: true });
   // A standalone profile file is reviewable; never edit the user's existing Codex configuration.
   const config = hostConfig(root, clientPath, args.includes('--approve-tools'), true);
@@ -63,7 +59,7 @@ if (command === 'setup') {
     legacyFiles
   });
   if (!existingInstallation || JSON.stringify(installation) !== JSON.stringify(existingInstallation)) await atomicWrite(installationPath, JSON.stringify(installation));
-  console.log(JSON.stringify({ installed: true, credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
+  console.log(JSON.stringify({ installed: true, camoufox_launch: classifyCamoufoxBinding(installation), credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
 } else if (command === 'access') {
   const action = args[0];
   const status = await ensureRuntime(dataDir);

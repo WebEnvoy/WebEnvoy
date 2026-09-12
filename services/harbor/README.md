@@ -1,6 +1,6 @@
 # Harbor
 
-> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 资格、用户选择和职责边界的待合并修订见 [.github#20](https://github.com/WebEnvoy/.github/pull/20)。
+> 当前产品定位和 V1 约束见 [canonical v1.4 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 资格、用户选择和职责边界以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准。
 
 Harbor 让 Agent 可以长期、稳定、可接管地使用真实浏览器账号。
 

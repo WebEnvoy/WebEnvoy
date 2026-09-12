@@ -18,7 +18,6 @@ import {
   resolveIdentityEnvironmentLaunchConfiguration,
   type ResolvedIdentityEnvironmentLaunchConfiguration
 } from "./identity-environment-configuration.js";
-import { launchCamoufoxProvider } from "./camoufox-driver.js";
 import { prepareProfileStorage } from "./profile-storage.js";
 import {
   trustLocalProviderReadProbe,
@@ -71,9 +70,7 @@ class ProviderOriginDriftError extends Error {}
 
 export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
   const explicitBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
-  const camoufoxOverride = resolveCamoufoxOverride(process.env);
   const persistedBinding = input.identity_environment?.provider_binding;
-  const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (persistedBinding && (
     !persistedBinding.selected_provider_id || !persistedBinding.selected_provider ||
     persistedBinding.selected_provider.provider_id !== persistedBinding.selected_provider_id ||
@@ -86,23 +83,12 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
       { key: "provider.binding", source: "observed", value: "provider_mismatch" }
     ]);
   }
-  const configuredProvider = process.env.HARBOR_BROWSER_PROVIDER;
-  const providerId = selectLocalProviderId(
-    input.provider_id,
-    providerBinding?.selected_provider_id,
-    configuredProvider,
-    Boolean(camoufoxOverride && !explicitBrowserPath)
-  );
-  if (providerId === "camoufox") {
-    const camoufoxPath = (persistedBinding ? persistedBinding.selected_provider?.install.path : input.browser_path || camoufoxOverride) ||
-      (providerBinding?.selected_provider_id === "camoufox" ? providerBinding.selected_provider?.install.path : "") ||
-      detectBrowserProviders().providers.find((provider) => provider.provider_id === "camoufox")?.install.path || "";
-    return launchCamoufoxProvider({
-      ...input,
-      browser_path: camoufoxPath,
-      provider_id: "camoufox"
-    });
-  }
+  // Camoufox's private browser/driver binding is retained only as an
+  // observable historical installation fact. Reject it after the existing
+  // managed-binding checks, but before detection, profile preparation, or
+  // provider fallback so it can never start or silently switch providers.
+  if (isCamoufoxLaunchRequest(input)) return retiredCamoufoxUnavailable();
+  const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
   if (!browserPath) {
@@ -210,6 +196,54 @@ export function selectLocalProviderId(
   camoufoxAvailable: boolean
 ): string | undefined {
   return requested ?? bound ?? (configured === "camoufox" ? "camoufox" : undefined) ?? (camoufoxAvailable ? "camoufox" : undefined);
+}
+
+const CAMOUFOX_LAUNCH_REASONS = new Set(["retired_binding", "unqualified"]);
+
+export function isCamoufoxLaunchRequest(
+  input: Pick<LocalProviderLaunchInput, "browser_path" | "provider_id" | "identity_environment">,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  const bindingProvider = input.identity_environment?.provider_binding?.selected_provider_id;
+  const explicitCamoufoxProvider = input.provider_id === "camoufox";
+  const explicitNonCamoufoxProvider = input.provider_id !== undefined && input.provider_id !== "camoufox";
+  // `browser_path` wins over HARBOR_BROWSER_PATH in the launcher. Only that
+  // effective path can turn an explicit non-Camoufox request into a retired
+  // Camoufox launch; unrelated Camoufox environment hints must not do so.
+  const effectiveBrowserPath = input.browser_path || env.HARBOR_BROWSER_PATH;
+  const effectiveCamoufoxPath = isCamoufoxPath(effectiveBrowserPath);
+
+  // Persisted Camoufox bindings and explicit Camoufox requests are retired
+  // unconditionally once the managed-binding consistency check has passed.
+  // Explicit non-Camoufox requests remain eligible for the existing path and
+  // provider selection flow when that effective path is not Camoufox,
+  // including when unrelated Camoufox env flags are present.
+  if (explicitCamoufoxProvider || bindingProvider === "camoufox") return true;
+  if (effectiveCamoufoxPath) return true;
+  if (explicitNonCamoufoxProvider) return false;
+  if (bindingProvider !== undefined) return false;
+  // With no explicit provider or binding, the configured Camoufox provider
+  // owns even a path whose basename does not identify Camoufox. This keeps a
+  // renamed/opaque configured binary from reaching the generic spawn path.
+  if (env.HARBOR_BROWSER_PROVIDER === "camoufox") return true;
+  if (env.HARBOR_BROWSER_PROVIDER) return false;
+  if (effectiveBrowserPath) return false;
+  if (env.HARBOR_CAMOUFOX_LAUNCH_STATE === "retired") return true;
+  return Boolean(resolveCamoufoxOverride(env));
+}
+
+function isCamoufoxPath(path: string | undefined): boolean {
+  return typeof path === "string" && /(?:^|[\\/])camoufox(?:$|[._\\/-])/i.test(path);
+}
+
+function retiredCamoufoxUnavailable(): LocalProviderLaunchResult {
+  const reason = CAMOUFOX_LAUNCH_REASONS.has(process.env.HARBOR_CAMOUFOX_LAUNCH_REASON ?? "")
+    ? process.env.HARBOR_CAMOUFOX_LAUNCH_REASON!
+    : "unqualified";
+  return unavailable("unsupported", "Camoufox 的旧补丁运行路线已退役，需要明确选择受支持版本；当前原版 Camoufox/Playwright 组合尚未通过 Qualification Gate。Harbor 不会启动 Camoufox 或自动切换 Provider。", [
+    { key: "provider.camoufox.launch_state", source: "observed", value: "retired" },
+    { key: "provider.camoufox.launch_reason", source: "observed", value: reason }
+  ]);
 }
 
 type WritePrecheckObservation = {

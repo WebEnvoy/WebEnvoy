@@ -2,12 +2,13 @@
 
 本仓库是 `WebEnvoy/WebEnvoy` 产品 monorepo：`packages/*` 承载 Core，`apps/desktop` 承载 Desktop App，`services/harbor` 承载 Harbor Runtime；Lode 仍是独立资产仓。
 
-产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。
+产品方向、V1 约束和决策状态以组织级 [canonical v1.4 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。
 
 ## 实施原则
 
 - 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。
-- 先验证会推翻设计的页面或 Provider 假设。Provider 接入遵循 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate：先分类、后有界 spike、再决定是否采用。WebEnvoy 不实现、模拟或长期补偿 Provider 缺失的浏览器核心语义；Obscura 在当前愿景内不采用，历史见 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)，不再验证、等待或跟踪版本。该产品方向以待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提。
+- 先验证会推翻设计的页面或 Provider 假设。Provider 接入遵循 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate：先分类、后有界 spike、再决定是否采用。WebEnvoy 不实现、模拟或长期补偿 Provider 缺失的浏览器核心语义；Obscura 在当前愿景内不采用，历史见 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)，不再验证、等待或跟踪版本。该产品方向以已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21) 为准。
+- 本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性也尚未验收。当前 Harbor 将 Camoufox 私有 launch binding 视为 `unsupported`／已退役，不启动、不 fallback。#499、#504、#510 的补丁、native artifact 和 live 记录只作为历史证据保留；保留的 Profile／binding／bundle 仅可由 recovery validator 做安全校验，不能恢复 launchability。
 - Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
 - Browser Runtime capability 是否存在，与 Plugin 向 Agent 展示哪些工具以及当前 Grant 是否允许调用必须分离；Network、Console、文件、窗口、受控执行、画面等通用能力不得按站点特例散落到 Harbor／Core。
 - V1 实施优先采用 Plugin-first：一个已安装 Plugin 在真实第三方 Agent 中持续消费 Runtime、Profile、账号、环境、SKILL 和结果能力；完整 App 产品化后移，但必要 owner 授权、敏感决定、同实例接管与交还持续可用。
