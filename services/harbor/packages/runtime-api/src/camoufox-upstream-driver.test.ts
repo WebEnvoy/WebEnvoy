@@ -327,6 +327,103 @@ finally:
   });
 });
 
+test("waits for the declared Page condition instead of returning success after a delay", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+class FakeBody:
+    def __init__(self, page): self.page = page
+    def inner_text(self, timeout=None): return self.page.text
+
+class FakeTarget:
+    def __init__(self, page): self.page = page
+    def is_visible(self, timeout=None): return True
+    def is_enabled(self, timeout=None): return self.page.enabled
+
+class FakePage:
+    url = "https://example.test/"
+    main_frame = object()
+    def __init__(self):
+        self.text = "ready"
+        self.enabled = False
+        self.ticks = 0
+        self.on_wait = None
+    def is_closed(self): return False
+    def title(self): return "Fixture"
+    def locator(self, selector):
+        assert selector == "body"
+        return FakeBody(self)
+    def get_by_role(self, role, name, exact):
+        assert (role, name, exact) == ("button", "Continue", True)
+        return FakeTarget(self)
+    def wait_for_timeout(self, milliseconds):
+        self.ticks += 1
+        if self.on_wait: self.on_wait(self)
+
+page = FakePage()
+state = module.PageState("page:1", page, ["https://example.test"])
+state.controls["control:0"] = ("button", "Continue", None, None)
+instance = object.__new__(module.Driver)
+instance.pages = {"page:1": state}
+instance.current = "page:1"
+instance.request = {"timeout_ms": 1000}
+
+base = {"provider_page_ref": "page:1", "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
+missing = instance.interact({**base, "action": "wait", "wait_for": "text", "text": "Processing", "timeout_ms": 100})
+assert missing["status"] == "unavailable", missing
+assert missing["dispatch_state"] == "not_dispatched", missing
+assert missing["failure_class"] == "wait_condition_timeout", missing
+
+page.ticks = 0
+page.on_wait = lambda current: setattr(current, "text", "Processing") if current.ticks >= 2 else None
+found = instance.interact({**base, "action": "wait", "wait_for": "text", "text": "Processing", "timeout_ms": 100})
+assert found["status"] == "completed", found
+assert found["dispatch_state"] == "dispatched", found
+
+page.on_wait = lambda current: setattr(current, "enabled", True) if current.ticks >= 2 else None
+page.ticks = 0
+enabled = instance.interact({**base, "action": "wait", "wait_for": "enabled", "target_ref": "control:0", "timeout_ms": 100})
+assert enabled["status"] == "completed", enabled
+
+page.on_wait = lambda current: instance.on_navigate(state, page.main_frame) if current.ticks == 2 else None
+page.ticks = 0
+changed = instance.interact({**base, "action": "wait", "wait_for": "page_changed", "timeout_ms": 100})
+assert changed["status"] == "completed", changed
+`
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
 test("checks every redirect hop before issuing the next fetch", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
   const script = `

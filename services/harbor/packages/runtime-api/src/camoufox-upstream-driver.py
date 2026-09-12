@@ -45,6 +45,8 @@ MAX_TEXT = 64 * 1024
 MAX_LINE = 2 * 1024 * 1024
 MAX_REDIRECT_HOPS = 10
 REDIRECT_STATUSES = frozenset({300, 301, 302, 303, 307, 308})
+MAX_WAIT_MS = 10_000
+WAIT_POLL_MS = 50
 CAMOU_CONFIG_CHUNK = re.compile(r"^CAMOU_CONFIG_(\d+)$")
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
@@ -764,7 +766,19 @@ class Driver:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
                 state.page.mouse.wheel(0, delta)
             elif action == "wait":
-                state.page.wait_for_timeout(min(max(int(request.get("timeout_ms", 250)), 0), 5_000))
+                wait_for = request.get("wait_for")
+                if wait_for not in ("page_changed", "text", "enabled"):
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
+                if wait_for == "text" and (not isinstance(request.get("text"), str) or not request["text"]):
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
+                if wait_for == "enabled" and (not isinstance(request.get("target_ref"), str) or request["target_ref"] not in state.controls):
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
+                if not self.wait_for_condition(state, request):
+                    # A condition that was not observed is a deterministic
+                    # unavailable result.  No mutating browser action was
+                    # dispatched, so callers must not classify this as an
+                    # unknown outcome or retry a preceding action.
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wait_condition_timeout", "page": state.facts()}
             else:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
             return {"status": "completed", "dispatch_state": "dispatched", "page": state.facts()}
@@ -772,6 +786,41 @@ class Driver:
             return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "timeout", "page": state.facts()}
         except Exception as error:
             return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": safe_text(error, 128), "page": state.facts()}
+
+    def wait_for_condition(self, state: PageState, request: dict[str, Any]) -> bool:
+        """Wait for one bounded, declared Page condition using public APIs."""
+        wait_for = request.get("wait_for")
+        timeout_value = request.get("timeout_ms", 250)
+        try:
+            timeout_ms = min(max(int(timeout_value), 1), MAX_WAIT_MS)
+        except (TypeError, ValueError, OverflowError):
+            timeout_ms = 250
+        deadline = time.monotonic() + timeout_ms / 1000
+        initial_generation = state.generation
+        body = state.page.locator("body") if wait_for == "text" else None
+        target = self.locator(state, request) if wait_for == "enabled" else None
+        expected_text = request.get("text") if wait_for == "text" else None
+        while True:
+            if wait_for == "page_changed":
+                if state.generation != initial_generation:
+                    return True
+            elif wait_for == "text":
+                try:
+                    if expected_text in body.inner_text(timeout=max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))):
+                        return True
+                except TimeoutError:
+                    pass
+            elif wait_for == "enabled":
+                remaining_ms = max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))
+                try:
+                    if target.is_visible(timeout=remaining_ms) and target.is_enabled(timeout=remaining_ms):
+                        return True
+                except TimeoutError:
+                    pass
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            state.page.wait_for_timeout(min(WAIT_POLL_MS, max(1, int(remaining * 1000))))
 
     def snapshot(self, state: PageState) -> dict[str, Any]:
         raw = state.page.evaluate("""() => {
