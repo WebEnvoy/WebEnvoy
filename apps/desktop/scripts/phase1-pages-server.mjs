@@ -47,6 +47,7 @@ function pageBody(service, path) {
       <p id="console-marker">console=${lower}-console</p>
       <label for="safe-input">Safe input</label>
       <input id="safe-input" name="safe_input" type="text" autocomplete="off" aria-label="Safe input">
+      <p id="storage-marker">storage-marker=</p>
       <button id="count-button" type="button">Count action</button>
       <output id="count-result" aria-live="polite"></output>
       <button id="popup-button" type="button">Open popup</button>
@@ -62,6 +63,23 @@ function pageBody(service, path) {
       <p><a id="history-link" href="/history?step=link#${lower}-link">History link</a></p>`,
     script: `
       console.info("phase1-${lower}-console");
+      const storageKey = "phase1-safe-input";
+      const safeStoredValue = value => value === "safe-input" ? value : "";
+      const safeInput = document.querySelector("#safe-input");
+      const storageMarker = document.querySelector("#storage-marker");
+      let storedValue = "";
+      try { storedValue = safeStoredValue(localStorage.getItem(storageKey)); } catch {}
+      safeInput.value = storedValue;
+      const updateStorageMarker = value => {
+        const nextValue = safeStoredValue(value);
+        try {
+          if (nextValue) localStorage.setItem(storageKey, nextValue);
+          else localStorage.removeItem(storageKey);
+        } catch {}
+        storageMarker.textContent = "storage-marker=" + nextValue;
+      };
+      updateStorageMarker(storedValue);
+      safeInput.addEventListener("input", event => updateStorageMarker(event.currentTarget.value));
       const updatePageTitle = () => {
         const queryPhase1 = ${service === "S2"} && location.pathname === "/query" && new URLSearchParams(location.search).get("phase") === "1";
         const fragmentS2 = ${service === "S2"} && location.pathname === "/query" && location.hash === "#s2-fragment";
