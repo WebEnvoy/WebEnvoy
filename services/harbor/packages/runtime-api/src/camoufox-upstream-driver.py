@@ -436,7 +436,7 @@ class PageState:
         self.origins = set(origins)
         self.opener = opener
         self.generation = 1
-        self.controls: dict[str, tuple[str, str, str | None]] = {}
+        self.controls: dict[str, tuple[str, str, str | None, int | None]] = {}
         self.events: list[dict[str, Any]] = []
         self.last_url = page.url
         self.relation_pending = False
@@ -777,7 +777,8 @@ class Driver:
             return null;
           };
           const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].filter(visible).map(e => ({ e, role: implicitRole(e) })).filter(item => item.role).slice(0,128);
-          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), href: item.e.tagName === 'A' ? item.e.getAttribute('href') : null, enabled: !item.e.disabled })) };
+          const fileInputs = [...document.querySelectorAll('input[type="file"]')];
+          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), href: item.e.tagName === 'A' ? item.e.getAttribute('href') : null, file_index: item.role === 'file' ? fileInputs.indexOf(item.e) : null, enabled: !item.e.disabled })) };
         }""")
         controls = []
         state.controls.clear()
@@ -786,7 +787,8 @@ class Driver:
                 continue
             ref = f"control:{item['i']}"
             href = item.get("href") if isinstance(item.get("href"), str) else None
-            state.controls[ref] = (item["role"], item["name"], href)
+            file_index = item.get("file_index") if isinstance(item.get("file_index"), int) and item.get("file_index") >= 0 else None
+            state.controls[ref] = (item["role"], item["name"], href, file_index)
             controls.append({"target_ref": ref, "role": safe_text(item["role"], 64), "name": safe_text(item["name"], 256), "enabled": item.get("enabled") is True})
         text = safe_text(raw.get("text", "") if isinstance(raw, dict) else "")
         return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
@@ -860,16 +862,23 @@ class Driver:
             source = request.get("source_path")
             if not isinstance(source, str) or not source or "\x00" in source:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": state.facts()}
-            if target not in self.controls or self.controls[target][0] != "file":
+            if target not in state.controls or state.controls[target][0] != "file":
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
             try:
+                _role, _name, *metadata = state.controls[target]
+                file_index = metadata[1] if len(metadata) > 1 else None
+                if not isinstance(file_index, int) or file_index < 0:
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
                 source_path = Path(source)
                 with source_path.open("rb", buffering=0) as handle:
                     source_size = os.fstat(handle.fileno()).st_size
                 if source_size < 1 or source_size > 10 * 1024 * 1024:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_limit_exceeded", "page": state.facts()}
-                inputs = state.page.locator('input[type="file"]')
-                if inputs.count() != 1 or not inputs.is_visible(timeout=timeout):
+                file_inputs = state.page.locator('input[type="file"]')
+                if file_index >= file_inputs.count():
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
+                inputs = file_inputs.nth(file_index)
+                if not inputs.is_visible(timeout=timeout):
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
                 existing = inputs.evaluate("e => e.files ? e.files.length : 0")
                 if existing:
@@ -881,9 +890,9 @@ class Driver:
             except Exception as error:
                 return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": safe_text(error, 128), "page": state.facts()}
 
-        if target not in self.controls:
+        if target not in state.controls:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
-        role, _name, *metadata = self.controls[target]
+        role, _name, *metadata = state.controls[target]
         observed_href = metadata[0] if metadata else None
         if role != "link":
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
@@ -926,7 +935,7 @@ class Driver:
                     if not chunk:
                         break
                     digest.update(chunk)
-            suggested = safe_text(download.suggested_filename(), 128)
+            suggested = safe_text(download.suggested_filename, 128)
             if not suggested or "/" in suggested or "\\" in suggested:
                 return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_name_invalid", "page": state.facts()}
             return {"status": "completed", "dispatch_state": "dispatched", "operation": "download", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "observed", "page_processing": "unknown", "business_commit": "not_observed", "download": {"page_url": safe_url(state.page.url), "url": download_url, "suggested_filename": suggested, "byte_length": size, "sha256": digest.hexdigest(), "staging_path": staging}}

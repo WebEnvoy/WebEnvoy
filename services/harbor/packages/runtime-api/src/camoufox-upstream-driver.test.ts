@@ -245,6 +245,94 @@ finally:
   });
 });
 
+test("reads the Playwright 1.60 Download suggested_filename property", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import hashlib, importlib.util, os, sys, tempfile, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+body = b"id,status\\n1,ok\\n"
+class FakeDownload:
+    def __init__(self, page):
+        self.page = page
+        self.url = "https://example.test/receipt.csv"
+        self.suggested_filename = "receipt.csv"
+    def failure(self): return None
+    def save_as(self, path):
+        with open(path, "wb") as handle: handle.write(body)
+
+class DownloadExpectation:
+    def __init__(self, download): self.value = download
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+
+class FakeLink:
+    def get_attribute(self, name):
+        assert name == "href"
+        return "/receipt.csv"
+    def click(self, timeout): pass
+
+class FakePage:
+    url = "https://example.test/"
+    def __init__(self): self.download = FakeDownload(self)
+    def is_closed(self): return False
+    def title(self): return "Example"
+    def get_by_role(self, role, name, exact):
+        assert (role, name, exact) == ("link", "Download", True)
+        return FakeLink()
+    def expect_download(self, timeout):
+        assert timeout == 1000
+        return DownloadExpectation(self.download)
+
+page = FakePage()
+state = module.PageState("page:1", page, ["https://example.test"])
+state.controls["control:0"] = ("link", "Download", "/receipt.csv", None)
+instance = object.__new__(module.Driver)
+instance.pages = {"page:1": state}
+instance.current = "page:1"
+instance.request = {"timeout_ms": 1000}
+staging = tempfile.mktemp(prefix="harbor-download-property-")
+try:
+    result = instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"], "target_ref": "control:0", "staging_path": staging, "timeout_ms": 1000})
+    assert result["status"] == "completed", result
+    assert result["download"]["suggested_filename"] == "receipt.csv"
+    assert result["download"]["sha256"] == hashlib.sha256(body).hexdigest()
+finally:
+    try: os.unlink(staging)
+    except FileNotFoundError: pass
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
 test("checks every redirect hop before issuing the next fetch", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
   const script = `
