@@ -2,7 +2,7 @@
 
 状态：Accepted；版本：1.0；owner：Harbor / Provider Driver（观察）、Core（授权与 Run）。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续能力由 [FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
 
-> **2026-09-12 Provider 事实**：本合同保持 Provider-neutral 的 Network observation 语义；#519 B 的供应方原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过资格，完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不通过 fallback 或私有 patch 补偿；#499/#504/#510 的旧 Driver、native artifact 和 live 记录仅作历史证据。既有 Network wire 核心字段和拒绝／unknown 语义不变。
+> **2026-09-12 Provider 事实**：本合同保持 Provider-neutral 的 Network observation 语义；#519 的官方固定 Camoufox 路径只按 `limited` 使用。若 popup 首请求到达时尚不能在派发前可信关联已登记 Page，Driver 必须在 `fetch`/`continue`/外部请求前局部拒绝，并以 `page_relation_unavailable`/`not_dispatched` 保留请求归属未知事实；不能以 URL/title/时间邻近/active/新 Page 猜测或重放。触发它的 click 若已派发，click 的 `dispatched` 事实与 popup 子请求的拒绝、业务未完成分别记录；不得将 click 改写成 `not_dispatched`。原任务页的 fresh read/input、已可信 Page 和其他 Profile 不因该局部拒绝而暂停。正式 installed、人工交还和环境连续性仍待 #519 完成门；旧私有 launch binding、patched/native artifact 仅作历史/恢复事实。
 
 ## Boundary
 
@@ -20,6 +20,30 @@ Profile policy, and task scope origins; the Agent cannot submit an origin
 allowlist or combine multiple Grants. A stale Page, cursor, closed/lost
 Instance, provider failure, origin mismatch, or unproven Page relation returns
 an explicit unavailable result.
+
+## Pre-dispatch relation guard
+
+The fixed upstream Driver installs its public Playwright route before the
+managed context performs navigation. If `request.frame.page` cannot be
+resolved to an already registered Page, the route is aborted before
+`continue()` or `fetch()`; the target server therefore receives no first
+popup request. The later `page` event may register the actual popup and its
+opener only when the Provider supplies that relation, but it never authorizes
+or replays the rejected request. The public failure is the accurate
+`page_relation_unavailable` boundary, not a fabricated `page_id` or `opener`.
+
+The request guard is local to the affected Page/Instance. A click that caused
+the popup remains a separately dispatched interaction, while the popup
+navigation is rejected and the dependent business result remains incomplete.
+The original task Page can be freshly observed and used again; diagnostics
+and other trusted Pages/Profiles remain available. This is a supported
+limited boundary, not a claim that all popup forms are disabled.
+
+Every redirect destination is checked again against the Core-provided exact
+origin intersection before that hop is sent. Same-origin and explicitly
+authorized cross-origin redirects may continue; an unauthorized destination
+is blocked at that hop and cannot be inferred from a later response. No URL,
+title, timing, active-page or multi-Grant heuristic broadens this set.
 
 ## Public result
 
@@ -66,7 +90,9 @@ start to the observed response/failure, not response body completion. A 503
 is a response, not a transport failure. Navigation and controlled-input
 redirects are checked against the Core-provided origin set; an unauthorized
 destination is blocked before its request is sent. Diagnostics cannot enable
-redirects or broaden that set.
+redirects or broaden that set. A popup request rejected before the route can
+continue has no server dispatch; if a separate click already ran, its
+`dispatched` receipt is not erased by that child-navigation rejection.
 
 `cursor` is the starting checkpoint; `next_cursor` is the last returned
 event, not the newest unreturned event. Reads capture a high-water mark and
@@ -130,6 +156,13 @@ relation), or `provider_unavailable` (missing capability/Driver). Message is a
 bounded safe summary. `retryable` never authorizes replay of a page action.
 Core preserves the failure class in its existing failure result;
 authentication/Grant/Profile/task refusals occur at the Core boundary first.
+
+For an unknown Page relation at the first popup navigation, the failure class
+is `page_relation_unavailable` and the request dispatch state is
+`not_dispatched`; this means the target request was prevented, not that the
+triggering click was undone. Once a real Page relation is observed, later
+operations use the normal Page/origin checks. No late relation event can turn
+the original rejected request into a successful navigation.
 
 The trusted internal Harbor route accepts `{origin, authorized_origins?,
 page_ref?, document_generation?, cursor?, limit?}` (`origin` and every

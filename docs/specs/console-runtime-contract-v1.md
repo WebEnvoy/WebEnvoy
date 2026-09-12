@@ -2,12 +2,21 @@
 
 状态：Accepted；版本：1.0；owner：Harbor / Provider Driver。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续由 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
 
-> **2026-09-12 Provider 事实**：本合同保持 Provider-neutral 的 Console/Page Error observation 语义；#519 B 的供应方原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过资格，完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不通过 fallback 或私有 patch 补偿；#499/#504/#510 的旧 Driver、native artifact 和 live 记录仅作历史证据。既有 Console wire 核心字段和拒绝／unknown 语义不变。
+> **2026-09-12 Provider 事实**：本合同保持 Provider-neutral 的 Console/Page Error observation 语义；#519 的官方固定 Camoufox 路径只按 `limited` 使用。Console/page-error 事件只有在 Driver 能把事件可靠关联到已登记 Page、当前 `page_ref` 和 `document_generation` 时才投影；popup 首请求关系未知时不创建或猜测 Page ref，迟到的 Page 事件也不回填早先未归属的事件。正式 installed、人工交还和环境连续性仍待 #519 完成门；旧私有 launch binding、patched/native artifact 仅作历史/恢复事实。
 
 Console and page-error observations use the same `instance.diagnostics` route,
 one-Grant origin intersection, authorization, selected Page binding, document
 generation, cursor, lifecycle, and bounded window as the
 [Network Runtime Contract V1](network-runtime-contract-v1.md).
+
+The #519 upstream Driver keeps this projection Page-local. An event from a
+known Page is retained with that Page's opaque reference; an event whose Page
+relation is unknown, stale, closed, or outside the authorized origin set is
+not assigned to the last selected Page, the native active tab, or a newly
+observed Page. After takeover/return or a document change, the consumer must
+freshly observe the original task Page before using new targets; an old
+console cursor is stale. This localizes the popup limitation and leaves the
+original task Page and other trusted Pages available.
 
 The public levels are `warn`, `error`, and `pageerror`. A record contains an
 opaque event reference, UTC timestamp, Page reference, document generation,

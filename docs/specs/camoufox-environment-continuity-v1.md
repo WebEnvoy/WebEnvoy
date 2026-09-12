@@ -1,16 +1,68 @@
 # Camoufox Environment Continuity V1
 
-> 状态：Retired（历史 #499 provider-private implementation contract；2026-09-12）
-> 版本：1.1（历史 RGBA Canvas observation baseline）
+> 状态：Accepted（当前 #519 官方上游 launch bundle；#499 历史 continuity 事实保留；2026-09-12）
+> 版本：1.2（完整 `launch_options`/`context_options` exact replay；RGBA Canvas observation baseline 保留）
 > 日期：2026-09-12
 > 归口：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 > 上位语义：[Profile Environment V1](profile-environment-v1.md)
 
-本文保留 #499 切片的 Camoufox 私有持久化和 Driver readback 作为历史合同与 recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features；当前 #519 B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收，Harbor 不再启动或 fallback 到该私有 binding。保留 bundle 只能由纯 stdlib validator 校验，不能创建新 bundle、生成新指纹或恢复 launchability；旧 patched/native Driver 和 live 证据均为历史记录。
+本文冻结 #519 官方上游 Camoufox 的受管环境材料持久化和 Driver readback，并保留 #499 的历史 continuity 事实作为兼容/recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。当前只接受 owner 核验的固定官方来源和版本；popup 首请求无法在派发前建立可信 Page 归属时按 `limited` 边界局部拒绝，不猜测或重放。正式 installed、人工交还和环境连续性仍尚未完成 #519 现场验收，不能写成 `live_verified`。旧 patched/native Driver、私有 launch binding 和对应 live 证据仍为历史记录，不恢复旧 launchability。
+
+## Current #519 upstream path
+
+### Provenance and fixed pins
+
+正式安装绑定使用 `webenvoy.camoufox-upstream/v1`，只接受 owner 明确提供且重新计算的来源、版本和路径：
+
+| Material | Fixed fact |
+| --- | --- |
+| Camoufox Python package | `0.5.6`; source SHA-256 `b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561` |
+| Browser app/archive | `152.0.4-beta.30`; source SHA-256 `3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3` |
+| Playwright Python package | `1.60.0`; source SHA-256 `39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5` |
+| Browser `properties.json` | SHA-256 `10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4` |
+
+The installed owner binding also records the explicit browser root,
+executable and Python path, then verifies the browser `application.ini`,
+executable/package versions, `properties.json` and all three source archives.
+No latest lookup, download, app rewrite, site-packages rewrite, patched
+bundle, private transport or automatic upgrade is allowed.
+
+### Complete native options and replay
+
+For a new empty managed Profile, the public Camoufox `launch_options()` API
+is called once with the fixed official browser version and the configured
+timezone/locale/proxy values. The returned JSON object is persisted in
+`.webenvoy-camoufox-environment.v1.json` together with the complete
+`context_options` object (currently the bounded viewport option). The
+`launch_options` object must retain `args`, `env`, `executable_path`,
+`firefox_user_prefs` and `headless`; replay passes this exact object and the
+exact context object to the public Playwright persistent-context API, adding
+only the managed `user_data_dir` for that Profile. A non-empty Profile without
+the complete bundle fails closed; the driver never regenerates identity
+material or silently fills omitted fields.
+
+The bundle's private `config` remains the canonical environment projection for
+the existing identity/config hashes. The public Profile Environment contract
+continues to expose only configured/effective/pending/observed/drift/support
+facts; it never exposes raw options, seeds, full fingerprint or Profile data.
+Static provenance and fixed pins are validation facts, while installed/live
+and real-Agent continuity evidence remains pending until #519 completes its
+onsite gates.
+
+### Popup relation boundary
+
+The public Playwright route is installed before managed navigation. If a first
+popup request has no trustworthy relation to an already registered Page, it is
+aborted before `continue()`/`fetch()` and is not replayed when a later Page
+event arrives. The triggering click, if already dispatched, remains a
+separate fact; the popup business result remains incomplete. Once a real Page
+relation exists, ordinary Page reads and authorized operations use the normal
+Page/origin checks. This limitation is local to that popup/Instance and does
+not disable the original task Page, other Pages, or other Profiles.
 
 ## 1. Design Obligation disposition
 
-- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`（历史）：pinned Camoufox `launch_options()` 每次会生成 BrowserForge fingerprint、fonts、voices、WebGL 参数以及 `fonts:spacing_seed`、`audio:seed`、`canvas:seed`。这些值不会由 persistent Profile 自动证明为稳定，历史 Driver 曾要求先保存完整 provider config 再启动；该路径不属于当前 launch/support。
+- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`（当前 #519 + 历史 #499）：固定 public `launch_options()` 生成的完整启动对象和 `context_options` 由 Harbor 持久化并精确 replay；其中 BrowserForge fingerprint、fonts、voices、WebGL 参数和 seed 仍是 private material。#499 的 config-only 生成/replay 只作为历史兼容事实，不能替代当前完整 options bundle。
 - `DO-GRANT-WIRE = not-triggered`：公共授权只在既有 `allowed_operations` 增加 `environment.read/update` 固定值；继续使用 Profile ceiling、Principal Grant 和 task scope，不新增 Grant 字段、scope dimension 或持久授权对象。
 - `DO-PLUGIN-EXPOSURE = triggered`：environment.read/update 已成为 Installed Plugin 的稳定 operation projection；公共配置、授权和 envelope 见 [Profile Environment V1](profile-environment-v1.md)，本文件只负责 Driver-private readback。
 - Network/Console contract：`not-triggered`。本文件不形成 Network/Console 公共 payload。
@@ -21,7 +73,7 @@
 ### 2.1 Location and owner
 
 - Location: `<PROFILE_DIR>/.webenvoy-camoufox-environment.v1.json`。
-- Owner: Harbor/Driver owns the file and the containing managed Profile; Camoufox only consumes the `config` passed to `launch_options()`.
+- Owner: Harbor/Driver owns the file and the containing managed Profile; the current Driver consumes the persisted complete `launch_options`/`context_options` objects through public Playwright, while Camoufox receives only the resulting public launch inputs.
 - The file is private provider state. It must never be printed, returned in a Driver result, copied into public facts, or included in an error message. File mode is `0600`; temporary files are created in the same Profile directory.
 - The bundle contains no proxy URL, Cookie, account state, request/response body, raw HAR, or external network observation.
 
@@ -40,9 +92,22 @@ The exact v1 object is:
   "config_sha256": "<sha256 of canonical config>",
   "identity_hash": "<sha256 of canonical identity config>",
   "baseline": null,
-  "baseline_sha256": null
+  "baseline_sha256": null,
+  "launch_options": {
+    "args": [],
+    "env": {},
+    "executable_path": "<verified managed executable>",
+    "firefox_user_prefs": {},
+    "headless": false
+  },
+  "context_options": { "viewport": null }
 }
 ```
+
+`launch_options` and `context_options` are required for a current #519
+upstream launch bundle. Legacy #499 bundles may omit them and remain readable
+by the recovery validator, but they are not sufficient to start the current
+Driver and are never silently completed or migrated.
 
 `config` is the complete JSON object reconstructed from the pinned provider's `env.CAMOU_CONFIG_1`, `CAMOU_CONFIG_2`, ... chunks after the first `launch_options()` call. It includes the generated BrowserForge fields, font/voice lists, WebGL fields, media-device defaults and the three seed fields. No hand-curated subset is used: omitted provider keys could be randomly filled again by `launch_options()`.
 
@@ -58,9 +123,9 @@ The identity hash therefore stays stable when managed timezone/locale/viewport v
 
 The pre-1.1 baseline has no `canvas` member and its `observed.canvas_hash` is a PNG data-URL hash. The only supported observation upgrade adds the `canvas` member on the next safe read, retaining the entire original `observed` map, timestamp, config, seeds and identity hash. It does not compare PNG and RGBA hashes. The new Canvas baseline is `unknown` on that launch (including repeated reads); only a different Driver launch can verify it. This applies to fresh RGBA baselines too. Unknown algorithms fail closed. This is not a Provider/schema migration framework. A pre-1.1 reader rejects the extended baseline before launch; rollback requires the matching private backup, never automatic stripping of metadata or regeneration.
 
-### 2.3 Historical creation and replay contract
+### 2.3 Legacy #499 creation and replay contract (recovery reference only)
 
-以下步骤仅记录 #499 的历史 Driver 行为，不是当前 Harbor 的启动路径；当前请求在 launch binding gate 处以 `unsupported` 结束。
+以下步骤仅记录 #499 的历史 Driver 行为；当前 #519 上游创建和精确 replay 以本文 `Current #519 upstream path` 为准，旧私有 launch binding 不因此恢复。
 
 1. The historical Driver validated the existing qualified Python/package/browser/properties pins.
 2. If the bundle exists, load and validate it before browser launch. A symlink, non-regular file, broad permissions, malformed JSON, wrong shape, hash mismatch, provider mismatch, or unsupported version is a hard failure.
@@ -129,11 +194,15 @@ The expression bounds strings/lists and catches unsupported APIs. WebGL uses the
 
 ## 4. Provider facts matrix
 
-The matrix records facts historically verified from the pinned source and Driver, not Provider marketing claims. `V1 status` is the state of the historical #499 slice, not current Camoufox launch support.
+The matrix records fixed-source and Driver facts, not Provider marketing
+claims. Rows marked current describe the #519 upstream path; rows marked
+historical describe the retained #499 evidence. Neither fixture evidence nor
+static provenance alone is `live_verified`.
 
 | Fact | Owner / persistence | Apply or replay path | Readback / V1 status | Boundary |
 | --- | --- | --- | --- | --- |
-| Camoufox/package, browser, `properties.json` | WebEnvoy qualifies exact pins; observed every launch | Driver preflight and bundle metadata | `environment_read.provider`; verified for `0.5.6` / `152.0.4-beta.30` / given SHA | Mismatch rejects launch; no upgrade migration |
+| Camoufox/package, browser, `properties.json` (current #519) | Owner-provided fixed install binding; source archives and properties are rehashed | Installed binding preflight, Driver preflight and bundle metadata | Validation facts for `0.5.6` / `152.0.4-beta.30` / given SHA; installed/live evidence pending | Mismatch rejects launch; no latest lookup or upgrade migration |
+| Complete `launch_options` / `context_options` (current #519) | Harbor-owned private bundle in the managed Profile | One public `launch_options()` generation, then exact persistent-context replay | Bundle schema/hash validator and Driver fixture; cross-restart live evidence pending | Missing on non-empty Profile fails closed; no random completion |
 | Browser family / target OS / UA / platform / oscpu | Provider-generated on first launch, then WebEnvoy private bundle | Full `config` replay; `os` still maps host platform but stored keys win | JS language/device facts plus bundle hash; stable-config verified for pinned path | Host OS itself is not claimed stable; changing it is a qualified compatibility risk |
 | Locale / language list | WebEnvoy configured; dynamic and excluded from identity hash | `locale`/`handle_locales()` override in memory | `language`, `languages`; explicit locale path supported | No locale is inferred from network in this slice |
 | Timezone | WebEnvoy configured; dynamic and excluded from identity hash; Provider-owned derived preference | In-memory config, native `timezone_id` and exact `roverfox.s.timezone_0` preference on the default persistent context | `timezone`; IANA input validation does not replace actual browser readback | GeoIP-derived timezone is not enabled; no multi-container claim |
@@ -159,11 +228,11 @@ The matrix records facts historically verified from the pinned source and Driver
 | Page evaluation | Harbor fixed helpers use `mw:`; site probe/read operation have fixed expressions | `managed_observe`, site/read probes, environment read | Environment read has no public script parameter | No raw debugger/CDP/Juggler endpoint is exposed |
 | Route/interception | Driver only installs public-navigation/interaction guards for their existing managed scopes | Same-origin GET/redirect blocking; interaction route may fetch with `max_redirects=0` | No route facts in environment_read | These guards can affect managed navigation; environment_read itself does not route or request |
 
-### 4.1 Historical installed-provider verification boundary
+### 4.1 Installed-provider verification boundary
 
 The historical installed `0.5.6` / `152.0.4-beta.30` live run on 2026-09-09 used the same isolated Profile and retained the original bundle across normal Instance restarts and a full Runtime restart. The bounded storage marker, screen, hardware concurrency, WebGL pair, voices hash and audio hash remained unchanged in the observed runs. The pre-1.1 PNG hash changed, but local-page raw RGBA and decoded-PNG RGBA hashes matched across the measured drawings. PNG chunk types included `IHDR,IDAT,deBG,IEND`; this does not prove which chunk caused the difference. This is historical evidence only and does not qualify the current upstream combination or reopen the retired launch path.
 
-The historical qualified `properties.json` declares `canvas:seed`, but declaration and Python replay alone do not establish browser-side use. Read-only inspection did not find that key in the installed XUL binary; this is supporting diagnostic evidence, not proof of every browser implementation path or a settled root cause. The same historical live found config-only UTC failed browser readback, motivating the native timezone path above. Exact installed commit, public hashes/refs, verification of both fixes and individual lifecycle outcomes belong to the linked PR/Issue live evidence. Neither the measurement correction nor its fixtures alone satisfied #499 acceptance or qualifies the current #519 B candidate.
+The historical qualified `properties.json` declares `canvas:seed`, but declaration and Python replay alone do not establish browser-side use. Read-only inspection did not find that key in the installed XUL binary; this is supporting diagnostic evidence, not proof of every browser implementation path or a settled root cause. The same historical live found config-only UTC failed browser readback, motivating the native timezone path above. Exact installed commit, public hashes/refs, verification of both fixes and individual lifecycle outcomes belong to the linked PR/Issue live evidence. Neither the measurement correction nor its fixtures alone satisfied #499 acceptance or qualifies the current #519 B candidate; the current public-driver path still requires its separate installed/live evidence.
 
 Pinned-source timezone audit: [`TimezoneManager::GetTimezone`](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/timezone-spoofing.patch) checks stored `timezone_<userContextId>` before config and reapplies it to new documents. [`RoverfoxStorageManager`](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/anti-font-fingerprinting.patch) prefixes keys with `roverfox.s.` and uses Firefox Preferences; [parent-process synchronization](https://github.com/daijro/camoufox/blob/v152.0.4-beta.30/patches/cross-process-storage.patch) writes them with `Preferences::SetCString`. This explains why config-only and native-only restart attempts can retain the previous timezone. The launch preference aligns the existing cache; no page init-script, setter exposure or browser binary patch is added.
 
