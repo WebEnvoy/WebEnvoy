@@ -2,6 +2,17 @@
 
 状态：Accepted；版本：1.0；owner：Harbor / Provider Driver（现场）、Core（授权与 Run）。产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510)。依据：[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)。
 
+> **2026-09-12 Provider 退役说明**：Page/document/navigation 的公共语义、Page Registry、授权、receipt、失联安全暂停和 observation freshness 继续有效；其中 #510 Camoufox native tab-handoff 只保留为历史 Provider-private 设计，不是当前启动或支持承诺。本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收。当前 Harbor 对 Camoufox 私有 launch binding 直接返回 `unsupported`（`retryable: false`），不通过 fallback、URL/title 猜测或 replacement Page 恢复；未来支持必须先建立新的 qualification 和 provider contract。
+
+## 当前 v1.4 任务页与焦点边界
+
+当前任务页协作遵循 [canonical v1.4 产品架构](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#971-%E4%BB%BB%E5%8A%A1%E9%A1%B5%E4%B8%8E%E5%8E%9F%E7%94%9F%E7%84%A6%E7%82%B9%E5%90%88%E5%90%8C)。任务页 A 是用户或 Agent 本次工作的真实 Page 引用；Viewer 选中的帮助或其他页面 B 属于同一 Instance 的独立现场事实，不得把 B 冒充为 A。
+
+- 原生 tab/window selected、OS 前台和其他 focus 是可选观测。可信的 A 只要求供应方可验证的 Page 归属与新鲜度，不要求完整的全局窗口关系或 OS 前台证明；`page.list`、普通 read、snapshot 和 diagnostics 不得为了补齐可选焦点而激活、切页或抢前台。
+- 人类接管 A 后可以观看或操作 B；用户明确交还后，Agent 默认以交还前可信的 A 重新观察，不自动跟随 B，也不要求先证明 A 仍是原生选中标签。A 关闭、失联、替换或出现身份歧义时，只停止依赖 A 的动作，不能凭 URL、标题、内容或创建顺序认领另一页。
+- 原生焦点未知但 A 的 Page/document 归属和读取授权仍可信时，可以继续对象级读取或诊断；对象级输入还需 target/actionability、授权和 ControlLease，依赖 OS 窗口、屏幕坐标或原生键盘路由的输入才需可靠窗口与画面对应。只暂停需要不可信 relation／明确选择的相关动作或上下文，不把可选焦点缺失扩大为无关资源的全局失败。
+- 现有 `harbor-page-list/v2`、Page facts 的 `active`/selected 投影，以及旧 #510 的后台 open、原生焦点和安全邻页规则，均保留为历史／兼容 wire 语义；本轮 #519 B 没有实现新的任务页 wire adapter。不得把任务页 ID、`false` 或其他占位值填入旧原生 `active` 字段来冒充焦点事实，也不得据此宣称当前 Camoufox 已支持任务页协作。
+
 本文冻结受管 Instance 中 Page、Document 和导航的公共语义。Provider 的 page object、CDP/Juggler handle、window id 和地址不得越过 Harbor 边界。Page list 使用 `harbor-page-list/v2`；现有 `harbor-runtime-diagnostics/v1` 与 controlled-page snapshot 继续使用 document-bound `page_ref` 投影。旧投影只能映射到当前 Page 对象和当前 generation，不能把旧 ref 猜测映射到另一个 Page；未提供明确兼容适配的旧 Runtime/客户端必须报告版本错误，不能静默降级。
 
 ## 1. 绑定与生命周期
@@ -13,7 +24,7 @@
 - `page_id` 与 `page_ref` 都在 close、Instance stop、Driver loss 或 Runtime 重启后永久失效，不能复用；
 - 不含 Provider endpoint、CDP id、Profile 路径、URL query、fragment 或凭据。
 
-Page facts v2 至少包含 `requested_url`、`current_url`、`title`、`status`（`loading`、`ready`、`failed`、`closed`、`unavailable`、`unknown`）、`error_reason`、`observed_at`、`page_id`、当前 `page_ref`、`document_generation`、`origin` 和 `active`；`opener_page_id` 在可确认时才出现。旧 v1 facts 删除 `page_id` 后仍指向同一个当前 document-bound `page_ref`。`opener_page_id` 只能指向同一 Instance 中已存在的 Page；无法确认时省略。Agent `page.open` 不抢焦点，Provider 只在真实 popup/new-tab focus 事实发生时改变 active；网页 popup 记录 opener，不能由 Harbor 伪造焦点。
+历史兼容的 Page facts v2 至少包含 `requested_url`、`current_url`、`title`、`status`（`loading`、`ready`、`failed`、`closed`、`unavailable`、`unknown`）、`error_reason`、`observed_at`、`page_id`、当前 `page_ref`、`document_generation`、`origin` 和 `active`；`opener_page_id` 在可确认时才出现。旧 v1 facts 删除 `page_id` 后仍指向同一个当前 document-bound `page_ref`。`opener_page_id` 只能指向同一 Instance 中已存在的 Page；无法确认时省略。Agent `page.open` 不抢焦点，Provider 只在真实 popup/new-tab focus 事实发生时改变 active；网页 popup 记录 opener，不能由 Harbor 伪造焦点。当前任务页 A／Viewer 页 B 的语义以上一节为准，不能从这些旧字段推导全局焦点。
 
 Document generation 从 1 开始。一次 committed navigation（包括 reload、history navigation 和 popup 初始 document）只递增对应 Page；失败且保留旧 document 的导航不递增。公开 Page list 只投影仍然 present 的 live Page，不把 closed tombstone 当作可用 Page。
 
@@ -37,13 +48,15 @@ Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分�
 | `page.reload` | interact | 明确 `page_ref` |
 | `page.back` / `page.forward` | interact | 明确 `page_ref` |
 
-`page.list` v2 返回 `{schema_version: "harbor-page-list/v2", runtime_session_ref, active_page_id, pages, filtered_page_count, observed_at}`；每项同时有 `page_id`、`page_ref` 和 `document_generation`，closed tombstone 不出现在 `pages` 中，`filtered_page_count` 只汇总被授权 origin 过滤的 live Page。v1 客户端投影不是本切片的隐式兼容行为；没有经验证的适配器时必须明确拒绝，而不是猜测 `active_page_ref` 或把旧 Page ref 映射到新对象。`page.open` 返回新 Page facts 和 operation receipt。`activate`、`close` 和导航返回当前 Page facts、`document_generation` 与 bounded failure。所有 mutating input 都有 `idempotency_key`；同 key 不得以不同 request 重放。
+历史兼容的 `page.list` v2 投影返回 `{schema_version: "harbor-page-list/v2", runtime_session_ref, active_page_id, pages, filtered_page_count, observed_at}`；每项同时有 `page_id`、`page_ref` 和 `document_generation`，closed tombstone 不出现在 `pages` 中，`filtered_page_count` 只汇总被授权 origin 过滤的 live Page。v1 客户端投影不是本切片的隐式兼容行为；没有经验证的适配器时必须明确拒绝，而不是猜测 `active_page_ref` 或把旧 Page ref 映射到新对象。`page.open` 返回新 Page facts 和 operation receipt。`activate`、`close` 和导航返回当前 Page facts、`document_generation` 与 bounded failure。所有 mutating input 都有 `idempotency_key`；同 key 不得以不同 request 重放。任务页引用不能由 `active_page_id` 反推，且 #519 未提供新的 task-page wire adapter。
 
 每个 Page mutation 的 receipt 使用 `harbor-page-navigation/v1`，并带 `operation_ref` 与 `dispatch_state`。派发前的拒绝是 `not_dispatched`；Provider 调用已经可能发生而响应丢失、Driver 异常或结果无法确认时必须是 `unknown_outcome` + `dispatched`，只能查询原 operation/Run 对账，不能换 key 重放。Supervisor 的 `GET /runtime/managed-pages/{operation_ref}` 是只读查询；找不到 receipt 也返回保守的 `unknown_outcome` + `dispatched`，不证明 Provider 未被触碰。
 
 旧 `instance.start`/`instance.navigate`/`instance.observe`/`instance.read`/`instance.diagnostics` 在只有一个可用 Page 时可以映射到该 Page。`instance.navigate`、`instance.read` 和 `instance.observe` 可带 `page_id`、`page_ref` 与可选 `document_generation`；其中 `page_id`/`page_ref` 明确选定 Page，`document_generation` 是对当前 document 的新鲜度保护。存在多个可用 Page 且请求没有明确 `page_id`/`page_ref` 时返回 `page_selection_required`，不得按 active 或创建顺序猜测。显式 ref 不存在、与 `page_id` 不匹配、origin 未授权或 generation 过期时必须拒绝，不能回退到另一张 Page。成功的 `instance.navigate`/`instance.read` 在 `session.current_page` 投影 Harbor 选定 Page 的 `page_id`、`page_ref` 和 `document_generation`；成功的 `instance.observe` 在 `observation.page` 投影同一绑定。新 Page 不会因为 Instance 复用而隐式导航旧 Page。
 
 ## 2.1 Close and focus rules
+
+> `page.close` 的目标校验、safe-return 失败和最后一页保护仍是公共 close 语义；下列 `active`、Provider focus 和邻页选择的具体投影保留为旧 #510 兼容材料。当前任务页 A／Viewer 页 B 与可选原生焦点不依赖这些旧投影，详见上文。
 
 - 关闭非 active Page 只要求该 `page_id`/`page_ref` 仍新鲜；它不会改变 active Page。
 - 关闭 active Page 只有在 Registry 能选出另一张状态为 `ready` 或 `loading`、origin 仍在授权集合、且不是已关闭对象的安全返回 Page 时才执行。优先选择最近一次明确使用的安全 Page，其次选择公开列表中的安全 Page；不按 provider 创建顺序猜测。
@@ -52,7 +65,9 @@ Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分�
 - Provider list 只是遗漏一个仍在 Registry 中的 live Page 时，Harbor 返回 `page_relation_unavailable` 并暂停受影响 Instance 的 Page/网页派发；在获得完整关系前不得把遗漏解释成 human close、reload、reopen 或新的 Page。
 - Provider 的真实焦点事实优先于请求顺序。Agent `page.open` 不调用 bring-to-front；popup 是否 active 只由 provider 事件和真实焦点决定。
 
-## 2.2 Native tab handoff and relation recovery
+## 2.2 Historical #510 native tab handoff and relation recovery
+
+以下 native swap、完整 relation 和安全暂停条款只保留 #510 的历史 Provider-private 设计与兼容阅读，不构成当前 Camoufox launch/support 承诺；当前任务页交还和可选焦点语义以上述 v1.4 章节为准。
 
 #510 的 native tab handoff 是原生 tab/window location 的变化，不是新的 Page、document 或 navigation。只有在 Provider 给出一个较新的、完整且可双向验证的 relation，并证明仍是同一个客户端 Page、同一个稳定的 target 与同一个 `BrowsingContext` 时，Harbor 才能接受这次 handoff。此时：
 
@@ -96,7 +111,7 @@ Work Items #504 and #510 record the following Design Obligation decisions:
 | `DO-GRANT-WIRE` | `not-triggered` | The Page slice reuses the existing single-Grant `profile_refs`/`allowed_origins`/`allowed_operations` intersection; it adds no persisted Grant dimension, confirmation credential, or security field. |
 | `DO-NETWORK-CONTRACT` | `triggered` | Network observations are bound to the selected Page/document and authorized origin set; [Network Runtime V1](network-runtime-contract-v1.md) carries the public result and stale/cursor rules. |
 | `DO-CONSOLE-CONTRACT` | `triggered` | Console and page-error observations use the same selected Page/document binding and lifecycle; [Console Runtime V1](console-runtime-contract-v1.md) carries the public result rules. |
-| `DO-PROVIDER-PRIVATE-SCHEMA` | `triggered` | The fixed native snapshot, Playwright adapter, test-only Camoufox artifact, and #510 v2 tab-handoff lifecycle/CSS variant are governed by [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md); public Page facts still do not expose provider handles. |
+| `DO-PROVIDER-PRIVATE-SCHEMA` | `triggered` | The fixed native snapshot, Playwright adapter, test-only Camoufox artifact, and #510 v2 tab-handoff lifecycle/CSS variant are governed by [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md); these remain historical provider-private designs after the 2026-09-12 retirement, and public Page facts still do not expose provider handles. |
 | `DO-APP-IA` | `not-triggered` | Page operations use the existing owner/handback entry; this slice does not add a Library, Activity, multi-instance workspace, or other complete App information architecture. |
 
-The deterministic Harbor evidence is kept in `services/harbor/packages/runtime-api/src/page-navigation.test.ts` and the real listener coverage in `runtime-diagnostics.test.ts` plus `camoufox-diagnostics.fixture.py`; #510 relation, artifact and CSS integrity evidence is linked from [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md). Installed live evidence remains a separate acceptance requirement: a fixture pass does not claim that native foreground focus, human close observation, complete handoff cycles, or installed Plugin consumption is verified for a pinned Camoufox build.
+The deterministic Harbor evidence is kept in `services/harbor/packages/runtime-api/src/page-navigation.test.ts` and the real listener coverage in `runtime-diagnostics.test.ts`; #510 relation, artifact and CSS integrity evidence is historical and linked from [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md). Installed live evidence remains a separate acceptance requirement: a fixture pass does not claim that native foreground focus, human close observation, complete handoff cycles, or installed Plugin consumption is verified for a pinned Camoufox build. Current Camoufox launch retirement is a Harbor provider fact, not a change to the public Page contract.

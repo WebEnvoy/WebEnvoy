@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { createHash, webcrypto } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test, { after } from "node:test";
-import { runInNewContext } from "node:vm";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { boundedEnvironmentUpdate, normalizeEnvironmentObservation, trustEnvironmentProbe } from "./profile-environment.js";
 import { startHarborRuntimeServer } from "./server.js";
@@ -15,34 +12,6 @@ const root = mkdtempSync(join(tmpdir(), "harbor-environment-test-"));
 process.env.HARBOR_PROFILE_STORAGE_ROOT = join(root, "profiles");
 after(() => rmSync(root, { recursive: true, force: true }));
 const hash = "a".repeat(64);
-test("Canvas observation hashes fixed RGBA bytes, not variable PNG representation", async () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const driver = [join(here, "camoufox-driver.py"), join(here, "../../../../packages/runtime-api/src/camoufox-driver.py")].find(existsSync);
-  assert.ok(driver);
-  const expression = readFileSync(driver, "utf8").match(/ENVIRONMENT_READ_EXPRESSION = r"""([\s\S]*?)"""/)?.[1];
-  assert.ok(expression);
-  const pixels = new Uint8ClampedArray(240 * 60 * 4).fill(127);
-  const context = { fillRect() {}, fillText() {}, getImageData(x: number, y: number, width: number, height: number) {
-    assert.deepEqual([x, y, width, height], [0, 0, 240, 60]);
-    return { data: pixels };
-  } };
-  const read = async () => await runInNewContext(expression, {
-    crypto: webcrypto, TextEncoder, navigator: {}, innerWidth: 240, innerHeight: 60,
-    screen: { width: 240, height: 60, availWidth: 240, availHeight: 60 },
-    document: { fonts: [], createElement: () => ({ getContext: (kind: string) => kind === "2d" ? context : null,
-      toDataURL() { throw new Error("PNG serialization is not a stable pixel measurement"); } }) }
-  }) as { canvas_hash: string | null };
-  assert.equal((await read()).canvas_hash, createHash("sha256").update(pixels).digest("hex"));
-  const before = (await read()).canvas_hash;
-  pixels[0] = 128;
-  assert.notEqual((await read()).canvas_hash, before);
-});
-test("private environment bundle and launch failure/replay follow the versioned contract", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const fixture = [join(here, "camoufox-environment.fixture.py"), join(here, "../../../../packages/runtime-api/src/camoufox-environment.fixture.py")].find(existsSync);
-  assert.ok(fixture);
-  assert.match(execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? process.env.PYTHON ?? "python3", ["-B", fixture], { encoding: "utf8" }), /camoufox real launch boundary fixture passed/);
-});
 function observation(timezone = "Asia/Shanghai") {
   return normalizeEnvironmentObservation({ status: "completed", observed_at: "2026-09-09T18:00:00.000Z",
     provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: hash }, bundle_hash: hash,

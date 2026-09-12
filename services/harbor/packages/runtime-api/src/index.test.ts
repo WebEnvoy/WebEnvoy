@@ -32,6 +32,7 @@ test("keeps legacy site adapters behind explicit namespaces", () => {
   assert.equal(HarborRuntimeApi.LODE_262_ALLOWLIST_PIN.repository, "WebEnvoy/Lode");
   assert.equal(HarborRuntimeApi.LODE_268_DETAIL_PIN.repository, "WebEnvoy/Lode");
   assert.equal("public_summary" in HarborRuntimeApi, false);
+  assert.equal("launchCamoufoxProvider" in HarborRuntimeApi, false);
   assert.equal(typeof HarborRuntimeApi.legacyReadOperation.admitAllowlistedReadOperation, "function");
   assert.equal(typeof HarborRuntimeApi.legacySiteRuntimeFacts.createSiteResourceFacts, "function");
 });
@@ -301,9 +302,11 @@ test("binds identity environments to CloakBrowser by default and warns on Chrome
     env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
     requested_provider_id: "camoufox"
   });
-  assert.equal(camoufox.selected_provider_id, "camoufox");
-  assert.equal(camoufox.selection_reason, "requested_provider_available");
-  assert.equal(camoufox.selected_provider?.role, "qualification");
+  assert.equal(camoufox.selected_provider_id, null);
+  assert.equal(camoufox.selection_reason, "requested_provider_unavailable");
+  assert.equal(camoufox.selected_provider, null);
+  assert.equal(camoufox.fallback_provider_id, null);
+  assert.equal(camoufox.warnings.some((warning) => warning.includes("退役")), true);
 });
 
 test("explains provider install and launch failure diagnostics", () => {

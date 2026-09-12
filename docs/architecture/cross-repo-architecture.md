@@ -1,6 +1,6 @@
 # WebEnvoy 跨仓架构
 
-> 2026-09-09：产品方向和模块职责以 [canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。本文只维护现行模块间接口边界，不替代字段级 spec、Issue 状态或逐模块实现设计。
+> 2026-09-12：产品方向和模块职责以 [canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。本文只维护现行模块间接口边界，不替代字段级 spec、Issue 状态或逐模块实现设计。
 
 本文定义 `WebEnvoy/WebEnvoy` monorepo 中 Core、Desktop、Plugin／agent-entry、Harbor 与独立 `WebEnvoy/Lode` 的协作边界。
 
@@ -14,7 +14,7 @@ ADR 记录为什么选择某个方向；spec 定义能力、状态、JSON Schema
 
 ## 权威文档
 
-- 产品范围：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+- 产品范围：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 - 实施决策：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 - Browser Runtime：[Runtime Capability Plane](runtime-capability-plane.md)
 - 能力语义：[Browser Runtime Capabilities V1](../specs/browser-runtime-capabilities-v1.md)

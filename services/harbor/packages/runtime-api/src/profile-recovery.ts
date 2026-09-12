@@ -20,13 +20,13 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LocalIdentityEnvironmentFacts } from "./identity-environment.js";
-import { resolveCamoufoxPython } from "./camoufox-driver.js";
 import { acquireFileOwnership, acquireProfileStorageOwnership, profileStorageHasExternalLock, profileStoragePath } from "./profile-storage.js";
 
 export const HARBOR_PROFILE_RECOVERY_SCHEMA = "harbor-profile-recovery/v1";
 export const HARBOR_PROFILE_RECOVERY_BACKUP_SCHEMA = "webenvoy.profile-recovery-backup.v1";
 export const HARBOR_PROFILE_RECOVERY_OPERATION_SCHEMA = "harbor.profile-recovery-operation.v1";
 const CAMOUFOX_BUNDLE = ".webenvoy-camoufox-environment.v1.json";
+const CAMOUFOX_BUNDLE_VALIDATOR = "camoufox-bundle-validator.py";
 const PROFILE_RESIDUE = new Set(["DevToolsActivePort", "SingletonLock", "SingletonCookie", "SingletonSocket", ".parentlock", "parent.lock", "lock", ".harbor-profile-lock"]);
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -321,8 +321,9 @@ function isCompatibility(value: unknown): value is RecoveryCompatibility {
     (compatibility.properties_sha256 === null || (typeof compatibility.properties_sha256 === "string" && SHA256.test(compatibility.properties_sha256)));
 }
 function readCamoufoxBundleFacts(profileDirectory: string): Record<string, unknown> {
-    const helperPath = process.env.HARBOR_CAMOUFOX_DRIVER_PATH || join(dirname(fileURLToPath(import.meta.url)), "camoufox-driver.py");
-    const output = execFileSync(resolveCamoufoxPython(), ["-B", helperPath], {
+    const helperPath = join(dirname(fileURLToPath(import.meta.url)), CAMOUFOX_BUNDLE_VALIDATOR);
+    const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON || process.env.PYTHON || "python3";
+    const output = execFileSync(pythonPath, ["-B", helperPath], {
       input: `${JSON.stringify({ id: 1, op: "validate_environment_bundle", profile_dir: profileDirectory })}\n`,
       encoding: "utf8",
       timeout: 5_000,

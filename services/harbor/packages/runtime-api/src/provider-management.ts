@@ -200,6 +200,11 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
   const chrome = catalog.providers.find((provider) => provider.provider_id === "chrome_official")!;
   const requested = input.requested_provider_id ? catalog.providers.find((provider) => provider.provider_id === input.requested_provider_id) ?? null : null;
 
+  if (requested?.provider_id === "camoufox") {
+    return binding(input, null, null, "requested_provider_unavailable", true, [
+      "Camoufox 的私有浏览器/Driver 绑定已退役；Harbor 不会启动或自动切换到其他 provider。"
+    ]);
+  }
   if (requested && isLaunchable(requested)) {
     return binding(input, requested, null, "requested_provider_available", requested.provider_id === "chrome_official");
   }
@@ -304,7 +309,14 @@ function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
 }
 
 function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
-  return detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");
+  const detected = detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");
+  return {
+    ...detected,
+    // Keep the existing wire enum: this provider is deliberately not
+    // re-qualified by detection after the private binding was retired.
+    launchability: "not_checked",
+    reason: detected.reason ? `${detected.reason} Camoufox 私有浏览器/Driver 绑定已退役。` : "Camoufox 私有浏览器/Driver 绑定已退役。"
+  };
 }
 
 function detectPath(ctx: DetectionContext, candidates: ProviderPathCandidate[], missingReason: string): BrowserProviderInstallFacts {

@@ -48,21 +48,21 @@ export function chromeCapabilities(): BrowserProviderCapabilityFact[] {
 
 export function camoufoxCapabilities(): BrowserProviderCapabilityFact[] {
   return [
-    capability("persistent_profile", "supported", "configured", "Camoufox 通过 Playwright persistent context 使用专用持久化 profile。"),
-    capability("independent_user_data_dir", "supported", "configured", "每个 Harbor Profile 使用独立的 Firefox/Camoufox profile 目录。"),
-    capability("proxy", "limited", "configured", "Driver 只把已解析的代理配置交给 Camoufox；连接结果仍需运行时观察。"),
-    capability("timezone", "limited", "configured", "Driver 将配置时区交给 Camoufox，并以运行时事实回读；完整指纹一致性不在此切片。"),
-    capability("locale", "limited", "configured", "Driver 将语言交给 Camoufox，并以运行时页面事实回读。"),
-    capability("viewport", "limited", "configured", "Driver 将窗口/视口交给 Camoufox；窗口 readback 由页面事实和 provider 诊断覆盖。"),
-    capability("extensions", "unsupported", "configured", "本切片不配置或管理扩展。"),
-    capability("cookie_persistence", "supported", "configured", "Playwright persistent context 将会话存储在同一 managed Profile。"),
-    capability("cdp", "unsupported", "configured", "Camoufox 使用 Firefox/Juggler pipe；Harbor 不等待 DevToolsActivePort。"),
-    capability("viewer", "limited", "configured", "有头 Driver 暴露本地窗口给既有 ViewerControl；Harbor 不暴露 Juggler pipe。"),
-    capability("snapshot_refs", "limited", "configured", "snapshot ref 继续依赖存活 Runtime Session 和既有受控页面边界。"),
-    capability("evidence_refs", "limited", "configured", "evidence ref 继续依赖 Harbor 策略和存活 Runtime Session。"),
-    capability("native_fingerprint_control", "provider_claim", "provider_claim", "Camoufox 原生指纹能力只作为 provider claim，未在此切片承诺任务成功率。"),
-    capability("anti_detection_binary_patches", "provider_claim", "provider_claim", "Camoufox 二进制反检测能力只作为 provider claim。"),
-    capability("automation_exposure_reduction", "provider_claim", "provider_claim", "Camoufox automation exposure 降低只作为 provider claim。")
+    capability("persistent_profile", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("independent_user_data_dir", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("proxy", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("timezone", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("locale", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("viewport", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("extensions", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("cookie_persistence", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("cdp", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("viewer", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("snapshot_refs", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("evidence_refs", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("native_fingerprint_control", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("anti_detection_binary_patches", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
+    capability("automation_exposure_reduction", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。")
   ];
 }
 
@@ -84,10 +84,9 @@ export function chromeLimitations(): string[] {
 
 export function camoufoxLimitations(): string[] {
   return [
-    "Camoufox 仅通过固定外部安装和 Harbor Driver 选择；不加入 provider 插件平台。",
-    "当前 Driver 只承诺持久 Profile、受控页面导航、生命周期和低风险页面 readiness probe；不承诺通用 CDP/DSL。",
-    "原生指纹、反检测和目标站点通过率保留为 provider claim，必须由独立验证证据升级。",
-    "Camoufox Python 0.5.6、兼容的 Playwright 和 Camoufox 二进制必须由同一固定安装提供，版本或 properties.json 不兼容时相关启动动作拒绝。"
+    "Camoufox 仅保留安装、绑定和恢复查询事实；私有浏览器/Driver 启动绑定已退役。",
+    "Harbor 不创建 Profile、不启动 Camoufox，也不把 Camoufox 自动替换为其他 provider。",
+    "待未来通过独立 Qualification Gate 的原版核心能力后，才能另行定义新的支持路线。"
   ];
 }
 
@@ -121,11 +120,11 @@ export function camoufoxDownloadGuide(): BrowserProviderDownloadGuide {
   return {
     action: "external_management",
     primary_url: "https://github.com/daijro/camoufox/releases",
-    install_hint: "请安装并固定受支持的官方 Camoufox archive、Python camoufox 0.5.6 与兼容的 Playwright runtime，然后设置 HARBOR_CAMOUFOX_PATH。",
+    install_hint: "Camoufox 的 Harbor 私有启动绑定已退役；不要为 Harbor 安装、绑定或设置启动覆盖。",
     missing_impacts: [
       "Camoufox 不能作为身份环境 provider 启动。",
-      "没有 Juggler Driver 就不能把 Camoufox 当作 Chromium/CDP 使用。",
-      "properties.json bundle 路径不兼容时，Driver 会拒绝启动并返回诊断。"
+      "旧绑定保留为管理和恢复诊断事实，但不会启动或自动 fallback。",
+      "未来若重新引入支持路线，必须先通过新的原版 Provider Qualification Gate。"
     ]
   };
 }

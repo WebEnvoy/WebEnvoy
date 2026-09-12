@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-09
-- 产品规范：[WebEnvoy v1.1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；2026-09-12 Provider 职责修订以待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提
+- 产品规范：[WebEnvoy v1.4 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；2026-09-12 Provider 职责修订以已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 
@@ -108,7 +108,7 @@ App 不得成为 Runtime 生命周期或普通 Agent 操作的隐藏依赖。
 
 Profile 的 Provider 和设备环境按 [Profile 环境规格](../specs/profile-environment-v1.md) 管理。系统必须区分 configured、effective、pending、observed 和 drift，并明确 Provider 原生生成、WebEnvoy 持久化、启动时应用和每次观测的责任。
 
-Camoufox 的设备环境能力以固定版本和实测证据为依据，不以宣传或“开启所有隐身选项”作为验收，也不承诺不可检测或不会封号。
+Camoufox 的设备环境能力曾以固定版本和实测证据作为 #499 的历史验证对象；当前 #519 B 的上游原版组合未通过 Qualification Gate，相关 patched/native 证据不构成现行 launch/support 承诺。无论历史或未来候选，都不以宣传或“开启所有隐身选项”作为验收，也不承诺不可检测或不会封号。
 
 ### 9. 深层能力按数据和副作用分级
 
@@ -118,7 +118,7 @@ Network、Console、受控脚本、存储、下载等深层能力可以在 Runti
 
 ## 2026-09-12 Provider 职责与 Qualification Gate 修订
 
-本节在仓内替代 [ADR 0011](0011-v1-managed-browser-and-skill-delivery.md) 第 3 条的“默认 Provider 验证目标”解释，并收紧本 ADR 第 3 条的 Driver 适配边界。它不复制产品 canonical；产品方向以待合并的 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提，该 PR 若改变则本修订必须先对账，不得自行成为第二份产品真相。
+本节在仓内替代 [ADR 0011](0011-v1-managed-browser-and-skill-delivery.md) 第 3 条的“默认 Provider 验证目标”解释，并收紧本 ADR 第 3 条的 Driver 适配边界。它不复制产品 canonical；产品方向以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准，本修订若随 canonical 变化必须先对账，不得自行成为第二份产品真相。
 
 ### Provider 职责边界
 
@@ -153,6 +153,8 @@ WebEnvoy 管理、约束、调用、组合、观察和验证 Provider 已经具�
 每次 spike 必须预先写明产品问题、已有能力证据、允许范围和输出决定。资格未通过时，不加入正式 Provider enum、持久合同、用户安装、App 选项或支持承诺。发现必须补浏览器核心语义、维护 fork／内核补丁链，或放弃身份隔离、可信控制与结果真实性时立即停止。
 
 Obscura 在当前愿景完成前明确不采用。不继续研发、适配、验证、分发准备、候选跟踪或版本监控，也不以待授权、新版本或临时补丁自动重启。当前愿景完成也不自动重开，届时需新的显式产品决定。历史目标、实验和失败证据保留在 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)；`not_planned` 不表示功能验收成功。
+
+本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（详见 [#519 证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），且完整 installed、人工交还和环境连续性尚未验收。不能以仓内私有 patch、复制 bundle 或 Driver 补偿继续推进。当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不创建新绑定、不启动、不自动切换 Provider；#499、#504、#510 的 patched/native artifact、Driver 和 live 记录均为历史证据。保留的 Profile、binding 和 bundle 仍可供 recovery 做 schema/hash 校验，但 validator 不授予 launchability。
 
 退出该候选不缩小 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 的能力基线，不改变 [Plugin FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) 的真实第三方 Agent 消费要求，也不代替 [V1 验收 FR #482](https://github.com/WebEnvoy/WebEnvoy/issues/482) 的完整证据汇合；三项均按各自原验收继续开放。
 
@@ -204,7 +206,7 @@ ADR 0011 的以下决策继续有效：
 - Runtime 能力是否完整可以独立于 Agent 工具数量和 App 完成度验收。
 - Plugin 从第一批开始成为真实消费者，避免最后才发现入口、授权和安装生命周期缺口。
 - App 后续可以消费稳定 owner facts，而不是替底层能力发明第二套模型。
-- Camoufox 的价值从“可启动 Provider”提升为“长期、可解释的 Profile 设备环境”。
+- Camoufox 的历史验证价值是“长期、可解释的 Profile 设备环境”；当前不因该历史价值恢复已退役的 launch binding。
 
 ### 成本与约束
 

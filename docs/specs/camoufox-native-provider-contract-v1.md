@@ -1,12 +1,14 @@
 # Camoufox Native Provider Contract V1
 
-> 状态：Accepted；Provider-private implementation contract
-> 版本：1.0
-> 日期：2026-09-11
+> 状态：Retired（历史 Provider-private contract；2026-09-12）
+> 版本：1.0（历史）
+> 日期：2026-09-12
 > owner：Harbor / Camoufox Provider Driver
 > 产品归口：[Phase 1 native Camoufox validation #504](https://github.com/WebEnvoy/WebEnvoy/issues/504)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510)
 > 上位语义：[Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md)、[Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)
 > 架构依据：[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
+
+> **2026-09-12 退役说明（现行事实）**：本文件保留 #504/#510 的历史 Provider-private 设计、fixture 和验收边界，但不再描述当前可启动的实现。由于未形成可接受的原版 Provider Qualification Gate，Harbor 已退役 Camoufox 私有浏览器／Driver 绑定：不启动、不创建新 Profile、不自动 fallback，也不把原始 Camoufox 安装或旧 test artifact 当作当前支持路线。既有安装、binding、Profile、recovery 和 bundle 校验事实仍可查询并用于安全诊断；其中纯 stdlib bundle validator 只负责保留材料的校验，不能恢复 launchability。任何重新引入支持路线都必须另建 qualification、契约和验收，不得复活本文件中的 patch builder、native adapter 或 patched artifact。
 
 本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation，以及一个固定的 Page reload 适配；同时冻结 #510 的独立 v2 tab-handoff 构件变体和原生 swap 生命周期边界。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代两个 Work Item 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
 

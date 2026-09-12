@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-camoufox-driver.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-camoufox-bundle-validator.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start:runtime": "pnpm build && node dist/packages/runtime-api/src/runtime-server.js",
     "test": "pnpm build && node --test 'dist/packages/runtime-api/src/*.test.js'",

@@ -9,6 +9,7 @@ import {
   fieldFillProbeExpression,
   imageFileInputProbeExpression,
   imageUploadPathProbeExpression,
+  isCamoufoxLaunchRequest,
   noteManagerNavigationPointExpression,
   observeXhsPathPrepareRequest,
   providerConfigurationPageUrl,
@@ -21,6 +22,194 @@ import {
   writePrecheckProbeExpression,
   xhsContentRef
 } from "./local-provider-launcher.js";
+import { launchLocalDedicatedProvider } from "./local-provider-launcher.js";
+
+test("retires Camoufox launches before detection or provider fallback", async () => {
+  const keys = ["HARBOR_CAMOUFOX_LAUNCH_STATE", "HARBOR_CAMOUFOX_LAUNCH_REASON", "HARBOR_BROWSER_PROVIDER", "HARBOR_BROWSER_PATH"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.HARBOR_CAMOUFOX_LAUNCH_STATE = "retired";
+  process.env.HARBOR_CAMOUFOX_LAUNCH_REASON = "retired_binding";
+  delete process.env.HARBOR_BROWSER_PROVIDER;
+  delete process.env.HARBOR_BROWSER_PATH;
+  try {
+    const retired = await launchLocalDedicatedProvider({
+      browser_path: "/private/tmp/camoufox.app/Contents/MacOS/camoufox",
+      provider_id: "camoufox",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-camoufox-retired",
+      provider_ref: "provider-camoufox-retired"
+    });
+    assert.equal(retired.status, "unavailable");
+    if (retired.status !== "unavailable") return;
+    assert.equal(retired.error.code, "unsupported");
+    assert.equal(retired.error.retryable, false);
+    assert.match(retired.error.message, /旧补丁运行路线已退役，需要明确选择受支持版本/);
+    assert.match(retired.error.message, /尚未通过 Qualification Gate/);
+    assert.match(retired.error.message, /不会启动 Camoufox 或自动切换 Provider/);
+    assert.equal(retired.facts.some(fact => fact.key === "provider.camoufox.launch_state" && fact.value === "retired"), true);
+    assert.equal(retired.facts.some(fact => fact.key === "provider.camoufox.launch_reason" && fact.value === "retired_binding"), true);
+
+    // A caller that explicitly selects a non-Camoufox provider is not blocked
+    // by the retirement marker (the management-only scope returns before any
+    // browser process is needed).
+    const explicitChrome = await launchLocalDedicatedProvider({
+      browser_path: "/private/tmp/chrome.app/Contents/MacOS/Google Chrome",
+      provider_id: "chrome_official",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-chrome-retirement-marker",
+      provider_ref: "provider-chrome-retirement-marker",
+      operation_scope: "profile_management"
+    });
+    assert.equal(explicitChrome.status, "unavailable");
+    if (explicitChrome.status !== "unavailable") return;
+    assert.equal(explicitChrome.error.code, "provider_unavailable");
+    assert.notEqual(explicitChrome.error.code, "unsupported");
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("prioritizes explicit Camoufox provider and legacy binding over non-Camoufox path/env", async () => {
+  const previousProvider = process.env.HARBOR_BROWSER_PROVIDER;
+  const previousBrowserPath = process.env.HARBOR_BROWSER_PATH;
+  delete process.env.HARBOR_BROWSER_PATH;
+  process.env.HARBOR_BROWSER_PROVIDER = "chrome_official";
+  try {
+    const explicitCamoufox = await launchLocalDedicatedProvider({
+      browser_path: "/private/tmp/browser",
+      provider_id: "camoufox",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-camoufox-priority",
+      provider_ref: "provider-camoufox-priority"
+    });
+    assert.equal(explicitCamoufox.status, "unavailable");
+    if (explicitCamoufox.status !== "unavailable") return;
+    assert.equal(explicitCamoufox.error.code, "unsupported");
+    assert.equal(explicitCamoufox.error.retryable, false);
+
+    // CreateRuntimeSessionInput permits an explicit provider id and path
+    // independently. The effective path still wins: a Camoufox path must
+    // never reach spawn even when the provider id says Chrome.
+    assert.equal(isCamoufoxLaunchRequest({
+      browser_path: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox",
+      provider_id: "chrome_official"
+    }, { HARBOR_BROWSER_PROVIDER: "chrome_official" }), true);
+    assert.equal(isCamoufoxLaunchRequest({
+      browser_path: "",
+      provider_id: "chrome_official"
+    }, {
+      HARBOR_BROWSER_PROVIDER: "chrome_official",
+      HARBOR_BROWSER_PATH: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox"
+    }), true);
+    const explicitChromeWithCamoufoxPath = await launchLocalDedicatedProvider({
+      browser_path: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox",
+      provider_id: "chrome_official",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-chrome-with-camoufox-path",
+      provider_ref: "provider-chrome-with-camoufox-path",
+      operation_scope: "profile_management"
+    });
+    assert.equal(explicitChromeWithCamoufoxPath.status, "unavailable");
+    if (explicitChromeWithCamoufoxPath.status !== "unavailable") return;
+    assert.equal(explicitChromeWithCamoufoxPath.error.code, "unsupported");
+
+    // An explicit Chrome path takes precedence over an unrelated Camoufox
+    // path left in the environment.
+    assert.equal(isCamoufoxLaunchRequest({
+      browser_path: "/private/tmp/chrome.app/Contents/MacOS/Google Chrome",
+      provider_id: "chrome_official"
+    }, {
+      HARBOR_BROWSER_PROVIDER: "chrome_official",
+      HARBOR_BROWSER_PATH: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox"
+    }), false);
+
+    const legacyBinding = {
+      profile_ref: "profile-camoufox-legacy-binding",
+      browser_storage: { profile_storage_ref: "profile-storage-camoufox-legacy-binding" },
+      provider_binding: {
+        selected_provider_id: "camoufox",
+        selected_provider: {
+          provider_id: "camoufox",
+          install: { path: "/private/tmp/camoufox.app/Contents/MacOS/camoufox" }
+        }
+      }
+    } as Parameters<typeof launchLocalDedicatedProvider>[0]["identity_environment"];
+    assert.equal(isCamoufoxLaunchRequest({ browser_path: "", identity_environment: legacyBinding }, { HARBOR_BROWSER_PROVIDER: "chrome_official" }), true);
+    const retiredBinding = await launchLocalDedicatedProvider({
+      browser_path: "",
+      identity_environment: legacyBinding,
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-camoufox-legacy-binding",
+      profile_storage_ref: "profile-storage-camoufox-legacy-binding",
+      provider_ref: "provider-camoufox-legacy-binding"
+    });
+    assert.equal(retiredBinding.status, "unavailable");
+    if (retiredBinding.status !== "unavailable") return;
+    assert.equal(retiredBinding.error.code, "unsupported");
+
+    const genericBoundCamoufox = {
+      profile_ref: "profile-camoufox-generic-binding",
+      browser_storage: { profile_storage_ref: "profile-storage-camoufox-generic-binding" },
+      provider_binding: {
+        selected_provider_id: "camoufox",
+        selected_provider: {
+          provider_id: "camoufox",
+          install: { path: "/private/tmp/browser" }
+        }
+      }
+    } as Parameters<typeof launchLocalDedicatedProvider>[0]["identity_environment"];
+    assert.equal(isCamoufoxLaunchRequest({ browser_path: "/private/tmp/browser", identity_environment: genericBoundCamoufox }, { HARBOR_BROWSER_PROVIDER: "chrome_official" }), true);
+    const retiredGenericBinding = await launchLocalDedicatedProvider({
+      browser_path: "/private/tmp/browser",
+      identity_environment: genericBoundCamoufox,
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-camoufox-generic-binding",
+      profile_storage_ref: "profile-storage-camoufox-generic-binding",
+      provider_ref: "provider-camoufox-generic-binding"
+    });
+    assert.equal(retiredGenericBinding.status, "unavailable");
+    if (retiredGenericBinding.status !== "unavailable") return;
+    assert.equal(retiredGenericBinding.error.code, "unsupported");
+
+    const explicitChromeConflict = await launchLocalDedicatedProvider({
+      browser_path: "",
+      identity_environment: legacyBinding,
+      provider_id: "chrome_official",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: "profile-camoufox-legacy-binding",
+      profile_storage_ref: "profile-storage-camoufox-legacy-binding",
+      provider_ref: "provider-camoufox-legacy-binding"
+    });
+    assert.equal(explicitChromeConflict.status, "unavailable");
+    if (explicitChromeConflict.status !== "unavailable") return;
+    assert.equal(explicitChromeConflict.error.code, "identity_environment_unavailable");
+    assert.equal(explicitChromeConflict.facts.some(fact => fact.value === "provider_mismatch"), true);
+  } finally {
+    if (previousProvider === undefined) delete process.env.HARBOR_BROWSER_PROVIDER;
+    else process.env.HARBOR_BROWSER_PROVIDER = previousProvider;
+    if (previousBrowserPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+    else process.env.HARBOR_BROWSER_PATH = previousBrowserPath;
+  }
+
+});
 
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };

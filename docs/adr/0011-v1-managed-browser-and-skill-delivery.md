@@ -12,8 +12,8 @@
 ## 决策
 
 1. 当前交付以用户或 Agent 的纵向真实路径为单位。对象和合同只细化到当前消费者所需，不要求先形成独立服务、存储、队列或完整字段矩阵。
-2. 当前批验证 Camoufox、一个 WebEnvoy 管理的 Profile、人工接管、最小正式入口和一个低风险真实任务；下一批验证单宿主多个 Profile、最小 Grant、显式账号绑定、冲突与控制权。
-3. Camoufox 只是默认 Provider 的首个验证目标；Chrome 保留为显式兼容 Provider。ego-lite／ego-browser 与 Wayfern 不进入产品。
+2. 历史首批验证 Camoufox、一个 WebEnvoy 管理的 Profile、人工接管、最小正式入口和一个低风险真实任务；下一批验证单宿主多个 Profile、最小 Grant、显式账号绑定、冲突与控制权。
+3. Camoufox 曾是默认 Provider 的首个验证目标；Chrome 保留为显式兼容 Provider。该 Provider 目标的当前解释已由 ADR 0012 的 2026-09-12 修订替代；ego-lite／ego-browser 与 Wayfern 不进入产品。
 4. 站点知识以标准 Agent SKILL 为主要载体；AccountSystem 独立复用，运行时以用户本地定义为准。没有网站 SKILL 不阻断通用浏览器。
 5. Core 统一拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场与 ControlLease；Desktop 投影 owner facts；Lode 不成为运行时或授权来源。
 6. 首个网站写入只保留图片上传、必要字段回读和页面实际证明支持的一种明确授权 commit。统一复用现有授权、锁、幂等、unknown outcome 与只读对账，不预建第二套站点状态机。
