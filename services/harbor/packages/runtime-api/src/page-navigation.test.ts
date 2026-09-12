@@ -200,7 +200,8 @@ test("PageRegistry refuses closing the only remaining Page after the selected Pa
   };
   let states: LocalProviderPageState[] = [
     { ...unknownPage("provider:one", "https://s1.example"), task_selected: true },
-    unknownPage("provider:two", "https://s2.example")
+    unknownPage("provider:two", "https://s2.example"),
+    { ...unknownPage("provider:popup", "about:blank"), current_url: null, status: "unknown" }
   ];
   let closeCalls = 0;
   const pageController: LocalProviderPageController = {
@@ -214,7 +215,8 @@ test("PageRegistry refuses closing the only remaining Page after the selected Pa
 
   states = [
     { ...unknownPage("provider:one", "https://s1.example"), status: "closed" },
-    unknownPage("provider:two", "https://s2.example")
+    unknownPage("provider:two", "https://s2.example"),
+    { ...unknownPage("provider:popup", "about:blank"), current_url: null, status: "unknown" }
   ];
   await registry.refresh();
   const remaining = registry.list(["https://s2.example"]).pages[0]!;
