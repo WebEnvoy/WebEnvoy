@@ -192,6 +192,43 @@ test("PageRegistry refuses closing the last active Page and returns to a safe Pa
   assert.equal("failure_class" in refused && refused.failure_class, "no_safe_return_page");
 });
 
+test("PageRegistry refuses closing the only remaining Page after the selected Page was externally closed", async () => {
+  const unknownPage = (provider_page_ref: string, current_url: string): LocalProviderPageState => {
+    const value = page(provider_page_ref, current_url);
+    delete value.active;
+    return value;
+  };
+  let states: LocalProviderPageState[] = [
+    { ...unknownPage("provider:one", "https://s1.example"), task_selected: true },
+    unknownPage("provider:two", "https://s2.example")
+  ];
+  let closeCalls = 0;
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(states),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!),
+    closePage: async () => { closeCalls += 1; return structuredClone(states); },
+    navigatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:last-page-after-external-close", pageController, states);
+
+  states = [
+    { ...unknownPage("provider:one", "https://s1.example"), status: "closed" },
+    unknownPage("provider:two", "https://s2.example")
+  ];
+  await registry.refresh();
+  const remaining = registry.list(["https://s2.example"]).pages[0]!;
+  const receipt = await registry.operateReceipt({
+    operation: "page.close", page_id: remaining.page_id, page_ref: remaining.page_ref,
+    authorized_origins: ["https://s2.example"], operation_ref: "run:close-last-after-external-close"
+  });
+  assert.equal(receipt.status, "unavailable");
+  assert.equal(receipt.failure_class, "no_safe_return_page");
+  assert.equal(receipt.dispatch_state, "not_dispatched");
+  assert.equal(closeCalls, 0);
+  assert.equal(registry.list(["https://s2.example"]).pages.length, 1);
+});
+
 test("closing a background Page returns the unchanged active Page", async () => {
   const registry = new PageRegistry("session:test", controller([
     page("provider:one", "https://s1.example", true),
