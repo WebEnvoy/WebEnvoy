@@ -163,6 +163,25 @@ def json_safe_options(options: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
+def canonical_executable_path(value: Any) -> str:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("Camoufox browser executable is missing.")
+    try:
+        path = Path(value).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError("Camoufox browser executable is unavailable.") from error
+    if not path.is_file():
+        raise ValueError("Camoufox browser executable is not a file.")
+    return str(path)
+
+
+def verify_launch_executable(request: dict[str, Any], options: dict[str, Any]) -> None:
+    requested = canonical_executable_path(request.get("browser_path"))
+    actual = canonical_executable_path(options.get("executable_path"))
+    if actual != requested:
+        raise ValueError("Camoufox launch executable does not match the owner-verified browser path.")
+
+
 def camoufox_config_chunks(options: dict[str, Any]) -> list[tuple[int, str]]:
     """Return the complete, ordered config chunks emitted by Camoufox."""
     environment = options.get("env")
@@ -348,6 +367,7 @@ def parse_viewport(value: Any) -> dict[str, int] | None:
 def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, Any], dict[str, Any], bool, dict[str, Any]]:
     bundle = load_bundle(profile_dir) if Path(profile_dir, ENVIRONMENT_BUNDLE_FILENAME).exists() else None
     if bundle is not None:
+        verify_launch_executable(request, bundle["launch_options"])
         environment = request.get("environment") if isinstance(request.get("environment"), dict) else {}
         bundle = update_persisted_timezone(profile_dir, bundle, environment.get("timezone"))
         context_options = bundle.get("context_options", {})
@@ -384,7 +404,9 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         proxy=proxy,
     )
     options = json_safe_options(options)
+    verify_launch_executable(request, options)
     bundle = write_bundle(profile_dir, options, context_options)
+    verify_launch_executable(request, bundle["launch_options"])
     return options, bundle, False, context_options
 
 
@@ -421,7 +443,7 @@ class PageState:
         self.relation_rejection = False
         self.relation_rejection_count = 0
 
-    def facts(self, active: bool = False) -> dict[str, Any]:
+    def facts(self, task_selected: bool = False) -> dict[str, Any]:
         current = safe_url(self.page.url)
         return {
             "provider_page_ref": self.ref,
@@ -429,8 +451,8 @@ class PageState:
             "title": safe_text(self.page.title() if not self.page.is_closed() else "", 256),
             "status": "closed" if self.page.is_closed() else "ready" if current and (not self.relation_rejection or self.origins) else "unknown",
             "origin": origin_of(current or "") if current else None,
-            "active": active,
             "document_generation": self.generation,
+            **({"task_selected": True} if task_selected else {}),
             **({"opener_provider_page_ref": self.opener} if self.opener else {}),
             "facts": [
                 {"key": "page.relation", "source": "validation_evidence", "value": "unavailable"},
@@ -458,25 +480,42 @@ class Driver:
         self.profile_dir = profile_dir
         self.options, self.bundle, self.replay, self.context_options = options_for(request, profile_dir)
         self.unattributed_rejection_count = 0
-        self.playwright = sync_playwright().start()
-        launch = dict(self.options)
-        launch.update(self.context_options)
-        launch["user_data_dir"] = profile_dir
-        self.context = self.playwright.firefox.launch_persistent_context(**launch)
         self.pages: dict[str, PageState] = {}
         self.next_ref = 1
         self.current: str | None = None
-        self.context.on("page", self.on_page)
-        self.context.route("**/*", self.route)
-        page = self.context.pages[0] if self.context.pages else self.context.new_page()
-        initial_origin = origin_of(str(request.get("url", "")))
-        state = next((item for item in self.pages.values() if item.page == page), None)
-        if state is None:
-            state = self.register(page, [initial_origin] if initial_origin else [])
-        else:
-            state.origins.update([initial_origin] if initial_origin else [])
-        self.current = state.ref
-        self.navigate(state, str(request.get("url", "about:blank")), [initial_origin] if initial_origin else [])
+        self.playwright: Any = None
+        self.context: Any = None
+        try:
+            self.playwright = sync_playwright().start()
+            launch = dict(self.options)
+            launch.update(self.context_options)
+            launch["user_data_dir"] = profile_dir
+            # Keep the persistent context offline until the route guard is
+            # installed. Any restored-page request is still subject to that
+            # guard; the requested document navigation follows explicitly.
+            launch["offline"] = True
+            launch["service_workers"] = "block"
+            self.context = self.playwright.firefox.launch_persistent_context(**launch)
+            self.context.on("page", self.on_page)
+            self.context.route("**/*", self.route)
+            page = self.context.pages[0] if self.context.pages else self.context.new_page()
+            self.context.set_offline(False)
+            initial_origin = origin_of(str(request.get("url", "")))
+            state = next((item for item in self.pages.values() if item.page == page), None)
+            if state is None:
+                state = self.register(page, [initial_origin] if initial_origin else [])
+            else:
+                state.origins.update([initial_origin] if initial_origin else [])
+            self.current = state.ref
+            self.navigate(state, str(request.get("url", "about:blank")), [initial_origin] if initial_origin else [])
+        except BaseException:
+            try:
+                if self.context is not None:
+                    self.context.close()
+            finally:
+                if self.playwright is not None:
+                    self.playwright.stop()
+            raise
 
     def register(self, page: Page, origins: list[str], opener: str | None = None) -> PageState:
         state = PageState(f"page:{self.next_ref}", page, [origin for origin in origins if origin])
@@ -613,7 +652,7 @@ class Driver:
         if not target_origin or target_origin not in scope:
             raise ValueError("Page navigation origin is not authorized.")
         state.page.goto(url, wait_until="domcontentloaded", timeout=int(self.request.get("timeout_ms", 60_000)))
-        return state.facts(state.ref == self.current)
+        return state.facts(task_selected=state.ref == self.current)
 
     def apply_page_scope(self, state: PageState, origins: Any, require_current: bool = True) -> set[str]:
         if state.relation_rejection and not state.origins:
@@ -627,12 +666,12 @@ class Driver:
     def on_navigate(self, state: PageState, frame: Any) -> None:
         if frame != state.page.main_frame:
             return
-        if state.page.url != state.last_url:
-            state.generation += 1
-            state.last_url = state.page.url
+        state.generation += 1
+        state.controls.clear()
+        state.last_url = state.page.url
 
     def list_pages(self) -> list[dict[str, Any]]:
-        return [state.facts(state.ref == self.current) for state in self.pages.values() if not state.page.is_closed()]
+        return [state.facts(task_selected=state.ref == self.current) for state in self.pages.values()]
 
     def interact(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
@@ -718,7 +757,7 @@ class Driver:
         state = self.state(request)
         raw = state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
         raw["document_generation"] = state.generation
-        return {**state.facts(state.ref == self.current), "observation": raw}
+        return {**state.facts(task_selected=state.ref == self.current), "observation": raw}
 
     def public_page(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
@@ -759,11 +798,22 @@ class Driver:
         ref = request.get("provider_page_ref")
         if not isinstance(ref, str) or ref not in self.pages:
             raise ValueError("Page relation is unavailable.")
-        return self.pages[ref]
+        state = self.pages[ref]
+        if state.page.is_closed():
+            raise ValueError("Page is closed.")
+        return state
 
     def close(self) -> None:
-        self.context.close()
-        self.playwright.stop()
+        context = getattr(self, "context", None)
+        playwright = getattr(self, "playwright", None)
+        self.context = None
+        self.playwright = None
+        try:
+            if context is not None:
+                context.close()
+        finally:
+            if playwright is not None:
+                playwright.stop()
 
     def network_request(self, state: PageState, request: Any) -> None:
         self.add_network(state, request, "request")
@@ -819,20 +869,20 @@ def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
         driver.current = state.ref
         if request.get("url"):
             driver.navigate(state, request["url"], origins)
-        return state.facts(True)
+        return state.facts(task_selected=True)
     if op == "page_activate":
         state = driver.state(request)
         driver.current = state.ref
-        return state.facts(True)
+        return state.facts(task_selected=True)
     if op == "page_close":
         state = driver.state(request)
         state.page.close()
-        driver.pages.pop(state.ref, None)
         target = request.get("safe_return_provider_page_ref")
-        if isinstance(target, str) and target in driver.pages:
+        if isinstance(target, str) and target in driver.pages and not driver.pages[target].page.is_closed():
             driver.current = target
-        elif driver.pages:
-            driver.current = next(iter(driver.pages))
+        elif driver.current == state.ref:
+            fallback = next((item.ref for item in driver.pages.values() if not item.page.is_closed()), None)
+            driver.current = fallback
         return driver.list_pages()
     if op == "page_navigate":
         state = driver.state(request)
@@ -847,7 +897,7 @@ def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
             driver.apply_page_scope(state, origins)
             state.page.go_forward()
         else: driver.navigate(state, str(request.get("url", "")), origins)
-        return state.facts(state.ref == driver.current)
+        return state.facts(task_selected=state.ref == driver.current)
     if op == "observe": return driver.observe(request)
     if op == "observe_identity": return driver.observe(request).get("observation", {})
     if op == "interact": return driver.interact(request)
@@ -874,7 +924,7 @@ def main() -> None:
             if request.get("op") == "launch":
                 if driver is not None: raise ValueError("Driver is already launched.")
                 driver = Driver(request)
-                result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": driver.pages[driver.current].facts(True), "pages": driver.list_pages(), "viewer_entry": viewer_entry(bool(driver.request.get("headless", False))), "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
+                result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": driver.pages[driver.current].facts(task_selected=True), "pages": driver.list_pages(), "viewer_entry": viewer_entry(bool(driver.request.get("headless", False))), "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
             elif driver is None:
                 raise ValueError("Driver has not launched.")
             else:

@@ -32,7 +32,7 @@ export interface ManagedPageFacts extends RuntimePageFacts {
   page_ref: string;
   document_generation: number;
   origin: string | null;
-  active: boolean;
+  active?: boolean;
   opener_page_id?: string;
 }
 
@@ -134,6 +134,8 @@ export class PageRegistry {
   private readonly byId = new Map<string, PageRecord>();
   private readonly receipts = new Map<string, Receipt>();
   private activePageId: string | null = null;
+  /** Explicit Harbor task selection; this is never projected as native focus. */
+  private taskPageId: string | null = null;
   private lastUsed: string[] = [];
 
   constructor(
@@ -162,7 +164,8 @@ export class PageRegistry {
 
   activeBinding(): { facts: ManagedPageFacts; provider_page_ref: string } | undefined {
     if (!this.relationFresh) return undefined;
-    const record = this.activePageId ? this.byId.get(this.activePageId) : undefined;
+    const record = (this.taskPageId ? this.byId.get(this.taskPageId) : undefined) ??
+      (this.activePageId ? this.byId.get(this.activePageId) : undefined);
     return record && !record.closed && record.present ? { facts: this.public(record), provider_page_ref: record.provider_page_ref } : undefined;
   }
 
@@ -292,6 +295,7 @@ export class PageRegistry {
         const state = await this.controller.openPage(input.url, input.authorized_origins ?? []);
         this.sync(await this.controller.listPages());
         const record = this.byProvider.get(state.provider_page_ref);
+        if (record && record.present && !record.closed) this.taskPageId = record.page_id;
         return record && record.present && !record.closed
           ? this.public(record)
           : this.unavailable("provider_unavailable", "Provider did not return the opened Page.", true, input, undefined, dispatched);
@@ -305,6 +309,7 @@ export class PageRegistry {
         dispatch();
         const state = await this.controller.activatePage(record.provider_page_ref);
         this.sync(await this.controller.listPages());
+        this.taskPageId = record.page_id;
         return this.updated(record, state);
       }
       if (input.operation === "page.close") return await this.close(record, allowed, input, dispatch);
@@ -318,6 +323,7 @@ export class PageRegistry {
       const state = await this.controller.navigatePage(record.provider_page_ref, action, input.url, input.authorized_origins ?? []);
       this.sync(await this.controller.listPages());
       const current = this.byProvider.get(state.provider_page_ref) ?? record;
+      this.taskPageId = current.page_id;
       return this.updated(current, state);
     } catch (error) {
       const failureClass = error instanceof PageNavigationError
@@ -330,10 +336,11 @@ export class PageRegistry {
   }
 
   private async close(record: PageRecord, allowed: Set<string>, input: ManagedPageOperationInput, markDispatched: () => void): Promise<ManagedPageFacts | ManagedPageUnavailable> {
-    const active = record.page_id === this.activePageId || Boolean(record.provider_state.active);
-    if (active) {
+    const selected = record.page_id === this.taskPageId;
+    const nativeActive = record.page_id === this.activePageId || record.provider_state.active === true;
+    if (selected || nativeActive) {
       const fallback = this.safeFallback(record.page_id, allowed);
-      if (!fallback) return this.unavailable("no_safe_return_page", "The active Page has no safe return Page.", false, input, record);
+      if (!fallback) return this.unavailable("no_safe_return_page", "The selected Page has no safe return Page.", false, input, record);
       markDispatched();
       const states = await this.controller.closePage(record.provider_page_ref, fallback.provider_page_ref);
       const closedState = states.find(state => state.provider_page_ref === record.provider_page_ref);
@@ -342,17 +349,16 @@ export class PageRegistry {
       }
       record.closed = true;
       record.present = false;
-      this.sync(states, false, new Set([record.provider_page_ref]));
+      this.sync(states, true, new Set([record.provider_page_ref]));
       const next = this.byId.get(fallback.page_id);
       if (!next || next.closed || !next.present) return this.unavailable("provider_unavailable", "The safe return Page closed with the active Page.", true, input, record, "dispatched");
-      if (this.activePageId === next.page_id) return this.public(next);
-      // Closing an active Page must atomically select the safe return Page.
-      // A second activation would be a new focus-changing operation and could
-      // steal focus from a user or select an unrelated native window.
-      return this.unavailable("provider_unavailable", "The Provider did not select the safe return Page during close.", true, input, record, "dispatched");
+      // The safe return handle is an explicit internal task selection. The
+      // provider may omit native focus, which must remain unknown publicly.
+      this.taskPageId = next.page_id;
+      return this.public(next);
     }
     markDispatched();
-    const current = this.activePageId ? this.byId.get(this.activePageId) : undefined;
+    const current = this.taskPageId ? this.byId.get(this.taskPageId) : undefined;
     const states = await this.controller.closePage(record.provider_page_ref, current?.provider_page_ref);
     const closedState = states.find(state => state.provider_page_ref === record.provider_page_ref);
     if (closedState && closedState.status !== "closed") {
@@ -360,10 +366,10 @@ export class PageRegistry {
     }
     record.closed = true;
     record.present = false;
-    this.sync(states, false, new Set([record.provider_page_ref]));
-    const activeAfterClose = this.activePageId ? this.byId.get(this.activePageId) : undefined;
-    return activeAfterClose && !activeAfterClose.closed && activeAfterClose.present && this.visible(activeAfterClose, allowed)
-      ? this.public(activeAfterClose)
+    this.sync(states, true, new Set([record.provider_page_ref]));
+    const selectedAfterClose = this.taskPageId ? this.byId.get(this.taskPageId) : undefined;
+    return selectedAfterClose && !selectedAfterClose.closed && selectedAfterClose.present && this.visible(selectedAfterClose, allowed)
+      ? this.public(selectedAfterClose)
       : this.unavailable("page_not_found", "Page was closed.", false, input, record, "dispatched");
   }
 
@@ -442,7 +448,9 @@ export class PageRegistry {
       throw new PageNavigationError("page_relation_unavailable", "The Provider marked a closed Page as active.");
     }
     const active = openStates.filter(state => state.active === true);
-    if (openStates.length > 0 && active.length !== 1 && !(allowNoActive && active.length === 0)) {
+    const activeFacts = openStates.filter(state => typeof state.active === "boolean");
+    if (active.length > 1) throw new PageNavigationError("page_relation_unavailable", "The Provider Page list proved more than one active Page.");
+    if (activeFacts.length > 0 && active.length !== 1 && !allowNoActive) {
       throw new PageNavigationError("page_relation_unavailable", "The Provider Page list did not prove exactly one active Page.");
     }
     const seen = new Set(states.map(state => state.provider_page_ref));
@@ -500,10 +508,13 @@ export class PageRegistry {
       page.opener_page_id = opener && !opener.closed && opener.present ? opener.page_id : undefined;
       this.byProvider.set(state.provider_page_ref, page);
       this.byId.set(page.page_id, page);
-      if (state.active) {
-        this.activePageId = page.page_id;
+      if (state.active || state.task_selected === true) {
         this.lastUsed = [page.page_id, ...this.lastUsed.filter(id => id !== page.page_id)].slice(0, MAX_PAGE_OBJECTS);
       }
+      if (state.active) {
+        this.activePageId = page.page_id;
+      }
+      if (state.task_selected === true) this.taskPageId = page.page_id;
     }
     this.activePageId = active.length === 1 ? this.byProvider.get(active[0]!.provider_page_ref)?.page_id ?? null : null;
     // A valid list that omits an existing object does not prove that the
@@ -511,6 +522,10 @@ export class PageRegistry {
     // reject its old binding, but retain the distinction for diagnostics and
     // future identity allocation.
     this.pruneUnavailableRecords();
+    if (this.taskPageId && !this.byId.get(this.taskPageId)?.present) this.taskPageId = null;
+    if (!this.taskPageId && active.length === 1) {
+      this.taskPageId = this.byProvider.get(active[0]!.provider_page_ref)?.page_id ?? null;
+    }
     this.relationFresh = true;
   }
 
@@ -529,6 +544,7 @@ export class PageRegistry {
     }
     this.lastUsed = this.lastUsed.filter(pageId => this.byId.has(pageId));
     if (this.activePageId && !this.byId.has(this.activePageId)) this.activePageId = null;
+    if (this.taskPageId && !this.byId.has(this.taskPageId)) this.taskPageId = null;
   }
 
   private updated(record: PageRecord, state: LocalProviderPageState): ManagedPageFacts {
@@ -541,6 +557,7 @@ export class PageRegistry {
     record.provider_state = state;
     record.closed = false;
     record.present = true;
+    if (state.task_selected === true) this.taskPageId = record.page_id;
     if (state.active) this.activePageId = record.page_id;
     record.last_used_at = Date.now();
     this.lastUsed = [record.page_id, ...this.lastUsed.filter(id => id !== record.page_id)].slice(0, MAX_PAGE_OBJECTS);
@@ -559,7 +576,8 @@ export class PageRegistry {
     return {
       requested_url: current_url ?? "about:blank", current_url, title: safeTitle(page.title), status: page.status,
       error_reason: page.error ?? null, observed_at: new Date().toISOString(), page_id: record.page_id,
-      page_ref: record.page_ref, document_generation: record.document_generation, origin, active: record.page_id === this.activePageId,
+      page_ref: record.page_ref, document_generation: record.document_generation, origin,
+      ...(typeof page.active === "boolean" ? { active: page.active } : {}),
       ...(record.opener_page_id ? { opener_page_id: record.opener_page_id } : {})
     };
   }

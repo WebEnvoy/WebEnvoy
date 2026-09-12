@@ -126,12 +126,17 @@ assert module.SOURCE_SHA256_PIN == "${CAMOUFOX_UPSTREAM_PINS.source_sha256}"
 seen = []
 def fake_launch_options(**kwargs):
     seen.append(kwargs)
-    config = {"timezone": kwargs["config"]["timezone"], "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
-    return {"args": [], "env": {**utils.get_env_vars(config, "mac"), "PROVIDER_ENV": "stable"}, "executable_path": "/managed/camoufox", "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
+    config = {"timezone": kwargs["config"].get("timezone", "UTC"), "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
+    return {"args": [], "env": {**utils.get_env_vars(config, "mac", path=executable_path), "PROVIDER_ENV": "stable"}, "executable_path": executable_path, "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
 module.launch_options = fake_launch_options
 profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-options-")
+executable_root = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-executables-")
+executable_path = os.path.join(executable_root, "camoufox")
+other_executable = os.path.join(executable_root, "other-camoufox")
+open(executable_path, "wb").close()
+open(other_executable, "wb").close()
 try:
-    options, bundle, replay, context_options = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
+    options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
     assert seen[0]["config"]["timezone"] == "UTC"
     assert context_options == {"timezone_id": "UTC"}
@@ -142,7 +147,7 @@ try:
     immutable = {key: bundle[key] for key in ("config_sha256", "identity_hash")}
     immutable_launch = {key: options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")}
     immutable_config = {key: value for key, value in bundle["config"].items() if key != "timezone"}
-    updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
     assert updated_replay is True
     assert updated_context_options == {"timezone_id": "Europe/Paris"}
     assert updated_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
@@ -157,9 +162,24 @@ try:
     assert "UTC" not in updated_options["env"]["CAMOU_CONFIG_1"]
     assert module.decode_camoufox_config(updated_options) == updated_bundle["config"]
     assert env_calls[-1][0]["timezone"] == "Europe/Paris"
-    assert env_calls[-1][1:] == ("mac", "/managed/camoufox")
+    assert env_calls[-1][1:] == ("mac", executable_path)
+    try:
+        module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, profile)
+        raise AssertionError("replay accepted an executable path different from the owner request")
+    except ValueError:
+        pass
+    fresh_mismatch = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-executable-mismatch-")
+    try:
+        try:
+            module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, fresh_mismatch)
+            raise AssertionError("fresh launch accepted an executable path different from the owner request")
+        except ValueError:
+            pass
+    finally:
+        __import__("shutil").rmtree(fresh_mismatch)
     class EnvironmentPage:
         url = "https://example.test/"
+        def is_closed(self): return False
         def evaluate(self, expression):
             return {"language": "en-US", "languages": ["en-US"], "timezone": "Europe/Paris", "viewport": {"width": 800, "height": 600}, "screen": {"width": 800, "height": 600}, "hardware_concurrency": None, "device_memory": None, "webgl_vendor": None, "webgl_renderer": None, "fonts_hash": None, "voices_hash": None, "canvas_hash": None, "audio_hash": None}
     environment_driver = object.__new__(module.Driver)
@@ -171,7 +191,7 @@ try:
     assert initial_environment["bundle_hash"] == bundle["identity_hash"]
     assert restarted_environment["bundle_hash"] == updated_bundle["identity_hash"] == initial_environment["bundle_hash"]
     bundle_mtime = os.stat(module.bundle_path(profile)).st_mtime_ns
-    _, same_bundle, same_replay, _ = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    _, same_bundle, same_replay, _ = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
     assert same_replay is True
     assert same_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
     assert os.stat(module.bundle_path(profile)).st_mtime_ns == bundle_mtime
@@ -184,14 +204,14 @@ try:
         module.bundle_path(legacy_profile).write_bytes(module.canonical_json(legacy_bundle) + b"\\n")
         os.chmod(module.bundle_path(legacy_profile), 0o600)
         try:
-            module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Asia/Tokyo"}}, legacy_profile)
+            module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Asia/Tokyo"}}, legacy_profile)
             raise AssertionError("legacy raw-env bundle was accepted")
         except ValueError:
             pass
     finally:
         __import__("shutil").rmtree(legacy_profile)
     try:
-        module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Not/AZone"}}, profile)
+        module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Not/AZone"}}, profile)
         raise AssertionError("invalid timezone was accepted")
     except ValueError:
         pass
@@ -200,6 +220,7 @@ try:
     assert module.viewer_entry(True)["availability"] == "unsupported"
 finally:
     __import__("shutil").rmtree(profile)
+    __import__("shutil").rmtree(executable_root)
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",
@@ -297,6 +318,15 @@ driver.pages = {"page:1": state}
 driver.next_ref = 2
 driver.current = "page:1"
 driver.unattributed_rejection_count = 0
+state.controls["control:stale"] = ("button", "Stale")
+driver.on_navigate(state, object())
+assert state.generation == 1
+driver.on_navigate(state, page.main_frame)
+assert state.generation == 2
+assert state.controls == {}
+driver.on_navigate(state, page.main_frame)
+assert state.generation == 3
+assert "active" not in state.facts()
 initial = "https://s1.test/redirect/s2"
 same_origin = "https://s1.test/from-s1/s3"
 route = FakeRoute(FakeRequest(page, initial), {
@@ -370,6 +400,104 @@ assert popup_state.origins == {"https://s1.test", "https://s2.test"}
 narrowed = driver.interact({"provider_page_ref": popup_state.ref, "action": "click", "expected_origin": "https://s2.test", "authorized_origins": ["https://s1.test"], "target_ref": "control:1"})
 assert narrowed["status"] == "unavailable"
 assert popup_state.origins == {"https://s1.test"}
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("installs the persistent-context guard before the initial navigation and closes safely on setup failure", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+events = []
+class FakePage:
+    def __init__(self):
+        self.url = "about:blank"
+        self.main_frame = object()
+        self.closed = False
+    def on(self, *args): events.append(("page.on", args[0]))
+    def is_closed(self): return self.closed
+    def title(self): return "Fixture"
+    def goto(self, url, **kwargs): events.append("goto"); self.url = url
+    def close(self): self.closed = True
+
+class FakeContext:
+    def __init__(self, page, fail_online=False):
+        self.pages = [page]
+        self.fail_online = fail_online
+    def on(self, event, callback): events.append(("context.on", event))
+    def route(self, pattern, callback): events.append(("context.route", pattern))
+    def set_offline(self, value):
+        events.append(("context.offline", value))
+        if self.fail_online: raise RuntimeError("offline setup failure")
+    def close(self): events.append("context.close")
+    def new_page(self): return self.pages[0]
+
+class FakeBrowserType:
+    def launch_persistent_context(self, **kwargs):
+        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers")))
+        return current_context
+
+class FakePlaywright:
+    firefox = FakeBrowserType()
+    def stop(self): events.append("playwright.stop")
+
+class Factory:
+    def start(self): events.append("playwright.start"); return FakePlaywright()
+
+module.verify_runtime_pins = lambda request: "properties"
+module.options_for = lambda request, profile: ({"args": [], "env": {}, "executable_path": request["browser_path"], "firefox_user_prefs": {}, "headless": False}, {"identity_hash": "stable"}, False, {})
+module.sync_playwright = lambda: Factory()
+request = {"profile_dir": "/tmp/harbor-driver-guard", "browser_path": "/managed/camoufox", "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "url": "https://s1.test/start", "timeout_ms": 100}
+current_context = FakeContext(FakePage())
+instance = module.Driver(request)
+launch_index = next(i for i, value in enumerate(events) if isinstance(value, tuple) and value[0] == "launch")
+route_index = events.index(("context.route", "**/*"))
+offline_index = events.index(("context.offline", False))
+goto_index = events.index("goto")
+assert events[launch_index] == ("launch", True, "block")
+assert launch_index < route_index < offline_index < goto_index
+instance.close()
+
+events.clear()
+current_context = FakeContext(FakePage(), fail_online=True)
+try:
+    module.Driver(request)
+    raise AssertionError("setup failure was swallowed")
+except RuntimeError:
+    pass
+assert "context.close" in events
+assert "playwright.stop" in events
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",

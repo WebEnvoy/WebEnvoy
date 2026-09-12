@@ -252,6 +252,7 @@ type UpstreamPage = {
   status: LocalProviderPageFacts["status"];
   origin?: string | null;
   active?: boolean;
+  task_selected?: boolean;
   document_generation?: number;
   opener_provider_page_ref?: string;
   facts?: RuntimeFact[];
@@ -304,7 +305,8 @@ function upstreamPage(value: unknown): LocalProviderPageState {
     title,
     status,
     origin,
-    active: raw.active === true,
+    ...(typeof raw.active === "boolean" ? { active: raw.active } : {}),
+    ...(raw.task_selected === true ? { task_selected: true } : {}),
     ...(Number.isSafeInteger(raw.document_generation) && Number(raw.document_generation) >= 1 ? { document_generation: Number(raw.document_generation) } : {}),
     ...(typeof raw.opener_provider_page_ref === "string" ? { opener_provider_page_ref: raw.opener_provider_page_ref } : {}),
     facts
@@ -342,7 +344,8 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
     const initialPage = upstreamPage(launched.page);
     const initialPages = Array.isArray(launched.pages) ? launched.pages.map(upstreamPage) : [initialPage];
     if (!initialPages.some(page => page.provider_page_ref === initialPage.provider_page_ref)) initialPages.unshift(initialPage);
-    const context = { driver, input, source, profileStorage, pages: initialPages, current: initialPage.provider_page_ref, unattributedRequestRejectionCount: 0 };
+    const selectedPage = initialPages.find(page => page.task_selected === true) ?? initialPage;
+    const context = { driver, input, source, profileStorage, pages: initialPages, current: selectedPage.provider_page_ref, unattributedRequestRejectionCount: 0 };
     const pageController = createPageController(context);
     const resultBase = {
       status: "ready" as const,
@@ -397,6 +400,8 @@ function createPageController(context: DriverContext): LocalProviderPageControll
         ? Math.min(Number(rejectionCount), 128)
         : 0;
       context.pages = Array.isArray(pages) ? pages.map(upstreamPage) : context.pages;
+      const selected = context.pages.find(item => item.task_selected === true);
+      if (selected) context.current = selected.provider_page_ref;
       return context.pages;
     },
     unattributedRequestRejectionCount: () => context.unattributedRequestRejectionCount,
@@ -408,15 +413,16 @@ function createPageController(context: DriverContext): LocalProviderPageControll
     },
     activatePage: async provider_page_ref => {
       const page = upstreamPage(await context.driver.request("page_activate", { provider_page_ref }));
-      context.pages = context.pages.map(item => ({ ...item, active: item.provider_page_ref === provider_page_ref }));
+      context.pages = context.pages.map(item => item.provider_page_ref === page.provider_page_ref ? page : item);
       context.current = page.provider_page_ref;
       return page;
     },
     closePage: async (provider_page_ref, safe_return_provider_page_ref) => {
       const pages = await context.driver.request("page_close", { provider_page_ref, safe_return_provider_page_ref: safe_return_provider_page_ref ?? null });
       context.pages = Array.isArray(pages) ? pages.map(upstreamPage) : context.pages.filter(item => item.provider_page_ref !== provider_page_ref);
-      const active = context.pages.find(item => item.active) ?? context.pages[0];
-      if (active) context.current = active.provider_page_ref;
+      const selected = context.pages.find(item => item.task_selected === true && item.status !== "closed");
+      if (selected) context.current = selected.provider_page_ref;
+      else if (safe_return_provider_page_ref && context.pages.some(item => item.provider_page_ref === safe_return_provider_page_ref && item.status !== "closed")) context.current = safe_return_provider_page_ref;
       return context.pages;
     },
     navigatePage: async (provider_page_ref, action, url, authorized_origins) => {
@@ -431,6 +437,7 @@ function createPageController(context: DriverContext): LocalProviderPageControll
 async function callPage(context: DriverContext, op: string, payload: JsonObject): Promise<LocalProviderPageState> {
   const page = upstreamPage(await context.driver.request(op, payload, context.input.timeout_ms));
   context.pages = context.pages.map(item => item.provider_page_ref === page.provider_page_ref ? page : item);
+  if (page.task_selected === true) context.current = page.provider_page_ref;
   return page;
 }
 
@@ -504,7 +511,15 @@ function launchEnvironment(input: LocalProviderLaunchInput): JsonObject {
 }
 
 function toPageFacts(page: LocalProviderPageState): LocalProviderPageFacts {
-  return { current_url: page.current_url, title: page.title, status: page.status, origin: page.origin ?? null, active: page.active === true, ...(page.document_generation === undefined ? {} : { document_generation: page.document_generation }), facts: page.facts };
+  return {
+    current_url: page.current_url,
+    title: page.title,
+    status: page.status,
+    origin: page.origin ?? null,
+    ...(typeof page.active === "boolean" ? { active: page.active } : {}),
+    ...(page.document_generation === undefined ? {} : { document_generation: page.document_generation }),
+    facts: page.facts
+  };
 }
 
 function sourceFacts(source: CamoufoxUpstreamSourceFacts): RuntimeFact[] {

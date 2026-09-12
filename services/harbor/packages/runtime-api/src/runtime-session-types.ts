@@ -216,6 +216,8 @@ export interface LocalProviderPageFacts {
 export interface LocalProviderPageState extends LocalProviderPageFacts {
   provider_page_ref: string;
   opener_provider_page_ref?: string;
+  /** Provider-private task selection; never project this as native focus. */
+  task_selected?: boolean;
   active?: boolean;
   document_generation?: number;
 }

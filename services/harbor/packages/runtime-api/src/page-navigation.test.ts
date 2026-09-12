@@ -53,6 +53,74 @@ test("PageRegistry keeps stable page_id, rotates document page_ref, preserves po
   assert.equal((navigated as ManagedPageFacts).current_url, "https://s1.example/next");
 });
 
+test("PageRegistry keeps task selection separate from unknown native focus and preserves a closed tombstone", async () => {
+  let pages: LocalProviderPageState[] = [
+    { provider_page_ref: "provider:one", current_url: "https://s1.example", title: "one", status: "ready", facts: [], task_selected: true },
+    { provider_page_ref: "provider:two", current_url: "https://s2.example", title: "two", status: "ready", facts: [] }
+  ];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(pages.find(page => page.provider_page_ref === ref)!),
+    closePage: async (ref, safeReturnRef) => {
+      pages = pages
+        .filter(page => page.provider_page_ref !== ref)
+        .map(page => page.provider_page_ref === safeReturnRef ? { ...page, task_selected: true } : { ...page, task_selected: undefined });
+      return structuredClone(pages);
+    },
+    navigatePage: async ref => structuredClone(pages.find(page => page.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:unknown-focus", pageController);
+  await registry.refresh();
+  const before = registry.list(["https://s1.example", "https://s2.example"]);
+  const first = before.pages.find(item => item.current_url === "https://s1.example/")!;
+  assert.equal(before.active_page_id, null);
+  assert.equal("active" in first, false);
+
+  const closed = await registry.operate({
+    operation: "page.close", page_id: first.page_id, page_ref: first.page_ref,
+    authorized_origins: ["https://s1.example", "https://s2.example"]
+  });
+  assert.equal("failure_class" in closed, false);
+  assert.equal((closed as ManagedPageFacts).current_url, "https://s2.example/");
+  assert.equal("active" in (closed as ManagedPageFacts), false);
+  assert.equal(registry.list(["https://s1.example", "https://s2.example"]).active_page_id, null);
+
+  const stale = await registry.operate({
+    operation: "page.navigate", page_id: first.page_id, page_ref: first.page_ref,
+    url: "https://s1.example/stale", authorized_origins: ["https://s1.example"]
+  });
+  assert.equal("failure_class" in stale && stale.failure_class, "stale_page");
+  const second = registry.list(["https://s2.example"]).pages[0]!;
+  const continued = await registry.operate({
+    operation: "page.navigate", page_id: second.page_id, page_ref: second.page_ref,
+    url: "https://s2.example/continued", authorized_origins: ["https://s2.example"]
+  });
+  assert.equal("failure_class" in continued, false);
+});
+
+test("PageRegistry keeps explicit active validation while allowing close reconciliation without a native active", async () => {
+  const invalid = [page("provider:one", "https://s1.example", false), page("provider:two", "https://s2.example", false)];
+  assert.throws(() => new PageRegistry("session:invalid-active", controller(invalid), invalid), /exactly one active Page/);
+
+  let pages = [page("provider:one", "https://s1.example", true), page("provider:two", "https://s2.example", false)];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(pages.find(item => item.provider_page_ref === ref)!),
+    closePage: async ref => {
+      pages = pages.filter(item => item.provider_page_ref !== ref).map(item => ({ ...item, active: false }));
+      return structuredClone(pages);
+    },
+    navigatePage: async ref => structuredClone(pages.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:close-no-active", pageController, pages);
+  const first = registry.list(["https://s1.example", "https://s2.example"]).pages.find(item => item.current_url?.startsWith("https://s1"))!;
+  const result = await registry.operate({ operation: "page.close", page_id: first.page_id, page_ref: first.page_ref, authorized_origins: ["https://s1.example", "https://s2.example"] });
+  assert.equal("failure_class" in result, false);
+  assert.equal((result as ManagedPageFacts).active, false);
+});
+
 test("PageRegistry exposes only a bounded aggregate for unattributed blocked requests", async () => {
   const registry = new PageRegistry("session:test", controller([
     page("provider:one", "https://s1.example/start", true),
