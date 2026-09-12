@@ -188,6 +188,12 @@ export async function verifyInstalledCamoufox(installation) {
   }) : null;
 }
 
+/** Resolve setup's optional binding without making ordinary installs provider-specific. */
+export async function resolveCamoufoxSetupBinding({ existingInstallation, hasUpstreamArguments, upstreamInput }) {
+  if (hasUpstreamArguments) return verifyCamoufoxUpstreamInstall(upstreamInput);
+  return record(existingInstallation?.camoufoxUpstream) ? verifyInstalledCamoufox(existingInstallation) : null;
+}
+
 export const CAMOUFOX_RETIRED_STATE = RETIRED_STATE;
 export const CAMOUFOX_RETIRED_BINDING_REASON = RETIRED_BINDING_REASON;
 export const CAMOUFOX_UNQUALIFIED_REASON = UNQUALIFIED_REASON;

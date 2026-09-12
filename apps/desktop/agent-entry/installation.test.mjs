@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, verifyCamoufoxUpstreamInstall, verifyInstalledCamoufox } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding, verifyCamoufoxUpstreamInstall, verifyInstalledCamoufox } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -44,6 +44,29 @@ test('managed A→B, modified-file preservation, uninstall/reinstall and symlink
 test('derives the same recovery operation ref from an idempotency key', () => {
   assert.equal(recoveryOperationRef('apply', 'lost-response'), 'recovery:091ddd10bbbaec94ee0da9f965b35ef2ea4fd7987b8244e8dba0e13ed0364097');
   assert.notEqual(recoveryOperationRef('apply', 'lost-response'), recoveryOperationRef('backup', 'lost-response'));
+});
+
+test('leaves an ordinary setup without a Camoufox binding', async () => {
+  assert.equal(await resolveCamoufoxSetupBinding({ existingInstallation: { coreEndpoint: 'http://127.0.0.1:1' }, hasUpstreamArguments: false }), null);
+});
+
+test('revalidates an existing upstream binding when setup has no new provider arguments', async (t) => {
+  const sourceDir = '/private/tmp/webenvoy-upstream-source-audit.LWbSiJ';
+  const browserRoot = '/Users/claw/Library/Caches/camoufox/browsers/official/152.0.4-beta.30-3b43e766/Camoufox.app';
+  const browserExecutable = join(browserRoot, 'Contents/MacOS/camoufox');
+  const pythonPath = '/Users/claw/.webenvoy/providers/camoufox/venv/bin/python';
+  try { await Promise.all([access(browserRoot), access(browserExecutable), access(pythonPath), access(join(sourceDir, 'camoufox-152.0.4-beta.30-mac.arm64.zip')), access(join(sourceDir, 'camoufox-0.5.6-py3-none-any.whl')), access(join(sourceDir, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl'))]); }
+  catch { t.skip('official upstream source fixtures are not available on this host'); return; }
+  const input = {
+    browser_install_root: browserRoot, browser_executable: browserExecutable, python_path: pythonPath,
+    browser_version: CAMOUFOX_UPSTREAM_PINS.browser_version, camoufox_version: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    playwright_version: CAMOUFOX_UPSTREAM_PINS.playwright_version,
+    browser_source_path: join(sourceDir, 'camoufox-152.0.4-beta.30-mac.arm64.zip'),
+    camoufox_source_path: join(sourceDir, 'camoufox-0.5.6-py3-none-any.whl'),
+    playwright_source_path: join(sourceDir, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl')
+  };
+  const binding = await verifyCamoufoxUpstreamInstall(input);
+  assert.deepEqual(await resolveCamoufoxSetupBinding({ existingInstallation: { camoufoxUpstream: binding }, hasUpstreamArguments: false }), binding);
 });
 
 test('classifies historical Camoufox bindings without resolving or launching them', async () => {

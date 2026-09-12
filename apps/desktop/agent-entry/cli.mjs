@@ -8,7 +8,7 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, verifyCamoufoxUpstreamInstall } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -22,20 +22,25 @@ if (command === 'setup') {
   const existingInstallation = await readInstallation(installationPath);
   const legacyBinding = existingInstallation && ['camoufoxArtifact', 'native504', 'native510', 'camoufoxNativeArtifact', 'camoufoxNativeBinding'].some(key => Object.hasOwn(existingInstallation, key));
   const upstreamArgs = ['--browser-install-root', '--browser-root', '--browser-executable', '--python-path', '--python', '--browser-version', '--camoufox-version', '--playwright-version', '--browser-source-path', '--browser-source', '--browser-archive', '--camoufox-source-path', '--camoufox-source', '--camoufox-wheel', '--playwright-source-path', '--playwright-source', '--playwright-wheel', '--browser-executable-sha256', '--python-executable-sha256'];
-  if (args.includes('--camoufox-artifact') || legacyBinding && upstreamArgs.some(name => args.includes(name))) throw new Error('camoufox_artifact_binding_retired');
-  const upstream = legacyBinding ? null : await verifyCamoufoxUpstreamInstall({
-    provider: 'camoufox',
-    browser_install_root: requiredAny('--browser-install-root', '--browser-root'),
-    browser_executable: required('--browser-executable'),
-    python_path: requiredAny('--python-path', '--python'),
-    browser_version: arg('--browser-version') ?? CAMOUFOX_UPSTREAM_PINS.browser_version,
-    camoufox_version: arg('--camoufox-version') ?? CAMOUFOX_UPSTREAM_PINS.camoufox_version,
-    playwright_version: arg('--playwright-version') ?? CAMOUFOX_UPSTREAM_PINS.playwright_version,
-    browser_source_path: requiredAny('--browser-source-path', '--browser-source', '--browser-archive'),
-    camoufox_source_path: requiredAny('--camoufox-source-path', '--camoufox-source', '--camoufox-wheel'),
-    playwright_source_path: requiredAny('--playwright-source-path', '--playwright-source', '--playwright-wheel'),
-    ...(arg('--browser-executable-sha256') ? { browser_executable_sha256: arg('--browser-executable-sha256') } : {}),
-    ...(arg('--python-executable-sha256') ? { python_executable_sha256: arg('--python-executable-sha256') } : {})
+  const hasUpstreamArguments = upstreamArgs.some(name => args.includes(name));
+  if (args.includes('--camoufox-artifact') || legacyBinding && hasUpstreamArguments) throw new Error('camoufox_artifact_binding_retired');
+  const upstream = legacyBinding ? null : await resolveCamoufoxSetupBinding({
+    existingInstallation,
+    hasUpstreamArguments,
+    upstreamInput: hasUpstreamArguments ? {
+      provider: 'camoufox',
+      browser_install_root: requiredAny('--browser-install-root', '--browser-root'),
+      browser_executable: required('--browser-executable'),
+      python_path: requiredAny('--python-path', '--python'),
+      browser_version: arg('--browser-version') ?? CAMOUFOX_UPSTREAM_PINS.browser_version,
+      camoufox_version: arg('--camoufox-version') ?? CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+      playwright_version: arg('--playwright-version') ?? CAMOUFOX_UPSTREAM_PINS.playwright_version,
+      browser_source_path: requiredAny('--browser-source-path', '--browser-source', '--browser-archive'),
+      camoufox_source_path: requiredAny('--camoufox-source-path', '--camoufox-source', '--camoufox-wheel'),
+      playwright_source_path: requiredAny('--playwright-source-path', '--playwright-source', '--playwright-wheel'),
+      ...(arg('--browser-executable-sha256') ? { browser_executable_sha256: arg('--browser-executable-sha256') } : {}),
+      ...(arg('--python-executable-sha256') ? { python_executable_sha256: arg('--python-executable-sha256') } : {})
+    } : undefined
   });
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
