@@ -86,6 +86,12 @@ def safe_url(value: str) -> str | None:
         return None
 
 
+def validated_origins(value: Any) -> set[str]:
+    if not isinstance(value, list) or any(not isinstance(origin, str) or safe_origin(origin) != origin for origin in value):
+        return set()
+    return set(value)
+
+
 def redirect_target(response_url: str, status: int, headers: Any) -> str | None:
     """Resolve one redirect without permitting a non-web or malformed URL."""
     if status not in REDIRECT_STATUSES or not hasattr(headers, "items"):
@@ -498,12 +504,21 @@ class Driver:
                 pass
 
     def navigate(self, state: PageState, url: str, origins: list[str]) -> dict[str, Any]:
+        scope = self.apply_page_scope(state, origins, require_current=False)
         target_origin = origin_of(url)
-        if not target_origin or target_origin not in set(origins or state.origins):
+        if not target_origin or target_origin not in scope:
             raise ValueError("Page navigation origin is not authorized.")
-        state.origins.update(origins)
         state.page.goto(url, wait_until="domcontentloaded", timeout=int(self.request.get("timeout_ms", 60_000)))
         return state.facts(state.ref == self.current)
+
+    def apply_page_scope(self, state: PageState, origins: Any, require_current: bool = True) -> set[str]:
+        if state.relation_rejection and not state.origins:
+            raise ValueError("Page relation is unavailable.")
+        scope = validated_origins(origins)
+        state.origins = scope
+        if require_current and origin_of(state.page.url) not in scope:
+            raise ValueError("Current Page origin is not authorized.")
+        return scope
 
     def on_navigate(self, state: PageState, frame: Any) -> None:
         if frame != state.page.main_frame:
@@ -519,8 +534,18 @@ class Driver:
         state = self.state(request)
         action = request.get("action")
         expected = request.get("expected_origin")
-        if not isinstance(expected, str) or expected not in state.origins or origin_of(state.page.url) != expected:
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+        scope = validated_origins(request.get("authorized_origins"))
+        current_origin = origin_of(state.page.url)
+        if action == "snapshot":
+            if not isinstance(expected, str) or expected not in scope or current_origin != expected or expected not in state.origins:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+        else:
+            try:
+                scope = self.apply_page_scope(state, request.get("authorized_origins"))
+            except ValueError:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+            if not isinstance(expected, str) or expected not in scope or current_origin != expected:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
         try:
             if action == "snapshot":
                 return {"status": "completed", "dispatch_state": "not_dispatched", "page": state.facts(), "snapshot": self.snapshot(state)}
@@ -683,10 +708,10 @@ def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     op = request.get("op")
     if op == "page_list": return driver.list_pages()
     if op == "page_open":
-        origins = [item for item in request.get("authorized_origins", []) if isinstance(item, str)]
+        origins = list(validated_origins(request.get("authorized_origins")))
         page = driver.context.new_page()
         state = next((item for item in driver.pages.values() if item.page == page), None) or driver.register(page, origins)
-        state.origins.update(origins)
+        state.origins = set(origins)
         driver.current = state.ref
         if request.get("url"):
             driver.navigate(state, request["url"], origins)
@@ -707,10 +732,17 @@ def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
         return driver.list_pages()
     if op == "page_navigate":
         state = driver.state(request)
-        if request.get("action") == "reload": state.page.reload()
-        elif request.get("action") == "back": state.page.go_back()
-        elif request.get("action") == "forward": state.page.go_forward()
-        else: driver.navigate(state, str(request.get("url", "")), [item for item in request.get("authorized_origins", []) if isinstance(item, str)])
+        origins = list(validated_origins(request.get("authorized_origins")))
+        if request.get("action") == "reload":
+            driver.apply_page_scope(state, origins)
+            state.page.reload()
+        elif request.get("action") == "back":
+            driver.apply_page_scope(state, origins)
+            state.page.go_back()
+        elif request.get("action") == "forward":
+            driver.apply_page_scope(state, origins)
+            state.page.go_forward()
+        else: driver.navigate(state, str(request.get("url", "")), origins)
         return state.facts(state.ref == driver.current)
     if op == "observe": return driver.observe(request)
     if op == "observe_identity": return driver.observe(request).get("observation", {})

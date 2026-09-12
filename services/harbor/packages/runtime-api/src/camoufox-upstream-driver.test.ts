@@ -197,9 +197,20 @@ spec.loader.exec_module(module)
 class FakePage:
     url = "https://s1.test/"
     main_frame = object()
+    mouse = types.SimpleNamespace(wheel=lambda *args: None)
     def on(self, *args): pass
     def is_closed(self): return False
     def title(self): return "Fixture"
+    def get_by_role(self, *args, **kwargs): return FakeLocator()
+    def goto(self, url, **kwargs): self.url = url
+    def reload(self): pass
+    def go_back(self): pass
+    def go_forward(self): pass
+
+class FakeLocator:
+    def click(self, **kwargs): pass
+    def fill(self, text, **kwargs): pass
+    def press(self, key, **kwargs): pass
 
 class FakeRequest:
     def __init__(self, page, url):
@@ -281,6 +292,23 @@ driver.on_page(popup)
 assert popup_state.opener == "page:1"
 assert popup_state.origins == {"https://s1.test"}
 assert popup_state.relation_rejection is True
+
+state.controls["control:1"] = ("button", "Count")
+main_action = driver.interact({"provider_page_ref": "page:1", "action": "click", "expected_origin": "https://s1.test", "authorized_origins": ["https://s1.test", "https://s2.test"], "target_ref": "control:1"})
+assert main_action["status"] == "completed"
+assert state.origins == {"https://s1.test", "https://s2.test"}
+driver.navigate(state, "https://s1.test/narrow", ["https://s1.test"])
+assert state.origins == {"https://s1.test"}
+
+popup.url = "https://s2.test/popup"
+popup_state.controls["control:1"] = ("button", "Count")
+popup_action = driver.interact({"provider_page_ref": popup_state.ref, "action": "click", "expected_origin": "https://s2.test", "authorized_origins": ["https://s1.test", "https://s2.test"], "target_ref": "control:1"})
+assert popup_action["status"] == "completed"
+assert popup_state.origins == {"https://s1.test", "https://s2.test"}
+
+narrowed = driver.interact({"provider_page_ref": popup_state.ref, "action": "click", "expected_origin": "https://s2.test", "authorized_origins": ["https://s1.test"], "target_ref": "control:1"})
+assert narrowed["status"] == "unavailable"
+assert popup_state.origins == {"https://s1.test"}
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",
@@ -327,7 +355,7 @@ for await (const line of rl) {
   else if (request.op === "page_list") result = pages;
   else if (request.op === "observe") result = page();
   else if (request.op === "observe_identity") result = { current_url: "https://example.test/start", title: "Example", ready_state: "complete", stable_id: null, document_generation: 1 };
-  else if (request.op === "interact") result = request.action === "snapshot" ? { status: "completed", dispatch_state: "not_dispatched", page: page(), snapshot: { page_ref: "page:1", observation_ref: "observation:1", controls: [], text: "Example", truncated: false } } : { status: "completed", dispatch_state: "dispatched", page: page() };
+  else if (request.op === "interact") result = request.action === "snapshot" ? { status: "completed", dispatch_state: "not_dispatched", page: page(), snapshot: { page_ref: "page:1", observation_ref: "observation:1", controls: [], text: "Example", truncated: false } } : { status: "completed", dispatch_state: "dispatched", page: { ...page(), facts: [{ key: "test.authorized_origins", source: "observed", value: (request.authorized_origins ?? []).join(",") }] } };
   else if (request.op === "read_public_page") result = { status: "completed", page: page(), text: "Example", truncated: false };
   else if (request.op === "environment") result = { status: "completed", observed_at: "2026-09-12T00:00:00.000Z", provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: "${"b".repeat(64)}" }, bundle_hash: "${"c".repeat(64)}", observed: { language: "en-US", languages: ["en-US"], timezone: "UTC", viewport: { width: 800, height: 600 }, screen: { width: 800, height: 600 }, hardware_concurrency: null, device_memory: null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null }, continuity: { state: "unknown", checked_fields: [], changed_fields: [], unknown_fields: [] } };
   else if (request.op === "close") result = { closed: true };
@@ -345,7 +373,9 @@ for await (const line of rl) {
     assert.equal((await result.pageController?.listPages())?.[0]?.provider_page_ref, "page:1");
     assert.equal((await result.observePage?.())?.page.current_url, "https://example.test/start");
     assert.equal((await result.interaction?.({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1 }))?.status, "completed");
-    assert.equal((await result.interaction?.({ action: "click", expected_origin: "https://example.test", control_generation: 1, target_ref: "control:1" }))?.dispatch_state, "dispatched");
+    const scopedClick = await result.interaction?.({ action: "click", expected_origin: "https://example.test", authorized_origins: ["https://example.test", "https://s2.test"], control_generation: 1, target_ref: "control:1" });
+    assert.equal(scopedClick?.dispatch_state, "dispatched");
+    assert.equal(scopedClick?.page?.facts.find(fact => fact.key === "test.authorized_origins")?.value, "https://example.test,https://s2.test");
     assert.equal((await result.publicPage?.({ expected_origin: "https://example.test" }))?.status, "completed");
     assert.equal((await result.readEnvironment?.())?.provider.browser_version, "152.0.4-beta.30");
     await result.close();
