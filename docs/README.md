@@ -4,6 +4,8 @@
 
 仓内文档不得另立产品方向；它们负责解释架构决策、模块关系、规范性语义、稳定合同和实际验证。
 
+Provider 资格、用户选择和职责边界的组织级修订尚在 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 待合并。本仓的 2026-09-12 ADR／spec 修订以它为前提，不复制另一份 canonical；该 PR 变化时必须先对账。
+
 ## 权威关系
 
 遇到冲突时按以下顺序处理：
@@ -41,7 +43,7 @@
 - [Profile Environment V1](specs/profile-environment-v1.md)
 - [合同索引](contracts/README.md)
 
-ADR 0012 部分替代 ADR 0011 中“仅因当前消费者未使用即可省略 Runtime 基础能力类别”的过度实施解释；ADR 0011 的纵向用户结果、单一 owner、SKILL 边界和不预建大型平台等原则继续有效。
+ADR 0012 部分替代 ADR 0011 中“仅因当前消费者未使用即可省略 Runtime 基础能力类别”的过度实施解释；其 2026-09-12 修订又替代 ADR 0011 第 3 条的“默认 Provider 验证目标”当前解释。ADR 0011 的纵向用户结果、单一 owner、SKILL 边界和不预建大型平台等原则继续有效。
 
 ## 当前正式验证入口
 

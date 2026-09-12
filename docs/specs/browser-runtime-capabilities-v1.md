@@ -1,11 +1,12 @@
 # Browser Runtime Capabilities V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.0
-> 日期：2026-09-09
-> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 版本：1.1（规范性语义修订，不改变 wire 枚举）
+> 日期：2026-09-12
+> 产品依据：[canonical v1.1](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以待合并的 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品完成归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
+> 验收衔接：[已安装 Plugin／真实 Agent #474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[完整 V1 证据汇合 #482](https://github.com/WebEnvoy/WebEnvoy/issues/482)
 
 本文定义 WebEnvoy V1 Browser Runtime capability plane 的**规范性语义、能力类别、支持状态、权限层次、结果和验收规则**。
 
@@ -23,7 +24,7 @@
 - 提供等待、结果判断、失败分类和恢复指导；
 - 减少探索、工具调用和错误。
 
-网站 SKILL 不负责补齐 Runtime 缺失的基础浏览器能力，也不授予权限。
+网站 SKILL 不负责补齐 Runtime 缺失的基础浏览器能力，也不授予权限。Runtime 能力由已具备相应浏览器语义的成熟 Provider 加 WebEnvoy 有界适配交付；WebEnvoy 不实现、模拟或长期补偿 Provider 缺失的浏览器核心语义。
 
 ## 2. 规范性概念
 
@@ -68,7 +69,7 @@ Capability 是 WebEnvoy 定义的稳定浏览器能力语义，不等同于具�
 
 - 当前 Provider／平台未实现或无法安全实现；
 - 必须返回准确能力事实；
-- 对 V1 必需能力，仅标记 `unsupported` 不能关闭产品要求；必须补实现、提供等价路径，或通过产品决策缩小支持范围。
+- 对 V1 必需能力，仅标记 `unsupported` 不能关闭产品要求；必须由已具备真实能力的 Provider 加 WebEnvoy 有界适配交付，或通过明确产品决策调整支持范围。不得以 WebEnvoy 建设或模拟缺失的浏览器核心能力制造“支持”。
 
 ### 2.3 Capability evidence state
 
@@ -83,6 +84,8 @@ Capability 是 WebEnvoy 定义的稳定浏览器能力语义，不等同于具�
 
 具体枚举可以在 wire spec 中调整，但不能把 Provider 宣传或底层库存在直接写成已交付。
 
+上述三个 verified 名称和原义保持不变。具体验收另行记录“正式安装路径”、“真人操作”和“真实第三方站点”上下文，不为本次语义澄清迁移 wire 枚举。`plugin_verified` 只能由已安装 Plugin 在真实第三方 Agent 中的消费路径产生；安装检查器、脚本、独立 MCP 辅助客户端、直接 HTTP 或仅工具可见都不足以标记它。
+
 ### 2.4 四层判定
 
 每次调用必须分别处理：
@@ -95,6 +98,16 @@ Capability exists
 ```
 
 任一层不成立都不能执行；但“不展示工具”不等于“不存在能力”，也不等于授权拒绝。
+
+### 2.5 Provider Qualification Gate
+
+候选 Provider 必须先分类：
+
+1. 真实能力已存在、仅协议／启动／调用方式不同的“接口差异”；
+2. 不破坏承诺用户结果、可准确表达为 `limited`／`unsupported` 的“可接受能力差异”；
+3. 需要 WebEnvoy 建设或模拟浏览器底层行为的“核心浏览器能力缺失”。
+
+只有前两类可以进入适配或受限支持。核心缺失、需要长期补偿或需要维护浏览器 fork／内核补丁链时停止候选，不反向扩张 Runtime 职责。资格顺序、正常管理工作与具体停止条件由 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订) 统一定义。Obscura 在当前愿景内不采用，历史证据仅由 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 保留，不再验证、等待或监控新版本。
 
 ## 3. 通用调用约束
 
@@ -598,7 +611,7 @@ Plugin 不得：
 1. 公共语义和版本是什么；
 2. 哪些 Provider／平台为 supported／limited／unsupported；
 3. 哪些实现路径被使用；
-4. fixture、真实 Provider live、Plugin live 分别证明什么；
+4. fixture／mock、真实 Provider、正式安装路径、真实第三方 Agent、真人操作和真实第三方站点分别证明什么；
 5. 成功、必要拒绝和恢复是否覆盖；
 6. Grant、ControlLease、数据脱敏和 unknown 规则是否覆盖；
 7. 实际安装资产、Driver 和 Runtime 版本是什么；
@@ -635,4 +648,6 @@ Plugin 不得：
 - 验证码或平台风控绕过；
 - 通过代理、指纹或身份轮换自动重试；
 - 将站点业务状态机放入 Harbor／Core；
+- 实现、模拟或长期补偿 Provider 缺失的浏览器核心语义；
+- 维护自有浏览器 fork／内核补丁链来使候选 Provider 达到资格；
 - 要求所有 Provider 的实现方式和能力等级完全一致。

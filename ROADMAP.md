@@ -4,15 +4,16 @@
 
 ## 当前批
 
-在最小正式入口中验证一个受管 Profile 的创建、人工登录、关闭重开、Camoufox 有界能力、人工接管和一个低风险真实网站任务。
+按完整 Runtime 与 Plugin 主入口目标继续交付 [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 和 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)，并由 [#482](https://github.com/WebEnvoy/WebEnvoy/issues/482) 汇合 V1 验收。
 
-- Harbor 验证 Provider 与长期 Profile；Core 复用现有授权、锁、Run、结果和恢复；Desktop 提供必要入口与接管。
-- 一个小型网站 SKILL 尽早作为真实消费者，不等待完整对象、合同或 UI。
+- Provider 候选先通过 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate；必须由 WebEnvoy 补浏览器核心语义时停止采用，不把候选缺口变成 Runtime 新职责。
+- Obscura 仅保留 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 的历史结论，当前愿景内不采用且不再验证；通用 Provider 选择与新建默认由 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 独立交付。
+- 此边界对齐待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20)；不在本仓复制第二份 canonical。
 
 ## 下一批
 
-让一个 Agent 宿主管理多个 Profile，提供最小 Grant、显式账号绑定、唯一归属冲突、Instance 控制权和撤销。
+根据 #497／#474 的真实消费缺口继续创建可独立验收的 Work Item；不按 Harbor→Core→Plugin 分层串行，也不为每个底层协议 method 建票。
 
 ## 后续
 
-首个小红书 SKILL 和轻量 App 现场保持路线图级主题；只在页面事实明确后展开一种 commit，不恢复全形态先行。
+第二网站的 SKILL 扩展成本由 [#476](https://github.com/WebEnvoy/WebEnvoy/issues/476) 在 Runtime 和 Plugin 检查点成立后验证；完整 App／Viewer 产品化保留原 V1 验收，不被 Plugin-first 取消。

@@ -7,7 +7,7 @@
 ## 实施原则
 
 - 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。
-- 先验证会推翻设计的页面或 Provider 假设。Camoufox 是首个默认 Provider 验证目标，不是已确认结论；Chrome 是显式兼容 Provider；不得引入 ego-lite／ego-browser 或 Wayfern。
+- 先验证会推翻设计的页面或 Provider 假设。Provider 接入遵循 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate：先分类、后有界 spike、再决定是否采用。WebEnvoy 不实现、模拟或长期补偿 Provider 缺失的浏览器核心语义；Obscura 在当前愿景内不采用，历史见 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)，不再验证、等待或跟踪版本。该产品方向以待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提。
 - Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
 - Browser Runtime capability 是否存在，与 Plugin 向 Agent 展示哪些工具以及当前 Grant 是否允许调用必须分离；Network、Console、文件、窗口、受控执行、画面等通用能力不得按站点特例散落到 Harbor／Core。
 - V1 实施优先采用 Plugin-first：一个已安装 Plugin 在真实第三方 Agent 中持续消费 Runtime、Profile、账号、环境、SKILL 和结果能力；完整 App 产品化后移，但必要 owner 授权、敏感决定、同实例接管与交还持续可用。
@@ -23,6 +23,7 @@
 - 探索性内部实现可以先验证；一旦新增或改变稳定跨进程 API、MCP／Plugin tool projection、wire payload、持久字段、enum、Grant 维度或 Provider-private versioned config，必须在该合同成为正式消费者依赖或 durable write 之前同步冻结对应正式规格。
 - `not-triggered` 必须给出具体理由；`conditional` 必须写清转为 `triggered` 的条件。不要为了占位创建空 spec，也不要把实现代码、fixture 或 Issue body 当成最终合同。
 - CI 可以检查声明是否存在、引用文件是否存在；是否真的触发某项设计义务由 PR 作者声明并由 exact-head 独立 reviewer 复核，不能把自动检查当成语义审查替代品。
+- 验收分别记录 fixture／mock、真实 Provider、正式安装路径、真实第三方 Agent、真人操作和真实第三方站点。`plugin_verified` 只表示已安装 Plugin 由真实第三方 Agent 消费通过；安装检查、脚本或 MCP 辅助客户端不能冒充。
 
 ## 构建与验证
 

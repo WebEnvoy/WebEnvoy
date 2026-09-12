@@ -1,6 +1,6 @@
 # Harbor
 
-> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Camoufox 是首个默认 Provider 验证目标，Chrome 是显式兼容 Provider。
+> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 资格、用户选择和职责边界的待合并修订见 [.github#20](https://github.com/WebEnvoy/.github/pull/20)。
 
 Harbor 让 Agent 可以长期、稳定、可接管地使用真实浏览器账号。
 
@@ -64,6 +64,8 @@ Harbor 适合那些需要让 Agent 使用真实浏览器账号的场景：
 Harbor 不负责理解具体网站业务，也不决定一个任务应该怎样完成。它不会替用户设计发布策略、运营账号或编排业务流程。
 
 Harbor 负责的是浏览器账号和运行环境：这个账号用哪个 Profile、哪个代理、哪个浏览器、哪个会话，Agent 如何连接，人类如何接管，执行后留下哪些证据。具体网站任务由 WebEnvoy Core 执行，normalized result schema 由 Lode 定义。Harbor 只提供 raw_payload_ref、source_trace 和 evidence_ref，不解释站点业务字段。
+
+Harbor 只管理、调用和核验 Provider 已有的浏览器能力。协议、启动、配置和画面接口差异可以由 Driver 适配；浏览器渲染／命中、键盘／IME、窗口／对话框、下载、Web Storage／IndexedDB、站点权限和浏览器级设备身份缺失时，不由 Harbor 实现、模拟或长期补偿。
 
 Runtime API 的 owner-clean 读取入口是 `GET /runtime/sessions/{runtime_session_ref}/runtime-facts`，返回现有 `harbor-core-runtime-facts/v0` provider/session/viewer/control facts 与 refs。旧的 `/site-resource-facts` 和 `/read-operations` 路径仍保留为显式兼容适配，供迁移和回滚使用；其中的 XHS/BOSS admission、Lode pin、`public_summary` 和 normalized output 不是 Harbor owner truth，待 Core #342/#343 的兼容证据完成后再退役。
 

@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-09
-- 产品规范：[WebEnvoy v1.1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+- 产品规范：[WebEnvoy v1.1 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；2026-09-12 Provider 职责修订以待合并的 [canonical 修订 .github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 
@@ -115,6 +115,67 @@ Camoufox 的设备环境能力以固定版本和实测证据为依据，不以�
 Network、Console、受控脚本、存储、下载等深层能力可以在 Runtime 内存在，但必须按元数据观察、内容读取、状态修改、敏感／破坏性操作分别授权和脱敏。
 
 普通 Agent 不直接获得 raw DevTools／CDP／Juggler／Playwright endpoint、Cookie、token、密码、验证码、未脱敏凭据或内部数据库写入口。
+
+## 2026-09-12 Provider 职责与 Qualification Gate 修订
+
+本节在仓内替代 [ADR 0011](0011-v1-managed-browser-and-skill-delivery.md) 第 3 条的“默认 Provider 验证目标”解释，并收紧本 ADR 第 3 条的 Driver 适配边界。它不复制产品 canonical；产品方向以待合并的 [.github#20](https://github.com/WebEnvoy/.github/pull/20) 为前提，该 PR 若改变则本修订必须先对账，不得自行成为第二份产品真相。
+
+### Provider 职责边界
+
+WebEnvoy 管理、约束、调用、组合、观察和验证 Provider 已经具备的浏览器能力。Harbor、Driver、App、Plugin、SKILL、安装脚本和站点脚本都不得实现、模拟或长期补偿 Provider 缺失的浏览器渲染／命中、键盘／IME、窗口／弹窗／对话框、下载、Web Storage／IndexedDB、站点权限或浏览器级设备身份；也不以自维护浏览器 fork／内核补丁链作为交付路线。
+
+允许的正常工作包括：
+
+- 适配 Provider 已有协议、启动方式及页面、输入、文件、网络和窗口接口；
+- 管理受管目录、进程、Profile／账号归属、授权、ControlLease、Run／结果和恢复；
+- 保存并重放 Provider 已支持的配置、seed 或官方生成结果，核对 effective／observed／drift；
+- 管理 Provider 原生持久数据的生命周期、备份、导入、迁移和版本兼容；
+- 转发原 Instance 画面与可靠输入，且在不改变浏览器语义时组合调用、等待状态、诊断和处理失败。
+
+### Qualification Gate
+
+先将候选问题分成三类，不得在未分类前创建正式接入面：
+
+1. **接口差异**：Provider 已有真实能力，只是协议、启动或调用方式不同，可由 Driver 适配。
+2. **可接受能力差异**：限制不破坏已承诺用户结果，可准确报告 `limited`／`unsupported` 并局部处理；不要求所有 Provider 同等级。
+3. **浏览器核心能力缺失**：交付已承诺结果需要 WebEnvoy 建设或模拟底层浏览器行为，候选停止采用，不转为普通 Driver 任务。
+
+资格工作按固定顺序进行：
+
+```text
+产品场景与职责边界初筛
+→ 固定版本文档／源码和最小黑盒核对
+→ 必要的可丢弃适配 spike
+→ 有证据的采用／不采用决定
+→ 正式 Driver、Provider 注册、持久合同、App／Plugin 和安装交付
+```
+
+每次 spike 必须预先写明产品问题、已有能力证据、允许范围和输出决定。资格未通过时，不加入正式 Provider enum、持久合同、用户安装、App 选项或支持承诺。发现必须补浏览器核心语义、维护 fork／内核补丁链，或放弃身份隔离、可信控制与结果真实性时立即停止。
+
+Obscura 在当前愿景完成前明确不采用。不继续研发、适配、验证、分发准备、候选跟踪或版本监控，也不以待授权、新版本或临时补丁自动重启。当前愿景完成也不自动重开，届时需新的显式产品决定。历史目标、实验和失败证据保留在 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)；`not_planned` 不表示功能验收成功。
+
+退出该候选不缩小 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 的能力基线，不改变 [Plugin FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) 的真实第三方 Agent 消费要求，也不代替 [V1 验收 FR #482](https://github.com/WebEnvoy/WebEnvoy/issues/482) 的完整证据汇合；三项均按各自原验收继续开放。
+
+### 验收证据语义
+
+每份验收按用户结果选择必要证据，并分别记录六类上下文：
+
+| 证据类型 | 证明范围 |
+| --- | --- |
+| 确定性测试 | fixture、mock 或单元测试；可标记 `fixture_verified`，不证明真实浏览器或用户路径。 |
+| 真实 Provider | 真实二进制与原 Instance 的实际行为；可标记 `live_verified`。 |
+| 正式安装路径 | 正式构建与隔离安装资产经正式接口调用；测试客户端可以证明这一类。 |
+| 真实 Agent | 真实第三方 Agent 通过已安装 Plugin 完成声明路径；只有这一类可标记 `plugin_verified`。 |
+| 真人操作 | 真实人类完成观看、输入、接管等；中文 IME 不得由 `insertText` 或脚本替代。 |
+| 真实第三方站点 | 记录站点、版本／时间和具体场景；受控站点不算第三方站点，只读也不证明登录或写入。 |
+
+六类不是互斥等级，也不是每个 Work Item 必须凑齐的六项门槛。`fixture_verified`、`live_verified`、`plugin_verified` 保持现有合同名称和原义。安装脚本、检查器、独立 MCP 辅助客户端、直接 HTTP 或仅工具可见都不是真实第三方 Agent，不得写为 `plugin_verified`。`provider_claim` 仍只是上游声明；支持状态、证据来源、运行可用性和授权分别判断。
+
+每份证据至少记录用户结果、实际消费者、固定 source／build／config、平台与是否原 Instance、场景与身份／授权边界、成功／拒绝／恢复、脱敏证据地址和未执行项。API 成功、CI 通过、PR APPROVE 或 Issue 关闭都不自动等于用户结果验收。
+
+### 本修订的 Design Obligation Gate
+
+本修订只收紧已有架构、能力和验收语义，不新增或改变稳定跨进程 API、MCP／Plugin tool projection、wire payload、持久字段或 enum。因此 `DO-PLUGIN-EXPOSURE`、`DO-GRANT-WIRE`、`DO-NETWORK-CONTRACT`、`DO-CONSOLE-CONTRACT`、`DO-PROVIDER-PRIVATE-SCHEMA` 和 `DO-APP-IA` 均为 `not-triggered`。[#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 未来实现 Provider preference 时的持久、Plugin、Grant 和 App 义务由该 Work Item 另行声明并在其产品合同 PR 冻结，不在本治理修订中预建字段或 operation。
 
 ## 对 ADR 0011 的关系
 
