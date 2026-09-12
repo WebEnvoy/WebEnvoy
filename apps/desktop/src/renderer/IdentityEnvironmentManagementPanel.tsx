@@ -86,7 +86,7 @@ export function IdentityEnvironmentManagementPanel({
           {mode === "import" ? <label>导入来源<input name="importSourceRef" required maxLength={240} placeholder="Harbor 可读取的导入来源标识" /></label> : null}
         </div> : null}
         <div className="identity-editor-grid">
-          <label>浏览器 Provider<select required ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value as ProviderId)}>{providerOptions(providers, selectedProviderId, mode === "edit")}</select>{mode === "create" && !preference?.user_creation_default.provider_id ? <small>项目推荐：{preference?.project_recommendation.provider_id ?? providers.find((item) => item.role === "primary")?.display_name ?? "未知"}；请选择确认后再创建。</small> : null}{mode === "create" && preference?.user_creation_default.availability !== "available" && preference?.user_creation_default.provider_id ? <small>已保存默认 {preference.user_creation_default.provider_id} 当前不可用，请明确选择其他 Provider。</small> : null}</label>
+          <label>浏览器 Provider<select required ref={providerSelectRef} name="providerId" value={selectedProviderId} onChange={(event) => setSelectedProviderId(event.target.value as ProviderId)}>{providerOptions(providers, selectedProviderId, mode === "edit")}</select>{mode === "create" && !preference?.user_creation_default.provider_id ? <small>项目推荐：{preference?.project_recommendation.provider_id ?? providers.find((item) => item.role === "primary")?.display_name ?? "未知"}；请选择确认后再创建。</small> : null}{mode === "create" && preference?.user_creation_default.availability !== "available" && preference?.user_creation_default.provider_id ? <small>已保存默认 {preference.user_creation_default.provider_id} 当前不可用：{preference.user_creation_default.unavailable_reason ?? "Harbor 未提供原因"}；请明确选择其他 Provider。</small> : null}</label>
           <label>代理<select name="proxyMode" defaultValue={identity?.environment.proxyRef ? "preserve" : "system"}>{identity?.environment.proxyRef ? <option value="preserve">保留当前代理</option> : null}<option value="system">不使用代理</option><option value="disabled">禁用代理配置</option></select></label>
           {supportsLocale ? <label>语言<input name="language" maxLength={40} defaultValue={known(identity?.environment.language)} placeholder="例如：zh-CN" /></label> : null}
           {supportsTimezone ? <label>时区<input name="timezone" maxLength={80} defaultValue={known(identity?.environment.timezone)} placeholder="例如：Asia/Shanghai" /></label> : null}
@@ -117,11 +117,9 @@ function known(value: string | undefined) {
 }
 
 function providerId(identity: IdentityEnvironmentProjection | undefined, providers: HarborProviderStatus[], preference: HarborProviderPreference | null, mode: IdentityManagementMode): ProviderId | "" {
-  if (identity?.admissionFacts?.providerId) return identity.admissionFacts.providerId;
-  if (identity?.provider.selected === "Camoufox") return "camoufox";
-  if (identity?.provider.selected === "官方 Chrome") return "chrome_official";
-  if (identity?.provider.selected === "CloakBrowser") return "cloakbrowser";
-  const saved = mode === "create" ? preference?.user_creation_default : undefined;
+  if (mode === "edit") return identity?.admissionFacts?.providerId ?? "";
+  if (mode !== "create") return "";
+  const saved = preference?.user_creation_default;
   if (saved?.availability === "available" && providers.some((provider) => provider.provider_id === saved.provider_id)) return saved.provider_id as ProviderId;
   return "";
 }
