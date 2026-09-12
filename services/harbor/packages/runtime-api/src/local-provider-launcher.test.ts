@@ -135,6 +135,35 @@ test("prioritizes explicit Camoufox provider and legacy binding over non-Camoufo
       HARBOR_BROWSER_PATH: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox"
     }), false);
 
+    // Without an explicit non-Camoufox provider or managed binding, the
+    // configured Camoufox provider owns an opaque effective path as well.
+    assert.equal(isCamoufoxLaunchRequest({ browser_path: "" }, {
+      HARBOR_BROWSER_PROVIDER: "camoufox",
+      HARBOR_BROWSER_PATH: "/private/tmp/stock-browser"
+    }), true);
+    const previousConfiguredPath = process.env.HARBOR_BROWSER_PATH;
+    process.env.HARBOR_BROWSER_PROVIDER = "camoufox";
+    process.env.HARBOR_BROWSER_PATH = "/private/tmp/stock-browser";
+    try {
+      const configuredCamoufox = await launchLocalDedicatedProvider({
+        browser_path: "",
+        headless: true,
+        timeout_ms: 25,
+        url: "about:blank",
+        profile_ref: "profile-configured-camoufox-opaque-path",
+        provider_ref: "provider-configured-camoufox-opaque-path",
+        operation_scope: "profile_management"
+      });
+      assert.equal(configuredCamoufox.status, "unavailable");
+      if (configuredCamoufox.status !== "unavailable") return;
+      assert.equal(configuredCamoufox.error.code, "unsupported");
+      assert.equal(configuredCamoufox.error.retryable, false);
+    } finally {
+      process.env.HARBOR_BROWSER_PROVIDER = "chrome_official";
+      if (previousConfiguredPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+      else process.env.HARBOR_BROWSER_PATH = previousConfiguredPath;
+    }
+
     const legacyBinding = {
       profile_ref: "profile-camoufox-legacy-binding",
       browser_storage: { profile_storage_ref: "profile-storage-camoufox-legacy-binding" },

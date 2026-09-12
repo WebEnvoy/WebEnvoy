@@ -222,11 +222,14 @@ export function isCamoufoxLaunchRequest(
   if (effectiveCamoufoxPath) return true;
   if (explicitNonCamoufoxProvider) return false;
   if (bindingProvider !== undefined) return false;
-  if (env.HARBOR_BROWSER_PROVIDER && env.HARBOR_BROWSER_PROVIDER !== "camoufox") return false;
+  // With no explicit provider or binding, the configured Camoufox provider
+  // owns even a path whose basename does not identify Camoufox. This keeps a
+  // renamed/opaque configured binary from reaching the generic spawn path.
+  if (env.HARBOR_BROWSER_PROVIDER === "camoufox") return true;
+  if (env.HARBOR_BROWSER_PROVIDER) return false;
   if (effectiveBrowserPath) return false;
   if (env.HARBOR_CAMOUFOX_LAUNCH_STATE === "retired") return true;
-  return env.HARBOR_BROWSER_PROVIDER === "camoufox" ||
-    Boolean(resolveCamoufoxOverride(env));
+  return Boolean(resolveCamoufoxOverride(env));
 }
 
 function isCamoufoxPath(path: string | undefined): boolean {
