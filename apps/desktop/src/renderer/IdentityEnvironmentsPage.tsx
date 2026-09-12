@@ -32,6 +32,7 @@ import {
   projectHarborSession,
   releaseHarborSession,
   stopHarborSession,
+  mutateHarborProviderPreference,
 } from "./harborIdentityClient";
 import {
   mutateHarborIdentityEnvironment,
@@ -39,7 +40,7 @@ import {
   type IdentityEnvironmentConfigurationUpdate,
   type IdentityEnvironmentMutationIntent,
 } from "./harborIdentityMutationClient";
-import { identitySelectionStorageKey, type HarborIdentityLoadState } from "./harborIdentityTypes";
+import { identitySelectionStorageKey, type HarborIdentityLoadState, type ProviderId } from "./harborIdentityTypes";
 import type { IdentityRecoveryRequest } from "./siteSkillRecovery";
 import type {
   BrowserSessionProjection,
@@ -53,7 +54,7 @@ type PageMode = "catalog" | "detail" | IdentityManagementMode;
 type IdentitySort = "recent" | "site";
 type ConfirmOperation = "remove" | "delete" | null;
 
-const initialHarborState: HarborIdentityLoadState = { status: "loading", fetchedAt: "pending", summary: "正在读取账号身份。", identities: [], providers: [] };
+const initialHarborState: HarborIdentityLoadState = { status: "loading", fetchedAt: "pending", summary: "正在读取账号身份。", identities: [], providers: [], providerPreference: null };
 
 export function IdentityEnvironmentsPage({
   harborEndpoint,
@@ -158,12 +159,21 @@ export function IdentityEnvironmentsPage({
     if (!request.isCurrent()) return null;
     const current = harborStateRef.current;
     const retained = next.status === "offline" && current.identities.length > 0
-      ? { ...next, identities: current.identities, providers: next.providers.length > 0 ? next.providers : current.providers }
+      ? { ...next, identities: current.identities, providers: next.providers.length > 0 ? next.providers : current.providers, providerPreference: next.providerPreference ?? current.providerPreference }
       : next;
     harborStateRef.current = retained;
     setHarborState(retained);
     onHarborStateChange(retained);
     return retained;
+  }
+
+  async function updateProviderPreference(operation: "set" | "clear", providerId?: ProviderId) {
+    if (!canMutate || busy) return;
+    setBusy(true);
+    const result = await mutateHarborProviderPreference(harborEndpoint, operation, providerId);
+    setMessage(result.message);
+    await refreshHarborState();
+    setBusy(false);
   }
 
   function openIdentity(identity: IdentityEnvironmentProjection) {
@@ -287,12 +297,13 @@ export function IdentityEnvironmentsPage({
   ) : null;
 
   if (mode === "create" || mode === "import" || mode === "edit") {
-    return <div className="identity-page production-identity-page">{topbarActions}<IdentityEnvironmentManagementPanel busy={busy} focusProviderRequestKey={recoveryRequest?.destination === "provider" ? recoveryRequest.key : undefined} identity={selected} message={message} mode={mode} providers={harborState.providers ?? []} onCancel={() => setMode(selected ? "detail" : "catalog")} onSubmit={submitEditor} /></div>;
+    return <div className="identity-page production-identity-page">{topbarActions}<IdentityEnvironmentManagementPanel key={mode === "edit" ? selected?.id ?? "edit" : mode} busy={busy} focusProviderRequestKey={recoveryRequest?.destination === "provider" ? recoveryRequest.key : undefined} identity={mode === "edit" ? selected : undefined} message={message} mode={mode} preference={harborState.providerPreference} providers={harborState.providers ?? []} onCancel={() => setMode(selected ? "detail" : "catalog")} onSubmit={submitEditor} /></div>;
   }
 
   if (mode === "catalog") {
     return <div className="identity-page production-identity-page">
       <CatalogHeader canMutate={canMutate} onCreate={() => { setMessage(""); setMode("create"); }} onImport={() => { setMessage(""); setMode("import"); }} onRefresh={() => void refreshHarborState()} />
+      <ProviderPreferenceControl busy={busy} canMutate={canMutate} preference={harborState.providerPreference} providers={harborState.providers} onChange={(operation, providerId) => void updateProviderPreference(operation, providerId)} />
       {message ? <p className="identity-page-message" role="status">{message}</p> : null}
       {harborState.status === "offline" ? <ConnectionNotice summary={harborState.summary} onRefresh={() => void refreshHarborState()} /> : null}
       <CatalogToolbar provider={provider} query={query} site={site} sort={sort} status={status} onProvider={setProvider} onQuery={setQuery} onSite={setSite} onSort={setSort} onStatus={setStatus} />
@@ -325,6 +336,21 @@ export function IdentityEnvironmentsPage({
     />
     {confirmOperation ? <IdentityRemovalDialog accountLabel={selected.accountLabel} deleteConfirmation={deleteConfirmation} operation={confirmOperation} onCancel={() => { setConfirmOperation(null); setDeleteConfirmation(""); }} onConfirmationChange={setDeleteConfirmation} onConfirm={() => void runMutation(confirmOperation === "delete" ? { operation: "delete", identity_environment_ref: selected.identityEnvironmentRef, confirmation: "delete_local_data" } : { operation: "remove", identity_environment_ref: selected.identityEnvironmentRef })} /> : null}
   </div>;
+}
+
+function ProviderPreferenceControl({ busy, canMutate, preference, providers, onChange }: {
+  busy: boolean;
+  canMutate: boolean;
+  preference: HarborIdentityLoadState["providerPreference"];
+  providers: HarborIdentityLoadState["providers"];
+  onChange: (operation: "set" | "clear", providerId?: ProviderId) => void;
+}) {
+  const current = preference?.user_creation_default.provider_id ?? "";
+  const [selected, setSelected] = useState(current);
+  useEffect(() => setSelected(current), [current]);
+  const available = providers.filter((item) => item.install.status === "installed" && item.install.launchability === "launchable");
+  const savedUnavailable = current && !available.some((item) => item.provider_id === current);
+  return <section className="identity-environment-section" aria-label="Provider 新建默认"><div className="identity-section-heading"><div><h2>Provider 新建默认</h2><p>仅影响以后创建的 Profile；项目推荐是 {preference?.project_recommendation.provider_id ?? "未知"}，不会自动保存。</p></div></div><div className="settings-action-row"><select aria-label="Provider 新建默认" value={selected} disabled={!canMutate || busy} onChange={(event) => setSelected(event.currentTarget.value)}><option value="">未设置</option>{savedUnavailable ? <option value={current} disabled>{current}（当前不可用）</option> : null}{available.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.display_name}</option>)}</select><button type="button" disabled={!canMutate || busy || !selected || selected === current} onClick={() => onChange("set", selected as ProviderId)}>保存默认</button><button type="button" disabled={!canMutate || busy || !current} onClick={() => onChange("clear")}>清除默认</button></div>{preference?.user_creation_default.availability === "unavailable" || preference?.user_creation_default.availability === "unsupported" ? <p role="status">已保存的 {current} 当前不可用：{preference.user_creation_default.unavailable_reason ?? "Harbor 未提供原因"}；旧值仍保留，不会自动切换。</p> : null}</section>;
 }
 
 function CatalogHeader({ canMutate, onCreate, onImport, onRefresh }: { canMutate: boolean; onCreate: () => void; onImport: () => void; onRefresh: () => void }) {

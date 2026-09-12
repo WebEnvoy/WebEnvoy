@@ -6,7 +6,7 @@ export type ProjectedOwnerApiError = {
 
 export function projectOwnerApiError(value: unknown): ProjectedOwnerApiError | undefined {
   if (!isRecord(value)) return undefined;
-  const source = isRecord(value.error) ? value.error : value;
+  const source = isRecord(value.error) ? value.error : isRecord(value.failure) ? value.failure : value;
   const code = safeErrorToken(source.code);
   const category = safeErrorToken(source.category);
   const retryable = typeof source.retryable === "boolean" ? source.retryable : undefined;

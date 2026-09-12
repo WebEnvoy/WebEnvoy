@@ -121,6 +121,24 @@ async function route(
     return;
   }
 
+  if (method === "GET" && url.pathname === "/runtime/browser-provider-preference") {
+    writeJson(response, 200, runtime.getBrowserProviderPreference());
+    return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/browser-provider-preference") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.mutateBrowserProviderPreference(await readJson<unknown>(request));
+    writeJson(response, result.status === "completed" ? 200 : result.failure?.code === "invalid_request" ? 400 : 409, result);
+    return;
+  }
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "browser-provider-preference-mutations" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    if (parts[2].length > 200 || /[\u0000-\u001f\u007f]/.test(parts[2])) throw new BadRequest("Invalid idempotency key.");
+    const result = runtime.getBrowserProviderPreferenceMutationResult(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? { error: "mutation_not_found" });
+    return;
+  }
+
   if (parts.length <= 5 && parts[0] === "runtime" && parts[1] === "browser-providers" && parts[2] === "cloakbrowser" && parts[3] === "lifecycle") {
     await routeManagedProviderLifecycle(runtime, manualAuthenticationAuthorizer, providerIdempotency, parts[4], method, request, response);
     return;
@@ -298,6 +316,8 @@ function readinessBody(): object {
       "/readiness",
       "/runtime/health",
       "/runtime/browser-providers",
+      "/runtime/browser-provider-preference",
+      "/runtime/browser-provider-preference-mutations/{idempotency_key}",
       "/runtime/browser-providers/cloakbrowser/lifecycle",
       "/runtime/browser-providers/cloakbrowser/lifecycle/operations",
       "/runtime/browser-providers/cloakbrowser/lifecycle/cancel",

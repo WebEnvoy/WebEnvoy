@@ -1,6 +1,7 @@
-import { chmodSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync } from "node:fs";
+import { chmodSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { LocalIdentityEnvironmentFacts } from "./identity-environment.js";
 import type { StoredLocalIdentityEnvironmentRecord } from "./identity-environment-manager.js";
 
@@ -27,6 +28,26 @@ export function secureIdentityEnvironmentStoreFile(path: string): void {
 export function fsyncIdentityEnvironmentStoreDirectory(path: string): void {
   const fd = openSync(path, constants.O_RDONLY);
   try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+export function writeSecureJsonFile(path: string, value: unknown): void {
+  secureIdentityEnvironmentStoreDirectory(dirname(path));
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  let fd: number | null = null;
+  try {
+    fd = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+    writeFileSync(fd, JSON.stringify(value, null, 2));
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(temporary, path);
+    secureIdentityEnvironmentStoreFile(path);
+    fsyncIdentityEnvironmentStoreDirectory(dirname(path));
+  } catch (error) {
+    if (fd !== null) closeSync(fd);
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 export function replaceMap<K, V>(target: Map<K, V>, source: Map<K, V>): void {

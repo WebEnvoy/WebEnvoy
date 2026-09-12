@@ -36,6 +36,7 @@ const identityMutationFailureCodes = new Set([
   "active_session", "duplicate_identity", "duplicate_import", "idempotency_conflict",
   "identity_environment_missing", "invalid_request", "mutation_failed", "persistence_failed",
   "profile_locked", "profile_storage_exists", "provider_mismatch", "proxy_policy_incompatible",
+  "provider_selection_required", "provider_unavailable",
   "proxy_resolution_unavailable", "proxy_unreachable", "proxy_validation_unavailable", "repair_required",
   "source_in_use", "source_material_missing", "target_in_use", "local_material_cleanup_failed",
   "local_material_cleanup_unavailable", "local_material_copy_failed", "local_material_copy_unavailable",
@@ -102,6 +103,8 @@ function isAuthorizationDecisionPath(value: string) {
 
 export function isHarborSupervisorProtectedRequest(request: Extract<ParsedOwnerApiRequest, { ok: true }>) {
   const pathname = new URL(request.url).pathname;
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/runtime/browser-provider-preference" ||
+    request.method === "GET" && /^\/runtime\/browser-provider-preference-mutations\/[^/]+$/.test(pathname)) return true;
   if (
     request.method === "POST" &&
     (pathname === "/runtime/identity-environment-mutations" || pathname === "/runtime/identity-environments")

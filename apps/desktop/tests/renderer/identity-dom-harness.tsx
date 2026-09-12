@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { IdentityEnvironmentsPage } from "../../src/renderer/IdentityEnvironmentsPage";
 import type { IdentityEnvironmentMutationFailureCode } from "../../src/renderer/harborIdentityMutationClient";
-import type { HarborIdentityLoadState } from "../../src/renderer/harborIdentityTypes";
+import { identitySelectionStorageKey, type HarborIdentityLoadState } from "../../src/renderer/harborIdentityTypes";
 import type { TaskProjection } from "../../src/renderer/taskThreadFixtures";
 import { runtime } from "./library-harness-fixtures";
 import "../../src/renderer/uiFoundation.css";
@@ -12,24 +12,178 @@ import "../../src/renderer/styles.css";
 type OwnerRequest = WebEnvoyOwnerApiJsonRequest;
 
 const requests: OwnerRequest[] = [];
-let facts = [identityFact("identity-env_aaaaaaaaaaaaaaaaaaaaaaaa", "品牌运营号", "xiaohongshu"), identityFact("identity-env_bbbbbbbbbbbbbbbbbbbbbbbb", "招聘观察号", "boss")];
 let nextFailure: IdentityEnvironmentMutationFailureCode | null = null;
 let offline = false;
 let identityOffline = false;
 let unknownMutationResult = false;
+let providerUnavailable = false;
+let providerPreference: NonNullable<HarborIdentityLoadState["providerPreference"]> = {
+  schema_version: "harbor-browser-provider-preference/v1",
+  project_recommendation: { provider_id: "cloakbrowser", availability: "available", unavailable_reason: null },
+  user_creation_default: { provider_id: "cloakbrowser", availability: "available", unavailable_reason: null, updated_at: "2026-07-22T00:00:00Z" },
+};
+let facts = [identityFact("identity-env_aaaaaaaaaaaaaaaaaaaaaaaa", "品牌运营号", "xiaohongshu", "camoufox"), identityFact("identity-env_bbbbbbbbbbbbbbbbbbbbbbbb", "招聘观察号", "boss")];
 
 installOwnerMock();
 
 function Harness() {
   const [generation, setGeneration] = useState(0);
-  const initialState: HarborIdentityLoadState = { status: "ready", fetchedAt: "2026-07-22T00:00:00Z", summary: "ready", identities: [], providers: providerCatalog().providers };
-  return <main className="identity-harness"><header className="shell-topbar production-topbar"><div className="topbar-center-surface"><h2>账号身份</h2><div id="identity-topbar-actions" className="prototype-center-actions" /></div></header><button hidden data-test-offline type="button" onClick={() => { offline = true; }}>offline</button><button hidden data-test-identity-offline type="button" onClick={() => { identityOffline = true; }}>identity-offline</button><button hidden data-test-empty type="button" onClick={() => { offline = false; identityOffline = false; facts = []; setGeneration((value) => value + 1); }}>empty</button><IdentityEnvironmentsPage key={generation} harborEndpoint="http://127.0.0.1:8790" initialState={initialState} runtimeSupervisorState={runtime} tasks={tasks} onHarborStateChange={() => {}} onOpenLibrary={() => {}} onOpenSettings={() => {}} /></main>;
+  const initialState: HarborIdentityLoadState = {
+    status: "ready", fetchedAt: "2026-07-22T00:00:00Z", summary: "ready", identities: [], providers: providerCatalog().providers,
+    providerPreference
+  };
+  return <main className="identity-harness"><header className="shell-topbar production-topbar"><div className="topbar-center-surface"><h2>账号身份</h2><div id="identity-topbar-actions" className="prototype-center-actions" /></div></header><button hidden data-test-offline type="button" onClick={() => { offline = true; }}>offline</button><button hidden data-test-identity-offline type="button" onClick={() => { identityOffline = true; }}>identity-offline</button><button hidden data-test-empty type="button" onClick={() => { offline = false; identityOffline = false; facts = []; setGeneration((value) => value + 1); }}>empty</button><button hidden data-test-reopen type="button" onClick={() => setGeneration((value) => value + 1)}>reopen</button><button hidden data-test-set-default type="button" onClick={() => { providerUnavailable = false; providerPreference = { ...providerPreference, user_creation_default: { provider_id: "chrome_official", availability: "available", unavailable_reason: null, updated_at: "2026-07-22T00:00:00Z" } }; setGeneration((value) => value + 1); }}>set-default</button><button hidden data-test-provider-unavailable type="button" onClick={() => { providerUnavailable = true; providerPreference = { ...providerPreference, user_creation_default: { ...providerPreference.user_creation_default, availability: "unavailable", unavailable_reason: "Provider 当前不可启动" } }; setGeneration((value) => value + 1); }}>provider-unavailable</button><IdentityEnvironmentsPage key={generation} harborEndpoint="http://127.0.0.1:8790" initialState={initialState} runtimeSupervisorState={runtime} tasks={tasks} onHarborStateChange={() => {}} onOpenLibrary={() => {}} onOpenSettings={() => {}} /></main>;
 }
 
 createRoot(document.getElementById("root")!).render(<Harness />);
 
 window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelectorAll(".identity-catalog-row").length === 2, "identity catalog");
+  if (mode === "provider-default") {
+    async function returnToCatalog(label: string) {
+      document.querySelector<HTMLButtonElement>(".identity-editor-actions button:not(.primary)")?.click();
+      await waitUntil(() => document.querySelector(".identity-detail-title") != null, `${label} detail`);
+      document.querySelector<HTMLButtonElement>(".identity-back-link")?.click();
+      await waitUntil(() => document.querySelector(".identity-catalog-header") != null, `${label} catalog`);
+    }
+    function oldProfileRow() {
+      const row = Array.from(document.querySelectorAll<HTMLButtonElement>(".identity-catalog-row")).find((candidate) => candidate.textContent?.includes("品牌运营号"));
+      if (!row) throw new Error("Missing old Camoufox identity.");
+      return row;
+    }
+    async function openOldProfile(label: string) {
+      oldProfileRow().click();
+      await waitUntil(() => document.querySelector(".identity-detail-title") != null, `${label} detail`);
+    }
+    async function openCreate(label: string) {
+      clickButton("创建账号身份");
+      await waitUntil(() => document.querySelector(".identity-editor") != null, `${label} create form`);
+    }
+    async function openImport(label: string) {
+      clickButton("导入");
+      await waitUntil(() => document.querySelector(".identity-editor") != null, `${label} import form`);
+    }
+    function providerValue() { return document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value ?? ""; }
+    function assertFreshEnvironment(modeLabel: string) {
+      if (document.querySelector<HTMLSelectElement>("select[name='proxyMode']")?.value !== "system") throw new Error(`${modeLabel} reused the old proxy mode.`);
+      for (const name of ["language", "timezone", "viewport"]) {
+        const field = document.querySelector<HTMLInputElement | HTMLSelectElement>(`[name='${name}']`);
+        if (field?.value) throw new Error(`${modeLabel} reused an environment field: ${name}, provider=${providerValue()}.`);
+      }
+    }
+    function latestMutation(operation: string) {
+      return requests.filter((request) => request.path === "/runtime/identity-environment-mutations" && (request.body as { operation?: string }).operation === operation).at(-1)?.body as Record<string, unknown> | undefined;
+    }
+
+    await openOldProfile("old Profile");
+    const oldRef = window.localStorage.getItem(identitySelectionStorageKey);
+    if (!oldRef) throw new Error("Viewing the old Profile did not persist selectedId.");
+    document.querySelector<HTMLButtonElement>(".identity-back-link")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after old identity");
+
+    setSelect("Provider 新建默认", "chrome_official");
+    await twoFrames();
+    clickButton("保存默认");
+    await waitUntil(() => document.body.textContent?.includes("已保存新建默认") === true, "save Chrome creation default");
+
+    await openCreate("saved Chrome default after old Profile");
+    if (providerValue() !== "chrome_official") throw new Error("Create did not use the saved creation default after viewing an old Profile.");
+    if (document.querySelector<HTMLInputElement>("[name='accountIdentifier']")?.value !== "") throw new Error("Create inherited old Profile form data.");
+    assertFreshEnvironment("saved-default create");
+    await returnToCatalog("saved Chrome default");
+
+    clickButton("清除默认");
+    await waitUntil(() => document.body.textContent?.includes("已清除新建默认") === true, "clear creation default");
+    await openCreate("unset default after old Profile");
+    if (providerValue() !== "") throw new Error("Create fell back to the old Profile after clearing the default.");
+    assertFreshEnvironment("unset-default create");
+    await returnToCatalog("unset default");
+
+    await openImport("explicit import after old Profile");
+    if (providerValue() !== "" || document.querySelector<HTMLInputElement>("[name='accountIdentifier']")?.value !== "" || document.querySelector<HTMLInputElement>("[name='importSourceRef']")?.value !== "") throw new Error("Import inherited old Profile or creation form input.");
+    assertFreshEnvironment("explicit import");
+    await returnToCatalog("explicit import");
+
+    document.querySelector<HTMLButtonElement>("[data-test-reopen]")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after component reopen");
+    if (window.localStorage.getItem(identitySelectionStorageKey) !== oldRef) throw new Error("Component reopen did not retain selectedId.");
+    await openCreate("reopened unset default");
+    if (providerValue() !== "") throw new Error("Reopened create inherited the persisted old Profile.");
+    assertFreshEnvironment("reopened create");
+    await returnToCatalog("reopened create");
+    await openImport("reopened import");
+    if (providerValue() !== "") throw new Error("Reopened import inherited the persisted old Profile.");
+    assertFreshEnvironment("reopened import");
+    await returnToCatalog("reopened import");
+
+    await openOldProfile("edit binding");
+    document.querySelector<HTMLButtonElement>("[aria-label='编辑身份']")?.click();
+    await waitUntil(() => document.querySelector(".identity-editor") != null, "edit form");
+    if (providerValue() !== "camoufox" || document.querySelector<HTMLSelectElement>("select[name='proxyMode']")?.value !== "preserve") throw new Error("Edit did not preserve the Profile's actual Camoufox binding or environment.");
+    if (document.querySelector("[name='accountIdentifier']") || document.querySelector("[name='importSourceRef']")) throw new Error("Edit exposed create/import-only inputs.");
+    await returnToCatalog("edit binding");
+
+    document.querySelector<HTMLButtonElement>("[data-test-set-default]")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "valid default for explicit override");
+    await openCreate("explicit override");
+    if (providerValue() !== "chrome_official") throw new Error("Explicit override test did not start from the valid default.");
+    setSelect("浏览器 Provider", "camoufox");
+    await nextFrame();
+    if (providerValue() !== "camoufox") throw new Error("Explicit Provider selection did not update the form.");
+    fillInput("accountIdentifier", "显式 Camoufox 账号");
+    document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
+    await waitUntil(() => document.body.textContent?.includes("账号身份已创建") === true, "explicit override create");
+    const explicitCreate = latestMutation("create");
+    if ((explicitCreate?.identity_environment as { requested_provider_id?: string } | undefined)?.requested_provider_id !== "camoufox") throw new Error("Explicit Provider did not override the saved default in the create request.");
+    document.querySelector<HTMLButtonElement>(".identity-back-link")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after explicit override");
+    await openOldProfile("unavailable default setup");
+    document.querySelector<HTMLButtonElement>(".identity-back-link")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog before unavailable default");
+    document.querySelector<HTMLButtonElement>("[data-test-provider-unavailable]")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "unavailable default catalog");
+    if (!document.body.textContent?.includes("Provider 当前不可启动")) throw new Error("Unavailable default reason was not retained in the UI.");
+    await openCreate("unavailable default");
+    if (providerValue() !== "" || !document.body.textContent?.includes("Provider 当前不可启动")) throw new Error("Unavailable default fell back to the old Profile or lost its reason.");
+    assertFreshEnvironment("unavailable-default create");
+    fillInput("accountIdentifier", "不可用默认不应创建");
+    const beforeUnavailableSubmit = requests.length;
+    document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
+    await nextFrame();
+    if (requests.length !== beforeUnavailableSubmit) throw new Error("Unavailable default submitted a create without an explicit Provider.");
+    await returnToCatalog("unavailable default");
+
+    document.querySelector<HTMLButtonElement>("[data-test-set-default]")?.click();
+    await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog before mode isolation");
+    await openCreate("create input isolation");
+    fillInput("accountIdentifier", "create-only-account");
+    setSelect("浏览器 Provider", "camoufox");
+    await nextFrame();
+    fillInput("language", "create-only-language");
+    await returnToCatalog("create input isolation");
+    await openImport("import input isolation");
+    if (providerValue() !== "" || document.querySelector<HTMLInputElement>("[name='accountIdentifier']")?.value !== "" || document.querySelector<HTMLInputElement>("[name='importSourceRef']")?.value !== "") throw new Error("Import reused create input.");
+    setSelect("浏览器 Provider", "camoufox");
+    await nextFrame();
+    fillInput("accountIdentifier", "import-only-account");
+    fillInput("importSourceRef", "import-only-source");
+    fillInput("language", "import-only-language");
+    await returnToCatalog("import input isolation");
+    await openOldProfile("edit input isolation");
+    document.querySelector<HTMLButtonElement>("[aria-label='编辑身份']")?.click();
+    await waitUntil(() => document.querySelector(".identity-editor") != null, "edit input isolation form");
+    if (providerValue() !== "camoufox" || document.querySelector<HTMLInputElement>("[name='language']")?.value !== "zh-CN") throw new Error("Edit reused import input instead of the Profile environment.");
+    fillInput("language", "edit-only-language");
+    await returnToCatalog("edit input isolation");
+    await openCreate("post-edit create isolation");
+    if (providerValue() !== "chrome_official" || document.querySelector<HTMLInputElement>("[name='accountIdentifier']")?.value !== "") throw new Error("Create reused edit input or defaulted to the wrong Provider.");
+    assertFreshEnvironment("post-edit create");
+    await returnToCatalog("post-edit create isolation");
+    await openImport("post-edit import isolation");
+    if (providerValue() !== "" || document.querySelector<HTMLInputElement>("[name='accountIdentifier']")?.value !== "" || document.querySelector<HTMLInputElement>("[name='importSourceRef']")?.value !== "") throw new Error("Import reused edit input.");
+    assertFreshEnvironment("post-edit import");
+    return { oldProfileSelection: true, creationDefault: true, clearedDefault: true, importExplicit: true, persistedSelection: true, editBinding: true, explicitOverride: true, unavailableDefault: true, modeIsolation: true };
+  }
   if (mode === "narrow") {
     document.querySelector<HTMLButtonElement>(".identity-catalog-row")?.click();
     await waitUntil(() => document.querySelector(".identity-detail-title") != null, "narrow identity detail");
@@ -104,6 +258,7 @@ window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after edit");
   clickButton("创建账号身份");
   await waitUntil(() => document.querySelector(".identity-editor") != null, "create identity form");
+  if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "cloakbrowser") throw new Error("Create did not use the saved creation default.");
   fillInput("accountIdentifier", "新建运营号");
   document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
   await waitUntil(() => document.body.textContent?.includes("账号身份已创建") === true, "identity create");
@@ -111,6 +266,8 @@ window.__runIdentityDomSmoke = async (mode) => {
   await waitUntil(() => document.querySelector(".identity-catalog-header") != null, "catalog after create");
   clickButton("导入");
   await waitUntil(() => document.querySelector(".identity-editor") != null, "import identity form");
+  if (document.querySelector<HTMLSelectElement>("select[name='providerId']")?.value !== "") throw new Error("Import inherited the creation-only default.");
+  setSelect("浏览器 Provider", "chrome_official");
   fillInput("accountIdentifier", "导入运营号");
   fillInput("importSourceRef", "import-source-public");
   document.querySelector<HTMLButtonElement>(".identity-editor-actions .primary")?.click();
@@ -168,6 +325,18 @@ function installOwnerMock() {
       requests.push(structuredClone(request));
       if (offline) return { ok: false, status: 503, error: "owner unavailable" };
       if (request.path === "/runtime/browser-providers") return { ok: true, body: providerCatalog() };
+      if (request.path === "/runtime/browser-provider-preference") {
+        if (request.method === "POST") {
+          const body = request.body as { operation?: string; provider_id?: string };
+          if (body.operation === "set" && typeof body.provider_id === "string") {
+            providerPreference = { ...providerPreference, user_creation_default: { provider_id: body.provider_id, availability: "available", unavailable_reason: null, updated_at: "2026-07-22T00:00:00Z" } };
+          } else if (body.operation === "clear") {
+            providerPreference = { ...providerPreference, user_creation_default: { provider_id: null, availability: "unset", unavailable_reason: null, updated_at: "2026-07-22T00:00:00Z" } };
+          }
+          return { ok: true, body: { schema_version: "harbor-browser-provider-preference-mutation/v1", operation: body.operation, status: "completed", preference: providerPreference, failure: null } };
+        }
+        return { ok: true, body: providerPreference };
+      }
       if (identityOffline && request.path.includes("identity-environments")) return { ok: false, status: 503, error: "identity owner unavailable" };
       if (request.path === "/runtime/identity-environments") return { ok: true, body: { items: facts } };
       if (request.path === "/runtime/identity-environment-mutations") return mutationResponse(request);
@@ -194,8 +363,8 @@ function mutationResponse(request: OwnerRequest) {
   let targetRef = sourceRef;
   if (operation === "create" || operation === "import") {
     targetRef = `identity-env_${String(facts.length + 1).padStart(24, "c")}`;
-    const input = body.identity_environment as { site?: { account_identifier?: string; site_id?: string } };
-    facts = [...facts, identityFact(targetRef, input.site?.account_identifier ?? "新账号", input.site?.site_id === "boss" ? "boss" : "xiaohongshu")];
+    const input = body.identity_environment as { site?: { account_identifier?: string; site_id?: string }; requested_provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
+    facts = [...facts, identityFact(targetRef, input.site?.account_identifier ?? "新账号", input.site?.site_id === "boss" ? "boss" : "xiaohongshu", input.requested_provider_id ?? "cloakbrowser")];
   } else if (operation.startsWith("copy_")) {
     targetRef = `identity-env_${String(facts.length + 1).padStart(24, "d")}`;
     const source = facts.find((fact) => fact.identity_environment_ref === sourceRef)!;
@@ -210,12 +379,12 @@ function mutationResult(operation: string, status: "completed" | "rejected", ref
   return { schema_version: "harbor-identity-environment-mutation/v1", operation, status, identity_environment_ref: ref, source_identity_environment_ref: null, record: null, effects: { index: status === "completed" ? "updated" : "unchanged", local_data: "unchanged", login_state: "unchanged" }, failure: code ? { code, retryable: true, recovery_actions: [] } : null, public_boundary: { output: "status_and_redacted_refs_only", raw_material: "not_exposed", not_exposed: ["cookie", "token", "password", "profile_storage", "local_path"] } };
 }
 
-function identityFact(ref: string, account: string, siteId: "xiaohongshu" | "boss") {
+function identityFact(ref: string, account: string, siteId: "xiaohongshu" | "boss", providerId: "cloakbrowser" | "chrome_official" | "camoufox" = "cloakbrowser") {
   const boss = siteId === "boss";
-  return { schema_version: "harbor-local-identity-environment/v0", identity_environment_ref: ref, execution_identity_ref: `${ref}:execution`, profile_ref: `${ref}:profile`, site_binding: { site_id: siteId, origin: boss ? "https://www.zhipin.com" : "https://www.xiaohongshu.com", display_name: boss ? "BOSS" : "小红书", account_label: account }, login_state: { state: "logged_in", reason: null, recovery_required: false, manual_authentication_state: "not_required", human_verification: [] }, browser_storage: { profile_storage_ref: `${ref}:storage`, state: "present", cookies_session_state: "present" }, environment: { proxy: { state: "configured", proxy_ref: "proxy_ref_public", label: "团队推荐线路" }, region: "CN-SH", geoip_mode: "proxy", language: "zh-CN", timezone: "Asia/Shanghai", browser_family: "cloakbrowser", user_agent_summary: "Chrome family", viewport: "1440x900", hardware_concurrency: 8, device_memory_gb: 8, gpu_profile: "desktop-default", interaction_preset: "default", fingerprint_strategy: "provider_default", fingerprint_summary: "provider default" }, provider_binding: { selected_provider_id: "cloakbrowser", selection_reason: "configured", requires_user_notice: false, selected_provider: providerCatalog().providers[0], warnings: [], unavailable_reason: null }, credential_recovery: { credential_ref: null, recovery_actions: [] }, diagnostics: [] };
+  return { schema_version: "harbor-local-identity-environment/v0", identity_environment_ref: ref, execution_identity_ref: `${ref}:execution`, profile_ref: `${ref}:profile`, site_binding: { site_id: siteId, origin: boss ? "https://www.zhipin.com" : "https://www.xiaohongshu.com", display_name: boss ? "BOSS" : "小红书", account_label: account }, login_state: { state: "logged_in", reason: null, recovery_required: false, manual_authentication_state: "not_required", human_verification: [] }, browser_storage: { profile_storage_ref: `${ref}:storage`, state: "present", cookies_session_state: "present" }, environment: { proxy: { state: "configured", proxy_ref: "proxy_ref_public", label: "团队推荐线路" }, region: "CN-SH", geoip_mode: "proxy", language: "zh-CN", timezone: "Asia/Shanghai", browser_family: providerId, user_agent_summary: "Chrome family", viewport: "1440x900", hardware_concurrency: 8, device_memory_gb: 8, gpu_profile: "desktop-default", interaction_preset: "default", fingerprint_strategy: "provider_default", fingerprint_summary: "provider default" }, provider_binding: { selected_provider_id: providerId, selection_reason: "configured", requires_user_notice: providerId === "chrome_official", selected_provider: providerCatalog().providers.find((provider) => provider.provider_id === providerId) ?? null, warnings: [], unavailable_reason: null }, credential_recovery: { credential_ref: null, recovery_actions: [] }, diagnostics: [] };
 }
 
-function providerCatalog() { return { schema_version: "harbor-browser-provider-status/v0", providers: [{ provider_id: "cloakbrowser", display_name: "CloakBrowser", role: "primary", install: { status: "installed", path: null, version: "test", launchability: "launchable", reason: null }, capabilities: [{ key: "proxy", state: "supported", source: "runtime_verification" }, { key: "locale", state: "supported", source: "runtime_verification" }, { key: "timezone", state: "supported", source: "runtime_verification" }, { key: "viewport", state: "supported", source: "runtime_verification" }] }, { provider_id: "chrome_official", display_name: "官方 Chrome", role: "restricted_fallback", install: { status: "installed", path: null, version: "test", launchability: "launchable", reason: null }, capabilities: [] }], excluded_providers: [] } as const; }
+function providerCatalog() { return { schema_version: "harbor-browser-provider-status/v0", providers: [{ provider_id: "cloakbrowser", display_name: "CloakBrowser", role: "primary", install: { status: "installed", path: null, version: "test", launchability: "launchable", reason: null }, capabilities: [{ key: "proxy", state: "supported", source: "runtime_verification" }, { key: "locale", state: "supported", source: "runtime_verification" }, { key: "timezone", state: "supported", source: "runtime_verification" }, { key: "viewport", state: "supported", source: "runtime_verification" }] }, { provider_id: "chrome_official", display_name: "官方 Chrome", role: "restricted_fallback", install: { status: providerUnavailable ? "missing" : "installed", path: null, version: "test", launchability: providerUnavailable ? "not_checked" : "launchable", reason: providerUnavailable ? "Provider 当前不可启动" : null }, capabilities: [] }, { provider_id: "camoufox", display_name: "Camoufox", role: "qualification", install: { status: "installed", path: null, version: "test", launchability: "launchable", reason: null }, capabilities: [{ key: "locale", state: "supported", source: "runtime_verification" }, { key: "timezone", state: "supported", source: "runtime_verification" }, { key: "viewport", state: "supported", source: "runtime_verification" }] }], excluded_providers: [] } as const; }
 function runtimeSession(controlOwner: "user" | "none" = "user") { return { schema_version: "harbor-runtime-facts/v0", runtime_session_ref: "session_public", provider_ref: "provider_public", lifecycle_state: "active", created_at: "2026-07-22T00:00:00Z", last_seen_at: "2026-07-22T00:00:01Z", current_page: { requested_url: "https://www.xiaohongshu.com", current_url: "https://www.xiaohongshu.com", title: "小红书", status: "ready" }, control_owner: controlOwner, control_lock: { owner: controlOwner, state: controlOwner === "user" ? "held" : "released" }, current_error: null }; }
 
 const tasks = [{ id: "task-a", title: "A", accountIdentity: "A", siteSkill: "A", businessInput: "", source: "Core live", packageSource: { name: "A", version: "1", capabilityRef: "A", sourceRef: "A", fetchedAt: "", source: "Core live", boundary: "" }, runs: [], updatedAt: "2026-07-20T00:00:00Z", threadContext: { siteLabel: "小红书", siteSkillKey: "A", accountIdentityKey: "identity-env_aaaaaaaaaaaaaaaaaaaaaaaa" } }, { id: "task-b", title: "B", accountIdentity: "B", siteSkill: "B", businessInput: "", source: "Core live", packageSource: { name: "B", version: "1", capabilityRef: "B", sourceRef: "B", fetchedAt: "", source: "Core live", boundary: "" }, runs: [], updatedAt: "2026-07-22T00:00:00Z", threadContext: { siteLabel: "BOSS", siteSkillKey: "B", accountIdentityKey: "identity-env_bbbbbbbbbbbbbbbbbbbbbbbb" } }] satisfies TaskProjection[];
@@ -225,10 +394,10 @@ function fillInput(name: string, value: string) { fillInputIn(document.querySele
 function fillInputIn(element: Element | null, value: string) { if (!element) throw new Error("Missing input."); setInput(element, value); }
 function findButton(text: string) { const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim().includes(text)); if (!button) throw new Error(`Missing button: ${text}`); return button; }
 function clickButton(text: string) { findButton(text).click(); }
-function setSelect(label: string, value: string) { const select = document.querySelector<HTMLSelectElement>(`[aria-label='${label}']`) ?? Array.from(document.querySelectorAll("label")).find((item) => item.textContent?.startsWith(label))?.querySelector("select"); if (!select) throw new Error(`Missing select: ${label}`); select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); }
+function setSelect(label: string, value: string) { const select = document.querySelector<HTMLSelectElement>(`select[aria-label='${label}']`) ?? Array.from(document.querySelectorAll("label")).find((item) => item.textContent?.startsWith(label))?.querySelector("select"); if (!select) throw new Error(`Missing select: ${label}`); const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set; if (!setter) throw new Error("Missing select value setter."); setter.call(select, value); select.dispatchEvent(new Event("change", { bubbles: true })); }
 function nextFrame() { return new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); }
 async function twoFrames() { await nextFrame(); await nextFrame(); }
 async function waitUntil(predicate: () => boolean, label: string) { for (let attempt = 0; attempt < 120; attempt += 1) { if (predicate()) return; await nextFrame(); } const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".identity-catalog-header button, .identity-empty button")).map((button) => `${button.textContent}:${button.disabled}`); throw new Error(`Timed out waiting for ${label}: ${document.body.textContent?.slice(-500)} buttons=${buttons.join("|")}.`); }
 function assertNoOverflow(label: string) { const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth; if (overflow > 1) throw new Error(`${label} overflowed by ${overflow}px.`); }
 
-declare global { interface Window { __runIdentityDomSmoke: (mode: "desktop" | "narrow") => Promise<unknown>; } }
+declare global { interface Window { __runIdentityDomSmoke: (mode: "desktop" | "narrow" | "provider-default") => Promise<unknown>; } }

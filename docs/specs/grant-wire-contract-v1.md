@@ -1,10 +1,18 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.1（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508) 与已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)。本合同冻结恢复 Grant 与 SKILL 资源范围的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.2（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505) 与 Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)。本合同冻结恢复 Grant、SKILL 资源范围与 Provider preference/创建模板的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery Grant 语义保持不变。v1.1 只增加可选的 `skill_scope` 维度，不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义；当前持久化 envelope 仍为 `webenvoy.managed-access.v0`，因此不要求给旧记录伪造新的 schema 字段。当前没有额外宿主版本协商或第二套 projection 状态机。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。当前持久化 envelope 仍为 `webenvoy.managed-access.v0`，不要求给旧记录伪造字段，也没有第二套权限系统。
+
+## Provider preference 与创建模板
+
+`allowed_operations` 新值为 `provider.preference.read`、`provider.preference.set`、`provider.preference.clear`，必须逐项明确授予并同时出现在 task scope。调用不带 Profile 或 origin，task scope 的 `profile_refs`/`origins` 为空；Profile policy 不参与，也不能推出这些权限。set/clear 不由 create、browser、environment 或模板权限推出。旧 Grant 缺少新值即没有权限。
+
+旧模板 `provider_id:string` 保持 fixed：Core 只发送该值，任何 Agent 请求级 `provider_id` 都拒绝。新模板 `provider_id:null` 表示 owner 允许创建时使用一次性 Provider 或 Harbor 用户默认；它不允许修改默认，也不把当前默认复制进模板。动态模板无一次性选择且用户默认 unset 时 create 返回 `provider_selection_required`。旧严格 reader 不认识 null 或新 operation 时必须拒绝，不能忽略后继续。
+
+偏好权限不新增 Provider ID scope；set 的候选仍由 Harbor 当前 catalog 可用性和有效主体授权共同限制。Core 的 preference target/owner proof 与 managed Profile 分离，write 走现有 Run、idempotency、unknown outcome 和只读 receipt 对账。
 
 新版 reader 读取没有 `skill_scope` 的旧 Grant 时必须成功，但该 Grant 没有任何 SKILL 权限；不能自动补全全库 scope、`skill.*` operation 或来源。旧严格 reader 遇到新增 `skill_scope` 字段或 `skill.*` operation 必须明确拒绝，不能自动降级、忽略字段或继续执行；因此旧消费者不能被喂入新字段，兼容边界由严格解析和拒绝保证。新版 reader 仍须通过逐项 `allowed_operations` 和 scope 交集检查。
 

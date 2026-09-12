@@ -384,6 +384,9 @@ if (
 ) {
   throw new Error("Electron owner API error projection exposed non-allowlisted or credential-bearing fields.");
 }
+if (ownerApiRequestModule.projectOwnerApiError({ failure: { code: "provider_unavailable", retryable: true } })?.code !== "provider_unavailable") {
+  throw new Error("Electron owner API error projection did not preserve a bounded Harbor failure code.");
+}
 
 const projectedIdentityMutationError = ownerApiRequestModule.projectHarborIdentityMutationErrorBody(
   "/runtime/identity-environment-mutations",
@@ -627,13 +630,15 @@ for (const expectedText of [
   "打开浏览器并登录",
   "接管",
   "已完成，继续",
-  "放弃接管",
+  "交还控制",
   "停止实例",
   "选择技能",
   "代理",
   "地区与语言",
   "指纹摘要",
   "高级环境信息",
+  "Provider 新建默认",
+  "动态：本次选择或用户新建默认",
   "检查环境依赖",
   "从 App 移除",
   "删除本机数据",

@@ -64,8 +64,12 @@ export function validateIdentityEnvironmentConfiguration(
   const requestedProvider = "provider_id" in input
     ? input.provider_id
     : "requested_provider_id" in input ? input.requested_provider_id : undefined;
+  if (!facts.provider_binding.selected_provider_id || !facts.provider_binding.selected_provider) {
+    return facts.provider_binding.selection_reason === "selection_required" || facts.provider_binding.selection_reason === "no_launchable_provider"
+      ? "provider_selection_required"
+      : "provider_unavailable";
+  }
   if (requestedProvider && facts.provider_binding.selected_provider_id !== requestedProvider) return "provider_mismatch";
-  if (!facts.provider_binding.selected_provider_id || !facts.provider_binding.selected_provider) return "provider_mismatch";
   if ("browser_family" in input && input.browser_family !== undefined &&
     input.browser_family !== facts.provider_binding.selected_provider_id) return "provider_mismatch";
 

@@ -240,6 +240,85 @@ test("prioritizes explicit Camoufox provider and legacy binding over non-Camoufo
 
 });
 
+test("rejects incomplete persisted bindings without borrowing global provider settings", async () => {
+  const previous = { ...process.env };
+  const chromePath = "/fixture/bound-chrome";
+  const camoufoxPath = "/fixture/bound-camoufox";
+  const pins = {
+    HARBOR_CAMOUFOX_SOURCE: "official_release",
+    HARBOR_CAMOUFOX_SOURCE_SHA256: "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+    HARBOR_CAMOUFOX_VERSION: "0.5.6",
+    HARBOR_CAMOUFOX_BROWSER_VERSION: "152.0.4-beta.30",
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: "1.60.0"
+  };
+  Object.assign(process.env, pins, { HARBOR_BROWSER_PATH: "/private/tmp/Camoufox.app/Contents/MacOS/camoufox" });
+  try {
+    const chrome = (await import("./identity-environment.js")).createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-incomplete-chrome-binding",
+      requested_provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { HARBOR_CHROME_PATH: chromePath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === chromePath,
+      is_executable: candidate => candidate === chromePath,
+      read_text: () => null,
+      list_dir: () => []
+    });
+    chrome.provider_binding.selected_provider!.install.launchability = "not_checked";
+    const chromeResult = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: chrome.profile_ref,
+      profile_storage_ref: chrome.browser_storage.profile_storage_ref,
+      provider_ref: "provider-incomplete-chrome-binding",
+      identity_environment: chrome
+    });
+    assert.equal(chromeResult.status, "unavailable");
+    if (chromeResult.status !== "unavailable") return;
+    assert.equal(chromeResult.error.code, "identity_environment_unavailable");
+    assert.equal(chromeResult.facts.some(fact => fact.value === "provider_unavailable"), true);
+
+    const camoufox = (await import("./identity-environment.js")).createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-incomplete-camoufox-binding",
+      requested_provider_id: "camoufox",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { ...pins, HARBOR_CAMOUFOX_PATH: camoufoxPath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === camoufoxPath,
+      is_executable: candidate => candidate === camoufoxPath,
+      read_text: () => null,
+      list_dir: () => []
+    });
+    const install = camoufox.provider_binding.selected_provider!.install;
+    delete install.source;
+    delete install.source_sha256;
+    delete install.camoufox_version;
+    delete install.browser_version;
+    delete install.playwright_version;
+    const camoufoxResult = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 25,
+      url: "about:blank",
+      profile_ref: camoufox.profile_ref,
+      profile_storage_ref: camoufox.browser_storage.profile_storage_ref,
+      provider_ref: "provider-incomplete-camoufox-binding",
+      identity_environment: camoufox
+    });
+    assert.equal(camoufoxResult.status, "unavailable");
+    if (camoufoxResult.status !== "unavailable") return;
+    assert.equal(camoufoxResult.error.code, "unsupported");
+    assert.equal(camoufoxResult.facts.some(fact => fact.key === "browser.launch" && fact.value === "unsupported"), true);
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    for (const [key, value] of Object.entries(previous)) process.env[key] = value;
+  }
+});
+
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
   let titleDecoy = false;

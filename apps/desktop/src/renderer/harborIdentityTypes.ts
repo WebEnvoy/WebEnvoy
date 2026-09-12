@@ -35,6 +35,12 @@ export type HarborProviderStatus = {
   }>;
 };
 
+export type HarborProviderPreference = {
+  schema_version: "harbor-browser-provider-preference/v1";
+  project_recommendation: { provider_id: ProviderId; availability: "available" | "unavailable"; unavailable_reason: string | null };
+  user_creation_default: { provider_id: string | null; availability: "unset" | "available" | "unavailable" | "unsupported"; unavailable_reason: string | null; updated_at: string | null };
+};
+
 export type HarborIdentityFacts = {
   schema_version: "harbor-local-identity-environment/v0";
   identity_environment_ref: string;
@@ -121,6 +127,7 @@ export type HarborIdentityLoadState = {
   summary: string;
   identities: IdentityEnvironmentProjection[];
   providers: HarborProviderStatus[];
+  providerPreference: HarborProviderPreference | null;
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +136,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function isProviderCatalog(value: unknown): value is HarborProviderCatalog {
   return isRecord(value) && value.schema_version === "harbor-browser-provider-status/v0" && Array.isArray(value.providers);
+}
+
+export function isProviderPreference(value: unknown): value is HarborProviderPreference {
+  return isRecord(value) && value.schema_version === "harbor-browser-provider-preference/v1" &&
+    isRecord(value.project_recommendation) && isProviderId(value.project_recommendation.provider_id) &&
+    isRecord(value.user_creation_default) && (value.user_creation_default.provider_id === null || typeof value.user_creation_default.provider_id === "string");
+}
+
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "cloakbrowser" || value === "chrome_official" || value === "camoufox";
 }
 
 export function isHarborIdentityFacts(value: unknown): value is HarborIdentityFacts {

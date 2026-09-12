@@ -19,6 +19,7 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
   const [principalId, setPrincipalId] = useState("");
   const [hours, setHours] = useState(24);
   const [profileRef, setProfileRef] = useState("");
+  const [templateProviderId, setTemplateProviderId] = useState<string | null>(null);
   const [scope, setScope] = useState<AgentScopeInput>({ origin: "", origins: [""], operations: [...defaultAgentOperations], controlled: false });
   const [policyRef, setPolicyRef] = useState("");
   const [policyScope, setPolicyScope] = useState<AgentScopeInput>({ origin: "", origins: [""], operations: [...defaultAgentOperations], controlled: false });
@@ -144,11 +145,12 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
         <ScopeFields value={policyScope} onChange={setPolicyScope} disabled={disabled} declaration />
         <button className="save-button" type="submit" disabled={disabled || !policyRef}>保存 Profile 权限上限</button>
       </form>
-      <form onSubmit={event => { event.preventDefault(); void mutate("/agent-access/grants", key => createAgentGrantInput(principalId, hours, key, scope, profileRef)); }}>
+      <form onSubmit={event => { event.preventDefault(); void mutate("/agent-access/grants", key => createAgentGrantInput(principalId, hours, key, scope, profileRef, templateProviderId)); }}>
         <h3>授予非生产浏览器权限</h3>
         <p>{agentManagementScope}</p>
         <label className="connection-field"><span>授权 Agent</span><select name="grant_principal" required value={principalId} disabled={disabled} onChange={event => setPrincipalId(event.currentTarget.value)}><option value="">请选择 Agent</option>{activePrincipals.map(item => <option key={item.principal_id} value={item.principal_id}>{item.display_name} · {item.principal_id}</option>)}</select></label>
-        <label className="connection-field"><span>授权 Profile 或创建模板</span><select name="grant_profile" value={profileRef} disabled={disabled} onChange={event => { setProfileRef(event.currentTarget.value); setScope(current => ({ ...current, controlled: false })); }}><option value="">创建最多 2 个新 Camoufox Profile</option>{state?.profile_policies.map(item => <option key={item.profile_ref} value={item.profile_ref}>{item.profile_ref}</option>)}</select></label>
+        <label className="connection-field"><span>授权 Profile 或创建模板</span><select name="grant_profile" value={profileRef} disabled={disabled} onChange={event => { setProfileRef(event.currentTarget.value); setScope(current => ({ ...current, controlled: false })); }}><option value="">创建最多 2 个新 Profile</option>{state?.profile_policies.map(item => <option key={item.profile_ref} value={item.profile_ref}>{item.profile_ref}</option>)}</select></label>
+        {!profileRef && <label className="connection-field"><span>创建模板 Provider</span><select value={templateProviderId ?? ""} disabled={disabled} onChange={event => setTemplateProviderId(event.currentTarget.value || null)}><option value="">动态：本次选择或用户新建默认</option><option value="cloakbrowser">固定 CloakBrowser</option><option value="chrome_official">固定 Google Chrome</option><option value="camoufox">固定 Camoufox</option></select></label>}
         <p>{profileRef ? "此授权仍受已保存的 Profile 上限约束；受控页面声明须在上方独立保存。" : "新环境使用中文、Asia/Shanghai 时区。所选范围同时作为创建模板权限上限；不包含已有 Profile。"}</p>
         <ScopeFields value={scope} onChange={setScope} disabled={disabled} declaration={!profileRef} />
         <label className="connection-field"><span>授权有效期</span><select value={hours} disabled={disabled} onChange={event => setHours(Number(event.currentTarget.value))}><option value={1}>1 小时</option><option value={24}>24 小时</option><option value={168}>7 天</option></select></label>
@@ -165,7 +167,7 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
       {state?.grants.map(item => <div className="settings-row we-settings-row" key={item.grant_id}><div>
         <strong>{principalName(item.principal_id)} · {item.revoked_at ? "已撤销" : Date.parse(item.expires_at) <= Date.now() ? "已过期" : "有效"}</strong>
         <span>{item.grant_id}</span><span>有效至 {new Date(item.expires_at).toLocaleString()} · {item.allowed_origins.join("、") || "无站点授权"}</span>
-        <span>允许操作：{item.allowed_operations.join("、")}</span><span>{item.creation_template?.provider_id ?? "无创建模板"} · 已创建 {item.created_profile_refs.length} / {item.max_created_profiles} 个 Profile</span>
+        <span>允许操作：{item.allowed_operations.join("、")}</span><span>{item.creation_template ? item.creation_template.provider_id ?? "动态 Provider" : "无创建模板"} · 已创建 {item.created_profile_refs.length} / {item.max_created_profiles} 个 Profile</span>
         <span>已授权 Profile：{[...new Set([...item.profile_refs, ...item.created_profile_refs])].join("、") || "尚无"}</span>
         <button className="save-button" type="button" disabled={disabled || item.revoked_at !== null} onClick={() => void mutate(`/agent-access/grants/${encodeURIComponent(item.grant_id)}/revoke`, key => ({ idempotency_key: key }))}>撤销授权</button>
       </div></div>)}

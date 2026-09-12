@@ -8,6 +8,7 @@ import type {
 import type { SiteBindingInput } from "./identity-environment.js";
 
 export const HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA = "harbor-identity-environment-mutation/v1";
+export const HARBOR_PROVIDER_SELECTION_SCHEMA = "harbor-provider-selection/v1";
 
 export type IdentityEnvironmentMutationOperation = "create" | "import" | "edit" | "copy_full" | "copy_environment" | "remove" | "delete";
 
@@ -121,6 +122,8 @@ export type IdentityEnvironmentMutationFailureCode =
   | "persistence_failed"
   | "profile_locked"
   | "profile_storage_exists"
+  | "provider_selection_required"
+  | "provider_unavailable"
   | "provider_mismatch"
   | "proxy_policy_incompatible"
   | "proxy_resolution_unavailable"
@@ -143,6 +146,11 @@ export interface IdentityEnvironmentMutationResult {
   identity_environment_ref: string | null;
   source_identity_environment_ref: string | null;
   record: LocalIdentityEnvironmentPublicRecord | null;
+  provider_selection: null | {
+    schema_version: typeof HARBOR_PROVIDER_SELECTION_SCHEMA;
+    source: "explicit_request" | "user_default";
+    selected_provider_id: BrowserProviderId;
+  };
   effects: {
     index: "registered" | "updated" | "removed" | "unchanged";
     local_data: "created" | "copied" | "excluded" | "preserved" | "deleted" | "unchanged" | "residual";
@@ -194,6 +202,7 @@ export interface IdentityEnvironmentMutationConflict {
 
 export interface IdentityEnvironmentMutationOptions {
   provider_detection?: BrowserProviderDetectionInput;
+  resolve_user_creation_default_provider_id?: () => string | undefined;
   validate_proxy?: (proxy_ref: string) => "reachable" | "unreachable" | "incompatible";
   resolve_proxy?: (proxy_ref: string) => string | null;
   delete_local_material?: (refs: IdentityEnvironmentLocalMaterialRefs) => "deleted" | "unknown" | "failed";

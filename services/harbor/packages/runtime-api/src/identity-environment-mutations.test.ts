@@ -20,6 +20,7 @@ import {
   testProviderDetection,
   tempDir
 } from "./identity-environment-mutation-test-helpers.js";
+import { materializeIdentityEnvironmentMutation } from "./identity-environment-mutations.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
 import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
@@ -63,6 +64,87 @@ test("persists idempotent receipts and rejects sensitive or conflicting payloads
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("resolves create selection once as explicit over user default and otherwise requires selection", () => {
+  let defaultProvider: "chrome_official" | undefined;
+  const manager = new LocalIdentityEnvironmentManager({
+    provider_detection: testProviderDetection,
+    resolve_user_creation_default_provider_id: () => defaultProvider,
+  });
+  const missingRequest: IdentityEnvironmentMutationRequest = {
+    operation: "create",
+    idempotency_key: "selection-missing",
+    identity_environment: { site: createMutationInput().site },
+  };
+  const missing = manager.mutate(missingRequest);
+  assert.equal(missing.failure?.code, "provider_selection_required");
+  defaultProvider = "chrome_official";
+  assert.deepEqual(manager.mutate(missingRequest), missing, "same key keeps the original selection snapshot");
+  assert.equal(manager.mutate({ ...missingRequest, idempotency_key: "selection-after-default" }).status, "completed");
+
+  let installed = false;
+  const unavailableManager = new LocalIdentityEnvironmentManager({
+    provider_detection: {
+      ...testProviderDetection,
+      path_exists: () => installed,
+      is_executable: () => installed,
+    },
+  });
+  const unavailableRequest: IdentityEnvironmentMutationRequest = {
+    operation: "create",
+    idempotency_key: "selection-unavailable",
+    identity_environment: createMutationInput(),
+  };
+  const unavailable = unavailableManager.mutate(unavailableRequest);
+  assert.equal(unavailable.failure?.code, "provider_unavailable");
+  installed = true;
+  assert.deepEqual(unavailableManager.mutate(unavailableRequest), unavailable, "same key keeps the unavailable result");
+  assert.equal(unavailableManager.mutate({ ...unavailableRequest, idempotency_key: "selection-after-install" }).status, "completed");
+
+  const unsupportedDefault = new LocalIdentityEnvironmentManager({
+    provider_detection: testProviderDetection,
+    resolve_user_creation_default_provider_id: () => "future_browser",
+  }).mutate({
+    operation: "create",
+    idempotency_key: "selection-unsupported-default",
+    identity_environment: { site: createMutationInput().site },
+  });
+  assert.equal(unsupportedDefault.failure?.code, "provider_unavailable");
+
+  const defaultManager = new LocalIdentityEnvironmentManager({ provider_detection: testProviderDetection, resolve_user_creation_default_provider_id: () => "chrome_official" });
+  const fromDefault = defaultManager.mutate({
+    operation: "create",
+    idempotency_key: "selection-default",
+    identity_environment: { site: createMutationInput().site },
+  });
+  assert.equal(fromDefault.status, "completed");
+  assert.deepEqual(fromDefault.provider_selection, {
+    schema_version: "harbor-provider-selection/v1",
+    source: "user_default",
+    selected_provider_id: "chrome_official",
+  });
+  assert.deepEqual(defaultManager.mutate({
+    operation: "create",
+    idempotency_key: "selection-default",
+    identity_environment: { site: createMutationInput().site },
+  }), fromDefault);
+
+  const explicit = defaultManager.mutate({
+    operation: "create",
+    idempotency_key: "selection-explicit",
+    identity_environment: createMutationInput(),
+  });
+  assert.equal(explicit.provider_selection?.source, "explicit_request");
+  assert.equal(explicit.provider_selection?.selected_provider_id, "chrome_official");
+
+  const imported = materializeIdentityEnvironmentMutation({
+    operation: "import",
+    idempotency_key: "selection-import",
+    identity_environment: { site: createMutationInput().site, import_source_ref: "source-profile" },
+  }, testProviderDetection, "chrome_official");
+  assert.equal(imported.operation, "import");
+  assert.equal(imported.identity_environment.user_creation_default_provider_id, undefined, "creation default does not choose an imported Profile's provider");
 });
 
 test("allocates owner refs and rejects provider metadata that conflicts with the selected provider", () => {

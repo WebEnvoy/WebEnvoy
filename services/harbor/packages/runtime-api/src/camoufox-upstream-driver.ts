@@ -115,9 +115,13 @@ export function isOfficialCamoufoxLaunchRequest(
   input: Pick<LocalProviderLaunchInput, "provider_id" | "browser_path" | "identity_environment">,
   env: Record<string, string | undefined> = process.env
 ): boolean {
-  if (input.provider_id !== "camoufox" && input.identity_environment?.provider_binding.selected_provider_id !== "camoufox" && !isCamoufoxPath(input.browser_path || env.HARBOR_BROWSER_PATH)) return false;
+  const bindingProvider = input.identity_environment?.provider_binding.selected_provider_id;
+  if (bindingProvider !== undefined && bindingProvider !== "camoufox") return false;
+  if (input.provider_id !== "camoufox" && bindingProvider !== "camoufox" && !isCamoufoxPath(input.browser_path || env.HARBOR_BROWSER_PATH)) return false;
   if (hasRetiredCamoufoxBinding(input.identity_environment?.provider_binding)) return false;
-  return readCamoufoxUpstreamSourceFacts(env, input.identity_environment?.provider_binding?.selected_provider?.install as JsonObject | undefined) !== null;
+  const hasPersistedBinding = input.identity_environment?.provider_binding !== undefined;
+  const binding = input.identity_environment?.provider_binding?.selected_provider?.install as JsonObject | undefined;
+  return readCamoufoxUpstreamSourceFacts(hasPersistedBinding ? {} : env, binding) !== null;
 }
 
 /**

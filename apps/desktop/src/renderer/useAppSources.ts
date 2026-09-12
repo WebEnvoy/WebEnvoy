@@ -21,6 +21,7 @@ const initialHarborIdentityState: HarborIdentityLoadState = {
   summary: "正在读取 Harbor live identity public facts。",
   identities: [],
   providers: [],
+  providerPreference: null,
 };
 
 export function useAppSources() {

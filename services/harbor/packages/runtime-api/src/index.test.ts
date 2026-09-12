@@ -7,18 +7,21 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import {
   bindIdentityEnvironmentDefaultProvider,
+  CAMOUFOX_UPSTREAM_PINS,
   createLocalIdentityEnvironmentFacts,
   createFixtureLauncher,
   DEFAULT_IDENTITY_SITE_URLS,
   detectBrowserProviders,
   diagnoseBrowserProviderFailure,
   HarborRuntime,
+  LocalIdentityEnvironmentManager,
   launchLocalDedicatedProvider,
   type LocalProviderLauncher,
   type LocalProviderLaunchInput
 } from "./index.js";
 import * as HarborRuntimeApi from "./index.js";
 import { classifyLaunchFailure } from "./provider-management.js";
+import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
 import { resolveRuntimeProviderBinding } from "./local-provider-launcher.js";
 import { trustLocalProviderReadProbe } from "./read-operation-probe-trust.js";
 
@@ -174,6 +177,26 @@ setInterval(() => {}, 10000);
   return browserPath;
 }
 
+function writeFakeCamoufoxDriver(dir: string): string {
+  const driverPath = join(dir, "fake-camoufox-driver.mjs");
+  writeFileSync(driverPath, `import readline from "node:readline";
+import { writeFileSync } from "node:fs";
+const page = { provider_page_ref: "page:bound-camoufox", current_url: "about:blank", title: "about:blank", status: "ready", origin: "null", active: true, document_generation: 1, facts: [] };
+const rl = readline.createInterface({ input: process.stdin });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  let result;
+  if (request.op === "launch") {
+    if (process.env.HARBOR_FAKE_CAMOUFOX_PATH_MARKER) writeFileSync(process.env.HARBOR_FAKE_CAMOUFOX_PATH_MARKER, request.browser_path);
+    result = { status: "ready", driver_ref: "fake-bound-camoufox", page, pages: [page], viewer_entry: { availability: "unavailable", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [] };
+  } else if (request.op === "close") result = { closed: true };
+  else result = page;
+  process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
+}`);
+  chmodSync(driverPath, 0o700);
+  return driverPath;
+}
+
 async function startNonCdpEndpoint(): Promise<{ port: number; close: () => Promise<void> }> {
   const server = createServer((_request, response) => {
     response.setHeader("content-type", "application/json");
@@ -260,7 +283,8 @@ test("detects registered provider status without promoting Camoufox to the defau
   const chrome = catalog.providers[1]!;
   const camoufox = catalog.providers[2]!;
   assert.equal(cloak.role, "primary");
-  assert.equal(cloak.default_for_identity_environment, true);
+  assert.equal(cloak.project_recommended, true);
+  assert.equal(cloak.default_for_identity_environment, false);
   assert.equal(cloak.install.status, "installed");
   assert.equal(cloak.install.version, "145.0.7632.109.2");
   assert.equal(chrome.role, "restricted_fallback");
@@ -272,22 +296,21 @@ test("detects registered provider status without promoting Camoufox to the defau
   assert.equal(camoufox.capabilities.find((capability) => capability.key === "cdp")?.state, "unsupported");
 });
 
-test("binds identity environments to CloakBrowser by default and warns on Chrome fallback", () => {
-  const cloakDefault = bindIdentityEnvironmentDefaultProvider(providerFixture({
+test("requires an explicit or user-default provider without silently using the recommendation", () => {
+  const selectionRequired = bindIdentityEnvironmentDefaultProvider(providerFixture({
     [cloakPath]: { executable: true },
     [chromePath]: { executable: true }
   }));
-  assert.equal(cloakDefault.selected_provider_id, "cloakbrowser");
-  assert.equal(cloakDefault.selection_reason, "cloakbrowser_default");
-  assert.equal(cloakDefault.requires_user_notice, false);
+  assert.equal(selectionRequired.selected_provider_id, null);
+  assert.equal(selectionRequired.selection_reason, "selection_required");
+  assert.equal(selectionRequired.requires_user_notice, true);
 
-  const chromeFallback = bindIdentityEnvironmentDefaultProvider(providerFixture({
-    [chromePath]: { executable: true }
-  }));
-  assert.equal(chromeFallback.selected_provider_id, "chrome_official");
-  assert.equal(chromeFallback.selection_reason, "chrome_restricted_fallback");
-  assert.equal(chromeFallback.requires_user_notice, true);
-  assert.equal(chromeFallback.warnings.some((warning) => warning.includes("受限后备")), true);
+  const userDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    user_creation_default_provider_id: "chrome_official"
+  });
+  assert.equal(userDefault.selected_provider_id, "chrome_official");
+  assert.equal(userDefault.selection_reason, "user_default_available");
 
   const unavailableRequested = bindIdentityEnvironmentDefaultProvider({
     ...providerFixture({ [chromePath]: { executable: true } }),
@@ -307,6 +330,37 @@ test("binds identity environments to CloakBrowser by default and warns on Chrome
   assert.equal(camoufox.selected_provider, null);
   assert.equal(camoufox.fallback_provider_id, null);
   assert.equal(camoufox.warnings.some((warning) => warning.includes("退役")), true);
+
+  const officialCamoufoxEnv = {
+    HARBOR_CAMOUFOX_PATH: camoufoxPath,
+    HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+    HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+    HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+  };
+  const camoufoxUserDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: officialCamoufoxEnv,
+    user_creation_default_provider_id: "camoufox"
+  });
+  const camoufoxExplicit = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: officialCamoufoxEnv,
+    requested_provider_id: "camoufox"
+  });
+  assert.equal(camoufoxUserDefault.selected_provider_id, "camoufox");
+  assert.equal(camoufoxUserDefault.selection_reason, "user_default_available");
+  assert.equal(camoufoxExplicit.selected_provider_id, "camoufox");
+  assert.equal(camoufoxExplicit.selection_reason, "requested_provider_available");
+
+  const camoufoxUnavailableDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    user_creation_default_provider_id: "camoufox"
+  });
+  assert.equal(camoufoxUnavailableDefault.selected_provider_id, null);
+  assert.equal(camoufoxUnavailableDefault.selection_reason, "user_default_unavailable");
 });
 
 test("explains provider install and launch failure diagnostics", () => {
@@ -363,6 +417,7 @@ test("returns local identity environment facts without protected material", () =
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const facts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [cloakPath]: { executable: true } }),
+    requested_provider_id: "cloakbrowser",
     identity_environment_ref: "identity-env_xhs-alice",
     execution_identity_ref: "execution-identity_xhs-alice",
     profile_ref: "profile_xhs-alice",
@@ -441,6 +496,7 @@ test("manages local xhs and boss identity environments with redacted public outp
     });
     const xhs = runtime.createLocalIdentityEnvironment({
       ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-managed",
       execution_identity_ref: "execution-identity_xhs-managed",
       profile_ref: "profile_xhs-managed",
@@ -469,6 +525,7 @@ test("manages local xhs and boss identity environments with redacted public outp
     });
     const boss = runtime.importLocalIdentityEnvironment({
       ...providerFixture({ [chromePath]: { executable: true } }),
+      requested_provider_id: "chrome_official",
       identity_environment_ref: "identity-env_boss-managed",
       execution_identity_ref: "execution-identity_boss-managed",
       profile_ref: "profile_boss-managed",
@@ -665,6 +722,300 @@ test("local provider maps profile storage refs to stable private directories wit
   } finally {
     if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
     else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("uses a persisted Chrome binding over a global Camoufox path and rejects mismatches before spawning", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-bound-chrome-global-camoufox-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousBrowserPath = process.env.HARBOR_BROWSER_PATH;
+  const previousMarker = process.env.HARBOR_FAKE_BROWSER_MARKER;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const marker = join(dir, "spawned.txt");
+  const globalCamoufoxPath = "/private/tmp/Camoufox.app/Contents/MacOS/camoufox";
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_BROWSER_PATH = globalCamoufoxPath;
+  process.env.HARBOR_FAKE_BROWSER_MARKER = marker;
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "about:blank",
+    url: "about:blank",
+    readyState: "complete"
+  });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-bound-chrome-global-camoufox",
+      requested_provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { HARBOR_CHROME_PATH: browserPath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === browserPath,
+      is_executable: candidate => candidate === browserPath,
+      read_text: () => null,
+      list_dir: () => [],
+      profile_storage_ref: "profile-storage-bound-chrome-global-camoufox",
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    assert.equal(identity.provider_binding.selected_provider_id, "chrome_official");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, browserPath);
+
+    const base = {
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-bound-chrome-global-camoufox",
+      identity_environment: identity
+    };
+    for (const mismatch of [
+      { provider_id: "camoufox" as const },
+      { browser_path: globalCamoufoxPath }
+    ]) {
+      const result = await launchLocalDedicatedProvider({ ...base, ...mismatch });
+      assert.equal(result.status, "unavailable");
+      if (result.status !== "unavailable") continue;
+      assert.equal(result.error.code, "identity_environment_unavailable");
+      assert.equal(result.facts.some(fact => fact.value === "provider_mismatch"), true);
+      assert.equal(existsSync(marker), false);
+    }
+
+    const ready = await launchLocalDedicatedProvider(base);
+    assert.equal(ready.status, "ready", JSON.stringify(ready));
+    assert.equal(existsSync(marker), true);
+    if (ready.status === "ready") await ready.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousBrowserPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+    else process.env.HARBOR_BROWSER_PATH = previousBrowserPath;
+    if (previousMarker === undefined) delete process.env.HARBOR_FAKE_BROWSER_MARKER;
+    else process.env.HARBOR_FAKE_BROWSER_MARKER = previousMarker;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reloads a historical Chrome fallback binding and launches its persisted executable", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-historical-chrome-binding-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousBrowserPath = process.env.HARBOR_BROWSER_PATH;
+  const previousMarker = process.env.HARBOR_FAKE_BROWSER_MARKER;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const marker = join(dir, "spawned.txt");
+  const globalCamoufoxPath = "/private/tmp/Camoufox.app/Contents/MacOS/camoufox";
+  let state: IdentityEnvironmentMutationPersistenceState | null = null;
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_BROWSER_PATH = globalCamoufoxPath;
+  process.env.HARBOR_FAKE_BROWSER_MARKER = marker;
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "about:blank",
+    url: "about:blank",
+    readyState: "complete"
+  });
+  try {
+    const manager = new LocalIdentityEnvironmentManager({
+      load_state: () => state,
+      persist_state: (next) => { state = structuredClone(next); }
+    });
+    const created = manager.create({
+      ...providerFixture({ [browserPath]: { executable: true } }),
+      env: { HARBOR_CHROME_PATH: browserPath },
+      requested_provider_id: "chrome_official",
+      identity_environment_ref: "identity-env-historical-chrome-fallback",
+      execution_identity_ref: "execution-identity-historical-chrome-fallback",
+      profile_ref: "profile-historical-chrome-fallback",
+      profile_storage_ref: "profile-storage-historical-chrome-fallback",
+      site: { site_id: "fixture", origin: "about:blank", display_name: "Fixture" },
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    const persistedState = state as IdentityEnvironmentMutationPersistenceState | null;
+    assert.ok(persistedState);
+    const persisted = persistedState.records.find((record) => record.identity_environment.identity_environment_ref === created.identity_environment_ref);
+    assert.ok(persisted);
+    // This is the historical base-main record shape: Chrome was persisted as
+    // the restricted fallback while retaining its verified install facts.
+    const historicalBinding = persisted.identity_environment.provider_binding as unknown as {
+      fallback_provider_id: string | null;
+      selection_reason: string;
+    };
+    historicalBinding.fallback_provider_id = "chrome_official";
+    historicalBinding.selection_reason = "chrome_restricted_fallback";
+
+    const reloaded = new LocalIdentityEnvironmentManager({
+      load_state: () => state,
+      persist_state: (next) => { state = structuredClone(next); }
+    });
+    const identity = reloaded.getFacts(created.identity_environment_ref);
+    assert.ok(identity);
+    assert.equal(identity.provider_binding.selection_reason, "chrome_restricted_fallback");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, browserPath);
+
+    const result = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-historical-chrome-fallback",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    assert.equal(existsSync(marker), true);
+    if (result.status === "ready") await result.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousBrowserPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+    else process.env.HARBOR_BROWSER_PATH = previousBrowserPath;
+    if (previousMarker === undefined) delete process.env.HARBOR_FAKE_BROWSER_MARKER;
+    else process.env.HARBOR_FAKE_BROWSER_MARKER = previousMarker;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("applies Chrome accept-language and ICU locale before strict readback", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-chrome-locale-readback-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const previousRedirectUrl = process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const targetUrl = "http://127.0.0.1:51680";
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL = targetUrl;
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "Fixture",
+    url: targetUrl,
+    readyState: "complete"
+  }, { userAgentReadbackRequiresAcceptLanguage: true });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-chrome-locale-readback",
+      requested_provider_id: "chrome_official",
+      site: { site_id: "fixture", origin: targetUrl, display_name: "Fixture" },
+      env: { HARBOR_CHROME_PATH: browserPath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === browserPath,
+      is_executable: candidate => candidate === browserPath,
+      read_text: () => null,
+      list_dir: () => [],
+      language: "en-US",
+      timezone: "UTC",
+      profile_storage_ref: "profile-storage-chrome-locale-readback",
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    const result = await launchLocalDedicatedProvider({
+      browser_path: browserPath,
+      headless: true,
+      timeout_ms: 3_000,
+      url: targetUrl,
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-chrome-locale-readback",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    if (result.status === "ready") await result.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    if (previousRedirectUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL;
+    else process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL = previousRedirectUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("uses a persisted official Camoufox binding path over the global Camoufox path", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-bound-camoufox-global-path-"));
+  const previous = { ...process.env };
+  const boundPath = join(dir, "bound-camoufox", "Contents", "MacOS", "camoufox");
+  const globalPath = join(dir, "global-camoufox", "Contents", "MacOS", "camoufox");
+  const driverPath = writeFakeCamoufoxDriver(dir);
+  const marker = join(dir, "camoufox-path.txt");
+  const pins = {
+    HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+    HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+    HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+  };
+  Object.assign(process.env, pins, {
+    HARBOR_CAMOUFOX_PATH: boundPath,
+    HARBOR_CAMOUFOX_INSTALL_ROOT: dir,
+    HARBOR_CAMOUFOX_PYTHON: process.execPath,
+    HARBOR_CAMOUFOX_DRIVER: driverPath,
+    HARBOR_PROFILE_STORAGE_ROOT: join(dir, "profiles"),
+    HARBOR_BROWSER_PATH: globalPath,
+    HARBOR_FAKE_CAMOUFOX_PATH_MARKER: marker
+  });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-bound-camoufox-global-path",
+      requested_provider_id: "camoufox",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { ...pins, HARBOR_CAMOUFOX_PATH: boundPath, HARBOR_CAMOUFOX_INSTALL_ROOT: dir },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === boundPath,
+      is_executable: candidate => candidate === boundPath,
+      read_text: () => null,
+      list_dir: () => [],
+      profile_storage_ref: "profile-storage-bound-camoufox-global-path"
+    });
+    assert.equal(identity.provider_binding.selected_provider_id, "camoufox");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, boundPath);
+
+    const result = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-bound-camoufox-global-path",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    assert.equal(readFileSync(marker, "utf8"), boundPath);
+    if (result.status === "ready") await result.close();
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    for (const [key, value] of Object.entries(previous)) process.env[key] = value;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -921,10 +1272,16 @@ function assignedLocation(message: { method: string; params?: { expression?: str
   return JSON.parse(match[1]!) as string;
 }
 
-function installFakeCdpWebSocket(ignoredMethod: string, redirectUrl?: string): void {
+function installFakeCdpWebSocket(
+  ignoredMethod: string,
+  redirectUrl?: string,
+  environmentReadback?: { language: string; timezone: string; width: number; height: number; title?: string; url?: string; readyState?: string },
+  options: { userAgentReadbackRequiresAcceptLanguage?: boolean } = {}
+): void {
   class FakeCdpWebSocket extends EventTarget {
     readyState = 0;
     private currentUrl = "about:blank";
+    private userAgentOverrideApplied = !options.userAgentReadbackRequiresAcceptLanguage;
 
     constructor(_url: string | URL) {
       super();
@@ -935,17 +1292,25 @@ function installFakeCdpWebSocket(ignoredMethod: string, redirectUrl?: string): v
     }
 
     send(payload: string): void {
-      const message = JSON.parse(payload) as { id: number; method: string; params?: { expression?: string; url?: string } };
+      const message = JSON.parse(payload) as { id: number; method: string; params?: { expression?: string; url?: string; acceptLanguage?: string } };
       if (message.method === ignoredMethod) return;
+      if (message.method === "Emulation.setUserAgentOverride" && message.params?.acceptLanguage === environmentReadback?.language) {
+        this.userAgentOverrideApplied = true;
+      }
       if (message.method === "Page.navigate") this.currentUrl = redirectUrl ?? message.params?.url ?? this.currentUrl;
       const assignedUrl = assignedLocation(message);
       if (assignedUrl) this.currentUrl = redirectUrl ?? assignedUrl;
+      const readback = environmentReadback && options.userAgentReadbackRequiresAcceptLanguage && !this.userAgentOverrideApplied
+        ? { ...environmentReadback, language: "system" }
+        : environmentReadback;
       queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", {
         data: JSON.stringify({
           id: message.id,
           result: message.method === "Page.getFrameTree"
             ? { frameTree: { frame: { url: this.currentUrl } } }
-            : {}
+            : message.method === "Runtime.evaluate" && readback
+              ? { result: { value: readback } }
+              : {}
         })
       })));
     }
@@ -1552,6 +1917,7 @@ test("opens an identity environment session with page and controller facts", asy
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
       ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-open",
       execution_identity_ref: "execution-identity_xhs-open",
       profile_ref: "profile_xhs-open",
@@ -1594,6 +1960,7 @@ test("routes registered inline identity facts through the managed session path",
   const runtime = new HarborRuntime(capturingLauncher(launches));
   runtime.createLocalIdentityEnvironment({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-managed",
     profile_ref: "profile_inline-managed",
@@ -1609,6 +1976,7 @@ test("routes registered inline identity facts through the managed session path",
 
   const mismatchedInlineFacts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-bypass",
     profile_ref: "profile_inline-bypass",
@@ -1633,6 +2001,7 @@ test("routes registered inline identity facts through the managed session path",
 
   const inlineFacts = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_inline-managed",
     execution_identity_ref: "execution-identity_inline-managed",
     profile_ref: "profile_inline-managed",
@@ -1662,6 +2031,7 @@ test("reuses, locks, releases, and stops identity environment sessions", async (
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const identity_environment = runtime.getLocalIdentityEnvironmentFacts({
     ...providerFixture({ [cloakPath]: { executable: true } }),
+    requested_provider_id: "cloakbrowser",
     identity_environment_ref: "identity-env_boss",
     execution_identity_ref: "execution-identity_boss",
     profile_ref: "profile_boss",
@@ -2159,6 +2529,7 @@ test("returns structured failure for invalid target URLs", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const result = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      requested_provider_id: "cloakbrowser",
       site: {
         site_id: "xhs",
         origin: "https://www.xiaohongshu.com"
@@ -2370,6 +2741,8 @@ test("captures live page screenshot refs and artifact facts without raw screensh
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       site: {
         site_id: "xiaohongshu",
         origin: "https://www.xiaohongshu.com",
@@ -2425,6 +2798,8 @@ test("captures live page refs without screenshot evidence when screenshot captur
   });
   const session = await runtime.openIdentityEnvironmentSession({
     identity_environment: {
+      ...providerFixture({ [cloakPath]: { executable: true } }),
+      requested_provider_id: "cloakbrowser",
       identity_environment_ref: "identity-env_xhs-screenshot-failure",
       execution_identity_ref: "execution-identity_xhs-screenshot-failure",
       profile_ref: "profile_xhs-screenshot-failure",

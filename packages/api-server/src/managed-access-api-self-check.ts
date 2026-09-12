@@ -114,7 +114,7 @@ async function assertManagementPolicyApi(): Promise<void> {
     }));
     else if (request.url === "/runtime/identity-environment-mutations") {
       request.resume(); creates++;
-      response.end(JSON.stringify({ status: "completed", record: { refs: { profile_ref: "profile:policy" }, identity_environment_ref: "identity:policy", site: { origin: "https://example.com" }, status: { readiness: "ready" } } }));
+      response.end(JSON.stringify({ status: "completed", record: { refs: { profile_ref: "profile:policy" }, identity_environment_ref: "identity:policy", site: { origin: "https://example.com" }, status: { readiness: "ready" } }, provider_selection: { schema_version: "harbor-provider-selection/v1", source: "explicit_request", selected_provider_id: "camoufox" } }));
     } else { response.writeHead(404); response.end("{}"); }
   });
   const harborPort = await listen(harbor);

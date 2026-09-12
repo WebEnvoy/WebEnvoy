@@ -25,6 +25,7 @@ test("user confirmation clears only the authentication gate for a restricted Chr
     path_exists: (path) => path === chromePath,
     is_executable: (path) => path === chromePath,
     read_text: () => null,
+    requested_provider_id: "chrome_official",
     identity_environment_ref: "identity-env_chrome-manual-auth",
     execution_identity_ref: "execution-identity_chrome-manual-auth",
     profile_ref: "profile_chrome-manual-auth",

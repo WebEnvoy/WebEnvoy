@@ -6,7 +6,7 @@ import { withFileOwnershipLock } from "./file-ownership.js";
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
 export const managedPageOperations = ["page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"] as const;
 export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.install", "skill.enable", "skill.read", "skill.update", "skill.rollback", "skill.disable"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedSkillOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedSkillOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
@@ -15,7 +15,7 @@ export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: Ma
 export type ManagedSkillScope = { skill_refs: string[]; source_refs: string[] };
 export type ManagedCreationTemplate = {
   template_ref: string;
-  provider_id: string;
+  provider_id: string | null;
   site: { site_id: string; origin: string; display_name: string };
   language: string;
   timezone: string;
@@ -107,7 +107,7 @@ function template(value: unknown): ManagedCreationTemplate | null {
   if (value === null) return null;
   const obj = object(value, ["template_ref", "provider_id", "site", "language", "timezone", "permission_ceiling"]);
   const site = object(obj.site, ["site_id", "origin", "display_name"]);
-  return { template_ref: string(obj.template_ref), provider_id: string(obj.provider_id),
+  return { template_ref: string(obj.template_ref), provider_id: obj.provider_id === null ? null : string(obj.provider_id),
     site: { site_id: string(site.site_id), origin: origin(site.origin), display_name: string(site.display_name) },
     language: string(obj.language), timezone: string(obj.timezone), permission_ceiling: ceiling(obj.permission_ceiling) };
 }
@@ -311,6 +311,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         return result;
       }
       if (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined) return fail("managed_access_invalid_input");
+      if (["provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(op)) {
+        if (profileRef !== undefined || targetOrigin !== undefined || templateRef !== undefined || task.profile_refs.length || task.origins.length) return fail("managed_access_denied");
+        return result;
+      }
       if (op === "profile.create") {
         if (profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles) return fail("managed_access_creation_denied");
         const creationOrigin = grant.creation_template.site.origin;

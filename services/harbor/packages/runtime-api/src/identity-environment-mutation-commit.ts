@@ -222,9 +222,10 @@ export function completed(
   source: string | null,
   index: IdentityEnvironmentMutationResult["effects"]["index"],
   localData: IdentityEnvironmentMutationResult["effects"]["local_data"],
-  login: IdentityEnvironmentMutationResult["effects"]["login_state"]
+  login: IdentityEnvironmentMutationResult["effects"]["login_state"],
+  providerSelection: IdentityEnvironmentMutationResult["provider_selection"] = null
 ): IdentityEnvironmentMutationResult {
-  return mutationResult(operation, "completed", record?.identity_environment_ref ?? source, source, record, index, localData, login, null);
+  return mutationResult(operation, "completed", record?.identity_environment_ref ?? source, source, record, index, localData, login, null, providerSelection);
 }
 
 export function rejected(
@@ -234,7 +235,7 @@ export function rejected(
   retryable: boolean,
   recovery_actions: string[]
 ): IdentityEnvironmentMutationResult {
-  return mutationResult(operation, "rejected", ref, null, null, "unchanged", "unchanged", "unchanged", { code, retryable, recovery_actions });
+  return mutationResult(operation, "rejected", ref, null, null, "unchanged", "unchanged", "unchanged", { code, retryable, recovery_actions }, null);
 }
 
 export function profileFailure(
@@ -344,7 +345,8 @@ function mutationResult(
   index: IdentityEnvironmentMutationResult["effects"]["index"],
   localData: IdentityEnvironmentMutationResult["effects"]["local_data"],
   login: IdentityEnvironmentMutationResult["effects"]["login_state"],
-  failure: IdentityEnvironmentMutationResult["failure"]
+  failure: IdentityEnvironmentMutationResult["failure"],
+  providerSelection: IdentityEnvironmentMutationResult["provider_selection"] = null
 ): IdentityEnvironmentMutationResult {
   return {
     schema_version: HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA,
@@ -353,6 +355,7 @@ function mutationResult(
     identity_environment_ref: ref,
     source_identity_environment_ref: source,
     record,
+    provider_selection: providerSelection,
     effects: { index, local_data: localData, login_state: login },
     failure,
     public_boundary: {

@@ -4,7 +4,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
-import { createFixtureLauncher, HarborRuntime, type LocalProviderLauncher, type LocalProviderLaunchInput } from "./index.js";
+import { createFixtureLauncher, HarborRuntime as ProductionHarborRuntime, type LocalProviderLauncher, type LocalProviderLaunchInput } from "./index.js";
 import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
 import { waitForXiaohongshuSiteResourceReadiness } from "./local-provider-launcher.js";
 import { trustLocalProviderReadProbe, trustLocalProviderSiteResourceProbe, type ReadOperationProbe, type SiteResourceProbe } from "./read-operation-probe-trust.js";
@@ -16,6 +16,36 @@ const identityAliases = new Map<string, string>();
 const identityEnvironmentOwners = new Map<string, HarborRuntime>();
 process.env.HARBOR_PROFILE_STORAGE_ROOT = testProfileRoot;
 after(() => rmSync(testProfileRoot, { recursive: true, force: true }));
+
+const fixtureCloakPath = "/fixture/CloakBrowser";
+const fixtureProviderDetection = {
+  platform: "darwin" as const,
+  arch: "arm64",
+  home_dir: "/Users/test",
+  env: { HARBOR_CLOAKBROWSER_PATH: fixtureCloakPath },
+  path_exists: (path: string) => path === fixtureCloakPath,
+  is_executable: (path: string) => path === fixtureCloakPath,
+  read_text: () => null,
+};
+class HarborRuntime extends ProductionHarborRuntime {
+  constructor(
+    launcher?: ConstructorParameters<typeof ProductionHarborRuntime>[0],
+    identityEnvironmentOptions: ConstructorParameters<typeof ProductionHarborRuntime>[1] = {},
+    providerLifecycleOptions: ConstructorParameters<typeof ProductionHarborRuntime>[2] = {},
+  ) {
+    super(launcher, {
+      provider_detection: fixtureProviderDetection,
+      ...identityEnvironmentOptions,
+    }, providerLifecycleOptions);
+  }
+
+  override openIdentityEnvironmentSession(input: Parameters<ProductionHarborRuntime["openIdentityEnvironmentSession"]>[0]) {
+    return super.openIdentityEnvironmentSession({
+      ...input,
+      identity_environment: { ...fixtureProviderDetection, ...input.identity_environment },
+    });
+  }
+}
 
 async function startHarborRuntimeServer(options: Parameters<typeof startUnconfiguredHarborRuntimeServer>[0] = {}) {
   const running = await startUnconfiguredHarborRuntimeServer({
@@ -48,6 +78,16 @@ test("serves readiness and provider facts as JSON", async () => {
 
     const alias = await getJson(`${running.url}/runtime/browser-provider-status`);
     assert.deepEqual(alias, providers);
+
+    const preference = await getJson(`${running.url}/runtime/browser-provider-preference`);
+    assert.equal(preference.schema_version, "harbor-browser-provider-preference/v1");
+    assert.equal(preference.user_creation_default.availability, "unset");
+    const unauthorized = await fetch(`${running.url}/runtime/browser-provider-preference`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: "clear", idempotency_key: "unauthorized-preference" }),
+    });
+    assert.equal(unauthorized.status, 403);
   } finally {
     await running.close();
   }
@@ -575,6 +615,7 @@ test("serves site resource facts failures without raw browser material", async (
 
     const session = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_challenge-test",
         execution_identity_ref: "execution-identity_challenge-test",
         profile_ref: "profile_challenge-test",
@@ -1534,6 +1575,7 @@ test("rejects missing, unmanaged, closed, and failed sessions without changing i
 
     const unmanaged = await postJson(`${running.url}/runtime/identity-environment-sessions`, {
       identity_environment: {
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_inline-unmanaged",
         execution_identity_ref: "execution-identity_inline-unmanaged",
         profile_ref: "profile_inline-unmanaged",
@@ -1627,6 +1669,7 @@ test("ignores caller-supplied owner refs when creating identities through the co
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": "same-profile-b", ...manualAuthHeaders() },
       body: JSON.stringify({
+        requested_provider_id: "cloakbrowser",
         identity_environment_ref: "identity-env_same-profile-b",
         execution_identity_ref: "identity-env_same-profile-b:execution",
         profile_ref: "profile_same-profile",
@@ -2530,7 +2573,7 @@ async function postJson(url: string, body: unknown): Promise<any> {
 
 async function postIdentityEnvironment(url: string, body: Record<string, unknown>): Promise<any> {
   const stateKeys = ["login_state", "login_state_reason", "storage_state", "manual_authentication_state"] as const;
-  const businessInput = Object.fromEntries(Object.entries(body).filter(([key]) => !stateKeys.includes(key as typeof stateKeys[number])));
+  const businessInput = Object.fromEntries(Object.entries({ requested_provider_id: "cloakbrowser", ...body }).filter(([key]) => !stateKeys.includes(key as typeof stateKeys[number])));
   const stateUpdate = Object.fromEntries(stateKeys.flatMap((key) => Object.hasOwn(body, key) ? [[key, body[key]]] : []));
   const result = await postJson(url, businessInput);
   if (Object.keys(stateUpdate).length === 0) return result;

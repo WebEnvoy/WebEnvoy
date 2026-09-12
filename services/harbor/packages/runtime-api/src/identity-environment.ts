@@ -54,6 +54,8 @@ export interface LocalIdentityEnvironmentInput extends BrowserProviderDetectionI
   manual_authentication_state?: ManualAuthenticationState;
   human_verification?: HumanVerificationKind[];
   requested_provider_id?: IdentityEnvironmentProviderBindingInput["requested_provider_id"];
+  /** Harbor-owned snapshot used only while creating a new Profile. */
+  user_creation_default_provider_id?: IdentityEnvironmentProviderBindingInput["user_creation_default_provider_id"];
 }
 
 export interface MaterialBoundary {
@@ -174,7 +176,8 @@ export function createLocalIdentityEnvironmentFacts(input: LocalIdentityEnvironm
     ...input,
     execution_identity_ref,
     profile_ref,
-    requested_provider_id: input.requested_provider_id
+    requested_provider_id: input.requested_provider_id,
+    user_creation_default_provider_id: input.user_creation_default_provider_id
   });
   const recoveryRequired = loginState === "logged_out" || loginState === "expired" || loginState === "unknown" || loginState === "manual_auth_required";
   const humanVerification = input.human_verification ?? (recoveryRequired ? ["manual_login"] : []);
