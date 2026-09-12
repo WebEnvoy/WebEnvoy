@@ -394,6 +394,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         context_options["timezone_id"] = timezone_id
     options = launch_options(
         browser=f"official/{BROWSER_VERSION_PIN}",
+        executable_path=request["browser_path"],
         env={},
         headless=bool(request.get("headless", False)),
         os="macos" if sys.platform == "darwin" else sys.platform,

@@ -139,6 +139,7 @@ try:
     options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
     assert seen[0]["config"]["timezone"] == "UTC"
+    assert seen[0]["executable_path"] == executable_path
     assert context_options == {"timezone_id": "UTC"}
     assert bundle["context_options"] == {"timezone_id": "UTC"}
     assert module.decode_camoufox_config(options) == {"timezone": "UTC", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
