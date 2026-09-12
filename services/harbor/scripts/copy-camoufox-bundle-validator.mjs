@@ -3,9 +3,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
-const source = join(root, "..", "packages", "runtime-api", "src", "camoufox-bundle-validator.py");
+const sources = [
+  ["camoufox-bundle-validator.py", "camoufox-bundle-validator.py"],
+  ["camoufox-upstream-driver.py", "camoufox-upstream-driver.py"]
+];
 const targetDir = join(root, "..", "dist", "packages", "runtime-api", "src");
-const target = join(targetDir, "camoufox-bundle-validator.py");
 const staleGeneratedFiles = [
   "camoufox-driver.py",
   "camoufox-native-playwright.py",
@@ -17,7 +19,6 @@ const staleGeneratedFiles = [
   "camoufox-interaction.test.d.ts"
 ];
 
-if (!existsSync(source)) throw new Error(`Camoufox bundle validator source is missing: ${source}`);
 mkdirSync(targetDir, { recursive: true });
 
 for (const file of staleGeneratedFiles) {
@@ -33,4 +34,9 @@ for (const file of staleGeneratedFiles) {
   }
 }
 
-copyFileSync(source, target);
+for (const [sourceName, targetName] of sources) {
+  const source = join(root, "..", "packages", "runtime-api", "src", sourceName);
+  const target = join(targetDir, targetName);
+  if (!existsSync(source)) throw new Error(`Camoufox helper source is missing: ${source}`);
+  copyFileSync(source, target);
+}

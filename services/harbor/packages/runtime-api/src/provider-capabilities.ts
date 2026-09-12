@@ -46,7 +46,24 @@ export function chromeCapabilities(): BrowserProviderCapabilityFact[] {
   ];
 }
 
-export function camoufoxCapabilities(): BrowserProviderCapabilityFact[] {
+export function camoufoxCapabilities(official = false): BrowserProviderCapabilityFact[] {
+  if (official) return [
+    capability("persistent_profile", "supported", "configured", "通过原版 Playwright persistent context 使用 Harbor 专用 Profile。"),
+    capability("independent_user_data_dir", "supported", "configured", "任务 Page 使用独立 managed Profile，不复用用户日常 Profile。"),
+    capability("proxy", "limited", "configured", "仅通过公开 Playwright proxy 参数应用，并由 owner 配置 resolver。"),
+    capability("timezone", "limited", "configured", "仅支持固定环境配置并在 Page environment readback 中报告。"),
+    capability("locale", "limited", "configured", "仅支持公开 Playwright locale 配置并在 Page environment readback 中报告。"),
+    capability("viewport", "limited", "configured", "仅支持公开 persistent context viewport 配置。"),
+    capability("extensions", "unsupported", "derived", "当前 vertical slice 不加载或管理扩展。"),
+    capability("cookie_persistence", "supported", "configured", "Cookie 随 managed Profile 持久化。"),
+    capability("cdp", "unsupported", "configured", "原版 JSONL Driver 不暴露 CDP endpoint；Harbor 使用公开 Playwright Page。"),
+    capability("viewer", "limited", "configured", "原生焦点是可选 Viewer 事实，与 task Page 控制分离。"),
+    capability("snapshot_refs", "limited", "configured", "snapshot 仅生成有界 control refs，不暴露 raw DOM。"),
+    capability("evidence_refs", "limited", "configured", "diagnostics/environment 只返回有界脱敏事实。"),
+    capability("native_fingerprint_control", "provider_claim", "provider_claim", "原版 Camoufox 能力不被 Harbor 重新实现或承诺。"),
+    capability("anti_detection_binary_patches", "unsupported", "derived", "Harbor 不接受或加载任何 patched/native504/native510 构件。"),
+    capability("automation_exposure_reduction", "provider_claim", "provider_claim", "仅记录原版 provider claim，不承诺目标站点结果。")
+  ];
   return [
     capability("persistent_profile", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
     capability("independent_user_data_dir", "unsupported", "derived", "Camoufox 私有浏览器/Driver 绑定已退役。"),
@@ -82,7 +99,13 @@ export function chromeLimitations(): string[] {
   ];
 }
 
-export function camoufoxLimitations(): string[] {
+export function camoufoxLimitations(official = false): string[] {
+  if (official) return [
+    "仅接受 owner 提供且重新验证的 official_release source、Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0 和 properties hash。",
+    "Driver 只调用公开 launch_options、sync_playwright、persistent context 和 Page API；不恢复旧 patched/native adapter/browser builder。",
+    "popup 首请求在无法建立可信 Page 归属时本地拒绝；原生焦点是可选 Viewer，不能替代 task Page。",
+    "不暴露 CDP、原始 endpoint、raw DOM、HAR 或反检测成功保证。"
+  ];
   return [
     "Camoufox 仅保留安装、绑定和恢复查询事实；私有浏览器/Driver 启动绑定已退役。",
     "Harbor 不创建 Profile、不启动 Camoufox，也不把 Camoufox 自动替换为其他 provider。",
@@ -116,15 +139,15 @@ export function chromeDownloadGuide(): BrowserProviderDownloadGuide {
   };
 }
 
-export function camoufoxDownloadGuide(): BrowserProviderDownloadGuide {
+export function camoufoxDownloadGuide(official = false): BrowserProviderDownloadGuide {
   return {
     action: "external_management",
     primary_url: "https://github.com/daijro/camoufox/releases",
-    install_hint: "Camoufox 的 Harbor 私有启动绑定已退役；不要为 Harbor 安装、绑定或设置启动覆盖。",
+    install_hint: official ? "仅由 installed owner 提供固定官方 Camoufox/Playwright 组合及完整 provenance；Harbor 不自行下载、补丁或替换。" : "Camoufox 的历史 Harbor 私有启动绑定已退役；未验证官方 provenance 时不要设置启动覆盖。",
     missing_impacts: [
-      "Camoufox 不能作为身份环境 provider 启动。",
-      "旧绑定保留为管理和恢复诊断事实，但不会启动或自动 fallback。",
-      "未来若重新引入支持路线，必须先通过新的原版 Provider Qualification Gate。"
+      official ? "缺失任一固定 source/version/hash 或 Python/Playwright runtime 时不能启动。" : "Camoufox 不能作为身份环境 provider 启动。",
+      "旧 binding 保留为管理和恢复诊断事实，但不会启动或自动 fallback。",
+      "Harbor 不修改上游 Camoufox，也不复制 patched/native adapter。"
     ]
   };
 }

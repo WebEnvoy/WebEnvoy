@@ -11,7 +11,7 @@ export type FactSource = "configured" | "observed" | "provider_claim" | "validat
 export type LifecycleState = "starting" | "active" | "idle" | "locked" | "disconnected" | "expired" | "failed" | "closed";
 export type ProviderMode = "local_dedicated_profile";
 /** The transport owned by a local provider driver. */
-export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler";
+export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler" | "playwright_jsonl";
 export type RuntimeErrorCode =
   | "provider_unavailable"
   | "identity_environment_unavailable"
