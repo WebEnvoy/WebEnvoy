@@ -2,13 +2,13 @@
 
 ## 当前批
 
-- 有界验证 Camoufox 的受管 Profile、跨重启连续性、有头人工使用、上传下载、目标站点和恢复。
-- 提供最小正式入口所需的 Instance、现场 readback、原生窗口和 ControlLease。
-- 验证失败也形成明确采用／不采用结论，不扩张为多 Provider 框架。
+- 以 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 的公共能力基线交付 Provider 已具备能力的有界适配、实际支持事实和恢复。
+- 候选 Provider 先区分接口差异、可接受能力差异和核心浏览器能力缺失；只有前两类进入适配或受限支持。
+- 需要 Harbor／Driver 实现、模拟或长期补偿浏览器核心语义时立即停止候选；Obscura 已按 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 结束，不再验证、等待或跟踪。
 
 ## 下一批
 
-- 单宿主多个 Profile 与一个 Profile 一个主 Instance。
-- configured/effective/pending/drift、账号唯一归属冲突、控制权和撤销后的恢复。
+- [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 通过 Harbor owner 事实交付用户新建默认与显式选择，不改既有 ProfileBinding；本治理修订不预建其字段、Grant 或 Plugin operation。
+- [#471](https://github.com/WebEnvoy/WebEnvoy/issues/471) 继续承接 Provider／环境长期一致性；configured／effective／pending／drift、身份归属、控制权和恢复仍按实际缺口交付。
 
-实时多实例画面、复杂迁移矩阵和 Provider 自动修复保持后续主题。
+实时多实例画面、复杂迁移矩阵和 Provider 自动修复保持后续主题。新 Provider 研究不是当前等待项，以后需新的显式产品决定才能启动。
