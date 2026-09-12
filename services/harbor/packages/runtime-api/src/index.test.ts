@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import {
   bindIdentityEnvironmentDefaultProvider,
+  CAMOUFOX_UPSTREAM_PINS,
   createLocalIdentityEnvironmentFacts,
   createFixtureLauncher,
   DEFAULT_IDENTITY_SITE_URLS,
@@ -307,6 +308,37 @@ test("requires an explicit or user-default provider without silently using the r
   assert.equal(camoufox.selected_provider, null);
   assert.equal(camoufox.fallback_provider_id, null);
   assert.equal(camoufox.warnings.some((warning) => warning.includes("退役")), true);
+
+  const officialCamoufoxEnv = {
+    HARBOR_CAMOUFOX_PATH: camoufoxPath,
+    HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+    HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+    HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+  };
+  const camoufoxUserDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: officialCamoufoxEnv,
+    user_creation_default_provider_id: "camoufox"
+  });
+  const camoufoxExplicit = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: officialCamoufoxEnv,
+    requested_provider_id: "camoufox"
+  });
+  assert.equal(camoufoxUserDefault.selected_provider_id, "camoufox");
+  assert.equal(camoufoxUserDefault.selection_reason, "user_default_available");
+  assert.equal(camoufoxExplicit.selected_provider_id, "camoufox");
+  assert.equal(camoufoxExplicit.selection_reason, "requested_provider_available");
+
+  const camoufoxUnavailableDefault = bindIdentityEnvironmentDefaultProvider({
+    ...providerFixture({ [camoufoxPath]: { executable: true } }),
+    env: { HARBOR_CAMOUFOX_PATH: camoufoxPath },
+    user_creation_default_provider_id: "camoufox"
+  });
+  assert.equal(camoufoxUnavailableDefault.selected_provider_id, null);
+  assert.equal(camoufoxUnavailableDefault.selection_reason, "user_default_unavailable");
 });
 
 test("explains provider install and launch failure diagnostics", () => {

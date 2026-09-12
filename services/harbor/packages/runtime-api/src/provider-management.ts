@@ -214,11 +214,11 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
 
   if (requested?.provider_id === "camoufox") {
     if (isLaunchable(requested) && requested.install.source === "official_release") {
-      return binding(input, requested, null, "requested_provider_available", true, [
+      return binding(input, requested, null, fromUserDefault ? "user_default_available" : "requested_provider_available", true, [
         "Camoufox 仅通过固定官方 source、version、hash 和原版 Playwright JSONL Driver 启动；native504/native510 绑定仍被拒绝。"
       ]);
     }
-    return binding(input, null, null, "requested_provider_unavailable", true, [
+    return binding(input, null, null, fromUserDefault ? "user_default_unavailable" : "requested_provider_unavailable", true, [
       "Camoufox 未提供可验证的官方 source、version、hash；历史私有/native binding 已退役，Harbor 不会启动或自动切换到其他 provider。"
     ]);
   }
