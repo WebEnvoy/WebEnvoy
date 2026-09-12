@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a pinned, test-only Camoufox artifact for Harbor phase-1 validation.
+"""Build a pinned, test-only Camoufox artifact for Harbor native validation.
 
 The source app and existing Profiles are never modified.  The output is a
 separate app with exactly four Juggler entries patched in omni.ja and a
@@ -25,10 +25,42 @@ PROPERTIES_SHA256_PIN = "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a354
 SOURCE_EXECUTABLE_SHA256_PIN = "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33"
 SOURCE_INFO_PLIST_SHA256_PIN = "c843c5dd03cb9c6241ec589573bd408df69a5a9dc079aba3e8711ee3adac60d2"
 SOURCE_APPLICATION_INI_SHA256_PIN = "b96cb1a88c4c6dd22b308f8125b70a227ef6fb10dee994c8daf47c9cf019f2a5"
+SOURCE_CHROME_CSS_SHA256_PIN = "8edbf68d8b73d2e59bcbaa37560ebfdc145888b37c98628eda6bc3e5f54359ab"
 ARTIFACT_BUNDLE_IDENTIFIER = "com.webenvoy.camoufox.native504"
 ARTIFACT_BUNDLE_NAME = "WebEnvoy Camoufox Native Test"
+TAB_HANDOFF_ARTIFACT_BUNDLE_IDENTIFIER = "com.webenvoy.camoufox.native510"
+TAB_HANDOFF_ARTIFACT_BUNDLE_NAME = "WebEnvoy Camoufox Native Tab Handoff Test"
 PATCH_SCHEMA = "webenvoy.camoufox-native/v1"
+TAB_HANDOFF_PATCH_SCHEMA = "webenvoy.camoufox-native/v2"
 PATCH_ID = "managed-native-snapshot"
+TAB_HANDOFF_PATCH_ID = "managed-native-tab-handoff"
+TAB_HANDOFF_CSS_PATH = "Contents/Resources/chrome.css"
+TAB_HANDOFF_CSS_BLOCK = """/* Disable tab dragging and use it for window movement */
+#TabsToolbar {
+  -moz-window-dragging: drag !important;
+}
+
+.tabbrowser-tab {
+  -moz-window-dragging: inherit !important;
+}
+
+.tab-content {
+  pointer-events: none !important;
+}
+"""
+TAB_HANDOFF_CSS_REPLACEMENT = """/* Keep blank toolbar space draggable while tabs retain native DnD */
+#TabsToolbar {
+  -moz-window-dragging: drag !important;
+}
+
+.tabbrowser-tab {
+  -moz-window-dragging: no-drag !important;
+}
+
+.tab-content {
+  pointer-events: auto !important;
+}
+"""
 PATCHED_ENTRIES = (
     "chrome/juggler/content/protocol/Protocol.js",
     "chrome/juggler/content/protocol/BrowserHandler.js",
@@ -74,7 +106,7 @@ def executable_for(app: Path) -> Path:
     return executable
 
 
-def check_source(source: Path) -> tuple[Path, dict[str, str]]:
+def check_source(source: Path, *, tab_handoff: bool = False) -> tuple[Path, dict[str, str]]:
     directory(source, "Camoufox source app")
     executable = executable_for(source)
     resources = source / "Contents" / "Resources"
@@ -82,8 +114,11 @@ def check_source(source: Path) -> tuple[Path, dict[str, str]]:
     application_ini = resources / "application.ini"
     properties = resources / "properties.json"
     omni = resources / "omni.ja"
+    chrome_css = source / "Contents" / "Resources" / "chrome.css"
     for path, label in ((application_ini, "application.ini"), (properties, "properties.json"), (omni, "omni.ja")):
         regular(path, label)
+    if tab_handoff:
+        regular(chrome_css, "chrome.css")
     version = ""
     for line in application_ini.read_text(encoding="utf-8").splitlines():
         if line.startswith("Version="):
@@ -98,13 +133,18 @@ def check_source(source: Path) -> tuple[Path, dict[str, str]]:
         "info_plist": sha256(source / "Contents" / "Info.plist"),
         "application_ini": sha256(application_ini),
     }
-    if hashes != {
+    if tab_handoff:
+        hashes["chrome_css"] = sha256(chrome_css)
+    expected_hashes = {
         "omni.ja": SOURCE_OMNI_SHA256_PIN,
         "properties.json": PROPERTIES_SHA256_PIN,
         "executable": SOURCE_EXECUTABLE_SHA256_PIN,
         "info_plist": SOURCE_INFO_PLIST_SHA256_PIN,
         "application_ini": SOURCE_APPLICATION_INI_SHA256_PIN,
-    }:
+    }
+    if tab_handoff:
+        expected_hashes["chrome_css"] = SOURCE_CHROME_CSS_SHA256_PIN
+    if hashes != expected_hashes:
         raise BuildError("source Camoufox integrity pins do not match")
     return executable, hashes
 
@@ -203,7 +243,160 @@ def patch_browser_handler(source: str) -> str:
     return source.replace(anchor, anchor + methods, 1)
 
 
-def patch_target_registry(source: str) -> str:
+def patch_native_tab_handoff_lifecycle(source: str) -> str:
+    methods_anchor = """  // Firefox uses nsHttpAuthCache to cache authentication to the proxy.
+"""
+    methods = r'''  // Follow the two real BrowsingContexts through the native frame-loader swap.
+  // No title/URL matching, target recreation, actor rebind, or Page
+  // initialization is allowed here.
+  _onNativeSwap(event) {
+    // AsyncTabSwitcher handles these capturing events through
+    // event.originalTarget. event.target may be the retargeted window, which
+    // is never a valid Browser relation for this registry.
+    const browser = event?.originalTarget;
+    const other = event?.detail;
+    if (!browser || typeof browser !== 'object' || !other || typeof other !== 'object' || browser === other)
+      return;
+    this._nativeSwaps ??= new WeakMap();
+    if (this._nativeSwaps.has(browser))
+      return;
+    const first = this._browserToTarget.get(browser);
+    const second = this._browserToTarget.get(other);
+    if (!first || !second) {
+      if (first) first._nativeSwapPending = true;
+      if (second) second._nativeSwapPending = true;
+      return;
+    }
+    const swap = {browser, other, first, second,
+      context: browser.browsingContext, otherContext: other.browsingContext};
+    first._nativeSwapPending = second._nativeSwapPending = true;
+    this._nativeSwaps.set(browser, swap);
+    this._nativeSwaps.set(other, swap);
+    // removeProgressListener resolves browser.webProgress dynamically: detach
+    // before swapFrameLoaders changes which BrowsingContext the browser owns.
+    helper.removeListeners(first._eventListeners);
+    first._eventListeners = [];
+    helper.removeListeners(second._eventListeners);
+    second._eventListeners = [];
+  }
+
+  _onNativeSwapDone(event) {
+    const eventBrowser = event?.originalTarget;
+    if (!eventBrowser || typeof eventBrowser !== 'object')
+      return;
+    const swap = this._nativeSwaps?.get(eventBrowser);
+    if (!swap)
+      return;
+    const {browser, other, first, second, context, otherContext} = swap;
+    // A partial, missing, or mismatched swap stays unavailable; never guess
+    // which target owns a document after a native move.
+    if (event.detail !== (eventBrowser === browser ? other : browser) ||
+        browser.browsingContext !== otherContext || other.browsingContext !== context ||
+        first._disposed || second._disposed || first.browserContext() !== second.browserContext())
+      return;
+    const firstTab = (other.ownerGlobal || other.documentGlobal)?.gBrowser?.getTabForBrowser(other);
+    const secondTab = (browser.ownerGlobal || browser.documentGlobal)?.gBrowser?.getTabForBrowser(browser);
+    if (!firstTab?.isConnected || !secondTab?.isConnected)
+      return;
+    first._adoptNativeTab(firstTab);
+    second._adoptNativeTab(secondTab);
+    this._browserToTarget.set(other, first);
+    this._browserToTarget.set(browser, second);
+    // browserId -> target and the live actor/channel stay with the content.
+    this._nativeSwaps.delete(browser);
+    this._nativeSwaps.delete(other);
+    first._nativeSwapPending = second._nativeSwapPending = false;
+    // Ordinary adoption already emitted TabClose before Swap. Last-tab
+    // adoption emits no TabClose; a later window close disposes its placeholder.
+    for (const target of [first, second]) {
+      target._nativeAdopting = false;
+      if (target._tab.closing)
+        target.dispose();
+    }
+  }
+
+'''
+    if source.count(methods_anchor) != 1:
+        raise BuildError("TargetRegistry.js native swap method anchor is not unique")
+    source = source.replace(methods_anchor, methods + methods_anchor, 1)
+
+    close_anchor = """      const target = this._browserToTarget.get(linkedBrowser);
+      if (target)
+          target.dispose();
+"""
+    close_replacement = """      const target = this._browserToTarget.get(linkedBrowser);
+      if (target && event.detail?.adoptedBy) {
+        target._nativeAdopting = true;
+        return;
+      }
+      if (target)
+          target.dispose();
+"""
+    if source.count(close_anchor) != 1:
+        raise BuildError("TargetRegistry.js native TabClose anchor is not unique")
+    source = source.replace(close_anchor, close_replacement, 1)
+
+    listeners_anchor = """        helper.addEventListener(tabContainer, 'TabClose', onTabCloseListener),
+"""
+    listeners_replacement = listeners_anchor + """        helper.addEventListener(domWindow, 'SwapDocShells', event => this._onNativeSwap(event), true),
+        helper.addEventListener(domWindow, 'EndSwapDocShells', event => this._onNativeSwapDone(event), true),
+"""
+    if source.count(listeners_anchor) != 1:
+        raise BuildError("TargetRegistry.js native swap listener anchor is not unique")
+    source = source.replace(listeners_anchor, listeners_replacement, 1)
+
+    navigation_anchor = """    const navigationListener = {
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
+      onLocationChange: (aWebProgress, aRequest, aLocation) => this._onNavigated(aLocation),
+    };
+    this._eventListeners = [
+      helper.addObserver(this._updateModalDialogs.bind(this), 'common-dialog-loaded'),
+      helper.addProgressListener(tab.linkedBrowser, navigationListener, Ci.nsIWebProgress.NOTIFY_LOCATION),
+      helper.addEventListener(this._linkedBrowser, 'DOMModalDialogClosed', event => this._updateModalDialogs()),
+      helper.addEventListener(this._linkedBrowser, 'WillChangeBrowserRemoteness', event => this._willChangeBrowserRemoteness()),
+    ];
+"""
+    if source.count(navigation_anchor) != 1:
+        raise BuildError("TargetRegistry.js native navigation listener anchor is not unique")
+    source = source.replace(navigation_anchor, "    this._listenToNativeBrowser();\n", 1)
+
+    listen_method = "  _listenToNativeBrowser() {\n" + navigation_anchor.replace("tab.linkedBrowser", "this._linkedBrowser") + "  }\n\n"
+    activate_anchor = """  async activateAndRun(callback = () => {}, { muteNotificationsPopup = false } = {}) {
+"""
+    if source.count(activate_anchor) != 1:
+        raise BuildError("TargetRegistry.js native adoption method anchor is not unique")
+    source = source.replace(activate_anchor, listen_method + """  _adoptNativeTab(tab) {
+    this._tab = tab;
+    this._linkedBrowser = tab.linkedBrowser;
+    this._window = tab.ownerGlobal || tab.documentGlobal;
+    this._gBrowser = this._window.gBrowser;
+    this._listenToNativeBrowser();
+  }
+
+""" + activate_anchor, 1)
+
+    browser_id_anchor = """    const browserId = this._linkedBrowser.browsingContext.browserId;
+"""
+    browser_id_replacement = browser_id_anchor + """    this._registeredBrowserId = browserId;
+"""
+    if source.count(browser_id_anchor) != 1:
+        raise BuildError("TargetRegistry.js native browser identity anchor is not unique")
+    source = source.replace(browser_id_anchor, browser_id_replacement, 1)
+
+    dispose_anchor = """    this._registry._browserToTarget.delete(this._linkedBrowser);
+    this._registry._browserIdToTarget.delete(this._linkedBrowser.browsingContext.browserId);
+"""
+    dispose_replacement = """    if (this._registry._browserToTarget.get(this._linkedBrowser) === this)
+      this._registry._browserToTarget.delete(this._linkedBrowser);
+    if (this._registry._browserIdToTarget.get(this._registeredBrowserId) === this)
+      this._registry._browserIdToTarget.delete(this._registeredBrowserId);
+"""
+    if source.count(dispose_anchor) != 1:
+        raise BuildError("TargetRegistry.js native dispose ownership anchor is not unique")
+    return source.replace(dispose_anchor, dispose_replacement, 1)
+
+
+def patch_target_registry(source: str, *, tab_handoff: bool = False) -> str:
     import_anchor = 'const {AppConstants} = ChromeUtils.importESModule("resource://gre/modules/AppConstants.sys.mjs");\n'
     imports = import_anchor + 'const {TabManager} = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs");\nconst {UserContextManager} = ChromeUtils.importESModule("chrome://remote/content/shared/UserContextManager.sys.mjs");\n'
     if source.count(import_anchor) != 1:
@@ -247,6 +440,8 @@ def patch_target_registry(source: str) -> str:
   _nativePageFact(target, windowId, tab = target._tab) {
     const linkedBrowser = target._linkedBrowser;
     const browsingContext = linkedBrowser && linkedBrowser.browsingContext;
+    if (target._nativeSwapPending)
+      throw new Error('Native snapshot encountered a Page during a pending tab handoff');
     if (!tab || target._tab !== tab || !linkedBrowser || !browsingContext || browsingContext.isDiscarded || target._window?.gBrowser?.selectedTab === undefined)
       throw new Error('Native snapshot encountered an incomplete Page relation');
     const browsingContextId = browsingContext.id ?? browsingContext.browserId;
@@ -289,7 +484,7 @@ def patch_target_registry(source: str) -> str:
         ++nativeTabCount;
         const windowId = this._nativeWindowId(window);
         const target = this._browserToTarget.get(tab.linkedBrowser);
-        if (!target || target._disposed || target._browserContext !== browserContext || target._window !== window || target._tab !== tab) {
+        if (!target || target._disposed || target._nativeSwapPending || target._browserContext !== browserContext || target._window !== window || target._tab !== tab) {
           complete = false;
           continue;
         }
@@ -416,7 +611,8 @@ def patch_target_registry(source: str) -> str:
 '''
     if source.count(method_anchor) != 1:
         raise BuildError("TargetRegistry.js target lookup anchor is not unique")
-    return source.replace(method_anchor, method_anchor + methods, 1)
+    source = source.replace(method_anchor, method_anchor + methods, 1)
+    return patch_native_tab_handoff_lifecycle(source) if tab_handoff else source
 
 
 def patch_page_handler(source: str) -> str:
@@ -456,7 +652,7 @@ def patch_page_handler(source: str) -> str:
     return source.replace(anchor, replacement, 1)
 
 
-def patch_entries(omni: Path) -> tuple[Path, dict[str, str], dict[str, str]]:
+def patch_entries(omni: Path, *, tab_handoff: bool = False) -> tuple[Path, dict[str, str], dict[str, str]]:
     if sha256(omni) != SOURCE_OMNI_SHA256_PIN:
         raise BuildError("source omni.ja changed before patching")
     with zipfile.ZipFile(omni, "r") as archive:
@@ -465,7 +661,7 @@ def patch_entries(omni: Path) -> tuple[Path, dict[str, str], dict[str, str]]:
             raise BuildError("source omni.ja is missing a pinned Juggler entry")
         payloads = {name: archive.read(name) for name in members}
         before = {name: hashlib.sha256(payloads[name]).hexdigest() for name in PATCHED_ENTRIES}
-        patchers = (patch_protocol, patch_browser_handler, patch_target_registry, patch_page_handler)
+        patchers = (patch_protocol, patch_browser_handler, lambda value: patch_target_registry(value, tab_handoff=tab_handoff), patch_page_handler)
         for name, patcher in zip(PATCHED_ENTRIES, patchers):
             payloads[name] = patcher(payloads[name].decode("utf-8")).encode("utf-8")
         after = {name: hashlib.sha256(payloads[name]).hexdigest() for name in PATCHED_ENTRIES}
@@ -494,31 +690,45 @@ def copy_source(source: Path, output: Path) -> None:
     shutil.copytree(source, output, symlinks=False)
 
 
-def patch_identity(output: Path) -> None:
+def patch_chrome_css(output: Path) -> tuple[str, str]:
+    path = output / TAB_HANDOFF_CSS_PATH
+    regular(path, "copied chrome.css")
+    original = path.read_text(encoding="utf-8")
+    if sha256(path) != SOURCE_CHROME_CSS_SHA256_PIN or original.count(TAB_HANDOFF_CSS_BLOCK) != 1:
+        raise BuildError("chrome.css native tab-handoff anchor or source hash is not qualified")
+    patched = original.replace(TAB_HANDOFF_CSS_BLOCK, TAB_HANDOFF_CSS_REPLACEMENT, 1)
+    path.write_text(patched, encoding="utf-8")
+    return hashlib.sha256(original.encode("utf-8")).hexdigest(), sha256(path)
+
+
+def patch_identity(output: Path, *, tab_handoff: bool = False) -> None:
     path = output / "Contents" / "Info.plist"
     regular(path, "copied Info.plist")
     try:
         info = plistlib.loads(path.read_bytes())
     except (ValueError, plistlib.InvalidFileException) as error:
         raise BuildError("copied Info.plist is unreadable") from error
-    info["CFBundleIdentifier"] = ARTIFACT_BUNDLE_IDENTIFIER
-    info["CFBundleName"] = ARTIFACT_BUNDLE_NAME
-    info["CFBundleDisplayName"] = ARTIFACT_BUNDLE_NAME
+    info["CFBundleIdentifier"] = TAB_HANDOFF_ARTIFACT_BUNDLE_IDENTIFIER if tab_handoff else ARTIFACT_BUNDLE_IDENTIFIER
+    info["CFBundleName"] = TAB_HANDOFF_ARTIFACT_BUNDLE_NAME if tab_handoff else ARTIFACT_BUNDLE_NAME
+    info["CFBundleDisplayName"] = TAB_HANDOFF_ARTIFACT_BUNDLE_NAME if tab_handoff else ARTIFACT_BUNDLE_NAME
     path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
 
 
-def build(source: Path, output: Path, *, sign: bool) -> dict[str, object]:
+def build(source: Path, output: Path, *, sign: bool, tab_handoff: bool = False) -> dict[str, object]:
     source = source.expanduser().resolve(strict=False)
     output = output.expanduser().resolve(strict=False)
-    source_executable, source_hashes = check_source(source)
+    source_executable, source_hashes = check_source(source, tab_handoff=tab_handoff)
     if output.exists() or output.is_symlink():
         raise BuildError(f"output already exists: {output}")
     if output == source or source in output.parents or output in source.parents:
         raise BuildError("source and output app paths must be separate")
-    temporary, before, after = patch_entries(source / "Contents" / "Resources" / "omni.ja")
+    temporary, before, after = patch_entries(source / "Contents" / "Resources" / "omni.ja", tab_handoff=tab_handoff)
     try:
         copy_source(source, output)
-        patch_identity(output)
+        patch_identity(output, tab_handoff=tab_handoff)
+        css_before = css_after = None
+        if tab_handoff:
+            css_before, css_after = patch_chrome_css(output)
         destination_omni = output / "Contents" / "Resources" / "omni.ja"
         shutil.copy2(temporary, destination_omni)
         # Camoufox's macOS launcher resolves properties.json beside the binary;
@@ -529,8 +739,8 @@ def build(source: Path, output: Path, *, sign: bool) -> dict[str, object]:
             output / "Contents" / "MacOS" / "properties.json",
         )
         manifest = {
-        "schema": PATCH_SCHEMA,
-        "patch_id": PATCH_ID,
+        "schema": TAB_HANDOFF_PATCH_SCHEMA if tab_handoff else PATCH_SCHEMA,
+        "patch_id": TAB_HANDOFF_PATCH_ID if tab_handoff else PATCH_ID,
         "distribution_or_production_use_authorized": False,
         "test_only": True,
         "source": {
@@ -549,13 +759,21 @@ def build(source: Path, output: Path, *, sign: bool) -> dict[str, object]:
             "application_ini_sha256": sha256(output / "Contents" / "Resources" / "application.ini"),
             "adjacent_properties_sha256": sha256(output / "Contents" / "MacOS" / "properties.json"),
         },
-        "identity": {"bundle_identifier": ARTIFACT_BUNDLE_IDENTIFIER, "bundle_name": ARTIFACT_BUNDLE_NAME},
+        "identity": {
+            "bundle_identifier": TAB_HANDOFF_ARTIFACT_BUNDLE_IDENTIFIER if tab_handoff else ARTIFACT_BUNDLE_IDENTIFIER,
+            "bundle_name": TAB_HANDOFF_ARTIFACT_BUNDLE_NAME if tab_handoff else ARTIFACT_BUNDLE_NAME,
+        },
         "provider": {"camoufox_version": CAMOUFOX_VERSION_PIN, "browser_version": BROWSER_VERSION_PIN},
         "patched_entries": {
             name: {"before_sha256": before[name], "after_sha256": after[name]}
             for name in PATCHED_ENTRIES
         },
         }
+        if tab_handoff:
+            manifest["output"]["chrome_css_sha256"] = sha256(output / TAB_HANDOFF_CSS_PATH)
+            manifest["patched_assets"] = {
+                TAB_HANDOFF_CSS_PATH: {"before_sha256": css_before, "after_sha256": css_after}
+            }
         manifest_path = output / "Contents" / "Resources" / "webenvoy-native-manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
@@ -581,11 +799,11 @@ def output_path_safety_check() -> bool:
         return False
 
 
-def self_check(source: Path) -> dict[str, object]:
-    executable, hashes = check_source(source)
+def self_check(source: Path, *, tab_handoff: bool = False) -> dict[str, object]:
+    executable, hashes = check_source(source, tab_handoff=tab_handoff)
     with zipfile.ZipFile(source / "Contents" / "Resources" / "omni.ja") as archive:
         values = {name: archive.read(name).decode("utf-8") for name in PATCHED_ENTRIES}
-    patched = (patch_protocol(values[PATCHED_ENTRIES[0]]), patch_browser_handler(values[PATCHED_ENTRIES[1]]), patch_target_registry(values[PATCHED_ENTRIES[2]]), patch_page_handler(values[PATCHED_ENTRIES[3]]))
+    patched = (patch_protocol(values[PATCHED_ENTRIES[0]]), patch_browser_handler(values[PATCHED_ENTRIES[1]]), patch_target_registry(values[PATCHED_ENTRIES[2]], tab_handoff=tab_handoff), patch_page_handler(values[PATCHED_ENTRIES[3]]))
     checks = {
         "protocol_snapshot": "getWebEnvoyNativeSnapshot" in patched[0],
         "protocol_background_page": "newPageInWindow" in patched[0],
@@ -596,8 +814,11 @@ def self_check(source: Path) -> dict[str, object]:
         "registry_background_page": "TabManager.addTab" in patched[2],
         "registry_safe_return_close": "closePageWithSafeReturn" in patched[2] and "selectedTab" in patched[2] and "TabManager.removeTab" in patched[2],
         "registry_native_context_ownership": "_userContextIdToBrowserContext.get(tab.userContextId)" in patched[2],
+        "registry_native_tab_adoption": (not tab_handoff) or all(marker in patched[2] for marker in ("_onNativeSwap(event)", "_onNativeSwapDone(event)", "_adoptNativeTab(tab)", "event.detail?.adoptedBy", "target._nativeSwapPending")),
+        "registry_native_swap_original_target": (not tab_handoff) or all(marker in patched[2] for marker in ("const browser = event?.originalTarget;", "const eventBrowser = event?.originalTarget;")),
+        "chrome_css_tab_drag_patch": (not tab_handoff) or (TAB_HANDOFF_CSS_BLOCK.count("inherit") == 1 and TAB_HANDOFF_CSS_REPLACEMENT.count("no-drag") == 1 and TAB_HANDOFF_CSS_REPLACEMENT.count("pointer-events: auto") == 1),
         "page_reload_uses_browsing_context": "browsingContext.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE)" in patched[3] and "activateAndRun" not in patched[3].split("  async ['Page.reload']()", 1)[1].split("  async ['Page.describeNode']", 1)[0],
-        "source_unchanged": sha256(source / "Contents" / "Resources" / "omni.ja") == SOURCE_OMNI_SHA256_PIN,
+        "source_unchanged": sha256(source / "Contents" / "Resources" / "omni.ja") == SOURCE_OMNI_SHA256_PIN and (not tab_handoff or sha256(source / TAB_HANDOFF_CSS_PATH) == SOURCE_CHROME_CSS_SHA256_PIN),
         "existing_output_parent_traversal_safe": output_path_safety_check(),
     }
     if not all(checks.values()):
@@ -610,16 +831,17 @@ def main() -> int:
     parser.add_argument("--source-app", type=Path, default=Path("/Applications/Camoufox.app"))
     parser.add_argument("--output-app", type=Path)
     parser.add_argument("--self-check", action="store_true", help="verify pins/anchors without creating an app")
+    parser.add_argument("--tab-handoff", action="store_true", help="build the independent native tab-handoff test artifact")
     parser.add_argument("--no-adhoc-sign", action="store_true", help="leave the local test artifact unsigned")
     args = parser.parse_args()
     source = args.source_app.expanduser().resolve(strict=False)
     if args.self_check:
-        print(json.dumps(self_check(source), ensure_ascii=False, sort_keys=True))
+        print(json.dumps(self_check(source, tab_handoff=args.tab_handoff), ensure_ascii=False, sort_keys=True))
         return 0
     if args.output_app is None:
         parser.error("--output-app is required unless --self-check is used")
     output = args.output_app.expanduser().resolve(strict=False)
-    manifest = build(source, output, sign=not args.no_adhoc_sign)
+    manifest = build(source, output, sign=not args.no_adhoc_sign, tab_handoff=args.tab_handoff)
     print(json.dumps({
         "status": "built",
         "artifact": str(output),

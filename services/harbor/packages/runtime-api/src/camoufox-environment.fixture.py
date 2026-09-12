@@ -436,21 +436,41 @@ class RelationPage:
         pass
 
 
+class DiscardProbe:
+    def __init__(self) -> None:
+        self.evaluate_calls = 0
+        self.dispose_calls = 0
+
+    def evaluate(self, _expression: str) -> None:
+        self.evaluate_calls += 1
+
+    def dispose(self) -> None:
+        self.dispose_calls += 1
+
+
 def native_relation(epoch: str, sequence: int, pages: list[tuple[RelationPage, str, str, str, str, bool]], active_window_id: str = "window-a") -> dict[str, object]:
     facts = [
         {"page": page, "target_id": target, "tab_id": tab, "browsing_context_id": context,
          "window_id": window, "selected": selected}
         for page, target, tab, context, window, selected in pages
     ]
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for fact in facts:
+        grouped.setdefault(str(fact["window_id"]), []).append(fact)
+    windows = []
+    for window_id, window_facts in grouped.items():
+        windows.append({
+            "window_id": window_id,
+            "os_foreground": window_id == active_window_id,
+            "selected_tab_id": next((item["tab_id"] for item in window_facts if item["selected"]), None),
+            "pages": [{key: value for key, value in item.items() if key != "page"} for item in window_facts],
+        })
     return {
         "epoch": epoch,
         "sample_sequence": sequence,
         "selection_status": "complete",
         "active_window_id": active_window_id,
-        "windows": [{
-            "window_id": "window-a", "os_foreground": True,
-            "pages": [{key: value for key, value in item.items() if key != "page"} for item in facts],
-        }],
+        "windows": windows,
         "pages": facts,
     }
 
@@ -463,6 +483,29 @@ class RelationAdapter:
     def native_snapshot(self, _browser, _context) -> dict[str, object]:
         self.calls += 1
         return self.samples.pop(0) if self.samples else self.samples[-1]
+
+
+# A late Context page event can carry a Page already closed by the provider;
+# do not register a stale placeholder, while a live Page still enters scope.
+DRIVER.reset_provider_pages()
+closed_context_page = RelationPage("closed-context")
+closed_context_page.is_closed = lambda: True
+DRIVER.context_page_created(closed_context_page)
+assert not DRIVER.PAGE_STATES and id(closed_context_page) not in DRIVER.PAGE_STATE_BY_OBJECT
+opener_race_page = RelationPage("opener-race")
+
+def close_during_opener() -> None:
+    opener_race_page.is_closed = lambda: True
+
+opener_race_page.opener = close_during_opener
+assert not opener_race_page.is_closed()
+DRIVER.context_page_created(opener_race_page)
+assert DRIVER.page_state_for(opener_race_page) is None
+open_context_page = RelationPage("open-context")
+DRIVER.context_page_created(open_context_page)
+assert DRIVER.page_state_for(open_context_page) is not None
+DRIVER.reset_provider_pages()
+print("camoufox Context page admission fixture passed")
 
 
 DRIVER.reset_provider_pages()
@@ -534,6 +577,58 @@ try:
                     DRIVER.page_state_for(page_b).get("native_selected"))
     assert after_atomic == before_atomic
 
+    # Native adoption keeps the client Page, target and BrowsingContext while
+    # replacing the destination tab/window location identities.
+    DRIVER.reset_provider_pages()
+    moved = RelationPage("moved")
+    DRIVER.CONTEXT.pages = [moved]
+    DRIVER.register_provider_page(moved)
+    moved_adapter = RelationAdapter(
+        native_relation("move-epoch", 1, [(moved, "target-move", "tab-source", "context-move", "window-source", True)], "window-source"),
+        native_relation("move-epoch", 2, [(moved, "target-move", "tab-destination", "context-move", "window-destination", True)], "window-destination"),
+    )
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = moved_adapter
+    DRIVER.PAGE = moved
+    DRIVER.refresh_native_selected_page()
+    moved_state = DRIVER.page_state_for(moved)
+    assert moved_state and moved_state["native_tab_id"] == "tab-source" and moved_state["native_window_id"] == "window-source"
+    moved_state["diagnostic_page_ref"] = "page_" + "a" * 32
+    moved_state["interaction_page_ref"] = "page_" + "b" * 32
+    old_generation = moved_state["document_generation"]
+    old_diagnostic_ref = moved_state["diagnostic_page_ref"]
+    snapshot_handle, snapshot_target = DiscardProbe(), DiscardProbe()
+    DRIVER.INTERACTION_STATE = {
+        "handle": snapshot_handle,
+        "targets": {"target_old": snapshot_target},
+        "generation": 1,
+        "page_ref": old_diagnostic_ref,
+        "observation_ref": "observation_old",
+    }
+    old_relation_revision = DRIVER.NATIVE_RELATION_REVISION
+    DRIVER.refresh_native_selected_page()
+    assert DRIVER.NATIVE_RELATION_INVALID is False
+    assert DRIVER.PAGE is moved and DRIVER.page_state_for(moved) is moved_state
+    assert moved_state["native_target_id"] == "target-move" and moved_state["native_browsing_context_id"] == "context-move"
+    assert moved_state["native_tab_id"] == "tab-destination" and moved_state["native_window_id"] == "window-destination"
+    assert DRIVER.INTERACTION_STATE is None
+    assert snapshot_handle.evaluate_calls == 1 and snapshot_handle.dispose_calls == 1
+    assert snapshot_target.dispose_calls == 1
+    assert moved_state["diagnostic_page_ref"] != old_diagnostic_ref
+    assert "interaction_page_ref" not in moved_state
+    assert moved_state["document_generation"] == old_generation
+    assert DRIVER.NATIVE_RELATION_REVISION == old_relation_revision + 1
+    assert DRIVER.PAGE is moved
+
+    changed_context = RelationAdapter(native_relation("move-epoch", 3, [(moved, "target-move", "tab-next", "context-replaced", "window-next", True)], "window-next"))
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = changed_context
+    try:
+        DRIVER.refresh_native_selected_page()
+    except RuntimeError as error:
+        assert "identity changed" in str(error) or "different target" in str(error)
+    else:
+        raise AssertionError("changed native BrowsingContext identity was accepted")
+    assert DRIVER.NATIVE_RELATION_INVALID is True
+
     stale_adapter = RelationAdapter(native_relation("stale-epoch", 1, [
         (page_a, "target-a", "tab-a", "context-a", "window-a", True),
     ]), native_relation("stale-epoch", 1, [
@@ -576,6 +671,314 @@ finally:
     DRIVER.reset_provider_pages()
 
 print("camoufox native Page relation fixtures passed")
+
+# Relation-bound reads must not publish a result from a Page whose native
+# location changed while the provider was evaluating it.
+class ReadPage(RelationPage):
+    def __init__(self, name: str, url: str = "https://example.com/read") -> None:
+        super().__init__(name)
+        self.url = url
+        self.routes = []
+        self.frames = [self]
+        self.mouse = types.SimpleNamespace(move=lambda *_args: None, wheel=lambda *_args: None)
+
+    def evaluate(self, expression: str, *_args):
+        if expression.startswith("mw:({width:innerWidth"):
+            return {"width": 1280, "height": 720}
+        return {"read": "old relation"}
+
+    def route(self, _pattern, handler) -> None:
+        self.routes.append(handler)
+
+    def unroute(self, _pattern, handler) -> None:
+        if handler in self.routes:
+            self.routes.remove(handler)
+
+
+def read_context(page: ReadPage) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        browser=object(),
+        pages=[page],
+        _impl_obj=types.SimpleNamespace(_browser_context_id="context-read"),
+        route=lambda _pattern, handler: setattr(DRIVER.CONTEXT, "guard", handler),
+        unroute=lambda *_args: None,
+    )
+
+
+def read_handoff_samples(page: ReadPage, second: dict[str, object] | None = None) -> tuple[dict[str, object], dict[str, object]]:
+    first = native_relation("read-epoch", 1, [(page, "target-read", "tab-read", "context-read", "window-read", True)], "window-read")
+    if second is None:
+        second = native_relation("read-epoch", 2, [(page, "target-read", "tab-read-new", "context-read", "window-read-new", True)], "window-read-new")
+    return first, second
+
+
+def run_read_handoff_regression(operation: str, partial: bool = False) -> None:
+    DRIVER.reset_provider_pages()
+    page = ReadPage(operation)
+    DRIVER.PAGE = page
+    DRIVER.CONTEXT = read_context(page)
+    state = DRIVER.register_provider_page(page)
+    first, second = read_handoff_samples(page)
+    if partial:
+        second = {"selection_status": "partial"}
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = RelationAdapter(first, second)
+    try:
+        if operation == "public":
+            result = DRIVER.managed_public_page({"expected_origin": "https://example.com"})
+            assert result["failure_class"] == "managed_public_page_unavailable"
+        elif operation == "observe":
+            try:
+                DRIVER.managed_observe({"expected_origin": "https://example.com", "expression": "(() => ({read: true}))()"})
+            except ValueError as error:
+                assert str(error) == "managed_observation_relation_unavailable"
+            else:
+                raise AssertionError("managed_observe returned a result from a moved Page")
+        else:
+            state["diagnostic_page_ref"] = "page_" + "a" * 32
+            result = DRIVER.diagnostics_read({"origin": "https://example.com"})
+            assert result["status"] == "unavailable" and result["failure_class"] == "page_relation_unavailable"
+    finally:
+        DRIVER.clear_public_navigation_guard()
+        DRIVER.PAGE = None
+        DRIVER.CONTEXT = None
+        DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+        DRIVER.reset_provider_pages()
+
+
+run_read_handoff_regression("public")
+run_read_handoff_regression("observe")
+run_read_handoff_regression("diagnostics", partial=True)
+print("camoufox native relation-bound read fixtures passed")
+
+# A relation handoff first observed at an interaction dispatch gate must stop
+# the action before the old target or wheel is used.
+class MouseProbe:
+    def __init__(self) -> None:
+        self.moves = 0
+        self.wheels = 0
+
+    def move(self, *_args) -> None:
+        self.moves += 1
+
+    def wheel(self, *_args) -> None:
+        self.wheels += 1
+
+
+class InteractionTarget:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def wait_for_element_state(self, *_args, **_kwargs) -> None:
+        pass
+
+    def is_visible(self) -> bool:
+        return True
+
+    def click(self, **_kwargs) -> None:
+        self.calls.append("click")
+
+    def fill(self, value, **_kwargs) -> None:
+        self.calls.append(("fill", value))
+
+    def press(self, key, **_kwargs) -> None:
+        self.calls.append(("press", key))
+
+    def dispose(self) -> None:
+        pass
+
+
+class InteractionHandle(DiscardProbe):
+    def __init__(self, role: str) -> None:
+        super().__init__()
+        self.role = role
+
+    def evaluate(self, expression: str, *_args):
+        if "state => state.dispose()" in expression:
+            return super().evaluate(expression)
+        if "state => state.valid()" in expression:
+            return True
+        if "state => state.controls" in expression:
+            return [{"role": self.role, "name": "fixture-control"}]
+        if "state.describe" in expression:
+            return {"role": self.role, "name": "fixture-control", "enabled": True}
+        return True
+
+
+def run_interaction_handoff_regression(action: str) -> None:
+    DRIVER.reset_provider_pages()
+    page = ReadPage("interaction")
+    page.mouse = MouseProbe()
+    DRIVER.PAGE = page
+    DRIVER.CONTEXT = read_context(page)
+    state = DRIVER.register_provider_page(page)
+    first, second = read_handoff_samples(page)
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = RelationAdapter(first, second)
+    target = InteractionTarget()
+    role = "textbox" if action == "input" else "button"
+    handle = InteractionHandle(role)
+    page_ref = "page_" + "a" * 32
+    DRIVER.INTERACTION_STATE = {
+        "handle": handle,
+        "targets": {} if action == "scroll" else {"target_" + "b" * 32: target},
+        "generation": 1,
+        "page_ref": page_ref,
+        "observation_ref": "observation_" + "c" * 32,
+    }
+    request = {
+        "action": action,
+        "expected_origin": "https://example.com",
+        "authorized_origins": ["https://example.com"],
+        "control_generation": 1,
+        "timeout_ms": 100,
+        "page_ref": page_ref,
+        "observation_ref": "observation_" + "c" * 32,
+    }
+    if action != "scroll":
+        request["target_ref"] = "target_" + "b" * 32
+    if action == "input":
+        request["text"] = "safe fixture text"
+    if action == "press":
+        request["key"] = "Enter"
+    if action == "scroll":
+        request["delta_y"] = 100
+    try:
+        result = DRIVER.managed_interaction(request)
+        assert result == {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "managed_interaction_stale_target"}
+        assert target.calls == []
+        assert page.mouse.moves == 0 and page.mouse.wheels == 0
+    finally:
+        DRIVER.clear_interaction_guard()
+        DRIVER.PAGE = None
+        DRIVER.CONTEXT = None
+        DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+        DRIVER.reset_provider_pages()
+
+
+for interaction_action in ("click", "input", "press", "scroll"):
+    run_interaction_handoff_regression(interaction_action)
+print("camoufox native interaction handoff fixtures passed")
+
+# The final interaction response also contains a fresh DOM snapshot and Page
+# title. A native handoff during either read must not publish that old result;
+# after an action, the dispatch state remains unknown rather than being reset.
+class MidReadNodes:
+    def dispose(self) -> None:
+        pass
+
+
+class MidReadHandle(DiscardProbe):
+    def evaluate(self, expression: str, *_args):
+        if "controls:state.controls" in expression:
+            return {"controls": [], "text": "", "truncated": False}
+        if "state => state.dispose()" in expression:
+            return super().evaluate(expression)
+        return True
+
+    def get_property(self, name: str) -> MidReadNodes:
+        assert name == "nodes"
+        return MidReadNodes()
+
+
+class MidReadPage(ReadPage):
+    def __init__(self, name: str, trigger: str) -> None:
+        super().__init__(name)
+        self.trigger = trigger
+        self.adapter = None
+        self.title_triggered = False
+        self.last_snapshot_handle = None
+
+    def evaluate_handle(self, _expression: str) -> MidReadHandle:
+        if self.trigger == "snapshot":
+            assert self.adapter is not None
+            self.adapter.handoff_requested = True
+        self.last_snapshot_handle = MidReadHandle()
+        return self.last_snapshot_handle
+
+    def title(self) -> str:
+        if self.trigger == "title" and not self.title_triggered:
+            assert self.adapter is not None
+            self.title_triggered = True
+            self.adapter.handoff_requested = True
+        return self.name
+
+
+class MidReadAdapter:
+    def __init__(self, page: MidReadPage) -> None:
+        self.page = page
+        self.calls = 0
+        self.handoff_requested = False
+
+    def native_snapshot(self, _browser, _context) -> dict[str, object]:
+        self.calls += 1
+        moved = self.handoff_requested
+        tab = "tab-destination" if moved else "tab-source"
+        window = "window-destination" if moved else "window-source"
+        return native_relation(
+            "mid-read-epoch", self.calls,
+            [(self.page, "target-mid-read", tab, "context-mid-read", window, True)],
+            window,
+        )
+
+
+def run_mid_read_handoff(trigger: str, action: str) -> None:
+    DRIVER.reset_provider_pages()
+    page = MidReadPage(trigger, trigger)
+    DRIVER.PAGE = page
+    DRIVER.CONTEXT = read_context(page)
+    DRIVER.register_provider_page(page)
+    adapter = MidReadAdapter(page)
+    page.adapter = adapter
+    DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = adapter
+    request = {
+        "action": action,
+        "expected_origin": "https://example.com",
+        "authorized_origins": ["https://example.com"],
+        "control_generation": 1,
+        "timeout_ms": 100,
+    }
+    target = None
+    if action == "click":
+        target = InteractionTarget()
+        page_ref = "page_" + "a" * 32
+        observation_ref = "observation_" + "c" * 32
+        DRIVER.INTERACTION_STATE = {
+            "handle": InteractionHandle("button"),
+            "targets": {"target_" + "b" * 32: target},
+            "generation": 1,
+            "page_ref": page_ref,
+            "observation_ref": observation_ref,
+        }
+        request.update({
+            "page_ref": page_ref,
+            "observation_ref": observation_ref,
+            "target_ref": "target_" + "b" * 32,
+        })
+    try:
+        result = DRIVER.managed_interaction(request)
+        expected_status = "unknown_outcome" if action == "click" else "unavailable"
+        expected_dispatch = "dispatched" if action == "click" else "not_dispatched"
+        assert result == {
+            "status": expected_status,
+            "dispatch_state": expected_dispatch,
+            "failure_class": "managed_interaction_relation_unavailable",
+        }
+        assert adapter.calls >= 4
+        if target is not None:
+            assert target.calls == ["click"]
+        assert DRIVER.INTERACTION_STATE is None
+        assert page.last_snapshot_handle is not None
+        assert page.last_snapshot_handle.dispose_calls == 1
+    finally:
+        DRIVER.clear_interaction_guard()
+        DRIVER.PAGE = None
+        DRIVER.CONTEXT = None
+        DRIVER.NATIVE_PLAYWRIGHT_ADAPTER = None
+        DRIVER.reset_provider_pages()
+
+
+run_mid_read_handoff("snapshot", "snapshot")
+run_mid_read_handoff("title", "click")
+print("camoufox native interaction snapshot/title handoff fixtures passed")
 
 # Interaction origin scopes are resolved by Page identity and opener identity,
 # never by the active Page as a global fallback.

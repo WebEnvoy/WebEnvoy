@@ -4,11 +4,11 @@
 > 版本：1.0
 > 日期：2026-09-11
 > owner：Harbor / Camoufox Provider Driver
-> 产品归口：[Phase 1 native Camoufox validation #504](https://github.com/WebEnvoy/WebEnvoy/issues/504)
+> 产品归口：[Phase 1 native Camoufox validation #504](https://github.com/WebEnvoy/WebEnvoy/issues/504)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510)
 > 上位语义：[Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md)、[Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)
 > 架构依据：[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 
-本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation，以及一个固定的 Page reload 适配。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代 #504 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
+本文冻结 #504 使用的 **test-only Camoufox native adapter**、独立管理构件和三项私有 native protocol operation，以及一个固定的 Page reload 适配；同时冻结 #510 的独立 v2 tab-handoff 构件变体和原生 swap 生命周期边界。它是 Harbor Driver 与受管测试构件之间的私有合同，不是 Core、MCP、Plugin 或 Agent 可见的公共 wire contract。本文不替代两个 Work Item 的公共合同或验收证据；构件、Provider 和 fixture 的实际验收仍须由链接 Work Item 的 exact-head evidence 证明。
 
 ## 1. 范围、owner 和边界
 
@@ -16,7 +16,7 @@
 
 ```text
 qualified Camoufox source app
-        │  read-only copy + exact four-entry patch
+        │  read-only copy + exact four-entry patch (+ v2 chrome.css patch)
         ▼
 independent native test artifact + manifest
         │
@@ -29,10 +29,10 @@ independent native test artifact + manifest
              private Juggler Browser methods
 ```
 
-- **Builder** 固定来源 Camoufox 版本、浏览器版本、资源 hash、patch anchor 和 test-only app identity，并把结果写入一个新构件目录。
+- **Builder** 固定来源 Camoufox 版本、浏览器版本、资源 hash、patch anchor 和 test-only app identity，并把结果写入一个新构件目录。#510 v2 另外固定 `chrome.css` 的 source hash、唯一替换块和 output before/after hash；v1 构件路径不变。
 - **Native Playwright adapter** 只在当前 Driver 进程安装，复制已核验的 Playwright driver package，在副本的 `coreBundle.js` 中增加固定方法，并在进程内替换 transport executable resolver。
 - **Harbor Driver** 负责 Page Registry、native identity mapping、active state、导航/关闭失败和 tombstone；它不把 native handle 当作公共 Page identity。
-- **Camoufox/Juggler patch** 负责从真实 `navigator:browser` tab/window 读取关系、在现有 window 中创建 tab，以及在同一 window 中安全切换并关闭 tab。
+- **Camoufox/Juggler patch** 负责从真实 `navigator:browser` tab/window 读取关系、在现有 window 中创建 tab，以及在同一 window 中安全切换并关闭 tab。#510 v2 还只在成对 `SwapDocShells`/`EndSwapDocShells` 关系完整时采用原生 tab handoff，其他事件保持 partial/unavailable。
 
 以下内容永远不得越过 Harbor：`targetId`、`tabId`、`browsingContextId`、`windowId`、`browserContextId`、Juggler endpoint、native protocol method、Profile 路径和构件内部路径。公共 Page facts 继续由 Harbor 的既有 Page contract 投影。
 
@@ -86,7 +86,17 @@ Builder 产生的 manifest schema 是 `webenvoy.camoufox-native/v1`，并且必�
 5. 输出 app 的 bundle identifier/name 被改为上面的 test identity；Resources 中的 `properties.json` 另外复制到 `Contents/MacOS/properties.json`，且两份内容必须相同。
 6. manifest 的 `test_only` 必须为 `true`，`distribution_or_production_use_authorized` 必须为 `false`，`patch_id` 必须精确匹配；builder 会拒绝缺失/anchor 不唯一/source hash 不匹配，installed-binding preflight 会拒绝 manifest/output hash/版本不兼容。这个 preflight 是构件绑定门槛，不应被误读为 Python Driver 自己解析 manifest。
 
-### 2.2 Installed binding
+### 2.2 #510 Native tab-handoff variant
+
+#510 使用独立的 `webenvoy.camoufox-native/v2` manifest、`managed-native-tab-handoff` patch id、`com.webenvoy.camoufox.native510` bundle identity 和 `WebEnvoy Camoufox Native Tab Handoff Test` bundle name。它保留 v1 的四个 Juggler entry、Camoufox/Playwright pins 和 test-only 限制，并额外要求：
+
+- source `Contents/Resources/chrome.css` SHA-256 为 `8edbf68d8b73d2e59bcbaa37560ebfdc145888b37c98628eda6bc3e5f54359ab`；
+- 只匹配一次固定块，将 tab 的 `-moz-window-dragging` 从 `inherit` 改为 `no-drag`，将 `.tab-content` 的 `pointer-events` 从 `none` 改为 `auto`，保留 `#TabsToolbar` 空白区的 window drag；
+- output 记录 `chrome_css_sha256`，并在 `patched_assets["Contents/Resources/chrome.css"]` 记录 source/output before/after SHA-256；output hash 必须是 `7e7f9e13bfb872344f81934fde84464e1791b03b3831b6e6a467e7300662d6eb`。
+
+legacy v1 reader 只接受 v1/`managed-native-snapshot`/native504；当前 installed-binding reader 明确接受 legacy v1 或 v2 tab-handoff variant，但不会把 v2 的 CSS 字段降级为 v1，也不会把 v1 的 manifest 当作 tab-handoff 构件。两个 identity 和 patch id 均不能互换。
+
+### 2.3 Installed binding
 
 Real validation 只接受显式传入的 artifact 和 Profile：
 
@@ -273,6 +283,26 @@ bounded 64-entry pending map and transferred to the Page registry only after a
 trusted native snapshot maps that target; closed targets remove their pending
 entry.
 
+### 4.6 Native tab-handoff lifecycle (v2)
+
+The v2 TargetRegistry listens to the existing native `SwapDocShells` and
+`EndSwapDocShells` events on each managed browser window. On a `TabClose` with
+an explicit `event.detail.adoptedBy`, it marks the target as pending instead of
+disposing it. It records both browser objects and their pre-swap
+`BrowsingContext` objects, removes their progress listeners before the native
+swap, and adopts only when the paired end event has the exact reverse detail,
+the two BrowsingContexts exchanged, both destination tabs remain connected,
+and both targets still belong to the same BrowserContext.
+
+Successful adoption keeps the existing Juggler target, actor/channel,
+BrowsingContext and client Page object while refreshing its native tab,
+window, gBrowser and listeners. The target's registered browser id is retained
+for ownership-safe actor disposal. A pending, partial, mismatched, disposed,
+cross-context or unknown swap never guesses an owner: native snapshots report
+`partial` until a complete adoption is observed, and the Driver leaves the
+last trusted relation unchanged. No URL/title, tab order, replacement Page,
+reload, reopen or synthetic channel is used.
+
 ## 5. Snapshot and Page mapping semantics
 
 ### 5.1 Native enumeration
@@ -281,7 +311,7 @@ entry.
 
 For every owned tab, a complete snapshot requires:
 
-- a live Juggler target whose BrowserContext, native window and native tab are the exact same objects;
+- a live Juggler target whose BrowserContext, native window and native tab are the exact same objects (or an already-completed v2 adoption with refreshed native location objects);
 - a non-discarded linked BrowsingContext with a stable id;
 - unique `targetId`, `tabId` and `browsingContextId` across the snapshot;
 - the native tab count, native target set and `browserContext.pages` set to agree bidirectionally;
@@ -309,7 +339,7 @@ Before mutating Page state, Harbor resolves the entire relation:
 4. prove one active selected Page when `activeWindowId` is present;
 5. only then commit `native_selected`, `native_active`, native window/tab/target/BCID fields and `PAGE`.
 
-If any validation fails, the last trusted relation remains unchanged and the operation returns unavailable/error. A relation that reports a different Page object for an existing `browsingContextId`, or changes a previously trusted target/tab/window/BCID identity, sets the Driver's relation-invalid latch and fails closed for the rest of that connection. It must not close and reopen a Page to repair the mapping.
+If any validation fails, the last trusted relation remains unchanged and the operation returns unavailable/error. A relation that reports a different Page object for an existing `browsingContextId`, or changes a previously trusted target/BCID identity, sets the Driver's relation-invalid latch and fails closed for the rest of that connection. In v2, native `tabId` and `windowId` are location facts and may change only after the exact TargetRegistry adoption path; the same client Page, target and BrowsingContext must remain. It must not close and reopen a Page to repair the mapping.
 
 ## 6. Background creation and safe close
 
@@ -358,6 +388,7 @@ Old public refs, provider handles and document generations remain stale. A new `
 | --- | --- |
 | Source app, browser, properties, manifest, output hash or patch anchor mismatch | Builder or installed-binding preflight rejects before the test launch; preserve source and Profile. Direct `camoufox-driver.py` launch currently does not parse the manifest and must not be treated as this gate. |
 | Artifact is original installed app, production-authorized, or not the fixed test identity | Installed-binding preflight rejects; do not patch or launch it. The direct Driver path must remain behind that preflight. |
+| v2 `chrome.css` source hash, unique block, output hash or patch metadata mismatch | Builder and installed-binding preflight reject before launch; v1 artifact/reader paths remain unchanged. |
 | Playwright version/hash/anchor mismatch, symlinked closure, or adapter install failure | Reject before native operation; restore only a separately qualified pair; do not edit `site-packages`. |
 | Unknown protocol schema, field type, enum, duplicate identity or unknown active window | Return unavailable/error; no Page state commit. |
 | Request relation missing without a resolvable target | Preserve legacy context-route pass-through for an unqualified request; interaction remains fail-closed when it cannot prove a target. |
@@ -365,6 +396,8 @@ Old public refs, provider handles and document generations remain stale. A new `
 | Request relation target/opener/context is unknown or inconsistent | Fail closed; do not fall back to the active Page, URL/title, or a guessed opener. |
 | `selectionStatus = partial`, stale sequence, or epoch change | Fail closed; preserve the last trusted relation. A changed epoch/identity does not trigger remapping. |
 | Same BCID maps to a replacement Page object | Latch native relation invalid and stop using the connection; never close+open or match URL/title. |
+| v2 native swap is pending, partial, mismatched, cross-context or unknown | Keep the target pending, return native snapshot `partial`, preserve the last trusted Page relation and require a fresh complete observation; never dispose/recreate by guessing. |
+| v2 native adoption completes with the same Page/target/BCID but new tab/window objects | Accept the exact adopted relation and refresh tab/window facts and listeners; old observations still require re-observation. |
 | Background window/context/user-context ownership cannot be proven | Reject creation before adding a tab. |
 | Safe target is missing, closed, different window/context, or identity changed | Reject close before removal. |
 | `beforeunload` veto, tab-switch timeout, target-created timeout or provider disconnect | Return bounded unavailable/unknown; do not replay a mutating close/create automatically. |
@@ -380,7 +413,7 @@ An owner may roll back before launch by selecting a matching legacy artifact/dri
 
 ## 8. Explicit non-goals and evidence boundary
 
-- No native swap, binary patch of the installed Camoufox app, runtime Juggler endpoint, CDP exposure or production/distribution release.
+- No native swap outside the exact v2 `SwapDocShells`/`EndSwapDocShells` lifecycle patch, binary patch of the installed Camoufox app, runtime Juggler endpoint, CDP exposure or production/distribution release. The legacy v1 artifact has no native tab-handoff path.
 - No public exposure of target/tab/window/BCID identities, native protocol fields, Profile paths or copied package paths.
 - No URL/title/creation-order inference, synthetic Page channels, guessed opener relation or cross-window safe return.
 - No Network body, Console body, Cookie, account, storage, raw DOM, HAR, screenshot or external proxy/geo readback.
