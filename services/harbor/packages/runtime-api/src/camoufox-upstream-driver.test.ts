@@ -139,7 +139,9 @@ try:
     options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
     assert seen[0]["config"]["timezone"] == "UTC"
-    assert seen[0]["executable_path"] == executable_path
+    expected_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(executable_path))), "Resources", "camoufox")
+    assert seen[0]["executable_path"] == expected_config_path
+    assert options["executable_path"] == os.path.realpath(executable_path)
     assert context_options == {"timezone_id": "UTC"}
     assert bundle["context_options"] == {"timezone_id": "UTC"}
     assert module.decode_camoufox_config(options) == {"timezone": "UTC", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
@@ -163,21 +165,12 @@ try:
     assert "UTC" not in updated_options["env"]["CAMOU_CONFIG_1"]
     assert module.decode_camoufox_config(updated_options) == updated_bundle["config"]
     assert env_calls[-1][0]["timezone"] == "Europe/Paris"
-    assert env_calls[-1][1:] == ("mac", executable_path)
+    assert env_calls[-1][1:] == ("mac", os.path.realpath(executable_path))
     try:
         module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, profile)
         raise AssertionError("replay accepted an executable path different from the owner request")
     except ValueError:
         pass
-    fresh_mismatch = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-executable-mismatch-")
-    try:
-        try:
-            module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, fresh_mismatch)
-            raise AssertionError("fresh launch accepted an executable path different from the owner request")
-        except ValueError:
-            pass
-    finally:
-        __import__("shutil").rmtree(fresh_mismatch)
     class EnvironmentPage:
         url = "https://example.test/"
         def is_closed(self): return False

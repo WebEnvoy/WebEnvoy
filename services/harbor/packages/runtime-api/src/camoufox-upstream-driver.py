@@ -392,9 +392,18 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     if timezone_id:
         timezone_id = validate_timezone_id(timezone_id)
         context_options["timezone_id"] = timezone_id
+    executable = canonical_executable_path(request["browser_path"])
+    # The public Camoufox validator resolves properties.json beside the path
+    # supplied to launch_options. Official macOS bundles keep it in
+    # Contents/Resources while the executable lives in Contents/MacOS, so use
+    # a sibling Resources path for public config validation and bind the actual
+    # launch path back to the owner-verified executable before the final guard.
+    config_executable = Path(executable)
+    if sys.platform == "darwin":
+        config_executable = config_executable.parent.parent / "Resources" / "camoufox"
     options = launch_options(
         browser=f"official/{BROWSER_VERSION_PIN}",
-        executable_path=request["browser_path"],
+        executable_path=str(config_executable),
         env={},
         headless=bool(request.get("headless", False)),
         os="macos" if sys.platform == "darwin" else sys.platform,
@@ -405,6 +414,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         proxy=proxy,
     )
     options = json_safe_options(options)
+    options["executable_path"] = executable
     verify_launch_executable(request, options)
     bundle = write_bundle(profile_dir, options, context_options)
     verify_launch_executable(request, bundle["launch_options"])
