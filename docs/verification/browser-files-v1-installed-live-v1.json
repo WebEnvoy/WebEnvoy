@@ -80,7 +80,7 @@
     "evidence_files": [
       {"role": "offline_response_shapes_and_unique_key_selftest", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-selftest-evidence.json", "sha256": "826add95d937ae193114ec51cecd3ec7bc525d607cdf4878a01e637319e37587"},
       {"role": "handoff_slice", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/handoff-slice-v4-evidence.json", "sha256": "a1e3018289f465ce91714d15110408d4565ca6939a21ec7ef9d67fab4ae1f8c1"},
-      {"role": "corrected_transport_drop_continuation_and_owner_boundaries", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee"},
+      {"role": "corrected_transport_drop_continuation_and_owner_boundaries", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee4"},
       {"role": "context_runtime_restart_persistence_and_grant_revoke", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b"}
     ]
   },
