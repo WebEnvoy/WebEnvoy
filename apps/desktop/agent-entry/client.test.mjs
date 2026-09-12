@@ -6,7 +6,7 @@ import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promi
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { localRequest } from './client.mjs';
-import { root, sha } from './bundle.mjs';
+import { REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
 test('localRequest preserves UTF-8 when a socket response splits a code point', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-client-test-'));
@@ -42,7 +42,8 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     'agent-entry/bundle.mjs',
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs',
-    'dist-electron/runtime/harbor/start-runtime.mjs'
+    'dist-electron/runtime/harbor/start-runtime.mjs',
+    ...REQUIRED_DRIVER_ASSETS
   ];
   let server;
   let child;

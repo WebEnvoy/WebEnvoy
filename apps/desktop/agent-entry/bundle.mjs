@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 export const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const sha = value => createHash('sha256').update(value).digest('hex');
 export const recoveryOperationRef = (kind, idempotencyKey) => `recovery:${sha(`${kind}:${idempotencyKey}`).slice(0, 64)}`;
+export const REQUIRED_DRIVER_ASSETS = [
+  'dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.py'
+];
 export async function files(directory, prefix = '') {
   const out = {};
   for (const name of (await readdir(directory)).sort()) {
@@ -22,7 +25,7 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
   const manifest = JSON.parse(await readFile(join(bundleRoot, 'agent-manifest.json'), 'utf8'));
   if (manifest.schema !== 'webenvoy-installed-agent/v1' || manifest.skill_version !== '0.2.0') throw new Error('asset_version_mismatch: reinstall the matching bundle');
   if (checkHost && process.versions.electron && sha(await readFile(hostExecutable)) !== manifest.host?.executable_sha256) throw new Error('runtime_host_integrity_failed');
-  const required = ['agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/skills/webenvoy-browser/SKILL.md', 'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs'];
+  const required = ['agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/skills/webenvoy-browser/SKILL.md', 'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs', ...REQUIRED_DRIVER_ASSETS];
   if (!manifest.files || required.some(name => !manifest.files[name])) throw new Error('asset_manifest_incomplete');
   for (const [name, hash] of Object.entries(manifest.files)) {
     if (!name || name === 'agent-manifest.json' || relative(bundleRoot, resolve(bundleRoot, name)).startsWith('..') || !/^[a-f0-9]{64}$/.test(hash)) throw new Error('asset_manifest_invalid');

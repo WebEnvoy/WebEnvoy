@@ -1,8 +1,8 @@
 # 安装后的单宿主 Agent 入口
 
-安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。本文的 macOS、Codex MCP 和 Camoufox 步骤是历史安装／验收记录，不代表当前 Camoufox launch/support。测试包不签名、不发布，不代表完整发行或多宿主支持。
+安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。本文的 macOS、Codex MCP 和固定官方 Camoufox setup 步骤是安装绑定与验收记录，不代表完整发行或多宿主支持。
 
-> **2026-09-12 现行边界**：#519 B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 已退役 Camoufox 私有 launch binding；下文只保留历史流程和证据定位，不能作为新启动、建 Profile 或 fallback 的操作指引。
+> **2026-09-12 现行边界**：installed Camoufox 只接受已验证的官方固定组合：Python package `camoufox==0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`。旧 `camoufoxArtifact`、`native504`、`native510` binding 仍为 retired；未带完整官方来源记录的安装也保持 retired。下文的 setup 只能绑定 owner 明确提供的既有安装路径和本地来源归档，不下载、不解析 latest、不读取日常 Profile。完整 Runtime/Harbor 现场仍由 #519 的集成验收承接。
 
 ## 安装和显式授权
 
@@ -12,10 +12,16 @@
 pnpm --filter @webenvoy/app package:agent '/tmp/webenvoy-test/WebEnvoy Test.app'
 '/tmp/webenvoy-test/WebEnvoy Test.app/Contents/MacOS/webenvoy' setup \
   --data-dir /tmp/webenvoy-test-data --host-dir /tmp/webenvoy-test-host \
+  --browser-install-root /path/to/official/152.0.4-beta.30/Camoufox.app \
+  --browser-executable /path/to/official/152.0.4-beta.30/Camoufox.app/Contents/MacOS/camoufox \
+  --python-path /path/to/venv/bin/python \
+  --browser-source-path /path/to/camoufox-152.0.4-beta.30-mac.arm64.zip \
+  --camoufox-source-path /path/to/camoufox-0.5.6-py3-none-any.whl \
+  --playwright-source-path /path/to/playwright-1.60.0-py3-none-macosx_11_0_arm64.whl \
   --codex-profile webenvoy-test --approve-tools
 ```
 
-`setup` 写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中五个 WebEnvoy 工具的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
+`setup` 会实际读取并校验 browser `application.ini`、Python 环境中的两个包版本，以及三个 owner 提供的来源文件 SHA-256；版本、来源和路径不匹配即拒绝。它写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中五个 WebEnvoy 工具的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
 
 双击这个 App（或运行 `webenvoy app`），进入设置 → Agent 接入：登记名称与公开指纹，允许已授权的环境管理操作，再选择 Agent 并授予页面展示的管理范围。选择精确 origin、必要操作与有效期；可创建最多两个非生产 Camoufox Profile，或选择已受管 Profile。既有 Profile 上限在独立表单中显式保存，Grant 不会提升上限。默认只有读取操作。Core 的管理执行策略只作用于 `harbor:managed-browser`，不会修改网站策略。
 

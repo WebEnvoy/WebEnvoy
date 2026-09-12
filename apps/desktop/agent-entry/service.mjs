@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, unlink, lstat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
-import { classifyCamoufoxBinding } from './provider-artifact.mjs';
+import { classifyCamoufoxBinding, verifyInstalledCamoufox } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 const dataDir = process.argv[2];
@@ -71,8 +71,9 @@ for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, shutdown);
 try {
   const assets = await verifyBundle();
   const config = JSON.parse(await readFile(join(dataDir, 'installation.json'), 'utf8'));
-  const camoufoxLaunch = classifyCamoufoxBinding(config);
-  const publicConfig = Object.fromEntries(Object.entries(config).filter(([key]) => key !== 'camoufoxArtifact'));
+  const verifiedCamoufox = await verifyInstalledCamoufox(config);
+  const camoufoxLaunch = verifiedCamoufox ? { state: 'qualified', reason: 'official_upstream' } : classifyCamoufoxBinding(config);
+  const publicConfig = Object.fromEntries(Object.entries(config).filter(([key]) => !['camoufoxArtifact', 'camoufoxUpstream'].includes(key)));
   for (const key of ['coreEndpoint', 'harborEndpoint']) {
     const url = new URL(config[key]);
     if (url.hostname !== '127.0.0.1' || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) throw new Error('installation_endpoint_invalid');
@@ -81,7 +82,7 @@ try {
   // fixture providers or private resolvers. Historical Camoufox bindings are
   // local evidence only and are never converted into a launch path.
   for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
-  Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxLaunch }));
+  Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxLaunch, camoufoxBinding: verifiedCamoufox }));
   const { createRuntimeSupervisor } = await import('../dist-electron/runtimeSupervisor.js');
   supervisor = createRuntimeSupervisor({ dataDir });
   state = { ...state, ...publicConfig, camoufox_launch: camoufoxLaunch, assets };

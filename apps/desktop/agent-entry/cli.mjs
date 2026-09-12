@@ -8,7 +8,7 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { classifyCamoufoxBinding } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, verifyCamoufoxUpstreamInstall } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -20,7 +20,23 @@ if (command === 'setup') {
   const assets = await verifyBundle();
   const installationPath = join(dataDir, 'installation.json');
   const existingInstallation = await readInstallation(installationPath);
-  if (args.includes('--camoufox-artifact')) throw new Error('camoufox_artifact_binding_retired');
+  const legacyBinding = existingInstallation && ['camoufoxArtifact', 'native504', 'native510', 'camoufoxNativeArtifact', 'camoufoxNativeBinding'].some(key => Object.hasOwn(existingInstallation, key));
+  const upstreamArgs = ['--browser-install-root', '--browser-root', '--browser-executable', '--python-path', '--python', '--browser-version', '--camoufox-version', '--playwright-version', '--browser-source-path', '--browser-source', '--browser-archive', '--camoufox-source-path', '--camoufox-source', '--camoufox-wheel', '--playwright-source-path', '--playwright-source', '--playwright-wheel', '--browser-executable-sha256', '--python-executable-sha256'];
+  if (args.includes('--camoufox-artifact') || legacyBinding && upstreamArgs.some(name => args.includes(name))) throw new Error('camoufox_artifact_binding_retired');
+  const upstream = legacyBinding ? null : await verifyCamoufoxUpstreamInstall({
+    provider: 'camoufox',
+    browser_install_root: requiredAny('--browser-install-root', '--browser-root'),
+    browser_executable: required('--browser-executable'),
+    python_path: requiredAny('--python-path', '--python'),
+    browser_version: arg('--browser-version') ?? CAMOUFOX_UPSTREAM_PINS.browser_version,
+    camoufox_version: arg('--camoufox-version') ?? CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    playwright_version: arg('--playwright-version') ?? CAMOUFOX_UPSTREAM_PINS.playwright_version,
+    browser_source_path: requiredAny('--browser-source-path', '--browser-source', '--browser-archive'),
+    camoufox_source_path: requiredAny('--camoufox-source-path', '--camoufox-source', '--camoufox-wheel'),
+    playwright_source_path: requiredAny('--playwright-source-path', '--playwright-source', '--playwright-wheel'),
+    ...(arg('--browser-executable-sha256') ? { browser_executable_sha256: arg('--browser-executable-sha256') } : {}),
+    ...(arg('--python-executable-sha256') ? { python_executable_sha256: arg('--python-executable-sha256') } : {})
+  });
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -36,7 +52,11 @@ if (command === 'setup') {
   let installation = existingInstallation;
   if (!installation) {
     const ports = await Promise.all([reservePort(), reservePort()]);
-    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}` };
+    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}`, ...(upstream ? { camoufoxUpstream: upstream } : {}) };
+  } else if (upstream && installation.camoufoxUpstream) {
+    if (JSON.stringify(installation.camoufoxUpstream) !== JSON.stringify(upstream)) throw new Error('camoufox_upstream_binding_mismatch');
+  } else if (upstream) {
+    installation = { ...installation, camoufoxUpstream: upstream };
   }
   await mkdir(join(hostDir, '.agents/skills/webenvoy-browser'), { recursive: true });
   // A standalone profile file is reviewable; never edit the user's existing Codex configuration.
@@ -182,6 +202,7 @@ async function readInstallation(path) {
 }
 
 function required(name) { const value = arg(name); if (!value) throw new Error(`${name}_required`); return value; }
+function requiredAny(...names) { for (const name of names) { const value = arg(name); if (value) return value; } throw new Error(`${names[0]}_required`); }
 async function readJsonFile(path) { try { return JSON.parse(await readFile(resolve(path), 'utf8')); } catch { throw new Error('recovery_json_file_invalid'); } }
 function hostConfig(installRoot, clientPath, approveTools, includeRecovery, executable = process.execPath) {
   let config = `[mcp_servers.webenvoy]\ncommand = ${JSON.stringify(executable)}\nargs = ${JSON.stringify([join(installRoot, 'agent-entry/mcp.mjs'), clientPath])}\nstartup_timeout_sec = 30\ntool_timeout_sec = 100\n[mcp_servers.webenvoy.env]\nELECTRON_RUN_AS_NODE = "1"\n`;

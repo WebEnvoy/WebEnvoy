@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { classifyCamoufoxBinding } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, verifyCamoufoxUpstreamInstall, verifyInstalledCamoufox } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -78,6 +78,49 @@ test('classifies historical Camoufox bindings without resolving or launching the
     assert.equal(unqualified.HARBOR_CAMOUFOX_LAUNCH_STATE, 'retired');
     assert.equal(unqualified.HARBOR_CAMOUFOX_LAUNCH_REASON, 'unqualified');
     assert.equal(unqualified.HARBOR_CAMOUFOX_PATH, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('accepts only the explicit official upstream Camoufox installation binding', async (t) => {
+  const sourceDir = '/private/tmp/webenvoy-upstream-source-audit.LWbSiJ';
+  const browserRoot = '/Users/claw/Library/Caches/camoufox/browsers/official/152.0.4-beta.30-3b43e766/Camoufox.app';
+  const executable = join(browserRoot, 'Contents/MacOS/camoufox');
+  const pythonPath = '/Users/claw/.webenvoy/providers/camoufox/venv/bin/python';
+  try { await Promise.all([access(browserRoot), access(executable), access(join(sourceDir, 'camoufox-152.0.4-beta.30-mac.arm64.zip')), access(join(sourceDir, 'camoufox-0.5.6-py3-none-any.whl')), access(join(sourceDir, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl')), access(pythonPath)]); }
+  catch { t.skip('official upstream source fixtures are not available on this host'); return; }
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-camoufox-upstream-test-'));
+  try {
+    const input = {
+      browser_install_root: browserRoot, browser_executable: executable, python_path: pythonPath,
+      browser_version: CAMOUFOX_UPSTREAM_PINS.browser_version, camoufox_version: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+      playwright_version: CAMOUFOX_UPSTREAM_PINS.playwright_version,
+      browser_source_path: join(sourceDir, 'camoufox-152.0.4-beta.30-mac.arm64.zip'),
+      camoufox_source_path: join(sourceDir, 'camoufox-0.5.6-py3-none-any.whl'),
+      playwright_source_path: join(sourceDir, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl')
+    };
+    const binding = await verifyCamoufoxUpstreamInstall(input);
+    assert.equal(binding.schema, 'webenvoy.camoufox-upstream/v1');
+    assert.deepEqual(classifyCamoufoxBinding({ camoufoxUpstream: binding }), { state: 'qualified', reason: 'official_upstream' });
+    assert.deepEqual(await verifyInstalledCamoufox({ camoufoxUpstream: binding }), binding);
+    const environment = installedRuntimeEnvironment({
+      parentEnvironment: { HARBOR_BROWSER_PATH: '/private/untrusted', CAMOUFOX_EXECUTABLE: '/private/untrusted', WEBENVOY_DEV_STORE: '/private/untrusted' },
+      dataDir: join(root, 'data'), installRoot: join(root, 'install'), camoufoxLaunch: { state: 'qualified', reason: 'official_upstream' }, camoufoxBinding: binding
+    });
+    assert.equal(environment.HARBOR_BROWSER_PATH, executable);
+    assert.equal(environment.HARBOR_CAMOUFOX_PATH, executable);
+    assert.equal(environment.HARBOR_CAMOUFOX_PYTHON, pythonPath);
+    assert.equal(environment.HARBOR_CAMOUFOX_SOURCE_SHA256, CAMOUFOX_UPSTREAM_PINS.browser_source_sha256);
+    assert.equal(environment.HARBOR_CAMOUFOX_SOURCE_SHA256, binding.source_sha256.browser);
+    assert.equal(environment.HARBOR_CAMOUFOX_BROWSER_SOURCE_SHA256, binding.source_sha256.browser);
+    assert.equal(environment.HARBOR_CAMOUFOX_PLAYWRIGHT_SOURCE_SHA256, binding.source_sha256.playwright);
+    assert.equal(environment.HARBOR_CAMOUFOX_BROWSER_VERSION, CAMOUFOX_UPSTREAM_PINS.browser_version);
+    assert.equal(environment.HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION, CAMOUFOX_UPSTREAM_PINS.playwright_version);
+    assert.equal(environment.WEBENVOY_DEV_STORE, undefined);
+    await writeFile(join(root, 'wrong-source'), 'not-an-official-archive');
+    await assert.rejects(verifyCamoufoxUpstreamInstall({ ...input, browser_source_path: join(root, 'wrong-source') }), /source_hash_mismatch/);
+    await assert.rejects(verifyCamoufoxUpstreamInstall({ ...input, browser_version: '152.0.4' }), /browser_version_invalid/);
+    await assert.rejects(verifyCamoufoxUpstreamInstall({ ...input, browser_executable: join(root, 'outside') }), /browser_executable_invalid/);
+    await assert.rejects(verifyCamoufoxUpstreamInstall({ ...input, camoufoxArtifact: {} }), /artifact_binding_retired/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
