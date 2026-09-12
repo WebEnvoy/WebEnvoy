@@ -30,6 +30,7 @@ The files intentionally stay small:
 - `schemas/execution-policy-mutation.schema.json`
 - `schemas/single-action-decision-command.schema.json`
 - `schemas/single-action-decision.schema.json`
+- `schemas/browser-file-result.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 

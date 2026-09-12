@@ -99,7 +99,7 @@ if (command === 'setup') {
   } else if (action === 'grant') {
     const value = await readJsonFile(required('--grant-file'));
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_grant_file_invalid');
-    const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope'];
+    const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope', 'file_scope'];
     if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('access_grant_file_invalid');
     result = await requestOwner('/agent-access/grants', value);
   } else if (action === 'revoke') {
@@ -110,6 +110,28 @@ if (command === 'setup') {
   } else if (action === 'operation') {
     result = await requestOwner(`/agent-access/operations/${encodeURIComponent(required('--operation-ref'))}`);
   } else throw new Error('Use access list, register, grant, revoke or operation with --data-dir. Owner credentials stay local.');
+  console.log(JSON.stringify(result));
+} else if (command === 'files') {
+  const action = args[0];
+  const status = await ensureRuntime(dataDir);
+  const owner = JSON.parse(await readFile(join(dataDir, 'owner.json'), 'utf8'));
+  if (owner.runtime_id !== status.runtime_id || typeof owner.credential !== 'string' || !owner.credential.length) throw new Error('owner_runtime_mismatch');
+  const requestOwner = (path, body) => localRequest(dataDir, path, { credential: owner.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  let result;
+  if (action === 'import') {
+    const input = { source_path: resolve(required('--source-path')), profile_ref: required('--profile-ref'),
+      ...(arg('--display-name') === undefined ? {} : { display_name: arg('--display-name') }),
+      ...(arg('--mime-type') === undefined ? {} : { mime_type: arg('--mime-type') }),
+      ...(arg('--operation-ref') === undefined ? {} : { operation_ref: arg('--operation-ref') }) };
+    result = await requestOwner('/owner/files/import', input);
+  } else if (action === 'inspect') {
+    const fileRef = arg('--file-ref');
+    result = await requestOwner(fileRef === undefined ? '/owner/files' : `/owner/files?file_ref=${encodeURIComponent(fileRef)}`);
+  } else if (action === 'export') {
+    result = await requestOwner('/owner/files/export', { file_ref: required('--file-ref'), destination_path: resolve(required('--destination-path')) });
+  } else if (action === 'revoke' || action === 'delete') {
+    result = await requestOwner(`/owner/files/${action}`, { file_ref: required('--file-ref') });
+  } else throw new Error('Use files import, inspect, export, revoke or delete with --data-dir. Owner file paths never enter Agent requests.');
   console.log(JSON.stringify(result));
 } else if (command === 'recovery') {
   const action = args[0];
@@ -185,7 +207,7 @@ if (command === 'setup') {
   const child = spawn(process.execPath, [root], { detached: true, stdio: 'ignore', env: { ...environment, WEBENVOY_INSTALLED_RUNTIME_DIR: dataDir } });
   child.unref();
   console.log(JSON.stringify({ app_started: true, pid: child.pid }));
-} else throw new Error('Use setup, access, recovery, start, diagnose, app or stop with --data-dir. Stop and access are owner commands, not Agent tools.');
+} else throw new Error('Use setup, access, files, recovery, start, diagnose, app or stop with --data-dir. Stop and owner file/access commands are not Agent tools.');
 async function reservePort() {
   const server = createServer();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });

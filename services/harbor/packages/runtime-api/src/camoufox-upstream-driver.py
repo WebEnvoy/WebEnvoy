@@ -436,7 +436,7 @@ class PageState:
         self.origins = set(origins)
         self.opener = opener
         self.generation = 1
-        self.controls: dict[str, tuple[str, str]] = {}
+        self.controls: dict[str, tuple[str, str, str | None]] = {}
         self.events: list[dict[str, Any]] = []
         self.last_url = page.url
         self.relation_pending = False
@@ -629,7 +629,21 @@ class Driver:
             route.abort("blockedbyclient")
             return
         method = str(getattr(request, "method", "GET")).upper()
-        post_data = getattr(request, "post_data", None)
+        # ``Request.post_data`` decodes the body as UTF-8.  A standard file
+        # input can legitimately dispatch arbitrary bytes (PNG/PDF/etc.), so
+        # reading that text projection would fail before the guard can fetch
+        # or reject the request.  Prefer Playwright's public binary property;
+        # retain the text projection only for older/fake request objects used
+        # by the deterministic contract tests.
+        try:
+            post_data = request.post_data_buffer
+        except (AttributeError, PlaywrightError, UnicodeDecodeError):
+            post_data = None
+        if post_data is None:
+            try:
+                post_data = request.post_data
+            except (AttributeError, PlaywrightError, UnicodeDecodeError):
+                post_data = None
         response = None
         try:
             # Playwright routing only invokes this handler for the first URL
@@ -755,6 +769,7 @@ class Driver:
             const explicit = e.getAttribute('role'); if (explicit) return explicit;
             if (e.tagName === 'BUTTON' || (e.tagName === 'INPUT' && ['button','submit','reset'].includes(e.type))) return 'button';
             if (e.tagName === 'A' && e.hasAttribute('href')) return 'link';
+            if (e.tagName === 'INPUT' && e.type === 'file') return 'file';
             if (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !['checkbox','radio','file','hidden','button','submit','reset'].includes(e.type))) return 'textbox';
             if (e.tagName === 'INPUT' && e.type === 'checkbox') return 'checkbox';
             if (e.tagName === 'INPUT' && e.type === 'radio') return 'radio';
@@ -762,7 +777,7 @@ class Driver:
             return null;
           };
           const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].filter(visible).map(e => ({ e, role: implicitRole(e) })).filter(item => item.role).slice(0,128);
-          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), enabled: !item.e.disabled })) };
+          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), href: item.e.tagName === 'A' ? item.e.getAttribute('href') : null, enabled: !item.e.disabled })) };
         }""")
         controls = []
         state.controls.clear()
@@ -770,7 +785,8 @@ class Driver:
             if not isinstance(item, dict) or not isinstance(item.get("i"), int) or not isinstance(item.get("role"), str) or not isinstance(item.get("name"), str):
                 continue
             ref = f"control:{item['i']}"
-            state.controls[ref] = (item["role"], item["name"])
+            href = item.get("href") if isinstance(item.get("href"), str) else None
+            state.controls[ref] = (item["role"], item["name"], href)
             controls.append({"target_ref": ref, "role": safe_text(item["role"], 64), "name": safe_text(item["name"], 256), "enabled": item.get("enabled") is True})
         text = safe_text(raw.get("text", "") if isinstance(raw, dict) else "")
         return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
@@ -779,7 +795,7 @@ class Driver:
         ref = request.get("target_ref")
         if not isinstance(ref, str) or ref not in state.controls:
             raise ValueError("Target ref is not from the current Page observation.")
-        role, name = state.controls[ref]
+        role, name, *_metadata = state.controls[ref]
         return state.page.get_by_role(role, name=name, exact=True)
 
     def observe(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -822,6 +838,102 @@ class Driver:
         state.page.screenshot(path=str(path), type="png")
         data = path.read_bytes()
         return {"status": "completed", "screenshot_ref": "screenshot:" + hashlib.sha256(data).hexdigest(), "mime_type": "image/png", "byte_length": len(data), "sha256": hashlib.sha256(data).hexdigest(), "captured_at": now()}
+
+    def file_operation(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Deliver one owner-resolved file through a standard Page control.
+
+        Paths in this method are Harbor-private staging paths.  The Agent only
+        supplies opaque target/material references to Core; Harbor resolves
+        them before this public Playwright boundary is called.
+        """
+        state = self.state(request)
+        expected = request.get("expected_origin")
+        scope = validated_origins(request.get("authorized_origins"))
+        if not isinstance(expected, str) or expected not in scope or expected not in state.origins or origin_of(state.page.url) != expected:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": request.get("operation"), "failure_class": "wrong_page", "page": state.facts()}
+        operation = request.get("operation")
+        target = request.get("target_ref")
+        if operation not in ("upload", "download") or not isinstance(target, str) or not REF.fullmatch(target):
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": operation, "failure_class": "file_operation_invalid", "page": state.facts()}
+        timeout = int(request.get("timeout_ms", self.request.get("timeout_ms", 60_000)))
+        if operation == "upload":
+            source = request.get("source_path")
+            if not isinstance(source, str) or not source or "\x00" in source:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": state.facts()}
+            if target not in self.controls or self.controls[target][0] != "file":
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
+            try:
+                source_path = Path(source)
+                with source_path.open("rb", buffering=0) as handle:
+                    source_size = os.fstat(handle.fileno()).st_size
+                if source_size < 1 or source_size > 10 * 1024 * 1024:
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_limit_exceeded", "page": state.facts()}
+                inputs = state.page.locator('input[type="file"]')
+                if inputs.count() != 1 or not inputs.is_visible(timeout=timeout):
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
+                existing = inputs.evaluate("e => e.files ? e.files.length : 0")
+                if existing:
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_not_empty", "page": state.facts()}
+                inputs.set_input_files(str(source_path), timeout=timeout)
+                return {"status": "completed", "dispatch_state": "dispatched", "operation": "upload", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "unknown", "page_processing": "unknown", "business_commit": "not_observed"}
+            except TimeoutError:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": "timeout", "page": state.facts()}
+            except Exception as error:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": safe_text(error, 128), "page": state.facts()}
+
+        if target not in self.controls:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+        role, _name, *metadata = self.controls[target]
+        observed_href = metadata[0] if metadata else None
+        if role != "link":
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+        staging = request.get("staging_path")
+        if not isinstance(staging, str) or not staging or "\x00" in staging:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_staging_unavailable", "page": state.facts()}
+        try:
+            link = self.locator(state, request)
+            href = link.get_attribute("href")
+            resolved = safe_url(urljoin(state.page.url, href or "")) if isinstance(href, str) else None
+            observed_resolved = safe_url(urljoin(state.page.url, observed_href or "")) if observed_href else None
+            if not resolved or not observed_resolved or resolved != observed_resolved or origin_of(resolved) != expected:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+            with state.page.expect_download(timeout=timeout) as download_info:
+                link.click(timeout=timeout)
+            download = download_info.value
+            try:
+                download_page = download.page
+                if callable(download_page):
+                    download_page = download_page()
+            except Exception:
+                download_page = None
+            if download_page is not state.page:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_relation_unavailable", "page": state.facts()}
+            download_url = safe_url(download.url)
+            if not download_url or origin_of(download_url) not in scope:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_relation_unavailable", "page": state.facts()}
+            failure = download.failure()
+            if failure:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": safe_text(failure, 128), "page": state.facts()}
+            download.save_as(staging)
+            staged = Path(staging)
+            size = staged.stat().st_size
+            if size > 10 * 1024 * 1024:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "file_limit_exceeded", "page": state.facts()}
+            digest = hashlib.sha256()
+            with staged.open("rb", buffering=0) as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            suggested = safe_text(download.suggested_filename(), 128)
+            if not suggested or "/" in suggested or "\\" in suggested:
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_name_invalid", "page": state.facts()}
+            return {"status": "completed", "dispatch_state": "dispatched", "operation": "download", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "observed", "page_processing": "unknown", "business_commit": "not_observed", "download": {"page_url": safe_url(state.page.url), "url": download_url, "suggested_filename": suggested, "byte_length": size, "sha256": digest.hexdigest(), "staging_path": staging}}
+        except TimeoutError:
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "timeout", "page": state.facts()}
+        except Exception as error:
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": safe_text(error, 128), "page": state.facts()}
 
     def state(self, request: dict[str, Any]) -> PageState:
         ref = request.get("provider_page_ref")
@@ -934,6 +1046,7 @@ def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     if op == "diagnostics": return driver.diagnostics(request)
     if op == "environment": return driver.environment(request)
     if op == "screenshot": return driver.screenshot(request)
+    if op == "file_operation": return driver.file_operation(request)
     if op == "close": driver.close(); return {"closed": True}
     raise ValueError("Driver operation is not allowlisted.")
 

@@ -1,10 +1,30 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.2（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505) 与 Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)。本合同冻结恢复 Grant、SKILL 资源范围与 Provider preference/创建模板的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.3（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 与受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板和 browser-files 文件范围的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。当前持久化 envelope 仍为 `webenvoy.managed-access.v0`，不要求给旧记录伪造字段，也没有第二套权限系统。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`。这些扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。当前持久化 envelope 仍为 `webenvoy.managed-access.v0`，不要求给旧记录伪造字段，也没有第二套权限系统。
+
+## Managed Browser Files Grant 与 task scope
+
+`file.upload` 与 `file.download` 是需要逐项明确授予的 `allowed_operations`；旧 Grant 缺少它们即没有文件权限。带文件操作的 Grant 可选地包含：
+
+```json
+{
+  "file_scope": {
+    "upload_refs": ["attachment:runtime/<UUID>"],
+    "allowed_mime_types": ["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"],
+    "max_file_bytes": 10485760
+  }
+}
+```
+
+`upload_refs` 是 owner 已登记、属于同一 Profile 的精确 opaque refs，最多 32 项；不接受路径、通配符、正文或 URL。`allowed_mime_types` 必须是上述五种类型的非空唯一子集，`max_file_bytes` 为 1–10 MiB 的整数。省略 `file_scope`、空数组或不兼容字段都不会推导文件权限；旧严格 reader 必须明确拒绝不认识的非兼容扩展，不能忽略后放宽权限。
+
+Browser task scope 在保留 `operations`、`profile_refs`、`origins` 的同时，可为文件操作带 `file_refs`（最多 32 项、唯一 opaque refs）。上传必须恰好携带一个与 Grant `upload_refs` 及任务 scope 一致的 `file_ref`；下载必须携带空 `file_refs`，因为输出材料尚不存在。非文件 operation 不得借 `file_refs` 传递隐藏权限。Core 还须在派发时重新核对文件存在、Profile 归属、未过期/未撤销、类型/大小上限、Page/document/target 新鲜度和 ControlLease。
+
+文件 scope 只允许交付已登记的不可变副本或创建同一 Principal/Profile 的下载结果；它不授予 owner import/export/delete、任意本地路径、正文读取、headers/body、Network interception、跨 Profile 共享或网站业务提交。Grant/Principal/Connection 撤销和过期只阻止新的 Agent 文件操作，不改写已经派发的 Run/receipt；响应丢失按原 operation/idempotency 查询，未知结果不得以新 key 重放。
 
 ## Provider preference 与创建模板
 

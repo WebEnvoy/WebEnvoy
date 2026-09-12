@@ -20,6 +20,11 @@ import {
   type ManagedInteractionResult
 } from "./managed-interaction.js";
 import {
+  trustLocalProviderFileOperation,
+  type LocalProviderFileOperationInput,
+  type LocalProviderFileOperationResult
+} from "./runtime-session-types.js";
+import {
   normalizeManagedProviderObservation,
   trustManagedPageObserver,
   trustManagedPublicPageOperation,
@@ -371,6 +376,7 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
       observePage: trustManagedPageObserver(async (pageInput?: ManagedProviderPageInput) => observe(context, pageInput)),
       interaction: trustManagedInteractionOperation(async (interactionInput: ManagedInteractionInput) => interact(context, interactionInput)),
       publicPage: trustManagedPublicPageOperation(async (publicInput: ManagedPublicPageInput) => readPublicPage(context, publicInput)),
+      executeFileOperation: trustLocalProviderFileOperation(async (fileInput: LocalProviderFileOperationInput) => fileOperation(context, fileInput)),
       readDiagnostics: trustRuntimeDiagnosticsProbe(async (diagnosticsInput: RuntimeDiagnosticsInput) => diagnostics(context, diagnosticsInput)),
       readEnvironment: trustEnvironmentProbe(async () => environment(context))
     };
@@ -474,6 +480,48 @@ async function interact(context: DriverContext, input: ManagedInteractionInput):
     ...(typeof raw?.failure_class === "string" ? { failure_class: raw.failure_class } : {}),
     ...(raw?.page ? { page: toPageFacts(upstreamPage(raw.page)) } : {}),
     ...(raw?.snapshot && typeof raw.snapshot === "object" ? { snapshot: raw.snapshot as never } : {})
+  };
+}
+
+async function fileOperation(context: DriverContext, input: LocalProviderFileOperationInput): Promise<LocalProviderFileOperationResult> {
+  const pageRef = input.provider_page_ref;
+  if (!context.pages.some(page => page.provider_page_ref === pageRef)) return { status: "unavailable", dispatch_state: "not_dispatched", operation: input.operation, failure_class: "page_relation_unavailable" };
+  const rawValue = object(await context.driver.request("file_operation", {
+    provider_page_ref: pageRef,
+    operation: input.operation,
+    expected_origin: input.expected_origin,
+    authorized_origins: input.authorized_origins,
+    target_ref: input.target_ref,
+    ...(input.source_path === undefined ? {} : { source_path: input.source_path }),
+    ...(input.staging_path === undefined ? {} : { staging_path: input.staging_path }),
+    timeout_ms: input.timeout_ms ?? context.input.timeout_ms
+  }));
+  if (!rawValue) return { status: "unknown_outcome", dispatch_state: "dispatched", operation: input.operation, failure_class: "file_result_invalid" };
+  const raw = rawValue;
+  const status = raw?.status === "completed" ? "completed" : raw?.status === "unknown_outcome" ? "unknown_outcome" : "unavailable";
+  const dispatch = raw?.dispatch_state === "dispatched" ? "dispatched" : "not_dispatched";
+  const page = raw?.page ? toPageFacts(upstreamPage(raw.page)) : undefined;
+  if (status !== "completed") return { status, dispatch_state: dispatch, operation: input.operation, failure_class: typeof raw?.failure_class === "string" ? raw.failure_class : "file_operation_failed", ...(page ? { page } : {}) };
+  if (!page || raw.operation !== input.operation || raw.browser_delivery !== "completed" || raw.business_commit !== "not_observed") return { status: "unknown_outcome", dispatch_state: "dispatched", operation: input.operation, failure_class: "file_result_invalid", ...(page ? { page } : {}) };
+  const download = raw.download && typeof raw.download === "object" ? raw.download as JsonObject : undefined;
+  if (input.operation === "download" && (!download || typeof download.page_url !== "string" || typeof download.url !== "string" || typeof download.suggested_filename !== "string" || !Number.isSafeInteger(download.byte_length) || typeof download.sha256 !== "string" || typeof download.staging_path !== "string")) return { status: "unknown_outcome", dispatch_state: "dispatched", operation: "download", failure_class: "file_result_invalid", page };
+  return {
+    status: "completed",
+    dispatch_state: "dispatched",
+    operation: input.operation,
+    page,
+    browser_delivery: "completed",
+    page_receipt: raw.page_receipt === "observed" ? "observed" : "unknown",
+    page_processing: raw.page_processing === "observed" ? "observed" : "unknown",
+    business_commit: "not_observed",
+    ...(download ? { download: {
+      page_url: download.page_url as string,
+      url: download.url as string,
+      suggested_filename: download.suggested_filename as string,
+      byte_length: download.byte_length as number,
+      sha256: download.sha256 as string,
+      staging_path: download.staging_path as string
+    } } : {})
   };
 }
 

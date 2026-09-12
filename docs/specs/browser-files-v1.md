@@ -1,7 +1,7 @@
 # 受管浏览器文件闭环 V1：#523 实施合同
 
-> 状态：Draft / 产品实施决定已固定；尚未实现、未通过固定 Provider Files 资格门、未合并为当前支持能力。
-> 版本：draft-1；日期：2026-09-13。
+> 状态：Accepted / #523 实现合同已冻结；固定 Provider 资格门已通过，正式 installed/live 验收证据仍以 verification 记录和 Issue/PR readback 为准。
+> 版本：v1.0；日期：2026-09-13。
 > Owning Work Item：[#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，M23；消费 #474，环境 #471，安装 #477，最终验收 #482。
 > 基线：`95b415bc6924529adc25d9129e678ad0a2d67212`；以实际最新 main 集成，不降版。
 > 依据：canonical v1.4、ADR0012、Browser Runtime Capabilities V1 §10、现有 Page/Navigation、Grant/Plugin/Run 合同。本文件不扩大完整 V1，也不将全部 Files 组压缩成本切片。
@@ -33,9 +33,11 @@
 
 | 门 | 实际结果 |
 |---|---|
-| G0-U | 使用公开接口向标准控件交付生成PNG；网页通过真实请求上传到受控服务，服务端收到的字节 SHA-256 与源文件相同；正式同等的请求保护始终启用。 |
-| G0-D | 对已知同页下载链接，先监听再点击一次；真实 download.page/URL 与获准请求链可核对，CSV完整保存；Context关闭后受管测试副本hash仍一致；未授权URL/redirect在请求前拒绝。 |
-| G0-I | 文件动作不会要求放宽现有授权/归属；未知popup仍局部拒绝，独立P2的普通读取不受影响；无需修改上游、猜归属或扫描系统下载目录。 |
+| G0-U | 通过。原版固定组合使用公开 `request.post_data_buffer` / `locator.set_input_files`；受控服务收到 PNG，源/服务端 SHA-256 均为 `431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460`；正式请求 guard 始终启用。 |
+| G0-D | 通过。已登记同页 link 先监听后单击；真实 `download.page`/URL 通过核对，CSV 保存成功；Runtime/Context 关闭后受管副本 hash 仍为 `6d4ddc85515525576304235af892cbec19e7bd2ff8eea3c72018d146dc585da2`；未授权 redirect 在目标服务收到请求前拒绝。 |
+| G0-I | 通过。专用 profile/无账号受控页面下无权限放宽；未知 popup 维持局部拒绝，独立普通读取不受影响；无上游/Provider/私有协议修改、归属猜测或系统下载目录扫描。拒绝计数：未授权 origin redirect 1、未知关系 1、缺失 frame 未归属 1。 |
+
+G0 证据由固定来源、配置快照、包/应用 SHA-256、请求计数和类型化结果组成，保存在任务主机的临时证据目录（`g0-evidence.json` 与 `g0-i-evidence.json`）；文件正文不进入仓库或 Core Run。固定来源与实际运行配置为：原版 Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0，browser zip SHA-256 `3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3`，Camoufox wheel SHA-256 `b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561`，Playwright wheel SHA-256 `39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5`。G0 只证明固定上游公开能力和本 Driver guard 适配，不替代最终 installed/live Agent 现场验收。
 
 G0-U/D/I全部成立才连续进入实现。范围内的 WebEnvoy Driver 适配缺口可修；不能修改 Camoufox/CSS/Juggler/Playwright、构建修改副本、monkey-patch、升级/换Provider或关闭guard。若无法成立，保留第一份反例、具体缺口和排除项，#523不完成；不自行缩成只上传、不要反复堆新探针。局部暂停不影响已完成#519/#516。
 
@@ -169,7 +171,7 @@ Design Obligations：
 - DO-PROVIDER-PRIVATE-SCHEMA：初始not-triggered；不改Provider环境bundle/浏览器格式。Harbor材料格式属于本组件正式合同，不借此省略定义。
 - DO-APP-IA：not-triggered；固定owner CLI与原接管入口，不新建App区域。
 
-实现同PR更新本文件为Accepted及schema/fixture、Plugin/Grant/Network、specs/contracts索引和必要引导。是否有Files接口、是否获授权、是否Provider能执行、是否已验证四层分开。Draft本身不进入运行时supported声明。
+实现同PR已更新本文件为Accepted及 schema/fixture、Plugin/Grant/Network、specs/contracts 索引和必要引导。是否有 Files 接口、是否获授权、是否 Provider 能执行、是否已验证四层分开；未完成 installed/live 现场前不得仅凭代码或 G0 声称 `plugin_verified`。
 
 ## 8. 固定验收和最小执行顺序
 

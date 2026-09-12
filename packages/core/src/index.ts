@@ -364,8 +364,9 @@ export {
   type TaskTurnInputSummaryConstraint
 } from "./task-turn-input-policy.js";
 
-export { createFileManagedAccessStore, ManagedAccessError, managedOperations, managedSkillOperations, type FileManagedAccessStore, type ManagedSkillOperation, type ManagedSkillScope } from "./managed-access.js";
+export { createFileManagedAccessStore, ManagedAccessError, managedOperations, managedFileOperations, managedSkillOperations, type FileManagedAccessStore, type ManagedFileScope, type ManagedSkillOperation, type ManagedSkillScope } from "./managed-access.js";
 export { createManagedBrowserService } from "./managed-browser.js";
+export { createHttpManagedFileOwnerClient, type ManagedFileOwnerClient } from "./managed-file-owner.js";
 export {
   createFileSkillLibraryService,
   ManagedSkillError,

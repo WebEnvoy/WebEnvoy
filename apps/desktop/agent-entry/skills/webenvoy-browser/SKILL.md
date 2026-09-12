@@ -34,6 +34,16 @@ When a response is lost, reconnect and call `webenvoy_query` with the original i
 
 Human takeover stops Agent input for that Instance. Wait for explicit App handback, then take a new snapshot of the same Instance before continuing; do not resume old input or reclaim human control. Another authorized Profile can continue independently. Revocation prevents later operations and survives reconnect; it does not undo earlier page effects.
 
+## 受管文件闭环（browser-files-v1）
+
+The owner must first use the installed owner CLI (`files import`, `files inspect`, `files export`, `files revoke`, or `files delete`) to create and manage an immutable `attachment:runtime/<UUID>` material. The owner grants an exact `file_scope` with `upload_refs`, the allowed MIME subset, and a byte ceiling; an old Grant without that scope has no file permission. Owner paths, file bodies, selectors, headers, URLs, and credentials never enter Agent requests.
+
+For `file.upload`, use the original Instance and a fresh snapshot containing one visible standard `input[type=file]` target. Send only `file_ref`, the exact Profile/Page/document binding, `observation_ref`, `target_ref`, and a task scope whose `file_refs` contains that ref. Harbor delivers exactly one immutable copy through the public Playwright file-input API; it does not append, clear, replace, click submit, or claim that the website processed the file. Follow with a fresh snapshot/read/wait to establish any page-side receipt, which remains separate from `browser_delivery`.
+
+For `file.download`, use a fresh snapshot with one ordinary same-page HTTP(S) link target and `task_scope.file_refs: []`; do not provide a URL or file ref. Harbor listens before one click, verifies the real download Page/URL/request guard, bounds the received file, validates its type, and commits a new output ref under the same Principal/Profile only after save and hash checks. A download event means start, not business success. The result exposes only bounded file metadata and the opaque output ref; call the owner CLI to export it.
+
+Uploads and downloads support only PNG, JPEG, PDF, UTF-8 TXT, and UTF-8 CSV, one file at a time and at most 10 MiB (uploads are at least 1 byte; empty downloads may be valid text/CSV). Directories, multiple files, blob/data/JS exports, cross-frame or hidden controls, arbitrary local access, and business commits are outside this slice. On `unknown_outcome` or a lost response, call `webenvoy_query` with the original key; never use a new key, re-open the Page, re-click, or re-upload. Revocation, expiry, stale bindings, user takeover, and missing/ambiguous Page relations fail closed without changing earlier dispatch facts.
+
 ## 安装接续与 Profile 恢复
 
 更新或重装接入口后，重新调用 status/connect，核对原 Principal、Profile 和当前有效 Grant；原 Instance 不会因 Runtime 重启而复活。使用原 Profile 启动新的 Instance，再重新读取环境与页面事实。撤销或过期权限不会因重连恢复；历史动作只查询，不重新执行。

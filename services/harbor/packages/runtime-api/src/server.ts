@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import {
   HarborRuntime,
   HARBOR_RUNTIME_FACTS_SCHEMA,
+  ManagedFileError,
   type OpenIdentityEnvironmentSessionInput,
   type RuntimeErrorFact,
   type RuntimeSessionControlInput,
@@ -62,7 +63,9 @@ export function createHarborRuntimeHttpServer(
     } catch (error) {
       const requestError = error instanceof ProviderLifecycleHttpError
         ? error
-        : error instanceof BadRequest ? new ProviderLifecycleHttpError(400, "bad_request", error.message) : null;
+        : error instanceof BadRequest ? new ProviderLifecycleHttpError(400, "bad_request", error.message)
+          : error instanceof ManagedFileError ? new ProviderLifecycleHttpError(["file_source_missing", "file_ref_unavailable", "file_expired"].includes(error.code) ? 404 : ["file_limit_exceeded", "file_type_unsupported", "file_type_mismatch", "file_name_invalid", "file_source_invalid", "file_destination_invalid", "file_destination_exists", "file_symlink_rejected"].includes(error.code) ? 400 : 409, error.code, error.code)
+          : null;
       writeJson(response, requestError?.statusCode ?? 500, {
         error: requestError?.code ?? "internal_error",
         message: requestError?.message ?? "Internal Harbor Runtime API error.",
@@ -150,6 +153,30 @@ async function route(
   }
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
+  }
+  if (method === "GET" && url.pathname === "/owner/files") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    writeJson(response, 200, { files: await runtime.inspectManagedFiles(url.searchParams.get("file_ref") ?? undefined) });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/owner/files/import") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    writeJson(response, 201, { file: await runtime.importManagedFile(await readJson<ManagedFileImportBody>(request)) });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/owner/files/export") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<ManagedFileExportBody>(request);
+    writeJson(response, 200, { file: await runtime.exportManagedFile(body.file_ref, body.destination_path) });
+    return;
+  }
+  if ((method === "POST" || method === "DELETE") && parts[0] === "owner" && parts[1] === "files" && parts[2] && parts.length === 3 && ["revoke", "delete"].includes(parts[2])) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = method === "POST" ? await readJson<{ file_ref?: unknown }>(request) : { file_ref: url.searchParams.get("file_ref") };
+    if (typeof body.file_ref !== "string") throw new BadRequest("Invalid file reference.");
+    const file = parts[2] === "revoke" ? await runtime.revokeManagedFile(body.file_ref) : await runtime.deleteManagedFile(body.file_ref);
+    writeJson(response, 200, { file });
+    return;
   }
   if (method === "POST" && url.pathname === "/runtime/profile-recovery/inspect") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
@@ -291,6 +318,13 @@ async function route(
     return;
   }
 
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "managed-files" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.getManagedFileOperation(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? { status: "unavailable", failure_class: "file_operation_receipt_missing", operation_ref: parts[2] });
+    return;
+  }
+
   if (parts[0] === "runtime" && (parts[1] === "sessions" || parts[1] === "identity-environment-sessions") && parts[2]) {
     await routeSession(runtime, manualAuthenticationAuthorizer, parts[2], parts[3], method, request, response);
     return;
@@ -335,7 +369,9 @@ function readinessBody(): object {
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
       "/runtime/sessions/{runtime_session_ref}/diagnostics",
       "/runtime/sessions/{runtime_session_ref}/pages",
+      "/runtime/sessions/{runtime_session_ref}/files",
       "/runtime/managed-pages/{operation_ref}",
+      "/runtime/managed-files/{operation_ref}",
       "/runtime/sessions/{runtime_session_ref}/handoff",
       "/runtime/sessions/{runtime_session_ref}/manual-authentication-completed",
       "/runtime/sessions/{runtime_session_ref}/read-operations",
@@ -468,6 +504,12 @@ async function routeSession(
       authorized_origins: Array.isArray(body.authorized_origins) && body.authorized_origins.every(item => typeof item === "string") ? body.authorized_origins as string[] : []
     });
     writeJson(response, "failure_class" in result ? result.failure_class === "session_missing" ? 404 : 409 : 200, result);
+    return;
+  }
+  if (action === "files" && method === "POST") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = await runtime.operateManagedFile(runtimeSessionRef, await readJson<unknown>(request)) as { status: string; dispatch_state: string; [key: string]: unknown };
+    writeJson(response, result.status === "completed" ? 200 : result.status === "unavailable" && result.dispatch_state === "not_dispatched" ? 409 : 202, result);
     return;
   }
   if (action === "interactions" && method === "POST") {
@@ -640,6 +682,8 @@ function siteResourceFactsInput(url: URL): SiteResourceFactsInput {
 
 type ProfileRecoveryPlanBody = ProfileRecoveryPlanInput;
 type ProfileRecoveryApplyBody = ProfileRecoveryApplyInput;
+type ManagedFileImportBody = import("./managed-files.js").ManagedFileImportInput;
+type ManagedFileExportBody = { file_ref: string; destination_path: string };
 
 function recoveryFailure(error: unknown): { code: string; recovery_hint: string } {
   return error && typeof error === "object" && "code" in error && typeof error.code === "string"

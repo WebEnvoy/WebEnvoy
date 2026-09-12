@@ -12,6 +12,7 @@ import {
   createFileExecutionPolicyConfigStore,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
+  createHttpManagedFileOwnerClient,
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
   recoverInterruptedCoreTaskSessions
@@ -66,6 +67,9 @@ if (import.meta.url === entrypoint) {
   const harborRuntimeClient = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborRuntimeClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
+  const managedFileService = process.env.WEBENVOY_HARBOR_RUNTIME_URL
+    ? createHttpManagedFileOwnerClient({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+    : undefined;
   const harborIdentityFactsReader = process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createHttpHarborIdentityFactsReader({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL })
     : undefined;
@@ -98,6 +102,7 @@ if (import.meta.url === entrypoint) {
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
     ...(managedSkillService === undefined ? {} : { managedSkillService }),
     ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
+    ...(managedFileService === undefined ? {} : { managedFileService }),
     ...(runRecordStore === undefined ? {} : { runRecordStore }),
     ...(authorizationDecisionStore === undefined ? {} : { authorizationDecisionStore }),
     ...(executionPolicyConfigStore === undefined ? {} : { executionPolicyConfigStore }),

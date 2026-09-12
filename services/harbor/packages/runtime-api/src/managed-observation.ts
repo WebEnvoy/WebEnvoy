@@ -3,7 +3,7 @@ import type { LocalProviderPageFacts } from "./runtime-session-types.js";
 
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
-  catalog_ref: "harbor://managed-operations", catalog_version: "7",
+  catalog_ref: "harbor://managed-operations", catalog_version: "8",
   operations: [...["profile.list", "profile.read", "profile.create", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].map(operation_id => ({
     operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"]
@@ -17,6 +17,12 @@ export const managedOperationCatalog = {
   ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({
     operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"]
+  })),
+  ...["file.upload", "file.download"].map(operation_id => ({
+    operation_id,
+    category: "prepare" as const,
+    target_scope: { target_types: ["managed_profile"] },
+    resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"]
   }))]
 };
 export type DiscoveredManagedAccount = { status: "verified" | "unknown"; account_system_ref: string | null; account_ref: string | null };

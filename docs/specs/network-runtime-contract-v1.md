@@ -1,6 +1,6 @@
 # Network Runtime Contract V1
 
-状态：Accepted；版本：1.0；owner：Harbor / Provider Driver（观察）、Core（授权与 Run）。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续能力由 [FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
+状态：Accepted；版本：1.1；owner：Harbor / Provider Driver（观察）、Core（授权与 Run）。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续能力由 [FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 与受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523) 承载。产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 > **2026-09-12 Provider 事实**：本合同保持 Provider-neutral 的 Network observation 语义；#519 的官方固定 Camoufox 路径只按 `limited` 使用。若 popup 首请求到达时尚不能在派发前可信关联已登记 Page，Driver 必须在 `fetch`/`continue`/外部请求前局部拒绝，并以 `page_relation_unavailable`/`not_dispatched` 保留请求归属未知事实；不能以 URL/title/时间邻近/active/新 Page 猜测或重放。触发它的 click 若已派发，click 的 `dispatched` 事实与 popup 子请求的拒绝、业务未完成分别记录；不得将 click 改写成 `not_dispatched`。原任务页的 fresh read/input、已可信 Page 和其他 Profile 不因该局部拒绝而暂停。正式 installed、人工交还和环境连续性仍待 #519 完成门；旧私有 launch binding、patched/native artifact 仅作历史/恢复事实。
 
@@ -53,6 +53,27 @@ origin intersection before that hop is sent. Same-origin and explicitly
 authorized cross-origin redirects may continue; an unauthorized destination
 is blocked at that hop and cannot be inferred from a later response. No URL,
 title, timing, active-page or multi-Grant heuristic broadens this set.
+
+## Managed browser file download boundary
+
+`file.download` reuses the same request guard and Page relation contract. Core
+must provide the exact authorized origin intersection and a fresh Page/target
+binding; Harbor/Driver listens for the native download before one click and
+accepts only a real `Download.page` equal to that registered Page and a
+same-origin HTTP(S) `Download.url`. A redirect is checked hop by hop before the
+request is sent. An unknown Page relation, unsupported target, unauthorized
+redirect, competing download, or missing causal event is a structured
+`download_relation_unavailable`/`download_target_unsupported` failure, not a
+file claim and not a reason to scan the host download directory.
+
+The download event is only a transport fact. The file is bounded to the Core
+approved size and MIME subset, copied out of the browser temporary directory,
+validated for declared/identified type and SHA-256, and atomically committed by
+Harbor before a `webenvoy.browser-file-result/v1` output `file_ref` is exposed.
+Provider temporary paths, response bodies, headers and arbitrary Network
+payloads never cross the Core/Plugin boundary. A failed or lost response keeps
+the original `dispatched`/`unknown` receipt; `webenvoy_query` may reconcile it
+but cannot repeat the click or download.
 
 ## Public result
 
