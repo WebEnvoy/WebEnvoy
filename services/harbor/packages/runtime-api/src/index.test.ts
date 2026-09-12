@@ -175,6 +175,26 @@ setInterval(() => {}, 10000);
   return browserPath;
 }
 
+function writeFakeCamoufoxDriver(dir: string): string {
+  const driverPath = join(dir, "fake-camoufox-driver.mjs");
+  writeFileSync(driverPath, `import readline from "node:readline";
+import { writeFileSync } from "node:fs";
+const page = { provider_page_ref: "page:bound-camoufox", current_url: "about:blank", title: "about:blank", status: "ready", origin: "null", active: true, document_generation: 1, facts: [] };
+const rl = readline.createInterface({ input: process.stdin });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  let result;
+  if (request.op === "launch") {
+    if (process.env.HARBOR_FAKE_CAMOUFOX_PATH_MARKER) writeFileSync(process.env.HARBOR_FAKE_CAMOUFOX_PATH_MARKER, request.browser_path);
+    result = { status: "ready", driver_ref: "fake-bound-camoufox", page, pages: [page], viewer_entry: { availability: "unavailable", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [] };
+  } else if (request.op === "close") result = { closed: true };
+  else result = page;
+  process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
+}`);
+  chmodSync(driverPath, 0o700);
+  return driverPath;
+}
+
 async function startNonCdpEndpoint(): Promise<{ port: number; close: () => Promise<void> }> {
   const server = createServer((_request, response) => {
     response.setHeader("content-type", "application/json");
@@ -704,6 +724,148 @@ test("local provider maps profile storage refs to stable private directories wit
   }
 });
 
+test("uses a persisted Chrome binding over a global Camoufox path and rejects mismatches before spawning", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-bound-chrome-global-camoufox-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousBrowserPath = process.env.HARBOR_BROWSER_PATH;
+  const previousMarker = process.env.HARBOR_FAKE_BROWSER_MARKER;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const marker = join(dir, "spawned.txt");
+  const globalCamoufoxPath = "/private/tmp/Camoufox.app/Contents/MacOS/camoufox";
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_BROWSER_PATH = globalCamoufoxPath;
+  process.env.HARBOR_FAKE_BROWSER_MARKER = marker;
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "about:blank",
+    url: "about:blank",
+    readyState: "complete"
+  });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-bound-chrome-global-camoufox",
+      requested_provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { HARBOR_CHROME_PATH: browserPath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === browserPath,
+      is_executable: candidate => candidate === browserPath,
+      read_text: () => null,
+      list_dir: () => [],
+      profile_storage_ref: "profile-storage-bound-chrome-global-camoufox",
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    assert.equal(identity.provider_binding.selected_provider_id, "chrome_official");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, browserPath);
+
+    const base = {
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-bound-chrome-global-camoufox",
+      identity_environment: identity
+    };
+    for (const mismatch of [
+      { provider_id: "camoufox" as const },
+      { browser_path: globalCamoufoxPath }
+    ]) {
+      const result = await launchLocalDedicatedProvider({ ...base, ...mismatch });
+      assert.equal(result.status, "unavailable");
+      if (result.status !== "unavailable") continue;
+      assert.equal(result.error.code, "identity_environment_unavailable");
+      assert.equal(result.facts.some(fact => fact.value === "provider_mismatch"), true);
+      assert.equal(existsSync(marker), false);
+    }
+
+    const ready = await launchLocalDedicatedProvider(base);
+    assert.equal(ready.status, "ready", JSON.stringify(ready));
+    assert.equal(existsSync(marker), true);
+    if (ready.status === "ready") await ready.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousBrowserPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+    else process.env.HARBOR_BROWSER_PATH = previousBrowserPath;
+    if (previousMarker === undefined) delete process.env.HARBOR_FAKE_BROWSER_MARKER;
+    else process.env.HARBOR_FAKE_BROWSER_MARKER = previousMarker;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("uses a persisted official Camoufox binding path over the global Camoufox path", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-bound-camoufox-global-path-"));
+  const previous = { ...process.env };
+  const boundPath = join(dir, "bound-camoufox", "Contents", "MacOS", "camoufox");
+  const globalPath = join(dir, "global-camoufox", "Contents", "MacOS", "camoufox");
+  const driverPath = writeFakeCamoufoxDriver(dir);
+  const marker = join(dir, "camoufox-path.txt");
+  const pins = {
+    HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+    HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+    HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+    HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+  };
+  Object.assign(process.env, pins, {
+    HARBOR_CAMOUFOX_PATH: boundPath,
+    HARBOR_CAMOUFOX_INSTALL_ROOT: dir,
+    HARBOR_CAMOUFOX_PYTHON: process.execPath,
+    HARBOR_CAMOUFOX_DRIVER: driverPath,
+    HARBOR_PROFILE_STORAGE_ROOT: join(dir, "profiles"),
+    HARBOR_BROWSER_PATH: globalPath,
+    HARBOR_FAKE_CAMOUFOX_PATH_MARKER: marker
+  });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-bound-camoufox-global-path",
+      requested_provider_id: "camoufox",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      env: { ...pins, HARBOR_CAMOUFOX_PATH: boundPath, HARBOR_CAMOUFOX_INSTALL_ROOT: dir },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === boundPath,
+      is_executable: candidate => candidate === boundPath,
+      read_text: () => null,
+      list_dir: () => [],
+      profile_storage_ref: "profile-storage-bound-camoufox-global-path"
+    });
+    assert.equal(identity.provider_binding.selected_provider_id, "camoufox");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, boundPath);
+
+    const result = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-bound-camoufox-global-path",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    assert.equal(readFileSync(marker, "utf8"), boundPath);
+    if (result.status === "ready") await result.close();
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    for (const [key, value] of Object.entries(previous)) process.env[key] = value;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("local provider preserves persistent profile dirs and removes ephemeral dirs after successful close", async () => {
   const dir = mkdtempSync(join(tmpdir(), "harbor-fake-browser-"));
   const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
@@ -956,7 +1118,11 @@ function assignedLocation(message: { method: string; params?: { expression?: str
   return JSON.parse(match[1]!) as string;
 }
 
-function installFakeCdpWebSocket(ignoredMethod: string, redirectUrl?: string): void {
+function installFakeCdpWebSocket(
+  ignoredMethod: string,
+  redirectUrl?: string,
+  environmentReadback?: { language: string; timezone: string; width: number; height: number; title?: string; url?: string; readyState?: string }
+): void {
   class FakeCdpWebSocket extends EventTarget {
     readyState = 0;
     private currentUrl = "about:blank";
@@ -980,7 +1146,9 @@ function installFakeCdpWebSocket(ignoredMethod: string, redirectUrl?: string): v
           id: message.id,
           result: message.method === "Page.getFrameTree"
             ? { frameTree: { frame: { url: this.currentUrl } } }
-            : {}
+            : message.method === "Runtime.evaluate" && environmentReadback
+              ? { result: { value: environmentReadback } }
+              : {}
         })
       })));
     }

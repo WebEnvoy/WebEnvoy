@@ -25,7 +25,11 @@ import {
   trustLocalProviderMediaActionProbe,
   trustLocalProviderWritePrecheckProbe
 } from "./read-operation-probe-trust.js";
-import { isOfficialCamoufoxLaunchRequest, launchCamoufoxUpstreamProvider } from "./camoufox-upstream-driver.js";
+import {
+  isOfficialCamoufoxLaunchRequest,
+  launchCamoufoxUpstreamProvider,
+  readCamoufoxUpstreamSourceFacts
+} from "./camoufox-upstream-driver.js";
 import { isCanonicalDetailUrl } from "./detail-read-target.js";
 import type {
   BossJobDetailPublicSummary,
@@ -70,29 +74,40 @@ class ProviderPageCommitError extends Error {}
 class ProviderOriginDriftError extends Error {}
 
 export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInput): Promise<LocalProviderLaunchResult> {
-  const explicitBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
   const persistedBinding = input.identity_environment?.provider_binding;
+  // A persisted binding owns its verified executable; the process-level path
+  // is only a fallback for unbound launches.
+  const configuredBrowserPath = input.browser_path || process.env.HARBOR_BROWSER_PATH || "";
+  const bindingBrowserPath = persistedBinding?.selected_provider?.install?.path || "";
+  const explicitBrowserPath = persistedBinding ? input.browser_path || "" : configuredBrowserPath;
   if (persistedBinding && (
     !persistedBinding.selected_provider_id || !persistedBinding.selected_provider ||
     persistedBinding.selected_provider.provider_id !== persistedBinding.selected_provider_id ||
     (input.profile_ref !== input.identity_environment?.profile_ref) ||
     (input.provider_id && input.provider_id !== persistedBinding.selected_provider_id) ||
-    (explicitBrowserPath && explicitBrowserPath !== persistedBinding.selected_provider.install.path) ||
+    (explicitBrowserPath && explicitBrowserPath !== persistedBinding.selected_provider.install?.path) ||
     (input.profile_storage_ref !== input.identity_environment?.browser_storage.profile_storage_ref)
   )) {
     return unavailable("identity_environment_unavailable", "Requested provider or Profile does not match the managed identity binding.", [
       { key: "provider.binding", source: "observed", value: "provider_mismatch" }
     ]);
   }
+  if (persistedBinding && !isLaunchablePersistedBinding(persistedBinding)) {
+    if (persistedBinding.selected_provider_id === "camoufox") return retiredCamoufoxUnavailable();
+    return unavailable("identity_environment_unavailable", "The managed identity binding is not currently launchable.", [
+      { key: "provider.binding", source: "observed", value: "provider_unavailable" }
+    ]);
+  }
+  const launchInput = persistedBinding && bindingBrowserPath ? { ...input, browser_path: bindingBrowserPath } : input;
   // Camoufox is admitted only through the owner-provided official source and
   // fixed pins. All other Camoufox/native/legacy requests remain fail-closed
   // before detection, profile preparation, or provider fallback.
-  if (isCamoufoxLaunchRequest(input)) {
-    return isOfficialCamoufoxLaunchRequest(input) ? launchCamoufoxUpstreamProvider(input) : retiredCamoufoxUnavailable();
+  if (isCamoufoxLaunchRequest(launchInput)) {
+    return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput) : retiredCamoufoxUnavailable();
   }
   const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
-  const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
+  const browserPath = bindingBrowserPath || explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";
   if (!browserPath) {
     const diagnostic = providerBinding?.diagnostics[0] ?? diagnoseBrowserProviderFailure({ provider_id: "cloakbrowser", failure_class: "not_installed" });
     return unavailable("provider_unavailable", diagnostic.app_summary, providerBindingFacts(providerBinding));
@@ -236,6 +251,22 @@ export function isCamoufoxLaunchRequest(
 
 function isCamoufoxPath(path: string | undefined): boolean {
   return typeof path === "string" && /(?:^|[\\/])camoufox(?:$|[._\\/-])/i.test(path);
+}
+
+function isLaunchablePersistedBinding(binding: IdentityEnvironmentProviderBinding): boolean {
+  const provider = binding.selected_provider;
+  if (!provider) return false;
+  const install = provider.install;
+  if (!install || typeof install !== "object" || Array.isArray(install)) return false;
+  if (!binding.selected_provider_id ||
+    !["cloakbrowser", "chrome_official", "camoufox"].includes(provider.provider_id) ||
+    provider.provider_id !== binding.selected_provider_id ||
+    provider.selectable !== true ||
+    (binding.selection_reason !== "requested_provider_available" && binding.selection_reason !== "user_default_available") ||
+    typeof install.path !== "string" || !install.path.trim() ||
+    install.status !== "installed" || install.launchability !== "launchable") return false;
+  if (provider.provider_id !== "camoufox") return true;
+  return readCamoufoxUpstreamSourceFacts({}, install as unknown as Record<string, unknown>) !== null;
 }
 
 function retiredCamoufoxUnavailable(): LocalProviderLaunchResult {
