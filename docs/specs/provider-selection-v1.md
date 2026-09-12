@@ -49,6 +49,8 @@ Harbor 在 create 的 raw request idempotency receipt lookup 之后读取一次�
 
 App 同时读取 catalog、preference 和 Profile binding。未设置时只展示可修改的推荐，select 保持未确认；真人明确选择后才创建。可用默认可作新建预选；失效默认保持显示并阻止静默创建。一次性选择不修改默认，默认管理只提供最小 set/clear/readback。
 
+编辑只以被编辑 Profile 的实际 `provider_binding.selected_provider_id`（及其 admission facts）作为 Provider 初值；create 与 import 均不得读取历史 `selected`、当前选中 Profile 或最近使用值。import 的 Provider 必须在本次表单中明确选择，不能继承新建默认或任何历史状态。App 表单按 mode 与编辑对象隔离，切换 mode 或编辑对象时不得复用前一表单输入。
+
 已安装 Plugin 复用 `webenvoy_operation`：`provider.preference.read`、`provider.preference.set`、`provider.preference.clear`，以及动态模板 create 的可选 `provider_id`。偏好 operation 的 task scope 使用当前 operation 和空 `profile_refs`/`origins`。Core 仍检查 Principal、Connection、单一有效 Grant、task scope 和执行策略，并将 `provider_preference` target 匹配到 `harbor://browser-provider-preference` resource requirement。
 
 三项 preference operation 必须逐项出现在 `allowed_operations`；旧 Grant 没有权限。set/clear 是 write risk，read 不能推出修改权限。没有新增 Provider ID scope 或第二权限系统；动态模板本身表示 owner 允许在 create 时按本次选择或用户默认解析，但不赋予修改默认权。
