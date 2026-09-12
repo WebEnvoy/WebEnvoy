@@ -7,9 +7,9 @@ const PRIVATE_PREFIXES = /^(WEBENVOY_|HARBOR_|CAMOUFOX_)/;
  *
  * Development launch overrides are deliberately removed before the fixed
  * service values are added. Historical Camoufox paths are never accepted;
- * Harbor receives only a bounded retirement classification.
+ * Harbor receives only the verified upstream binding facts.
  */
-export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' } }) {
+export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' }, camoufoxBinding = null }) {
   const environment = { ...parentEnvironment };
   for (const key of Object.keys(environment)) if (PRIVATE_PREFIXES.test(key)) delete environment[key];
   Object.assign(environment, {
@@ -22,6 +22,24 @@ export function installedRuntimeEnvironment({ parentEnvironment = process.env, d
     WEBENVOY_DISABLE_PACKAGED_RUNTIME: '0', HARBOR_RUNTIME_PROVIDER: '',
     HARBOR_CAMOUFOX_LAUNCH_STATE: camoufoxLaunch.state,
     HARBOR_CAMOUFOX_LAUNCH_REASON: camoufoxLaunch.reason
+  });
+  if (camoufoxBinding) Object.assign(environment, {
+    HARBOR_BROWSER_PROVIDER: 'camoufox',
+    HARBOR_BROWSER_PATH: camoufoxBinding.browser.executable,
+    HARBOR_CAMOUFOX_PATH: camoufoxBinding.browser.executable,
+    HARBOR_CAMOUFOX_SOURCE: camoufoxBinding.source,
+    HARBOR_CAMOUFOX_PROPERTIES_SHA256: camoufoxBinding.properties_sha256,
+    HARBOR_CAMOUFOX_INSTALL_ROOT: camoufoxBinding.browser.install_root,
+    HARBOR_CAMOUFOX_PYTHON: camoufoxBinding.python.path,
+    HARBOR_CAMOUFOX_DRIVER: join(installRoot, 'dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.py'),
+    HARBOR_CAMOUFOX_VERSION: camoufoxBinding.camoufox_version,
+    HARBOR_CAMOUFOX_BROWSER_VERSION: camoufoxBinding.browser_version,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: camoufoxBinding.playwright_version,
+    HARBOR_CAMOUFOX_BROWSER_SOURCE_SHA256: camoufoxBinding.source_sha256.browser,
+    // Harbor's singular source fact identifies the official browser release;
+    // package-specific hashes remain separate validation facts.
+    HARBOR_CAMOUFOX_SOURCE_SHA256: camoufoxBinding.source_sha256.browser,
+    HARBOR_CAMOUFOX_PLAYWRIGHT_SOURCE_SHA256: camoufoxBinding.source_sha256.playwright
   });
   return environment;
 }

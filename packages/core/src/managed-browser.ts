@@ -251,7 +251,7 @@ export function createManagedBrowserService(options: {
       if (input.operation === "page.list") {
         const pageAccess = await check();
         return await harbor(`/runtime/sessions/${ref}/pages`, {
-          operation: input.operation,
+          operation: input.operation, holder_ref: holder,
           authorized_origins: pageAccess.authorized_origins
         });
       }

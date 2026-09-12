@@ -12,7 +12,7 @@
 
 本文不承诺不可检测、不封号，也不要求开启 Provider 的所有可选“隐身”功能。
 
-> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收；当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不启动或 fallback。#499 的环境连续性、#504/#510 的 patched/native artifact 与 live 记录仅为历史证据；保留的 Profile／binding／bundle 仍可由 recovery validator 做安全校验，但不能恢复 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
+> **2026-09-12 当前 Provider 事实**：#519 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整启动材料并精确复用。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；正式 installed、人工交还和同 Profile 环境连续性仍待 #519 现场验收，不能标 `live_verified`。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
 
 ## 1. 核心原则
 
@@ -316,9 +316,9 @@ drift evaluated
 
 不得以单一“fingerprint id”掩盖内部事实不自洽，也不应向 Agent 暴露完整可复制的敏感环境材料。
 
-## 11. Camoufox 历史适配基线
+## 11. Camoufox Provider 基线与 #519 上游路径
 
-Camoufox 曾是 #499 的第一验证 Provider。该历史矩阵不等于当前资格或启动支持；本轮 #519 B 的上游原版 Camoufox／Playwright 组合未通过 Qualification Gate，当前 Harbor 对其私有 launch binding 返回 `unsupported`，不启动、不 fallback。旧 patched/native Driver、bundle 和 live evidence 只作历史记录。若未来重新评估，必须按 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 另行通过 qualification。
+Camoufox 是 #499 的第一验证 Provider；#519 现在只恢复供应方原版路径，不恢复旧私有 binding。当前路径的静态来源和版本事实可进入 `validation_evidence`，但整体资格仍受 installed/live 门约束；popup 首请求的关系未知只允许局部拒绝，不能以补丁或 replacement Page 补偿。旧 patched/native Driver、bundle 和 live evidence 仍作历史/恢复记录。
 
 历史 #499 记录按明确版本组合保存：
 
@@ -330,11 +330,37 @@ Camoufox 曾是 #499 的第一验证 Provider。该历史矩阵不等于当前�
 - platform／architecture；
 - capability and limitation facts。
 
-### 11.1 历史正式启动机制（非当前支持）
+### 11.1 #519 官方固定组合与完整环境材料（installed/live 待验）
 
-历史合同要求使用当时已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设；当前 Harbor 不执行该启动路径。
+正式安装记录使用 `webenvoy.camoufox-upstream/v1`，必须由 owner 传入明确的 browser install root、可执行文件、Python、三份来源归档，并重新计算文件与包版本。固定组合如下：
 
-### 11.2 历史环境生成与复用
+| 材料 | 固定事实 |
+| --- | --- |
+| Camoufox Python | `0.5.6`; source SHA-256 `b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561` |
+| Browser | `152.0.4-beta.30`; source SHA-256 `3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3` |
+| Playwright Python | `1.60.0`; source SHA-256 `39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5` |
+| Browser properties | `properties.json` SHA-256 `10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4` |
+
+固定 public Driver 只调用供应方 `launch_options`、`sync_playwright`、
+`launch_persistent_context` 和 Page API。第一次在空的受管 Profile 生成后，
+必须保存完整的 `launch_options` JSON（含 `args`、`env`、
+`executable_path`、`firefox_user_prefs`、`headless`）以及受管
+`context_options`；后续启动直接精确 replay 这两个对象，不只保存几个
+config 字段、不随机补身份、不改写上游 app/site-packages/Driver bundle。
+非空 Profile 缺少完整 bundle 时 fail closed；旧 bundle 仍可按 recovery
+规则校验，但不授予当前启动资格。
+
+`configured`、`effective`、`pending` 的公共状态继续由 §18 表达：活动
+Instance 不热改，timezone/language/viewport 的 owner 更新进入 pending，
+安全停止并按同 Profile 重启后才成为 effective；实际 Page readback 与
+bundle/Provider 摘要另列 observed/support。上述静态来源与固定材料是
+validation facts，不是尚未完成的 installed/live/Plugin 验收证据。
+
+### 11.2 历史正式启动机制（非当前支持）
+
+历史 #499 合同要求使用当时已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设；它不等同于当前 #519 上游路径的 installed/live 证据。
+
+### 11.3 历史环境生成与复用
 
 [#499](https://github.com/WebEnvoy/WebEnvoy/issues/499) 的历史证据记录了：
 
@@ -343,9 +369,9 @@ Camoufox 曾是 #499 的第一验证 Provider。该历史矩阵不等于当前�
 - 每次只能观测、无法精确控制的事实；
 - 当前版本 unsupported／limited 的事实。
 
-该历史矩阵不能作为当前 #519 B 的资格证据；不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定，也不能以旧结果恢复当前 launchability。
+该历史矩阵不能替代当前 #519 的 installed/live 资格证据；不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定，也不能以旧结果恢复旧 launchability。当前完整 bundle replay 和局部 popup 拒绝的代码/fixture 证据仍须与实际安装、真实 Agent 和同 Profile 重启现场分开记录。
 
-### 11.3 自动化暴露和辅助能力
+### 11.4 自动化暴露和辅助能力
 
 以下机制必须在使用时记录并验证其影响：
 

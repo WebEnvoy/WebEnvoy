@@ -53,6 +53,127 @@ test("PageRegistry keeps stable page_id, rotates document page_ref, preserves po
   assert.equal((navigated as ManagedPageFacts).current_url, "https://s1.example/next");
 });
 
+test("PageRegistry keeps task selection separate from unknown native focus and preserves a closed tombstone", async () => {
+  let pages: LocalProviderPageState[] = [
+    { provider_page_ref: "provider:one", current_url: "https://s1.example", title: "one", status: "ready", facts: [], task_selected: true },
+    { provider_page_ref: "provider:two", current_url: "https://s2.example", title: "two", status: "ready", facts: [] }
+  ];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(pages.find(page => page.provider_page_ref === ref)!),
+    closePage: async (ref, safeReturnRef) => {
+      pages = pages
+        .filter(page => page.provider_page_ref !== ref)
+        .map(page => page.provider_page_ref === safeReturnRef ? { ...page, task_selected: true } : { ...page, task_selected: undefined });
+      return structuredClone(pages);
+    },
+    navigatePage: async ref => structuredClone(pages.find(page => page.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:unknown-focus", pageController);
+  await registry.refresh();
+  const before = registry.list(["https://s1.example", "https://s2.example"]);
+  const first = before.pages.find(item => item.current_url === "https://s1.example/")!;
+  assert.equal(before.active_page_id, null);
+  assert.equal("active" in first, false);
+
+  const closed = await registry.operate({
+    operation: "page.close", page_id: first.page_id, page_ref: first.page_ref,
+    authorized_origins: ["https://s1.example", "https://s2.example"]
+  });
+  assert.equal("failure_class" in closed, false);
+  assert.equal((closed as ManagedPageFacts).current_url, "https://s2.example/");
+  assert.equal("active" in (closed as ManagedPageFacts), false);
+  assert.equal(registry.list(["https://s1.example", "https://s2.example"]).active_page_id, null);
+
+  const stale = await registry.operate({
+    operation: "page.navigate", page_id: first.page_id, page_ref: first.page_ref,
+    url: "https://s1.example/stale", authorized_origins: ["https://s1.example"]
+  });
+  assert.equal("failure_class" in stale && stale.failure_class, "stale_page");
+  const second = registry.list(["https://s2.example"]).pages[0]!;
+  const continued = await registry.operate({
+    operation: "page.navigate", page_id: second.page_id, page_ref: second.page_ref,
+    url: "https://s2.example/continued", authorized_origins: ["https://s2.example"]
+  });
+  assert.equal("failure_class" in continued, false);
+});
+
+test("PageRegistry keeps explicit active validation while allowing close reconciliation without a native active", async () => {
+  const invalid = [page("provider:one", "https://s1.example", false), page("provider:two", "https://s2.example", false)];
+  assert.throws(() => new PageRegistry("session:invalid-active", controller(invalid), invalid), /exactly one active Page/);
+
+  let pages = [page("provider:one", "https://s1.example", true), page("provider:two", "https://s2.example", false)];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(pages.find(item => item.provider_page_ref === ref)!),
+    closePage: async ref => {
+      pages = pages.filter(item => item.provider_page_ref !== ref).map(item => ({ ...item, active: false }));
+      return structuredClone(pages);
+    },
+    navigatePage: async ref => structuredClone(pages.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:close-no-active", pageController, pages);
+  const first = registry.list(["https://s1.example", "https://s2.example"]).pages.find(item => item.current_url?.startsWith("https://s1"))!;
+  const result = await registry.operate({ operation: "page.close", page_id: first.page_id, page_ref: first.page_ref, authorized_origins: ["https://s1.example", "https://s2.example"] });
+  assert.equal("failure_class" in result, false);
+  assert.equal((result as ManagedPageFacts).active, false);
+});
+
+test("PageRegistry exposes only a bounded aggregate for unattributed blocked requests", async () => {
+  const registry = new PageRegistry("session:test", controller([
+    page("provider:one", "https://s1.example/start", true),
+    {
+      ...page("provider:popup", "about:blank"),
+      status: "unknown",
+      current_url: null,
+      opener_provider_page_ref: "provider:one",
+      facts: [
+        { key: "page.relation", source: "validation_evidence", value: "unavailable" },
+        { key: "page.rejected_unattributed_count", source: "validation_evidence", value: "2" }
+      ]
+    }
+  ]));
+  await registry.refresh();
+  const result = registry.list(["https://s1.example"]);
+  assert.deepEqual(result.rejected_unattributed, {
+    count: 2,
+    failure_class: "page_relation_unavailable",
+    dispatch_state: "not_dispatched"
+  });
+  assert.equal(JSON.stringify(result).includes("provider:popup"), false);
+  assert.equal(JSON.stringify(result).includes("about:blank"), false);
+});
+
+test("PageRegistry does not leak unattributed rejection counts across unauthorized opener scope", async () => {
+  const registry = new PageRegistry("session:test", controller([
+    page("provider:one", "https://s1.example/start", true),
+    page("provider:other", "https://s2.example/start"),
+    {
+      ...page("provider:popup", "about:blank"),
+      status: "unknown",
+      current_url: null,
+      opener_provider_page_ref: "provider:other",
+      facts: [{ key: "page.rejected_unattributed_count", source: "validation_evidence", value: "1" }]
+    }
+  ]));
+  await registry.refresh();
+  assert.equal(registry.list(["https://s1.example"]).rejected_unattributed, undefined);
+});
+
+test("PageRegistry reports a bounded Instance-level rejection without inventing a Page", async () => {
+  const provider = controller([page("provider:one", "https://s1.example/start", true)]);
+  provider.unattributedRequestRejectionCount = () => MAX_SAFE_REJECTION_COUNT;
+  const registry = new PageRegistry("session:test", provider);
+  await registry.refresh();
+  const result = registry.list(["https://s1.example"]);
+  assert.equal(result.rejected_unattributed?.count, 128);
+  assert.equal(result.pages.length, 1);
+});
+
+const MAX_SAFE_REJECTION_COUNT = 10_000;
+
 test("PageRegistry refuses closing the last active Page and returns to a safe Page when possible", async () => {
   const registry = new PageRegistry("session:test", controller([
     page("provider:one", "https://s1.example", true),
@@ -69,6 +190,45 @@ test("PageRegistry refuses closing the last active Page and returns to a safe Pa
   const last = secondRegistry.list(["https://s1.example"]).pages[0]!;
   const refused = await secondRegistry.operate({ operation: "page.close", page_id: last.page_id, page_ref: last.page_ref, authorized_origins: ["https://s1.example"] });
   assert.equal("failure_class" in refused && refused.failure_class, "no_safe_return_page");
+});
+
+test("PageRegistry refuses closing the only remaining Page after the selected Page was externally closed", async () => {
+  const unknownPage = (provider_page_ref: string, current_url: string): LocalProviderPageState => {
+    const value = page(provider_page_ref, current_url);
+    delete value.active;
+    return value;
+  };
+  let states: LocalProviderPageState[] = [
+    { ...unknownPage("provider:one", "https://s1.example"), task_selected: true },
+    unknownPage("provider:two", "https://s2.example"),
+    { ...unknownPage("provider:popup", "about:blank"), current_url: null, status: "unknown" }
+  ];
+  let closeCalls = 0;
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(states),
+    openPage: async () => { throw new Error("unused"); },
+    activatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!),
+    closePage: async () => { closeCalls += 1; return structuredClone(states); },
+    navigatePage: async ref => structuredClone(states.find(item => item.provider_page_ref === ref)!)
+  };
+  const registry = new PageRegistry("session:last-page-after-external-close", pageController, states);
+
+  states = [
+    { ...unknownPage("provider:one", "https://s1.example"), status: "closed" },
+    unknownPage("provider:two", "https://s2.example"),
+    { ...unknownPage("provider:popup", "about:blank"), current_url: null, status: "unknown" }
+  ];
+  await registry.refresh();
+  const remaining = registry.list(["https://s2.example"]).pages[0]!;
+  const receipt = await registry.operateReceipt({
+    operation: "page.close", page_id: remaining.page_id, page_ref: remaining.page_ref,
+    authorized_origins: ["https://s2.example"], operation_ref: "run:close-last-after-external-close"
+  });
+  assert.equal(receipt.status, "unavailable");
+  assert.equal(receipt.failure_class, "no_safe_return_page");
+  assert.equal(receipt.dispatch_state, "not_dispatched");
+  assert.equal(closeCalls, 0);
+  assert.equal(registry.list(["https://s2.example"]).pages.length, 1);
 });
 
 test("closing a background Page returns the unchanged active Page", async () => {

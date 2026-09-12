@@ -346,6 +346,68 @@ test("legacy instance observation and public operations require an explicit Page
   } finally { await runtime.stopSession(session.runtime_session_ref); }
 });
 
+test("handback Page list preserves a same-holder binding and fences a different holder", async () => {
+  const origin = "https://example.com";
+  const pages: LocalProviderPageState[] = [{ provider_page_ref: "provider:one", current_url: `${origin}/one`, title: "One", status: "ready", facts: [], active: true, document_generation: 1 }];
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => structuredClone(pages[0]!),
+    activatePage: async provider_page_ref => {
+      for (const page of pages) page.active = page.provider_page_ref === provider_page_ref;
+      return structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!);
+    },
+    closePage: async provider_page_ref => {
+      const index = pages.findIndex(page => page.provider_page_ref === provider_page_ref);
+      if (index >= 0) pages.splice(index, 1);
+      return structuredClone(pages);
+    },
+    navigatePage: async provider_page_ref => structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!)
+  };
+  const launcher: LocalProviderLauncher = async input => {
+    const ready = await createFixtureLauncher("ready")(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    return { ...ready, execution_surface: "local_provider", page: pages[0]!, pages, pageController };
+  };
+  const runtime = new HarborRuntime(launcher);
+  runtime.createLocalIdentityEnvironment({ ...identityInput("identity:handback-pages", "profile:handback-pages"), site: { site_id: "public", origin, display_name: "Public" } });
+  const session = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:handback-pages", url: `${origin}/one`, control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
+  if ("status" in session) throw new Error("session unavailable");
+  try {
+    assert.equal("status" in runtime.recordHandoff(session.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in runtime.releaseSession(session.runtime_session_ref, { control_owner: "user" }), false);
+    const listed = await runtime.operateManagedPage(session.runtime_session_ref, { operation: "page.list", holder_ref: "principal:one", authorized_origins: [origin] });
+    assert.equal(listed.status, "completed");
+    if (!("pages" in listed)) throw new Error("page list unavailable");
+    const selected = listed.pages[0]!;
+    const generation = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(session.runtime_session_ref)!.control_generation;
+    const claimed = runtime.lockSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:one" });
+    assert.ok(!("status" in claimed));
+    const activated = await runtime.operateManagedPage(session.runtime_session_ref, {
+      operation: "page.activate", holder_ref: "principal:one", page_id: selected.page_id, page_ref: selected.page_ref,
+      authorized_origins: [origin], operation_ref: "page-activate:same-holder"
+    });
+    assert.equal(activated.status, "completed");
+    assert.equal((runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(session.runtime_session_ref)!.control_generation, generation);
+
+    assert.equal("status" in runtime.recordHandoff(session.runtime_session_ref, { control_owner: "user", handoff_reason: "user_requested" }), false);
+    assert.equal("status" in runtime.releaseSession(session.runtime_session_ref, { control_owner: "user" }), false);
+    const relisted = await runtime.operateManagedPage(session.runtime_session_ref, { operation: "page.list", holder_ref: "principal:one", authorized_origins: [origin] });
+    assert.equal(relisted.status, "completed");
+    if (!("pages" in relisted)) throw new Error("page list unavailable");
+    const old = relisted.pages[0]!;
+    const otherClaim = runtime.lockSession(session.runtime_session_ref, { control_owner: "core_task", holder_ref: "principal:other" });
+    assert.ok(!("status" in otherClaim));
+    const stale = await runtime.operateManagedPage(session.runtime_session_ref, {
+      operation: "page.activate", holder_ref: "principal:other", page_id: old.page_id, page_ref: old.page_ref,
+      authorized_origins: [origin], operation_ref: "page-activate:different-holder"
+    });
+    assert.equal(stale.status, "unavailable");
+    if (!("failure_class" in stale)) throw new Error("stale page failure missing");
+    assert.equal(stale.failure_class, "stale_page");
+    assert.equal(stale.dispatch_state, "not_dispatched");
+  } finally { await runtime.stopSession(session.runtime_session_ref); }
+});
+
 test("legacy observation, public, and interaction paths fence a handoff that occurs during Page refresh", async () => {
   const origin = "https://example.com";
   for (const kind of ["public", "observe", "interaction"] as const) {

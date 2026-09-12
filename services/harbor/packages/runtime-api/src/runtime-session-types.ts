@@ -11,7 +11,7 @@ export type FactSource = "configured" | "observed" | "provider_claim" | "validat
 export type LifecycleState = "starting" | "active" | "idle" | "locked" | "disconnected" | "expired" | "failed" | "closed";
 export type ProviderMode = "local_dedicated_profile";
 /** The transport owned by a local provider driver. */
-export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler";
+export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler" | "playwright_jsonl";
 export type RuntimeErrorCode =
   | "provider_unavailable"
   | "identity_environment_unavailable"
@@ -216,12 +216,16 @@ export interface LocalProviderPageFacts {
 export interface LocalProviderPageState extends LocalProviderPageFacts {
   provider_page_ref: string;
   opener_provider_page_ref?: string;
+  /** Provider-private task selection; never project this as native focus. */
+  task_selected?: boolean;
   active?: boolean;
   document_generation?: number;
 }
 
 export interface LocalProviderPageController {
   listPages: () => Promise<LocalProviderPageState[]>;
+  /** Instance-level count only; no URL, Page, opener, or request identity is inferred. */
+  unattributedRequestRejectionCount?: () => number;
   openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
   activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
   /**

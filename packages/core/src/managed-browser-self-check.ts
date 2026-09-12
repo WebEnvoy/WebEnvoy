@@ -111,8 +111,9 @@ const server = createServer((req, res) => { void (async () => {
   }
   else if (req.url === "/runtime/sessions/session%3Aone/pages") {
     let body = ""; for await (const chunk of req) body += chunk;
-    const input = JSON.parse(body) as { operation?: string; operation_ref?: string; page_ref?: string; url?: string };
+    const input = JSON.parse(body) as { operation?: string; operation_ref?: string; holder_ref?: string; page_ref?: string; url?: string };
     if (input.operation === "page.list") {
+      assert.equal(input.holder_ref, principalId);
       pageLists++;
       value = { status: "completed", schema_version: "harbor-page-list/v2", runtime_session_ref: "session:one", active_page_id: "page-id:one", filtered_page_count: 0, observed_at: new Date().toISOString(), pages: [{ page_id: "page-id:one", page_ref: "page:one", document_generation: 1, requested_url: "https://example.com/", current_url: "https://example.com/", origin: "https://example.com", title: "Fixture", status: "ready", active: true, error_reason: null, observed_at: new Date().toISOString() }] };
     } else {

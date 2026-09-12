@@ -17,6 +17,7 @@ import {
   cloakDownloadGuide,
   cloakLimitations
 } from "./provider-capabilities.js";
+import { readCamoufoxUpstreamSourceFacts } from "./camoufox-upstream-driver.js";
 
 export const HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA = "harbor-browser-provider-status/v0";
 export const HARBOR_IDENTITY_PROVIDER_BINDING_SCHEMA = "harbor-identity-provider-binding/v0";
@@ -80,6 +81,13 @@ export interface BrowserProviderInstallFacts {
   version_status: "known" | "unknown";
   launchability: BrowserProviderLaunchability;
   reason: string | null;
+  /** Owner-verified provenance fields used by the original Camoufox path. */
+  source?: "official_release";
+  source_sha256?: string;
+  camoufox_version?: string;
+  browser_version?: string;
+  playwright_version?: string;
+  install_root?: string;
 }
 
 export interface BrowserProviderDiagnostic {
@@ -201,8 +209,13 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
   const requested = input.requested_provider_id ? catalog.providers.find((provider) => provider.provider_id === input.requested_provider_id) ?? null : null;
 
   if (requested?.provider_id === "camoufox") {
+    if (isLaunchable(requested) && requested.install.source === "official_release") {
+      return binding(input, requested, null, "requested_provider_available", true, [
+        "Camoufox 仅通过固定官方 source、version、hash 和原版 Playwright JSONL Driver 启动；native504/native510 绑定仍被拒绝。"
+      ]);
+    }
     return binding(input, null, null, "requested_provider_unavailable", true, [
-      "Camoufox 的私有浏览器/Driver 绑定已退役；Harbor 不会启动或自动切换到其他 provider。"
+      "Camoufox 未提供可验证的官方 source、version、hash；历史私有/native binding 已退役，Harbor 不会启动或自动切换到其他 provider。"
     ]);
   }
   if (requested && isLaunchable(requested)) {
@@ -289,13 +302,13 @@ function providerStatus(
     default_for_identity_environment: defaultForIdentity,
     management_mode: managementMode,
     install,
-    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities() : chromeCapabilities(),
-    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations() : chromeLimitations(),
+    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities(install.source === "official_release") : chromeCapabilities(),
+    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations(install.source === "official_release") : chromeLimitations(),
     download_guide: provider_id === "cloakbrowser"
       ? managementMode === "external"
         ? { ...cloakDownloadGuide(), action: "external_management", install_hint: "该覆盖路径由外部管理；请在外部更新或移除覆盖后重新检查。" }
         : cloakDownloadGuide()
-      : provider_id === "camoufox" ? camoufoxDownloadGuide() : chromeDownloadGuide(),
+      : provider_id === "camoufox" ? camoufoxDownloadGuide(install.source === "official_release") : chromeDownloadGuide(),
     diagnostics: diagnosticsFor(provider_id, install)
   };
 }
@@ -310,6 +323,18 @@ function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
 
 function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
   const detected = detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");
+  const source = readCamoufoxUpstreamSourceFacts(ctx.env);
+  if (source && detected.status === "installed") {
+    return {
+      ...detected,
+      source: source.source,
+      source_sha256: source.source_sha256,
+      camoufox_version: source.camoufox_version,
+      browser_version: source.browser_version,
+      playwright_version: source.playwright_version,
+      ...(detected.path ? { install_root: ctx.env.HARBOR_CAMOUFOX_INSTALL_ROOT } : {})
+    };
+  }
   return {
     ...detected,
     // Keep the existing wire enum: this provider is deliberately not

@@ -25,6 +25,7 @@ import {
   trustLocalProviderMediaActionProbe,
   trustLocalProviderWritePrecheckProbe
 } from "./read-operation-probe-trust.js";
+import { isOfficialCamoufoxLaunchRequest, launchCamoufoxUpstreamProvider } from "./camoufox-upstream-driver.js";
 import { isCanonicalDetailUrl } from "./detail-read-target.js";
 import type {
   BossJobDetailPublicSummary,
@@ -83,11 +84,12 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
       { key: "provider.binding", source: "observed", value: "provider_mismatch" }
     ]);
   }
-  // Camoufox's private browser/driver binding is retained only as an
-  // observable historical installation fact. Reject it after the existing
-  // managed-binding checks, but before detection, profile preparation, or
-  // provider fallback so it can never start or silently switch providers.
-  if (isCamoufoxLaunchRequest(input)) return retiredCamoufoxUnavailable();
+  // Camoufox is admitted only through the owner-provided official source and
+  // fixed pins. All other Camoufox/native/legacy requests remain fail-closed
+  // before detection, profile preparation, or provider fallback.
+  if (isCamoufoxLaunchRequest(input)) {
+    return isOfficialCamoufoxLaunchRequest(input) ? launchCamoufoxUpstreamProvider(input) : retiredCamoufoxUnavailable();
+  }
   const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
   const browserPath = explicitBrowserPath || providerBinding?.selected_provider?.install.path || "";

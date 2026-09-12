@@ -148,6 +148,8 @@ export interface RuntimeSessionRecord {
   publicPage?: ManagedPublicPageOperation;
   interaction?: ManagedInteractionOperation;
   interaction_snapshot?: { page_ref: string; provider_snapshot_ref?: string; observation_ref: string; control_generation: number; holder_ref: string };
+  /** The last lease-free Page list explicitly requested by a Core holder. */
+  released_page_list?: { control_generation: number; holder_ref: string };
   observePage?: (input?: ManagedProviderPageInput) => Promise<ManagedProviderObservation>;
   readDiagnostics?: (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;
   readEnvironment?: EnvironmentProbe;
@@ -417,14 +419,22 @@ export class RuntimeSessionStore {
     return this.records.get(runtime_session_ref);
   }
 
-  async listManagedPages(runtime_session_ref: string, authorized_origins: readonly string[] = []): Promise<ManagedPageList | ManagedPageUnavailable> {
+  async listManagedPages(runtime_session_ref: string, authorized_origins: readonly string[] = [], holder_ref?: string): Promise<ManagedPageList | ManagedPageUnavailable> {
     const record = this.records.get(runtime_session_ref);
     if (!record) return pageUnavailable("session_missing", runtime_session_ref, true);
     if (!isRuntimeSessionReadable(record.facts)) return pageUnavailable("session_not_ready", runtime_session_ref, true);
     if (!record.page_registry) return pageUnavailable("provider_unavailable", runtime_session_ref, true);
+    const releasedGeneration = record.control_generation;
+    const released = isReleasedControl(record);
     try {
       await record.page_registry.refresh();
-      return record.page_registry.list(authorized_origins);
+      const result = record.page_registry.list(authorized_origins);
+      if (released && isReleasedControl(record) && record.control_generation === releasedGeneration && boundedManagedRef(holder_ref)) {
+        record.released_page_list = { control_generation: releasedGeneration, holder_ref };
+      } else {
+        delete record.released_page_list;
+      }
+      return result;
     } catch (cause) {
       return pageUnavailable(pageFailureClass(cause), runtime_session_ref, true);
     }
@@ -435,7 +445,7 @@ export class RuntimeSessionStore {
   }
 
   async operateManagedPage(runtime_session_ref: string, input: ManagedPageOperationInput): Promise<ManagedPageOperationReceipt | ManagedPageList | ManagedPageUnavailable> {
-    if (input.operation === "page.list") return this.listManagedPages(runtime_session_ref, input.authorized_origins ?? []);
+    if (input.operation === "page.list") return this.listManagedPages(runtime_session_ref, input.authorized_origins ?? [], input.holder_ref);
     const record = this.records.get(runtime_session_ref);
     if (!record) return pageUnavailable("session_missing", runtime_session_ref, true, input.operation_ref);
     if (!isRuntimeSessionReadable(record.facts)) return pageUnavailable("session_not_ready", runtime_session_ref, true, input.operation_ref);
@@ -1354,6 +1364,7 @@ export class RuntimeSessionStore {
       conflict_error: null
     };
     if (!preserveReleasedSnapshotGeneration) bumpControlGeneration(record);
+    delete record.released_page_list;
     record.user_held_session = false;
     record.read_operation_user_handoff = preserveReadOperationHandoff ||
       record.read_operation_user_release_pending && owner === "core_task";
@@ -1455,7 +1466,11 @@ function isCoreLeaseHeld(record: RuntimeSessionRecord, holder_ref: string): bool
 
 function canPreserveReleasedSnapshotGeneration(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {
   const observation = record.interaction_snapshot;
-  return owner === "core_task" && isReleasedControl(record) && observation?.holder_ref === holder_ref && observation.control_generation === record.control_generation;
+  const pageList = record.released_page_list;
+  return owner === "core_task" && isReleasedControl(record) && (
+    observation?.holder_ref === holder_ref && observation.control_generation === record.control_generation ||
+    pageList?.holder_ref === holder_ref && pageList.control_generation === record.control_generation
+  );
 }
 
 function retainsRuntimeResources(record: RuntimeSessionRecord): boolean {

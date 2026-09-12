@@ -4,7 +4,7 @@
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
-> **2026-09-12 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性尚未验收。Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），Plugin 不启动、不 fallback 或隐藏该事实。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录只作历史证据；recovery validator 只校验保留 bundle，不恢复 launchability。下列工具、operation、授权和 wire 核心字段保持原义。
+> **2026-09-12 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) 的官方固定 Camoufox／Playwright 路径已接入现有 Plugin operation，但按 `limited` 暴露：只接受 owner 核验的 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 组合；popup 首请求无法在派发前建立可信 Page 归属时局部返回 `page_relation_unavailable`，不先发请求、不猜测、不重放。工具可见、能力存在、Grant 授权和当前可执行性仍是独立事实；正式 installed、人工交还、环境连续性和真实 Agent 消费尚待 #519 完成门，不能写成 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，Plugin 不 fallback 或隐藏拒绝原因。
 
 ## 固定工具与投影
 
@@ -19,6 +19,23 @@
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
 
 `webenvoy_skill` 仍只提供必需管理/浏览器引导资产；`webenvoy_skills` 不能替换或覆盖它。工具唯一拼写为 `webenvoy_skills`，不引入 `webevoy_skills` 别名。
+
+对于 #519，Plugin 继续复用上述既有 Page、diagnostics、environment 和
+ControlLease projection，不新增 task-page tool 或 Provider-private
+operation。固定官方 Driver 的 limited popup 边界必须透传为结构化
+`page_relation_unavailable`/`not_dispatched`；若触发 popup 的 click 已经
+`dispatched`，不能把 click 改写成未派发。原任务页可在 fresh observe 后
+继续 read/input，后续真实 Page 事件不授权或重放原首请求；其他 Page、
+Profile、Grant、查询和 SKILL 管理不被该局部拒绝污染。
+
+`page.list` 仍使用 `harbor-page-list/v2`，并可选透传
+`rejected_unattributed: {count, failure_class: "page_relation_unavailable", dispatch_state: "not_dispatched"}`。
+该值是 Instance 级有界聚合，不是 Page 或 Network event；不含 URL、
+`page_id`/`page_ref`、`opener_page_id`、request identity 或 Provider handle，
+计数为零时省略，不改变 `pages`/`filtered_page_count`。它不覆盖独立的
+click receipt：已派发的 click 仍保持 `dispatch_state: "dispatched"`。旧
+Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它解释成 popup
+已成功或已获得 Page 归属；installed/live/plugin 验收状态仍待现场完成。
 
 ## SKILL 工具输入
 
@@ -44,7 +61,7 @@
 
 `environment.read` / `environment.update` 复用既有 `webenvoy_operation`。update 额外要求非空 `configuration`，只接受 timezone/language/viewport（各 1–128 字符）；不接受 Instance/Page/cursor、脚本、Provider/proxy/seed 参数。返回 `harbor-profile-environment/v1` 的 configured/effective/pending/observed/drift/provider/support/last_verified_at；保存不热改活动 Instance，不隐式重启。更新响应丢失后 query 原 key，只查询 mutation receipt 和当前环境事实，不再次提交更新；首次 readback/跨 restart 与未验证项必须区分，unknown 不等于 verified。
 
-MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。
+MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。#519 的静态 source/version/hash 事实可以在 status/diagnostics 中回读，但在实际安装和真实 Agent 通过前只能记为 validation/fixture evidence，不能冒称 live/plugin verified。
 
 恢复投影只允许 `recovery.inspect`、`recovery.request`、`recovery.status`。inspect 返回安全摘要；request 创建待 owner 决定的 plan/operation，不自动 stop、覆盖或确认；status 只查询原 operation/receipt。Plugin 永远不能调用 owner-only 的 backup/plan/apply，不能携带 owner token。plan 的 Profile、当前材料指纹、backup ref、范围与有效期由 Core 持久化；目标/材料/归属变化或活动 Instance 会使后续确认失效。
 
@@ -69,6 +86,17 @@ Core 沿用 `{ok, run_id, status, result?, failure?}` 包装。管理操作的�
 Page mutation 的响应丢失、Harbor receipt 缺失或 Provider 关系无法确认时，Core/Harbor 保留 `unknown_outcome` 与 `dispatch_state: "dispatched"`，再由原 operation/Run 做只读对账；`not_dispatched` 只表示在 Provider dispatch boundary 之前被拒绝。旧 Plugin、旧 Runtime 或未知 schema/version 不认识 Page operation 时必须明确拒绝，不得改投旧 `instance.navigate`、内部 HTTP、CDP/Juggler 或其他 raw Provider path。兼容拒绝不扩大授权、不重放动作。
 
 SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
+
+### #519 Design Obligation disposition
+
+| Trigger | disposition | 依据 |
+| --- | --- | --- |
+| `DO-PLUGIN-EXPOSURE` | `not-triggered` | #519 复用现有 Page/diagnostics/environment operation 和 Plugin projection；只增加 Provider availability/limited facts，不新增 Agent tool、动态发现或第二宿主规则。 |
+| `DO-GRANT-WIRE` | `not-triggered` | 复用既有单 Grant、Profile ceiling 和 task scope 交集，不新增 Grant 字段或 scope 维度。 |
+| `DO-NETWORK-CONTRACT` | `not-triggered` | popup 首请求拒绝和 redirect 逐跳检查复用 [Network Runtime V1](network-runtime-contract-v1.md)；不新增公共 Network payload。 |
+| `DO-CONSOLE-CONTRACT` | `not-triggered` | 可靠 Page 事件仍复用 [Console Runtime V1](console-runtime-contract-v1.md) 的 envelope、过滤和 cursor；不新增公共 Console payload。 |
+| `DO-PROVIDER-PRIVATE-SCHEMA` | `triggered` | 固定官方 `launch_options` 与 `context_options` 的完整持久化/精确 replay 形成 Provider-private versioned bundle，见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。 |
+| `DO-APP-IA` | `not-triggered` | 只复用既有 owner 授权、接管/交还和安装入口，不新增完整 App 工作台或导航。 |
 
 ## 版本与安装边界
 

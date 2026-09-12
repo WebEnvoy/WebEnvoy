@@ -12,7 +12,7 @@
 
 本文不是最终 wire schema。具体 HTTP／MCP 字段、JSON Schema、生成类型和 Provider adapter 可以在实现中演进，但不得改变本文的语义和安全边界，除非通过新的 ADR／spec 修订。
 
-> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性也尚未验收；当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不启动、不 fallback。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录仅为历史证据；保留的 Profile／binding／bundle 只可由 recovery validator 校验，不能恢复 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
+> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。正式 installed、人工交还、环境连续性和真实 Agent 消费仍尚未验收，因此当前证据不能标为 `live_verified` 或 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 
 ## 1. 目标
 
@@ -111,7 +111,7 @@ Capability exists
 
 只有前两类可以进入适配或受限支持。核心缺失、需要长期补偿或需要维护浏览器 fork／内核补丁链时停止候选，不反向扩张 Runtime 职责。资格顺序、正常管理工作与具体停止条件由 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订) 统一定义。Obscura 在当前愿景内不采用，历史证据仅由 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 保留，不再验证、等待或监控新版本。
 
-本轮 #519 B 属于第三类：popup 首请求在派发前无法建立可信 Page 归属（详见 [#519 证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），且完整 installed、人工交还和环境连续性尚未验收，故不形成当前 Provider 的 `supported`／`limited` 资格。旧 #499 环境连续性和 #504/#510 native 证据不覆盖这些未验收项，也不能授权 Harbor 以私有 patch 或 Driver 补偿继续接入。
+本轮 #519 B 当前按第二类处理：popup 首请求在派发前无法建立可信 Page 归属时，官方 public API Driver 能准确局部拒绝并保留原任务页恢复路径，故不需要 WebEnvoy 模拟浏览器核心行为；该局部能力记录为 `limited`，不是 popup 全面支持。完整 installed、人工交还、环境连续性和真实 Agent 消费仍未验收，故整体证据状态不能写为 `live_verified`／`plugin_verified`。旧 #499 环境连续性和 #504/#510 native 证据不覆盖这些未验收项；私有 patch、native artifact、fallback 或 URL/title 猜测仍不被授权。
 
 ## 3. 通用调用约束
 

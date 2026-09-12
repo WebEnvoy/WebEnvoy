@@ -14,7 +14,18 @@ const executable = join(app, 'Contents/MacOS/Electron');
 const directory = await mkdtemp('/tmp/webenvoy-check-');
 const root = join(directory, 'assets');
 await cp(join(app, 'Contents/Resources/app'), root, { recursive: true });
-const cli = async (command, data = join(directory, 'data')) => JSON.parse((await run(executable, [join(root, 'agent-entry/cli.mjs'), command, '--data-dir', data, '--host-dir', join(directory, 'host')], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 })).stdout);
+const upstreamSourceDir = process.env.WEBENVOY_UPSTREAM_SOURCE_DIR ?? '/private/tmp/webenvoy-upstream-source-audit.LWbSiJ';
+const upstreamBrowserRoot = process.env.WEBENVOY_CAMOUFOX_BROWSER_ROOT ?? '/Users/claw/Library/Caches/camoufox/browsers/official/152.0.4-beta.30-3b43e766/Camoufox.app';
+const upstreamBrowserExecutable = process.env.WEBENVOY_CAMOUFOX_BROWSER_EXECUTABLE ?? join(upstreamBrowserRoot, 'Contents/MacOS/camoufox');
+const upstreamPython = process.env.WEBENVOY_CAMOUFOX_PYTHON ?? '/Users/claw/.webenvoy/providers/camoufox/venv/bin/python';
+const upstreamSetupArgs = [
+  '--browser-install-root', upstreamBrowserRoot, '--browser-executable', upstreamBrowserExecutable, '--python-path', upstreamPython,
+  '--browser-version', '152.0.4-beta.30', '--camoufox-version', '0.5.6', '--playwright-version', '1.60.0',
+  '--browser-source-path', join(upstreamSourceDir, 'camoufox-152.0.4-beta.30-mac.arm64.zip'),
+  '--camoufox-source-path', join(upstreamSourceDir, 'camoufox-0.5.6-py3-none-any.whl'),
+  '--playwright-source-path', join(upstreamSourceDir, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl')
+];
+const cli = async (command, data = join(directory, 'data'), extra = []) => JSON.parse((await run(executable, [join(root, 'agent-entry/cli.mjs'), command, '--data-dir', data, '--host-dir', join(directory, 'host'), ...extra], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 })).stdout);
 const { ensureRuntime, localRequest } = await import(pathToFileURL(join(root, 'agent-entry/client.mjs')));
 const { verifyBundle } = await import(pathToFileURL(join(root, 'agent-entry/bundle.mjs')));
 const data = join(directory, 'data');
@@ -25,8 +36,8 @@ let grantId;
 let connector;
 let originServer;
 try {
-  await cli('setup');
-  await cli('setup'); // Exact repeat is recoverable without replacing another host config.
+  await cli('setup', join(directory, 'data'), upstreamSetupArgs);
+  await cli('setup', join(directory, 'data'), upstreamSetupArgs); // Exact repeat is recoverable without replacing another host config.
   await assert.rejects(
     run(executable, [join(root, 'agent-entry/cli.mjs'), 'setup', '--data-dir', data, '--host-dir', join(directory, 'host'), '--camoufox-artifact', join(directory, 'retired.app')], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 }),
     error => `${error.stderr ?? ''}${error.stdout ?? ''}${error.message ?? ''}`.includes('camoufox_artifact_binding_retired')

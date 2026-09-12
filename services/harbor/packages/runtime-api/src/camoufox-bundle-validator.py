@@ -97,7 +97,7 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
         "baseline",
         "baseline_sha256",
     }
-    if not isinstance(bundle, dict) or set(bundle) != required:
+    if not isinstance(bundle, dict) or not required.issubset(bundle) or set(bundle) - required - {"launch_options", "context_options"}:
         raise ValueError("Camoufox environment bundle schema is unsupported or corrupt.")
     if (
         type(bundle["schema_version"]) is not int
@@ -121,6 +121,43 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
         raise ValueError("Camoufox environment bundle config is too large.")
     if bundle["config_sha256"] != config_hash or bundle["identity_hash"] != identity_hash:
         raise ValueError("Camoufox environment bundle hash does not match its config.")
+
+    # New upstream launches persist the complete public launch_options result
+    # beside the historical config projection. Retained old bundles do not
+    # have this field and remain valid for recovery-only inspection.
+    if "launch_options" in bundle:
+        options = bundle["launch_options"]
+        if not isinstance(options, dict) or set(options) - {"args", "env", "executable_path", "firefox_user_prefs", "headless"}:
+            raise ValueError("Camoufox launch options are unsupported or corrupt.")
+        if not isinstance(options.get("args"), list) or not all(isinstance(item, str) for item in options["args"]):
+            raise ValueError("Camoufox launch options args are corrupt.")
+        if not isinstance(options.get("env"), dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in options["env"].items()):
+            raise ValueError("Camoufox launch options env is corrupt.")
+        if not isinstance(options.get("executable_path"), str) or not options["executable_path"] or not isinstance(options.get("headless"), bool):
+            raise ValueError("Camoufox launch options are incomplete.")
+
+    if "context_options" in bundle:
+        context_options = bundle["context_options"]
+        if not isinstance(context_options, dict) or set(context_options) - {"viewport", "timezone_id"}:
+            raise ValueError("Camoufox context options are unsupported or corrupt.")
+        viewport = context_options.get("viewport")
+        if viewport is not None and (
+            not isinstance(viewport, dict)
+            or set(viewport) != {"width", "height"}
+            or type(viewport["width"]) is not int
+            or type(viewport["height"]) is not int
+            or not 200 <= viewport["width"] <= 16384
+            or not 200 <= viewport["height"] <= 16384
+        ):
+            raise ValueError("Camoufox context viewport is corrupt.")
+        timezone_id = context_options.get("timezone_id")
+        if timezone_id is not None and (
+            not isinstance(timezone_id, str)
+            or not timezone_id
+            or len(timezone_id) > 128
+            or any(ord(char) < 0x20 or ord(char) == 0x7f for char in timezone_id)
+        ):
+            raise ValueError("Camoufox context timezone is corrupt.")
 
     baseline = bundle["baseline"]
     baseline_hash = bundle["baseline_sha256"]

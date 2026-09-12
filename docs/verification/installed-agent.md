@@ -1,8 +1,8 @@
 # 安装后的单宿主 Agent 入口
 
-安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。本文的 macOS、Codex MCP 和 Camoufox 步骤是历史安装／验收记录，不代表当前 Camoufox launch/support。测试包不签名、不发布，不代表完整发行或多宿主支持。
+安装切片由 [Work Item #490](https://github.com/WebEnvoy/WebEnvoy/issues/490)、通用受控交互由 [Work Item #494](https://github.com/WebEnvoy/WebEnvoy/issues/494) 承载；当前证据、验收和后继范围以该 Issue/PR 为准。本文的 macOS、Codex MCP 和固定官方 Camoufox setup 步骤是安装绑定与验收记录，不代表完整发行或多宿主支持。
 
-> **2026-09-12 现行边界**：#519 B 的上游原版 Camoufox／Playwright 组合因 popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）未通过 Qualification Gate，完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 已退役 Camoufox 私有 launch binding；下文只保留历史流程和证据定位，不能作为新启动、建 Profile 或 fallback 的操作指引。
+> **2026-09-12 现行边界**：installed Camoufox 只接受 owner 核验的官方固定组合：Python package `camoufox==0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`，以及正式合同规定的 `properties.json` 与三份来源 hash。当前按 `limited` 接入：popup 首导航若在派发前无法可信归属已登记 Page，则在任何外部请求前返回 `page_relation_unavailable`/`not_dispatched`；触发 click 若已派发，保留独立的 `dispatched` 事实，不重放首请求，后续 Page 事件也不追补授权。有可信 Page 关系的 popup 仍按普通 Page/origin 规则处理。旧 `camoufoxArtifact`、`native504`、`native510` binding 仍为 retired；未带完整官方来源记录的安装也保持 retired。下文的 setup 只能绑定 owner 明确提供的既有安装路径和本地来源归档，不下载、不解析 latest、不读取日常 Profile。安装绑定和 fixture/code 事实不等于 installed/live/plugin verified；完整 Runtime/Harbor 现场仍由 #519 的集成验收承接。
 
 ## 安装和显式授权
 
@@ -12,10 +12,16 @@
 pnpm --filter @webenvoy/app package:agent '/tmp/webenvoy-test/WebEnvoy Test.app'
 '/tmp/webenvoy-test/WebEnvoy Test.app/Contents/MacOS/webenvoy' setup \
   --data-dir /tmp/webenvoy-test-data --host-dir /tmp/webenvoy-test-host \
+  --browser-install-root /path/to/official/152.0.4-beta.30/Camoufox.app \
+  --browser-executable /path/to/official/152.0.4-beta.30/Camoufox.app/Contents/MacOS/camoufox \
+  --python-path /path/to/venv/bin/python \
+  --browser-source-path /path/to/camoufox-152.0.4-beta.30-mac.arm64.zip \
+  --camoufox-source-path /path/to/camoufox-0.5.6-py3-none-any.whl \
+  --playwright-source-path /path/to/playwright-1.60.0-py3-none-macosx_11_0_arm64.whl \
   --codex-profile webenvoy-test --approve-tools
 ```
 
-`setup` 写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中五个 WebEnvoy 工具的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
+`setup` 会实际读取并校验 browser `application.ini`、Python 环境中的两个包版本，以及三个 owner 提供的来源文件 SHA-256；版本、来源和路径不匹配即拒绝。它写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中五个 WebEnvoy 工具的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
 
 双击这个 App（或运行 `webenvoy app`），进入设置 → Agent 接入：登记名称与公开指纹，允许已授权的环境管理操作，再选择 Agent 并授予页面展示的管理范围。选择精确 origin、必要操作与有效期；可创建最多两个非生产 Camoufox Profile，或选择已受管 Profile。既有 Profile 上限在独立表单中显式保存，Grant 不会提升上限。默认只有读取操作。Core 的管理执行策略只作用于 `harbor:managed-browser`，不会修改网站策略。
 
@@ -31,7 +37,9 @@ App 只持有 owner 连接。完整退出 App 不停止独立 Runtime 或 Profil
 
 ## 操作边界与恢复
 
-`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例选定的 Page 内导航和读取至多 4096 字符的可见正文；`instance.observe` 同样读取并回显选定 Page 的 page facts/identity facts，不产生控件引用。多 Page Instance 必须传入 `page_id` 或 `page_ref`（并在已知时传入 `document_generation`），省略时返回 `page_selection_required`，不会猜测 active/首个 Page。成功结果回显同一 Page 的当前 binding；stale、origin 不符或 Page/Document 不匹配时不回退到其他 Page。不执行网站 SKILL、任意脚本、CDP 或上传。导航通过原 PAGE 的请求拦截禁用重定向跟随（所有 3xx 拒绝），允许响应仍在同页渲染；持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。本切片 URL 不含查询串、片段或内嵌凭据；每个 Instance 操作须显式传入 origin。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
+`instance.navigate` / `instance.read` 需要精确 `runtime_session_ref`，在该实例选定的 Page 内导航和读取至多 4096 字符的可见正文；`instance.observe` 同样读取并回显选定 Page 的 page facts/identity facts，不产生控件引用。多 Page Instance 必须传入 `page_id` 或 `page_ref`（并在已知时传入 `document_generation`），省略时返回 `page_selection_required`，不会猜测 active/首个 Page。成功结果回显同一 Page 的当前 binding；stale、origin 不符或 Page/Document 不匹配时不回退到其他 Page。不执行网站 SKILL、任意脚本、CDP 或上传。导航由原 Page 的请求拦截保护，每个 redirect hop 都在发出该 hop 前按精确授权 origin 单独核验；同源或明确获准的跨源目标可继续，未授权目标在发出请求前拒绝，不能概括为拒绝全部 3xx。持续 guard 阻止脚本跨 origin 顶层跳转，正式人工接管后释放。URL 可含普通查询串或片段，但公开摘要会移除它们；不得含凭据。每个 Instance 操作须显式传入 origin。另一个 Profile 不受影响。账号依赖站点/已绑定身份 origin 在这个公开读取入口明确拒绝。
+
+固定官方 Driver 的 popup 首导航若不能在派发前可信关联已登记 Page，会在路由 `continue`/`fetch` 或任何外部请求前局部拒绝；这只隔离受影响的 popup/Instance，不暂停原任务页 A 的 fresh read/input、其他可信 Page、Profile 或管理查询。触发它的 click/Run 若已派发，必须与 popup 子请求的 `page_relation_unavailable`/`not_dispatched` 分开记录，业务结果保持未完成；迟到的真实 Page 事件只登记实际关系，不授权或重放原首请求。原任务页在接管、查看 B 并交还后仍须重新观察同一 Instance；stale 引用不能换页猜测。该边界不宣称 popup 全面支持。
 
 ### 受控页面交互（0.2.0）
 
@@ -41,7 +49,7 @@ owner 必须在 Profile 上限或新 Profile 模板中明确勾选：精确 orig
 
 这些浏览器操作的权限仍逐项取交集；执行策略消费 Harbor 的受控页面观察/read 或交互/prepare 声明，不把 click/input 伪装成真实站点业务动作。策略目标是受管 Profile，精确 origin 与上限绑定在资源匹配版本、Run 摘要和 Runtime 请求中；因此专用本地测试 origin 不需要放松公共网站业务 URL 规范。管理策略需 owner 通过正常按钮明确允许 prepare。
 
-Camoufox 复用原 PAGE 与 Playwright 原生输入，临时 ElementHandle 不通过 selector 重试替换目标。输入期间复用在途计数与 ControlLease，转移不能与在途输入重叠。HTTP 请求限制精确受控 origin，全部重定向仍拒绝；它不声称是任意网站的网络副作用防火墙。iframe、多窗口、文件/富文本、任意脚本不支持；不会换 Page/Instance。查询串、片段和导航 512 字符限制本轮保留。
+Camoufox 复用原 PAGE 与 Playwright 原生输入，临时 ElementHandle 不通过 selector 重试替换目标。输入期间复用在途计数与 ControlLease，转移不能与在途输入重叠。HTTP 请求限制精确受控 origin，每个重定向逐跳核验；同源或明确获准的跨源目标可继续，未授权目标在发出该 hop 前拒绝。它不声称是任意网站的网络副作用防火墙。iframe、多窗口、文件/富文本、任意脚本不支持；不会换 Page/Instance。查询串、片段和导航 512 字符限制本轮保留。
 
 每个新入口返回 dispatch_state。派发前拒绝为 not_dispatched；调用 Driver 后不能确认则保留 unknown_outcome，查询原 operation/receipt，不改 key 重放。Runtime 内存回执存续到退出，Core 持久 Run 保留结果；若 Runtime 退出导致回执不可用，unknown 继续保留。查询获得新回执只追加 reconciliation/result，不把原 unknown 历史改写成成功。页面回读才是完成依据。
 
