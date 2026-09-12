@@ -14,12 +14,14 @@ import {
   detectBrowserProviders,
   diagnoseBrowserProviderFailure,
   HarborRuntime,
+  LocalIdentityEnvironmentManager,
   launchLocalDedicatedProvider,
   type LocalProviderLauncher,
   type LocalProviderLaunchInput
 } from "./index.js";
 import * as HarborRuntimeApi from "./index.js";
 import { classifyLaunchFailure } from "./provider-management.js";
+import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
 import { resolveRuntimeProviderBinding } from "./local-provider-launcher.js";
 import { trustLocalProviderReadProbe } from "./read-operation-probe-trust.js";
 
@@ -792,6 +794,96 @@ test("uses a persisted Chrome binding over a global Camoufox path and rejects mi
     assert.equal(ready.status, "ready", JSON.stringify(ready));
     assert.equal(existsSync(marker), true);
     if (ready.status === "ready") await ready.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousBrowserPath === undefined) delete process.env.HARBOR_BROWSER_PATH;
+    else process.env.HARBOR_BROWSER_PATH = previousBrowserPath;
+    if (previousMarker === undefined) delete process.env.HARBOR_FAKE_BROWSER_MARKER;
+    else process.env.HARBOR_FAKE_BROWSER_MARKER = previousMarker;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reloads a historical Chrome fallback binding and launches its persisted executable", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-historical-chrome-binding-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousBrowserPath = process.env.HARBOR_BROWSER_PATH;
+  const previousMarker = process.env.HARBOR_FAKE_BROWSER_MARKER;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const marker = join(dir, "spawned.txt");
+  const globalCamoufoxPath = "/private/tmp/Camoufox.app/Contents/MacOS/camoufox";
+  let state: IdentityEnvironmentMutationPersistenceState | null = null;
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_BROWSER_PATH = globalCamoufoxPath;
+  process.env.HARBOR_FAKE_BROWSER_MARKER = marker;
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "about:blank",
+    url: "about:blank",
+    readyState: "complete"
+  });
+  try {
+    const manager = new LocalIdentityEnvironmentManager({
+      load_state: () => state,
+      persist_state: (next) => { state = structuredClone(next); }
+    });
+    const created = manager.create({
+      ...providerFixture({ [browserPath]: { executable: true } }),
+      env: { HARBOR_CHROME_PATH: browserPath },
+      requested_provider_id: "chrome_official",
+      identity_environment_ref: "identity-env-historical-chrome-fallback",
+      execution_identity_ref: "execution-identity-historical-chrome-fallback",
+      profile_ref: "profile-historical-chrome-fallback",
+      profile_storage_ref: "profile-storage-historical-chrome-fallback",
+      site: { site_id: "fixture", origin: "about:blank", display_name: "Fixture" },
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    const persistedState = state as IdentityEnvironmentMutationPersistenceState | null;
+    assert.ok(persistedState);
+    const persisted = persistedState.records.find((record) => record.identity_environment.identity_environment_ref === created.identity_environment_ref);
+    assert.ok(persisted);
+    // This is the historical base-main record shape: Chrome was persisted as
+    // the restricted fallback while retaining its verified install facts.
+    const historicalBinding = persisted.identity_environment.provider_binding as unknown as {
+      fallback_provider_id: string | null;
+      selection_reason: string;
+    };
+    historicalBinding.fallback_provider_id = "chrome_official";
+    historicalBinding.selection_reason = "chrome_restricted_fallback";
+
+    const reloaded = new LocalIdentityEnvironmentManager({
+      load_state: () => state,
+      persist_state: (next) => { state = structuredClone(next); }
+    });
+    const identity = reloaded.getFacts(created.identity_environment_ref);
+    assert.ok(identity);
+    assert.equal(identity.provider_binding.selection_reason, "chrome_restricted_fallback");
+    assert.equal(identity.provider_binding.selected_provider?.install.path, browserPath);
+
+    const result = await launchLocalDedicatedProvider({
+      browser_path: "",
+      headless: true,
+      timeout_ms: 3_000,
+      url: "about:blank",
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-historical-chrome-fallback",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    assert.equal(existsSync(marker), true);
+    if (result.status === "ready") await result.close();
   } finally {
     if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
     else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;

@@ -262,7 +262,10 @@ function isLaunchablePersistedBinding(binding: IdentityEnvironmentProviderBindin
     !["cloakbrowser", "chrome_official", "camoufox"].includes(provider.provider_id) ||
     provider.provider_id !== binding.selected_provider_id ||
     provider.selectable !== true ||
-    (binding.selection_reason !== "requested_provider_available" && binding.selection_reason !== "user_default_available") ||
+    (binding.selection_reason !== "requested_provider_available" &&
+      binding.selection_reason !== "user_default_available" &&
+      binding.selection_reason !== "cloakbrowser_default" &&
+      binding.selection_reason !== "chrome_restricted_fallback") ||
     typeof install.path !== "string" || !install.path.trim() ||
     install.status !== "installed" || install.launchability !== "launchable") return false;
   if (provider.provider_id !== "camoufox") return true;

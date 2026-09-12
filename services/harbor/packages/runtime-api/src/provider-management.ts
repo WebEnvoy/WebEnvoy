@@ -138,6 +138,9 @@ export interface IdentityEnvironmentProviderBinding {
   selected_provider_id: BrowserProviderId | null;
   fallback_provider_id: BrowserProviderId | null;
   selection_reason:
+    /** Historical values retained for persisted bindings created before explicit/default separation. */
+    | "cloakbrowser_default"
+    | "chrome_restricted_fallback"
     | "requested_provider_available"
     | "requested_provider_unavailable"
     | "user_default_available"
