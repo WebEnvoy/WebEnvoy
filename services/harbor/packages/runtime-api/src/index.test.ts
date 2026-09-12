@@ -806,6 +806,68 @@ test("uses a persisted Chrome binding over a global Camoufox path and rejects mi
   }
 });
 
+test("applies Chrome locale emulation before document navigation and keeps strict readback", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "harbor-chrome-locale-readback-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+  const previousRedirectUrl = process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL;
+  const originalWebSocket = globalThis.WebSocket;
+  const browserPath = writeFakeBrowserExecutable(dir);
+  const targetUrl = "http://127.0.0.1:51680";
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(dir, "profiles");
+  process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = "ws://127.0.0.1/fake-page";
+  process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL = targetUrl;
+  installFakeCdpWebSocket("Never", undefined, {
+    language: "en-US",
+    timezone: "UTC",
+    width: 1280,
+    height: 720,
+    title: "Fixture",
+    url: targetUrl,
+    readyState: "complete"
+  }, { localeReadbackRequiresNavigation: true });
+  try {
+    const identity = createLocalIdentityEnvironmentFacts({
+      identity_environment_ref: "identity-env-chrome-locale-readback",
+      requested_provider_id: "chrome_official",
+      site: { site_id: "fixture", origin: targetUrl, display_name: "Fixture" },
+      env: { HARBOR_CHROME_PATH: browserPath },
+      platform: "darwin",
+      arch: "arm64",
+      path_exists: candidate => candidate === browserPath,
+      is_executable: candidate => candidate === browserPath,
+      read_text: () => null,
+      list_dir: () => [],
+      language: "en-US",
+      timezone: "UTC",
+      profile_storage_ref: "profile-storage-chrome-locale-readback",
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+    const result = await launchLocalDedicatedProvider({
+      browser_path: browserPath,
+      headless: true,
+      timeout_ms: 3_000,
+      url: targetUrl,
+      profile_ref: identity.profile_ref,
+      profile_storage_ref: identity.browser_storage.profile_storage_ref,
+      provider_ref: "provider-chrome-locale-readback",
+      identity_environment: identity
+    });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    if (result.status === "ready") await result.close();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    if (previousWebSocketUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
+    else process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL = previousWebSocketUrl;
+    if (previousRedirectUrl === undefined) delete process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL;
+    else process.env.HARBOR_FAKE_BROWSER_REDIRECT_URL = previousRedirectUrl;
+    globalThis.WebSocket = originalWebSocket;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("uses a persisted official Camoufox binding path over the global Camoufox path", async () => {
   const dir = mkdtempSync(join(tmpdir(), "harbor-bound-camoufox-global-path-"));
   const previous = { ...process.env };
@@ -1121,11 +1183,14 @@ function assignedLocation(message: { method: string; params?: { expression?: str
 function installFakeCdpWebSocket(
   ignoredMethod: string,
   redirectUrl?: string,
-  environmentReadback?: { language: string; timezone: string; width: number; height: number; title?: string; url?: string; readyState?: string }
+  environmentReadback?: { language: string; timezone: string; width: number; height: number; title?: string; url?: string; readyState?: string },
+  options: { localeReadbackRequiresNavigation?: boolean } = {}
 ): void {
   class FakeCdpWebSocket extends EventTarget {
     readyState = 0;
     private currentUrl = "about:blank";
+    private localeOverrideRequested = false;
+    private localeAppliedToDocument = !options.localeReadbackRequiresNavigation;
 
     constructor(_url: string | URL) {
       super();
@@ -1138,16 +1203,21 @@ function installFakeCdpWebSocket(
     send(payload: string): void {
       const message = JSON.parse(payload) as { id: number; method: string; params?: { expression?: string; url?: string } };
       if (message.method === ignoredMethod) return;
+      if (message.method === "Emulation.setLocaleOverride") this.localeOverrideRequested = true;
       if (message.method === "Page.navigate") this.currentUrl = redirectUrl ?? message.params?.url ?? this.currentUrl;
       const assignedUrl = assignedLocation(message);
       if (assignedUrl) this.currentUrl = redirectUrl ?? assignedUrl;
+      if ((message.method === "Page.navigate" || assignedUrl) && this.localeOverrideRequested) this.localeAppliedToDocument = true;
+      const readback = environmentReadback && options.localeReadbackRequiresNavigation && !this.localeAppliedToDocument
+        ? { ...environmentReadback, language: "system" }
+        : environmentReadback;
       queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", {
         data: JSON.stringify({
           id: message.id,
           result: message.method === "Page.getFrameTree"
             ? { frameTree: { frame: { url: this.currentUrl } } }
-            : message.method === "Runtime.evaluate" && environmentReadback
-              ? { result: { value: environmentReadback } }
+            : message.method === "Runtime.evaluate" && readback
+              ? { result: { value: readback } }
               : {}
         })
       })));
