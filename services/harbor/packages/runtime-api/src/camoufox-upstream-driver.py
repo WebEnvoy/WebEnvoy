@@ -19,6 +19,7 @@ import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 from camoufox.utils import launch_options
 from playwright.sync_api import Error as PlaywrightError
@@ -41,6 +42,8 @@ SOURCE_SHA256_PIN = "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a716
 MAX_EVENTS = 64
 MAX_TEXT = 64 * 1024
 MAX_LINE = 2 * 1024 * 1024
+MAX_REDIRECT_HOPS = 10
+REDIRECT_STATUSES = frozenset({300, 301, 302, 303, 307, 308})
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
 
@@ -80,6 +83,25 @@ def safe_url(value: str) -> str | None:
         return f"{origin}{parsed.path or '/'}{('?'+parsed.query) if parsed.query else ''}"
     except ValueError:
         return None
+
+
+def redirect_target(response_url: str, status: int, headers: Any) -> str | None:
+    """Resolve one redirect without permitting a non-web or malformed URL."""
+    if status not in REDIRECT_STATUSES or not hasattr(headers, "items"):
+        return None
+    location = next((value for key, value in headers.items() if str(key).lower() == "location"), None)
+    if not isinstance(location, str) or not location.strip() or len(location) > 4096 or any(ord(char) < 0x20 for char in location):
+        return None
+    try:
+        return safe_url(urljoin(response_url, location.strip()))
+    except ValueError:
+        return None
+
+
+def redirect_method(status: int, method: str) -> str:
+    """Apply browser redirect method semantics for a manually fetched hop."""
+    normalized = method.upper()
+    return "GET" if status in (301, 302, 303) and normalized not in ("GET", "HEAD") else normalized
 
 
 def safe_text(value: Any, limit: int = MAX_TEXT) -> str:
@@ -195,9 +217,16 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     config = {}
     if isinstance(environment.get("timezone"), str) and environment["timezone"]:
         config["timezone"] = environment["timezone"]
+    timezone_id = environment.get("timezone") if isinstance(environment.get("timezone"), str) and environment["timezone"] else None
     locale = environment.get("language") if isinstance(environment.get("language"), str) and environment["language"] else None
     proxy = {"server": environment["proxy_server"]} if isinstance(environment.get("proxy_server"), str) and environment["proxy_server"] else None
-    context_options = {"viewport": viewport} if (viewport := parse_viewport(environment.get("viewport"))) else {}
+    context_options = {}
+    if (viewport := parse_viewport(environment.get("viewport"))):
+        context_options["viewport"] = viewport
+    if timezone_id:
+        if len(timezone_id) > 128 or any(ord(char) < 0x20 for char in timezone_id):
+            raise ValueError("Camoufox timezone is invalid.")
+        context_options["timezone_id"] = timezone_id
     options = launch_options(
         browser=f"official/{BROWSER_VERSION_PIN}",
         env={},
@@ -344,7 +373,52 @@ class Driver:
         if request_origin is None or request_origin not in state.origins:
             route.abort("blockedbyclient")
             return
-        route.continue_()
+        method = str(getattr(request, "method", "GET")).upper()
+        post_data = getattr(request, "post_data", None)
+        response = None
+        try:
+            # Playwright routing only invokes this handler for the first URL
+            # in a redirect chain. Fetch one hop at a time so Location is
+            # checked before the next network request is issued.
+            response = route.fetch(max_redirects=0, timeout=int(self.request.get("timeout_ms", 60_000)))
+            for hop in range(MAX_REDIRECT_HOPS + 1):
+                status = int(response.status)
+                location = next((value for key, value in response.headers.items() if str(key).lower() == "location"), None)
+                if status not in REDIRECT_STATUSES or not location:
+                    route.fulfill(response=response)
+                    response = None
+                    return
+                target = redirect_target(response.url, status, response.headers)
+                if not target or origin_of(target) not in state.origins or hop >= MAX_REDIRECT_HOPS:
+                    response.dispose()
+                    response = None
+                    route.abort("blockedbyclient")
+                    return
+                next_method = redirect_method(status, method)
+                next_post_data = post_data if next_method not in ("GET", "HEAD") else ""
+                response.dispose()
+                response = route.fetch(
+                    url=target,
+                    method=next_method,
+                    post_data=next_post_data,
+                    max_redirects=0,
+                    timeout=int(self.request.get("timeout_ms", 60_000)),
+                )
+                method = next_method
+            if response is not None:
+                response.dispose()
+                response = None
+            route.abort("blockedbyclient")
+        except Exception:
+            if response is not None:
+                try:
+                    response.dispose()
+                except Exception:
+                    pass
+            try:
+                route.abort("blockedbyclient")
+            except Exception:
+                pass
 
     def navigate(self, state: PageState, url: str, origins: list[str]) -> dict[str, Any]:
         target_origin = origin_of(url)

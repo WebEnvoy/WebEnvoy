@@ -89,6 +89,120 @@ spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.ar
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.SOURCE_SHA256_PIN == "${CAMOUFOX_UPSTREAM_PINS.source_sha256}"
+seen = []
+def fake_launch_options(**kwargs):
+    seen.append(kwargs)
+    return {"args": [], "env": {"CAMOU_CONFIG_1": __import__("json").dumps(kwargs["config"], separators=(",", ":"))}, "executable_path": "/managed/camoufox", "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
+module.launch_options = fake_launch_options
+profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-options-")
+try:
+    options, bundle, replay, context_options = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
+    assert replay is False
+    assert seen[0]["config"]["timezone"] == "UTC"
+    assert context_options == {"timezone_id": "UTC"}
+    assert bundle["context_options"] == {"timezone_id": "UTC"}
+    assert options["env"]["CAMOU_CONFIG_1"] == '{"timezone":"UTC"}'
+finally:
+    __import__("shutil").rmtree(profile)
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("checks every redirect hop before issuing the next fetch", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+class FakePage:
+    url = "https://s1.test/"
+    main_frame = object()
+
+class FakeRequest:
+    def __init__(self, page, url):
+        self.frame = types.SimpleNamespace(page=page)
+        self.url = url
+        self.method = "GET"
+        self.post_data = None
+
+class FakeResponse:
+    def __init__(self, url, status, location=None):
+        self.url = url
+        self.status = status
+        self.headers = {} if location is None else {"location": location}
+        self.disposed = False
+    def dispose(self):
+        self.disposed = True
+
+class FakeRoute:
+    def __init__(self, request, responses):
+        self.request = request
+        self.responses = responses
+        self.fetches = []
+        self.fulfilled = None
+        self.aborted = None
+    def fetch(self, **kwargs):
+        self.fetches.append(kwargs)
+        url = kwargs.get("url", self.request.url)
+        return self.responses[url]
+    def fulfill(self, response=None, **kwargs):
+        self.fulfilled = response
+    def abort(self, reason):
+        self.aborted = reason
+
+page = FakePage()
+driver = object.__new__(module.Driver)
+driver.request = {"timeout_ms": 100}
+state = module.PageState("page:1", page, ["https://s1.test"])
+driver.pages = {"page:1": state}
+initial = "https://s1.test/redirect/s2"
+same_origin = "https://s1.test/from-s1/s3"
+route = FakeRoute(FakeRequest(page, initial), {
+    initial: FakeResponse(initial, 302, "/from-s1/s3"),
+    same_origin: FakeResponse(same_origin, 302, "https://s3.test/final"),
+})
+driver.route(route)
+assert route.aborted == "blockedbyclient"
+assert route.fulfilled is None
+assert [item.get("url", initial) for item in route.fetches] == [initial, same_origin]
+assert all("s3.test" not in item.get("url", "") for item in route.fetches)
+
+allowed_final = "https://s1.test/final"
+allowed = FakeRoute(FakeRequest(page, initial), {
+    initial: FakeResponse(initial, 302, "/final"),
+    allowed_final: FakeResponse(allowed_final, 200),
+})
+driver.route(allowed)
+assert allowed.aborted is None
+assert allowed.fulfilled.status == 200
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",

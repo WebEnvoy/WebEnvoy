@@ -138,7 +138,7 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
 
     if "context_options" in bundle:
         context_options = bundle["context_options"]
-        if not isinstance(context_options, dict) or set(context_options) - {"viewport"}:
+        if not isinstance(context_options, dict) or set(context_options) - {"viewport", "timezone_id"}:
             raise ValueError("Camoufox context options are unsupported or corrupt.")
         viewport = context_options.get("viewport")
         if viewport is not None and (
@@ -150,6 +150,14 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
             or not 200 <= viewport["height"] <= 16384
         ):
             raise ValueError("Camoufox context viewport is corrupt.")
+        timezone_id = context_options.get("timezone_id")
+        if timezone_id is not None and (
+            not isinstance(timezone_id, str)
+            or not timezone_id
+            or len(timezone_id) > 128
+            or any(ord(char) < 0x20 or ord(char) == 0x7f for char in timezone_id)
+        ):
+            raise ValueError("Camoufox context timezone is corrupt.")
 
     baseline = bundle["baseline"]
     baseline_hash = bundle["baseline_sha256"]
