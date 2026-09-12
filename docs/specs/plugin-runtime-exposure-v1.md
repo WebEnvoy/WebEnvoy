@@ -28,6 +28,15 @@ operation。固定官方 Driver 的 limited popup 边界必须透传为结构化
 继续 read/input，后续真实 Page 事件不授权或重放原首请求；其他 Page、
 Profile、Grant、查询和 SKILL 管理不被该局部拒绝污染。
 
+`page.list` 仍使用 `harbor-page-list/v2`，并可选透传
+`rejected_unattributed: {count, failure_class: "page_relation_unavailable", dispatch_state: "not_dispatched"}`。
+该值是 Instance 级有界聚合，不是 Page 或 Network event；不含 URL、
+`page_id`/`page_ref`、`opener_page_id`、request identity 或 Provider handle，
+计数为零时省略，不改变 `pages`/`filtered_page_count`。它不覆盖独立的
+click receipt：已派发的 click 仍保持 `dispatch_state: "dispatched"`。旧
+Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它解释成 popup
+已成功或已获得 Page 归属；installed/live/plugin 验收状态仍待现场完成。
+
 ## SKILL 工具输入
 
 每次 `webenvoy_skills` 调用都要求 `idempotency_key`、`grant_id`、`operation`、`task_scope`；Connector 注入当前 `connection_id`。`task_scope` 必须恰好含 `operations`、`skill_refs`、`source_refs` 三组数组，数组项唯一且 operation 必须包含当前 operation。SKILL 请求不带 Profile、origin、runtime session、page、URL、路径、脚本或浏览器动作字段；未知字段拒绝。

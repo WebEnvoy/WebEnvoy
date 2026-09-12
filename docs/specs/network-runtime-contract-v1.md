@@ -32,6 +32,15 @@ opener only when the Provider supplies that relation, but it never authorizes
 or replays the rejected request. The public failure is the accurate
 `page_relation_unavailable` boundary, not a fabricated `page_id` or `opener`.
 
+The `page.list` projection may expose an optional `rejected_unattributed`
+value with `{count, failure_class: "page_relation_unavailable",
+dispatch_state: "not_dispatched"}`. This is a bounded aggregate for the
+Instance, not a Network event or a Page identity; it contains no URL,
+Page/opener reference, request identity or Provider handle, and is omitted
+when its count is zero. It remains additive to `harbor-page-list/v2`; it does
+not alter the diagnostics envelope, and a click that already dispatched
+retains its independent `dispatched` receipt.
+
 The request guard is local to the affected Page/Instance. A click that caused
 the popup remains a separately dispatched interaction, while the popup
 navigation is rejected and the dependent business result remains incomplete.
