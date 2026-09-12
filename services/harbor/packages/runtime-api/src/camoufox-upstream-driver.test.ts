@@ -382,7 +382,7 @@ for await (const line of rl) {
   const previous = { ...process.env };
   Object.assign(process.env, pins, { HARBOR_CAMOUFOX_PYTHON: process.execPath, HARBOR_CAMOUFOX_DRIVER: helper, HARBOR_PROFILE_STORAGE_ROOT: profileRoot });
   try {
-    const result = await launchCamoufoxUpstreamProvider({ browser_path: "/managed/camoufox", provider_id: "camoufox", headless: true, timeout_ms: 5_000, url: "https://example.test/start", profile_ref: "profile:test", profile_storage_ref: "storage:test", provider_ref: "provider:test" });
+    const result = await launchCamoufoxUpstreamProvider({ browser_path: "/managed/camoufox", provider_id: "camoufox", operation_scope: "profile_management", headless: true, timeout_ms: 5_000, url: "https://example.test/start", profile_ref: "profile:test", profile_storage_ref: "storage:test", provider_ref: "provider:test" });
     assert.equal(result.status, "ready");
     if (result.status !== "ready") return;
     assert.equal(result.driver_kind, "playwright_jsonl");

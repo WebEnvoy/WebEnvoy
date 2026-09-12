@@ -315,7 +315,9 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
   const binding = input.identity_environment?.provider_binding?.selected_provider?.install as JsonObject | undefined;
   const source = readCamoufoxUpstreamSourceFacts(process.env, binding);
   if (!source || !isOfficialCamoufoxLaunchRequest(input)) return unavailable("unsupported", "Camoufox 仅允许由 owner 提供并验证固定官方 source、version、hash；未知或历史 binding 已拒绝。");
-  if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "Provider 不支持 guarded management navigation。", sourceFacts(source));
+  // This official Driver installs the context route before the initial
+  // navigation, so the management-start scope remains fail-closed at the
+  // network boundary while still allowing the managed Profile to start.
   const profileStorage = await prepareProfileStorage(input.profile_storage_ref);
   if (input.profile_storage_ref && profileStorageHasExternalLock(input.profile_storage_ref)) return unavailable("profile_locked", "Managed Profile 当前由其他 owner 使用。", [...sourceFacts(source), ...profileStorage.facts]);
   const pythonPath = process.env.HARBOR_CAMOUFOX_PYTHON;
