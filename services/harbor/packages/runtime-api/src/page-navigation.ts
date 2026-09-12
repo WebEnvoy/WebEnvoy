@@ -337,7 +337,7 @@ export class PageRegistry {
 
   private async close(record: PageRecord, allowed: Set<string>, input: ManagedPageOperationInput, markDispatched: () => void): Promise<ManagedPageFacts | ManagedPageUnavailable> {
     if (this.safeReturnablePageCount() <= 1) {
-      return this.unavailable("no_safe_return_page", "The last live Page cannot be closed without a safe return Page.", false, input, record);
+      return this.unavailable("no_safe_return_page", "The last usable Page cannot be closed without a safe return Page.", false, input, record);
     }
     const selected = record.page_id === this.taskPageId;
     const nativeActive = record.page_id === this.activePageId || record.provider_state.active === true;
