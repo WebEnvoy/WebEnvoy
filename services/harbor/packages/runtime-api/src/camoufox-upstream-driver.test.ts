@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   CAMOUFOX_UPSTREAM_PINS,
   classifyUpstreamPageRequest,
   hasRetiredCamoufoxBinding,
+  inheritUpstreamPopupAuthorizedOrigins,
   isOfficialCamoufoxLaunchRequest,
   launchCamoufoxUpstreamProvider,
   readCamoufoxUpstreamSourceFacts
@@ -43,6 +46,54 @@ test("rejects an unknown popup relation before request continuation", () => {
   assert.equal(classifyUpstreamPageRequest({ page_ref: null, known_page_refs: ["page:1"], request_origin: "https://example.test", authorized_origins: ["https://example.test"] }), "reject_unknown_page");
   assert.equal(classifyUpstreamPageRequest({ page_ref: "page:1", known_page_refs: ["page:1"], request_origin: "https://other.test", authorized_origins: ["https://example.test"] }), "reject_origin");
   assert.equal(classifyUpstreamPageRequest({ page_ref: "page:1", known_page_refs: ["page:1"], request_origin: "https://example.test", authorized_origins: ["https://example.test"] }), "allow");
+});
+
+test("inherits popup origins only from a confirmed opener Page", () => {
+  const pages = [
+    { provider_page_ref: "page:1", authorized_origins: ["https://example.test", "https://example.test", "file:///tmp/private"] },
+    { provider_page_ref: "page:2", authorized_origins: ["https://other.test"] }
+  ];
+  assert.deepEqual(inheritUpstreamPopupAuthorizedOrigins({ opener_page_ref: "page:1", pages }), ["https://example.test"]);
+  assert.deepEqual(inheritUpstreamPopupAuthorizedOrigins({ opener_page_ref: "page:missing", pages }), []);
+  assert.deepEqual(inheritUpstreamPopupAuthorizedOrigins({ opener_page_ref: null, pages }), []);
+});
+
+test("packages the Python validator under the importable upstream-driver name", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert module.SOURCE_SHA256_PIN == "${CAMOUFOX_UPSTREAM_PINS.source_sha256}"
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
 });
 
 test("projects only owner-verified Camoufox as launchable", () => {

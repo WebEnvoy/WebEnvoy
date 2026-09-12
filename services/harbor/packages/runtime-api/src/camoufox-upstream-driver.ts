@@ -120,6 +120,21 @@ export function classifyUpstreamPageRequest(input: {
   return input.authorized_origins.includes(input.request_origin) ? "allow" : "reject_origin";
 }
 
+/**
+ * Copy the opener scope only when the opener Page is already known by ref.
+ * An absent or stale relation intentionally produces an empty scope so the
+ * first popup request remains fail-closed until no request can be replayed.
+ */
+export function inheritUpstreamPopupAuthorizedOrigins(input: {
+  opener_page_ref: string | null;
+  pages: readonly { provider_page_ref: string; authorized_origins: readonly string[] }[];
+}): string[] {
+  if (!input.opener_page_ref) return [];
+  const opener = input.pages.find(page => page.provider_page_ref === input.opener_page_ref);
+  if (!opener) return [];
+  return [...new Set(opener.authorized_origins.filter(origin => safeOrigin(origin) !== null))];
+}
+
 class CamoufoxDriverError extends Error {
   constructor(readonly code: "source_untrusted" | "driver_unavailable" | "request_failed" | "profile_locked" | "protocol_error", message: string) {
     super(message);

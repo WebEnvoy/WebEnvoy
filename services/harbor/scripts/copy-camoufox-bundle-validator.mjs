@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 const sources = [
   ["camoufox-bundle-validator.py", "camoufox-bundle-validator.py"],
+  // The hyphenated filename is retained for Profile recovery. The upstream
+  // driver imports the same stdlib helper under Python's importable name.
+  ["camoufox-bundle-validator.py", "camoufox_bundle_validator.py"],
   ["camoufox-upstream-driver.py", "camoufox-upstream-driver.py"]
 ];
 const targetDir = join(root, "..", "dist", "packages", "runtime-api", "src");

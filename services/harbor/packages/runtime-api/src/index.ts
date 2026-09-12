@@ -190,6 +190,7 @@ export { createFixtureLauncher, launchLocalDedicatedProvider } from "./local-pro
 export {
   CAMOUFOX_UPSTREAM_PINS,
   classifyUpstreamPageRequest,
+  inheritUpstreamPopupAuthorizedOrigins,
   isOfficialCamoufoxLaunchRequest,
   launchCamoufoxUpstreamProvider,
   readCamoufoxUpstreamSourceFacts

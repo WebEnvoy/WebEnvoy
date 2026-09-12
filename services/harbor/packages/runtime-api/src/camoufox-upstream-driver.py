@@ -311,17 +311,21 @@ class Driver:
         if any(item.page == page for item in self.pages.values()):
             return
         opener_ref = None
+        opener_origins: list[str] = []
         try:
             opener = page.opener
             if callable(opener):
                 opener = opener()
-            opener_ref = next((item.ref for item in self.pages.values() if item.page == opener), None)
+            opener_state = next((item for item in self.pages.values() if item.page == opener), None)
+            if opener_state is not None:
+                opener_ref = opener_state.ref
+                opener_origins = list(opener_state.origins)
         except Exception:
             opener_ref = None
         # The first popup request was already handled by route(). Registering
         # this later Page event only records the real object; it never replays
         # or continues the rejected navigation.
-        self.register(page, [], opener_ref)
+        self.register(page, opener_origins, opener_ref)
 
     def route(self, route: Route) -> None:
         request = route.request
