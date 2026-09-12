@@ -2694,20 +2694,17 @@ async function applyAndReadbackProviderConfiguration(
     facts.push({ key: "identity_environment.proxy", source: "configured", value: "provider_argument_applied" });
   }
 
-  // Apply target-scoped emulation before the first document is created. Chrome
-  // exposes locale overrides to navigator.language only after navigation, so
-  // configuring an already-loaded page makes strict readback reject a valid
-  // environment.
-  let page: CdpPageTarget;
-  try {
-    page = await createProviderPage(port, "about:blank", signal);
-  } catch (cause) {
-    throw new Error(`Identity environment configuration could not open the requested page: ${cause instanceof Error ? cause.message : "unknown failure"}`);
+  const opened = await openProviderUrl(port, requestedUrl, signal);
+  if (opened.status !== "ready") {
+    throw new Error(`Identity environment configuration could not open the requested page: ${opened.error?.message ?? "unknown failure"}`);
   }
+  const page = await activePage(port, requestedUrl, signal);
   if (!page.webSocketDebuggerUrl) throw new Error("Identity environment configuration has no controlled CDP page target.");
   const observed = await withCdp(page.webSocketDebuggerUrl, async (client) => {
-    await client.send("Page.enable");
-    if (configuration.language) await client.send("Emulation.setLocaleOverride", { locale: configuration.language });
+    if (configuration.language) {
+      await client.send("Emulation.setUserAgentOverride", { userAgent: "", acceptLanguage: configuration.language });
+      await client.send("Emulation.setLocaleOverride", { locale: configuration.language });
+    }
     if (configuration.timezone) await client.send("Emulation.setTimezoneOverride", { timezoneId: configuration.timezone });
     if (configuration.viewport) {
       await client.send("Emulation.setDeviceMetricsOverride", {
@@ -2716,11 +2713,6 @@ async function applyAndReadbackProviderConfiguration(
         deviceScaleFactor: 1,
         mobile: false
       });
-    }
-    if (requestedUrl !== "about:blank") {
-      await navigateProviderPage(client, requestedUrl);
-      const committedUrl = await waitForProviderPageCommit(client, signal);
-      if (!committedUrl) throw new Error(`Identity environment configuration could not open the requested page: ${requestedUrl}`);
     }
     const result = await client.send("Runtime.evaluate", {
       expression: `(() => ({ language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, width: window.innerWidth, height: window.innerHeight }))()`,

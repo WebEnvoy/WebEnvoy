@@ -806,7 +806,7 @@ test("uses a persisted Chrome binding over a global Camoufox path and rejects mi
   }
 });
 
-test("applies Chrome locale emulation before document navigation and keeps strict readback", async () => {
+test("applies Chrome accept-language and ICU locale before strict readback", async () => {
   const dir = mkdtempSync(join(tmpdir(), "harbor-chrome-locale-readback-"));
   const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
   const previousWebSocketUrl = process.env.HARBOR_FAKE_BROWSER_WEBSOCKET_URL;
@@ -825,7 +825,7 @@ test("applies Chrome locale emulation before document navigation and keeps stric
     title: "Fixture",
     url: targetUrl,
     readyState: "complete"
-  }, { localeReadbackRequiresNavigation: true });
+  }, { userAgentReadbackRequiresAcceptLanguage: true });
   try {
     const identity = createLocalIdentityEnvironmentFacts({
       identity_environment_ref: "identity-env-chrome-locale-readback",
@@ -1184,13 +1184,12 @@ function installFakeCdpWebSocket(
   ignoredMethod: string,
   redirectUrl?: string,
   environmentReadback?: { language: string; timezone: string; width: number; height: number; title?: string; url?: string; readyState?: string },
-  options: { localeReadbackRequiresNavigation?: boolean } = {}
+  options: { userAgentReadbackRequiresAcceptLanguage?: boolean } = {}
 ): void {
   class FakeCdpWebSocket extends EventTarget {
     readyState = 0;
     private currentUrl = "about:blank";
-    private localeOverrideRequested = false;
-    private localeAppliedToDocument = !options.localeReadbackRequiresNavigation;
+    private userAgentOverrideApplied = !options.userAgentReadbackRequiresAcceptLanguage;
 
     constructor(_url: string | URL) {
       super();
@@ -1201,14 +1200,15 @@ function installFakeCdpWebSocket(
     }
 
     send(payload: string): void {
-      const message = JSON.parse(payload) as { id: number; method: string; params?: { expression?: string; url?: string } };
+      const message = JSON.parse(payload) as { id: number; method: string; params?: { expression?: string; url?: string; acceptLanguage?: string } };
       if (message.method === ignoredMethod) return;
-      if (message.method === "Emulation.setLocaleOverride") this.localeOverrideRequested = true;
+      if (message.method === "Emulation.setUserAgentOverride" && message.params?.acceptLanguage === environmentReadback?.language) {
+        this.userAgentOverrideApplied = true;
+      }
       if (message.method === "Page.navigate") this.currentUrl = redirectUrl ?? message.params?.url ?? this.currentUrl;
       const assignedUrl = assignedLocation(message);
       if (assignedUrl) this.currentUrl = redirectUrl ?? assignedUrl;
-      if ((message.method === "Page.navigate" || assignedUrl) && this.localeOverrideRequested) this.localeAppliedToDocument = true;
-      const readback = environmentReadback && options.localeReadbackRequiresNavigation && !this.localeAppliedToDocument
+      const readback = environmentReadback && options.userAgentReadbackRequiresAcceptLanguage && !this.userAgentOverrideApplied
         ? { ...environmentReadback, language: "system" }
         : environmentReadback;
       queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", {
