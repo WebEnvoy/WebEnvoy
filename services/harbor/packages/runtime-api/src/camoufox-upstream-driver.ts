@@ -60,6 +60,20 @@ const DRIVER_SOURCE_ENV = "HARBOR_CAMOUFOX_DRIVER";
 type JsonObject = Record<string, unknown>;
 type DriverResponse = { id: number; status: "ok" | "error"; result?: unknown; message?: string };
 
+const UNSUPPORTED_VIEWER_ENTRY: RuntimeViewerEntry = {
+  availability: "unsupported",
+  access_mode: "none",
+  transport: "not_applicable",
+  input_capabilities: [],
+  unavailable_reason: "unsupported"
+};
+
+const VIEWER_AVAILABILITIES = new Set(["available", "unavailable", "permission_denied", "expired", "unsupported"]);
+const VIEWER_ACCESS_MODES = new Set(["none", "read_only", "interactive", "input_disabled"]);
+const VIEWER_TRANSPORTS = new Set(["not_applicable", "local_window", "remote_vnc", "remote_browser_viewer"]);
+const VIEWER_INPUT_CAPABILITIES = new Set(["keyboard_mouse", "clipboard", "file_upload", "download_view"]);
+const VIEWER_UNAVAILABLE_REASONS = new Set(["viewer_unavailable", "permission_denied", "policy_denied", "already_user_controlled", "session_unavailable", "unsupported"]);
+
 export type CamoufoxUpstreamSourceFacts = {
   source: typeof CAMOUFOX_UPSTREAM_PINS.source;
   source_sha256: string;
@@ -243,6 +257,39 @@ type UpstreamPage = {
   facts?: RuntimeFact[];
 };
 
+/**
+ * Keep the JSONL boundary on the public Harbor viewer contract.  In
+ * particular, never cast upstream/private native-window values into the
+ * public enum: an invalid launch result is a protocol failure.
+ */
+export function normalizeUpstreamViewerEntry(value: unknown): RuntimeViewerEntry {
+  const raw = object(value);
+  if (!raw) return { ...UNSUPPORTED_VIEWER_ENTRY, input_capabilities: [] };
+  const availability = raw.availability;
+  const access_mode = raw.access_mode;
+  const transport = raw.transport;
+  const input_capabilities = raw.input_capabilities;
+  if (typeof availability !== "string" || !VIEWER_AVAILABILITIES.has(availability) ||
+    typeof access_mode !== "string" || !VIEWER_ACCESS_MODES.has(access_mode) ||
+    typeof transport !== "string" || !VIEWER_TRANSPORTS.has(transport) ||
+    !Array.isArray(input_capabilities) ||
+    input_capabilities.some(item => typeof item !== "string" || !VIEWER_INPUT_CAPABILITIES.has(item)) ||
+    new Set(input_capabilities).size !== input_capabilities.length) {
+    throw new CamoufoxDriverError("protocol_error", "Driver returned an invalid public viewer entry.");
+  }
+  const unavailable_reason = raw.unavailable_reason;
+  if (unavailable_reason !== undefined && (typeof unavailable_reason !== "string" || !VIEWER_UNAVAILABLE_REASONS.has(unavailable_reason))) {
+    throw new CamoufoxDriverError("protocol_error", "Driver returned an invalid viewer unavailable reason.");
+  }
+  return {
+    availability: availability as RuntimeViewerEntry["availability"],
+    access_mode: access_mode as RuntimeViewerEntry["access_mode"],
+    transport: transport as RuntimeViewerEntry["transport"],
+    input_capabilities: [...input_capabilities] as RuntimeViewerEntry["input_capabilities"],
+    ...(unavailable_reason === undefined ? {} : { unavailable_reason: unavailable_reason as RuntimeViewerEntry["unavailable_reason"] })
+  };
+}
+
 function upstreamPage(value: unknown): LocalProviderPageState {
   const raw = value && typeof value === "object" ? value as JsonObject : {};
   if (typeof raw.provider_page_ref !== "string" || !raw.provider_page_ref || raw.provider_page_ref.length > 256) throw new CamoufoxDriverError("protocol_error", "Driver returned an invalid Page ref.");
@@ -300,7 +347,7 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
       execution_surface: "local_provider" as const,
       driver_ref: String(launched.driver_ref || `camoufox-upstream:${input.profile_ref}`),
       driver_kind: "playwright_jsonl" as const,
-      viewer_entry: launched.viewer_entry && typeof launched.viewer_entry === "object" ? launched.viewer_entry as RuntimeViewerEntry : { availability: "unsupported" as const, access_mode: "none" as const, transport: "not_applicable" as const, input_capabilities: [] },
+      viewer_entry: normalizeUpstreamViewerEntry(launched.viewer_entry),
       page: toPageFacts(initialPage),
       pages: initialPages,
       pageController,

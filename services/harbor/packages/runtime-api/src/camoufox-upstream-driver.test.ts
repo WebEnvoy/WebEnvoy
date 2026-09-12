@@ -12,6 +12,7 @@ import {
   inheritUpstreamPopupAuthorizedOrigins,
   isOfficialCamoufoxLaunchRequest,
   launchCamoufoxUpstreamProvider,
+  normalizeUpstreamViewerEntry,
   readCamoufoxUpstreamSourceFacts
 } from "./camoufox-upstream-driver.js";
 import { bindIdentityEnvironmentDefaultProvider, detectBrowserProviders } from "./provider-management.js";
@@ -26,6 +27,7 @@ const pins = {
 };
 
 test("admits only the owner-provided official source and fixed pins", () => {
+  assert.equal(CAMOUFOX_UPSTREAM_PINS.source_sha256, "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3");
   assert.deepEqual(readCamoufoxUpstreamSourceFacts(pins), {
     source: "official_release",
     source_sha256: sourceSha,
@@ -40,6 +42,33 @@ test("admits only the owner-provided official source and fixed pins", () => {
   assert.equal(isOfficialCamoufoxLaunchRequest({ provider_id: "camoufox", browser_path: "/managed/camoufox" }, { ...pins, HARBOR_CAMOUFOX_SOURCE_SHA256: "bad" }), false);
   assert.equal(hasRetiredCamoufoxBinding({ camoufoxArtifact: { executable: "/old" } }), true);
   assert.equal(hasRetiredCamoufoxBinding({ source: "official_release" }), false);
+});
+
+test("accepts only public viewer values at the JSONL boundary", () => {
+  assert.deepEqual(normalizeUpstreamViewerEntry({
+    availability: "available",
+    access_mode: "interactive",
+    transport: "local_window",
+    input_capabilities: ["keyboard_mouse"]
+  }), {
+    availability: "available",
+    access_mode: "interactive",
+    transport: "local_window",
+    input_capabilities: ["keyboard_mouse"]
+  });
+  assert.deepEqual(normalizeUpstreamViewerEntry(undefined), {
+    availability: "unsupported",
+    access_mode: "none",
+    transport: "not_applicable",
+    input_capabilities: [],
+    unavailable_reason: "unsupported"
+  });
+  assert.throws(() => normalizeUpstreamViewerEntry({
+    availability: "available",
+    access_mode: "native_window",
+    transport: "native",
+    input_capabilities: ["mouse", "keyboard"]
+  }), /public viewer entry/);
 });
 
 test("rejects an unknown popup relation before request continuation", () => {
@@ -102,6 +131,29 @@ try:
     assert context_options == {"timezone_id": "UTC"}
     assert bundle["context_options"] == {"timezone_id": "UTC"}
     assert options["env"]["CAMOU_CONFIG_1"] == '{"timezone":"UTC"}'
+    immutable = {key: bundle[key] for key in ("launch_options", "config", "config_sha256", "identity_hash")}
+    updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    assert updated_replay is True
+    assert updated_context_options == {"timezone_id": "Europe/Paris"}
+    assert updated_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert updated_bundle["launch_options"] == immutable["launch_options"]
+    assert updated_bundle["config"] == immutable["config"]
+    assert updated_bundle["config_sha256"] == immutable["config_sha256"]
+    assert updated_bundle["identity_hash"] == immutable["identity_hash"]
+    assert updated_options == options
+    bundle_mtime = os.stat(module.bundle_path(profile)).st_mtime_ns
+    _, same_bundle, same_replay, _ = module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    assert same_replay is True
+    assert same_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert os.stat(module.bundle_path(profile)).st_mtime_ns == bundle_mtime
+    try:
+        module.options_for({"headless": False, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Not/AZone"}}, profile)
+        raise AssertionError("invalid timezone was accepted")
+    except ValueError:
+        pass
+    assert module.load_bundle(profile)["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert module.viewer_entry(False) == {"availability": "available", "access_mode": "interactive", "transport": "local_window", "input_capabilities": ["keyboard_mouse"]}
+    assert module.viewer_entry(True)["availability"] == "unsupported"
 finally:
     __import__("shutil").rmtree(profile)
 `;
@@ -145,6 +197,9 @@ spec.loader.exec_module(module)
 class FakePage:
     url = "https://s1.test/"
     main_frame = object()
+    def on(self, *args): pass
+    def is_closed(self): return False
+    def title(self): return "Fixture"
 
 class FakeRequest:
     def __init__(self, page, url):
@@ -183,6 +238,8 @@ driver = object.__new__(module.Driver)
 driver.request = {"timeout_ms": 100}
 state = module.PageState("page:1", page, ["https://s1.test"])
 driver.pages = {"page:1": state}
+driver.next_ref = 2
+driver.current = "page:1"
 initial = "https://s1.test/redirect/s2"
 same_origin = "https://s1.test/from-s1/s3"
 route = FakeRoute(FakeRequest(page, initial), {
@@ -203,6 +260,27 @@ allowed = FakeRoute(FakeRequest(page, initial), {
 driver.route(allowed)
 assert allowed.aborted is None
 assert allowed.fulfilled.status == 200
+
+popup = FakePage()
+popup.url = "https://popup.test/"
+popup.opener = page
+unknown = FakeRoute(FakeRequest(popup, "https://popup.test/popup?token=private"), {})
+driver.route(unknown)
+assert unknown.aborted == "blockedbyclient"
+assert unknown.fetches == []
+popup_state = next(item for item in driver.pages.values() if item.page is popup)
+assert popup_state.origins == set()
+assert popup_state.relation_rejection is True
+assert popup_state.facts()["facts"] == [
+    {"key": "page.relation", "source": "validation_evidence", "value": "unavailable"},
+    {"key": "page.initial_request", "source": "validation_evidence", "value": "not_dispatched"},
+    {"key": "page.blocked_reason", "source": "validation_evidence", "value": "page_relation_unavailable"},
+    {"key": "page.rejected_unattributed_count", "source": "validation_evidence", "value": "1"},
+]
+driver.on_page(popup)
+assert popup_state.opener == "page:1"
+assert popup_state.origins == {"https://s1.test"}
+assert popup_state.relation_rejection is True
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",

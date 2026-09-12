@@ -20,6 +20,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from camoufox.utils import launch_options
 from playwright.sync_api import Error as PlaywrightError
@@ -104,6 +105,16 @@ def redirect_method(status: int, method: str) -> str:
     return "GET" if status in (301, 302, 303) and normalized not in ("GET", "HEAD") else normalized
 
 
+def validate_timezone_id(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 128 or any(ord(char) < 0x20 or ord(char) == 0x7f for char in value):
+        raise ValueError("Camoufox timezone is invalid.")
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("Camoufox timezone is not a valid IANA timezone.") from error
+    return value
+
+
 def safe_text(value: Any, limit: int = MAX_TEXT) -> str:
     text = value if isinstance(value, str) else str(value or "")
     text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
@@ -178,6 +189,31 @@ def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dic
     return bundle
 
 
+def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone_id: Any) -> dict[str, Any]:
+    """Atomically update only Harbor-owned context timezone on restart."""
+    if not isinstance(timezone_id, str) or not timezone_id:
+        return bundle
+    context_options = bundle.get("context_options", {})
+    if not isinstance(context_options, dict):
+        raise ValueError("Camoufox context options are corrupt.")
+    if context_options.get("timezone_id") == timezone_id:
+        return bundle
+    timezone_id = validate_timezone_id(timezone_id)
+    updated = {**bundle, "context_options": {**context_options, "timezone_id": timezone_id}}
+    if any(updated[key] != bundle[key] for key in ("launch_options", "config", "config_sha256", "identity_hash")):
+        raise ValueError("Camoufox timezone update touched immutable launch state.")
+    validate_environment_bundle(updated)
+    path = bundle_path(profile_dir)
+    temporary = path.with_name(f".{path.name}.timezone-{os.getpid()}-{time.time_ns()}")
+    temporary.write_bytes(canonical_json(updated) + b"\n")
+    os.chmod(temporary, 0o600)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return updated
+
+
 def load_bundle(profile_dir: str) -> dict[str, Any]:
     path = bundle_path(profile_dir)
     if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
@@ -204,6 +240,8 @@ def parse_viewport(value: Any) -> dict[str, int] | None:
 def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, Any], dict[str, Any], bool, dict[str, Any]]:
     bundle = load_bundle(profile_dir) if Path(profile_dir, ENVIRONMENT_BUNDLE_FILENAME).exists() else None
     if bundle is not None:
+        environment = request.get("environment") if isinstance(request.get("environment"), dict) else {}
+        bundle = update_persisted_timezone(profile_dir, bundle, environment.get("timezone"))
         context_options = bundle.get("context_options", {})
         if not isinstance(context_options, dict):
             raise ValueError("Camoufox context options are corrupt.")
@@ -224,8 +262,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     if (viewport := parse_viewport(environment.get("viewport"))):
         context_options["viewport"] = viewport
     if timezone_id:
-        if len(timezone_id) > 128 or any(ord(char) < 0x20 for char in timezone_id):
-            raise ValueError("Camoufox timezone is invalid.")
+        timezone_id = validate_timezone_id(timezone_id)
         context_options["timezone_id"] = timezone_id
     options = launch_options(
         browser=f"official/{BROWSER_VERSION_PIN}",
@@ -272,6 +309,9 @@ class PageState:
         self.controls: dict[str, tuple[str, str]] = {}
         self.events: list[dict[str, Any]] = []
         self.last_url = page.url
+        self.relation_pending = False
+        self.relation_rejection = False
+        self.relation_rejection_count = 0
 
     def facts(self, active: bool = False) -> dict[str, Any]:
         current = safe_url(self.page.url)
@@ -279,12 +319,17 @@ class PageState:
             "provider_page_ref": self.ref,
             "current_url": current,
             "title": safe_text(self.page.title() if not self.page.is_closed() else "", 256),
-            "status": "closed" if self.page.is_closed() else "ready" if current else "unknown",
+            "status": "closed" if self.page.is_closed() else "ready" if current and (not self.relation_rejection or self.origins) else "unknown",
             "origin": origin_of(current or "") if current else None,
             "active": active,
             "document_generation": self.generation,
             **({"opener_provider_page_ref": self.opener} if self.opener else {}),
-            "facts": [],
+            "facts": [
+                {"key": "page.relation", "source": "validation_evidence", "value": "unavailable"},
+                {"key": "page.initial_request", "source": "validation_evidence", "value": "not_dispatched"},
+                {"key": "page.blocked_reason", "source": "validation_evidence", "value": "page_relation_unavailable"},
+                {"key": "page.rejected_unattributed_count", "source": "validation_evidence", "value": str(self.relation_rejection_count)},
+            ] if self.relation_rejection else [],
         }
 
     def add_event(self, event: dict[str, Any]) -> None:
@@ -337,8 +382,15 @@ class Driver:
         return state
 
     def on_page(self, page: Page) -> None:
-        if any(item.page == page for item in self.pages.values()):
+        existing = next((item for item in self.pages.values() if item.page == page), None)
+        if existing is not None:
+            if existing.relation_pending:
+                self.resolve_page_opener(existing, page)
             return
+        state = self.register(page, [], None)
+        self.resolve_page_opener(state, page)
+
+    def resolve_page_opener(self, state: PageState, page: Page) -> None:
         opener_ref = None
         opener_origins: list[str] = []
         try:
@@ -351,10 +403,10 @@ class Driver:
                 opener_origins = list(opener_state.origins)
         except Exception:
             opener_ref = None
-        # The first popup request was already handled by route(). Registering
-        # this later Page event only records the real object; it never replays
-        # or continues the rejected navigation.
-        self.register(page, opener_origins, opener_ref)
+        if opener_ref is not None:
+            state.opener = opener_ref
+            state.origins.update(opener_origins)
+        state.relation_pending = False
 
     def route(self, route: Route) -> None:
         request = route.request
@@ -368,6 +420,31 @@ class Driver:
         # This check is deliberately before continue/fetch: an unowned popup
         # cannot acquire a Page by racing its first navigation request.
         if state is None:
+            state = self.register(page, [])
+            state.relation_pending = True
+            state.relation_rejection = True
+            state.relation_rejection_count += 1
+            request_url = getattr(request, "url", None)
+            request_url = request_url if isinstance(request_url, str) else ""
+            sanitized_url = safe_url(request_url)
+            request_event = {
+                "event_ref": f"event:{state.ref}:{time.time_ns()}",
+                "kind": "failure",
+                "observed_at": now(),
+                "page_ref": state.ref,
+                "document_generation": state.generation,
+                "method": str(getattr(request, "method", "GET")),
+                "resource_kind": getattr(request, "resource_type", "other") or "other",
+                "failure_class": "blocked",
+                "relation": "unavailable",
+                "dispatch_state": "not_dispatched",
+            }
+            if sanitized_url:
+                request_event["url"] = safe_text(sanitized_url, 2_048)
+            request_event_origin = origin_of(request_url)
+            if request_event_origin:
+                request_event["origin"] = request_event_origin
+            state.add_event(request_event)
             route.abort("blockedbyclient")
             return
         if request_origin is None or request_origin not in state.origins:
@@ -585,6 +662,23 @@ def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
 
 
+def viewer_entry(headless: bool) -> dict[str, Any]:
+    if headless:
+        return {
+            "availability": "unsupported",
+            "access_mode": "none",
+            "transport": "not_applicable",
+            "input_capabilities": [],
+            "unavailable_reason": "unsupported",
+        }
+    return {
+        "availability": "available",
+        "access_mode": "interactive",
+        "transport": "local_window",
+        "input_capabilities": ["keyboard_mouse"],
+    }
+
+
 def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     op = request.get("op")
     if op == "page_list": return driver.list_pages()
@@ -644,7 +738,7 @@ def main() -> None:
             if request.get("op") == "launch":
                 if driver is not None: raise ValueError("Driver is already launched.")
                 driver = Driver(request)
-                result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": driver.pages[driver.current].facts(True), "pages": driver.list_pages(), "viewer_entry": {"availability": "available", "access_mode": "native_window", "transport": "native", "input_capabilities": ["mouse", "keyboard"]}, "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
+                result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": driver.pages[driver.current].facts(True), "pages": driver.list_pages(), "viewer_entry": viewer_entry(bool(driver.request.get("headless", False))), "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
             elif driver is None:
                 raise ValueError("Driver has not launched.")
             else:

@@ -53,6 +53,47 @@ test("PageRegistry keeps stable page_id, rotates document page_ref, preserves po
   assert.equal((navigated as ManagedPageFacts).current_url, "https://s1.example/next");
 });
 
+test("PageRegistry exposes only a bounded aggregate for unattributed blocked requests", async () => {
+  const registry = new PageRegistry("session:test", controller([
+    page("provider:one", "https://s1.example/start", true),
+    {
+      ...page("provider:popup", "about:blank"),
+      status: "unknown",
+      current_url: null,
+      opener_provider_page_ref: "provider:one",
+      facts: [
+        { key: "page.relation", source: "validation_evidence", value: "unavailable" },
+        { key: "page.rejected_unattributed_count", source: "validation_evidence", value: "2" }
+      ]
+    }
+  ]));
+  await registry.refresh();
+  const result = registry.list(["https://s1.example"]);
+  assert.deepEqual(result.rejected_unattributed, {
+    count: 2,
+    failure_class: "page_relation_unavailable",
+    dispatch_state: "not_dispatched"
+  });
+  assert.equal(JSON.stringify(result).includes("provider:popup"), false);
+  assert.equal(JSON.stringify(result).includes("about:blank"), false);
+});
+
+test("PageRegistry does not leak unattributed rejection counts across unauthorized opener scope", async () => {
+  const registry = new PageRegistry("session:test", controller([
+    page("provider:one", "https://s1.example/start", true),
+    page("provider:other", "https://s2.example/start"),
+    {
+      ...page("provider:popup", "about:blank"),
+      status: "unknown",
+      current_url: null,
+      opener_provider_page_ref: "provider:other",
+      facts: [{ key: "page.rejected_unattributed_count", source: "validation_evidence", value: "1" }]
+    }
+  ]));
+  await registry.refresh();
+  assert.equal(registry.list(["https://s1.example"]).rejected_unattributed, undefined);
+});
+
 test("PageRegistry refuses closing the last active Page and returns to a safe Page when possible", async () => {
   const registry = new PageRegistry("session:test", controller([
     page("provider:one", "https://s1.example", true),

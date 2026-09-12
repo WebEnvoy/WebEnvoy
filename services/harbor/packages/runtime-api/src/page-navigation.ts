@@ -43,6 +43,12 @@ export interface ManagedPageList {
   active_page_id: string | null;
   pages: ManagedPageFacts[];
   filtered_page_count: number;
+  /** Bounded aggregate for blocked Page requests with no proven relation. */
+  rejected_unattributed?: {
+    count: number;
+    failure_class: "page_relation_unavailable";
+    dispatch_state: "not_dispatched";
+  };
   observed_at: string;
 }
 
@@ -184,6 +190,7 @@ export class PageRegistry {
     const allowed = new Set(authorizedOrigins);
     const pages = [...this.byId.values()].filter(record => !record.closed && record.present);
     const visible = pages.filter(record => this.visible(record, allowed));
+    const rejectedUnattributedCount = this.rejectedUnattributedCount(pages, allowed);
     return {
       status: "completed",
       schema_version: HARBOR_PAGE_LIST_SCHEMA,
@@ -191,6 +198,13 @@ export class PageRegistry {
       active_page_id: visible.some(record => record.page_id === this.activePageId) ? this.activePageId : null,
       pages: visible.map(record => this.public(record)),
       filtered_page_count: pages.length - visible.length,
+      ...(rejectedUnattributedCount > 0 ? {
+        rejected_unattributed: {
+          count: rejectedUnattributedCount,
+          failure_class: "page_relation_unavailable" as const,
+          dispatch_state: "not_dispatched" as const
+        }
+      } : {}),
       observed_at: new Date().toISOString()
     };
   }
@@ -363,6 +377,19 @@ export class PageRegistry {
 
   private livePageCount(): number {
     return [...this.byId.values()].filter(record => !record.closed && record.present).length;
+  }
+
+  private rejectedUnattributedCount(pages: PageRecord[], allowed: Set<string>): number {
+    return pages.reduce((total, record) => {
+      const opener = record.provider_state.opener_provider_page_ref
+        ? this.byProvider.get(record.provider_state.opener_provider_page_ref)
+        : undefined;
+      if (!opener || opener.closed || !opener.present || !this.visible(opener, allowed)) return total;
+      const count = record.provider_state.facts
+        .find(fact => fact.key === "page.rejected_unattributed_count" && fact.source === "validation_evidence")?.value;
+      const parsed = count === undefined ? 0 : Number(count);
+      return total + (Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, MAX_PAGE_EVENTS) : 0);
+    }, 0);
   }
 
   private resolve(input: Pick<ManagedPageOperationInput, "page_id" | "page_ref">): PageRecord | undefined {
