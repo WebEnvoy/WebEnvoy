@@ -444,12 +444,41 @@ class PageState:
         self.relation_rejection_count = 0
 
     def facts(self, task_selected: bool = False) -> dict[str, Any]:
-        current = safe_url(self.page.url)
+        # A user may close a Page between any two public Playwright reads.
+        # Treat a target-closed read as a trusted tombstone so one stale Page
+        # cannot make the whole Page list unavailable while other Pages live.
+        closed: bool | None = False
+        try:
+            closed = self.page.is_closed()
+        except PlaywrightError:
+            closed = None
+        try:
+            current = safe_url(self.page.url)
+        except PlaywrightError:
+            current = None
+            try:
+                closed = self.page.is_closed()
+            except PlaywrightError:
+                closed = None
+        title = ""
+        if closed is not True:
+            try:
+                title = safe_text(self.page.title(), 256)
+            except PlaywrightError:
+                try:
+                    closed = self.page.is_closed()
+                except PlaywrightError:
+                    closed = None
+            else:
+                try:
+                    closed = self.page.is_closed()
+                except PlaywrightError:
+                    closed = None
         return {
             "provider_page_ref": self.ref,
             "current_url": current,
-            "title": safe_text(self.page.title() if not self.page.is_closed() else "", 256),
-            "status": "closed" if self.page.is_closed() else "ready" if current and (not self.relation_rejection or self.origins) else "unknown",
+            "title": title,
+            "status": "closed" if closed is True else "ready" if closed is False and current and (not self.relation_rejection or self.origins) else "unknown",
             "origin": origin_of(current or "") if current else None,
             "document_generation": self.generation,
             **({"task_selected": True} if task_selected else {}),

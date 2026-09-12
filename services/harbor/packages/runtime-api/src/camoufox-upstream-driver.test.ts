@@ -182,6 +182,23 @@ try:
         def is_closed(self): return False
         def evaluate(self, expression):
             return {"language": "en-US", "languages": ["en-US"], "timezone": "Europe/Paris", "viewport": {"width": 800, "height": 600}, "screen": {"width": 800, "height": 600}, "hardware_concurrency": None, "device_memory": None, "webgl_vendor": None, "webgl_renderer": None, "fonts_hash": None, "voices_hash": None, "canvas_hash": None, "audio_hash": None}
+    class ClosingPage:
+        url = "https://example.test/closed"
+        def __init__(self): self.closed_checks = 0
+        def is_closed(self):
+            self.closed_checks += 1
+            return self.closed_checks > 1
+        def title(self): raise module.PlaywrightError("Target page closed")
+    closing_facts = module.PageState("page:closed", ClosingPage(), ["https://example.test"]).facts()
+    assert closing_facts["status"] == "closed"
+    assert closing_facts["title"] == ""
+    class TransientTitleErrorPage:
+        url = "https://example.test/transient"
+        def is_closed(self): return False
+        def title(self): raise module.PlaywrightError("Transient protocol error")
+    transient_facts = module.PageState("page:transient", TransientTitleErrorPage(), ["https://example.test"]).facts()
+    assert transient_facts["status"] == "ready"
+    assert transient_facts["title"] == ""
     environment_driver = object.__new__(module.Driver)
     environment_driver.pages = {"page:1": module.PageState("page:1", EnvironmentPage(), ["https://example.test"])}
     environment_driver.bundle = bundle
