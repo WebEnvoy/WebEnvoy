@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { watch } from "node:fs";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -18,6 +19,7 @@ test("managed file owner store validates immutable copies, types, and export bou
     const source = join(sourceDir, "source.png");
     await writeFile(source, png, { mode: 0o600 });
     const store = createManagedFileStore({ root });
+    assert.equal((await stat(root)).mode & 0o777, 0o700);
     const imported = await store.importFile({ source_path: source, profile_ref: "profile:one" });
     assert.equal(imported.source, "owner_import");
     assert.equal(imported.mime_type, "image/png");
@@ -38,6 +40,17 @@ test("managed file owner store validates immutable copies, types, and export bou
     await symlink(destinationTarget, destinationLink);
     await rejectsCode(store.exportFile({ file_ref: imported.file_ref, destination_path: destinationLink }), "file_destination_exists");
     assert.equal(await readFile(destinationTarget, "utf8"), "do not overwrite");
+    await chmod(sourceDir, 0o755);
+    const parentModeBefore = (await stat(sourceDir)).mode & 0o777;
+    await store.exportFile({ file_ref: imported.file_ref, destination_path: join(sourceDir, "mode-preserved.png") });
+    assert.equal((await stat(sourceDir)).mode & 0o777, parentModeBefore);
+    await rejectsCode(store.exportFile({ file_ref: imported.file_ref, destination_path: join(root, "private-store-escape.png") }), "file_destination_invalid");
+    const destinationParentTarget = await mkdtemp(join(tmpdir(), "webenvoy-managed-export-parent-"));
+    const destinationParentLink = join(sourceDir, "linked-parent");
+    await symlink(destinationParentTarget, destinationParentLink);
+    await rejectsCode(store.exportFile({ file_ref: imported.file_ref, destination_path: join(destinationParentLink, "escape.png") }), "file_destination_invalid");
+    assert.equal((await readdir(destinationParentTarget)).length, 0);
+    await rm(destinationParentTarget, { recursive: true, force: true });
 
     const mismatched = join(sourceDir, "mismatch.png");
     await writeFile(mismatched, csv);
@@ -98,6 +111,7 @@ test("managed file store enforces quotas, revocation, expiry, and tamper evidenc
     await rejectsCode(store.exportFile({ file_ref: refs[1]!, destination_path: join(sourceDir, "tampered.txt") }), "file_integrity_mismatch");
 
     current = new Date(current.getTime() + MANAGED_FILE_RETENTION_MS + 1);
+    await rejectsCode(store.exportFile({ file_ref: refs[1]!, destination_path: join(sourceDir, "expired-before-inspect.txt") }), "file_expired");
     const expired = (await store.inspect()).find(item => item.file_ref === refs[1]);
     assert.equal(expired?.status, "expired");
     const revokedAfterExpiry = (await store.inspect()).find(item => item.file_ref === revokedExpiry.file_ref);
@@ -105,6 +119,38 @@ test("managed file store enforces quotas, revocation, expiry, and tamper evidenc
     await rejectsCode(store.exportFile({ file_ref: refs[1]!, destination_path: join(sourceDir, "expired.txt") }), "file_expired");
     const contentNames = await readdir(join(root, "content"));
     assert.equal(contentNames.some(name => name === tampered.storage_name), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(sourceDir, { recursive: true, force: true });
+  }
+});
+
+test("serializes expiry cleanup with concurrent import and preserves both index changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "webenvoy-managed-files-concurrent-"));
+  const sourceDir = await mkdtemp(join(tmpdir(), "webenvoy-managed-file-concurrent-source-"));
+  let current = new Date("2026-09-13T00:00:00.000Z");
+  try {
+    const source = join(sourceDir, "item.txt");
+    await writeFile(source, "bounded", { mode: 0o600 });
+    const first = createManagedFileStore({ root, clock: () => current });
+    const second = createManagedFileStore({ root, clock: () => current });
+    const expired = await first.importFile({ source_path: source, profile_ref: "profile:one", display_name: "expired.txt" });
+    current = new Date(current.getTime() + MANAGED_FILE_RETENTION_MS + 1);
+    let releaseRemoval!: () => void;
+    const removal = new Promise<void>(resolveRemoval => { releaseRemoval = resolveRemoval; });
+    const watcher = watch(join(root, "content"), { persistent: false }, () => {
+      watcher.close();
+      releaseRemoval();
+    });
+    const inspectionPromise = first.inspect();
+    await removal;
+    const importPromise = second.importFile({ source_path: source, profile_ref: "profile:one", display_name: "concurrent.txt" });
+    const [, imported] = await Promise.all([inspectionPromise, importPromise]);
+    const records = await first.inspect();
+    assert.equal(records.find(item => item.file_ref === expired.file_ref)?.status, "expired");
+    assert.equal(records.find(item => item.file_ref === imported.file_ref)?.status, "available");
+    const persisted = JSON.parse(await readFile(join(root, "index.json"), "utf8")) as { materials: Array<{ file_ref: string; status: string }> };
+    assert.deepEqual(persisted.materials.map(item => [item.file_ref, item.status]), [[expired.file_ref, "expired"], [imported.file_ref, "available"]]);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(sourceDir, { recursive: true, force: true });

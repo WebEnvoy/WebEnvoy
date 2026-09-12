@@ -11,7 +11,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { constants } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FileHandle } from "node:fs/promises";
 import { acquireFileOwnership } from "./profile-storage.js";
 
@@ -104,6 +104,7 @@ const ALLOWED_EXTENSIONS: Record<ManagedFileMimeType, readonly string[]> = {
   "text/plain": [".txt"],
   "text/csv": [".csv"]
 };
+const managedFileTransactionTails = new Map<string, Promise<void>>();
 
 function fail(code: string): never { throw new ManagedFileError(code); }
 function boundedRef(value: unknown): string {
@@ -165,6 +166,25 @@ async function ensureDirectory(path: string): Promise<void> {
   const entry = await lstat(path);
   if (!entry.isDirectory() || entry.isSymbolicLink()) fail("file_store_invalid");
   await chmod(path, 0o700);
+}
+
+function isWithin(path: string, parent: string): boolean {
+  const child = relative(parent, path);
+  return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+async function ensureExportParent(path: string): Promise<void> {
+  // Export destinations are owner-selected, so never create or chmod their
+  // parent. Only the selected parent is checked here; the final O_NOFOLLOW
+  // open closes the destination symlink race without rejecting legitimate
+  // platform paths such as macOS /var -> /private/var.
+  try {
+    const entry = await lstat(resolve(path));
+    if (!entry.isDirectory() || entry.isSymbolicLink()) return fail("file_destination_invalid");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return fail("file_destination_invalid");
+    throw error;
+  }
 }
 
 async function readRealFile(path: string, missingCode: string): Promise<{ fd: FileHandle; size: number }> {
@@ -262,27 +282,39 @@ export function createManagedFileStore(options: { persistence_path?: string; roo
   }
   async function transaction<T>(action: (state: FileState) => Promise<T> | T): Promise<T> {
     await ensureDirectory(root);
-    const lock = acquireFileOwnership(`${indexPath}.lock`, options.lock_timeout_ms ?? 5000);
+    const previous = managedFileTransactionTails.get(indexPath) ?? Promise.resolve();
+    let releaseQueue!: () => void;
+    const current = new Promise<void>(resolveQueue => { releaseQueue = resolveQueue; });
+    const queued = previous.then(() => current);
+    managedFileTransactionTails.set(indexPath, queued);
     try {
-      const state = await read();
-      await cleanupExpiredState(state, false);
-      const result = await action(state);
-      await save(state);
-      return result;
-    } finally { lock.release(); }
+      await previous;
+      const lock = acquireFileOwnership(`${indexPath}.lock`, options.lock_timeout_ms ?? 5000);
+      try {
+        const state = await read();
+        await cleanupExpiredState(state);
+        try {
+          return await action(state);
+        } finally {
+          // Expiry cleanup and the action share one lock and one write. This
+          // also persists cleanup when the action reports a typed failure.
+          await save(state);
+        }
+      } finally { lock.release(); }
+    } finally {
+      releaseQueue();
+      if (managedFileTransactionTails.get(indexPath) === queued) managedFileTransactionTails.delete(indexPath);
+    }
   }
-  async function cleanupExpiredState(state: FileState, persist: boolean): Promise<void> {
+  async function cleanupExpiredState(state: FileState): Promise<void> {
     const current = Date.parse(now());
-    let changed = false;
     for (const record of state.materials) {
       if ((record.status === "available" || record.status === "revoked") && Date.parse(record.expires_at) <= current) {
         record.status = "expired";
         if (record.storage_name) await rm(join(content, record.storage_name), { force: true }).catch(() => undefined);
         record.storage_name = null;
-        changed = true;
       }
     }
-    if (persist && changed) await save(state);
   }
   function activeMaterials(state: FileState): StoredManagedFileRecord[] {
     // Revoked material remains retained and owner-exportable until delete or
@@ -368,35 +400,38 @@ export function createManagedFileStore(options: { persistence_path?: string; roo
       } finally { await opened.fd.close(); }
     },
     async inspect(fileRef?: string): Promise<ManagedFileRecord[]> {
-      await ensureDirectory(root);
-      const state = await read();
-      await cleanupExpiredState(state, true);
-      const records = fileRef === undefined ? state.materials : [state.materials.find(item => item.file_ref === fileRef)].filter((item): item is StoredManagedFileRecord => item !== undefined);
-      if (fileRef !== undefined && !records.length) return fail("file_ref_unavailable");
-      return records.map(publicRecord);
+      return transaction(state => {
+        const records = fileRef === undefined ? state.materials : [state.materials.find(item => item.file_ref === fileRef)].filter((item): item is StoredManagedFileRecord => item !== undefined);
+        if (fileRef !== undefined && !records.length) return fail("file_ref_unavailable");
+        return records.map(publicRecord);
+      });
     },
     async exportFile(input: ManagedFileExportInput): Promise<ManagedFileRecord> {
       const ref = fileRef(input.file_ref);
       if (typeof input.destination_path !== "string" || !input.destination_path || input.destination_path.includes("\0")) return fail("file_destination_invalid");
-      const state = await read();
-      const record = state.materials.find(item => item.file_ref === ref);
-      if (!record || record.status === "deleted") return fail("file_ref_unavailable");
-      if (record.status === "expired") return fail("file_expired");
-      const data = await readManagedBytes(record);
       const destination = resolve(input.destination_path);
-      await ensureDirectory(dirname(destination));
+      if (isWithin(destination, root)) return fail("file_destination_invalid");
+      await ensureExportParent(dirname(destination));
       try { await lstat(destination); return fail("file_destination_exists"); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      const fd = await open(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
-      try {
-        let offset = 0;
-        while (offset < data.length) {
-          const result = await fd.write(data, offset, data.length - offset, null);
-          if (!result.bytesWritten) return fail("file_export_failed");
-          offset += result.bytesWritten;
-        }
-      } finally { await fd.close(); }
-      return publicRecord(record);
+      return transaction(async state => {
+        const record = state.materials.find(item => item.file_ref === ref);
+        if (!record || record.status === "deleted") return fail("file_ref_unavailable");
+        if (record.status === "expired") return fail("file_expired");
+        const data = await readManagedBytes(record);
+        try { await lstat(destination); return fail("file_destination_exists"); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        const fd = await open(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+        try {
+          let offset = 0;
+          while (offset < data.length) {
+            const result = await fd.write(data, offset, data.length - offset, null);
+            if (!result.bytesWritten) return fail("file_export_failed");
+            offset += result.bytesWritten;
+          }
+        } finally { await fd.close(); }
+        return publicRecord(record);
+      });
     },
     async revoke(fileRefInput: string): Promise<ManagedFileRecord> {
       const ref = fileRef(fileRefInput);
@@ -469,14 +504,13 @@ export function createManagedFileStore(options: { persistence_path?: string; roo
       });
     },
     async close(): Promise<void> {
-      await ensureDirectory(root);
-      const state = await read();
-      const entries = await import("node:fs/promises").then(fs => fs.readdir(staging)).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [] as string[];
-        throw error;
+      await transaction(async () => {
+        const entries = await import("node:fs/promises").then(fs => fs.readdir(staging)).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return [] as string[];
+          throw error;
+        });
+        for (const entry of entries) await rm(join(staging, entry), { force: true }).catch(() => undefined);
       });
-      for (const entry of entries) await rm(join(staging, entry), { force: true }).catch(() => undefined);
-      await cleanupExpiredState(state, true);
     }
   };
 }

@@ -14,7 +14,9 @@ import importlib.metadata
 import json
 import os
 import re
+import signal
 import sys
+import threading
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -47,9 +49,20 @@ MAX_REDIRECT_HOPS = 10
 REDIRECT_STATUSES = frozenset({300, 301, 302, 303, 307, 308})
 MAX_WAIT_MS = 10_000
 WAIT_POLL_MS = 50
+MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
+MAX_DOWNLOAD_TIMEOUT_MS = 120_000
+DOWNLOAD_MONITOR_INTERVAL_S = 0.05
 CAMOU_CONFIG_CHUNK = re.compile(r"^CAMOU_CONFIG_(\d+)$")
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
+
+
+class DownloadTimeout(Exception):
+    pass
+
+
+class DownloadLimitExceeded(Exception):
+    pass
 
 
 def safe_origin(value: str) -> str | None:
@@ -449,8 +462,14 @@ class PageState:
         self.origins = set(origins)
         self.opener = opener
         self.generation = 1
-        self.controls: dict[str, tuple[str, str, str | None, int | None]] = {}
+        # The optional fifth tuple member is the exact ElementHandle captured
+        # by snapshot.  Four-member tuples remain accepted for old generic
+        # interaction fixtures, but file operations fail closed without the
+        # identity-bound handle.
+        self.controls: dict[str, tuple[Any, ...]] = {}
+        self.snapshot_serial = 0
         self.events: list[dict[str, Any]] = []
+        self.request_chains: list[tuple[Any, tuple[str, ...]]] = []
         self.last_url = page.url
         self.relation_pending = False
         self.relation_rejection = False
@@ -507,6 +526,29 @@ class PageState:
     def add_event(self, event: dict[str, Any]) -> None:
         self.events.append(event)
         del self.events[:-MAX_EVENTS]
+
+    def add_request_chain(self, request: Any, urls: list[str]) -> None:
+        self.request_chains.append((request, tuple(urls)))
+        del self.request_chains[:-MAX_EVENTS]
+
+    def request_chain(self, request: Any) -> tuple[str, ...] | None:
+        for candidate, urls in reversed(self.request_chains):
+            if candidate is request:
+                return urls
+        return None
+
+    def clear_controls(self) -> None:
+        for control in self.controls.values():
+            handle = control[4] if len(control) > 4 else None
+            if handle is None:
+                continue
+            try:
+                dispose = getattr(handle, "dispose", None)
+                if callable(dispose):
+                    dispose()
+            except Exception:
+                pass
+        self.controls.clear()
 
 
 class Driver:
@@ -659,6 +701,7 @@ class Driver:
                 post_data = None
         response = None
         try:
+            route_chain = [safe_url(str(request.url))]
             # Playwright routing only invokes this handler for the first URL
             # in a redirect chain. Fetch one hop at a time so Location is
             # checked before the next network request is issued.
@@ -667,6 +710,8 @@ class Driver:
                 status = int(response.status)
                 location = next((value for key, value in response.headers.items() if str(key).lower() == "location"), None)
                 if status not in REDIRECT_STATUSES or not location:
+                    if route_chain[0] is not None:
+                        state.add_request_chain(request, [url for url in route_chain if url is not None])
                     route.fulfill(response=response)
                     response = None
                     return
@@ -676,6 +721,7 @@ class Driver:
                     response = None
                     route.abort("blockedbyclient")
                     return
+                route_chain.append(target)
                 next_method = redirect_method(status, method)
                 next_post_data = post_data if next_method not in ("GET", "HEAD") else ""
                 response.dispose()
@@ -723,7 +769,7 @@ class Driver:
         if frame != state.page.main_frame:
             return
         state.generation += 1
-        state.controls.clear()
+        state.clear_controls()
         state.last_url = state.page.url
 
     def list_pages(self) -> list[dict[str, Any]]:
@@ -823,6 +869,11 @@ class Driver:
             state.page.wait_for_timeout(min(WAIT_POLL_MS, max(1, int(remaining * 1000))))
 
     def snapshot(self, state: PageState) -> dict[str, Any]:
+        selector = 'button,a,input,textarea,select,[role]'
+        try:
+            element_handles = state.page.query_selector_all(selector)
+        except Exception:
+            element_handles = []
         raw = state.page.evaluate("""() => {
           const visible = e => { const r=e.getBoundingClientRect(), s=getComputedStyle(e); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
           const implicitRole = e => {
@@ -836,28 +887,64 @@ class Driver:
             if (e.tagName === 'SELECT') return 'combobox';
             return null;
           };
-          const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].filter(visible).map(e => ({ e, role: implicitRole(e) })).filter(item => item.role).slice(0,128);
+          const nodes = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map((e,dom_index) => ({ e, dom_index, role: implicitRole(e) })).filter(item => visible(item.e) && item.role).slice(0,128);
           const fileInputs = [...document.querySelectorAll('input[type="file"]')];
-          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), href: item.e.tagName === 'A' ? item.e.getAttribute('href') : null, file_index: item.role === 'file' ? fileInputs.indexOf(item.e) : null, enabled: !item.e.disabled })) };
+          return { text: (document.body?.innerText || '').slice(0,65536), controls: nodes.map((item,i) => ({ i, dom_index: item.dom_index, role: item.role, name: (item.e.getAttribute('aria-label') || item.e.innerText || item.e.value || '').trim().slice(0,256), href: item.e.tagName === 'A' ? item.e.getAttribute('href') : null, file_index: item.role === 'file' ? fileInputs.indexOf(item.e) : null, enabled: !item.e.disabled })) };
         }""")
         controls = []
-        state.controls.clear()
+        state.snapshot_serial += 1
+        state.clear_controls()
+        retained_indices: set[int] = set()
         for item in (raw.get("controls", []) if isinstance(raw, dict) else []):
-            if not isinstance(item, dict) or not isinstance(item.get("i"), int) or not isinstance(item.get("role"), str) or not isinstance(item.get("name"), str):
+            if not isinstance(item, dict) or not isinstance(item.get("i"), int) or not isinstance(item.get("dom_index"), int) or not isinstance(item.get("role"), str) or not isinstance(item.get("name"), str):
                 continue
-            ref = f"control:{item['i']}"
+            dom_index = item["dom_index"]
+            element = element_handles[dom_index] if 0 <= dom_index < len(element_handles) else None
+            if element is None:
+                continue
+            ref = f"control:{state.generation}:{state.snapshot_serial}:{item['i']}"
             href = item.get("href") if isinstance(item.get("href"), str) else None
             file_index = item.get("file_index") if isinstance(item.get("file_index"), int) and item.get("file_index") >= 0 else None
-            state.controls[ref] = (item["role"], item["name"], href, file_index)
+            state.controls[ref] = (item["role"], item["name"], href, file_index, element)
+            retained_indices.add(dom_index)
             controls.append({"target_ref": ref, "role": safe_text(item["role"], 64), "name": safe_text(item["name"], 256), "enabled": item.get("enabled") is True})
+        for index, element in enumerate(element_handles):
+            if index in retained_indices:
+                continue
+            try:
+                dispose = getattr(element, "dispose", None)
+                if callable(dispose):
+                    dispose()
+            except Exception:
+                pass
         text = safe_text(raw.get("text", "") if isinstance(raw, dict) else "")
-        return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
+        return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
+
+    def control_handle(self, state: PageState, target: str, role: str | None = None):
+        control = state.controls.get(target)
+        if control is None or len(control) < 5 or (role is not None and control[0] != role):
+            return None
+        handle = control[4]
+        if handle is None:
+            return None
+        try:
+            if handle.evaluate("e => Boolean(e.isConnected)") is not True:
+                return None
+        except Exception:
+            return None
+        return handle
 
     def locator(self, state: PageState, request: dict[str, Any]):
         ref = request.get("target_ref")
         if not isinstance(ref, str) or ref not in state.controls:
             raise ValueError("Target ref is not from the current Page observation.")
-        role, name, *_metadata = state.controls[ref]
+        control = state.controls[ref]
+        role, name = control[0], control[1]
+        if len(control) >= 5:
+            handle = self.control_handle(state, ref)
+            if handle is None:
+                raise ValueError("Target element is no longer attached to the current Page.")
+            return handle
         return state.page.get_by_role(role, name=name, exact=True)
 
     def observe(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -901,6 +988,138 @@ class Driver:
         data = path.read_bytes()
         return {"status": "completed", "screenshot_ref": "screenshot:" + hashlib.sha256(data).hexdigest(), "mime_type": "image/png", "byte_length": len(data), "sha256": hashlib.sha256(data).hexdigest(), "captured_at": now()}
 
+    def bounded_download_call(self, staging: str, deadline: float, action: Any, monitor_paths: list[str] | None = None) -> Any:
+        """Run one Download operation under the single transport deadline.
+
+        Playwright's synchronous Download.save_as has no byte or deadline
+        argument.  A process-local SIGALRM monitor is the only public-API
+        compatible way to interrupt a blocking call while observing the
+        Harbor staging file.  The Runtime driver runs on the main thread; a
+        different execution context fails closed instead of losing the cap.
+        """
+        if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
+            raise DownloadTimeout()
+        if time.monotonic() >= deadline:
+            raise DownloadTimeout()
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+        def monitor(_signum: int, _frame: Any) -> None:
+            for candidate in [staging, *(monitor_paths or [])]:
+                try:
+                    if Path(candidate).stat().st_size > MAX_DOWNLOAD_BYTES:
+                        raise DownloadLimitExceeded()
+                except FileNotFoundError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise DownloadTimeout()
+
+        signal.signal(signal.SIGALRM, monitor)
+        try:
+            remaining = max(0.001, deadline - time.monotonic())
+            signal.setitimer(signal.ITIMER_REAL, min(DOWNLOAD_MONITOR_INTERVAL_S, remaining), DOWNLOAD_MONITOR_INTERVAL_S)
+            return action()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+    @staticmethod
+    def remove_listener(page: Any, event: str, listener: Any) -> None:
+        try:
+            remove = getattr(page, "remove_listener", None)
+            if callable(remove):
+                remove(event, listener)
+        except Exception:
+            pass
+
+    @staticmethod
+    def cleanup_download(download: Any) -> None:
+        for name in ("cancel", "delete"):
+            try:
+                operation = getattr(download, name, None)
+                if callable(operation):
+                    operation()
+            except Exception:
+                pass
+
+    @staticmethod
+    def request_page(request: Any) -> Any:
+        try:
+            frame = getattr(request, "frame")
+            if callable(frame):
+                frame = frame()
+            page = getattr(frame, "page")
+            if callable(page):
+                page = page()
+            return page
+        except Exception:
+            return None
+
+    @staticmethod
+    def request_url(request: Any) -> str | None:
+        try:
+            value = getattr(request, "url")
+            if callable(value):
+                value = value()
+            return safe_url(value) if isinstance(value, str) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def request_redirected_from(request: Any) -> Any:
+        try:
+            previous = getattr(request, "redirected_from", None)
+            if callable(previous):
+                previous = previous()
+            return previous
+        except Exception:
+            return None
+
+    def request_chain(self, request: Any) -> list[Any]:
+        chain: list[Any] = []
+        seen: set[int] = set()
+        current = request
+        while current is not None:
+            identity = id(current)
+            if identity in seen:
+                return []
+            seen.add(identity)
+            chain.append(current)
+            current = self.request_redirected_from(current)
+        chain.reverse()
+        return chain
+
+    def matching_download_chain(self, state: PageState, requests: list[Any], observed_href: str, download_url: str, scope: set[str], download: Any) -> bool:
+        observed_ids = {id(item) for item in requests}
+        matches: list[tuple[tuple[str, ...], Any]] = []
+        for candidate in requests:
+            chain = self.request_chain(candidate)
+            if not chain or chain[-1] is not candidate or any(id(item) not in observed_ids for item in chain):
+                continue
+            object_urls = [self.request_url(item) for item in chain]
+            if any(url is None for url in object_urls):
+                continue
+            route_urls = state.request_chain(candidate)
+            urls = list(route_urls) if route_urls is not None else [url for url in object_urls if url is not None]
+            if not urls or urls[0] != observed_href or urls[-1] != download_url:
+                continue
+            if len(urls) > MAX_REDIRECT_HOPS + 1 or any(origin_of(url) not in scope for url in urls):
+                continue
+            if any(self.request_page(item) is not state.page for item in chain):
+                continue
+            matches.append((tuple(urls), candidate))
+        return len(matches) == 1 and self.request_page(matches[0][1]) is state.page and self._download_page(download) is state.page
+
+    @staticmethod
+    def _download_page(download: Any) -> Any:
+        try:
+            page = getattr(download, "page")
+            if callable(page):
+                page = page()
+            return page
+        except Exception:
+            return None
+
     def file_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         """Deliver one owner-resolved file through a standard Page control.
 
@@ -910,34 +1129,38 @@ class Driver:
         """
         state = self.state(request)
         expected = request.get("expected_origin")
-        scope = validated_origins(request.get("authorized_origins"))
-        if not isinstance(expected, str) or expected not in scope or expected not in state.origins or origin_of(state.page.url) != expected:
+        try:
+            # File operations have their own exact origin intersection. Apply
+            # it before any validation or dispatch so a narrower request can
+            # never inherit a prior broad route guard scope.
+            scope = self.apply_page_scope(state, request.get("authorized_origins"))
+        except ValueError:
+            scope = set()
+        if not isinstance(expected, str) or expected not in scope or origin_of(state.page.url) != expected:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": request.get("operation"), "failure_class": "wrong_page", "page": state.facts()}
         operation = request.get("operation")
         target = request.get("target_ref")
         if operation not in ("upload", "download") or not isinstance(target, str) or not REF.fullmatch(target):
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": operation, "failure_class": "file_operation_invalid", "page": state.facts()}
-        timeout = int(request.get("timeout_ms", self.request.get("timeout_ms", 60_000)))
+        try:
+            timeout = min(max(int(request.get("timeout_ms", self.request.get("timeout_ms", 60_000))), 1), MAX_DOWNLOAD_TIMEOUT_MS)
+        except (TypeError, ValueError, OverflowError):
+            timeout = 60_000
         if operation == "upload":
             source = request.get("source_path")
             if not isinstance(source, str) or not source or "\x00" in source:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": state.facts()}
-            if target not in state.controls or state.controls[target][0] != "file":
+            if target not in state.controls or state.controls[target][0] != "file" or self.control_handle(state, target, "file") is None:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
             try:
-                _role, _name, *metadata = state.controls[target]
-                file_index = metadata[1] if len(metadata) > 1 else None
-                if not isinstance(file_index, int) or file_index < 0:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
                 source_path = Path(source)
                 with source_path.open("rb", buffering=0) as handle:
                     source_size = os.fstat(handle.fileno()).st_size
-                if source_size < 1 or source_size > 10 * 1024 * 1024:
+                if source_size < 1 or source_size > MAX_DOWNLOAD_BYTES:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_limit_exceeded", "page": state.facts()}
-                file_inputs = state.page.locator('input[type="file"]')
-                if file_index >= file_inputs.count():
+                inputs = self.control_handle(state, target, "file")
+                if inputs is None:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
-                inputs = file_inputs.nth(file_index)
                 if not inputs.is_visible(timeout=timeout):
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
                 existing = inputs.evaluate("e => e.files ? e.files.length : 0")
@@ -954,55 +1177,105 @@ class Driver:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
         role, _name, *metadata = state.controls[target]
         observed_href = metadata[0] if metadata else None
-        if role != "link":
+        if role != "link" or self.control_handle(state, target, "link") is None:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
         staging = request.get("staging_path")
         if not isinstance(staging, str) or not staging or "\x00" in staging:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_staging_unavailable", "page": state.facts()}
+        deadline = time.monotonic() + timeout / 1000
+        download: Any = None
+        request_events: list[Any] = []
+        download_events: list[Any] = []
+        successful = False
+
+        def on_request(item: Any) -> None:
+            request_events.append(item)
+
+        def on_download(item: Any) -> None:
+            download_events.append(item)
+
+        def failure_result(failure_class: str) -> dict[str, Any]:
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": failure_class, "page": state.facts()}
+
         try:
-            link = self.locator(state, request)
+            link = self.control_handle(state, target, "link")
+            if link is None:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
             href = link.get_attribute("href")
             resolved = safe_url(urljoin(state.page.url, href or "")) if isinstance(href, str) else None
             observed_resolved = safe_url(urljoin(state.page.url, observed_href or "")) if observed_href else None
             if not resolved or not observed_resolved or resolved != observed_resolved or origin_of(resolved) != expected:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
-            with state.page.expect_download(timeout=timeout) as download_info:
-                link.click(timeout=timeout)
-            download = download_info.value
+            state.page.on("request", on_request)
+            state.page.on("download", on_download)
             try:
-                download_page = download.page
-                if callable(download_page):
-                    download_page = download_page()
-            except Exception:
-                download_page = None
-            if download_page is not state.page:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_relation_unavailable", "page": state.facts()}
+                remaining = max(1, min(timeout, int(max(0.001, deadline - time.monotonic()) * 1000)))
+                with state.page.expect_download(timeout=remaining) as download_info:
+                    link.click(timeout=remaining)
+            finally:
+                self.remove_listener(state.page, "request", on_request)
+                self.remove_listener(state.page, "download", on_download)
+            download = download_info.value
+            # Exactly one observed Download event must be the value returned by
+            # expect_download. Never claim the first same-page event.
+            if len(download_events) != 1 or download_events[0] is not download:
+                return failure_result("download_relation_unavailable")
             download_url = safe_url(download.url)
-            if not download_url or origin_of(download_url) not in scope:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_relation_unavailable", "page": state.facts()}
-            failure = download.failure()
+            if not download_url or origin_of(download_url) not in scope or not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download):
+                return failure_result("download_relation_unavailable")
+            # save_as is explicitly safe while a download is in progress. Run
+            # it first so the staging monitor can cancel an oversized stream;
+            # failure()/path() both wait for completion in Playwright 1.60.
+            self.bounded_download_call(staging, deadline, lambda: download.save_as(staging))
+            browser_temp_path: str | None = None
+            path_reader = getattr(download, "path", None)
+            if callable(path_reader):
+                candidate_path = self.bounded_download_call(staging, deadline, path_reader)
+                if isinstance(candidate_path, (str, os.PathLike)) and candidate_path:
+                    browser_temp_path = os.fspath(candidate_path)
+                    if Path(browser_temp_path).stat().st_size > MAX_DOWNLOAD_BYTES:
+                        return failure_result("file_limit_exceeded")
+            failure = self.bounded_download_call(staging, deadline, download.failure, [browser_temp_path] if browser_temp_path else None)
             if failure:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": safe_text(failure, 128), "page": state.facts()}
-            download.save_as(staging)
+                return failure_result(safe_text(failure, 128))
             staged = Path(staging)
             size = staged.stat().st_size
-            if size > 10 * 1024 * 1024:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "file_limit_exceeded", "page": state.facts()}
+            if time.monotonic() >= deadline:
+                return failure_result("timeout")
+            if size > MAX_DOWNLOAD_BYTES:
+                return failure_result("file_limit_exceeded")
             digest = hashlib.sha256()
             with staged.open("rb", buffering=0) as handle:
                 while True:
+                    if time.monotonic() >= deadline:
+                        raise DownloadTimeout()
                     chunk = handle.read(1024 * 1024)
                     if not chunk:
                         break
                     digest.update(chunk)
             suggested = safe_text(download.suggested_filename, 128)
             if not suggested or "/" in suggested or "\\" in suggested:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "download_name_invalid", "page": state.facts()}
+                return failure_result("download_name_invalid")
+            successful = True
             return {"status": "completed", "dispatch_state": "dispatched", "operation": "download", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "observed", "page_processing": "unknown", "business_commit": "not_observed", "download": {"page_url": safe_url(state.page.url), "url": download_url, "suggested_filename": suggested, "byte_length": size, "sha256": digest.hexdigest(), "staging_path": staging}}
+        except DownloadLimitExceeded:
+            return failure_result("file_limit_exceeded")
+        except DownloadTimeout:
+            return failure_result("timeout")
         except TimeoutError:
-            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": "timeout", "page": state.facts()}
+            return failure_result("timeout")
         except Exception as error:
-            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": safe_text(error, 128), "page": state.facts()}
+            return failure_result(safe_text(error, 128))
+        finally:
+            if not successful:
+                for candidate in download_events:
+                    self.cleanup_download(candidate)
+                if download is not None and all(candidate is not download for candidate in download_events):
+                    self.cleanup_download(download)
+                try:
+                    Path(staging).unlink()
+                except FileNotFoundError:
+                    pass
 
     def state(self, request: dict[str, Any]) -> PageState:
         ref = request.get("provider_page_ref")
