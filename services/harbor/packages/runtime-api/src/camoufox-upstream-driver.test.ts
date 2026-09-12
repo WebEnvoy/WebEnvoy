@@ -355,7 +355,7 @@ class Handle:
         if expression == "e => Boolean(e.isConnected)": return self.connected
         if expression == "e => e.files ? e.files.length : 0": return 0
         raise AssertionError(expression)
-    def is_visible(self, timeout=None): return self.connected
+    def is_visible(self): return self.connected
     def evaluate_files(self): return 0
     def set_input_files(self, path, timeout=None): self.calls.append((path, timeout))
     def dispose(self): self.connected = False
@@ -518,8 +518,8 @@ class FakeBody:
 
 class FakeTarget:
     def __init__(self, page): self.page = page
-    def is_visible(self, timeout=None): return True
-    def is_enabled(self, timeout=None): return self.page.enabled
+    def is_visible(self): return True
+    def is_enabled(self): return self.page.enabled
 
 class FakePage:
     url = "https://example.test/"

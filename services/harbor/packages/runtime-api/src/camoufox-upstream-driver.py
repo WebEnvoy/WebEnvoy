@@ -859,7 +859,10 @@ class Driver:
             elif wait_for == "enabled":
                 remaining_ms = max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))
                 try:
-                    if target.is_visible(timeout=remaining_ms) and target.is_enabled(timeout=remaining_ms):
+                    # Playwright 1.60 ElementHandle visibility methods have no
+                    # timeout keyword. The surrounding bounded polling loop
+                    # supplies the deadline without relying on a private API.
+                    if target.is_visible() and target.is_enabled():
                         return True
                 except TimeoutError:
                     pass
@@ -1161,7 +1164,9 @@ class Driver:
                 inputs = self.control_handle(state, target, "file")
                 if inputs is None:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
-                if not inputs.is_visible(timeout=timeout):
+                # ElementHandle.is_visible() is a zero-argument public API in
+                # the pinned Playwright 1.60 provider.
+                if not inputs.is_visible():
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
                 existing = inputs.evaluate("e => e.files ? e.files.length : 0")
                 if existing:
