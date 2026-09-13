@@ -1,14 +1,14 @@
 # Runtime Capability Plane 架构
 
 > 状态：现行 V1 架构基线
-> 日期：2026-09-09
-> 决策依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
+> 日期：2026-09-14
+> 决策依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 > 规范依据：[Browser Runtime 能力规格](../specs/browser-runtime-capabilities-v1.md)、[Profile 环境规格](../specs/profile-environment-v1.md)
 > 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 
 本文定义 WebEnvoy Browser Runtime capability plane 的模块关系、所有权、调用路径和不可跨越边界。它不冻结最终 HTTP／MCP 字段、JSON Schema 或 Provider 私有实现。
 
-> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（[证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），完整 installed、人工交还和环境连续性尚未验收。当前 Harbor 将 Camoufox 私有 launch binding 标为 `unsupported`／已退役，不启动或 fallback。#499、#504、#510 的 patched/native artifact、Driver 与 live 记录仅作历史证据；保留的 Profile／binding／bundle 只可由 recovery validator 做安全校验，不能恢复 launchability。该状态不改变本架构的公共 capability、Plugin、授权或 recovery 边界。
+> **2026-09-14 当前 Provider 事实**：[#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成其声明范围的供应方原版 Camoufox／Playwright 任务页协作与私有补丁退役；固定组合按 `limited` 使用，popup 首请求若不能在派发前建立可信 Page 归属，则局部返回 `page_relation_unavailable`，不猜测或重放。#523／PR #524 的受管文件 Plugin slice 单独记录其安装与真实消费者证据；这些局部事实不扩写为完整 Runtime 或 Plugin checkpoint。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史／恢复事实，不能恢复旧 launchability。
 
 ## 1. 架构目标
 
@@ -157,6 +157,8 @@ Harbor 应能发布可版本化的 capability facts。具体 wire schema 后续�
 
 Catalog 表达“能力可以怎样被实现”，不表达“当前 Agent 已获权”。
 
+V1 的十二类最低结果与规范来源由 [Browser Runtime 能力规格第 4 节](../specs/browser-runtime-capabilities-v1.md#4-v1-十二类能力最低结果矩阵)统一索引；本架构不另建能力清单或完成台账。实现 Work Item 必须引用适用类别并保留成功、必要拒绝和恢复的证据边界。
+
 Plugin 使用 catalog 生成或选择工具集；SKILL 可以引用 capability identifier 和最低语义版本；Core 在正式执行时仍重新授权，Harbor 在派发前仍重新核对现场。
 
 ## 6. 正式执行路径
@@ -234,6 +236,8 @@ Agent operating Instance A
 
 接管只影响指定 Instance。观看不自动取得 ControlLease；交还不允许恢复旧页面引用或自动重放未知动作。
 
+原 Instance 的网页事件处理不应依赖 Agent 持续发送 read／snapshot 或其他命令；Agent 空闲或用户持有控制权时，已获准页面仍应正常处理事件。该要求的当前 Driver 风险尚待专门 Work Item 核验，不能把代码结构推测写成已确认缺陷或已修复事实。Owner 的 stop、撤权或接管必须走独立正式控制通道；其接受和实际生效不能等业务请求自然完成后才被误报为成功，已派发动作仍保留真实终态或 `unknown`。
+
 交还后严格处于 `control_owner=none`、`ControlLease.owner=none`、`state=released` 且无 holder 的 Instance，仍可接受 Core 的新纯观察（包括 semantic snapshot、页面事实和公开 read），且不取得或续租输入租约。需要输入时，Core 必须先以新观察为依据取得租约；同一 Core holder 的非争用首次取得可沿用该新观察的当前代次，其他 holder 或期间发生控制变化则使观察失效。
 
 完整 App 后置不改变这条路径。可信 owner 入口可以是最小 App surface 或后续其他本地确认入口，但不得把 owner 凭据交给 Agent。
@@ -299,6 +303,8 @@ SKILL 可以减少 Agent 看到的工具、调用次数和探索成本；它不�
 - 在 Harbor／Core 中安装站点专用旁路；
 - 把工具成功当作业务成功。
 
+站点识别、页面术语和操作顺序应逐步归回 Lode／受控资产；Runtime 只保留可信执行、授权、页面归属和结果证据边界。跨层重复校验仍可保留，但共享字段和规则必须指向一个明确的合同来源，并由现有测试验证一致性，不能在多层复制权限决策。
+
 ## 11. Provider 支持和兼容
 
 不同 Provider 可以拥有不同支持等级，但必须使用同一公共语义解释差异。
@@ -312,7 +318,7 @@ SKILL 可以减少 Agent 看到的工具、调用次数和探索成本；它不�
 
 `unsupported` 对列为 V1 必需的能力不能单独作为完成依据。应实现、提供等价路径，或通过产品决策调整该 Provider／平台支持范围。
 
-当前 Camoufox 的 `unsupported` 是 #519 B Qualification Gate 未通过后的明确产品事实，不是要求 Harbor 通过私有补丁或 Driver 补偿制造等价能力；旧验证记录不改变该状态。
+当前上游原版 Camoufox 组合按 #519／PR #522 的已验证范围使用；popup 首请求无法在派发前可信归属时保持 `limited` 局部拒绝。`unsupported` 只适用于已退役的私有 launch binding、patched/native artifact 或已有明确不支持证据的能力；尚未由当前正式组合测试的能力保持未验证／unknown，不能冒写成 `unsupported` 或要求 Harbor 以私有补丁、Driver 补偿制造等价能力。
 
 Provider-specific extension 只允许在公共语义无法合理覆盖时存在，并且：
 
@@ -365,3 +371,7 @@ ConnectionState
 - 具体 JSON Schema、OpenAPI、MCP schema、生成类型和迁移由实现 Work Item 建立，并从 `docs/contracts/README.md` 索引。
 - Issue／Milestone 拥有交付范围和当前状态，不复制本架构全文。
 - Verification 文档记录某个版本实际证明了什么，不反向扩大能力范围。
+
+### 14.1 获批执行门
+
+实现前须能回读原生 Work Item 的 parent、Milestone、范围和完成标准，并完成适用 Design Obligation 判定。获批范围只包括已确认的用户结果、Provider、权限、数据和环境边界；不得以换 Provider、放宽 Grant、私有补丁、fallback 或猜测补齐资格缺口。高影响外部动作需要明确 owner 授权，已派发 unknown 只能查询／对账／人工接管，完成按证据类型分别回读，不能以安装脚本、独立客户端、CI 或 PR review 冒充真实第三方 Agent。

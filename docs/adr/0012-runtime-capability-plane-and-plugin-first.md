@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-09
-- 产品规范：[WebEnvoy v1.4 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；2026-09-12 Provider 职责修订以已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
+- 产品规范：[WebEnvoy v1.5 产品与架构方向规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；2026-09-12 Provider 职责修订以已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 
@@ -108,7 +108,7 @@ App 不得成为 Runtime 生命周期或普通 Agent 操作的隐藏依赖。
 
 Profile 的 Provider 和设备环境按 [Profile 环境规格](../specs/profile-environment-v1.md) 管理。系统必须区分 configured、effective、pending、observed 和 drift，并明确 Provider 原生生成、WebEnvoy 持久化、启动时应用和每次观测的责任。
 
-Camoufox 的设备环境能力曾以固定版本和实测证据作为 #499 的历史验证对象；当前 #519 B 的上游原版组合未通过 Qualification Gate，相关 patched/native 证据不构成现行 launch/support 承诺。无论历史或未来候选，都不以宣传或“开启所有隐身选项”作为验收，也不承诺不可检测或不会封号。
+Camoufox 的设备环境能力曾以固定版本和实测证据作为 #499 的历史验证对象；[#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 后，现行上游原版组合只按其已验证范围和 `limited` 边界承诺，相关 patched/native 证据不构成现行 launch/support 承诺。无论历史或未来候选，都不以宣传或“开启所有隐身选项”作为验收，也不承诺不可检测或不会封号。
 
 ### 9. 深层能力按数据和副作用分级
 
@@ -154,7 +154,7 @@ WebEnvoy 管理、约束、调用、组合、观察和验证 Provider 已经具�
 
 Obscura 在当前愿景完成前明确不采用。不继续研发、适配、验证、分发准备、候选跟踪或版本监控，也不以待授权、新版本或临时补丁自动重启。当前愿景完成也不自动重开，届时需新的显式产品决定。历史目标、实验和失败证据保留在 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)；`not_planned` 不表示功能验收成功。
 
-本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的供应方原版 Camoufox／Playwright 组合未通过 Qualification Gate：popup 首请求在派发前无法建立可信 Page 归属（详见 [#519 证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)），且完整 installed、人工交还和环境连续性尚未验收。不能以仓内私有 patch、复制 bundle 或 Driver 补偿继续推进。当前 Harbor 对 Camoufox 私有 launch binding 返回 `unsupported`（不可重试），不创建新绑定、不启动、不自动切换 Provider；#499、#504、#510 的 patched/native artifact、Driver 和 live 记录均为历史证据。保留的 Profile、binding 和 bundle 仍可供 recovery 做 schema/hash 校验，但 validator 不授予 launchability。
+[#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成供应方原版 Camoufox／Playwright 组合在其声明范围内的 Qualification、正式安装任务页协作、同实例接管／交还、环境与存储连续、原 Run 查询和不重放；popup 首请求在派发前无法建立可信 Page 归属时仍按 `limited` 边界局部拒绝（历史反例见 [#519 证据评论](https://github.com/WebEnvoy/WebEnvoy/issues/519#issuecomment-5643484622)）。这不外推所有平台、账号、升级、Provider 或完整 Runtime。Harbor 对旧 Camoufox 私有 launch binding 继续返回 `unsupported`（不可重试），不创建新绑定、不启动、不自动切换 Provider；#499、#504、#510 的 patched/native artifact、Driver 和 live 记录均为历史证据。保留的 Profile、binding 和 bundle 仍可供 recovery 做 schema/hash 校验，但 validator 不授予旧 binding launchability。
 
 退出该候选不缩小 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 的能力基线，不改变 [Plugin FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) 的真实第三方 Agent 消费要求，也不代替 [V1 验收 FR #482](https://github.com/WebEnvoy/WebEnvoy/issues/482) 的完整证据汇合；三项均按各自原验收继续开放。
 

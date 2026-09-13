@@ -1,9 +1,9 @@
 # Browser Runtime Capabilities V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.1（规范性语义修订，不改变 wire 枚举）
-> 日期：2026-09-12
-> 产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
+> 版本：1.2（规范性语义与来源矩阵修订，不改变 wire 枚举）
+> 日期：2026-09-14
+> 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品完成归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 > 验收衔接：[已安装 Plugin／真实 Agent #474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[完整 V1 证据汇合 #482](https://github.com/WebEnvoy/WebEnvoy/issues/482)
@@ -12,7 +12,7 @@
 
 本文不是最终 wire schema。具体 HTTP／MCP 字段、JSON Schema、生成类型和 Provider adapter 可以在实现中演进，但不得改变本文的语义和安全边界，除非通过新的 ADR／spec 修订。
 
-> **2026-09-12 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) B 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。正式 installed、人工交还、环境连续性和真实 Agent 消费仍尚未验收，因此当前证据不能标为 `live_verified` 或 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
+> **2026-09-14 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。#523／PR #524 的受管文件单文件 Plugin slice 有独立 `plugin_verified` 证据，但不把其他能力或完整 V1 扩写为 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 
 ## 1. 目标
 
@@ -111,7 +111,7 @@ Capability exists
 
 只有前两类可以进入适配或受限支持。核心缺失、需要长期补偿或需要维护浏览器 fork／内核补丁链时停止候选，不反向扩张 Runtime 职责。资格顺序、正常管理工作与具体停止条件由 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md#2026-09-12-provider-职责与-qualification-gate-修订) 统一定义。Obscura 在当前愿景内不采用，历史证据仅由 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 保留，不再验证、等待或监控新版本。
 
-本轮 #519 B 当前按第二类处理：popup 首请求在派发前无法建立可信 Page 归属时，官方 public API Driver 能准确局部拒绝并保留原任务页恢复路径，故不需要 WebEnvoy 模拟浏览器核心行为；该局部能力记录为 `limited`，不是 popup 全面支持。完整 installed、人工交还、环境连续性和真实 Agent 消费仍未验收，故整体证据状态不能写为 `live_verified`／`plugin_verified`。旧 #499 环境连续性和 #504/#510 native 证据不覆盖这些未验收项；私有 patch、native artifact、fallback 或 URL/title 猜测仍不被授权。
+#519／PR #522 已按第二类完成其声明范围的正式安装与真实 Agent 验证：popup 首请求在派发前无法建立可信 Page 归属时，官方 public API Driver 能准确局部拒绝并保留原任务页恢复路径，故不需要 WebEnvoy 模拟浏览器核心行为；该局部能力记录为 `limited`，不是 popup 全面支持。其证据不外推所有平台、账号、升级、Provider 或完整 Runtime；旧 #499 环境连续性和 #504/#510 native 证据也不恢复私有 launchability。私有 patch、native artifact、fallback 或 URL/title 猜测仍不被授权。
 
 ## 3. 通用调用约束
 
@@ -157,22 +157,26 @@ Page、Frame、语义目标、Network event 和 Download 等引用必须：
 - 不得直接成为 shell／SQL／脚本执行源；
 - 输出前必须按能力规格脱敏。
 
-## 4. V1 能力基线总表
+## 4. V1 十二类能力最低结果矩阵
 
-| 能力组 | V1 结果 | 默认效果等级 | ControlLease | 普通 Agent 直接暴露 |
-|---|---|---:|---:|---|
-| Instance | 启动、复用、停止、读取状态 | environment／interact | start/stop 需要管理权限 | 是，按 Grant |
-| Page／Tab／Window | 列出、打开、切换、关闭；popup/dialog 事实 | observe／interact | 改变当前现场时需要 | 是，按 Grant |
-| Navigation | URL、刷新、历史、重定向处理 | interact | 是 | 是，按 origin |
-| Observation | page facts、semantic snapshot、frame/shadow 边界 | observe | 否 | 是，脱敏 |
-| Interaction | click/input/press/mouse/scroll/select/drag/drop/wait | interact | 输入类是 | 是，按精确能力 |
-| Files | upload、页面接收、download、browser dialog | external-effect／interact | 上传和 dialog 处理是 | 有界 |
-| Network | 生命周期、失败、等待、选定内容、拦截/修改 | observe 到 external-effect | 修改类是 | 分级 |
-| Console／Page errors | log/warn/error/exception | observe | 否 | 有界 |
-| Controlled evaluation | 明确来源和世界的受控脚本 | observe 或 interact | 有副作用时是 | 高权限／有界 |
-| Screenshot／Frame | 原页面截图和基础画面 | observe | 否 | 有界 |
-| Storage／Permissions | 管理必要站点状态生命周期 | environment／destructive | 视操作而定 | 默认不直接暴露 |
-| Control／Recovery | lease、cancel、receipt、query、reconcile | control | 本身管理 lease | 是，按角色 |
+本表是 V1 能力的最低结果与来源索引，不是当前完成统计或 Provider 支持清单。每一行的实际支持状态、消费者、版本、平台、成功／必要拒绝／恢复和证据类型仍必须在对应 Work Item、正式合同与 verification 中分别回读；不能用“已定义”或单个 Provider 结果替代完整交付。
+
+| # | 能力类别 | 最低结果 | 规范来源 | 证据与边界 |
+|---:|---|---|---|---|
+| 1 | Instance | 获准 Profile 可启动、复用、停止并读取实例、Provider、控制者和可用性；锁冲突、未知启动和不存在实例准确拒绝，不创建替代实例。 | 本规格 [§5](#5-instance)；[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md#6-app-完整产品化后移但最小-owner-control-plane-保留)；canonical [§22 #14/#21/#29](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 分别记录 fixture、真实 Provider、安装路径和真实 Agent；未验证的 Provider／平台不外推。 |
+| 2 | Page／Tab／Window | 在同一 Instance 内列出、打开、明确切换和关闭 Page；返回真实 Page／document／父子／dialog 事实。任务页 A 与观看/原生焦点 B 分离；popup 归属不明时局部拒绝，不把 B 或原生 selected 冒充 A；关闭、接管或重启后旧引用失效。 | 本规格 [§6](#6-pagetabwindow)；[Page 合同 §1–2](page-navigation-runtime-contract-v1.md#1-绑定与生命周期)；canonical [§22 #15–20/#35/#37–40](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 目标必须由当前有效 Page/document ref 选定；不得按 active、URL、标题、顺序或 Provider handle 猜测。popup 首请求的 `page_relation_unavailable` 不影响原 A、其他可信 Page 或无关 Profile。 |
+| 3 | Navigation | 支持获准 HTTP(S) URL、query／fragment、刷新、历史和逐跳 redirect；未授权 origin、embedded credentials、失败和 unknown 在请求边界准确表达，不重放。 | 本规格 [§7](#7-navigation)；[Page 合同 §3](page-navigation-runtime-contract-v1.md#3-urlorigin-and-redirects)；canonical [§22 #14/#21/#37–40](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | HTTP 2xx、DOMContentLoaded 或 `goto` 返回不等于业务成功；拒绝应为 `not_dispatched` 或准确的已派发失败。 |
+| 4 | Observation | 提供有界 page facts、semantic snapshot、target／observation ref、document generation，以及 frame／shadow 的支持边界；不暴露 raw DOM、Provider handle 或敏感值。 | 本规格 [§8](#8-observation)；[Page 合同 §4](page-navigation-runtime-contract-v1.md#4-observation-and-stale-refs)；canonical [§22 #17/#31/#37–40](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | snapshot 只描述当前可信 Page；元素替换、重排、导航、接管或重启使旧目标失效，必须 fresh observe。 |
+| 5 | Interaction／Wait | 在授权和 ControlLease 下完成 click、input、press、mouse、scroll、select、drag／drop 及真实状态等待；普通多行、选择控件和 contenteditable／富文本的支持边界按 Provider/结果验证表达，不把当前实现限制冻结成产品禁止项；歧义、不可见、disabled、过期 target 和未知写入安全拒绝。 | 本规格 [§9](#9-interaction)；[Page 合同 §4](page-navigation-runtime-contract-v1.md#4-observation-and-stale-refs)；canonical [§22 #18–20/#26–29/#38–40](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 等待绑定 text／semantic／network／upload／dialog 等真实状态并有界；不得用随机 sleep、selector 重找或重提交掩盖 unknown；富文本/复杂编辑器不以普通 input 结果冒充。 |
+| 6 | Files／Dialog | owner 管理的文件引用可按精确 Page／target 上传并区分浏览器接收、页面处理和业务保存；获准普通下载产生受管结果引用；文件正文读取须有独立 content authorization；JS／native dialog 如有限制须保留同实例人工路径，上传/下载/临时材料各有生命周期。 | 本规格 [§10](#10-files)；[Plugin Exposure V1](plugin-runtime-exposure-v1.md)；canonical [§22 #26–28/#31–32](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 文件类型、大小、权限、下载归属、保留/删除和响应丢失分别证明；已派发上传／下载只能 query 原 operation，不重放；Agent 不因 operation 成功自动取得正文。 |
+| 7 | Network | 以 Page／Frame／operation 关联观察 request／response／failure lifecycle、状态、时序、redirect、bounded wait 和必要 WebSocket lifecycle；选定响应内容与允许的 headers、拦截和修改按更高权限、精确来源和大小边界处理。 | 本规格 [§11](#11-network)；[Network Contract V1](network-runtime-contract-v1.md)；canonical [§22 #31](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 默认过滤 Cookie、Set-Cookie、Authorization、body、未脱敏 query 与 raw HAR；允许 headers 需显式 allowlist，每跳授权失败不得先发请求。 |
+| 8 | Console／Page errors | 以可信 Page／Frame／document 关联有界暴露 warn、error、pageerror、uncaught exception 和 unhandled rejection、脱敏 source location；空窗口不推断“没有错误”。 | 本规格 [§12](#12-consolepage-errors)；[Console Contract V1](console-runtime-contract-v1.md)；canonical [§22 #31](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 文本、数量和保留有界，先脱敏再截断；缺事件保持 unknown；观察不取得 ControlLease，也不等于任意脚本执行。 |
+| 9 | Controlled evaluation | 只执行有 stable id／source／version／hash、world、精确参数、目标 Page／Frame、timeout／cancel、effect class 和有界结果的受控脚本；read-only 与 mutation 分开授权、记录和恢复。 | 本规格 [§13](#13-controlled-evaluation)；[ADR 0012 §7](../adr/0012-runtime-capability-plane-and-plugin-first.md#7-skill-是知识与效率层)；canonical [§22 #24/#31](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 普通 Agent 不获得任意 JS、CDP、Juggler 或 Provider endpoint；不要求所有脚本类型或 world 等级都支持；SKILL 不能补齐 Runtime 或扩权。 |
+| 10 | Screenshot／Frame | 取得绑定原 Page／Instance、时间和权限的静态截图；frame stream 可以 limited，但不得以截图冒充输入、原生焦点或高帧率交互。临时观看与显式保存是不同生命周期。 | 本规格 [§14](#14-screenshotframe)；[ADR 0012 §6](../adr/0012-runtime-capability-plane-and-plugin-first.md#6-app-完整产品化后移但最小-owner-control-plane-保留)；canonical [§22 #17/#23/#35](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 临时观看默认不录制、不保留；显式保存才生成受管 evidence／asset ref 并按脱敏和 retention；Provider／平台的实际支持与人工体验分开记录。 |
+| 11 | Storage／Permissions | 管理 Profile 自有存储、站点权限、upload／download 临时材料、cache／service worker 等与运行一致性相关的状态及迁移／归档／删除边界；普通 Agent 默认不能导出 Cookie、完整 storage、凭据或 Profile 路径。 | 本规格 [§15](#15-storagepermissions-boundary)；[Profile Environment V1](profile-environment-v1.md)；canonical [§22 #1–4/#21–22/#41–42](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#22-v1-验收标准) | 环境／身份连续性、撤销、到期和恢复只按 owner 事实核验；cache／service worker 变化不得静默改变身份或权限；不以配置保存成功推断活动 Instance 已应用。 |
+| 12 | Control／Recovery | mutating 操作服从 ControlLease、Run／operation、dispatch state、取消和 receipt；owner 可停止、撤销或接管，交还后 fresh observe；取消只停止后续执行，不回滚已发生的外部效果。响应丢失或 unknown 只 query／reconcile／接管，不换 key 重放。 | 本规格 [§16](#16-controlrecovery)；[ADR 0012 §4–6](../adr/0012-runtime-capability-plane-and-plugin-first.md#4-能力存在工具暴露授权和实际执行相互分离)；canonical [§18、§22 #18–20/#27–29/#40](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#18-人工接管) | `ConnectionState`、`InstanceState`、`ControlState`、`RunState` 和 `ExternalOutcome` 分离；撤销阻止新动作但不倒写历史；失败必须局部化，不以重启或替代页面伪造恢复。 |
+
+各类别的默认效果等级、ControlLease 和 Plugin exposure 仍见下列章节与正式合同；本矩阵只锁定“最低结果 + 来源”，不新增 wire 字段、Provider enum、Grant 维度或第二状态机。
 
 ## 5. Instance
 

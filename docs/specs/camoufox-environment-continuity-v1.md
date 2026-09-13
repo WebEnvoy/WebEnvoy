@@ -6,7 +6,7 @@
 > 归口：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 > 上位语义：[Profile Environment V1](profile-environment-v1.md)
 
-本文冻结 #519 官方上游 Camoufox 的受管环境材料持久化和 Driver readback，并保留 #499 的历史 continuity 事实作为兼容/recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。当前只接受 owner 核验的固定官方来源和版本；popup 首请求无法在派发前建立可信 Page 归属时按 `limited` 边界局部拒绝，不猜测或重放。正式 installed、人工交还和环境连续性仍尚未完成 #519 现场验收，不能写成 `live_verified`。旧 patched/native Driver、私有 launch binding 和对应 live 证据仍为历史记录，不恢复旧 launchability。
+本文冻结 #519 官方上游 Camoufox 的受管环境材料持久化和 Driver readback，并保留 #499 的历史 continuity 事实作为兼容/recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。当前只接受 owner 核验的固定官方来源和版本；popup 首请求无法在派发前建立可信 Page 归属时按 `limited` 边界局部拒绝，不猜测或重放。#519／PR #522 的正式安装、人工交还、环境与存储连续和真实 Agent 证据只按其声明范围成立，不外推完整 Runtime。旧 patched/native Driver、私有 launch binding 和对应 live 证据仍为历史记录，不恢复旧 launchability。
 
 ## Current #519 upstream path
 

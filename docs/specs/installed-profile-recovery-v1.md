@@ -4,7 +4,7 @@
 
 本规格定义已安装 WebEnvoy 在更换安装资产后继续使用原长期 Profile，以及在受支持损坏时由可信 owner 恢复一个指定私有备份的语义。当前 #519 路径只接受 macOS arm64、本机 Codex、owner 核验的固定官方 Camoufox Provider；旧私有 binding 仍仅作恢复材料。它不承诺跨操作系统、跨 Provider、历史任意版本或 Provider 下载/升级迁移。
 
-> **2026-09-12 现行边界**：#519 的官方固定 Camoufox／Playwright 组合已形成受管安装与 Profile 接续路径，但当前仍按 `limited` 处理：popup 首请求不能在派发前建立可信 Page 归属时局部拒绝，不猜测或重放；正式 installed、人工交还和环境连续性仍待 #519 现场完成门，不能写成 `live_verified`。Harbor 继续退役旧 Camoufox 私有浏览器／Driver launch binding，不为旧 binding 启动或自动切换；旧 binding、Profile、backup/plan/apply 记录和私有 bundle 仍由 recovery 路径保留并按原 schema/hash 做安全检查。纯 stdlib validator 只做 bundle 校验，不能重建身份、修改安装或恢复旧 launchability。
+> **2026-09-14 现行边界**：#519／PR #522 的官方固定 Camoufox／Playwright 组合已按声明范围证明受管安装、Profile 接续、同实例接管／交还、环境与存储连续及原 Run 查询；popup 首请求不能在派发前建立可信 Page 归属时仍按 `limited` 局部拒绝，不猜测或重放。Harbor 继续退役旧 Camoufox 私有浏览器／Driver launch binding，不为旧 binding 启动或自动切换；旧 binding、Profile、backup/plan/apply 记录和私有 bundle 仍由 recovery 路径保留并按原 schema/hash 做安全检查。纯 stdlib validator 只做 bundle 校验，不能重建身份、修改安装或恢复旧 launchability；上述局部证据不外推任意历史升级、平台或完整 V1。
 
 ## 1. 所有权与数据边界
 

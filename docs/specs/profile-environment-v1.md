@@ -2,8 +2,8 @@
 
 > 状态：V1 规范性语义规格
 > 版本：1.0
-> 日期：2026-09-12
-> 产品依据：[canonical v1.4](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 日期：2026-09-14
+> 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品归口：[Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471)
 > 首批执行项：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
@@ -12,7 +12,7 @@
 
 本文不承诺不可检测、不封号，也不要求开启 Provider 的所有可选“隐身”功能。
 
-> **2026-09-12 当前 Provider 事实**：#519 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整启动材料并精确复用。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；正式 installed、人工交还和同 Profile 环境连续性仍待 #519 现场验收，不能标 `live_verified`。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
+> **2026-09-14 当前 Provider 事实**：#519／PR #522 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整启动材料并精确复用。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；#523 文件 slice 的安装/真实消费者证据不扩写为整个环境连续性或完整 V1。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
 
 ## 1. 核心原则
 
@@ -318,7 +318,7 @@ drift evaluated
 
 ## 11. Camoufox Provider 基线与 #519 上游路径
 
-Camoufox 是 #499 的第一验证 Provider；#519 现在只恢复供应方原版路径，不恢复旧私有 binding。当前路径的静态来源和版本事实可进入 `validation_evidence`，但整体资格仍受 installed/live 门约束；popup 首请求的关系未知只允许局部拒绝，不能以补丁或 replacement Page 补偿。旧 patched/native Driver、bundle 和 live evidence 仍作历史/恢复记录。
+Camoufox 是 #499 的第一验证 Provider；#519／PR #522 已按声明范围交付供应方原版路径，不恢复旧私有 binding。当前路径的静态来源、版本、正式安装和现场证据必须分别记录；popup 首请求的关系未知只允许局部拒绝，不能以补丁或 replacement Page 补偿。旧 patched/native Driver、bundle 和 live evidence 仍作历史/恢复记录。
 
 历史 #499 记录按明确版本组合保存：
 
@@ -330,7 +330,7 @@ Camoufox 是 #499 的第一验证 Provider；#519 现在只恢复供应方原版
 - platform／architecture；
 - capability and limitation facts。
 
-### 11.1 #519 官方固定组合与完整环境材料（installed/live 待验）
+### 11.1 #519 官方固定组合与完整环境材料
 
 正式安装记录使用 `webenvoy.camoufox-upstream/v1`，必须由 owner 传入明确的 browser install root、可执行文件、Python、三份来源归档，并重新计算文件与包版本。固定组合如下：
 
@@ -354,11 +354,11 @@ config 字段、不随机补身份、不改写上游 app/site-packages/Driver bu
 Instance 不热改，timezone/language/viewport 的 owner 更新进入 pending，
 安全停止并按同 Profile 重启后才成为 effective；实际 Page readback 与
 bundle/Provider 摘要另列 observed/support。上述静态来源与固定材料是
-validation facts，不是尚未完成的 installed/live/Plugin 验收证据。
+validation facts；installed/live/Plugin 证据必须继续按实际消费者和范围单独回读，不能仅由材料存在推导。
 
 ### 11.2 历史正式启动机制（非当前支持）
 
-历史 #499 合同要求使用当时已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设；它不等同于当前 #519 上游路径的 installed/live 证据。
+历史 #499 合同要求使用当时已验证的 Camoufox 公共启动机制和持久 Profile，不依赖 raw Firefox 日常目录或 Chromium/CDP 假设；它不等同于 #519／PR #522 的当前正式安装和真实消费者证据，也不扩大其范围。
 
 ### 11.3 历史环境生成与复用
 
@@ -369,7 +369,7 @@ validation facts，不是尚未完成的 installed/live/Plugin 验收证据。
 - 每次只能观测、无法精确控制的事实；
 - 当前版本 unsupported／limited 的事实。
 
-该历史矩阵不能替代当前 #519 的 installed/live 资格证据；不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定，也不能以旧结果恢复旧 launchability。当前完整 bundle replay 和局部 popup 拒绝的代码/fixture 证据仍须与实际安装、真实 Agent 和同 Profile 重启现场分开记录。
+该历史矩阵不能替代 #519／PR #522 的当前正式安装和真实消费者证据；不能仅凭使用 Camoufox 声称完整设备环境跨重启稳定，也不能以旧结果恢复旧 launchability。完整 bundle replay 和局部 popup 拒绝的代码/fixture 证据仍须与实际安装、真实 Agent 和同 Profile 重启现场分开记录。
 
 ### 11.4 自动化暴露和辅助能力
 
