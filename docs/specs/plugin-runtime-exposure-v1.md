@@ -1,6 +1,6 @@
 # Plugin Runtime Exposure V1
 
-状态：Accepted；版本：v1；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)。
+状态：Accepted；版本：v1.1；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
@@ -18,6 +18,7 @@
 | Provider preference and create selection | `webenvoy_operation`：`provider.preference.read`、`provider.preference.set`、`provider.preference.clear`；动态模板的 `profile.create` 可带 `provider_id` | 每项需同名 `allowed_operations`；固定模板拒绝请求级 Provider；详见 [Provider Selection V1](provider-selection-v1.md)。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
+| 受管浏览器文件 | `webenvoy_operation`：`file.upload`、`file.download`；既有 `webenvoy_query` 查询原 Run/receipt | `file_scope`、task `file_refs`、Profile/Principal/Grant、Page/document、目标新鲜度和 ControlLease 的交集；owner `files import/inspect/export/revoke/delete` 只走受信入口。结果为 `webenvoy.browser-file-result/v1`，正文和路径不投影，详见 [Managed Browser Files V1](browser-files-v1.md)。 |
 
 `webenvoy_skill` 仍只提供必需管理/浏览器引导资产；`webenvoy_skills` 不能替换或覆盖它。工具唯一拼写为 `webenvoy_skills`，不引入 `webevoy_skills` 别名。
 
@@ -37,6 +38,30 @@ Profile、Grant、查询和 SKILL 管理不被该局部拒绝污染。
 click receipt：已派发的 click 仍保持 `dispatch_state: "dispatched"`。旧
 Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它解释成 popup
 已成功或已获得 Page 归属；installed/live/plugin 验收状态仍待现场完成。
+
+### Managed Browser Files 输入与结果
+
+`file.upload` 和 `file.download` 复用 `webenvoy_operation` 的既有
+`idempotency_key`、`grant_id`、browser task scope、`profile_ref`、
+`runtime_session_ref`、精确 `origin` 以及 Page/document binding。上传额外只
+接受 owner 已登记的 opaque `file_ref`；下载不接受 `file_ref`、URL、路径、
+selector、headers、body 或脚本。task scope 的 `file_refs` 对上传必须是单项
+精确匹配，对下载必须为空。Plugin 不携带 owner credential，不能调用 owner
+files route。
+
+上传只向当前新鲜观察中的一个可见标准 `input[type=file]` 交付一次；已有
+文件、失效 target、Page/lease 变化或 Grant/file scope 不匹配均在派发前拒绝。
+下载只对观察到的同页 HTTP(S) link 先监听后单击一次；Provider 必须证明实际
+`Download.page`、URL、请求 guard 和 Page binding，再由 Harbor 在有界格式/大小
+检查及原子提交后发布新 output ref。下载事件本身不是业务成功。
+
+结果只返回 `webenvoy.browser-file-result/v1` 的 bounded metadata、Page/
+operation refs 和 `file_ref`；不返回正文、Provider 临时路径、owner 路径、
+headers 或 raw network payload。上传的 `browser_delivery` 与网页
+`page_receipt`/`page_processing` 分层；下载的 `download_event` 与 committed
+material 分层。Provider error、stale Page、relation loss、撤销、过期、超限和
+unknown outcome 原样暴露为结构化失败，`webenvoy_query` 只读原事实，不会重触发
+上传/下载。
 
 ## SKILL 工具输入
 
@@ -75,6 +100,13 @@ MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。
 Core 只接受一个当前有效的 Principal/Connection/Grant。对浏览器 Page、navigation、interaction 和 diagnostics，effective origins 是 `Grant.allowed_origins ∩ ProfilePolicy.allowed_origins ∩ task_scope.origins`；请求的精确 `origin` 必须属于该交集。Core 不合并多个 Grant、多个 Profile 的 scope 或 Agent 自带 allowlist。对 SKILL 另取 `skill_scope={skill_refs,source_refs}`、task scope、批准清单和 compatibility 的交集。旧 Grant 缺少 `skill_scope` 时没有 SKILL 权限；不得以网页 Profile、origin、账号绑定或通用浏览器 Grant 推导 SKILL 权限，也不得以 SKILL 权限推导网页操作权。版本升级、旧 Grant 读取和旧严格 reader 的拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。
 
 既有 `webenvoy_operation` 的 browser/environment task scope 继续使用 `operations`、`profile_refs`、`origins`，其授权和 Web scope 不因 SKILL 工具改变。SKILL 请求不携带网页范围；同一个连接仍须先通过 `webenvoy_connect`，撤销/过期在每次新管理或 read 前重新检查。
+
+`origin` 是 operation-specific 的顶层输入，不由 `task_scope.origins` 代替。尤其
+`instance.start` 必须带一个与该 Profile、Grant 和 task scope 交集精确相等的
+顶层 `origin`；`url` 可省略（默认从 origin 启动），如提供则必须是同一 origin
+的 HTTP(S) URL。MCP envelope 为兼容不需要网页 origin 的 operation，仍将
+`origin` 声明为可选属性；调用方必须遵循上述 operation 合同，缺失时 Core 在
+派发前返回 `managed_access_origin_required`/`not_dispatched`。
 
 偏好 read/set/clear 同样要求单一有效 Principal、Connection、Grant 和 task scope 中的同名 operation；旧 Grant、Profile create、browser operation 或模板引用均不能推出偏好修改权。其资源 target 为 `provider_preference`，owner requirement 为 `harbor://browser-provider-preference`。
 

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvironmentState, type EnvironmentObservation, type EnvironmentProbe, type ProfileEnvironmentConfiguration } from "./profile-environment.js";
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
-import { isTrustedManagedPublicPageOperation, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
+import { isTrustedManagedPublicPageOperation, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedPublicOrigin, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
 import { assertNoUnfinishedProfileRecovery } from "./profile-recovery.js";
 import {
   createLocalIdentityEnvironmentFacts,
@@ -23,6 +23,9 @@ import {
   type CreateRuntimeSessionInput,
   type LocalProviderMediaActionInput,
   type LocalProviderMediaActionResult,
+  type LocalProviderFileOperationInput,
+  type LocalProviderFileOperationResult,
+  type LocalProviderFileOperation,
   type LocalProviderLauncher,
   type LocalProviderPageFacts,
   type LocalProviderReadProbeInput,
@@ -50,6 +53,7 @@ import {
   isTrustedLocalProviderSiteResourceProbe,
   isTrustedLocalProviderWritePrecheckProbe
 } from "./read-operation-probe-trust.js";
+import { isTrustedLocalProviderFileOperation } from "./runtime-session-types.js";
 import { diagnosticsUnavailable, isTrustedRuntimeDiagnosticsProbe, type RuntimeDiagnosticsInput, type RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 import {
   PageRegistry,
@@ -82,6 +86,9 @@ export type {
   LocalProviderDriverKind,
   LocalProviderMediaActionInput,
   LocalProviderMediaActionResult,
+  LocalProviderFileOperationInput,
+  LocalProviderFileOperationResult,
+  LocalProviderFileOperation,
   LocalProviderPageFacts,
   LocalProviderPageController,
   LocalProviderPageState,
@@ -161,6 +168,7 @@ export interface RuntimeSessionRecord {
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
   probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
   executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
+  executeFileOperation?: (input: LocalProviderFileOperationInput) => Promise<LocalProviderFileOperationResult>;
   captureScreenshot?: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
   close?: () => Promise<void>;
 }
@@ -172,9 +180,29 @@ const baselineFacts: RuntimeFact[] = [
   { key: "provider.anti_detection_success", source: "provider_claim", value: "not_claimed" }
 ];
 
+export type ManagedFileRuntimeInput = {
+  operation: "upload" | "download";
+  operation_ref: string;
+  idempotency_key: string;
+  holder_ref: string;
+  principal_id: string;
+  profile_ref: string;
+  expected_origin: string;
+  authorized_origins: string[];
+  page_id: string;
+  page_ref: string;
+  document_generation: number;
+  observation_ref: string;
+  target_ref: string;
+  source_path?: string;
+  staging_path?: string;
+  timeout_ms?: number;
+};
+
 export class RuntimeSessionStore {
   private readonly records = new Map<string, RuntimeSessionRecord>();
   private readonly interactionReceipts = new Map<string, { request_hash: string; result: ManagedInteractionResult & { operation_ref: string; runtime_session_ref: string; observed_at: string } }>();
+  private readonly fileOperationReceipts = new Map<string, { request_hash: string; result: LocalProviderFileOperationResult & { operation_ref: string; runtime_session_ref: string } }>();
   private readonly openingIdentityEnvironmentRefs = new Set<string>();
   private readonly openingProfileStorageRefs = new Set<string>();
   private readonly mutatingIdentityEnvironmentRefs = new Set<string>();
@@ -341,6 +369,7 @@ export class RuntimeSessionStore {
       probeSiteResource: ready ? launch.probeSiteResource : undefined,
       probeWritePrecheck: ready ? launch.probeWritePrecheck : undefined,
       executeMediaAction: ready ? launch.executeMediaAction : undefined,
+      executeFileOperation: ready ? launch.executeFileOperation : undefined,
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined,
       page_registry: pageController ? new PageRegistry(runtime_session_ref, pageController, initialPages) : undefined
@@ -800,6 +829,95 @@ export class RuntimeSessionStore {
 
   getManagedInteraction(operation_ref: string) {
     return this.interactionReceipts.get(operation_ref)?.result ?? null;
+  }
+
+  getManagedFileOperation(operation_ref: string) {
+    return this.fileOperationReceipts.get(operation_ref)?.result ?? null;
+  }
+
+  async operateManagedFile(runtime_session_ref: string, input: ManagedFileRuntimeInput): Promise<LocalProviderFileOperationResult & { operation_ref: string; runtime_session_ref: string }> {
+    const refused = (failure_class: string, dispatch_state: "not_dispatched" | "dispatched" = "not_dispatched") => ({
+      status: dispatch_state === "dispatched" ? "unknown_outcome" as const : "unavailable" as const,
+      dispatch_state,
+      operation: input.operation,
+      failure_class,
+      operation_ref: input.operation_ref,
+      runtime_session_ref
+    });
+    const requestHash = createHash("sha256").update(JSON.stringify([runtime_session_ref, Object.entries(input).filter(([key]) => !["source_path", "staging_path"].includes(key)).sort(([a], [b]) => a.localeCompare(b))])).digest("hex");
+    const previous = this.fileOperationReceipts.get(input.operation_ref);
+    if (previous) return previous.request_hash === requestHash ? previous.result : refused("file_idempotency_conflict");
+    if (!boundedManagedRef(input.operation_ref) || !boundedManagedRef(input.holder_ref) || !boundedManagedRef(input.profile_ref) ||
+      !boundedManagedRef(input.page_id) || !boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref) || !boundedManagedRef(input.target_ref) ||
+      !managedPublicOrigin(input.expected_origin) || !input.authorized_origins.includes(input.expected_origin) ||
+      !Number.isSafeInteger(input.document_generation) || input.document_generation < 1 ||
+      (input.operation === "upload" && (!input.source_path || input.staging_path !== undefined)) ||
+      (input.operation === "download" && (!input.staging_path || input.source_path !== undefined))) return refused("file_operation_invalid");
+    const record = this.records.get(runtime_session_ref);
+    if (!record) return refused("session_missing");
+    if (!isCoreLeaseHeld(record, input.holder_ref)) return refused("control_lock_conflict");
+    if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
+    if (record.execution_surface !== "local_provider" || !isTrustedLocalProviderFileOperation(record.executeFileOperation)) return refused("provider_unavailable");
+    const generation = record.control_generation;
+    const relationFailure = await this.refreshPageRelation(record);
+    if (relationFailure) return refused(relationFailure);
+    if (record.control_generation !== generation || !isCoreLeaseHeld(record, input.holder_ref)) return refused("control_changed");
+    let binding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
+    try { binding = record.page_registry?.binding({ page_id: input.page_id, page_ref: input.page_ref }); }
+    catch { binding = undefined; }
+    if (!binding || binding.facts.page_ref !== input.page_ref || binding.facts.page_id !== input.page_id || binding.facts.document_generation !== input.document_generation || binding.facts.origin !== input.expected_origin || !input.authorized_origins.includes(input.expected_origin)) return refused("stale_document");
+    const observed = [...(record.managed_observations ?? []), record.interaction_snapshot ? {
+      observation_ref: record.interaction_snapshot.observation_ref,
+      control_generation: record.interaction_snapshot.control_generation,
+      holder_ref: record.interaction_snapshot.holder_ref,
+      page: { page_ref: record.interaction_snapshot.page_ref }
+    } : undefined].find(item => item && item.observation_ref === input.observation_ref);
+    const observedHolder = observed && "holder_ref" in observed ? observed.holder_ref : undefined;
+    if (!observed || observed.control_generation !== generation || (observedHolder !== undefined && observedHolder !== input.holder_ref) || observed.page.page_ref !== input.page_ref) return refused("file_observation_stale");
+    const receipt = {
+      status: "unknown_outcome",
+      dispatch_state: "dispatched",
+      operation: input.operation,
+      failure_class: "file_operation_in_progress",
+      operation_ref: input.operation_ref,
+      runtime_session_ref
+    } as Record<string, unknown> & { operation_ref: string; runtime_session_ref: string };
+    this.fileOperationReceipts.set(input.operation_ref, { request_hash: requestHash, result: receipt as LocalProviderFileOperationResult & { operation_ref: string; runtime_session_ref: string } });
+    try {
+      const result = await this.withProviderInteraction(record, () => record.executeFileOperation!({
+        operation: input.operation,
+        provider_page_ref: binding!.provider_page_ref,
+        expected_origin: input.expected_origin,
+        authorized_origins: input.authorized_origins,
+        target_ref: input.target_ref,
+        ...(input.source_path === undefined ? {} : { source_path: input.source_path }),
+        ...(input.staging_path === undefined ? {} : { staging_path: input.staging_path }),
+        timeout_ms: input.timeout_ms
+      }));
+      const current = record.page_registry?.binding({ page_id: input.page_id });
+      if (record.control_generation !== generation || !isCoreLeaseHeld(record, input.holder_ref) || !current || current.facts.page_ref !== input.page_ref || current.facts.document_generation !== input.document_generation) {
+        receipt.status = "unknown_outcome";
+        receipt.failure_class = "control_changed";
+        receipt.dispatch_state = "dispatched";
+      } else {
+        const page = result.page;
+        if (page?.current_url) this.applyPageFacts(record, page.current_url, { ...page, page_id: input.page_id, page_ref: input.page_ref, document_generation: input.document_generation });
+        receipt.status = result.status;
+        receipt.dispatch_state = result.dispatch_state;
+        receipt.operation = result.operation;
+        if ("failure_class" in result) receipt.failure_class = result.failure_class;
+        else delete receipt.failure_class;
+        if (result.page) (receipt as Record<string, unknown>).page = result.page;
+        if (result.status === "completed") {
+          for (const key of ["browser_delivery", "page_receipt", "page_processing", "business_commit", "download"] as const) if (key in result) (receipt as Record<string, unknown>)[key] = result[key];
+        }
+      }
+    } catch {
+      receipt.status = "unknown_outcome";
+      receipt.dispatch_state = "dispatched";
+      receipt.failure_class = "file_operation_outcome_unknown";
+    }
+    return receipt as LocalProviderFileOperationResult & { operation_ref: string; runtime_session_ref: string };
   }
 
   async operateManagedInteraction(runtime_session_ref: string, input: ManagedInteractionRequest) {

@@ -1,0 +1,264 @@
+{
+  "schema_version": "webenvoy.browser-files-installed-live-evidence/v1",
+  "work_item": 523,
+  "recorded_at": "2026-09-13T01:54:09Z",
+  "judgment": "no_release",
+  "verification_input": {
+    "repository": "WebEnvoy/WebEnvoy",
+    "branch": "feat/523-managed-browser-files",
+    "commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+    "tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+    "provider": {
+      "source_root": "/Users/claw/.webenvoy/providers/camoufox/sources/official-0.5.6-152.0.4-beta.30/",
+      "camoufox": "0.5.6",
+      "browser": "152.0.4-beta.30",
+      "playwright": "1.60.0",
+      "browser_zip_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+      "camoufox_wheel_sha256": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+      "playwright_wheel_sha256": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+    }
+  },
+  "g0": {
+    "status": "pass",
+    "python": "3.12.13",
+    "browser_executable_sha256": "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33",
+    "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+    "png_sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    "csv_sha256": "6d4ddc85515525576304235af892cbec19e7bd2ff8eea3c72018d146dc585da2",
+    "refusal_counts": {
+      "unauthorized_origin_redirect": 1,
+      "unknown_relation": 1,
+      "missing_frame_unattributed": 1
+    },
+    "evidence_types": ["public-api-driver", "formal-request-guard", "dedicated-profile", "controlled-local-origin", "owner-readback"],
+    "evidence_files": [
+      {"path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-g0-2oz8hxvz/g0-evidence.json", "sha256": "f8a04c08b419e06fb69e6ad27d3abcc56057bcb78f7f8bb6721eb0dbd34deb3d"},
+      {"path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-g0-i-lc53jspe/g0-i-evidence.json", "sha256": "bc57206957d06092292d9230eb6d78a9c03b860d1a572974f440d934908bca07"}
+    ]
+  },
+  "installed_live": {
+    "status": "pass",
+    "install_kind": "unsigned_local_packaged_runtime",
+    "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+    "data_root": "/private/tmp/webenvoy-523-originfix-data-PbltJl",
+    "controlled_origin": "http://127.0.0.1:50794",
+    "png_sha256": "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
+    "server_metrics_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/site/metrics-agent.json",
+    "server_metrics_sha256": "62df58393d88c1eab1b1dd94d5d8f4b891326eeb96e9384929e4559f86ef5c61",
+    "status_asset_digest": "2029c8000c61b8bd23326add28239d4d33c960893d608417288c2977ca283733",
+    "manifest_sha256": "d57b0e38c0c4f0a6b55442d010fd4babbd393ce14f9fa82323ba4a344ba46ccb",
+    "skill_manifest_sha256": "ddcc8bf912379ed9731b3f7fb6b7ea19b39b716e428a8b64887c9fb97dfb3b4d",
+    "skill_sha256": "36581c5056bfc27896ea96663200497c52ee71463f85a780701882d32ae8f5d2",
+    "server_metrics": {
+      "uploads": 1,
+      "upload_sha256": ["0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3"],
+      "downloads": 1,
+      "download_sha256": ["c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715"],
+      "unexpected": []
+    }
+  },
+  "true_agent": {
+    "status": "pass",
+    "plugin_verified": true,
+    "thread_id": "01a09853-06d6-7c10-9277-4fddef763251",
+    "session_id": "01a09853-06d6-7c10-9277-4fddef763251",
+    "profile_ref": "profile_871a61e2b0a2b54f121122a1",
+    "file_ref": "attachment:runtime/873f5a11-2049-44e8-a4a2-a85e9a8cd5d3",
+    "upload_run_id": "managed-4b48333ab41647b1400e2e6ce3944bf993f1dc5cfcaf8aa22524305499123f47",
+    "download_run_id": "managed-14d01a539a6796102c9b90798583016ee8eb97136bf64519581f3e22714cc576",
+    "download_ref": "attachment:runtime/bfa080df-7d7c-431d-9d4c-e85ad91af37c",
+    "download_bytes": 15,
+    "download_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "owner_export_path": "/private/tmp/webenvoy-523-originfix-owner-export-receipt.csv",
+    "owner_export_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "server_upload_count": 1,
+    "server_download_count": 1,
+    "runtime_session_ref": "session_08919c61-85df-4da1-84e6-89f2f3ef9df3",
+    "page_ref": "page_8275b1e6-63c0-45c8-ae3a-e02752255acd",
+    "page_id": "page_object_0590b647-4e47-4b85-be59-5efbad6e2ed7",
+    "upload_target_ref": "control:2:1:0",
+    "upload_observation_ref": "observation:page:1:2:1",
+    "download_target_ref": "control:2:3:1",
+    "download_observation_ref": "observation:page:1:2:3",
+    "page_receipt": "PNG upload received:67:0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
+    "original_run_query_replayed": false,
+    "evidence_file": {
+      "path": "/private/tmp/webenvoy-523-final-agent-v3/codex-resume/sessions/2026/09/13/rollout-2026-09-13T09-12-53-01a09853-06d6-7c10-9277-4fddef763251.jsonl",
+      "sha256": "8805c8734a6a70534327b8cac7e9e31468a3c24f40511168f6a9428f4a3f70f8"
+    }
+  },
+  "deterministic_installed_acceptance": {
+    "status": "pass",
+    "final_install_provenance": {
+      "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+      "data_root": "/private/tmp/webenvoy-523-originfix-data-PbltJl",
+      "source_commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+      "source_tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+      "status_asset_digest": "2029c8000c61b8bd23326add28239d4d33c960893d608417288c2977ca283733",
+      "scope": "final installed 47d95ea head; current packaged-driver focused gates are reverified below. The Harbor driver behavior is also cross-checked against the separately identified 620e42d installed runtime by exact component tree and driver-content identity, while the old b2d30b23 v4 material is historical only and is excluded from current-head evidence."
+    },
+    "final_head_reverified": [
+      "authorized-origin narrowing A+B to current A rejects B",
+      "replacement input target rejects stale identity and fresh snapshot succeeds",
+      "same-page wrong-origin and multiple-candidate download attribution rejects",
+      "download 120-second deadline, bounded temporary space, cancel and cleanup",
+      "expiry/export/mode and concurrent cleanup transaction lock",
+      "owner import/grant/upload/download/export, response-loss query without replay",
+      "Context stop and Runtime restart persistence, scope isolation and Grant/material revoke"
+    ],
+    "groups": {
+      "owner_import_minimal_grant_file_upload_download_export": "pass",
+      "handoff_old_target_rejected_fresh_observe_same_page": "pass",
+      "upload_download_dropped_response_query_without_replay": "pass",
+      "context_stop_runtime_restart_persistence": "pass",
+      "scope_isolation_owner_boundaries_and_material_grant_revoke": "pass"
+    },
+    "installed_driver_focused_tests": {
+      "status": "pass",
+      "install": {
+        "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+        "source_commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+        "source_tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+        "component_trees": {
+          "core": "d6dea3aeca1b88335fc86603a64bea6bf3aa9376",
+          "harbor": "388ade70a0892feab88e2ea70ef485feb4158bbf"
+        },
+        "agent_manifest_sha256": "d57b0e38c0c4f0a6b55442d010fd4babbd393ce14f9fa82323ba4a344ba46ccb",
+        "driver_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app/Contents/Resources/app/dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.py",
+        "driver_sha256": "351ea13b5d665ff498de39a32b72261e00cc03b31d9ebbae16e84c645e2e71fc",
+        "test_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app/Contents/Resources/app/dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js",
+        "test_sha256": "379b505f689ed8b9b0a9c0d879b6fb4417dd3c373ee5316fd28353ef2a94026c",
+        "command": "node --test --test-concurrency=1 <installed-app>/Contents/Resources/app/dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js",
+        "tests": 13,
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "cases": [
+          "file route scope A+B to current A rejects B",
+          "replacement input target rejects stale ElementHandle and fresh snapshot succeeds",
+          "wrong-origin and multiple-candidate download relation reject",
+          "late second download during save is canceled and cleaned",
+          "oversize staged download is canceled and cleaned",
+          "oversize browser downloads_path artifact is monitored, canceled, and cleaned",
+          "bounded timeout cancels and cleans a slow download"
+        ],
+        "evidence_scope": "This is a deterministic test executed from the current packaged app and imports its packaged Python driver. Its browser-temp case uses the public downloads_path-shaped driver boundary with a controlled Download fixture; it is not claimed as a live network oversize transfer. The current fixed-provider live Agent evidence below covers the real browser upload/download path."
+      },
+      "real_provider_downloads_path_probe": {
+        "status": "pass",
+        "path": "docs/verification/browser-files-v1-downloads-path-probe-v1.json",
+        "sha256": "5134fc95ab023201281dd6d7c4fc71e67fc989838c7933c1a3fc6bcdef0a29ac",
+        "scope": "Real fixed Camoufox/Playwright 1.60 public API probe: a 10 MiB+1 download in task-owned downloads_path was canceled and deleted at 10485761 bytes with zero residual entries. This is provider/API evidence supporting the packaged-driver gate, not a WebEnvoy MCP or Agent result."
+      }
+    },
+    "component_equivalence": {
+      "current_47d": {
+        "source_commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+        "source_tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+        "component_trees": {
+          "core": "d6dea3aeca1b88335fc86603a64bea6bf3aa9376",
+          "harbor": "388ade70a0892feab88e2ea70ef485feb4158bbf"
+        },
+        "source_driver_blob": "24c9486c6804049c6020f82135a5ff5b001d8626",
+        "packaged_driver_sha256": "351ea13b5d665ff498de39a32b72261e00cc03b31d9ebbae16e84c645e2e71fc"
+      },
+      "620e_installed_reference": {
+        "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-install-620e42d.HqQgpGtfoq/WebEnvoy-523-620e42d.app",
+        "source_commit": "620e42d3f5f9bd797fdc8aeb7861e390570c35f9",
+        "source_tree": "da9894fd61b189e6d75e3bca9ce339b15be75451",
+        "component_trees": {
+          "core": "d6dea3aeca1b88335fc86603a64bea6bf3aa9376",
+          "harbor": "388ade70a0892feab88e2ea70ef485feb4158bbf"
+        },
+        "source_driver_blob": "24c9486c6804049c6020f82135a5ff5b001d8626",
+        "packaged_driver_sha256": "351ea13b5d665ff498de39a32b72261e00cc03b31d9ebbae16e84c645e2e71fc",
+        "installation_sha256": "440942b2994b555a752b5f834f9388e2f1542cb11744f9804e79b083b0699c9f",
+        "evidence_files": [
+          {"role": "installed_runtime_persistence_and_grant_revoke", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/persistence-runtime-evidence.json", "sha256": "6483401a74ad8641047e4ef0f06952fa883faf303efbe60cb98a3a9c0f84dba8"},
+          {"role": "installed_response_drop_no_replay_and_owner_boundaries", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/deterministic-resume-evidence.json", "sha256": "1bb4bdf63a030cdf76256426b1bb944e578d50417a8a659de6b1918cea58ef63"},
+          {"role": "installed_upload_drop_diagnosis", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/upload-diagnosis.json", "sha256": "71a43db8e82abd966dcead0f6084f2b16ea177bcee82d0911ad267ee58f9359f"}
+        ],
+        "reuse_rule": "Only the Harbor component and exact packaged driver content are used for applicability. The full 620e source identity is not relabeled as 47d; current 47d manifest, packaged focused tests, and live Agent readback remain separate evidence."
+      },
+      "historical_v4_excluded": {
+        "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/WebEnvoy 523 Formal v4.app",
+        "source_commit": "b2d30b23cd78c0ac355d1b3cf79eadedd87239c3",
+        "source_tree": "bd75fe0453e6b9c17a6eeb397c94a0045cdfe27d",
+        "component_trees": {
+          "core": "d6dea3aeca1b88335fc86603a64bea6bf3aa9376",
+          "harbor": "8acc0bdee6845296ceae19193c96ea331d759c6e"
+        },
+        "installation_sha256": "e8edc50ac09fe42bc10a429d393b20c100309be2cf3fafaa5c31215d819a95c7",
+        "evidence_files": [
+          {"role": "historical_response_drop_and_owner_boundary_run", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee4"},
+          {"role": "historical_persistence_and_revoke_run", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b"}
+        ],
+        "reuse": "historical_only",
+        "reason": "These files are valid historical observations and failure diagnosis, but their install manifests identify b2d30b23/tree bd75fe and Harbor 8acc0b; they are not f0, 620e, or current 47d evidence."
+      }
+    },
+    "evidence_files": [
+      {"role": "offline_response_shapes_and_unique_key_selftest", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-selftest-evidence.json", "sha256": "826add95d937ae193114ec51cecd3ec7bc525d607cdf4878a01e637319e37587"},
+      {"role": "handoff_slice", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/handoff-slice-v4-evidence.json", "sha256": "a1e3018289f465ce91714d15110408d4565ca6939a21ec7ef9d67fab4ae1f8c1"},
+      {"role": "historical_transport_drop_continuation_and_owner_boundaries_b2d", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee4", "tested_source_commit": "b2d30b23cd78c0ac355d1b3cf79eadedd87239c3"},
+      {"role": "historical_context_runtime_restart_persistence_and_grant_revoke_b2d", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b", "tested_source_commit": "b2d30b23cd78c0ac355d1b3cf79eadedd87239c3"}
+    ]
+  },
+  "first_unexpected": {
+    "classification": "diagnosed_test_harness_or_provider_scheduling_observation",
+    "summary": "External metrics polling did not advance the throttled Page event loop; formal instance.read/snapshot then advanced the existing upload event without replaying the upload.",
+    "upload_replayed": false,
+    "evidence_files": [
+      {"role": "bounded_120s_timeout", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-fifth-upload-metrics-timeout.json", "sha256": "e50267067c0abcbcb5c51bbacfafb49f6304586297fb433fa928c1719166d922"},
+      {"role": "read_snapshot_diagnosis_and_existing_upload_receipt", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/diagnose-upload-drop-v4-evidence.json", "sha256": "741f6e3e8c9f577faf38ca57c294f7b3415fc56e256f97134b318a5cd279572c"}
+    ]
+  },
+  "grant_cleanup": {
+    "status": "pass",
+    "final_originfix_grants_revoked": [
+      "grant:b3cbd33e-553f-49ee-aa77-c9bd3c2373af",
+      "grant:17ab0555-f6e9-4e01-a0df-1a378b31564f",
+      "grant:784402b9-eb34-4159-8e01-3ef94d8a613b"
+    ],
+    "final_originfix_principals_revoked": [
+      "principal:b6f98790-bd9e-455a-a124-aa69cec038a2",
+      "principal:53f5134c-06e7-4426-bdd4-ae8e02287c10"
+    ],
+    "revoke_readback": {
+      "path": "docs/verification/browser-files-v1-originfix-owner-readback-v1.json",
+      "sha256": "c683e2f8a2f16664b740c9aaaaec84c55ba20556b83f2a595f30be674d177b73",
+      "active_after": []
+    },
+    "current_readback": {"active_grants": 0, "active_principals": 0, "active_connections": 0, "revoked_grants": 3, "revoked_principals": 2, "revoked_connections": 7},
+    "active_after": [],
+    "runtime_stop": "owner CLI stop for current originfix runtime; controlled site stopped by task-owned process; unrelated #418 Electron process untouched"
+  },
+  "verification_commands": [
+    {"command": "pnpm --filter @webenvoy/harbor build", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/harbor typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/harbor test", "result": "pass", "notes": "339 tests: 338 passed, 1 Windows-only skipped, 0 failed"},
+    {"command": "node --test services/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js", "result": "pass", "notes": "13 passed, 0 failed"},
+    {"command": "node --test --test-concurrency=1 <installed-app>/Contents/Resources/app/dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js", "result": "pass", "notes": "Current 47d packaged driver: 13 passed, 0 failed, 0 skipped; covers scope narrowing, exact ElementHandle replacement, wrong/multiple/late download attribution, bounded temp/oversize cleanup, and timeout"},
+    {"command": "fixed-provider Playwright 1.60 public downloads_path oversize probe", "result": "pass", "notes": "10 MiB+1 real browser download crossed the bounded directory threshold, public Download.cancel/delete ran, and the task-owned directory was empty before/after context close; summary hash is recorded in docs/verification/browser-files-v1-downloads-path-probe-v1.json"},
+    {"command": "pnpm typecheck", "result": "pass"},
+    {"command": "pnpm build", "result": "pass"},
+    {"command": "pnpm lint", "result": "pass"},
+    {"command": "pnpm conformance", "result": "pass"},
+    {"command": "make py-compile", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/app typecheck", "result": "pass"},
+    {"command": "pnpm --filter @webenvoy/app smoke:packaged:runtime", "result": "pass", "notes": "Packaged Core/Harbor health, owner bridge, catalog including file.upload/file.download, fail-closed first-turn boundary, and 720px layout"},
+    {"command": "pnpm --filter @webenvoy/app smoke:packaged:readonly", "result": "pass"},
+    {"command": "node --test apps/desktop/agent-entry/client.test.mjs", "result": "pass", "notes": "3 passed; asserts installed MCP tools/list start-origin guidance and SKILL exposure"},
+    {"command": "node --test apps/desktop/agent-entry/installation.test.mjs", "result": "pass", "notes": "7 passed"},
+    {"command": "jq empty docs/verification/browser-files-v1-installed-live-v1.json docs/verification/browser-files-v1-originfix-owner-readback-v1.json", "result": "pass"},
+    {"command": "git diff --check", "result": "pass"}
+  ],
+  "safety_boundary": {
+    "real_account": "not_used",
+    "daily_profile": "not_used",
+    "production_page": "not_opened",
+    "external_business_write": "not_performed",
+    "credentials_cookies_tokens_raw_dom_har": "not_collected",
+    "release_deploy_signing": "not_run"
+  }
+}

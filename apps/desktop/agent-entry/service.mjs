@@ -32,6 +32,8 @@ const server = createServer(async (req, res) => {
     if (!state.ready) return send(res, 503, { ok: false, error: { code: state.error ?? 'runtime_starting' } });
     const ownerRoute = (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
       (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
+      (req.method === 'GET' && (req.url === '/owner/files' || req.url.startsWith('/owner/files?'))) ||
+      (req.method === 'POST' && ['/owner/files/import', '/owner/files/export', '/owner/files/revoke', '/owner/files/delete'].includes(req.url)) ||
       (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
       ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
       (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/profile-policies'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url)));

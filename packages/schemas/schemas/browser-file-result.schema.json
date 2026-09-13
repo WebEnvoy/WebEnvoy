@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/browser-file-result.v1.schema.json",
+  "title": "WebEnvoy Managed Browser File Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-webenvoy": {
+    "owner": "Harbor material owner and Core Run projection",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.browser-file-result/v1",
+    "compatibility_boundary": "Only bounded summaries and opaque runtime material references cross the Core/Plugin boundary. Provider paths, file bodies, raw network data, and business-commit claims remain private.",
+    "source_adrs": [
+      "docs/adr/0012-runtime-capability-plane-and-plugin-first.md",
+      "docs/specs/browser-files-v1.md"
+    ],
+    "field_owners": {
+      "status": "Core/Harbor receipt",
+      "dispatch_state": "Core/Harbor receipt",
+      "operation_ref": "Core Run and Harbor receipt",
+      "page": "Harbor public Page projection",
+      "upload": "Harbor managed material owner",
+      "download": "Harbor managed material owner",
+      "business_commit": "Harbor evidence boundary; never asserted by this slice"
+    }
+  },
+  "required": ["schema_version", "status", "dispatch_state", "operation", "operation_ref", "runtime_session_ref"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.browser-file-result/v1" },
+    "status": { "enum": ["completed", "unavailable", "unknown_outcome"] },
+    "dispatch_state": { "enum": ["not_dispatched", "dispatched"] },
+    "operation": { "enum": ["file.upload", "file.download"] },
+    "operation_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "runtime_session_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "profile_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "page_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "page_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "document_generation": { "type": "integer", "minimum": 1 },
+    "observation_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "target_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "failure_class": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "browser_delivery": { "const": "completed" },
+    "page_receipt": { "enum": ["observed", "unknown"] },
+    "page_processing": { "enum": ["observed", "unknown"] },
+    "business_commit": { "enum": ["not_observed", "unknown"] },
+    "page": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "upload": { "$ref": "#/$defs/material" },
+    "download": { "$ref": "#/$defs/material" },
+    "download_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["page_url", "url", "byte_length", "sha256"],
+      "properties": {
+        "page_url": { "type": "string", "format": "uri" },
+        "url": { "type": "string", "format": "uri" },
+        "byte_length": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  },
+  "$defs": {
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_ref", "source", "status", "display_name", "mime_type", "detected_mime_type", "byte_length", "sha256", "created_at", "expires_at"],
+      "properties": {
+        "file_ref": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$" },
+        "source": { "enum": ["owner_import", "browser_download"] },
+        "status": { "enum": ["available", "revoked", "expired", "deleted"] },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "mime_type": { "enum": ["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"] },
+        "detected_mime_type": { "enum": ["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"] },
+        "byte_length": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

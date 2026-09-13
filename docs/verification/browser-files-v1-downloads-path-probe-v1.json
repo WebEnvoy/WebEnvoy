@@ -1,0 +1,41 @@
+{
+  "schema_version": "webenvoy.browser-files-downloads-path-probe/v1",
+  "work_item": 523,
+  "recorded_at": "2026-09-13T01:52:51Z",
+  "status": "pass",
+  "scope": "Fixed-provider public API qualification supporting the installed driver evidence; this is not a WebEnvoy MCP or live Agent result.",
+  "provider": {
+    "source": "official_release",
+    "camoufox": "0.5.6",
+    "browser": "152.0.4-beta.30",
+    "playwright": "1.60.0",
+    "browser_zip_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+    "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+  },
+  "api": {
+    "entry": "playwright.sync_api.sync_playwright",
+    "launch": "firefox.launch_persistent_context",
+    "downloads_path": "task-owned temporary directory",
+    "download_controls": ["Download.url", "Download.suggested_filename", "Download.cancel", "Download.delete"]
+  },
+  "controlled_transfer": {
+    "request_count": 1,
+    "payload_bytes": 10485761,
+    "server_bytes_sent": 10485761,
+    "success_limit_bytes": 10485760,
+    "download_url": "http://127.0.0.1:57428/oversize.csv",
+    "download_suggested_filename": "oversize.csv",
+    "monitor": {
+      "threshold_bytes": 10485761,
+      "max_bytes": 10485761,
+      "cancel_called": true,
+      "elapsed_seconds": 4.487
+    },
+    "cleanup": {
+      "download_delete_called": true,
+      "downloads_path_entries_before_context_close": [],
+      "downloads_path_entries_after_context_close": []
+    }
+  },
+  "result": "A real fixed Camoufox/Playwright download exceeded 10 MiB in the native downloads_path, was canceled with the public Download API, and left no task-owned temporary artifact. The installed 47d packaged driver test separately proves the same monitor/cancel/cleanup path without treating this provider probe as product evidence."
+}

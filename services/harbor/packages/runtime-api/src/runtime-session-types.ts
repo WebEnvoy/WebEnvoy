@@ -237,6 +237,56 @@ export interface LocalProviderPageController {
   navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
 }
 
+/** Harbor-only File operation input. File paths are resolved by Harbor and are
+ * never accepted from the Agent/Core public operation payload. */
+export interface LocalProviderFileOperationInput {
+  operation: "upload" | "download";
+  provider_page_ref: string;
+  expected_origin: string;
+  authorized_origins: readonly string[];
+  target_ref: string;
+  source_path?: string;
+  staging_path?: string;
+  timeout_ms?: number;
+}
+
+export type LocalProviderFileOperationResult =
+  | {
+      status: "completed";
+      dispatch_state: "dispatched";
+      operation: "upload" | "download";
+      page: LocalProviderPageFacts;
+      browser_delivery: "completed";
+      page_receipt: "observed" | "unknown";
+      page_processing: "observed" | "unknown";
+      business_commit: "not_observed";
+      download?: {
+        page_url: string;
+        url: string;
+        suggested_filename: string;
+        byte_length: number;
+        sha256: string;
+        staging_path: string;
+      };
+    }
+  | {
+      status: "unavailable" | "unknown_outcome";
+      dispatch_state: "not_dispatched" | "dispatched";
+      operation: "upload" | "download";
+      failure_class: string;
+      page?: LocalProviderPageFacts;
+    };
+
+export type LocalProviderFileOperation = (input: LocalProviderFileOperationInput) => Promise<LocalProviderFileOperationResult>;
+const trustedFileOperations = new WeakSet<LocalProviderFileOperation>();
+export function trustLocalProviderFileOperation(operation: LocalProviderFileOperation): LocalProviderFileOperation {
+  trustedFileOperations.add(operation);
+  return operation;
+}
+export function isTrustedLocalProviderFileOperation(operation: LocalProviderFileOperation | undefined): operation is LocalProviderFileOperation {
+  return operation !== undefined && trustedFileOperations.has(operation);
+}
+
 export type AllowlistedReadOperationSite = "xiaohongshu" | "boss";
 export type AllowlistedReadOperationId = "xhs_search_notes" | "boss_job_search" | "xhs_read_note_detail" | "boss_read_job_detail";
 
@@ -791,6 +841,7 @@ export type LocalProviderLaunchResult =
       probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
       probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
       executeMediaAction?: (input: LocalProviderMediaActionInput) => Promise<LocalProviderMediaActionResult>;
+      executeFileOperation?: LocalProviderFileOperation;
       captureScreenshot: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
       close: () => Promise<void>;
     }

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
-import { ManagedAccessError, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
+import { ManagedAccessError, managedFileOperations, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
 import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
@@ -15,7 +15,7 @@ import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
-  page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
+  page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; file_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isPageMutation = (operation: string) => (managedPageOperations as readonly string[]).includes(operation) && operation !== "page.list";
 const isObservation = (operation: string) => ["instance.observe", "instance.read", "instance.snapshot", "instance.wait"].includes(operation);
@@ -28,6 +28,9 @@ class InteractionFailure extends ManagedAccessError {
 }
 class PageFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_page_outcome_unknown"); }
+}
+class FileFailure extends ManagedAccessError {
+  constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_file_outcome_unknown"); }
 }
 class CreationReceiptFailure extends ManagedAccessError {}
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -51,12 +54,12 @@ function configuration(value: unknown): EnvironmentConfiguration {
 }
 function parse(value: unknown): Request {
   const input = object(value);
-  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref", "provider_id"];
+  const allowed = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope", "profile_ref", "origin", "template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "file_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref", "provider_id"];
   if (Object.keys(input).some(key => !allowed.includes(key))) return fail("managed_browser_invalid_input");
   text(input.idempotency_key);
   if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
   if (input.provider_id !== undefined && !["cloakbrowser", "chrome_official", "camoufox"].includes(String(input.provider_id))) return fail("managed_browser_invalid_input");
-  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "cursor", "target_ref"]) if (input[key] !== undefined) text(input[key]);
+  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "cursor", "target_ref", "file_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return fail("managed_browser_invalid_input");
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
@@ -69,7 +72,17 @@ function parse(value: unknown): Request {
     if (["instance.navigate", "page.navigate", "page.open"].includes(String(input.operation))) text(input.url);
     if (input.operation === "instance.diagnostics" && input.url !== undefined) return fail("managed_browser_invalid_input");
   }
-  if ((managedPageOperations as readonly string[]).includes(String(input.operation))) {
+  if ((managedFileOperations as readonly string[]).includes(String(input.operation))) {
+    const operation = String(input.operation);
+    const fields = operation === "file.upload" ? ["page_ref", "observation_ref", "target_ref", "file_ref"] : ["page_ref", "observation_ref", "target_ref"];
+    const all = ["page_ref", "observation_ref", "target_ref", "file_ref"];
+    if (all.some(key => input[key] !== undefined && !fields.includes(key)) || !input.runtime_session_ref || !input.page_ref || !input.observation_ref || !input.target_ref || !input.origin ||
+      (operation === "file.upload" ? typeof input.file_ref !== "string" : input.file_ref !== undefined) || input.url !== undefined || input.text !== undefined || input.key !== undefined || input.delta_y !== undefined || input.wait_for !== undefined || input.timeout_ms !== undefined || input.page_id === undefined) return fail("managed_browser_invalid_input");
+    text(input.runtime_session_ref); text(input.page_ref); text(input.observation_ref); text(input.target_ref); text(input.origin); text(input.page_id);
+    if (input.document_generation === undefined || !Number.isSafeInteger(input.document_generation) || Number(input.document_generation) < 1) return fail("managed_browser_invalid_input");
+    if (operation === "file.upload") text(input.file_ref);
+    if (input.cursor !== undefined || input.limit !== undefined || input.configuration !== undefined || input.backup_ref !== undefined || input.operation_ref !== undefined || input.provider_id !== undefined || input.template_ref !== undefined || input.account_ref !== undefined || input.account_system_ref !== undefined) return fail("managed_browser_invalid_input");
+  } else if ((managedPageOperations as readonly string[]).includes(String(input.operation))) {
     const operation = String(input.operation);
     if (!["page.list", "page.open"].includes(operation) && input.page_id === undefined && input.page_ref === undefined) return fail("managed_browser_invalid_input");
     if (["page.open", "page.navigate"].includes(operation)) text(input.url);
@@ -115,7 +128,8 @@ function parse(value: unknown): Request {
   return input as Request;
 }
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...access } = input;
+  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, file_ref: _file, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...access } = input;
+  if (managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) access.file_refs = _file === undefined ? [] : [_file];
   return access;
 }
 function publicProfile(value: unknown): ObjectValue {
@@ -150,7 +164,7 @@ export function createManagedBrowserService(options: {
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-operation-locks");
-  async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page"): Promise<ObjectValue> {
+  async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page" | "file"): Promise<ObjectValue> {
     const result = await fetch(new URL(path, options.harborBaseUrl), { method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(70_000) });
@@ -176,7 +190,7 @@ export function createManagedBrowserService(options: {
     const proof = matchHarborBusinessOperationOwner(catalog, policyOperation, {
       schema_version: "webenvoy.harbor-resource-match.v0", match_ref: `resource-match:${version.slice(0, 32)}`,
       match_version: `sha256:${digest(JSON.stringify({ catalog: version, profile_ref: input.profile_ref, origin: input.origin, policy: access.profile_policy }))}`,
-      matched_requirement_refs: preference ? ["harbor://browser-provider-preference"] : ["harbor://managed-profile", ...(controlled ? ["harbor://controlled-page"] : [])]
+      matched_requirement_refs: preference ? ["harbor://browser-provider-preference"] : ["harbor://managed-profile", ...(controlled || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? ["harbor://controlled-page"] : []), ...(managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? ["harbor://managed-file"] : [])]
     });
     if (!proof) return fail("execution_policy_owner_declaration_invalid");
     const evaluation = evaluateExecutionPolicy({ caller: "agent", evaluated_at: new Date().toISOString(),
@@ -304,6 +318,31 @@ export function createManagedBrowserService(options: {
       if (result.status !== "completed") throw new PageFailure(result);
       return result;
     }
+    if ((managedFileOperations as readonly string[]).includes(input.operation)) {
+      const fileAccess = await acquireControlLease();
+      const run = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
+      const result = await harbor(`/runtime/sessions/${ref}/files`, {
+        operation: input.operation,
+        operation_ref: runId,
+        idempotency_key: runId,
+        holder_ref: holder,
+        principal_id: fileAccess.principal.principal_id,
+        profile_ref: input.profile_ref!,
+        expected_origin: input.origin!,
+        authorized_origins: fileAccess.authorized_origins,
+        page_id: input.page_id!,
+        page_ref: input.page_ref!,
+        document_generation: input.document_generation!,
+        observation_ref: input.observation_ref!,
+        target_ref: input.target_ref!,
+        ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref }),
+        ...(fileAccess.grant.file_scope === undefined ? {} : { max_file_bytes: fileAccess.grant.file_scope.max_file_bytes, allowed_mime_types: fileAccess.grant.file_scope.allowed_mime_types }),
+        ...(input.timeout_ms === undefined ? {} : { timeout_ms: input.timeout_ms })
+      }, "file");
+      if (result.status !== "completed") throw new FileFailure(result);
+      return result;
+    }
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
       const diagnosticsAccess = await check();
@@ -384,21 +423,22 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) ? {
-            ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { runtime_session_ref: input.runtime_session_ref } : {}),
+          ...(isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
+            ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { runtime_session_ref: input.runtime_session_ref } : {}),
             profile_ref: input.profile_ref, origin: input.origin,
-            ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { dispatch_state: "not_dispatched" } : {})
+            ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: "not_dispatched" } : {}),
+            ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref })
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation)) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: (["profile.create", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
-          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) || isPageMutation(input.operation) ? { dispatch_state: result.dispatch_state } : {}), result } });
+          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: result.dispatch_state } : {}), result } });
         } catch (error) {
           const current = (await store.getRunRecord(runId))!;
-          const receipt = error instanceof InteractionFailure || error instanceof PageFailure ? error.receipt : undefined;
-          const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation);
+          const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure ? error.receipt : undefined;
+          const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]);
           const known = dispatchAware
             ? (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched"
             : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown" && !(error instanceof CreationReceiptFailure);
@@ -488,6 +528,25 @@ export function createManagedBrowserService(options: {
             await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt,
               ...(receipt.status === "completed" ? { reconciliation: "completed" } : receipt.dispatch_state === "not_dispatched" ? { reconciliation: "not_dispatched" } : {}) } });
           } catch { /* Missing Runtime receipt never proves the original Page action did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && managedFileOperations.includes(String(run.public_result_summary?.operation) as typeof managedFileOperations[number]) && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.profile_ref))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.status === "succeeded" || current.public_result_summary?.reconciliation) return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            // Read the durable Harbor receipt only; a missing/unknown receipt is
+            // never evidence that an upload or download may safely be replayed.
+            const receipt = await harbor(`/runtime/managed-files/${encodeURIComponent(runId)}`, undefined, "file");
+            if (receipt.operation_ref !== runId || receipt.runtime_session_ref !== current.public_result_summary?.runtime_session_ref) throw new Error("receipt_mismatch");
+            await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt,
+              ...(receipt.status === "completed" ? { reconciliation: "completed" } : receipt.dispatch_state === "not_dispatched" ? { reconciliation: "not_dispatched" } : {}) } });
+          } catch { /* Missing Runtime receipt never proves the original file operation did not occur. */ }
           return response((await store.getRunRecord(runId))!);
         });
       }

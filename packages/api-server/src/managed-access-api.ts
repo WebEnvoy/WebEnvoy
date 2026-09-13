@@ -9,6 +9,13 @@ export type ManagedAccessApiOptions = {
     Partial<Pick<ReturnType<typeof createManagedBrowserService>, "getManagementPolicy" | "putManagementPolicy">>;
   managedSkillService?: Pick<ReturnType<typeof createFileSkillLibraryService>, "submit" | "query">;
   managedRecoveryService?: Pick<ReturnType<typeof createManagedRecoveryService>, "inspect" | "backup" | "plan" | "apply" | "status" | "request">;
+  managedFileService?: {
+    importFile(input: Record<string, unknown>): Promise<unknown>;
+    inspect(fileRef?: string): Promise<unknown>;
+    exportFile(input: Record<string, unknown>): Promise<unknown>;
+    revoke(fileRef: string): Promise<unknown>;
+    delete(fileRef: string): Promise<unknown>;
+  };
 };
 
 function send(response: ServerResponse, status: number, body: unknown) {
@@ -33,6 +40,9 @@ function agentRoute(path: string): boolean {
 }
 function ownerRecoveryRoute(path: string): boolean {
   return path === "/owner/recovery/inspect" || path === "/owner/recovery/backup" || path === "/owner/recovery/plan" || path === "/owner/recovery/apply" || /^\/owner\/recovery\/status\/[^/]+$/.test(path);
+}
+function ownerFileRoute(path: string): boolean {
+  return path === "/owner/files" || path === "/owner/files/import" || path === "/owner/files/export" || /^\/owner\/files\/(revoke|delete)$/.test(path);
 }
 
 /** Production enables the owner gate at startup; authenticated Agent credentials have only these dedicated routes. */
@@ -67,7 +77,7 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 export async function handleManagedAccessApi(request: IncomingMessage, response: ServerResponse, path: string, options: ManagedAccessApiOptions): Promise<boolean> {
-  if (!agentRoute(path) && !ownerRecoveryRoute(path) && path !== "/agent-access" && !path.startsWith("/agent-access/")) return false;
+  if (!agentRoute(path) && !ownerRecoveryRoute(path) && !ownerFileRoute(path) && path !== "/agent-access" && !path.startsWith("/agent-access/")) return false;
   const store = options.managedAccessStore;
   if (ownerRecoveryRoute(path)) {
     const service = options.managedRecoveryService;
@@ -83,6 +93,28 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     } catch (error) {
       const code = error instanceof ManagedAccessError ? error.code : error instanceof Error ? error.message : "recovery_unavailable";
       reject(response, code === "recovery_input_invalid" || code.endsWith("_invalid") ? 400 : 409, code); return true;
+    }
+  }
+  if (ownerFileRoute(path)) {
+    const service = options.managedFileService;
+    if (!service) { reject(response, 503, "managed_file_unavailable"); return true; }
+    try {
+      if (path === "/owner/files" && request.method === "GET") {
+        const requestUrl = new URL(request.url ?? "/owner/files", "http://127.0.0.1");
+        send(response, 200, { ok: true, files: await service.inspect(requestUrl.searchParams.get("file_ref") ?? undefined) }); return true;
+      }
+      if (path === "/owner/files/import" && request.method === "POST") { send(response, 201, { ok: true, file: await service.importFile(await body(request)) }); return true; }
+      if (path === "/owner/files/export" && request.method === "POST") { send(response, 200, { ok: true, file: await service.exportFile(await body(request)) }); return true; }
+      if ((path === "/owner/files/revoke" || path === "/owner/files/delete") && request.method === "POST") {
+        const input = await body(request);
+        if (Object.keys(input).length !== 1 || typeof input.file_ref !== "string") throw new ManagedAccessError("managed_access_invalid_input");
+        const file = path.endsWith("/revoke") ? await service.revoke(input.file_ref) : await service.delete(input.file_ref);
+        send(response, 200, { ok: true, file }); return true;
+      }
+      reject(response, 405, "managed_file_method_not_allowed"); return true;
+    } catch (error) {
+      const code = error instanceof ManagedAccessError ? error.code : error instanceof Error ? error.message : "managed_file_unavailable";
+      reject(response, code.endsWith("_invalid") ? 400 : code === "file_ref_unavailable" || code === "file_source_missing" || code === "file_expired" ? 404 : 409, code); return true;
     }
   }
   if (!store) { reject(response, 503, "managed_access_unavailable"); return true; }

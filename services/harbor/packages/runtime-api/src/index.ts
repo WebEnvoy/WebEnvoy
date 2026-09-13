@@ -1,5 +1,6 @@
 import { parseManagedInteractionRequest } from "./managed-interaction-request.js";
 import { createHash } from "node:crypto";
+import { dirname } from "node:path";
 import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
 import { boundedDiagnosticsInput, diagnosticsUnavailable, type RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
@@ -100,7 +101,8 @@ import {
   type ManagedPageFacts,
   type ManagedPageList,
   type ManagedPageOperationReceipt,
-  type ManagedPageUnavailable
+  type ManagedPageUnavailable,
+  type ManagedFileRuntimeInput
 } from "./runtime-session.js";
 import { isRuntimeDriverAvailable, isRuntimeSessionReadable } from "./runtime-session-types.js";
 import {
@@ -126,6 +128,18 @@ import {
   type ManagedProviderOperationInput
 } from "./managed-provider-lifecycle.js";
 import { ProfileRecoveryManager, type ProfileRecoveryApplyInput, type ProfileRecoveryPlanInput, type RecoveryProfileFacts } from "./profile-recovery.js";
+import {
+  HARBOR_BROWSER_FILE_RESULT_SCHEMA,
+  HARBOR_MANAGED_FILE_STORE_SCHEMA,
+  MANAGED_FILE_MAX_BYTES,
+  MANAGED_FILE_MIME_TYPES,
+  ManagedFileError,
+  createManagedFileStore,
+  type ManagedFileDownloadCommitInput,
+  type ManagedFileImportInput,
+  type ManagedFileRecord,
+  type ManagedFileStore
+} from "./managed-files.js";
 import {
   admitXhsPublishPrecheck,
   admitXhsPublishPathPrepare,
@@ -166,6 +180,26 @@ export const DEFAULT_IDENTITY_SITE_URLS = {
   xiaohongshu: "https://www.xiaohongshu.com/explore",
   boss: "https://www.zhipin.com/"
 } as const;
+
+function publicManagedFileSummary(record: ManagedFileRecord): Record<string, unknown> {
+  return {
+    file_ref: record.file_ref,
+    source: record.source,
+    status: record.status,
+    display_name: record.display_name,
+    mime_type: record.mime_type,
+    detected_mime_type: record.detected_mime_type,
+    byte_length: record.byte_length,
+    sha256: record.sha256,
+    created_at: record.created_at,
+    expires_at: record.expires_at
+  };
+}
+
+function mimeFromName(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".png") ? "image/png" : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".csv") ? "text/csv" : lower.endsWith(".txt") ? "text/plain" : undefined;
+}
 
 export { HARBOR_EVIDENCE_STATUS_FIXTURE_SCHEMA, HARBOR_PAGE_SCENE_REFS_SCHEMA } from "./page-scene.js";
 export { createIdentityConsistencyFacts, HARBOR_IDENTITY_CONSISTENCY_FACTS_SCHEMA } from "./identity-consistency.js";
@@ -226,6 +260,18 @@ export { HARBOR_ALLOWLISTED_READ_OPERATION_SCHEMA, LODE_262_ALLOWLIST_PIN, LODE_
 export { HARBOR_SITE_RESOURCE_FACTS_SCHEMA } from "./site-runtime-facts.js";
 export { HARBOR_PREVIEW_EVIDENCE_STATUS_FIXTURE_SCHEMA, HARBOR_REDACTED_PREVIEW_EXPORT_FIXTURE_SCHEMA, HARBOR_WRITE_PRECHECK_FACTS_SCHEMA } from "./runtime-fixtures.js";
 export { HARBOR_RUNTIME_FACTS_SCHEMA, HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA } from "./runtime-session.js";
+export {
+  HARBOR_BROWSER_FILE_RESULT_SCHEMA,
+  HARBOR_MANAGED_FILE_STORE_SCHEMA,
+  MANAGED_FILE_MAX_BYTES,
+  MANAGED_FILE_MAX_MATERIALS,
+  MANAGED_FILE_MAX_TOTAL_BYTES,
+  MANAGED_FILE_RETENTION_MS,
+  MANAGED_FILE_MIME_TYPES,
+  ManagedFileError,
+  createManagedFileStore
+} from "./managed-files.js";
+export type { ManagedFileDownloadCommitInput, ManagedFileImportInput, ManagedFileRecord, ManagedFileStore } from "./managed-files.js";
 export { HARBOR_PAGE_LIST_SCHEMA, HARBOR_PAGE_NAVIGATION_SCHEMA, MAX_PAGE_OBJECTS, MAX_PAGE_TOMBSTONES, PageRegistry } from "./page-navigation.js";
 export type { ManagedPageFacts, ManagedPageList, ManagedPageOperation, ManagedPageOperationInput, ManagedPageOperationReceipt, ManagedPageUnavailable, ManagedPageUnavailableClass } from "./page-navigation.js";
 export { HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA } from "./runtime-diagnostics.js";
@@ -482,6 +528,7 @@ export class HarborRuntime {
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
   private readonly browserProviderPreference: BrowserProviderPreferenceManager;
   private readonly runtimeSessions: RuntimeSessionStore;
+  private readonly managedFiles: ManagedFileStore;
   private readonly providerLifecycle: ManagedProviderLifecycle;
   private readonly profileRecovery: ProfileRecoveryManager;
 
@@ -491,6 +538,7 @@ export class HarborRuntime {
     providerLifecycleOptions: ManagedProviderLifecycleOptions = {}
   ) {
     const ownerOptions = withProfileBackedLocalMaterial(identityEnvironmentOptions);
+    this.managedFiles = createManagedFileStore({ persistence_path: identityEnvironmentOptions.persistence_path });
     this.browserProviderPreference = new BrowserProviderPreferenceManager({
       ...(identityEnvironmentOptions.persistence_path ? {
         persistence_path: resolveBrowserProviderPreferenceStorePath(identityEnvironmentOptions.persistence_path)
@@ -550,6 +598,152 @@ export class HarborRuntime {
 
   getManagedPageOperation(operation_ref: string) {
     return this.runtimeSessions.getManagedPageOperation(operation_ref);
+  }
+
+  getManagedFileOperation(operation_ref: string) {
+    return this.managedFiles.getOperation(operation_ref).then(result => result ?? this.runtimeSessions.getManagedFileOperation(operation_ref));
+  }
+
+  async importManagedFile(input: ManagedFileImportInput): Promise<ManagedFileRecord> {
+    return this.managedFiles.importFile(input);
+  }
+
+  async inspectManagedFiles(file_ref?: string): Promise<ManagedFileRecord[]> {
+    return this.managedFiles.inspect(file_ref);
+  }
+
+  async exportManagedFile(file_ref: string, destination_path: string): Promise<ManagedFileRecord> {
+    return this.managedFiles.exportFile({ file_ref, destination_path });
+  }
+
+  async revokeManagedFile(file_ref: string): Promise<ManagedFileRecord> {
+    return this.managedFiles.revoke(file_ref);
+  }
+
+  async deleteManagedFile(file_ref: string): Promise<ManagedFileRecord> {
+    return this.managedFiles.delete(file_ref);
+  }
+
+  async operateManagedFile(runtime_session_ref: string, value: unknown) {
+    const invalid = (failure_class: string) => ({
+      schema_version: HARBOR_BROWSER_FILE_RESULT_SCHEMA,
+      status: "unavailable" as const,
+      dispatch_state: "not_dispatched" as const,
+      operation: "file.upload" as const,
+      failure_class,
+      runtime_session_ref
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("file_operation_invalid");
+    const input = value as Record<string, unknown>;
+    const allowed = ["operation", "operation_ref", "idempotency_key", "holder_ref", "principal_id", "profile_ref", "expected_origin", "authorized_origins", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref", "max_file_bytes", "allowed_mime_types", "timeout_ms"];
+    if (Object.keys(input).some(key => !allowed.includes(key)) || !["file.upload", "file.download"].includes(String(input.operation)) ||
+      typeof input.operation_ref !== "string" || typeof input.idempotency_key !== "string" || typeof input.holder_ref !== "string" || typeof input.principal_id !== "string" || typeof input.profile_ref !== "string" ||
+      typeof input.expected_origin !== "string" || !Array.isArray(input.authorized_origins) || !input.authorized_origins.every(item => typeof item === "string") ||
+      typeof input.page_id !== "string" || typeof input.page_ref !== "string" || !Number.isSafeInteger(input.document_generation) || Number(input.document_generation) < 1 ||
+      typeof input.observation_ref !== "string" || typeof input.target_ref !== "string" ||
+      !Number.isSafeInteger(input.max_file_bytes) || Number(input.max_file_bytes) < 1 || Number(input.max_file_bytes) > MANAGED_FILE_MAX_BYTES ||
+      !Array.isArray(input.allowed_mime_types) || !input.allowed_mime_types.length || input.allowed_mime_types.some(item => typeof item !== "string" || !(MANAGED_FILE_MIME_TYPES as readonly string[]).includes(item)) || new Set(input.allowed_mime_types).size !== input.allowed_mime_types.length ||
+      (input.operation === "file.upload" ? typeof input.file_ref !== "string" : input.file_ref !== undefined)) return invalid("file_operation_invalid");
+    if (!boundedManagedRef(input.operation_ref) || !boundedManagedRef(input.idempotency_key) || !boundedManagedRef(input.holder_ref) || !boundedManagedRef(input.principal_id) || !boundedManagedRef(input.profile_ref) ||
+      !boundedManagedRef(input.page_id) || !boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref) || !boundedManagedRef(input.target_ref) ||
+      !managedPublicOrigin(input.expected_origin) || !(input.authorized_origins as string[]).includes(input.expected_origin)) return invalid("file_operation_invalid");
+    const operationRef = input.operation_ref;
+    const requestHash = createHash("sha256").update(JSON.stringify(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
+    const prior = await this.managedFiles.getOperation(operationRef);
+    if (prior !== undefined) return prior;
+    const operationLock = await this.managedFiles.acquireOperationLock(operationRef);
+    try {
+      const lockedPrior = await this.managedFiles.getOperation(operationRef);
+      if (lockedPrior !== undefined) return lockedPrior;
+      let material: (ManagedFileRecord & { path: string }) | undefined;
+      let stagingPath: string | undefined;
+      try {
+        if (input.operation === "file.upload") {
+          material = await this.managedFiles.getForUse(input.file_ref as string, input.profile_ref);
+          if (material.byte_length > (input.max_file_bytes as number)) return await this.managedFiles.putOperation(operationRef, requestHash, { schema_version: HARBOR_BROWSER_FILE_RESULT_SCHEMA, status: "unavailable", dispatch_state: "not_dispatched", operation: input.operation, operation_ref: operationRef, runtime_session_ref, failure_class: "file_limit_exceeded" });
+          if (!(input.allowed_mime_types as string[]).includes(material.mime_type)) return await this.managedFiles.putOperation(operationRef, requestHash, { schema_version: HARBOR_BROWSER_FILE_RESULT_SCHEMA, status: "unavailable", dispatch_state: "not_dispatched", operation: input.operation, operation_ref: operationRef, runtime_session_ref, failure_class: "file_type_unsupported" });
+        }
+        else stagingPath = await this.managedFiles.createDownloadStaging(operationRef);
+        const runtimeInput: ManagedFileRuntimeInput = {
+        operation: input.operation === "file.upload" ? "upload" : "download",
+        operation_ref: operationRef,
+        idempotency_key: input.idempotency_key,
+        holder_ref: input.holder_ref,
+        principal_id: input.principal_id,
+        profile_ref: input.profile_ref,
+        expected_origin: input.expected_origin,
+        authorized_origins: input.authorized_origins as string[],
+        page_id: input.page_id,
+        page_ref: input.page_ref,
+        document_generation: input.document_generation as number,
+        observation_ref: input.observation_ref,
+        target_ref: input.target_ref,
+        ...(material ? { source_path: material.path } : {}),
+        ...(stagingPath ? { staging_path: stagingPath } : {}),
+        ...(typeof input.timeout_ms === "number" ? { timeout_ms: input.timeout_ms } : {})
+        };
+        const providerResult = await this.runtimeSessions.operateManagedFile(runtime_session_ref, runtimeInput);
+        let result: Record<string, unknown> = {
+        schema_version: HARBOR_BROWSER_FILE_RESULT_SCHEMA,
+        status: providerResult.status,
+        dispatch_state: providerResult.dispatch_state,
+        operation: input.operation,
+        operation_ref: operationRef,
+        runtime_session_ref,
+        profile_ref: input.profile_ref,
+        page_id: input.page_id,
+        page_ref: input.page_ref,
+        document_generation: input.document_generation,
+        observation_ref: input.observation_ref,
+        target_ref: input.target_ref,
+        ...(providerResult.page ? { page: providerResult.page } : {}),
+        ...(providerResult.status === "completed" ? {
+          browser_delivery: providerResult.browser_delivery,
+          page_receipt: providerResult.page_receipt,
+          page_processing: providerResult.page_processing,
+          business_commit: providerResult.business_commit
+        } : {}),
+        ...(("failure_class" in providerResult && providerResult.failure_class) ? { failure_class: providerResult.failure_class } : {})
+        };
+        if (input.operation === "file.upload" && providerResult.status === "completed" && material) {
+          result.upload = publicManagedFileSummary(material);
+        } else if (input.operation === "file.download" && providerResult.status === "completed" && providerResult.download && stagingPath) {
+          try {
+            const committed = await this.managedFiles.commitDownloaded({
+            staging_path: stagingPath,
+            profile_ref: input.profile_ref,
+            operation_ref: operationRef,
+            principal_id: input.principal_id,
+            display_name: providerResult.download.suggested_filename,
+            max_file_bytes: input.max_file_bytes as number,
+            allowed_mime_types: input.allowed_mime_types as string[],
+            runtime_session_ref,
+            page_ref: input.page_ref,
+            page_id: input.page_id,
+            origin: input.expected_origin,
+            mime_type: mimeFromName(providerResult.download.suggested_filename)
+            });
+            result.download = publicManagedFileSummary(committed);
+            result.download_event = {
+              page_url: providerResult.download.page_url,
+              url: providerResult.download.url,
+              byte_length: providerResult.download.byte_length,
+              sha256: providerResult.download.sha256
+            };
+          } catch (error) {
+            result = { ...result, status: "unknown_outcome", dispatch_state: "dispatched", failure_class: error instanceof ManagedFileError ? error.code : "download_commit_failed" };
+          }
+        }
+        if (stagingPath && (!result.download || result.status !== "completed")) await import("node:fs/promises").then(fs => fs.rm(stagingPath!, { force: true })).catch(() => undefined);
+        return await this.managedFiles.putOperation(operationRef, requestHash, result);
+      } catch (error) {
+        if (stagingPath) await import("node:fs/promises").then(fs => fs.rm(stagingPath!, { force: true })).catch(() => undefined);
+        const result = { schema_version: HARBOR_BROWSER_FILE_RESULT_SCHEMA, status: "unavailable" as const, dispatch_state: "not_dispatched" as const, operation: input.operation, operation_ref: operationRef, runtime_session_ref, failure_class: error instanceof ManagedFileError ? error.code : "file_operation_unavailable" };
+        return this.managedFiles.putOperation(operationRef, requestHash, result);
+      }
+    } finally {
+      operationLock.release();
+    }
   }
 
   async operateManagedPage(runtime_session_ref: string, input: unknown): Promise<ManagedPageFacts | ManagedPageList | ManagedPageOperationReceipt | ManagedPageUnavailable> {
@@ -753,6 +947,7 @@ export class HarborRuntime {
 
   async close(): Promise<void> {
     await this.runtimeSessions.closeAllSessions();
+    await this.managedFiles.close();
     await this.providerLifecycle.close();
   }
 

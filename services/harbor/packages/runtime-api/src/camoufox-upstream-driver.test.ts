@@ -139,6 +139,9 @@ try:
     options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
     assert seen[0]["config"]["timezone"] == "UTC"
+    expected_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(executable_path))), "Resources", "camoufox") if sys.platform == "darwin" else os.path.realpath(executable_path)
+    assert seen[0]["executable_path"] == expected_config_path
+    assert options["executable_path"] == os.path.realpath(executable_path)
     assert context_options == {"timezone_id": "UTC"}
     assert bundle["context_options"] == {"timezone_id": "UTC"}
     assert module.decode_camoufox_config(options) == {"timezone": "UTC", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
@@ -162,21 +165,12 @@ try:
     assert "UTC" not in updated_options["env"]["CAMOU_CONFIG_1"]
     assert module.decode_camoufox_config(updated_options) == updated_bundle["config"]
     assert env_calls[-1][0]["timezone"] == "Europe/Paris"
-    assert env_calls[-1][1:] == ("mac", executable_path)
+    assert env_calls[-1][1:] == ("mac", os.path.realpath(executable_path))
     try:
         module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, profile)
         raise AssertionError("replay accepted an executable path different from the owner request")
     except ValueError:
         pass
-    fresh_mismatch = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-executable-mismatch-")
-    try:
-        try:
-            module.options_for({"headless": False, "browser_path": other_executable, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {}}, fresh_mismatch)
-            raise AssertionError("fresh launch accepted an executable path different from the owner request")
-        except ValueError:
-            pass
-    finally:
-        __import__("shutil").rmtree(fresh_mismatch)
     class EnvironmentPage:
         url = "https://example.test/"
         def is_closed(self): return False
@@ -239,6 +233,376 @@ finally:
     __import__("shutil").rmtree(profile)
     __import__("shutil").rmtree(executable_root)
 `;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("reads the Playwright 1.60 Download suggested_filename property", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import hashlib, importlib.util, os, sys, tempfile, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+body = b"id,status\\n1,ok\\n"
+class FakeDownload:
+    def __init__(self, page):
+        self.page = page
+        self.url = "https://example.test/receipt.csv"
+        self.suggested_filename = "receipt.csv"
+    def failure(self): return None
+    def save_as(self, path):
+        with open(path, "wb") as handle: handle.write(body)
+
+class DownloadExpectation:
+    def __init__(self, download): self.value = download
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+
+class FakeLink:
+    def __init__(self, page): self.page = page
+    def get_attribute(self, name):
+        assert name == "href"
+        return "/receipt.csv"
+    def evaluate(self, expression): assert expression == "e => Boolean(e.isConnected)"; return True
+    def click(self, timeout):
+        request = types.SimpleNamespace(frame=types.SimpleNamespace(page=self.page), url="https://example.test/receipt.csv", redirected_from=None)
+        for listener in self.page.listeners.get("request", []): listener(request)
+        for listener in self.page.listeners.get("download", []): listener(self.page.download)
+
+class FakePage:
+    url = "https://example.test/"
+    def __init__(self): self.download = FakeDownload(self); self.listeners = {}
+    def is_closed(self): return False
+    def title(self): return "Example"
+    def on(self, event, listener): self.listeners.setdefault(event, []).append(listener)
+    def remove_listener(self, event, listener): self.listeners.get(event, []).remove(listener)
+    def expect_download(self, timeout):
+        assert 1 <= timeout <= 1000
+        return DownloadExpectation(self.download)
+
+page = FakePage()
+state = module.PageState("page:1", page, ["https://example.test"])
+state.controls["control:0"] = ("link", "Download", "/receipt.csv", None, FakeLink(page))
+instance = object.__new__(module.Driver)
+instance.pages = {"page:1": state}
+instance.current = "page:1"
+instance.request = {"timeout_ms": 1000}
+staging = tempfile.mktemp(prefix="harbor-download-property-")
+try:
+    result = instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"], "target_ref": "control:0", "staging_path": staging, "timeout_ms": 1000})
+    assert result["status"] == "completed", result
+    assert result["download"]["suggested_filename"] == "receipt.csv"
+    assert result["download"]["sha256"] == hashlib.sha256(body).hexdigest()
+finally:
+    try: os.unlink(staging)
+    except FileNotFoundError: pass
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("narrows file route scope and fails closed on replaced snapshot targets", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, tempfile, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error; sync_api.Page = Page; sync_api.Route = Route; sync_api.TimeoutError = TimeoutError; sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api; sys.modules["playwright"] = playwright; sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+class Handle:
+    def __init__(self, name="Upload"): self.connected = True; self.calls = []; self.name = name
+    def evaluate(self, expression):
+        if expression == "e => Boolean(e.isConnected)": return self.connected
+        if expression == "e => e.files ? e.files.length : 0": return 0
+        if "getBoundingClientRect" in expression:
+            return {"role": "file", "name": self.name, "href": None, "enabled": True}
+        raise AssertionError(expression)
+    def is_visible(self): return self.connected
+    def evaluate_files(self): return 0
+    def set_input_files(self, path, timeout=None): self.calls.append((path, timeout))
+    def dispose(self): self.connected = False
+
+class PageImpl:
+    url = "https://a.test/"; main_frame = object()
+    def __init__(self):
+        self.first = Handle("First")
+        self.second = Handle("Second")
+        self.handles = [self.first, self.second]
+        self.reordered = False
+    def is_closed(self): return False
+    def title(self): return "Fixture"
+    def query_selector_all(self, selector):
+        values = list(self.handles)
+        if not self.reordered:
+            self.reordered = True
+            self.handles = list(reversed(self.handles))
+        return values
+    def evaluate(self, expression):
+        if "document.body" in expression: return ""
+        if "document.querySelectorAll" in expression: raise AssertionError("snapshot metadata must use the exact ElementHandle")
+        raise AssertionError(expression)
+
+class Request:
+    def __init__(self, page, url): self.frame = types.SimpleNamespace(page=page); self.url = url; self.redirected_from = None; self.method = "POST"; self.post_data = None
+class RouteImpl:
+    def __init__(self, request): self.request = request; self.aborted = None; self.fetch_called = False
+    def abort(self, reason): self.aborted = reason
+    def fetch(self, **kwargs): self.fetch_called = True; raise AssertionError("unauthorized route fetched")
+
+page = PageImpl(); instance = object.__new__(module.Driver); instance.pages = {}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0
+state = module.PageState("page:1", page, ["https://a.test", "https://b.test"]); instance.pages = {"page:1": state}
+snap = instance.snapshot(state); old_ref = snap["controls"][0]["target_ref"]
+assert [item["name"] for item in snap["controls"]] == ["First", "Second"], snap
+old = state.controls[old_ref][4]
+source = tempfile.mktemp(prefix="harbor-upload-target-"); open(source, "wb").write(b"x")
+try:
+    sent = instance.file_operation({"provider_page_ref": "page:1", "operation": "upload", "expected_origin": "https://a.test", "authorized_origins": ["https://a.test"], "target_ref": old_ref, "source_path": source, "timeout_ms": 1000})
+    assert sent["status"] == "completed", sent
+    assert state.origins == {"https://a.test"}
+    replacement = Handle(); page.handles = [replacement]; old.connected = False
+    stale = instance.file_operation({"provider_page_ref": "page:1", "operation": "upload", "expected_origin": "https://a.test", "authorized_origins": ["https://a.test"], "target_ref": old_ref, "source_path": source, "timeout_ms": 1000})
+    assert stale["status"] == "unavailable" and stale["dispatch_state"] == "not_dispatched", stale
+    assert replacement.calls == []
+    fresh = instance.snapshot(state); fresh_ref = fresh["controls"][0]["target_ref"]
+    delivered = instance.file_operation({"provider_page_ref": "page:1", "operation": "upload", "expected_origin": "https://a.test", "authorized_origins": ["https://a.test"], "target_ref": fresh_ref, "source_path": source, "timeout_ms": 1000})
+    assert delivered["status"] == "completed", delivered
+    route = RouteImpl(Request(page, "https://b.test/steal")); instance.route(route)
+    assert route.aborted == "blockedbyclient" and not route.fetch_called
+finally:
+    try: os.unlink(source)
+    except FileNotFoundError: pass
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("attributes downloads to one authorized request chain and bounds save cleanup", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, tempfile, time, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error; sync_api.Page = Page; sync_api.Route = Route; sync_api.TimeoutError = TimeoutError; sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api; sys.modules["playwright"] = playwright; sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+class Request:
+    def __init__(self, page, url): self.frame = types.SimpleNamespace(page=page); self.url = url; self.redirected_from = None; self.method = "GET"; self.post_data = None
+class Link:
+    def __init__(self, page, download, extras=()): self.page = page; self.download = download; self.extras = extras
+    def evaluate(self, expression): return True
+    def get_attribute(self, name): assert name == "href"; return "/expected.csv"
+    def click(self, timeout):
+        request = Request(self.page, "https://files.test/expected.csv")
+        for listener in self.page.listeners.get("request", []): listener(request)
+        for item in (self.download, *self.extras):
+            for listener in self.page.listeners.get("download", []): listener(item)
+class Download:
+    def __init__(self, page, url, body=b"id,status\\n1,ok\\n", delay=0, extra=None, temp_bytes=None): self.page = page; self.url = url; self.suggested_filename = "receipt.csv"; self.body = body; self.delay = delay; self.extra = extra; self.temp_bytes = temp_bytes; self.cancelled = 0; self.deleted = 0
+    def failure(self): return None
+    def save_as(self, path):
+        if self.extra is not None:
+            for listener in self.page.listeners.get("download", []): listener(self.extra)
+        if self.temp_bytes is not None:
+            with open(self.page.temp_path, "wb") as handle: handle.write(self.temp_bytes)
+        if self.delay: time.sleep(self.delay)
+        with open(path, "wb") as handle: handle.write(self.body)
+    def path(self): return getattr(self.page, "temp_path", None)
+    def cancel(self): self.cancelled += 1
+    def delete(self): self.deleted += 1
+class Expectation:
+    def __init__(self, value): self.value = value
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+class PageImpl:
+    url = "https://files.test/"; main_frame = object()
+    def __init__(self, download, extras=()): self.download = download; self.link = Link(self, download, extras); self.listeners = {}
+    def is_closed(self): return False
+    def title(self): return "Fixture"
+    def on(self, event, listener): self.listeners.setdefault(event, []).append(listener)
+    def remove_listener(self, event, listener): self.listeners.get(event, []).remove(listener)
+    def expect_download(self, timeout): return Expectation(self.download)
+def make(download, extras=()):
+    page = PageImpl(download, extras); download.page = page; [setattr(item, "page", page) for item in extras]
+    state = module.PageState("page:1", page, ["https://files.test"]); state.controls["target"] = ("link", "Download", "/expected.csv", None, page.link)
+    instance = object.__new__(module.Driver); instance.pages = {"page:1": state}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0
+    return instance, page
+def run(download, extras=(), timeout=1000, use_browser_temp=False):
+    instance, page = make(download, extras); staging = tempfile.mktemp(prefix="harbor-download-bound-")
+    temp_root = tempfile.mkdtemp(prefix="harbor-download-temp-") if use_browser_temp else None
+    if temp_root is not None:
+        instance.downloads_root = __import__("pathlib").Path(temp_root)
+        page.temp_path = os.path.join(temp_root, "download")
+    result = instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://files.test", "authorized_origins": ["https://files.test"], "target_ref": "target", "staging_path": staging, "timeout_ms": timeout})
+    assert not os.path.exists(staging)
+    if temp_root is not None:
+        assert not os.listdir(temp_root), (result, os.listdir(temp_root))
+        __import__("shutil").rmtree(temp_root)
+    return result, download, extras
+wrong, wrong_download, _ = run(Download(None, "https://files.test/unrelated.csv"))
+assert wrong["failure_class"] == "download_relation_unavailable" and wrong_download.cancelled == 1, wrong
+first = Download(None, "https://files.test/expected.csv"); second = Download(None, "https://files.test/expected.csv")
+multiple, first, extras = run(first, (second,))
+assert multiple["failure_class"] == "download_relation_unavailable" and first.cancelled == second.cancelled == 1, multiple
+oversize, oversized, _ = run(Download(None, "https://files.test/expected.csv", body=b"x" * (10 * 1024 * 1024 + 1)))
+assert oversize["failure_class"] == "file_limit_exceeded" and oversized.cancelled == 1, oversize
+timeout, slow, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2), timeout=20)
+assert timeout["failure_class"] == "timeout" and slow.cancelled == 1, timeout
+late = Download(None, "https://files.test/expected.csv")
+extra = Download(None, "https://files.test/expected.csv")
+late.extra = extra
+multiple_during_save, late, extras = run(late)
+assert multiple_during_save["failure_class"] == "download_relation_unavailable" and late.cancelled == extra.cancelled == 1, multiple_during_save
+temp_oversize, temp_download, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2, temp_bytes=b"x" * (10 * 1024 * 1024 + 1)), timeout=100, use_browser_temp=True)
+assert temp_oversize["failure_class"] == "file_limit_exceeded" and temp_download.cancelled == 1, temp_oversize
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("waits for the declared Page condition instead of returning success after a delay", () => {
+  const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const script = `
+import importlib.util, os, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+camoufox = types.ModuleType("camoufox")
+camoufox.__path__ = []
+utils = types.ModuleType("camoufox.utils")
+utils.launch_options = lambda **kwargs: {}
+utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
+camoufox.utils = utils
+sys.modules["camoufox"] = camoufox
+sys.modules["camoufox.utils"] = utils
+playwright = types.ModuleType("playwright")
+playwright.__path__ = []
+sync_api = types.ModuleType("playwright.sync_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+sync_api.Error = Error
+sync_api.Page = Page
+sync_api.Route = Route
+sync_api.TimeoutError = TimeoutError
+sync_api.sync_playwright = lambda: None
+playwright.sync_api = sync_api
+sys.modules["playwright"] = playwright
+sys.modules["playwright.sync_api"] = sync_api
+spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+class FakeBody:
+    def __init__(self, page): self.page = page
+    def inner_text(self, timeout=None): return self.page.text
+
+class FakeTarget:
+    def __init__(self, page): self.page = page
+    def is_visible(self): return True
+    def is_enabled(self): return self.page.enabled
+
+class FakePage:
+    url = "https://example.test/"
+    main_frame = object()
+    def __init__(self):
+        self.text = "ready"
+        self.enabled = False
+        self.ticks = 0
+        self.on_wait = None
+    def is_closed(self): return False
+    def title(self): return "Fixture"
+    def locator(self, selector):
+        assert selector == "body"
+        return FakeBody(self)
+    def get_by_role(self, role, name, exact):
+        assert (role, name, exact) == ("button", "Continue", True)
+        return FakeTarget(self)
+    def wait_for_timeout(self, milliseconds):
+        self.ticks += 1
+        if self.on_wait: self.on_wait(self)
+
+page = FakePage()
+state = module.PageState("page:1", page, ["https://example.test"])
+state.controls["control:0"] = ("button", "Continue", None, None)
+instance = object.__new__(module.Driver)
+instance.pages = {"page:1": state}
+instance.current = "page:1"
+instance.request = {"timeout_ms": 1000}
+
+base = {"provider_page_ref": "page:1", "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
+missing = instance.interact({**base, "action": "wait", "wait_for": "text", "text": "Processing", "timeout_ms": 100})
+assert missing["status"] == "unavailable", missing
+assert missing["dispatch_state"] == "not_dispatched", missing
+assert missing["failure_class"] == "wait_condition_timeout", missing
+
+page.ticks = 0
+page.on_wait = lambda current: setattr(current, "text", "Processing") if current.ticks >= 2 else None
+found = instance.interact({**base, "action": "wait", "wait_for": "text", "text": "Processing", "timeout_ms": 100})
+assert found["status"] == "completed", found
+assert found["dispatch_state"] == "dispatched", found
+
+page.on_wait = lambda current: setattr(current, "enabled", True) if current.ticks >= 2 else None
+page.ticks = 0
+enabled = instance.interact({**base, "action": "wait", "wait_for": "enabled", "target_ref": "control:0", "timeout_ms": 100})
+assert enabled["status"] == "completed", enabled
+
+page.on_wait = lambda current: instance.on_navigate(state, page.main_frame) if current.ticks == 2 else None
+page.ticks = 0
+changed = instance.interact({**base, "action": "wait", "wait_for": "page_changed", "timeout_ms": 100})
+assert changed["status"] == "completed", changed
+`
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
@@ -427,7 +791,7 @@ assert popup_state.origins == {"https://s1.test"}
 test("installs the persistent-context guard before the initial navigation and closes safely on setup failure", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
   const script = `
-import importlib.util, os, sys, types
+import importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
@@ -482,7 +846,7 @@ class FakeContext:
 
 class FakeBrowserType:
     def launch_persistent_context(self, **kwargs):
-        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers")))
+        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers"), kwargs.get("downloads_path")))
         return current_context
 
 class FakePlaywright:
@@ -495,16 +859,20 @@ class Factory:
 module.verify_runtime_pins = lambda request: "properties"
 module.options_for = lambda request, profile: ({"args": [], "env": {}, "executable_path": request["browser_path"], "firefox_user_prefs": {}, "headless": False}, {"identity_hash": "stable"}, False, {})
 module.sync_playwright = lambda: Factory()
-request = {"profile_dir": "/tmp/harbor-driver-guard", "browser_path": "/managed/camoufox", "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "url": "https://s1.test/start", "timeout_ms": 100}
+profile = tempfile.mkdtemp(prefix="harbor-driver-guard-")
+request = {"profile_dir": profile, "browser_path": "/managed/camoufox", "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "url": "https://s1.test/start", "timeout_ms": 100}
 current_context = FakeContext(FakePage())
 instance = module.Driver(request)
 launch_index = next(i for i, value in enumerate(events) if isinstance(value, tuple) and value[0] == "launch")
 route_index = events.index(("context.route", "**/*"))
 offline_index = events.index(("context.offline", False))
 goto_index = events.index("goto")
-assert events[launch_index] == ("launch", True, "block")
+assert events[launch_index][0:3] == ("launch", True, "block")
+assert isinstance(events[launch_index][3], str) and events[launch_index][3].startswith(profile)
+assert os.path.isdir(events[launch_index][3])
 assert launch_index < route_index < offline_index < goto_index
 instance.close()
+assert not os.path.exists(events[launch_index][3])
 
 events.clear()
 current_context = FakeContext(FakePage(), fail_online=True)
@@ -515,6 +883,7 @@ except RuntimeError:
     pass
 assert "context.close" in events
 assert "playwright.stop" in events
+__import__("shutil").rmtree(profile)
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",

@@ -148,6 +148,7 @@ import {
   createManagedRecoveryService,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
+  createHttpManagedFileOwnerClient,
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
   recoverInterruptedCoreTaskSessions
@@ -188,6 +189,9 @@ const harborRuntimeUrl = process.env.WEBENVOY_HARBOR_RUNTIME_URL;
 const harborRuntimeClient = harborRuntimeUrl
   ? createHttpHarborRuntimeClient({ baseUrl: harborRuntimeUrl })
   : undefined;
+const managedFileService = harborRuntimeUrl
+  ? createHttpManagedFileOwnerClient({ baseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+  : undefined;
 
 if (harborRuntimeClient) {
   await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
@@ -219,6 +223,7 @@ const server = createApiServer({
   managedSkillService,
   ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
   ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
+  ...(managedFileService === undefined ? {} : { managedFileService }),
   runRecordStore,
   authorizationDecisionStore,
   executionPolicyConfigStore,
