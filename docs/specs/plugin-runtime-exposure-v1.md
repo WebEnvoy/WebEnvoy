@@ -101,6 +101,13 @@ Core 只接受一个当前有效的 Principal/Connection/Grant。对浏览器 Pa
 
 既有 `webenvoy_operation` 的 browser/environment task scope 继续使用 `operations`、`profile_refs`、`origins`，其授权和 Web scope 不因 SKILL 工具改变。SKILL 请求不携带网页范围；同一个连接仍须先通过 `webenvoy_connect`，撤销/过期在每次新管理或 read 前重新检查。
 
+`origin` 是 operation-specific 的顶层输入，不由 `task_scope.origins` 代替。尤其
+`instance.start` 必须带一个与该 Profile、Grant 和 task scope 交集精确相等的
+顶层 `origin`；`url` 可省略（默认从 origin 启动），如提供则必须是同一 origin
+的 HTTP(S) URL。MCP envelope 为兼容不需要网页 origin 的 operation，仍将
+`origin` 声明为可选属性；调用方必须遵循上述 operation 合同，缺失时 Core 在
+派发前返回 `managed_access_origin_required`/`not_dispatched`。
+
 偏好 read/set/clear 同样要求单一有效 Principal、Connection、Grant 和 task scope 中的同名 operation；旧 Grant、Profile create、browser operation 或模板引用均不能推出偏好修改权。其资源 target 为 `provider_preference`，owner requirement 为 `harbor://browser-provider-preference`。
 
 `webenvoy_status`、bootstrap、合法 `connect`、Profile 管理和无网站 SKILL 的通用浏览器能力不得被可选 SKILL 清单缺失、内容损坏或不兼容阻断。未获授权的资产、修订和来源不能出现在 list、inspect、错误或结果中；错误不得泄露本地 data root、物化路径、凭据或正文。

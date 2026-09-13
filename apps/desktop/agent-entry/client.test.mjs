@@ -30,6 +30,31 @@ test('localRequest preserves UTF-8 when a socket response splits a code point', 
   }
 });
 
+test('MCP guidance exposes instance.start origin admission', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-schema-test-'));
+  const clientPath = join(dataDir, 'client.json');
+  let child;
+  try {
+    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
+    child = spawn(process.execPath, [join(root, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    const responsePromise = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.stdout.once('data', chunk => { try { resolve(JSON.parse(chunk.toString('utf8'))); } catch (error) { reject(error); } });
+    });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) + '\n');
+    const response = await responsePromise;
+    const operation = response.result.tools.find(tool => tool.name === 'webenvoy_operation');
+    assert.ok(operation);
+    assert.match(operation.description, /instance\.start requires the exact authorized origin as a top-level origin field/);
+    assert.equal(operation.inputSchema.required.includes('origin'), false);
+    const skill = await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8');
+    assert.match(skill, /`instance\.start` specifically requires the exact authorized origin in the top-level `origin` field/);
+  } finally {
+    if (child) { child.stdin.end(); await new Promise(resolve => child.once('exit', resolve)); }
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('MCP status omits private Camoufox artifact binding while preserving runtime status', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-status-test-'));
   const bundleRoot = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-bundle-test-'));
