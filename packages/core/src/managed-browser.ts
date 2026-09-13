@@ -33,6 +33,9 @@ class FileFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_file_outcome_unknown"); }
 }
 class CreationReceiptFailure extends ManagedAccessError {}
+function isDeterministicWaitTimeout(receipt: ObjectValue | undefined): boolean {
+  return receipt?.status === "unavailable" && receipt.dispatch_state === "dispatched" && receipt.failure_class === "wait_condition_timeout";
+}
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
 function object(value: unknown): ObjectValue {
@@ -439,11 +442,13 @@ export function createManagedBrowserService(options: {
           const current = (await store.getRunRecord(runId))!;
           const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure ? error.receipt : undefined;
           const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]);
+          const notDispatched = dispatchAware && (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched";
           const known = dispatchAware
-            ? (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched"
+            ? notDispatched ||
+              (error instanceof InteractionFailure && isDeterministicWaitTimeout(receipt))
             : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown" && !(error instanceof CreationReceiptFailure);
           if (dispatchAware) await store.updateRunRecord(runId, { public_result_summary: {
-            ...current.public_result_summary, dispatch_state: known ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
+            ...current.public_result_summary, dispatch_state: notDispatched ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
           } });
           await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
             failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : known ? "managed_browser_runtime_unavailable" : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
