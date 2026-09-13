@@ -1,0 +1,38 @@
+{
+  "schema": "webenvoy.runtime-continuity-verification/v1",
+  "status": "passed",
+  "date": "2026-09-14",
+  "issue": 526,
+  "platform": "macos-arm64",
+  "candidate": {
+    "commit": "7f842a56ef12438b822be52bda3720104ba1a0a9",
+    "tree": "91f598908af31fc5f15cf935e4f27525269923f4",
+    "asset_digest": "d37b5fd3d2e2bd8b1da64c4c702529fdc023f28124796ce112d0136417c38b42",
+    "provider": { "camoufox": "0.5.6", "browser": "152.0.4-beta.30", "playwright": "1.60.0" }
+  },
+  "g0": {
+    "idle": { "status": "passed", "sha256": "29678f47686a9eb5a7da1b99abcdedfc475b9e8985689cd6077e3e40821e3d6f", "quiet_ms": 10000, "work": 1, "completion": 1 },
+    "human": { "status": "passed", "class": "native_ui_automation_not_human", "native_sha256": "10656a5d614b4bb7d69674d59ac271fdfab4c686dc035c2796e1f7a921e27070", "control_sha256": "ea1bd4570b6161a92d0a7cfc9515865c6d92a4d7bd6f3ae2ee6cd009e68a3dc6" },
+    "control": {
+      "revoke": { "status": "passed", "sha256": "f3e2873ba5ad816b7b58f1427dc4ee1312f326d7107aac1cf97cfc27168fa00c", "observed_ms": 205.172166 },
+      "takeover": { "status": "passed", "sha256": "a8a18f0746040c31764eeff23351ae944fd0c8a7b9484afadb7b7e2d5e0660f2", "observed_ms": 3.307 },
+      "stop": { "status": "passed", "sha256": "4709c69f3f247ee2f1cb3b925b0949265f70da8b998f1086debd44d1f8074f50", "observed_ms": 96.59925 }
+    }
+  },
+  "regression": {
+    "p2_input_read": { "status": "passed", "sha256": "0f4cc4e21c8ca0ac3bf4d60b6f67280a9c163378959b1a84a8943d17f737c9be" },
+    "files": { "status": "passed", "sha256": "b98d9487b47d76f3c96f24eae26e0cfa9fe15e947ba4286989ecc71af70675f0", "uploads": 1, "downloads": 1, "input_sha256": "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3", "output_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715", "runtime_restart_replayed": false }
+  },
+  "real_agent": {
+    "status": "passed",
+    "thread_id": "01a09cc1-3197-73d1-bc47-0820614ba6c4",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low",
+    "quiet_sha256": "b0f40b25c3fdafa2732a8c48a834b2559eb373007bf7bdc681842bacaa99f97a",
+    "click_run_id": "managed-bdf44a4133d1099f4818919654c4d76689038781af593b97726653302c8a4eed",
+    "read_run_id": "managed-d47d216e87af19048e41ba810f5bd566eca046356b60df795df2b719c453fd22",
+    "visible_result": "completion-recorded",
+    "invalid_setup_continuations_without_browser_dispatch": 3,
+    "action_replayed": false
+  }
+}

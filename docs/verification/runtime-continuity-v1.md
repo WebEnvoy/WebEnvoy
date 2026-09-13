@@ -1,59 +1,80 @@
 # Runtime Continuity V1 verification
 
-状态：2026-09-14，#526 的确定性实现与合同证据；不替代正式安装、Provider live 或真实 Agent 验收。
+状态：2026-09-14，#526 的确定性、正式安装、固定原版与真实 Agent 验证已完成。
+本记录只证明列出的 macOS arm64 / Camoufox 组合与受控无账号页面；不外推真实账号、
+任意站点、其他 Provider/平台、真人体验或完整 Runtime。
 
 本记录覆盖官方 public Playwright async Driver 的 Runtime 连续性边界。所有
 Playwright 对象由同一个 owning asyncio event loop 使用；stdin reader 只在
-`asyncio.to_thread` 中读取字节，普通 Provider 操作仍在一个串行 command lock
-内执行，owner `close` 走独立 lifecycle consumer。
+`asyncio.to_thread` 中读取字节，普通 Provider 操作仍由一个 consumer 串行派发，
+owner `close` 走独立 lifecycle consumer。
 
 ## 已验证边界
 
-- 普通 JSONL 输入有界：单一 ordinary consumer 串行处理一个在途命令，缓冲
-  queue 为 `MAX_PENDING_COMMANDS - 1`（63），因此缓冲+在途总数严格不超过 64；
-  队列满时拒绝新的普通行并返回带原 `id` 的 error，reader 不会因普通队列满而
-  错过后续 close 或 EOF。
-- close 独立可达：close queue 为单项有界队列，不等待 ordinary consumer；它通过公开
-  `BrowserContext.close()` 中断仍在 Provider 中的 wait/file operation。未派发的
-  普通请求返回 `not_dispatched`，已进入 Provider 的 wait 超时返回
-  `status: unavailable`、`dispatch_state: dispatched`，不得重放。
-- EOF 先立关闭屏障：reader 发布 EOF sentinel 后，主 loop 先设置 closing、关闭
-  public Context，再等待 close consumer、ordinary consumer 和已派发任务，保留其
-  真实 JSONL 结果；不会在 sentinel 尚未入队时取消 reader。
-- 下载取消保持隔离：deadline/quota/owner close 先调用公开 `Download.cancel()`；
-  不取消在途 asyncio/Playwright task。取消或 action 未在 bounded grace 内收敛时，
-  再调用公开 Context close，保留 pending task、监听器和 task-owned 临时空间，
-  并以 `driver_closing` fence 拒绝复用，直到 deferred cleanup 收敛。
-- close 失败保持隔离：公开 `Context.close()` 或 `playwright.stop()` 的原始错误写入
-  sticky lifecycle state；失败的 Context/Playwright 资源留在 closing 槽位，后续
-  Driver/TypeScript owner stop 重复调用仍返回同一错误，不释放 ephemeral Profile。
-- Core handoff 关联：Runtime Session 在 mutating Provider operation 在途时先建立
-  handoff intent、递增 control generation 并拒绝新的 Agent input；passive wait
-  不制造伪造的 Provider clear hook。旧结果保持 `unknown_outcome`/
-  `dispatched`，交还后必须重新取得 fresh Page observation。
+- 普通 JSONL 输入有界：一个在途命令加 63 个缓冲项，总数不超过 64；队列满时按
+  原请求 ID 拒绝，reader 仍可接收 close/EOF。
+- 页面事件持续处理：正式 click 返回后 10 秒无 MCP/browser read、snapshot、wait、
+  diagnostics 或保活命令，页面的 1 秒 timer、同源 work response、DOM 更新和
+  completion 回执仍在窗口内各完成一次。
+- close/EOF 可独立生效：close 不排在普通业务队列尾部；EOF 先建立关闭屏障，再用
+  public `BrowserContext.close()` 收敛已派发调用。未派发请求保持 `not_dispatched`。
+- 结果分类保持因果：确定性的 `wait_condition_timeout` 是 `failed + dispatched`；
+  接管/停止改变控制代次的已派发等待是 `unknown_outcome + dispatched`。原 key query
+  只返回原 Run，不重放。
+- owner 控制建立新派发屏障：在强 T0（Driver receipt 已显示 wait dispatched，且原生
+  页面工作在同一 wait pending 时完成）后，撤权约 205 ms 生效并使新操作
+  `grant_unavailable/not_dispatched`；接管约 3 ms 生效并使新输入
+  `control_lock_conflict/not_dispatched`；stop 约 97 ms 关闭目标 Instance，后续操作
+  `session_missing/not_dispatched`。这些是观测值，不是新增 SLA。
+- 人工接管路径由已存在的原生 UI 自动化验证：helper 绑定确切 PID、固定原版 executable、
+  本任务 Profile 路径、窗口标题与 URL；10 秒内没有 Driver 命令，页面仍完成。该证据
+  是 native UI automation，不冒充真人。人工持有时 Agent 输入拒绝；交还后旧 target
+  拒绝，fresh observe 可继续同一 Page。
+- P1 控制未污染 P2：同一安装中的独立 P2 在最终候选上完成普通 `instance.input`、
+  `observe`、`read` 和值回读。
+- 文件路径受影响回归通过：标准 PNG 上传与普通 GET CSV 下载各一次；服务器 hash 分别为
+  `0a64b890…` 与 `c66edb8…`。Runtime stop/start 后原两个 Run 仍可 query，下载材料可由
+  owner inspect/export，两次 export 都是 15 bytes、`c66edb8…`，服务器计数仍为 1/1。
+- 下载取消保持隔离：deadline/quota/owner close 使用 public `Download.cancel()`；不把
+  asyncio task cancellation 当作浏览器动作取消。必要时 public Context close 建立
+  `driver_closing` fence，直到 task-owned cleanup 收敛。
+- close 失败保持隔离：public Context/Playwright stop 的原错误进入 sticky lifecycle
+  state；未收敛资源不释放 ephemeral Profile，也不被新操作复用。
 
-## 可重复证据
+## 正式安装与真实 Agent
 
-证据源码位于：
+安装候选来自 commit `7f842a56ef12438b822be52bda3720104ba1a0a9`、tree
+`91f598908af31fc5f15cf935e4f27525269923f4`，asset digest
+`d37b5fd3d2e2bd8b1da64c4c702529fdc023f28124796ce112d0136417c38b42`。固定原版为
+Camoufox Python 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0；未修改浏览器、
+Juggler、Playwright/site-packages 或私有协议。
+
+真实 Codex task `01a09cc1-3197-73d1-bc47-0820614ba6c4` 使用宿主接受并回读的
+`gpt-6-astra/low`。第一段从 installed Plugin fresh snapshot 取得 target，click 一次后
+立即停止浏览器命令；独立 fixture 在随后静默窗口内记录 work/completion 各一次。续接段
+connect 后只 query 原 click key、fresh observe 和 read，读到 `completion-recorded`，
+同一 session/Page 且没有重放。三次无浏览器派发的续接配置失败（未带 MCP server、未带
+tool approval、未先 connect）保留为 invalid test-setup evidence，不计产品失败或额外消费任务。
+
+## 可重复确定性检查
+
+关键实现与测试位于：
 
 - `services/harbor/packages/runtime-api/src/camoufox-upstream-driver.py`
 - `services/harbor/packages/runtime-api/src/camoufox-upstream-driver.ts`
 - `services/harbor/packages/runtime-api/src/camoufox-upstream-driver.test.ts`
 - `services/harbor/packages/runtime-api/src/runtime-session.ts`
-- `services/harbor/packages/runtime-api/src/index.ts`
 - `services/harbor/packages/runtime-api/src/control-interaction.test.ts`
 - `services/harbor/packages/runtime-api/src/managed-interaction.test.ts`
+- `packages/core/src/managed-browser.ts`
+- `packages/core/src/managed-browser-self-check.ts`
 
-在 `services/harbor` 下运行：
+`python3 -m py_compile`、Harbor build/full test（346 pass、1 Windows-only skip）、Core
+build/test（5/5）、Desktop build/typecheck、packaged no-release、workspace CI、Lode pins
+与 host attestation 均通过。重点定向集为 Driver 20/20、control 12/12、managed
+interaction 10/10；覆盖 bounded queue、close/EOF、control generation、排队旧输入拒绝、
+响应丢失、迟到结果与不重放。
 
-| 检查 | 结果 | 覆盖 |
-| --- | --- | --- |
-| `python3 -m py_compile packages/runtime-api/src/camoufox-upstream-driver.py` | pass | Python async bridge 语法 |
-| `pnpm --filter @webenvoy/harbor build` | pass | TypeScript build、Driver bundle copy |
-| `node --test dist/packages/runtime-api/src/camoufox-upstream-driver.test.js` | pass，20/20 | public async Driver、Download cancel/cleanup、bounded queue、close/EOF、sticky close failure 与 TS owner stop |
-| `node --test dist/packages/runtime-api/src/control-interaction.test.js` | pass，12/12 | control/handoff generation 与 settling fence |
-| `node --test dist/packages/runtime-api/src/managed-interaction.test.js` | pass，10/10 | Core unavailable+dispatched wait、no replay、Page/lease/handoff |
-
-这些检查使用 deterministic fakes，不启动浏览器、不访问账号或生产站点，也不把
-fixture 结果提升为 `installed`、`live` 或 `plugin_verified`。正式 Provider 安装、
-真实 Agent 和运行时材料应另以带 source/tree/manifest/实际读回的证据记录。
+脱敏机器摘要见 `docs/verification/runtime-continuity-v1.json`。原始非临时任务证据保存在
+`artifacts/browser-runtime-526-live-20260914`；无效样本与首个反例一并保留，未提交
+Profile、凭据、正文或安装大包。
