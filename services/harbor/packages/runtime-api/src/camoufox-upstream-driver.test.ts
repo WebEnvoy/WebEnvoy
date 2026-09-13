@@ -350,10 +350,12 @@ playwright.sync_api = sync_api; sys.modules["playwright"] = playwright; sys.modu
 spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 
 class Handle:
-    def __init__(self): self.connected = True; self.calls = []
+    def __init__(self, name="Upload"): self.connected = True; self.calls = []; self.name = name
     def evaluate(self, expression):
         if expression == "e => Boolean(e.isConnected)": return self.connected
         if expression == "e => e.files ? e.files.length : 0": return 0
+        if "getBoundingClientRect" in expression:
+            return {"role": "file", "name": self.name, "href": None, "enabled": True}
         raise AssertionError(expression)
     def is_visible(self): return self.connected
     def evaluate_files(self): return 0
@@ -362,13 +364,22 @@ class Handle:
 
 class PageImpl:
     url = "https://a.test/"; main_frame = object()
-    def __init__(self): self.handles = [Handle()]
+    def __init__(self):
+        self.first = Handle("First")
+        self.second = Handle("Second")
+        self.handles = [self.first, self.second]
+        self.reordered = False
     def is_closed(self): return False
     def title(self): return "Fixture"
-    def query_selector_all(self, selector): return list(self.handles)
+    def query_selector_all(self, selector):
+        values = list(self.handles)
+        if not self.reordered:
+            self.reordered = True
+            self.handles = list(reversed(self.handles))
+        return values
     def evaluate(self, expression):
-        if "document.querySelectorAll" in expression:
-            return {"text": "", "controls": [{"i": 0, "dom_index": 0, "role": "file", "name": "Upload", "href": None, "file_index": 0, "enabled": True}]}
+        if "document.body" in expression: return ""
+        if "document.querySelectorAll" in expression: raise AssertionError("snapshot metadata must use the exact ElementHandle")
         raise AssertionError(expression)
 
 class Request:
@@ -380,7 +391,9 @@ class RouteImpl:
 
 page = PageImpl(); instance = object.__new__(module.Driver); instance.pages = {}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0
 state = module.PageState("page:1", page, ["https://a.test", "https://b.test"]); instance.pages = {"page:1": state}
-snap = instance.snapshot(state); old_ref = snap["controls"][0]["target_ref"]; old = page.handles[0]
+snap = instance.snapshot(state); old_ref = snap["controls"][0]["target_ref"]
+assert [item["name"] for item in snap["controls"]] == ["First", "Second"], snap
+old = state.controls[old_ref][4]
 source = tempfile.mktemp(prefix="harbor-upload-target-"); open(source, "wb").write(b"x")
 try:
     sent = instance.file_operation({"provider_page_ref": "page:1", "operation": "upload", "expected_origin": "https://a.test", "authorized_origins": ["https://a.test"], "target_ref": old_ref, "source_path": source, "timeout_ms": 1000})
@@ -435,11 +448,16 @@ class Link:
         for item in (self.download, *self.extras):
             for listener in self.page.listeners.get("download", []): listener(item)
 class Download:
-    def __init__(self, page, url, body=b"id,status\\n1,ok\\n", delay=0): self.page = page; self.url = url; self.suggested_filename = "receipt.csv"; self.body = body; self.delay = delay; self.cancelled = 0; self.deleted = 0
+    def __init__(self, page, url, body=b"id,status\\n1,ok\\n", delay=0, extra=None, temp_bytes=None): self.page = page; self.url = url; self.suggested_filename = "receipt.csv"; self.body = body; self.delay = delay; self.extra = extra; self.temp_bytes = temp_bytes; self.cancelled = 0; self.deleted = 0
     def failure(self): return None
     def save_as(self, path):
+        if self.extra is not None:
+            for listener in self.page.listeners.get("download", []): listener(self.extra)
+        if self.temp_bytes is not None:
+            with open(self.page.temp_path, "wb") as handle: handle.write(self.temp_bytes)
         if self.delay: time.sleep(self.delay)
         with open(path, "wb") as handle: handle.write(self.body)
+    def path(self): return getattr(self.page, "temp_path", None)
     def cancel(self): self.cancelled += 1
     def delete(self): self.deleted += 1
 class Expectation:
@@ -459,10 +477,17 @@ def make(download, extras=()):
     state = module.PageState("page:1", page, ["https://files.test"]); state.controls["target"] = ("link", "Download", "/expected.csv", None, page.link)
     instance = object.__new__(module.Driver); instance.pages = {"page:1": state}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0
     return instance, page
-def run(download, extras=(), timeout=1000):
+def run(download, extras=(), timeout=1000, use_browser_temp=False):
     instance, page = make(download, extras); staging = tempfile.mktemp(prefix="harbor-download-bound-")
+    temp_root = tempfile.mkdtemp(prefix="harbor-download-temp-") if use_browser_temp else None
+    if temp_root is not None:
+        instance.downloads_root = __import__("pathlib").Path(temp_root)
+        page.temp_path = os.path.join(temp_root, "download")
     result = instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://files.test", "authorized_origins": ["https://files.test"], "target_ref": "target", "staging_path": staging, "timeout_ms": timeout})
     assert not os.path.exists(staging)
+    if temp_root is not None:
+        assert not os.listdir(temp_root), (result, os.listdir(temp_root))
+        __import__("shutil").rmtree(temp_root)
     return result, download, extras
 wrong, wrong_download, _ = run(Download(None, "https://files.test/unrelated.csv"))
 assert wrong["failure_class"] == "download_relation_unavailable" and wrong_download.cancelled == 1, wrong
@@ -473,6 +498,13 @@ oversize, oversized, _ = run(Download(None, "https://files.test/expected.csv", b
 assert oversize["failure_class"] == "file_limit_exceeded" and oversized.cancelled == 1, oversize
 timeout, slow, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2), timeout=20)
 assert timeout["failure_class"] == "timeout" and slow.cancelled == 1, timeout
+late = Download(None, "https://files.test/expected.csv")
+extra = Download(None, "https://files.test/expected.csv")
+late.extra = extra
+multiple_during_save, late, extras = run(late)
+assert multiple_during_save["failure_class"] == "download_relation_unavailable" and late.cancelled == extra.cancelled == 1, multiple_during_save
+temp_oversize, temp_download, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2, temp_bytes=b"x" * (10 * 1024 * 1024 + 1)), timeout=100, use_browser_temp=True)
+assert temp_oversize["failure_class"] == "file_limit_exceeded" and temp_download.cancelled == 1, temp_oversize
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",
@@ -759,7 +791,7 @@ assert popup_state.origins == {"https://s1.test"}
 test("installs the persistent-context guard before the initial navigation and closes safely on setup failure", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
   const script = `
-import importlib.util, os, sys, types
+import importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
@@ -814,7 +846,7 @@ class FakeContext:
 
 class FakeBrowserType:
     def launch_persistent_context(self, **kwargs):
-        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers")))
+        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers"), kwargs.get("downloads_path")))
         return current_context
 
 class FakePlaywright:
@@ -827,16 +859,20 @@ class Factory:
 module.verify_runtime_pins = lambda request: "properties"
 module.options_for = lambda request, profile: ({"args": [], "env": {}, "executable_path": request["browser_path"], "firefox_user_prefs": {}, "headless": False}, {"identity_hash": "stable"}, False, {})
 module.sync_playwright = lambda: Factory()
-request = {"profile_dir": "/tmp/harbor-driver-guard", "browser_path": "/managed/camoufox", "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "url": "https://s1.test/start", "timeout_ms": 100}
+profile = tempfile.mkdtemp(prefix="harbor-driver-guard-")
+request = {"profile_dir": profile, "browser_path": "/managed/camoufox", "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "url": "https://s1.test/start", "timeout_ms": 100}
 current_context = FakeContext(FakePage())
 instance = module.Driver(request)
 launch_index = next(i for i, value in enumerate(events) if isinstance(value, tuple) and value[0] == "launch")
 route_index = events.index(("context.route", "**/*"))
 offline_index = events.index(("context.offline", False))
 goto_index = events.index("goto")
-assert events[launch_index] == ("launch", True, "block")
+assert events[launch_index][0:3] == ("launch", True, "block")
+assert isinstance(events[launch_index][3], str) and events[launch_index][3].startswith(profile)
+assert os.path.isdir(events[launch_index][3])
 assert launch_index < route_index < offline_index < goto_index
 instance.close()
+assert not os.path.exists(events[launch_index][3])
 
 events.clear()
 current_context = FakeContext(FakePage(), fail_online=True)
@@ -847,6 +883,7 @@ except RuntimeError:
     pass
 assert "context.close" in events
 assert "playwright.stop" in events
+__import__("shutil").rmtree(profile)
 `;
   execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
     encoding: "utf8",
