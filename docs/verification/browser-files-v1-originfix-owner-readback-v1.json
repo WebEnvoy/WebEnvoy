@@ -1,0 +1,52 @@
+{
+  "schema_version": "webenvoy.browser-files-owner-readback/v1",
+  "work_item": 523,
+  "recorded_at": "2026-09-13T01:17:48Z",
+  "source": {
+    "commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+    "tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+    "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+    "data_root": "/private/tmp/webenvoy-523-originfix-data-PbltJl"
+  },
+  "material": {
+    "file_ref": "attachment:runtime/873f5a11-2049-44e8-a4a2-a85e9a8cd5d3",
+    "source": "owner_import",
+    "mime_type": "image/png",
+    "byte_length": 67,
+    "sha256": "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
+    "status": "available"
+  },
+  "download": {
+    "file_ref": "attachment:runtime/bfa080df-7d7c-431d-9d4c-e85ad91af37c",
+    "source": "browser_download",
+    "mime_type": "text/csv",
+    "byte_length": 15,
+    "sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "owner_export_path": "/private/tmp/webenvoy-523-originfix-owner-export-receipt.csv",
+    "owner_export_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "status": "available"
+  },
+  "grants": {
+    "revoked": [
+      {"grant_id": "grant:b3cbd33e-553f-49ee-aa77-c9bd3c2373af", "revoked_at": "2026-09-13T01:17:31.402Z"},
+      {"grant_id": "grant:17ab0555-f6e9-4e01-a0df-1a378b31564f", "revoked_at": "2026-09-13T01:17:31.408Z"},
+      {"grant_id": "grant:784402b9-eb34-4159-8e01-3ef94d8a613b", "revoked_at": "2026-09-13T01:17:31.412Z"}
+    ],
+    "principals_revoked": [
+      "principal:b6f98790-bd9e-455a-a124-aa69cec038a2",
+      "principal:53f5134c-06e7-4426-bdd4-ae8e02287c10"
+    ],
+    "active_after": {"grants": 0, "principals": 0, "connections": 0}
+  },
+  "server_metrics": {
+    "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/site/metrics-agent.json",
+    "sha256": "62df58393d88c1eab1b1dd94d5d8f4b891326eeb96e9384929e4559f86ef5c61",
+    "uploads": 1,
+    "upload_bytes": 67,
+    "upload_sha256": ["0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3"],
+    "downloads": 1,
+    "download_sha256": ["c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715"],
+    "unexpected": []
+  },
+  "runtime": {"runtime_id": "011bb5d2-36e7-45e2-955a-5f54a62c3635", "stopped_by": "owner CLI", "site_stopped_by": "task-owned process", "unrelated_processes_touched": false}
+}

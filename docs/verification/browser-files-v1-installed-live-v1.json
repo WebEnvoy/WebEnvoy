@@ -1,13 +1,13 @@
 {
   "schema_version": "webenvoy.browser-files-installed-live-evidence/v1",
   "work_item": 523,
-  "recorded_at": "2026-09-12T23:49:04Z",
+  "recorded_at": "2026-09-13T01:19:48Z",
   "judgment": "no_release",
   "verification_input": {
     "repository": "WebEnvoy/WebEnvoy",
     "branch": "feat/523-managed-browser-files",
-    "commit": "f0fca26e3dfd24313e20aff39309f174b6a5cb59",
-    "tree": "2518e2cf2ab94c380e342452e4fef857b01d2a01",
+    "commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+    "tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
     "provider": {
       "source_root": "/Users/claw/.webenvoy/providers/camoufox/sources/official-0.5.6-152.0.4-beta.30/",
       "camoufox": "0.5.6",
@@ -39,58 +39,63 @@
   "installed_live": {
     "status": "pass",
     "install_kind": "unsigned_local_packaged_runtime",
-    "app_path": "/private/tmp/webenvoy-523-final-v3.w4lJN4/WebEnvoy 523 Final v3.app",
-    "data_root": "/private/tmp/webenvoy-523-final-agent-v3/data",
-    "controlled_origin": "http://127.0.0.1:61349",
+    "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+    "data_root": "/private/tmp/webenvoy-523-originfix-data-PbltJl",
+    "controlled_origin": "http://127.0.0.1:50794",
     "png_sha256": "0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
-    "server_metrics_sha256": "83bfd549f9a29f62b39da1de1adc05d4c257656fe18ccf56fbd0d3e48e95c8de",
-    "status_asset_digest": "f0d5755997ed683f66a297930fccf0dff055598108d3d81741350c0283917142",
-    "manifest_sha256": "ada0ee12d8b83ab6007fe2c2418b5ee6ec056b58a492875875747b976db955d3",
+    "server_metrics_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-final-620e42d.C0wmIeMcGn/site/metrics-agent.json",
+    "server_metrics_sha256": "62df58393d88c1eab1b1dd94d5d8f4b891326eeb96e9384929e4559f86ef5c61",
+    "status_asset_digest": "2029c8000c61b8bd23326add28239d4d33c960893d608417288c2977ca283733",
+    "manifest_sha256": "d57b0e38c0c4f0a6b55442d010fd4babbd393ce14f9fa82323ba4a344ba46ccb",
     "skill_manifest_sha256": "ddcc8bf912379ed9731b3f7fb6b7ea19b39b716e428a8b64887c9fb97dfb3b4d",
+    "skill_sha256": "36581c5056bfc27896ea96663200497c52ee71463f85a780701882d32ae8f5d2",
     "server_metrics": {
       "uploads": 1,
       "upload_sha256": ["0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3"],
       "downloads": 1,
-      "download_sha256": ["3b324f87f403ae14797d252944a9452b8b0f6d58871cec4ad361cc4ccf04e066"],
+      "download_sha256": ["c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715"],
       "unexpected": []
     }
   },
   "true_agent": {
     "status": "pass",
     "plugin_verified": true,
-    "thread_id": "01a097f6-ed4b-7370-94a6-387f461e85fa",
-    "session_id": "01a097f6-ed4b-7370-94a6-387f461e85fa",
-    "upload_run_id": "managed-2f12fafca250ab4b91fff730f8b6191934cab4d1135fbf0c01eeaaf8232f9512",
-    "download_run_id": "managed-95e706421155677e78fb6f8ed3e116949451e32a43d61a165e59d1d08dcf8403",
-    "download_ref": "attachment:runtime/dabb7354-5c61-4d0f-a94f-531c0b9b2d83",
-    "download_bytes": 21,
-    "download_sha256": "3b324f87f403ae14797d252944a9452b8b0f6d58871cec4ad361cc4ccf04e066",
-    "owner_export_path": "/private/tmp/webenvoy-523-final-agent-v3/agent-owner-export.csv",
-    "owner_export_sha256": "3b324f87f403ae14797d252944a9452b8b0f6d58871cec4ad361cc4ccf04e066",
+    "thread_id": "01a09853-06d6-7c10-9277-4fddef763251",
+    "session_id": "01a09853-06d6-7c10-9277-4fddef763251",
+    "profile_ref": "profile_871a61e2b0a2b54f121122a1",
+    "file_ref": "attachment:runtime/873f5a11-2049-44e8-a4a2-a85e9a8cd5d3",
+    "upload_run_id": "managed-4b48333ab41647b1400e2e6ce3944bf993f1dc5cfcaf8aa22524305499123f47",
+    "download_run_id": "managed-14d01a539a6796102c9b90798583016ee8eb97136bf64519581f3e22714cc576",
+    "download_ref": "attachment:runtime/bfa080df-7d7c-431d-9d4c-e85ad91af37c",
+    "download_bytes": 15,
+    "download_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
+    "owner_export_path": "/private/tmp/webenvoy-523-originfix-owner-export-receipt.csv",
+    "owner_export_sha256": "c66edb8c595edcc4b598dcf6aa20fc2a808b5ae6418a2be9dd77607057e60715",
     "server_upload_count": 1,
     "server_download_count": 1,
-    "page_ref": "page_50fa4992-c5bc-43b1-a029-c9c22723f095",
-    "page_id": "page_object_f2f41001-d760-416c-bc46-987dfeee2655",
+    "runtime_session_ref": "session_08919c61-85df-4da1-84e6-89f2f3ef9df3",
+    "page_ref": "page_8275b1e6-63c0-45c8-ae3a-e02752255acd",
+    "page_id": "page_object_0590b647-4e47-4b85-be59-5efbad6e2ed7",
     "upload_target_ref": "control:2:1:0",
     "upload_observation_ref": "observation:page:1:2:1",
     "download_target_ref": "control:2:3:1",
     "download_observation_ref": "observation:page:1:2:3",
-    "page_receipt": "PNG received: 0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
+    "page_receipt": "PNG upload received:67:0a64b890a8453691dda8c30b75b48f3d0723ceb9377ebabeba5812c034a1a2b3",
     "original_run_query_replayed": false,
     "evidence_file": {
-      "path": "/private/tmp/webenvoy-523-final-agent-v3/codex-resume/sessions/2026/09/13/rollout-2026-09-13T07-32-17-01a097f6-ed4b-7370-94a6-387f461e85fa.jsonl",
-      "sha256": "c6fdfaa258023bc2c4e21ddd008fdf472a0afb1ba8afd7f30bcab4f658309e2b"
+      "path": "/private/tmp/webenvoy-523-final-agent-v3/codex-resume/sessions/2026/09/13/rollout-2026-09-13T09-12-53-01a09853-06d6-7c10-9277-4fddef763251.jsonl",
+      "sha256": "8805c8734a6a70534327b8cac7e9e31468a3c24f40511168f6a9428f4a3f70f8"
     }
   },
   "deterministic_installed_acceptance": {
     "status": "pass",
     "final_install_provenance": {
-      "app_path": "/private/tmp/webenvoy-523-final-v3.w4lJN4/WebEnvoy 523 Final v3.app",
-      "data_root": "/private/tmp/webenvoy-523-final-agent-v3/data",
-      "source_commit": "f0fca26e3dfd24313e20aff39309f174b6a5cb59",
-      "source_tree": "2518e2cf2ab94c380e342452e4fef857b01d2a01",
-      "status_asset_digest": "f0d5755997ed683f66a297930fccf0dff055598108d3d81741350c0283917142",
-      "scope": "final installed f0 head; no Provider or permission changes"
+      "app_path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-originfix-wdQoAN/WebEnvoy-523-47d95ea.app",
+      "data_root": "/private/tmp/webenvoy-523-originfix-data-PbltJl",
+      "source_commit": "47d95ea491bd12d27682ffa7e72d7e0f114ff328",
+      "source_tree": "c024e98b435ae5b20e3a89dd95528e00f6f69ec2",
+      "status_asset_digest": "2029c8000c61b8bd23326add28239d4d33c960893d608417288c2977ca283733",
+      "scope": "final installed 47d95ea head; runtime behavior gates reused from f0fca26 because this delta only changes MCP/SKILL origin guidance and documentation; current Agent path reverified below"
     },
     "final_head_reverified": [
       "authorized-origin narrowing A+B to current A rejects B",
@@ -111,8 +116,8 @@
     "evidence_files": [
       {"role": "offline_response_shapes_and_unique_key_selftest", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-selftest-evidence.json", "sha256": "826add95d937ae193114ec51cecd3ec7bc525d607cdf4878a01e637319e37587"},
       {"role": "handoff_slice", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/handoff-slice-v4-evidence.json", "sha256": "a1e3018289f465ce91714d15110408d4565ca6939a21ec7ef9d67fab4ae1f8c1"},
-      {"role": "corrected_transport_drop_continuation_and_owner_boundaries", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee4"},
-      {"role": "context_runtime_restart_persistence_and_grant_revoke", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b"}
+      {"role": "corrected_transport_drop_continuation_and_owner_boundaries_reused_from_f0", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/deterministic-acceptance-v4-resume2-evidence.json", "sha256": "73dceda318152d8313a6558aedbb6fc62e54a6dba945e78e465a376ae0d07ee4", "tested_source_commit": "f0fca26e3dfd24313e20aff39309f174b6a5cb59"},
+      {"role": "context_runtime_restart_persistence_and_grant_revoke_reused_from_f0", "path": "/var/folders/zd/dh222wbn5bz92d2rg9p708pm0000gn/T/webenvoy-523-formal-v4.UGgMni/persistence-final-v4-evidence.json", "sha256": "ee10ab79469912f2c7043991e2a5401ac5beae52be4aeda5f10e56ff5619327b", "tested_source_commit": "f0fca26e3dfd24313e20aff39309f174b6a5cb59"}
     ]
   },
   "first_unexpected": {
@@ -126,18 +131,23 @@
   },
   "grant_cleanup": {
     "status": "pass",
-    "final_v3_grants_revoked": [
-      "grant:0e65d6b9-031a-4fd0-8e2c-7c4a05ddeb8d",
-      "grant:8a6a9ad0-e39e-4a38-8127-6ec1677286ef",
-      "grant:fb4bb1fc-748b-4da0-9e55-b7b6f6210dfa"
+    "final_originfix_grants_revoked": [
+      "grant:b3cbd33e-553f-49ee-aa77-c9bd3c2373af",
+      "grant:17ab0555-f6e9-4e01-a0df-1a378b31564f",
+      "grant:784402b9-eb34-4159-8e01-3ef94d8a613b"
+    ],
+    "final_originfix_principals_revoked": [
+      "principal:b6f98790-bd9e-455a-a124-aa69cec038a2",
+      "principal:53f5134c-06e7-4426-bdd4-ae8e02287c10"
     ],
     "revoke_readback": {
-      "path": "/private/tmp/webenvoy-523-final-agent-v3/access-list-final.json",
-      "sha256": "2f9af20fa848eb21e3731a81fdd283accb024745e97683fb0d62da02c7a482eb",
+      "path": "docs/verification/browser-files-v1-originfix-owner-readback-v1.json",
+      "sha256": "c683e2f8a2f16664b740c9aaaaec84c55ba20556b83f2a595f30be674d177b73",
       "active_after": []
     },
+    "current_readback": {"active_grants": 0, "active_principals": 0, "active_connections": 0, "revoked_grants": 3, "revoked_principals": 2, "revoked_connections": 7},
     "active_after": [],
-    "runtime_stop": "owner CLI stop for final v3 runtime; controlled site stopped by task-owned PTY; unrelated #418 Electron process untouched"
+    "runtime_stop": "owner CLI stop for current originfix runtime; controlled site stopped by task-owned process; unrelated #418 Electron process untouched"
   },
   "verification_commands": [
     {"command": "pnpm --filter @webenvoy/harbor build", "result": "pass"},
@@ -151,7 +161,11 @@
     {"command": "make py-compile", "result": "pass"},
     {"command": "pnpm --filter @webenvoy/app typecheck", "result": "pass"},
     {"command": "pnpm --filter @webenvoy/app smoke:packaged:runtime", "result": "pass", "notes": "Packaged Core/Harbor health, owner bridge, catalog including file.upload/file.download, fail-closed first-turn boundary, and 720px layout"},
-    {"command": "pnpm --filter @webenvoy/app smoke:packaged:readonly", "result": "pass"}
+    {"command": "pnpm --filter @webenvoy/app smoke:packaged:readonly", "result": "pass"},
+    {"command": "node --test apps/desktop/agent-entry/client.test.mjs", "result": "pass", "notes": "3 passed; asserts installed MCP tools/list start-origin guidance and SKILL exposure"},
+    {"command": "node --test apps/desktop/agent-entry/installation.test.mjs", "result": "pass", "notes": "7 passed"},
+    {"command": "jq empty docs/verification/browser-files-v1-installed-live-v1.json docs/verification/browser-files-v1-originfix-owner-readback-v1.json", "result": "pass"},
+    {"command": "git diff --check", "result": "pass"}
   ],
   "safety_boundary": {
     "real_account": "not_used",
