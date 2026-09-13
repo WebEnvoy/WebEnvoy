@@ -1,10 +1,10 @@
 # Plugin Runtime Exposure V1
 
-状态：Accepted；版本：v1.1；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
+状态：Accepted；版本：v1.2（实施基线与 checkpoint 语义修订，不改变既有 MCP operation/wire 枚举）；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
-> **2026-09-12 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) 的官方固定 Camoufox／Playwright 路径已接入现有 Plugin operation，但按 `limited` 暴露：只接受 owner 核验的 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 组合；popup 首请求无法在派发前建立可信 Page 归属时局部返回 `page_relation_unavailable`，不先发请求、不猜测、不重放。工具可见、能力存在、Grant 授权和当前可执行性仍是独立事实；正式 installed、人工交还、环境连续性和真实 Agent 消费尚待 #519 完成门，不能写成 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，Plugin 不 fallback 或隐藏拒绝原因。
+> **2026-09-14 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成其声明的原任务页协作与私有补丁退役范围；官方固定 Camoufox／Playwright 路径仍按 `limited` 暴露：只接受 owner 核验的 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 组合，popup 首请求无法在派发前建立可信 Page 归属时局部返回 `page_relation_unavailable`，不先发请求、不猜测、不重放。受管浏览器文件的标准单文件 Plugin slice 由 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)／[PR #524](https://github.com/WebEnvoy/WebEnvoy/pull/524) 单独归档；工具可见、能力存在、Grant 授权和当前可执行性仍是独立事实，不能把局部 `plugin_verified` 证据扩写成完整 V1。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仅作历史／恢复事实，Plugin 不 fallback 或隐藏拒绝原因。
 
 ## 固定工具与投影
 
@@ -19,6 +19,12 @@
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
 | 受管浏览器文件 | `webenvoy_operation`：`file.upload`、`file.download`；既有 `webenvoy_query` 查询原 Run/receipt | `file_scope`、task `file_refs`、Profile/Principal/Grant、Page/document、目标新鲜度和 ControlLease 的交集；owner `files import/inspect/export/revoke/delete` 只走受信入口。结果为 `webenvoy.browser-file-result/v1`，正文和路径不投影，详见 [Managed Browser Files V1](browser-files-v1.md)。 |
+
+## 十二类基线与 Plugin checkpoint
+
+Plugin 以 [Browser Runtime Capabilities V1 §4](browser-runtime-capabilities-v1.md#4-v1-十二类能力最低结果矩阵) 作为十二类能力的语义与来源索引；一次早期、有界的真实消费者只证明其任务实际需要的能力、入口、资产和授权边界，不把未消费的类别或 Provider 能力升级为完成。实现仍沿用本规格固定工具和既有 Runtime/Grant/ControlLease/Run 真相，不新增工具、Grant 维度或第二状态机。
+
+完整 Plugin checkpoint 仍要求已安装且来源可核验的 Plugin 被真实第三方 Agent 消费，并对目标能力记录成功、明确拒绝和可恢复路径；还要回读 Provider 状态、暴露原因、Grant/ControlLease 边界以及重启后的持久事实。工具可见、capability 存在、当前授权和 Provider availability 是独立事实；[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)／[#482](https://github.com/WebEnvoy/WebEnvoy/issues/482) 的完整汇合证据不能由单个文件或站点闭环替代，但简单任务不必等待整个 checkpoint 才可做提前有界验证。
 
 `webenvoy_skill` 仍只提供必需管理/浏览器引导资产；`webenvoy_skills` 不能替换或覆盖它。工具唯一拼写为 `webenvoy_skills`，不引入 `webevoy_skills` 别名。
 
@@ -37,7 +43,8 @@ Profile、Grant、查询和 SKILL 管理不被该局部拒绝污染。
 计数为零时省略，不改变 `pages`/`filtered_page_count`。它不覆盖独立的
 click receipt：已派发的 click 仍保持 `dispatch_state: "dispatched"`。旧
 Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它解释成 popup
-已成功或已获得 Page 归属；installed/live/plugin 验收状态仍待现场完成。
+已成功或已获得 Page 归属；installed/live/plugin 验收状态必须按对应的脱敏
+evidence record 逐项记录，#523 的受管文件 slice 不扩写为完整 Runtime 验收。
 
 ### Managed Browser Files 输入与结果
 
@@ -89,7 +96,7 @@ unknown outcome 原样暴露为结构化失败，`webenvoy_query` 只读原事�
 
 Provider preference 三项 operation 使用 browser task scope，但 `profile_refs`、`origins` 必须为空；set 必须且仅带一个受支持 `provider_id`，read/clear 不带 Provider。动态创建模板 `provider_id=null` 时，`profile.create` 可选带一次性 `provider_id`；省略时由 Harbor 使用用户新建默认，二者都没有则返回 `provider_selection_required`。旧固定模板仍只使用模板 Provider，任何请求级字段即冲突。Plugin 不直接调用 Harbor，set/clear 响应丢失后 `webenvoy_query` 只读原 receipt。
 
-MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。#519 的静态 source/version/hash 事实可以在 status/diagnostics 中回读，但在实际安装和真实 Agent 通过前只能记为 validation/fixture evidence，不能冒称 live/plugin verified。
+MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。本版本不按站点或 SKILL 动态隐藏既有工具，也不发明诊断能力。未实现能力返回 unavailable，不能以空事件冒充成功；单 Profile 拒绝不改变其他 Profile 授权。没有网站 SKILL 不影响通用诊断、环境或浏览器能力。#519 的静态 source/version/hash 事实可以在 status/diagnostics 中回读，现场等级仍以对应 evidence record 为准；#523 的受管文件 slice 已有独立的安装／真实 Agent 证据，但不能冒称其他类别或完整 V1 已 `plugin_verified`。
 
 恢复投影只允许 `recovery.inspect`、`recovery.request`、`recovery.status`。inspect 返回安全摘要；request 创建待 owner 决定的 plan/operation，不自动 stop、覆盖或确认；status 只查询原 operation/receipt。Plugin 永远不能调用 owner-only 的 backup/plan/apply，不能携带 owner token。plan 的 Profile、当前材料指纹、backup ref、范围与有效期由 Core 持久化；目标/材料/归属变化或活动 Instance 会使后续确认失效。
 

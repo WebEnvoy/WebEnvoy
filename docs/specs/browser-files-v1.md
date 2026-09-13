@@ -4,7 +4,7 @@
 > 版本：v1.0；日期：2026-09-13。
 > Owning Work Item：[#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，M23；消费 #474，环境 #471，安装 #477，最终验收 #482。
 > 基线：`95b415bc6924529adc25d9129e678ad0a2d67212`；以实际最新 main 集成，不降版。
-> 依据：canonical v1.4、ADR0012、Browser Runtime Capabilities V1 §10、现有 Page/Navigation、Grant/Plugin/Run 合同。本文件不扩大完整 V1，也不将全部 Files 组压缩成本切片。
+> 依据：canonical v1.5、ADR0012、Browser Runtime Capabilities V1 §10、现有 Page/Navigation、Grant/Plugin/Run 合同。本文件不扩大完整 V1，也不将全部 Files 组压缩成本切片。
 
 ## 1. 用户结果、范围与非目标
 
