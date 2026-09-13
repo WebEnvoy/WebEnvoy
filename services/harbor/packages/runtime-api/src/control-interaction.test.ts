@@ -44,7 +44,9 @@ for (const operation of ["media", "write", "read", "site", "open"] as const) {
       assert.equal("failure_class" in result && result.failure_class, "session_locked");
     }
     assert.equal(record.active_provider_interactions, 1);
-    assert.deepEqual({ facts: record.facts, generation: record.control_generation, viewer: runtime.getViewerControlFacts(ref) }, before);
+    assert.deepEqual({ facts: record.facts, viewer: runtime.getViewerControlFacts(ref) }, { facts: before.facts, viewer: before.viewer });
+    assert.equal(record.control_generation, before.generation + 1, "handoff intent fences the in-flight operation generation");
+    assert.equal(record.handoff_intent?.control_owner, "user");
     finish();
     await pending;
     assert.equal(record.active_provider_interactions, 0, "finally clears the interaction guard, including exceptions");

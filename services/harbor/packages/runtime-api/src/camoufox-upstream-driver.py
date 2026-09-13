@@ -4,21 +4,24 @@
 This module intentionally has no browser-specific compatibility layer.  It
 calls ``camoufox.utils.launch_options`` once for a new managed Profile, saves
 the complete returned options, and reuses that exact JSON object on replay.
-All browser operations below use public synchronous Playwright objects.
+The installed bridge owns one asyncio event loop and one public Playwright
+async Context/Page set. JSONL input is read without blocking that loop, while
+ordinary Provider operations remain serialized and owner close is independent
+of a pending passive wait.
 """
 
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import importlib.metadata
+import inspect
 import json
 import os
 import re
-import signal
 import shutil
 import sys
 import tempfile
-import threading
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -27,8 +30,8 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from camoufox.utils import get_env_vars, launch_options
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, Route, TimeoutError, sync_playwright
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Page, Route, TimeoutError, async_playwright
 
 from camoufox_bundle_validator import (
     BROWSER_VERSION_PIN,
@@ -45,6 +48,7 @@ from camoufox_bundle_validator import (
 PLAYWRIGHT_VERSION_PIN = "1.60.0"
 SOURCE_SHA256_PIN = "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3"
 MAX_EVENTS = 64
+MAX_PENDING_COMMANDS = 64
 MAX_TEXT = 64 * 1024
 MAX_LINE = 2 * 1024 * 1024
 MAX_REDIRECT_HOPS = 10
@@ -55,13 +59,17 @@ MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
 MAX_DOWNLOAD_TEMP_BYTES = MAX_DOWNLOAD_BYTES * 2
 MAX_DOWNLOAD_TIMEOUT_MS = 120_000
 DOWNLOAD_MONITOR_INTERVAL_S = 0.05
+DOWNLOAD_CANCEL_GRACE_S = 0.25
+DOWNLOAD_SETTLE_GRACE_S = 5.0
 CAMOU_CONFIG_CHUNK = re.compile(r"^CAMOU_CONFIG_(\d+)$")
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
 
 
 class DownloadTimeout(Exception):
-    pass
+    def __init__(self, *args: Any, pending_tasks: tuple[asyncio.Task[Any], ...] = ()) -> None:
+        super().__init__(*args)
+        self.pending_tasks = pending_tasks
 
 
 class DownloadLimitExceeded(Exception):
@@ -478,7 +486,7 @@ class PageState:
         self.relation_rejection = False
         self.relation_rejection_count = 0
 
-    def facts(self, task_selected: bool = False) -> dict[str, Any]:
+    async def facts(self, task_selected: bool = False) -> dict[str, Any]:
         # A user may close a Page between any two public Playwright reads.
         # Treat a target-closed read as a trusted tombstone so one stale Page
         # cannot make the whole Page list unavailable while other Pages live.
@@ -498,7 +506,7 @@ class PageState:
         title = ""
         if closed is not True:
             try:
-                title = safe_text(self.page.title(), 256)
+                title = safe_text(await self.page.title(), 256)
             except PlaywrightError:
                 try:
                     closed = self.page.is_closed()
@@ -540,7 +548,7 @@ class PageState:
                 return urls
         return None
 
-    def clear_controls(self) -> None:
+    async def clear_controls(self) -> None:
         for control in self.controls.values():
             handle = control[4] if len(control) > 4 else None
             if handle is None:
@@ -548,7 +556,7 @@ class PageState:
             try:
                 dispose = getattr(handle, "dispose", None)
                 if callable(dispose):
-                    dispose()
+                    await dispose()
             except Exception:
                 pass
         self.controls.clear()
@@ -573,44 +581,64 @@ class Driver:
         self.playwright: Any = None
         self.context: Any = None
         self.downloads_root: Path | None = None
+        # Every Playwright object is owned by the asyncio loop that calls
+        # ``start``. The lock serializes ordinary commands; close first sets
+        # ``close_requested`` so a pending passive wait can return and release
+        # the lock before the public Context.close call begins.
+        self.operation_lock = asyncio.Lock()
+        self.close_requested = asyncio.Event()
+        self.close_lock = asyncio.Lock()
+        self._closing_context: Any = None
+        self._closing_playwright: Any = None
+        self._close_error: BaseException | None = None
+        self._close_finalized = False
+        self._close_completed = False
+        self._close_in_progress: asyncio.Task[Any] | None = None
+        # A Provider Download can outlive its public cancel call. Keep the
+        # complete cleanup coroutine here so no later command can touch the
+        # Page or temporary tree until the public objects have settled.
+        self.download_settling: set[asyncio.Task[Any]] = set()
+        # A file operation is registered before its first Provider await. A
+        # concurrent owner close waits for that task to classify its outcome
+        # and install the cleanup barrier, avoiding a close/timeout race that
+        # could otherwise stop Playwright before the barrier is visible.
+        self.download_operations: set[asyncio.Task[Any]] = set()
+
+    @classmethod
+    async def create(cls, request: dict[str, Any]) -> "Driver":
+        driver = cls(request)
         try:
-            self.playwright = sync_playwright().start()
-            self.downloads_root = Path(tempfile.mkdtemp(prefix=".webenvoy-downloads-", dir=profile_dir))
-            launch = dict(self.options)
-            launch.update(self.context_options)
-            launch["user_data_dir"] = profile_dir
-            # Playwright's public downloads_path option keeps the browser's
-            # original temporary artifacts inside this task-owned directory.
-            # save_as() may block until that artifact is complete, so the
-            # bounded monitor watches this directory as well as Harbor staging.
-            launch["downloads_path"] = str(self.downloads_root)
-            # Keep the persistent context offline until the route guard is
-            # installed. Any restored-page request is still subject to that
-            # guard; the requested document navigation follows explicitly.
-            launch["offline"] = True
-            launch["service_workers"] = "block"
-            self.context = self.playwright.firefox.launch_persistent_context(**launch)
-            self.context.on("page", self.on_page)
-            self.context.route("**/*", self.route)
-            page = self.context.pages[0] if self.context.pages else self.context.new_page()
-            self.context.set_offline(False)
-            initial_origin = origin_of(str(request.get("url", "")))
-            state = next((item for item in self.pages.values() if item.page == page), None)
-            if state is None:
-                state = self.register(page, [initial_origin] if initial_origin else [])
-            else:
-                state.origins.update([initial_origin] if initial_origin else [])
-            self.current = state.ref
-            self.navigate(state, str(request.get("url", "about:blank")), [initial_origin] if initial_origin else [])
+            await driver.start()
+            return driver
         except BaseException:
-            try:
-                if self.context is not None:
-                    self.context.close()
-            finally:
-                if self.playwright is not None:
-                    self.playwright.stop()
-                self.remove_downloads_root()
+            await driver.close()
             raise
+
+    async def start(self) -> None:
+        self.playwright = await async_playwright().start()
+        self.downloads_root = Path(tempfile.mkdtemp(prefix=".webenvoy-downloads-", dir=self.profile_dir))
+        launch = dict(self.options)
+        launch.update(self.context_options)
+        launch["user_data_dir"] = self.profile_dir
+        # Keep the browser's original temporary download artifacts in this
+        # task-owned directory. The async bounded monitor watches it together
+        # with Harbor staging during the complete Download lifecycle.
+        launch["downloads_path"] = str(self.downloads_root)
+        launch["offline"] = True
+        launch["service_workers"] = "block"
+        self.context = await self.playwright.firefox.launch_persistent_context(**launch)
+        self.context.on("page", self.on_page)
+        await self.context.route("**/*", self.route)
+        page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+        await self.context.set_offline(False)
+        initial_origin = origin_of(str(self.request.get("url", "")))
+        state = next((item for item in self.pages.values() if item.page == page), None)
+        if state is None:
+            state = self.register(page, [initial_origin] if initial_origin else [])
+        else:
+            state.origins.update([initial_origin] if initial_origin else [])
+        self.current = state.ref
+        await self.navigate(state, str(self.request.get("url", "about:blank")), [initial_origin] if initial_origin else [])
 
     def register(self, page: Page, origins: list[str], opener: str | None = None) -> PageState:
         state = PageState(f"page:{self.next_ref}", page, [origin for origin in origins if origin])
@@ -624,22 +652,20 @@ class Driver:
         page.on("pageerror", lambda error: self.page_error(state, error))
         return state
 
-    def on_page(self, page: Page) -> None:
+    async def on_page(self, page: Page) -> None:
         existing = next((item for item in self.pages.values() if item.page == page), None)
         if existing is not None:
             if existing.relation_pending:
-                self.resolve_page_opener(existing, page)
+                await self.resolve_page_opener(existing, page)
             return
         state = self.register(page, [], None)
-        self.resolve_page_opener(state, page)
+        await self.resolve_page_opener(state, page)
 
-    def resolve_page_opener(self, state: PageState, page: Page) -> None:
+    async def resolve_page_opener(self, state: PageState, page: Page) -> None:
         opener_ref = None
         opener_origins: list[str] = []
         try:
-            opener = page.opener
-            if callable(opener):
-                opener = opener()
+            opener = await page.opener()
             opener_state = next((item for item in self.pages.values() if item.page == opener), None)
             if opener_state is not None:
                 opener_ref = opener_state.ref
@@ -651,13 +677,13 @@ class Driver:
             state.origins.update(opener_origins)
         state.relation_pending = False
 
-    def route(self, route: Route) -> None:
+    async def route(self, route: Route) -> None:
         request = route.request
         try:
             page = request.frame.page
         except PlaywrightError:
             self.unattributed_rejection_count = min(self.unattributed_rejection_count + 1, MAX_EVENTS)
-            route.abort("blockedbyclient")
+            await route.abort("blockedbyclient")
             return
         state = next((item for item in self.pages.values() if item.page == page), None)
         request_origin = origin_of(request.url)
@@ -689,10 +715,10 @@ class Driver:
             if request_event_origin:
                 request_event["origin"] = request_event_origin
             state.add_event(request_event)
-            route.abort("blockedbyclient")
+            await route.abort("blockedbyclient")
             return
         if request_origin is None or request_origin not in state.origins:
-            route.abort("blockedbyclient")
+            await route.abort("blockedbyclient")
             return
         method = str(getattr(request, "method", "GET")).upper()
         # ``Request.post_data`` decodes the body as UTF-8.  A standard file
@@ -716,27 +742,27 @@ class Driver:
             # Playwright routing only invokes this handler for the first URL
             # in a redirect chain. Fetch one hop at a time so Location is
             # checked before the next network request is issued.
-            response = route.fetch(max_redirects=0, timeout=int(self.request.get("timeout_ms", 60_000)))
+            response = await route.fetch(max_redirects=0, timeout=int(self.request.get("timeout_ms", 60_000)))
             for hop in range(MAX_REDIRECT_HOPS + 1):
                 status = int(response.status)
                 location = next((value for key, value in response.headers.items() if str(key).lower() == "location"), None)
                 if status not in REDIRECT_STATUSES or not location:
                     if route_chain[0] is not None:
                         state.add_request_chain(request, [url for url in route_chain if url is not None])
-                    route.fulfill(response=response)
+                    await route.fulfill(response=response)
                     response = None
                     return
                 target = redirect_target(response.url, status, response.headers)
                 if not target or origin_of(target) not in state.origins or hop >= MAX_REDIRECT_HOPS:
-                    response.dispose()
+                    await response.dispose()
                     response = None
-                    route.abort("blockedbyclient")
+                    await route.abort("blockedbyclient")
                     return
                 route_chain.append(target)
                 next_method = redirect_method(status, method)
                 next_post_data = post_data if next_method not in ("GET", "HEAD") else ""
-                response.dispose()
-                response = route.fetch(
+                await response.dispose()
+                response = await route.fetch(
                     url=target,
                     method=next_method,
                     post_data=next_post_data,
@@ -745,27 +771,27 @@ class Driver:
                 )
                 method = next_method
             if response is not None:
-                response.dispose()
+                await response.dispose()
                 response = None
-            route.abort("blockedbyclient")
+            await route.abort("blockedbyclient")
         except Exception:
             if response is not None:
                 try:
-                    response.dispose()
+                    await response.dispose()
                 except Exception:
                     pass
             try:
-                route.abort("blockedbyclient")
+                await route.abort("blockedbyclient")
             except Exception:
                 pass
 
-    def navigate(self, state: PageState, url: str, origins: list[str]) -> dict[str, Any]:
+    async def navigate(self, state: PageState, url: str, origins: list[str]) -> dict[str, Any]:
         scope = self.apply_page_scope(state, origins, require_current=False)
         target_origin = origin_of(url)
         if not target_origin or target_origin not in scope:
             raise ValueError("Page navigation origin is not authorized.")
-        state.page.goto(url, wait_until="domcontentloaded", timeout=int(self.request.get("timeout_ms", 60_000)))
-        return state.facts(task_selected=state.ref == self.current)
+        await state.page.goto(url, wait_until="domcontentloaded", timeout=int(self.request.get("timeout_ms", 60_000)))
+        return await state.facts(task_selected=state.ref == self.current)
 
     def apply_page_scope(self, state: PageState, origins: Any, require_current: bool = True) -> set[str]:
         if state.relation_rejection and not state.origins:
@@ -776,17 +802,17 @@ class Driver:
             raise ValueError("Current Page origin is not authorized.")
         return scope
 
-    def on_navigate(self, state: PageState, frame: Any) -> None:
+    async def on_navigate(self, state: PageState, frame: Any) -> None:
         if frame != state.page.main_frame:
             return
         state.generation += 1
-        state.clear_controls()
+        await state.clear_controls()
         state.last_url = state.page.url
 
-    def list_pages(self) -> list[dict[str, Any]]:
-        return [state.facts(task_selected=state.ref == self.current) for state in self.pages.values()]
+    async def list_pages(self) -> list[dict[str, Any]]:
+        return [await state.facts(task_selected=state.ref == self.current) for state in self.pages.values()]
 
-    def interact(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def interact(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
         action = request.get("action")
         expected = request.get("expected_origin")
@@ -794,57 +820,59 @@ class Driver:
         current_origin = origin_of(state.page.url)
         if action == "snapshot":
             if not isinstance(expected, str) or expected not in scope or current_origin != expected or expected not in state.origins:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
         else:
             try:
                 scope = self.apply_page_scope(state, request.get("authorized_origins"))
             except ValueError:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
             if not isinstance(expected, str) or expected not in scope or current_origin != expected:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
         try:
             if action == "snapshot":
-                return {"status": "completed", "dispatch_state": "not_dispatched", "page": state.facts(), "snapshot": self.snapshot(state)}
+                return {"status": "completed", "dispatch_state": "not_dispatched", "page": await state.facts(), "snapshot": await self.snapshot(state)}
             if action == "click":
-                self.locator(state, request).click(timeout=int(request.get("timeout_ms", 5_000)))
+                await (await self.locator(state, request)).click(timeout=int(request.get("timeout_ms", 5_000)))
             elif action == "input":
                 text = request.get("text")
                 if not isinstance(text, str) or len(text) > MAX_TEXT:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
-                self.locator(state, request).fill(text, timeout=int(request.get("timeout_ms", 5_000)))
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+                await (await self.locator(state, request)).fill(text, timeout=int(request.get("timeout_ms", 5_000)))
             elif action == "press":
                 key = request.get("key")
                 if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_+\- ]{1,32}", key):
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
-                self.locator(state, request).press(key, timeout=int(request.get("timeout_ms", 5_000)))
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+                await (await self.locator(state, request)).press(key, timeout=int(request.get("timeout_ms", 5_000)))
             elif action == "scroll":
                 delta = request.get("delta_y")
                 if not isinstance(delta, (int, float)) or not -100_000 <= delta <= 100_000:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
-                state.page.mouse.wheel(0, delta)
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+                await state.page.mouse.wheel(0, delta)
             elif action == "wait":
                 wait_for = request.get("wait_for")
                 if wait_for not in ("page_changed", "text", "enabled"):
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
                 if wait_for == "text" and (not isinstance(request.get("text"), str) or not request["text"]):
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
                 if wait_for == "enabled" and (not isinstance(request.get("target_ref"), str) or request["target_ref"] not in state.controls):
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
-                if not self.wait_for_condition(state, request):
-                    # A condition that was not observed is a deterministic
-                    # unavailable result.  No mutating browser action was
-                    # dispatched, so callers must not classify this as an
-                    # unknown outcome or retry a preceding action.
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wait_condition_timeout", "page": state.facts()}
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+                if not await self.wait_for_condition(state, request):
+                    if self.close_requested.is_set():
+                        return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "control_changed", "page": await state.facts()}
+                    # The wait command was issued to the Provider even though
+                    # the declared condition was not observed before its
+                    # deadline. Project that as a failed dispatched outcome so
+                    # callers cannot safely replay an already-issued wait.
+                    return {"status": "unavailable", "dispatch_state": "dispatched", "failure_class": "wait_condition_timeout", "page": await state.facts()}
             else:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": state.facts()}
-            return {"status": "completed", "dispatch_state": "dispatched", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+            return {"status": "completed", "dispatch_state": "dispatched", "page": await state.facts()}
         except TimeoutError:
-            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "timeout", "page": state.facts()}
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "timeout", "page": await state.facts()}
         except Exception as error:
-            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": safe_text(error, 128), "page": state.facts()}
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": safe_text(error, 128), "page": await state.facts()}
 
-    def wait_for_condition(self, state: PageState, request: dict[str, Any]) -> bool:
+    async def wait_for_condition(self, state: PageState, request: dict[str, Any]) -> bool:
         """Wait for one bounded, declared Page condition using public APIs."""
         wait_for = request.get("wait_for")
         timeout_value = request.get("timeout_ms", 250)
@@ -855,15 +883,17 @@ class Driver:
         deadline = time.monotonic() + timeout_ms / 1000
         initial_generation = state.generation
         body = state.page.locator("body") if wait_for == "text" else None
-        target = self.locator(state, request) if wait_for == "enabled" else None
+        target = await self.locator(state, request) if wait_for == "enabled" else None
         expected_text = request.get("text") if wait_for == "text" else None
         while True:
+            if self.close_requested.is_set():
+                return False
             if wait_for == "page_changed":
                 if state.generation != initial_generation:
                     return True
             elif wait_for == "text":
                 try:
-                    if expected_text in body.inner_text(timeout=max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))):
+                    if expected_text in await body.inner_text(timeout=max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))):
                         return True
                 except TimeoutError:
                     pass
@@ -873,30 +903,30 @@ class Driver:
                     # Playwright 1.60 ElementHandle visibility methods have no
                     # timeout keyword. The surrounding bounded polling loop
                     # supplies the deadline without relying on a private API.
-                    if target.is_visible() and target.is_enabled():
+                    if await target.is_visible() and await target.is_enabled():
                         return True
                 except TimeoutError:
                     pass
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False
-            state.page.wait_for_timeout(min(WAIT_POLL_MS, max(1, int(remaining * 1000))))
+            await state.page.wait_for_timeout(min(WAIT_POLL_MS, max(1, int(remaining * 1000))))
 
-    def snapshot(self, state: PageState) -> dict[str, Any]:
+    async def snapshot(self, state: PageState) -> dict[str, Any]:
         selector = 'button,a,input,textarea,select,[role]'
         try:
-            element_handles = state.page.query_selector_all(selector)
+            element_handles = await state.page.query_selector_all(selector)
         except Exception:
             element_handles = []
         controls = []
         state.snapshot_serial += 1
-        state.clear_controls()
+        await state.clear_controls()
         retained_indices: set[int] = set()
         for index, element in enumerate(element_handles):
             if len(controls) >= 128:
                 break
             try:
-                item = element.evaluate("""e => {
+                item = await element.evaluate("""e => {
                   const rect = e.getBoundingClientRect(), style = getComputedStyle(e);
                   if (!(rect.width > 0 && rect.height > 0) || style.display === 'none' || style.visibility === 'hidden') return null;
                   let role = e.getAttribute('role');
@@ -927,16 +957,16 @@ class Driver:
             try:
                 dispose = getattr(element, "dispose", None)
                 if callable(dispose):
-                    dispose()
+                    await dispose()
             except Exception:
                 pass
         try:
-            text = safe_text(state.page.evaluate("() => (document.body?.innerText || '').slice(0,65536)"))
+            text = safe_text(await state.page.evaluate("() => (document.body?.innerText || '').slice(0,65536)"))
         except Exception:
             text = ""
         return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
 
-    def control_handle(self, state: PageState, target: str, role: str | None = None):
+    async def control_handle(self, state: PageState, target: str, role: str | None = None):
         control = state.controls.get(target)
         if control is None or len(control) < 5 or (role is not None and control[0] != role):
             return None
@@ -944,40 +974,40 @@ class Driver:
         if handle is None:
             return None
         try:
-            if handle.evaluate("e => Boolean(e.isConnected)") is not True:
+            if await handle.evaluate("e => Boolean(e.isConnected)") is not True:
                 return None
         except Exception:
             return None
         return handle
 
-    def locator(self, state: PageState, request: dict[str, Any]):
+    async def locator(self, state: PageState, request: dict[str, Any]):
         ref = request.get("target_ref")
         if not isinstance(ref, str) or ref not in state.controls:
             raise ValueError("Target ref is not from the current Page observation.")
         control = state.controls[ref]
         role, name = control[0], control[1]
         if len(control) >= 5:
-            handle = self.control_handle(state, ref)
+            handle = await self.control_handle(state, ref)
             if handle is None:
                 raise ValueError("Target element is no longer attached to the current Page.")
             return handle
         return state.page.get_by_role(role, name=name, exact=True)
 
-    def observe(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def observe(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
-        raw = state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
+        raw = await state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
         raw["document_generation"] = state.generation
-        return {**state.facts(task_selected=state.ref == self.current), "observation": raw}
+        return {**(await state.facts(task_selected=state.ref == self.current)), "observation": raw}
 
-    def public_page(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def public_page(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
         expected = request.get("expected_origin")
         if not isinstance(expected, str) or expected not in state.origins or origin_of(state.page.url) != expected:
-            return {"status": "unavailable", "failure_class": "wrong_page", "retryable": False, "page": state.facts()}
-        text = safe_text(state.page.locator("body").inner_text(timeout=5_000))
-        return {"status": "completed", "page": state.facts(), "text": text, "truncated": len(text) >= MAX_TEXT}
+            return {"status": "unavailable", "failure_class": "wrong_page", "retryable": False, "page": await state.facts()}
+        text = safe_text(await state.page.locator("body").inner_text(timeout=5_000))
+        return {"status": "completed", "page": await state.facts(), "text": text, "truncated": len(text) >= MAX_TEXT}
 
-    def diagnostics(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def diagnostics(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
         expected = request.get("origin")
         if not isinstance(expected, str) or expected not in state.origins or origin_of(state.page.url) != expected:
@@ -989,18 +1019,18 @@ class Driver:
         events = state.events[start:start + min(int(request.get("limit", MAX_EVENTS)), MAX_EVENTS)]
         network = [event for event in events if event.get("kind") in ("request", "response", "failure")]
         console = [event for event in events if event.get("level") in ("warn", "error", "pageerror")]
-        return {"status": "completed", "page_ref": state.ref, "document_generation": state.generation, "page": state.facts(), "cursor": str(start), "next_cursor": str(start + len(events)), "truncated": start + len(events) < len(state.events), "observed_at": now(), "network": network, "console": console}
+        return {"status": "completed", "page_ref": state.ref, "document_generation": state.generation, "page": await state.facts(), "cursor": str(start), "next_cursor": str(start + len(events)), "truncated": start + len(events) < len(state.events), "observed_at": now(), "network": network, "console": console}
 
-    def environment(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def environment(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
-        observed = state.page.evaluate("""() => ({ language: navigator.language || null, languages: navigator.languages || [], timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null, viewport: { width: innerWidth, height: innerHeight }, screen: { width: screen.width, height: screen.height }, hardware_concurrency: navigator.hardwareConcurrency || null, device_memory: navigator.deviceMemory || null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null })""")
+        observed = await state.page.evaluate("""() => ({ language: navigator.language || null, languages: navigator.languages || [], timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null, viewport: { width: innerWidth, height: innerHeight }, screen: { width: screen.width, height: screen.height }, hardware_concurrency: navigator.hardwareConcurrency || null, device_memory: navigator.deviceMemory || null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null })""")
         bundle_hash = self.bundle["identity_hash"]
         return {"status": "completed", "observed_at": now(), "provider": {"camoufox_version": CAMOUFOX_VERSION_PIN, "browser_version": BROWSER_VERSION_PIN, "properties_sha256": PROPERTIES_SHA256_PIN}, "bundle_hash": bundle_hash, "observed": observed, "continuity": {"state": "unknown", "checked_fields": [], "changed_fields": [], "unknown_fields": ["screen", "hardware_concurrency", "webgl_vendor", "webgl_renderer", "canvas_hash", "audio_hash"]}}
 
-    def screenshot(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def screenshot(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
         path = Path(self.profile_dir, f".webenvoy-screenshot-{time.time_ns()}.png")
-        state.page.screenshot(path=str(path), type="png")
+        await state.page.screenshot(path=str(path), type="png")
         data = path.read_bytes()
         return {"status": "completed", "screenshot_ref": "screenshot:" + hashlib.sha256(data).hexdigest(), "mime_type": "image/png", "byte_length": len(data), "sha256": hashlib.sha256(data).hexdigest(), "captured_at": now()}
 
@@ -1069,38 +1099,149 @@ class Driver:
         except OSError:
             pass
 
-    def bounded_download_call(self, staging: str, deadline: float, action: Any, monitor_paths: list[str] | None = None) -> Any:
-        """Run one Download operation under the single transport deadline.
+    async def close_context_for_download(self) -> None:
+        """Use the public Context.close as the final download interruption."""
+        self.close_requested.set()
+        if not hasattr(self, "_close_error"):
+            self._close_error = None
+        if not hasattr(self, "_close_completed"):
+            self._close_completed = False
+        if not hasattr(self, "_close_finalized"):
+            self._close_finalized = False
+        if self._close_completed:
+            return
+        if self._close_error is not None:
+            raise self._close_error
+        async with self.close_lock:
+            if self._close_completed:
+                return
+            if self._close_error is not None:
+                raise self._close_error
+            context = getattr(self, "_closing_context", None) or getattr(self, "context", None)
+            self.context = None
+            self._closing_context = context
+            if context is None:
+                return
+            try:
+                await context.close()
+            except BaseException as error:
+                # Keep the failed Context isolated from reusable state. The
+                # download caller may continue bounded settling, but the
+                # owning Driver.close must surface this same sticky error.
+                self._close_error = error
+                raise
+            else:
+                self._closing_context = None
 
-        Playwright's synchronous Download.save_as has no byte or deadline
-        argument.  A process-local SIGALRM monitor is the only public-API
-        compatible way to interrupt a blocking call while observing the
-        Harbor staging file.  The Runtime driver runs on the main thread; a
-        different execution context fails closed instead of losing the cap.
+    async def settle_download_call(self, action_task: asyncio.Task[Any], cancel: Any) -> tuple[asyncio.Task[Any], ...]:
+        """Request public cancellation and converge both awaitables.
+
+        ``asyncio.wait`` is deliberate: unlike ``wait_for`` it does not
+        cancel an in-flight Playwright coroutine when a grace period expires.
+        If the public cancel call or its action remains pending, close the
+        public Context and return the still-pending tasks to the lifecycle
+        cleanup barrier rather than letting them write behind the caller.
         """
-        if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
-            raise DownloadTimeout()
+        tasks: set[asyncio.Task[Any]] = {action_task}
+        if callable(cancel):
+            try:
+                result = cancel()
+                if inspect.isawaitable(result):
+                    tasks.add(asyncio.ensure_future(result))
+            except Exception:
+                pass
+        done, pending = await asyncio.wait(tasks, timeout=DOWNLOAD_CANCEL_GRACE_S)
+        completed = set(done)
+        if pending:
+            try:
+                await self.close_context_for_download()
+            except BaseException:
+                # close_context_for_download records a sticky lifecycle error
+                # before raising; continue the bounded task wait so any
+                # non-converged Download remains isolated for cleanup.
+                pass
+            done, pending = await asyncio.wait(pending, timeout=DOWNLOAD_SETTLE_GRACE_S)
+            completed.update(done)
+        if completed:
+            await asyncio.gather(*completed, return_exceptions=True)
+        return tuple(pending)
+
+    def defer_download_cleanup(
+        self,
+        pending_tasks: tuple[asyncio.Task[Any], ...],
+        page: Any,
+        request_listener: Any,
+        download_listener: Any,
+        downloads: list[Any],
+        primary: Any,
+        staging: str,
+        cancelled: set[int],
+    ) -> None:
+        """Keep a non-converged Download isolated until public cleanup is safe."""
+        # The public Context was closed by ``settle_download_call`` before a
+        # non-converged task reaches this method. Keep this fence explicit for
+        # deterministic fakes and for any future public cancellation path.
+        self.close_requested.set()
+
+        async def finish() -> None:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+            candidates: list[Any] = []
+            for candidate in (*downloads, primary):
+                if candidate is not None and all(existing is not candidate for existing in candidates):
+                    candidates.append(candidate)
+            for candidate in candidates:
+                await self.cleanup_download(candidate, cancel=id(candidate) not in cancelled)
+            self.remove_listener(page, "request", request_listener)
+            self.remove_listener(page, "download", download_listener)
+            self.clear_downloads_root()
+            try:
+                Path(staging).unlink()
+            except FileNotFoundError:
+                pass
+
+        cleanup = asyncio.create_task(finish())
+        self.download_settling.add(cleanup)
+        cleanup.add_done_callback(self.download_settling.discard)
+
+    async def wait_download_cleanup(self) -> None:
+        pending = tuple(task for task in self.download_settling if not task.done())
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async def bounded_download_call(self, staging: str, deadline: float, action: Any, monitor_paths: list[str] | None = None, cancel: Any = None) -> Any:
+        """Run one public Download operation under one bounded deadline.
+
+        Async Playwright exposes no byte cap on ``save_as``.  Keep the action
+        on the owning event loop, monitor both Harbor staging and the public
+        ``downloads_path`` tree while it is pending, and ask the public
+        Download to cancel on deadline, quota breach, or owner close. Await
+        the protected action briefly for Playwright to converge; never cancel
+        an in-flight Playwright task or use a private protocol.
+        """
         if time.monotonic() >= deadline:
             raise DownloadTimeout()
-        previous_handler = signal.getsignal(signal.SIGALRM)
-        previous_timer = signal.getitimer(signal.ITIMER_REAL)
-
-        def monitor(_signum: int, _frame: Any) -> None:
-            self.monitor_download_paths([staging, *(monitor_paths or [])])
-            if time.monotonic() >= deadline:
-                raise DownloadTimeout()
-
-        self.monitor_download_paths([staging, *(monitor_paths or [])])
-        signal.signal(signal.SIGALRM, monitor)
+        paths = [staging, *(monitor_paths or [])]
+        self.monitor_download_paths(paths)
+        task = asyncio.create_task(action())
         try:
-            remaining = max(0.001, deadline - time.monotonic())
-            signal.setitimer(signal.ITIMER_REAL, min(DOWNLOAD_MONITOR_INTERVAL_S, remaining), DOWNLOAD_MONITOR_INTERVAL_S)
-            result = action()
-            self.monitor_download_paths([staging, *(monitor_paths or [])])
+            while not task.done():
+                self.monitor_download_paths(paths)
+                if self.close_requested.is_set() or time.monotonic() >= deadline:
+                    raise DownloadTimeout()
+                remaining = max(0.001, deadline - time.monotonic())
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=min(DOWNLOAD_MONITOR_INTERVAL_S, remaining))
+                except asyncio.TimeoutError:
+                    continue
+            result = await task
+            self.monitor_download_paths(paths)
             return result
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
-            signal.signal(signal.SIGALRM, previous_handler)
+        except BaseException as error:
+            if not task.done():
+                pending = await self.settle_download_call(task, cancel)
+                if pending:
+                    raise DownloadTimeout(pending_tasks=pending) from error
+            raise
 
     @staticmethod
     def remove_listener(page: Any, event: str, listener: Any) -> None:
@@ -1112,12 +1253,14 @@ class Driver:
             pass
 
     @staticmethod
-    def cleanup_download(download: Any, cancel: bool = True) -> None:
+    async def cleanup_download(download: Any, cancel: bool = True) -> None:
         for name in (("cancel", "delete") if cancel else ("delete",)):
             try:
                 operation = getattr(download, name, None)
                 if callable(operation):
-                    operation()
+                    result = operation()
+                    if inspect.isawaitable(result):
+                        await result
             except Exception:
                 pass
 
@@ -1199,7 +1342,7 @@ class Driver:
         except Exception:
             return None
 
-    def file_operation(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def file_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         """Deliver one owner-resolved file through a standard Page control.
 
         Paths in this method are Harbor-private staging paths.  The Agent only
@@ -1216,11 +1359,11 @@ class Driver:
         except ValueError:
             scope = set()
         if not isinstance(expected, str) or expected not in scope or origin_of(state.page.url) != expected:
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": request.get("operation"), "failure_class": "wrong_page", "page": state.facts()}
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": request.get("operation"), "failure_class": "wrong_page", "page": await state.facts()}
         operation = request.get("operation")
         target = request.get("target_ref")
         if operation not in ("upload", "download") or not isinstance(target, str) or not REF.fullmatch(target):
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": operation, "failure_class": "file_operation_invalid", "page": state.facts()}
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": operation, "failure_class": "file_operation_invalid", "page": await state.facts()}
         try:
             timeout = min(max(int(request.get("timeout_ms", self.request.get("timeout_ms", 60_000))), 1), MAX_DOWNLOAD_TIMEOUT_MS)
         except (TypeError, ValueError, OverflowError):
@@ -1228,49 +1371,56 @@ class Driver:
         if operation == "upload":
             source = request.get("source_path")
             if not isinstance(source, str) or not source or "\x00" in source:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": state.facts()}
-            if target not in state.controls or state.controls[target][0] != "file" or self.control_handle(state, target, "file") is None:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": await state.facts()}
+            if target not in state.controls or state.controls[target][0] != "file" or await self.control_handle(state, target, "file") is None:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": await state.facts()}
             try:
                 source_path = Path(source)
                 with source_path.open("rb", buffering=0) as handle:
                     source_size = os.fstat(handle.fileno()).st_size
                 if source_size < 1 or source_size > MAX_DOWNLOAD_BYTES:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_limit_exceeded", "page": state.facts()}
-                inputs = self.control_handle(state, target, "file")
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_limit_exceeded", "page": await state.facts()}
+                inputs = await self.control_handle(state, target, "file")
                 if inputs is None:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": await state.facts()}
                 # ElementHandle.is_visible() is a zero-argument public API in
                 # the pinned Playwright 1.60 provider.
-                if not inputs.is_visible():
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": state.facts()}
-                existing = inputs.evaluate("e => e.files ? e.files.length : 0")
+                if not await inputs.is_visible():
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": await state.facts()}
+                existing = await inputs.evaluate("e => e.files ? e.files.length : 0")
                 if existing:
-                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_not_empty", "page": state.facts()}
-                inputs.set_input_files(str(source_path), timeout=timeout)
-                return {"status": "completed", "dispatch_state": "dispatched", "operation": "upload", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "unknown", "page_processing": "unknown", "business_commit": "not_observed"}
+                    return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_not_empty", "page": await state.facts()}
+                await inputs.set_input_files(str(source_path), timeout=timeout)
+                return {"status": "completed", "dispatch_state": "dispatched", "operation": "upload", "page": await state.facts(), "browser_delivery": "completed", "page_receipt": "unknown", "page_processing": "unknown", "business_commit": "not_observed"}
             except TimeoutError:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": "timeout", "page": state.facts()}
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": "timeout", "page": await state.facts()}
             except Exception as error:
-                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": safe_text(error, 128), "page": state.facts()}
+                return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "upload", "failure_class": safe_text(error, 128), "page": await state.facts()}
 
         if target not in state.controls:
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
         role, _name, *metadata = state.controls[target]
         observed_href = metadata[0] if metadata else None
-        if role != "link" or self.control_handle(state, target, "link") is None:
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+        if role != "link" or await self.control_handle(state, target, "link") is None:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
         staging = request.get("staging_path")
         if not isinstance(staging, str) or not staging or "\x00" in staging:
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_staging_unavailable", "page": state.facts()}
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_staging_unavailable", "page": await state.facts()}
         if not self.clear_downloads_root():
-            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_temp_unavailable", "page": state.facts()}
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_temp_unavailable", "page": await state.facts()}
         deadline = time.monotonic() + timeout / 1000
         download: Any = None
         request_events: list[Any] = []
         download_events: list[Any] = []
+        cancelled_downloads: set[int] = set()
         successful = False
         listeners_installed = False
+        deferred_pending_tasks: tuple[asyncio.Task[Any], ...] = ()
+        operation_task = asyncio.current_task()
+        if not hasattr(self, "download_operations"):
+            self.download_operations = set()
+        if operation_task is not None:
+            self.download_operations.add(operation_task)
         browser_temp_root = getattr(self, "downloads_root", None)
         monitor_paths = [str(browser_temp_root)] if isinstance(browser_temp_root, Path) else []
 
@@ -1281,63 +1431,71 @@ class Driver:
             if all(candidate is not item for candidate in download_events):
                 download_events.append(item)
 
-        def failure_result(failure_class: str) -> dict[str, Any]:
-            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": failure_class, "page": state.facts()}
+        async def failure_result(failure_class: str) -> dict[str, Any]:
+            return {"status": "unknown_outcome", "dispatch_state": "dispatched", "operation": "download", "failure_class": failure_class, "page": await state.facts()}
+
+        def cancel_download(item: Any) -> Any:
+            """Request public cancellation once; cleanup still deletes."""
+            identity = id(item)
+            if identity in cancelled_downloads:
+                return None
+            cancelled_downloads.add(identity)
+            return item.cancel()
 
         try:
-            link = self.control_handle(state, target, "link")
+            link = await self.control_handle(state, target, "link")
             if link is None:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
-            href = link.get_attribute("href")
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
+            href = await link.get_attribute("href")
             resolved = safe_url(urljoin(state.page.url, href or "")) if isinstance(href, str) else None
             observed_resolved = safe_url(urljoin(state.page.url, observed_href or "")) if observed_href else None
             if not resolved or not observed_resolved or resolved != observed_resolved or origin_of(resolved) != expected:
-                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": state.facts()}
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
             state.page.on("request", on_request)
             state.page.on("download", on_download)
             listeners_installed = True
             remaining = max(1, min(timeout, int(max(0.001, deadline - time.monotonic()) * 1000)))
-            with state.page.expect_download(timeout=remaining) as download_info:
-                link.click(timeout=remaining)
-            download = download_info.value
+            async with state.page.expect_download(timeout=remaining) as download_info:
+                await link.click(timeout=remaining)
+            download = await download_info.value
             if all(candidate is not download for candidate in download_events):
                 download_events.insert(0, download)
             # Exactly one observed Download event must be the value returned by
             # expect_download. Keep the listener installed until the complete
             # save/failure lifecycle so a second event cannot be missed.
             if len(download_events) != 1 or download_events[0] is not download:
-                return failure_result("download_relation_unavailable")
+                return await failure_result("download_relation_unavailable")
             download_url = safe_url(download.url)
             if not download_url or origin_of(download_url) not in scope or not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download):
-                return failure_result("download_relation_unavailable")
+                return await failure_result("download_relation_unavailable")
             # save_as may wait for Playwright's original browser artifact before
             # copying it to staging. Monitor both public download storage and
             # staging for the whole save/failure lifecycle.
-            self.bounded_download_call(staging, deadline, lambda: download.save_as(staging), monitor_paths)
+            await self.bounded_download_call(staging, deadline, lambda: download.save_as(staging), monitor_paths, lambda: cancel_download(download))
             browser_temp_path: str | None = None
             path_reader = getattr(download, "path", None)
             if callable(path_reader):
-                candidate_path = self.bounded_download_call(staging, deadline, path_reader, monitor_paths)
+                candidate_path = await self.bounded_download_call(staging, deadline, path_reader, monitor_paths, lambda: cancel_download(download))
                 if isinstance(candidate_path, (str, os.PathLike)) and candidate_path:
                     browser_temp_path = os.fspath(candidate_path)
                     if isinstance(browser_temp_root, Path):
                         try:
                             Path(browser_temp_path).absolute().relative_to(browser_temp_root.absolute())
                         except ValueError:
-                            return failure_result("download_temp_unavailable")
-            failure = self.bounded_download_call(staging, deadline, download.failure, monitor_paths)
+                            return await failure_result("download_temp_unavailable")
+            failure = await self.bounded_download_call(staging, deadline, download.failure, monitor_paths, lambda: cancel_download(download))
             if failure:
-                return failure_result(safe_text(failure, 128))
+                return await failure_result(safe_text(failure, 128))
             if len(download_events) != 1 or download_events[0] is not download:
-                return failure_result("download_relation_unavailable")
+                return await failure_result("download_relation_unavailable")
             if not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download):
-                return failure_result("download_relation_unavailable")
+                return await failure_result("download_relation_unavailable")
             staged = Path(staging)
             size = staged.stat().st_size
             if time.monotonic() >= deadline:
-                return failure_result("timeout")
+                return await failure_result("timeout")
             if size > MAX_DOWNLOAD_BYTES:
-                return failure_result("file_limit_exceeded")
+                return await failure_result("file_limit_exceeded")
             digest = hashlib.sha256()
             with staged.open("rb", buffering=0) as handle:
                 while True:
@@ -1349,34 +1507,40 @@ class Driver:
                     digest.update(chunk)
             suggested = safe_text(download.suggested_filename, 128)
             if not suggested or "/" in suggested or "\\" in suggested:
-                return failure_result("download_name_invalid")
-            self.cleanup_download(download, cancel=False)
+                return await failure_result("download_name_invalid")
+            await self.cleanup_download(download, cancel=False)
             if not self.clear_downloads_root():
-                return failure_result("download_cleanup_failed")
+                return await failure_result("download_cleanup_failed")
             successful = True
-            return {"status": "completed", "dispatch_state": "dispatched", "operation": "download", "page": state.facts(), "browser_delivery": "completed", "page_receipt": "observed", "page_processing": "unknown", "business_commit": "not_observed", "download": {"page_url": safe_url(state.page.url), "url": download_url, "suggested_filename": suggested, "byte_length": size, "sha256": digest.hexdigest(), "staging_path": staging}}
+            return {"status": "completed", "dispatch_state": "dispatched", "operation": "download", "page": await state.facts(), "browser_delivery": "completed", "page_receipt": "observed", "page_processing": "unknown", "business_commit": "not_observed", "download": {"page_url": safe_url(state.page.url), "url": download_url, "suggested_filename": suggested, "byte_length": size, "sha256": digest.hexdigest(), "staging_path": staging}}
         except DownloadLimitExceeded:
-            return failure_result("file_limit_exceeded")
-        except DownloadTimeout:
-            return failure_result("timeout")
+            return await failure_result("file_limit_exceeded")
+        except DownloadTimeout as error:
+            deferred_pending_tasks = error.pending_tasks
+            return await failure_result("timeout")
         except TimeoutError:
-            return failure_result("timeout")
+            return await failure_result("timeout")
         except Exception as error:
-            return failure_result(safe_text(error, 128))
+            return await failure_result(safe_text(error, 128))
         finally:
-            if listeners_installed:
+            pending_cleanup = bool(deferred_pending_tasks and any(not task.done() for task in deferred_pending_tasks))
+            if pending_cleanup:
+                self.defer_download_cleanup(deferred_pending_tasks, state.page, on_request, on_download, download_events, download, staging, cancelled_downloads)
+            elif listeners_installed:
                 self.remove_listener(state.page, "request", on_request)
                 self.remove_listener(state.page, "download", on_download)
-            if not successful:
+            if not successful and not pending_cleanup:
                 for candidate in download_events:
-                    self.cleanup_download(candidate)
+                    await self.cleanup_download(candidate, cancel=id(candidate) not in cancelled_downloads)
                 if download is not None and all(candidate is not download for candidate in download_events):
-                    self.cleanup_download(download)
+                    await self.cleanup_download(download, cancel=id(download) not in cancelled_downloads)
                 self.clear_downloads_root()
                 try:
                     Path(staging).unlink()
                 except FileNotFoundError:
                     pass
+            if operation_task is not None:
+                self.download_operations.discard(operation_task)
 
     def state(self, request: dict[str, Any]) -> PageState:
         ref = request.get("provider_page_ref")
@@ -1387,18 +1551,96 @@ class Driver:
             raise ValueError("Page is closed.")
         return state
 
-    def close(self) -> None:
-        context = getattr(self, "context", None)
-        playwright = getattr(self, "playwright", None)
-        self.context = None
-        self.playwright = None
-        try:
-            if context is not None:
-                context.close()
-        finally:
-            if playwright is not None:
-                playwright.stop()
-            self.remove_downloads_root()
+    async def close(self) -> None:
+        # This method intentionally does not acquire ``command_lock``.  The
+        # reader dispatches close on the same asyncio loop as ordinary
+        # commands, but close must be able to reach the public Context while
+        # a pending wait/save operation is still settling.  Playwright then
+        # owns the interruption; no task cancellation or second loop is used.
+        self.close_requested.set()
+        # Keep the lifecycle state explicit even for the small object fakes
+        # used by the deterministic driver tests (which bypass ``__init__``).
+        if not hasattr(self, "_close_completed"):
+            self._close_completed = False
+        if not hasattr(self, "_close_error"):
+            self._close_error = None
+        if not hasattr(self, "_close_finalized"):
+            self._close_finalized = False
+        if getattr(self, "_close_completed", False):
+            return
+        # A failed lifecycle is sticky: retrying a half-closed Provider could
+        # duplicate cleanup or turn the original failure into a false success.
+        # Keep the failed resources isolated and surface the same error to
+        # every later owner call.
+        if self._close_finalized and self._close_error is not None:
+            raise self._close_error
+        current = asyncio.current_task()
+        existing = getattr(self, "_close_in_progress", None)
+        if existing is not None and existing is not current:
+            # EOF and an explicit close can be observed together. Join the
+            # first lifecycle attempt so stop/root cleanup cannot race it or
+            # turn its Provider error into a second successful close.
+            await asyncio.shield(existing)
+            return
+        if current is not None:
+            self._close_in_progress = current
+        close_errors: list[BaseException] = []
+        async with self.close_lock:
+            if getattr(self, "_close_completed", False):
+                return
+            # Keep failed resources in private closing slots for isolation,
+            # while removing reusable references immediately. Every
+            # subsequent dispatch remains fenced by close_requested.
+            context = getattr(self, "_closing_context", None) or getattr(self, "context", None)
+            playwright = getattr(self, "_closing_playwright", None) or getattr(self, "playwright", None)
+            self.context = None
+            self.playwright = None
+            self._closing_context = context
+            self._closing_playwright = playwright
+            # A download cancellation may already have attempted Context.close
+            # and stored its failure. Do not invoke that failed public object a
+            # second time, but still make the remaining stop attempt below.
+            if context is not None and self._close_error is None:
+                try:
+                    await context.close()
+                except BaseException as error:
+                    close_errors.append(error)
+                else:
+                    self._closing_context = None
+        # Do not hold close_lock while waiting: a timed-out file operation may
+        # need the same lock for its final public Context.close call. The
+        # operation was registered before any Provider await, so waiting here
+        # closes the race between its timeout and this owner close.
+        current = asyncio.current_task()
+        pending_operations = tuple(
+            task for task in getattr(self, "download_operations", set())
+            if task is not current and not task.done()
+        )
+        if pending_operations:
+            await asyncio.gather(*pending_operations, return_exceptions=True)
+        await self.wait_download_cleanup()
+        if playwright is not None:
+            try:
+                await playwright.stop()
+            except BaseException as error:
+                close_errors.append(error)
+            else:
+                self._closing_playwright = None
+        if close_errors:
+            # Do not remove task-owned temporary state after an incomplete
+            # close. The driver is permanently fenced, and the original
+            # Provider error is surfaced to the JSONL caller instead of being
+            # reported as a successful close.
+            if self._close_error is None:
+                self._close_error = close_errors[0]
+            self._close_finalized = True
+            raise self._close_error
+        if self._close_error is not None:
+            self._close_finalized = True
+            raise self._close_error
+        self._close_completed = True
+        self._close_finalized = True
+        self.remove_downloads_root()
 
     def network_request(self, state: PageState, request: Any) -> None:
         self.add_network(state, request, "request")
@@ -1443,81 +1685,245 @@ def viewer_entry(headless: bool) -> dict[str, Any]:
     }
 
 
-def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
+async def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     op = request.get("op")
-    if op == "page_list": return {"pages": driver.list_pages(), "rejected_unattributed_count": driver.unattributed_rejection_count}
+    if op != "close" and (driver.close_requested.is_set() or driver.download_settling):
+        return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "driver_closing" if driver.close_requested.is_set() else "download_cleanup_pending"}
+    if op == "page_list": return {"pages": await driver.list_pages(), "rejected_unattributed_count": driver.unattributed_rejection_count}
     if op == "page_open":
         origins = list(validated_origins(request.get("authorized_origins")))
-        page = driver.context.new_page()
+        page = await driver.context.new_page()
         state = next((item for item in driver.pages.values() if item.page == page), None) or driver.register(page, origins)
         state.origins = set(origins)
         driver.current = state.ref
         if request.get("url"):
-            driver.navigate(state, request["url"], origins)
-        return state.facts(task_selected=True)
+            await driver.navigate(state, request["url"], origins)
+        return await state.facts(task_selected=True)
     if op == "page_activate":
         state = driver.state(request)
         driver.current = state.ref
-        return state.facts(task_selected=True)
+        return await state.facts(task_selected=True)
     if op == "page_close":
         state = driver.state(request)
-        state.page.close()
+        await state.page.close()
         target = request.get("safe_return_provider_page_ref")
         if isinstance(target, str) and target in driver.pages and not driver.pages[target].page.is_closed():
             driver.current = target
         elif driver.current == state.ref:
             fallback = next((item.ref for item in driver.pages.values() if not item.page.is_closed()), None)
             driver.current = fallback
-        return driver.list_pages()
+        return await driver.list_pages()
     if op == "page_navigate":
         state = driver.state(request)
         origins = list(validated_origins(request.get("authorized_origins")))
         if request.get("action") == "reload":
             driver.apply_page_scope(state, origins)
-            state.page.reload()
+            await state.page.reload()
         elif request.get("action") == "back":
             driver.apply_page_scope(state, origins)
-            state.page.go_back()
+            await state.page.go_back()
         elif request.get("action") == "forward":
             driver.apply_page_scope(state, origins)
-            state.page.go_forward()
-        else: driver.navigate(state, str(request.get("url", "")), origins)
-        return state.facts(task_selected=state.ref == driver.current)
-    if op == "observe": return driver.observe(request)
-    if op == "observe_identity": return driver.observe(request).get("observation", {})
-    if op == "interact": return driver.interact(request)
-    if op == "read_public_page": return driver.public_page(request)
-    if op == "diagnostics": return driver.diagnostics(request)
-    if op == "environment": return driver.environment(request)
-    if op == "screenshot": return driver.screenshot(request)
-    if op == "file_operation": return driver.file_operation(request)
-    if op == "close": driver.close(); return {"closed": True}
+            await state.page.go_forward()
+        else: await driver.navigate(state, str(request.get("url", "")), origins)
+        return await state.facts(task_selected=state.ref == driver.current)
+    if op == "observe": return await driver.observe(request)
+    if op == "observe_identity": return (await driver.observe(request)).get("observation", {})
+    if op == "interact": return await driver.interact(request)
+    if op == "read_public_page": return await driver.public_page(request)
+    if op == "diagnostics": return await driver.diagnostics(request)
+    if op == "environment": return await driver.environment(request)
+    if op == "screenshot": return await driver.screenshot(request)
+    if op == "file_operation": return await driver.file_operation(request)
+    if op == "close": await driver.close(); return {"closed": True}
     raise ValueError("Driver operation is not allowlisted.")
 
 
-def main() -> None:
+async def main_async() -> None:
     sys.stdout.reconfigure(line_buffering=True)
     driver: Driver | None = None
-    for raw in sys.stdin:
+    driver_holder: dict[str, Driver | None] = {"value": None}
+    launch_in_progress = False
+    launch_ready = asyncio.Event()
+    launch_ready.set()
+    command_lock = asyncio.Lock()
+    # One ordinary command is processed by the consumer at a time.  Keep the
+    # buffered portion one slot below the lifecycle budget so buffered + in
+    # flight ordinary work is always <= MAX_PENDING_COMMANDS (64).
+    input_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=MAX_PENDING_COMMANDS - 1)
+    close_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=1)
+    eof_seen = asyncio.Event()
+
+    def is_close_line(raw: str) -> bool:
+        if len(raw.encode("utf-8")) > MAX_LINE:
+            return False
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            return False
+        return isinstance(value, dict) and value.get("op") == "close"
+
+    def line_operation(raw: str) -> str | None:
+        if len(raw.encode("utf-8")) > MAX_LINE:
+            return None
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        operation = value.get("op") if isinstance(value, dict) else None
+        return operation if isinstance(operation, str) else None
+
+    def input_message_id(raw: str) -> int:
+        if len(raw.encode("utf-8")) > MAX_LINE:
+            return 0
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            return 0
+        return value.get("id") if isinstance(value, dict) and isinstance(value.get("id"), int) else 0
+
+    def reject_full_input_queue(raw: str) -> None:
+        print(json.dumps({"id": input_message_id(raw), "status": "error", "message": "Driver ordinary queue is full."}, separators=(",", ":")), flush=True)
+
+    async def read_input() -> None:
+        while True:
+            raw = await asyncio.to_thread(sys.stdin.readline)
+            if raw == "":
+                eof_seen.set()
+                await input_queue.put(None)
+                return
+            # Keep close out of the bounded ordinary queue so a producer can
+            # always reach the independent lifecycle path behind busy work.
+            if is_close_line(raw):
+                try:
+                    close_queue.put_nowait(raw)
+                except asyncio.QueueFull:
+                    pass
+            else:
+                # Never block the reader on ordinary admission: doing so
+                # would hide a later EOF/close line behind a full queue. The
+                # bounded queue is an explicit overload boundary; rejected
+                # lines receive a correlated response and are never started.
+                try:
+                    input_queue.put_nowait(raw)
+                except asyncio.QueueFull:
+                    reject_full_input_queue(raw)
+
+    async def process(raw: str) -> None:
+        nonlocal driver, launch_in_progress
         if len(raw.encode("utf-8")) > MAX_LINE:
             print(json.dumps({"id": 0, "status": "error", "message": "Driver request is too large."}, separators=(",", ":")), flush=True)
-            continue
+            return
         message_id = 0
         try:
             request = json.loads(raw)
             if not isinstance(request, dict): raise ValueError("Driver request must be an object.")
             message_id = request.get("id") if isinstance(request.get("id"), int) else 0
-            if request.get("op") == "launch":
-                if driver is not None: raise ValueError("Driver is already launched.")
-                driver = Driver(request)
-                result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": driver.pages[driver.current].facts(task_selected=True), "pages": driver.list_pages(), "viewer_entry": viewer_entry(bool(driver.request.get("headless", False))), "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
-            elif driver is None:
-                raise ValueError("Driver has not launched.")
-            else:
-                result = dispatch(driver, request)
+            if request.get("op") == "close":
+                # Close is the one lifecycle command that deliberately
+                # bypasses the ordinary-operation lock. All calls remain on
+                # this owner loop, while Context.close can interrupt a
+                # pending Playwright operation and make its outcome explicit.
+                active_driver = driver_holder["value"]
+                if active_driver is None and launch_in_progress:
+                    await launch_ready.wait()
+                    # Let an already queued ordinary command enter its
+                    # serialized Provider section before close interrupts it.
+                    await asyncio.sleep(0)
+                    active_driver = driver_holder["value"]
+                if active_driver is None:
+                    raise ValueError("Driver has not launched.")
+                active_driver.close_requested.set()
+                result = await dispatch(active_driver, request)
+                if driver is active_driver:
+                    driver = None
+                driver_holder["value"] = None
+                print(json.dumps({"id": message_id, "status": "ok", "result": result}, ensure_ascii=False, separators=(",", ":")), flush=True)
+                return
+            async with command_lock:
+                if request.get("op") == "launch":
+                    if driver is not None: raise ValueError("Driver is already launched.")
+                    if not launch_in_progress:
+                        launch_in_progress = True
+                        launch_ready.clear()
+                    try:
+                        driver = await Driver.create(request)
+                        driver_holder["value"] = driver
+                        page = await driver.pages[driver.current].facts(task_selected=True)
+                        result = {"status": "ready", "driver_ref": "camoufox-upstream-jsonl", "page": page, "pages": await driver.list_pages(), "viewer_entry": viewer_entry(bool(driver.request.get("headless", False))), "facts": [{"key": "driver.api", "source": "observed", "value": "playwright_public"}, {"key": "launch_options.replay", "source": "observed", "value": "exact" if driver.replay else "created"}, {"key": "provider.camoufox.properties_sha256", "source": "validation_evidence", "value": driver.properties_sha256}]}
+                    finally:
+                        launch_in_progress = False
+                elif driver is None:
+                    raise ValueError("Driver has not launched.")
+                else:
+                    result = await dispatch(driver, request)
             print(json.dumps({"id": message_id, "status": "ok", "result": result}, ensure_ascii=False, separators=(",", ":")), flush=True)
         except BaseException as error:
             print(json.dumps({"id": message_id, "status": "error", "message": f"{type(error).__name__}: {safe_text(error, 240)}"}, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+    reader = asyncio.create_task(read_input())
+
+    async def consume_ordinary() -> None:
+        nonlocal launch_in_progress
+        while True:
+            raw = await input_queue.get()
+            if raw is None:
+                return
+            operation = line_operation(raw)
+            # Mark launch before entering its process so a close consumer can
+            # wait for setup without taking the ordinary lock.  This consumer
+            # deliberately awaits each ordinary command instead of creating
+            # one task per admitted line: buffered + in-flight work remains
+            # bounded by MAX_PENDING_COMMANDS.
+            if operation == "launch" and driver is None and not launch_in_progress:
+                launch_in_progress = True
+                launch_ready.clear()
+            await process(raw)
+            if operation == "launch":
+                launch_ready.set()
+
+    async def consume_close() -> None:
+        while True:
+            raw = await close_queue.get()
+            if raw is None:
+                return
+            task = asyncio.create_task(process(raw))
+            await task
+
+    ordinary_consumer = asyncio.create_task(consume_ordinary())
+    close_consumer = asyncio.create_task(consume_close())
+    try:
+        # EOF is independent from the bounded ordinary consumer. It may be
+        # processing one ordinary command while close still needs to
+        # interrupt a pending Provider operation.
+        await eof_seen.wait()
+    finally:
+        # EOF is a lifecycle boundary: close the public Context first so
+        # pending Provider commands can settle, then retain their real JSONL
+        # outcomes while the bounded ordinary consumer drains.
+        if launch_in_progress:
+            await launch_ready.wait()
+        active_driver = driver_holder["value"]
+        if active_driver is not None:
+            active_driver.close_requested.set()
+            await active_driver.close()
+            if driver is active_driver:
+                driver = None
+            driver_holder["value"] = None
+        # Let the independent close consumer finish any close request already
+        # read before EOF, then stop it with a bounded queue sentinel.
+        await close_queue.put(None)
+        await asyncio.gather(close_consumer, return_exceptions=True)
+        await asyncio.gather(ordinary_consumer, return_exceptions=True)
+        # The reader publishes its EOF sentinel through the bounded queue. Do
+        # not cancel it before that put completes: cancellation at the
+        # boundary would strand the ordinary consumer forever on an empty
+        # queue after it drained the final command.
+        await asyncio.gather(reader, return_exceptions=True)
+
+
+def main() -> None:
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

@@ -13,7 +13,10 @@ const holder = "principal:fixture";
 const scope = { holder_ref: holder, expected_origin: origin, controlled_origin: origin };
 
 // Fixture checks Runtime/HTTP contracts only; no real Provider or browser is exercised.
-async function setup(before?: (input: ManagedInteractionInput, profile: string) => Promise<void>) {
+async function setup(
+  before?: (input: ManagedInteractionInput, profile: string) => Promise<void>,
+  resultFor?: (input: ManagedInteractionInput, version: number) => ManagedInteractionResult | undefined
+) {
   const calls: { profile: string; input: ManagedInteractionInput }[] = [];
   const launcher: LocalProviderLauncher = async input => {
     const ready = await createFixtureLauncher("ready")(input);
@@ -23,6 +26,8 @@ async function setup(before?: (input: ManagedInteractionInput, profile: string) 
       calls.push({ profile: input.profile_ref, input: action });
       await before?.(action, input.profile_ref);
       version++;
+      const selected = resultFor?.(action, version);
+      if (selected) return selected;
       return { status: "completed", dispatch_state: "dispatched", page: { current_url: `${origin}/fixture`, title: `fixture:${version}`, status: "ready", facts: [] },
         snapshot: { page_ref: `page:${input.profile_ref}`, observation_ref: `observation:${input.profile_ref}:${version}`, controls: [{ target_ref: "target:field", role: "textbox", name: "测试字段", enabled: true }], text: "non-sensitive fixture", truncated: false } };
     }) };
@@ -107,6 +112,26 @@ test("fixture HTTP interaction rejects unprivileged callers and malformed scope/
     const conflict = await post({ ...input, action: "snapshot", expected_origin: "https://other.invalid", controlled_origin: "https://other.invalid" });
     refused(await conflict.json() as ManagedInteractionResult, "managed_interaction_idempotency_conflict");
   } finally { await server.close(); await f.close(); }
+});
+
+test("a declared wait timeout remains failed and dispatched without replay", async () => {
+  const f = await setup(undefined, action => action.action === "wait" ? {
+    status: "unavailable",
+    dispatch_state: "dispatched",
+    failure_class: "wait_condition_timeout",
+    page: { current_url: `${origin}/fixture`, title: "waited", status: "ready", facts: [] }
+  } : undefined);
+  try {
+    const observed = await f.snapshot();
+    const input = f.request("wait", { ...observed, wait_for: "text", text: "never", timeout_ms: 50 });
+    const result = await f.runtime.operateManagedInteraction(f.a, input);
+    assert.equal(result.status, "unavailable");
+    assert.equal(result.dispatch_state, "dispatched");
+    assert.equal(result.failure_class, "wait_condition_timeout");
+    assert.deepEqual(f.runtime.getManagedInteraction(input.operation_ref), result);
+    assert.deepEqual(await f.runtime.operateManagedInteraction(f.a, input), result);
+    assert.equal(f.calls.filter(call => call.input.action === "wait").length, 1);
+  } finally { await f.close(); }
 });
 
 test("fixture interaction requires matching holder, lease, Page and observation; bound identity rejects and handoff isolates the other Profile", async () => {
@@ -261,13 +286,14 @@ for (const lost of [false, true]) test(`fixture in-flight interaction blocks han
     for (const result of [f.runtime.recordHandoff(f.a, { control_owner: "user" }), f.runtime.releaseSession(f.a, { control_owner: "core_task" }), f.runtime.lockSession(f.a, { control_owner: "user" })]) {
       assert.ok("failure_class" in result && result.failure_class === "session_locked");
     }
-    assert.equal(record.control_generation, generation);
+    assert.equal(record.control_generation, generation + 1, "mutating handoff intent fences the admitted operation");
+    assert.equal(record.handoff_intent?.control_owner, "user");
     assert.equal(record.active_provider_interactions, 1);
     const inProgress = f.runtime.getManagedInteraction(input.operation_ref);
     assert.equal(inProgress?.status, "unknown_outcome");
     assert.equal(inProgress?.dispatch_state, "dispatched");
     assert.deepEqual(await f.runtime.operateManagedInteraction(f.a, input), inProgress);
-    refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot")), "session_not_ready");
+    refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot")), "control_lock_conflict");
     await f.snapshot(f.b);
     assert.equal(f.calls.filter(call => call.input.action === "input").length, 1);
     await f.runtime.stopSession(f.a);

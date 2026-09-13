@@ -88,7 +88,7 @@ unknown outcome 原样暴露为结构化失败，`webenvoy_query` 只读原事�
 
 ## 既有 Runtime 输入与 availability
 
-`webenvoy_operation` 的 Page 输入为 `idempotency_key`、`grant_id`、对应 `operation`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref`，并按 operation 接受精确 `origin`、受管 `page_id`/`page_ref`、`document_generation` 或同源 URL。兼容的 `instance.navigate`、`instance.read`、`instance.observe` 也消费这组显式 Page binding：多 Page Instance 必须携带 `page_id` 或 `page_ref`，成功结果分别在 `session.current_page` 或 `observation.page` 回显 Harbor 当前绑定；stale、origin 不符或 selector 冲突不得回退到 active/创建顺序的另一张 Page。`page.list` 与诊断是 observation-only，不获取或续租 ControlLease；其余 Page 操作走既有 Run/receipt 和 ControlLease。Plugin 添加当前 `connection_id`；未知输入字段拒绝。页面输入不接受 selector、脚本、header、body 或 raw endpoint 参数。关系异常或原生 selected 页面无法与受管 Page 可靠对应时，Harbor 必须返回结构化 `page_relation_unavailable`（或精确 Provider unavailable），暂停受影响 Instance 的网页派发并保留现场；不得猜测、重放、reload/reopen/rebuild、隐式接管用户控制，或影响其他 Profile。
+`webenvoy_operation` 的 Page 输入为 `idempotency_key`、`grant_id`、对应 `operation`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref`，并按 operation 接受精确 `origin`、受管 `page_id`/`page_ref`、`document_generation` 或同源 URL。兼容的 `instance.navigate`、`instance.read`、`instance.observe` 也消费这组显式 Page binding：多 Page Instance 必须携带 `page_id` 或 `page_ref`，成功结果分别在 `session.current_page` 或 `observation.page` 回显 Harbor 当前绑定；stale、origin 不符或 selector 冲突不得回退到 active/创建顺序的另一张 Page。`page.list` 与诊断是 observation-only，不获取或续租 ControlLease；其余 Page 操作走既有 Run/receipt 和 ControlLease。Plugin 添加当前 `connection_id`；未知输入字段拒绝。页面输入不接受 selector、脚本、header、body 或 raw endpoint 参数。仅当受管 Page 的归属、document、权限或必要输入落点无法可信确认时，Harbor 才返回结构化 `page_relation_unavailable`（或精确 Provider unavailable），仅局部拒绝受影响 Page 的该次网页派发并保留现场；可选的原生焦点/`selected` 未知本身不阻断已可信的任务 Page。已派发的 click 保持 `dispatched`，popup 子请求的拒绝与业务未完成分别记录；不得猜测、重放、reload/reopen/rebuild、隐式接管用户控制；原任务页的 fresh read/input、已可信 Page、其他 Page、Profile、Grant、查询和 SKILL 管理不因该局部拒绝而暂停。
 
 `webenvoy_operation` 的诊断输入仍为 `idempotency_key`、`grant_id`、`operation=instance.diagnostics`、既有 browser `task_scope`、`profile_ref`、`runtime_session_ref` 和精确 `origin`，可选同一 Instance 的 `page_ref`、不透明 `cursor`、`limit`（整数 1–64）。Plugin 添加当前 `connection_id`；未知输入字段拒绝。诊断不接受页面动作、selector、脚本、header、body 或 raw endpoint 参数，结果仍是有界脱敏 metadata。
 
@@ -128,6 +128,19 @@ Core 沿用 `{ok, run_id, status, result?, failure?}` 包装。管理操作的�
 `webenvoy_query` 只查询原 Run/receipt/摘要，不重放安装、启用、切换、禁用或 read，也不因旧 receipt 返回新的正文。响应丢失时，Plugin 重新 connect 后按原 idempotency key 或 run 查询；idempotency conflict、CAS conflict、`managed_skill_local_modified`、`managed_skill_missing`、`managed_skill_source_corrupt`、unavailable、revoked 和 incompatible 都保持明确失败，不能降级为空成功。
 
 Page mutation 的响应丢失、Harbor receipt 缺失或 Provider 关系无法确认时，Core/Harbor 保留 `unknown_outcome` 与 `dispatch_state: "dispatched"`，再由原 operation/Run 做只读对账；`not_dispatched` 只表示在 Provider dispatch boundary 之前被拒绝。旧 Plugin、旧 Runtime 或未知 schema/version 不认识 Page operation 时必须明确拒绝，不得改投旧 `instance.navigate`、内部 HTTP、CDP/Juggler 或其他 raw Provider path。兼容拒绝不扩大授权、不重放动作。
+
+### Runtime continuity and lifecycle projection
+
+官方 async Driver 的 JSONL 生命周期仍属于同一 Plugin Runtime projection：普通
+Provider 操作在单一 owning event loop 上串行，输入队列有界；owner `close` 有独立
+入口，不排在普通 wait 或文件传输之后。EOF 先关闭 public Context，再等待已派发
+操作的真实结果。等待声明条件超时是 `unavailable` + `dispatched`，不能当作成功或
+重放；owner close、handoff intent、Page/ControlLease generation 变化也同样保持
+明确的 dispatched/unknown 事实。下载 deadline 或配额超限先走公开 Download cancel，
+未收敛时保留 task-owned 临时空间和清理屏障，并拒绝 Driver 复用，直到 cleanup
+完成。该段实现与确定性验证见 [Runtime Continuity V1 verification](../verification/runtime-continuity-v1.md)；
+它是公共 lifecycle/结果边界，不增加 MCP operation、Grant 维度或 Provider 私有
+协议，也不把确定性 fake 证据扩写成 installed/live/plugin checkpoint。
 
 SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
 

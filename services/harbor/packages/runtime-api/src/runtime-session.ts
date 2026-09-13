@@ -68,6 +68,7 @@ import {
 import type {
   ControlOwner,
   ControlOwnerFacts,
+  ViewerControlUnavailable,
   ViewerControlStore
 } from "./viewer-control.js";
 
@@ -139,6 +140,11 @@ export interface RuntimeSessionRecord {
   facts: RuntimeSessionFacts;
   control_generation: number;
   active_provider_interactions: number;
+  active_provider_interaction_kind?: "passive_wait" | "mutating";
+  /** A rejected mutating handoff invalidates the current generation and
+   * fences subsequent Agent input until the owner retries the handoff after
+   * the admitted operation has settled. */
+  handoff_intent?: { control_owner: "user"; requested_at: string; control_generation: number };
   closing?: Promise<RuntimeSessionFacts>;
   headless: boolean;
   identity_binding: {
@@ -481,6 +487,7 @@ export class RuntimeSessionStore {
     if (!record.page_registry) return pageUnavailable("provider_unavailable", runtime_session_ref, true, input.operation_ref);
     if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" ||
       record.facts.control_lock.holder_ref !== input.holder_ref) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref);
+    if (record.handoff_intent) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref);
     if (record.active_provider_interactions) return pageUnavailable("control_lock_conflict", runtime_session_ref, true, input.operation_ref);
     const generation = record.control_generation;
     try {
@@ -763,6 +770,32 @@ export class RuntimeSessionStore {
     );
   }
 
+  /**
+   * Establish a narrow handoff intent before a mutating Provider operation
+   * has settled. The current generation is fenced immediately, so later
+   * Agent input cannot enter; the owner retries the same handoff after the
+   * admitted operation reaches its existing receipt boundary.
+   */
+  prepareHandoff(runtime_session_ref: string): ViewerControlUnavailable | null {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || record.active_provider_interactions === 0 || record.active_provider_interaction_kind === "passive_wait") return null;
+    // A handoff is only a Core->user transition. A caller cannot create a
+    // dangling intent while a lease-free/user-controlled Page is merely
+    // being observed; the normal owner checks still report this as locked.
+    if (record.facts.control_owner !== "core_task" || record.facts.control_lock.owner !== "core_task" || record.facts.control_lock.state !== "held") {
+      return { status: "unavailable", failure_class: "session_locked", message: "Runtime Session is not currently controlled by Core.", retryable: true };
+    }
+    if (!record.handoff_intent) {
+      bumpControlGeneration(record);
+      record.handoff_intent = {
+        control_owner: "user",
+        requested_at: new Date().toISOString(),
+        control_generation: record.control_generation
+      };
+    }
+    return { status: "unavailable", failure_class: "session_locked", message: "A mutating Provider interaction is still settling; retry handoff after its receipt is terminal.", retryable: true };
+  }
+
   applyHandoff(runtime_session_ref: string, control: Pick<ControlOwnerFacts, "owner" | "previous_owner" | "handoff_reason" | "takeover" | "updated_at">): void {
     const record = this.records.get(runtime_session_ref);
     if (!record) return;
@@ -776,6 +809,7 @@ export class RuntimeSessionStore {
       conflict_error: null
     };
     bumpControlGeneration(record);
+    delete record.handoff_intent;
     // Only the server-owned handoff path calls applyHandoff; create/lock input
     // must never be treated as proof that a user held this session.
     record.user_held_session = control.owner === "user" && isInteractiveUserViewer(record.facts);
@@ -820,9 +854,16 @@ export class RuntimeSessionStore {
 
   async clearManagedPublicPageGuard(runtime_session_ref: string) {
     const record = this.records.get(runtime_session_ref);
-    if (!record || record.facts.control_owner !== "user" || record.facts.control_lock.state !== "held" || record.active_provider_interactions) return managedUnavailable("control_lock_conflict");
+    if (!record || record.facts.control_owner !== "user" || record.facts.control_lock.state !== "held") return managedUnavailable("control_lock_conflict");
+    // Camoufox's route guard is installed at launch and has no public
+    // clear hook. A passive wait may therefore transfer control atomically
+    // without manufacturing a second Provider interaction. Implementations
+    // that do expose a clear hook still wait for the current operation to
+    // settle before invoking it.
+    if (!record.clearPublicPageGuard) return { status: "completed" as const };
+    if (record.active_provider_interactions) return managedUnavailable("control_lock_conflict");
     try {
-      if (record.clearPublicPageGuard) await this.withProviderInteraction(record, record.clearPublicPageGuard);
+      await this.withProviderInteraction(record, record.clearPublicPageGuard);
       return { status: "completed" as const };
     } catch { return managedUnavailable("managed_public_guard_release_failed"); }
   }
@@ -976,7 +1017,7 @@ export class RuntimeSessionStore {
       ...(input.action === "snapshot" ? {} : { page_ref: observed?.provider_snapshot_ref ?? action.page_ref })
     } : { ...action, authorized_origins: authorizedOrigins };
     try {
-      const result = await this.withProviderInteraction(record, () => operation({ ...providerAction, control_generation: generation }));
+      const result = await this.withProviderInteraction(record, () => operation({ ...providerAction, control_generation: generation }), input.action === "wait" ? "passive_wait" : "mutating");
       const controlUnchanged = releasedForSnapshot
         ? isReleasedControl(record)
         : isCoreLeaseHeld(record, input.holder_ref);
@@ -1198,12 +1239,16 @@ export class RuntimeSessionStore {
     return session ? isRuntimeSessionReadable(session) : false;
   }
 
-  private async withProviderInteraction<T>(record: RuntimeSessionRecord, operation: () => Promise<T>): Promise<T> {
+  private async withProviderInteraction<T>(record: RuntimeSessionRecord, operation: () => Promise<T>, kind: "passive_wait" | "mutating" = "mutating"): Promise<T> {
+    const previousKind = record.active_provider_interaction_kind;
     record.active_provider_interactions += 1;
+    record.active_provider_interaction_kind = kind;
     try {
       return await operation();
     } finally {
       record.active_provider_interactions -= 1;
+      if (record.active_provider_interactions <= 0) delete record.active_provider_interaction_kind;
+      else if (previousKind !== undefined) record.active_provider_interaction_kind = previousKind;
     }
   }
 
@@ -1459,6 +1504,7 @@ export class RuntimeSessionStore {
 
   private acquireControl(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): RuntimeSessionUnavailable | null {
     if (record.active_provider_interactions > 0) return unavailableSession("session_locked", error("session_locked", "Provider interaction is still in progress.", true));
+    if (record.handoff_intent) return lockConflict(record, owner);
     if (
       record.facts.lifecycle_state !== "active" &&
       record.facts.lifecycle_state !== "idle" &&
@@ -1579,7 +1625,7 @@ function isReleasedControl(record: RuntimeSessionRecord): boolean {
 
 function isCoreLeaseHeld(record: RuntimeSessionRecord, holder_ref: string): boolean {
   const lock = record.facts.control_lock;
-  return record.facts.control_owner === "core_task" && lock.owner === "core_task" && lock.state === "held" && lock.holder_ref === holder_ref;
+  return !record.handoff_intent && record.facts.control_owner === "core_task" && lock.owner === "core_task" && lock.state === "held" && lock.holder_ref === holder_ref;
 }
 
 function canPreserveReleasedSnapshotGeneration(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {
