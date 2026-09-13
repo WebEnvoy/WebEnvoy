@@ -1,7 +1,7 @@
 {
   "schema_version": "webenvoy.browser-files-installed-live-evidence/v1",
   "work_item": 523,
-  "recorded_at": "2026-09-13T01:50:05Z",
+  "recorded_at": "2026-09-13T01:54:09Z",
   "judgment": "no_release",
   "verification_input": {
     "repository": "WebEnvoy/WebEnvoy",
@@ -143,6 +143,12 @@
           "bounded timeout cancels and cleans a slow download"
         ],
         "evidence_scope": "This is a deterministic test executed from the current packaged app and imports its packaged Python driver. Its browser-temp case uses the public downloads_path-shaped driver boundary with a controlled Download fixture; it is not claimed as a live network oversize transfer. The current fixed-provider live Agent evidence below covers the real browser upload/download path."
+      },
+      "real_provider_downloads_path_probe": {
+        "status": "pass",
+        "path": "docs/verification/browser-files-v1-downloads-path-probe-v1.json",
+        "sha256": "5134fc95ab023201281dd6d7c4fc71e67fc989838c7933c1a3fc6bcdef0a29ac",
+        "scope": "Real fixed Camoufox/Playwright 1.60 public API probe: a 10 MiB+1 download in task-owned downloads_path was canceled and deleted at 10485761 bytes with zero residual entries. This is provider/API evidence supporting the packaged-driver gate, not a WebEnvoy MCP or Agent result."
       }
     },
     "component_equivalence": {
@@ -233,6 +239,7 @@
     {"command": "pnpm --filter @webenvoy/harbor test", "result": "pass", "notes": "339 tests: 338 passed, 1 Windows-only skipped, 0 failed"},
     {"command": "node --test services/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js", "result": "pass", "notes": "13 passed, 0 failed"},
     {"command": "node --test --test-concurrency=1 <installed-app>/Contents/Resources/app/dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.test.js", "result": "pass", "notes": "Current 47d packaged driver: 13 passed, 0 failed, 0 skipped; covers scope narrowing, exact ElementHandle replacement, wrong/multiple/late download attribution, bounded temp/oversize cleanup, and timeout"},
+    {"command": "fixed-provider Playwright 1.60 public downloads_path oversize probe", "result": "pass", "notes": "10 MiB+1 real browser download crossed the bounded directory threshold, public Download.cancel/delete ran, and the task-owned directory was empty before/after context close; summary hash is recorded in docs/verification/browser-files-v1-downloads-path-probe-v1.json"},
     {"command": "pnpm typecheck", "result": "pass"},
     {"command": "pnpm build", "result": "pass"},
     {"command": "pnpm lint", "result": "pass"},
