@@ -356,6 +356,34 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
     const selectedPage = initialPages.find(page => page.task_selected === true) ?? initialPage;
     const context = { driver, input, source, profileStorage, pages: initialPages, current: selectedPage.provider_page_ref, unattributedRequestRejectionCount: 0 };
     const pageController = createPageController(context);
+    let closeAttempt: Promise<void> | null = null;
+    const close = (): Promise<void> => {
+      if (closeAttempt) return closeAttempt;
+      closeAttempt = (async () => {
+        let failed = false;
+        let failure: unknown;
+        try {
+          await driver.request("close", {}, input.timeout_ms);
+        } catch (error) {
+          // Python's public Context.close/Playwright.stop failure is a
+          // lifecycle fact. Preserve it while still terminating the child
+          // transport; never release the ephemeral Profile on this path.
+          failed = true;
+          failure = error;
+        }
+        try {
+          await driver.close();
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+        }
+        if (failed) throw failure;
+        if (!profileStorage.persistent) await removeDirectory(profileStorage.profileDir);
+      })();
+      return closeAttempt;
+    };
     const resultBase = {
       status: "ready" as const,
       execution_surface: "local_provider" as const,
@@ -366,7 +394,7 @@ export async function launchCamoufoxUpstreamProvider(input: LocalProviderLaunchI
       pages: initialPages,
       pageController,
       facts: [...sourceFacts(source), ...profileStorage.facts, ...arrayFacts(launched.facts), { key: "browser.launch", source: "observed" as const, value: "ready" }],
-      close: async () => { await driver.request("close", {}, input.timeout_ms).catch(() => undefined); await driver.close(); if (!profileStorage.persistent) await removeDirectory(profileStorage.profileDir); },
+      close,
       captureScreenshot: async () => screenshot(context),
       openUrl: async (url: string) => {
         const page = await callPage(context, "navigate", { provider_page_ref: context.current, action: "navigate", url, authorized_origins: [new URL(url).origin] });

@@ -20,7 +20,7 @@ let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let dropResponse = false, omitProviderSelection = false;
-let interactions = 0, dropInteractionResponse = false, refuseInteraction = false;
+let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false;
 const forwardedInteractionOrigins: string[][] = [];
 const receipts = new Map<string, unknown>();
 let pageLists = 0, pageMutations = 0, dropPageResponse = false;
@@ -186,9 +186,12 @@ const server = createServer((req, res) => { void (async () => {
     assert.equal(input.expected_origin, "http://127.0.0.1:18794");
     assert.ok(Array.isArray(input.authorized_origins));
     forwardedInteractionOrigins.push([...input.authorized_origins]);
-    if (!refuseInteraction) interactions++;
-    value = { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
-      operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
+    const timedOut = waitConditionTimeout && input.action === "wait";
+    if (!refuseInteraction && !timedOut) interactions++;
+    value = timedOut
+      ? { status: "unavailable", dispatch_state: "dispatched", failure_class: "wait_condition_timeout", operation_ref: input.operation_ref, runtime_session_ref: "session:one", page: { current_url: "http://127.0.0.1:18794/fixture", title: "Fixture", status: "ready" } }
+      : { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
+        operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
     receipts.set(input.operation_ref, value);
     if (dropInteractionResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/managed-interactions/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
@@ -560,6 +563,25 @@ try {
   assert.equal(interactions, 2);
   dropInteractionResponse = false;
   assert.deepEqual(await service.submit(credentialHash, input), lost, "same key cannot replay input");
+  waitConditionTimeout = true;
+  const timedOutWait = await service.submit(credentialHash, { ...interactive, idempotency_key: "wait-timeout", operation: "instance.wait",
+    page_ref: "page:one", observation_ref: "observation:1", wait_for: "text", text: "never", timeout_ms: 50 });
+  waitConditionTimeout = false;
+  assert.equal(timedOutWait.status, "failed", JSON.stringify(timedOutWait));
+  assert.equal(timedOutWait.dispatch_state, "dispatched");
+  assert.equal(timedOutWait.failure?.code, "wait_condition_timeout");
+  assert.equal((timedOutWait.result as { failure_class: string }).failure_class, "wait_condition_timeout");
+  assert.deepEqual(await service.query(credentialHash, timedOutWait.run_id), timedOutWait, "query preserves the known wait failure");
+
+  waitConditionTimeout = true;
+  dropInteractionResponse = true;
+  const timedOutLost = await service.submit(credentialHash, { ...interactive, idempotency_key: "wait-timeout-lost", operation: "instance.wait",
+    page_ref: "page:one", observation_ref: "observation:1", wait_for: "text", text: "never", timeout_ms: 50 });
+  dropInteractionResponse = false;
+  waitConditionTimeout = false;
+  assert.equal(timedOutLost.status, "unknown_outcome", JSON.stringify(timedOutLost));
+  assert.equal(timedOutLost.dispatch_state, "dispatched");
+  assert.equal((await service.query(credentialHash, timedOutLost.run_id)).status, "unknown_outcome", "a lost response remains unknown");
   await accessStore.revokeGrant({ idempotency_key: "revoke-controlled", grant_id: interactiveGrant.grant_id });
   const interactiveReconnect = await accessStore.connect(credentialHash);
   await assert.rejects(service.submit(credentialHash, { ...input, idempotency_key: "after-controlled-revoke", connection_id: interactiveReconnect.connection_id }), /grant_unavailable/);
