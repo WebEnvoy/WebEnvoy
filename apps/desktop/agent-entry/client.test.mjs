@@ -47,6 +47,14 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(operation);
     assert.match(operation.description, /instance\.start requires the exact authorized origin as a top-level origin field/);
     assert.equal(operation.inputSchema.required.includes('origin'), false);
+    const fileScopeCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('file.upload'));
+    assert.ok(fileScopeCondition);
+    assert.deepEqual(fileScopeCondition.if.properties.operation.enum, ['file.upload', 'file.download']);
+    assert.equal(operation.inputSchema.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(fileScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(fileScopeCondition.else.properties.task_scope.additionalProperties, false);
+    assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
+    assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);
     const skill = await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8');
     assert.match(skill, /`instance\.start` specifically requires the exact authorized origin in the top-level `origin` field/);
   } finally {
