@@ -1656,4 +1656,3 @@ async def main_async(adapter: Any) -> None:
 
 def main(adapter: Any) -> None:
     asyncio.run(main_async(adapter))
-
