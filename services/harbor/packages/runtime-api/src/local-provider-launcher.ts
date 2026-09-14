@@ -99,11 +99,19 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     ]);
   }
   const launchInput = persistedBinding && bindingBrowserPath ? { ...input, browser_path: bindingBrowserPath } : input;
+  // Resolve the persisted identity configuration before the shared Camoufox
+  // adapter can start; a missing resolver must not become a direct connection.
+  const providerConfiguration = input.identity_environment
+    ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy)
+    : null;
+  if (input.identity_environment && !providerConfiguration && isCamoufoxLaunchRequest(launchInput)) {
+    return unavailable("unsupported", "Identity environment configuration cannot be resolved by the selected local provider.", providerBindingFacts(persistedBinding ?? null));
+  }
   // Camoufox is admitted only through the owner-provided official source and
   // fixed pins. All other Camoufox/native/legacy requests remain fail-closed
   // before detection, profile preparation, or provider fallback.
   if (isCamoufoxLaunchRequest(launchInput)) {
-    return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput) : retiredCamoufoxUnavailable();
+    return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput, providerConfiguration ?? undefined) : retiredCamoufoxUnavailable();
   }
   const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
@@ -113,9 +121,6 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     return unavailable("provider_unavailable", diagnostic.app_summary, providerBindingFacts(providerBinding));
   }
   const profileStorage = await prepareProfileStorage(input.profile_storage_ref);
-  const providerConfiguration = input.identity_environment
-    ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy)
-    : null;
   if (input.identity_environment && !providerConfiguration) {
     return unavailable("unsupported", "Identity environment configuration cannot be resolved by the selected local provider.", [
       ...providerBindingFacts(providerBinding),
