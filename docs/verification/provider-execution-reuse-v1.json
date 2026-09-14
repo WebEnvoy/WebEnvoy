@@ -2,7 +2,7 @@
   "schema_version": "webenvoy.provider-execution-reuse-verification/v1",
   "work_item": 528,
   "recorded_at": "2026-09-14",
-  "status": "partial_g0_no_release",
+  "status": "blocked_supplier_compatibility_no_release",
   "scope": "Sanitized implementation and bounded host evidence for shared provider execution; not an installed/live Plugin checkpoint.",
   "shared_runtime": {
     "binding_schema": "webenvoy.playwright-shared-runtime/v1",
@@ -78,6 +78,86 @@
       "reason": "continue_ dispatched the unauthorized /private hop; the guarded implementation uses route.fetch(max_redirects=0) before dispatch and validates every hop."
     }
   ],
+  "bounded_compatibility": {
+    "status": "blocked",
+    "recorded_at": "2026-09-14",
+    "retrieved_at": "2026-09-14T17:58:00+08:00",
+    "scope": "Owner-authorized, isolated macOS arm64 qualification probe only; no production version change or support claim.",
+    "retrieval": {
+      "playwright_issue": "https://github.com/microsoft/playwright/issues/42506",
+      "playwright_v1_60_release": "https://github.com/microsoft/playwright/releases/tag/v1.60.0",
+      "playwright_release_notes": "https://playwright.dev/docs/release-notes#version-160",
+      "playwright_python_v1_62_release": "https://github.com/microsoft/playwright-python/releases/tag/v1.62.0",
+      "playwright_v1_63_release": "https://github.com/microsoft/playwright/releases/tag/v1.63.0",
+      "playwright_python_package_index": "https://pypi.org/pypi/playwright/json",
+      "chrome_stable_release": "https://chromereleases.googleblog.com/2026/09/stable-channel-update-for-desktop_0808145027.html",
+      "chrome_mac_arm64_version_history": "https://versionhistory.googleapis.com/v1/chrome/platforms/mac_arm64/channels/stable/versions/153.0.8010.37/releases",
+      "chrome_macos_stable_download": "https://support.google.com/chrome/a/answer/9915669?hl=en"
+    },
+    "candidate1": {
+      "browser_version": "153.0.8010.37",
+      "browser_channel": "Google Chrome Stable",
+      "platform": "macOS arm64",
+      "playwright_python_version": "1.60.0",
+      "source": {
+        "package": "Google official macOS DMG",
+        "sha256": "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3",
+        "executable_sha256": "83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2",
+        "google_signature_and_notarization": "verified"
+      },
+      "runs": [
+        {
+          "case_id": "run-1",
+          "status": "passed",
+          "result_sha256": "516ba402845a1fe94dd92c906bea8ee60f3485b685b86149bf3408b4488051ea",
+          "download_sha256": "3724e221f471baf51ad895e5f2046db334b4008dbafb0b939e15b46acd856f71",
+          "facts": [
+            "One persistent-context launch through public Playwright Python API.",
+            "Known download bytes/hash, localStorage marker, unique browser PID and normal close passed.",
+            "No new Crashpad dump was observed."
+          ]
+        },
+        {
+          "case_id": "run-2",
+          "status": "failed",
+          "result_sha256": "ba58df9235461905a035e177c14b39f7c3de7dc85217ae0e02fb71a613f11c1d",
+          "download_sha256": "3724e221f471baf51ad895e5f2046db334b4008dbafb0b939e15b46acd856f71",
+          "facts": [
+            "Known download bytes/hash, marker persistence and normal close passed.",
+            "A new Crashpad dump was observed and safely associated with the isolated Chrome 153 executable/profile run.",
+            "The crash signal fails the compatibility gate even though the user-visible download checks passed."
+          ],
+          "new_crashpad_dump_summary": "049a0b34…ac2a",
+          "failure_gate": "new_crashpad_dump"
+        },
+        {
+          "case_id": "run-3",
+          "status": "not_run",
+          "reason": "Stopped after the run2 Crashpad failure; no retry or alternate profile was used."
+        }
+      ],
+      "conclusion": "failed"
+    },
+    "candidate2": {
+      "status": "not_qualified",
+      "facts": [
+        "Playwright Python/PyPI 1.62.0 is the latest Python package considered here and its formal release pairing lists Chrome 151, not Chrome 153.",
+        "General Playwright v1.63 release material lists Chrome 153, but no formal Python package pairing is available for the existing Python shared implementation.",
+        "It therefore cannot replace the fixed Python 1.60.0 implementation as a qualified candidate."
+      ],
+      "official_sources": [
+        "https://github.com/microsoft/playwright-python/releases/tag/v1.62.0",
+        "https://pypi.org/pypi/playwright/json",
+        "https://github.com/microsoft/playwright/releases/tag/v1.63.0"
+      ]
+    },
+    "conclusion": "blocked",
+    "non_claims": [
+      "The candidate result does not change shared execution, profile data, guard, no-fallback, or daily-profile boundaries.",
+      "No Profile database, Preferences content, Crashpad dump content, or large package path is retained here.",
+      "No Chrome Provider support or installed/live Plugin completion is claimed."
+    ]
+  },
   "evidence_roles": {
     "source_and_assets": "relative packaged-source paths and SHA-256 values above; no temporary profile or payload is retained",
     "deterministic": "parameterized Harbor launch/trust tests and strict installed-runtime pairing tests",

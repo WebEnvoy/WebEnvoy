@@ -1,12 +1,12 @@
 # Provider 执行复用设计 V1
 
 - 文档性质：规范性实施设计；包含本文件的 docs PR 经独立审查合并后生效。
-- 版本：1.0；日期：2026-09-14。
+- 版本：1.1；日期：2026-09-14。
 - Owner：Harbor Runtime；产品归口：[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
-- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)；关联 #471、#474、#477、#482。
+- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)；实现 PR：[#530](https://github.com/WebEnvoy/WebEnvoy/pull/530)；关联 #471、#474、#477、#482。
 - 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
 - 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](runtime-capability-plane.md)。
-- 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#497 记录。
+- 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#530／#497 记录。
 
 ## 1. 产品决定
 
@@ -61,6 +61,12 @@
 使用同一已安装 Python/Playwright 运行资产，通过公开 `playwright.chromium.launch_persistent_context` 启动 **该 Profile binding 所指向、由 owner 验证的官方 Chrome executable** 与受管 user-data-dir。不以通用 `channel` 解析偷偷换程序，不自动安装 bundled Chromium，不接管用户默认或日常 Profile。
 
 Chrome `152.0.7977.84` 仅是 #516 的历史核对线索。G0 必须记录本机现有官方版本和来源；不同版本的证据不自动继承，不自动下载、升级、降级或换 Provider。Playwright 保持本任务固定版本。供应方文档存在该 API，不代表当前 Chrome/SDK 组合必然合格。
+
+截至 2026-09-14，#530 对官方 Stable Chrome `153.0.8010.37`（macOS arm64）与固定 Playwright Python `1.60.0` 授予一次有界兼容资格核对授权，并且仅在候选1失败后，允许对候选2进行同样有界的资格核对/条件性考虑。该授权仅替代本段原有的“不得因候选核对而变更浏览器版本”的限制：候选必须使用 owner 已取得、隔离 executable/profile 和固定端口，且不得迁移或清理用户数据；它不授权正式 Runtime 自动更新、版本漂移、回退、换 Provider 或复用候选证据，也不把候选2的条件性考虑视为支持资格。
+
+候选 run 1 的下载 bytes/hash、localStorage marker、唯一 PID 和正常 Context close 均通过；run 2 的 bytes/hash、marker 与正常 close 仍通过，但发现一个与 `153.0.8010.37` 隔离 executable/profile 关联的新 Crashpad dump（仅记录脱敏文件名摘要 `049a0b34…ac2a`）。这违反 crash-free 资格门，候选立即标为 blocked，run 3 不执行；不得用另一个版本、旧 CDP/站点路径或关闭保护制造通过。候选资格核对失败不改变下方共享实现、数据、guard、无 fallback 和不接管日常 Profile 的约束。
+
+候选1失败后，候选2仅完成资料层面的条件性考虑，因不满足执行资格而未进入安装或运行：现有 Playwright Python 共享实现没有正式的 Python/Chrome 153 配对依据（PyPI Python `1.62.0` 的正式配对仍对应 Chrome 151；通用 Playwright `1.63` 材料虽列 Chrome 153，但不提供当前 Python 实现所需的正式配对）。因此候选2不能替代固定 Python `1.60.0` 实现，也不能解除本节的暂停门。
 
 Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bundle。可使用同一已安装 Python 运行包，不要求为证明隔离而卸载其中的 Camoufox wheel；但 Chrome 启动模块不得导入该 SDK，也不得因 Camoufox 专用资料缺失而失败。
 
@@ -167,13 +173,13 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 不恢复浏览器/Playwright私有改写，不新增Provider marketplace、远程浏览器、自动更新平台、站点知识迁移或完整App；不新增第三个Provider、账号绑定/登录/交易、不使用日常Profile，不扩Files/Dialog/多行/frame/跨窗/popup成功/offscreen。
 
-本轮批准路线是现有正式程序的公开persistent-context适配。若该组合不能在既定安全条件下完成范围，保留未完成状态和可核对反例，不退回“每品牌复制一份”、关闭保护或换浏览器。架构要求是代码复用，不是让所有Provider原生能力完全相同。
+本轮批准路线是现有正式程序的公开persistent-context适配。若该组合不能在既定安全条件下完成范围，保留未完成状态和可核对反例，不退回“每品牌复制一份”、关闭保护或换浏览器。#530 的新 Crashpad 反例触发候选暂停门：在重新取得 owner 授权、固定来源和独立兼容证据前，不得继续候选 run、把 Chrome 标为可支持，或以候选 2 补齐现有 Python 共享实现；候选2的条件性考虑不会绕过该暂停门。架构要求是代码复用，不是让所有Provider原生能力完全相同。
 
 ## 12. 来源与证据边界
 
-本轮脱敏的实现、G0 A/B/C 结果和首个信任边界反例见
+本轮脱敏的实现、G0 A/B/C 结果、首个信任边界反例和 #530 有界兼容资格结果见
 [Provider execution reuse verification](../verification/provider-execution-reuse-v1.json)。该记录只
-绑定版本与 SHA-256、证据角色和限制，不包含临时正文、Profile 数据或 installed/live
+绑定版本与 SHA-256、证据角色和限制，不包含临时正文、Profile 数据、Crashpad dump 内容或 installed/live
 Plugin 完成声明。
 
 项目事实来源：本文件第2节列出的固定main源码，以及#516/#519/#523/#526和现行ADR0012/Runtime Capability Plane。以上支持“公共规则已存在、共同操作混在专用Driver、Chrome通用消费仍有缺口”，不支持“Chrome新路径已可用”。
