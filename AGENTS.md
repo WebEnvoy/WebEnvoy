@@ -16,6 +16,7 @@
 - 防御作用域不大于风险作用域。身份、授权、控制权和重复写入必须保护；可选 evidence、viewer 或未安装网站 SKILL 不得全局阻断通用浏览器与环境管理。
 - unknown 写入禁止重放，但允许安全查询、对账、人工接管和停止后续执行。
 - 复用现有存储、锁、授权、Run、结果和诊断；不为未来形态预建 DSL、服务、队列、Schema 或兼容层。
+- Provider 扩展同时兑现代码复用：同一受支持自动化接口的通用执行逻辑只维护一套，Provider adapter 只保留启动、来源校验、环境和有证据的差异；不能按品牌复制 Page／Files／诊断／调度，或将尚未接入冒称上游不支持。具体边界与双 Provider 完成门见 [Provider 执行复用设计](docs/architecture/provider-execution-reuse-v1.md)。共享代码不共享 Profile、Context 或权限，真实兼容性证据仍按 Provider 分别取得。
 
 ## 设计与合同义务
 
