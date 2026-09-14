@@ -60,8 +60,14 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);
+    for (const field of ['profile_ref', 'runtime_session_ref', 'origin', 'page_id', 'page_ref', 'document_generation', 'observation_ref', 'target_ref']) {
+      assert.match(operation.inputSchema.properties[field].description, /file\.upload\/file\.download/);
+    }
+    assert.match(operation.inputSchema.properties.file_ref.description, /Only for file\.upload/);
     const skill = await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8');
     assert.match(skill, /`instance\.start` specifically requires the exact authorized origin in the top-level `origin` field/);
+    assert.match(skill, /The operation must carry the fresh same-observation `profile_ref`, `runtime_session_ref`, exact `origin`, `page_id`, `page_ref`, `document_generation`, `observation_ref`, and `target_ref`/);
+    assert.match(skill, /omit `file_ref` and use `task_scope\.file_refs: \[\]`/);
   } finally {
     if (child) { child.stdin.end(); await new Promise(resolve => child.once('exit', resolve)); }
     await rm(dataDir, { recursive: true, force: true });

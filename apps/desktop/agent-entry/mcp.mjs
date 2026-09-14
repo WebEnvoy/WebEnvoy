@@ -7,7 +7,7 @@ const client = await readClient(process.argv[2]);
 let connection;
 const managedOperationIds = ['profile.create','profile.list','profile.read','provider.preference.read','provider.preference.set','provider.preference.clear','instance.start','instance.observe','instance.diagnostics','environment.read','environment.update','instance.navigate','instance.read','page.list','page.open','page.activate','page.close','page.navigate','page.reload','page.back','page.forward','instance.snapshot','instance.click','instance.input','instance.press','instance.scroll','instance.wait','instance.handoff','instance.stop','file.upload','file.download'];
 const managedFileOperationIds = ['file.upload', 'file.download'];
-const managedOperationDescription = 'Submit one authorized Provider preference, management, environment, Page, public-read, diagnostic, controlled-page, or managed file operation. File upload/download accepts only an opaque file_ref and a bound Page target; local paths, file bodies, arbitrary URLs, and business commit are never exposed. Preference writes, Profile creation, and browser/file actions never retry; query the original Run when an outcome is unknown. task_scope describes this submitted operation only; submit later workflow steps separately. task_scope.file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation, even when a later step will use a file. Operation-specific origin inputs are significant: instance.start requires the exact authorized origin as a top-level origin field (task_scope.origins alone is insufficient); url is optional and, when supplied, must be on that origin. Other operations require origin only where their contract says so.';
+const managedOperationDescription = 'Submit one authorized Provider preference, management, environment, Page, public-read, diagnostic, controlled-page, or managed file operation. File upload/download accepts only an opaque file_ref and a bound Page target; for both file operations include fresh profile_ref, runtime_session_ref, exact origin, page_id, page_ref, document_generation, observation_ref, and target_ref from the same current Page/document observation. Upload additionally requires file_ref and matching task_scope.file_refs; download omits file_ref and uses task_scope.file_refs: []. Local paths, file bodies, arbitrary URLs, and business commit are never exposed. Preference writes, Profile creation, and browser/file actions never retry; query the original Run when an outcome is unknown. task_scope describes this submitted operation only; submit later workflow steps separately. task_scope.file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation, even when a later step will use a file. Operation-specific origin inputs are significant: instance.start requires the exact authorized origin as a top-level origin field (task_scope.origins alone is insufficient); url is optional and, when supplied, must be on that origin. Other operations require origin only where their contract says so.';
 const managedTaskScopeProperties = {
   operations: { type: 'array', description: 'Operations in the scope for this submitted operation; include the current operation and do not use later workflow steps to justify fields in this request.', items: { type: 'string' } },
   profile_refs: { type: 'array', items: { type: 'string' } },
@@ -15,7 +15,7 @@ const managedTaskScopeProperties = {
 };
 const managedTaskScopeSchema = includeFileRefs => ({
   type: 'object',
-  description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow.',
+  description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. For file.upload/file.download, keep file_refs tied to this operation and use the fresh Page/document fields required by the operation.',
   properties: { ...managedTaskScopeProperties, ...(includeFileRefs ? { file_refs: { type: 'array', description: 'Only for the current file.upload or file.download operation: upload carries its one current file ref; download carries []. Omit this field for every non-file operation, even if a later workflow step uses a file.', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, maxItems: 32 } } : {}) },
   required: ['operations', 'profile_refs', 'origins'],
   additionalProperties: false
@@ -26,22 +26,22 @@ const managedOperationSchema = {
     idempotency_key: { type: 'string' },
     grant_id: { type: 'string' },
     operation: { type: 'string', enum: managedOperationIds },
-    task_scope: { type: 'object', description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow.', properties: managedTaskScopeProperties, required: ['operations', 'profile_refs', 'origins'] },
+    task_scope: { type: 'object', description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File operations use only their own fresh Page/document binding and file_refs.', properties: managedTaskScopeProperties, required: ['operations', 'profile_refs', 'origins'] },
     template_ref: { type: 'string' },
     provider_id: { type: 'string', enum: ['cloakbrowser','chrome_official','camoufox'] },
-    profile_ref: { type: 'string' },
-    runtime_session_ref: { type: 'string' },
-    origin: { type: 'string' },
+    profile_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the authorized Profile for the current Instance.' },
+    runtime_session_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the original Instance; do not substitute another session.' },
+    origin: { type: 'string', description: 'For file.upload/file.download, required exact authorized origin for the current Page.' },
     url: { type: 'string' },
-    file_ref: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' },
+    file_ref: { type: 'string', description: 'Only for file.upload: the owner-registered opaque ref matching task_scope.file_refs; omit for file.download.', pattern: '^attachment:runtime/[0-9a-f-]{36}$' },
     configuration: { type: 'object', properties: { timezone: { type: 'string', minLength: 1, maxLength: 128 }, language: { type: 'string', minLength: 1, maxLength: 128 }, viewport: { type: 'string', minLength: 1, maxLength: 128 } }, additionalProperties: false, minProperties: 1 },
-    page_id: { type: 'string' },
-    page_ref: { type: 'string' },
-    document_generation: { type: 'integer', minimum: 1 },
+    page_id: { type: 'string', description: 'For file.upload/file.download, required fresh Page identity from the same current observation.' },
+    page_ref: { type: 'string', description: 'For file.upload/file.download, required fresh Page/document ref from the same current snapshot.' },
+    document_generation: { type: 'integer', description: 'For file.upload/file.download, required fresh document generation matching page_ref.', minimum: 1 },
     cursor: { type: 'string' },
     limit: { type: 'integer', minimum: 1, maximum: 64 },
-    observation_ref: { type: 'string' },
-    target_ref: { type: 'string' },
+    observation_ref: { type: 'string', description: 'For file.upload/file.download, required fresh observation ref that contains the bound Page and target.' },
+    target_ref: { type: 'string', description: 'For file.upload/file.download, required visible target_ref from that same fresh observation.' },
     text: { type: 'string', maxLength: 512 },
     key: { type: 'string', enum: ['Enter','Tab','ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End','Space','Backspace','Delete','Escape'] },
     delta_y: { type: 'integer', minimum: -2000, maximum: 2000 },
