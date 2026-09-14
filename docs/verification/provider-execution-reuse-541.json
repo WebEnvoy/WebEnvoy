@@ -2,7 +2,7 @@
   "schema_version": "webenvoy.provider-execution-reuse-541/v1",
   "work_item": 541,
   "recorded_at": "2026-09-14",
-  "status": "deterministic_gates_passed_install_pending",
+  "status": "installed_and_agent_gates_passed_review_pending",
   "scope": "Camoufox shared execution closure only; no Chrome qualification or support claim.",
   "implementation_map": [
     {
@@ -39,55 +39,132 @@
       ]
     }
   ],
+  "runtime_candidate": {
+    "commit": "149a50c224f2b276cfb8f12a29d71699ed079684",
+    "tree": "280fd6c10bb5c4e5fdbb93d1e561c555d677db1c",
+    "core_tree": "d6dea3aeca1b88335fc86603a64bea6bf3aa9376",
+    "harbor_tree": "f6be80a4df911f99b121555dcaac816bdae6e835",
+    "package_asset_sha256": "88624b096e6808b2476f0940ce88ebd2c098c82936d75b4546407e13fdca18ba",
+    "package": "isolated WebEnvoy-541.app; package contents verified without checkout fallback"
+  },
+  "provider_pairing": {
+    "provider": "camoufox",
+    "source": "official_release",
+    "camoufox_python": "0.5.6",
+    "browser": "152.0.4-beta.30",
+    "playwright": "1.60.0",
+    "browser_archive_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+    "browser_executable_sha256": "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33",
+    "camoufox_wheel_sha256": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+    "playwright_wheel_sha256": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5",
+    "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+    "change": "none"
+  },
   "gates": {
-    "G0-A": {
-      "status": "passed_deterministic",
+    "reuse_and_dependency": {
+      "status": "passed",
       "evidence": [
-        "shared and adapter assets are both manifest-owned",
-        "shared module has no Camoufox import",
-        "missing, retired or mixed Camoufox binding is rejected before launch"
+        "formal Camoufox path loads the manifest-owned shared Python driver",
+        "shared module has no Camoufox import or provider-private source requirement",
+        "thin adapter exclusively owns Camoufox source, pins, properties, options and persistent Context creation",
+        "the packaged Camoufox path is complete without the unqualified Chrome adapter or Chrome materials"
       ]
     },
-    "G0-B": {
-      "status": "passed_deterministic",
+    "admission_and_installation": {
+      "status": "passed",
       "evidence": [
-        "Camoufox upload/download hash and owner scope checks"
+        "official binding and exact saved environment bundle replayed",
+        "missing, retired or mixed binding and request/provider conflicts reject before spawn",
+        "shared and Camoufox assets are manifest-owned and integrity checked",
+        "no checkout, development worktree or temporary driver fallback was used"
       ]
     },
-    "G0-C": {
+    "chrome_boundary": {
       "status": "passed_deterministic",
       "evidence": [
-        "close, EOF and lifecycle control remain on the owning loop"
+        "no formal route reaches the unqualified Chrome shared adapter",
+        "no Chrome generic availability or support projection is included",
+        "main's existing narrow Chrome selection, default and binding contracts remain unchanged"
       ]
     }
   },
-  "evidence_roles": {
-    "deterministic": {
-      "status": "passed",
-      "checks": [
-        "Harbor typecheck passed",
-        "Harbor tests: 349 passed, 0 failed, 1 platform-specific existing skip",
-        "Shared/Camoufox focused tests after the adapter-normalizer hook: 23 passed, 0 failed",
-        "Desktop typecheck, build:main and production build passed",
-        "Desktop installation/client tests: 10 passed, 0 failed",
-        "make py-compile passed for 3 files",
-        "workspace lint and conformance passed (23 schemas, 44 fixtures, 7 execution policy contracts, 8 Run Records)",
-        "JSON parse and git diff --check passed"
-      ]
+  "installed_verification": {
+    "profiles": {
+      "p1": "profile_40bd793dbb062e7d93b059a5",
+      "p2": "profile_fa5269f60d22d115ff9ae6ac"
     },
-    "host_probe": "not_run",
-    "real_browser": "not_run",
-    "plugin": "not_run"
+    "p1": [
+      "A/B Page selection, observation, input and old observation rejection passed",
+      "approved PNG upload receipt sha256 653364e5aaffd0fddac995ab514fbd656150538f8d84651b42a7ca642521be7d",
+      "ordinary GET CSV download and owner export sha256 4b2ac8591f21aca6931ec37ce836c11419849d3cbb591f92be14007869668900",
+      "10.052 seconds without browser commands still completed the delayed page event",
+      "original upload and download Runs were queried without retransmission"
+    ],
+    "persistence": [
+      "P1 and P2 markers existed before stop/start verification and remained directly observable",
+      "after Runtime restart both pre-existing markers, bindings and exact environment materials remained",
+      "the original succeeded download Run and file material remained queryable and exportable",
+      "the initial launch_failed Run remained failed and was not rewritten or replayed"
+    ],
+    "isolation": [
+      "P2 did not observe P1's marker and retained its own marker across restart",
+      "cross-Profile file reference use rejected",
+      "P1 failure and cleanup did not prevent P2's legal basic operation"
+    ]
   },
+  "real_agent": {
+    "status": "passed",
+    "host": "Codex",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "thread": "01a09fb8-8b01-7a72-8ad3-acf52c12fc35",
+    "profile": "profile_40bd793dbb062e7d93b059a5",
+    "results": [
+      "observed the assigned original task page and filled the ordinary field",
+      "uploaded the approved PNG and read the page receipt",
+      "downloaded the same-page CSV and queried both original operation keys",
+      "owner export independently matched sha256 4b2ac8591f21aca6931ec37ce836c11419849d3cbb591f92be14007869668900"
+    ]
+  },
+  "regression": {
+    "status": "passed",
+    "checks": [
+      "Harbor typecheck passed",
+      "Harbor tests: 349 passed, 0 failed, 1 existing Windows-specific skip",
+      "final focused shared/Camoufox tests: 20 passed, 0 failed",
+      "Desktop typecheck, build:main, production build and lint passed",
+      "Desktop installation/client tests: 10 passed, 0 failed",
+      "make py-compile passed for 4 files",
+      "conformance passed: 23 schemas, 44 fixtures, 7 execution policy contracts and 8 Run Records",
+      "JSON parse and git diff --check passed"
+    ],
+    "inherited_or_audited": [
+      "native UI takeover/return semantics were not repeated live; the unchanged owner path and #526 evidence were audited",
+      "the full #519/#516/#523/#526 matrices were not mechanically rerun"
+    ]
+  },
+  "review": {
+    "early_boundary_review": {
+      "reviewer": "gpt-6-astra",
+      "reasoning_effort": "low",
+      "verdict": "APPROVE"
+    },
+    "final_exact_head_review": "pending"
+  },
+  "retained_failures_and_side_effects": [
+    "The first isolated package exposed an implicit Camoufox default UBO download during launch options construction; the formal path now excludes that unsupported default addon and preserves exact replay for saved bundles.",
+    "A separate launch-options probe also populated the existing user cache with that UBO asset; it did not start a browser and the cache was retained rather than silently deleted.",
+    "The first launch_failed Run, a not_dispatched permission-ceiling denial and a not_dispatched stale Page selection are retained as failures and were not rewritten as successes."
+  ],
   "excluded": [
-    "Chrome adapter",
-    "Chrome generic launcher",
-    "Chrome availability/environment/support projection",
-    "Chrome reproduction and candidate evidence"
+    "Chrome shared adapter and generic launcher",
+    "Chrome generic Page, Files, diagnostics or profile-management availability",
+    "Chrome reproduction, candidate version work and Crashpad analysis",
+    "new browser or SDK versions"
   ],
   "non_claims": [
-    "No real browser was started here",
-    "No Chrome support or live/plugin verification is claimed",
-    "No profile database, dump, payload or credential content is retained"
+    "This is not the dual-provider completion of #528.",
+    "No new Chrome capability or compatibility is claimed.",
+    "No profile database, dump, payload, credential or installer is committed."
   ]
 }
