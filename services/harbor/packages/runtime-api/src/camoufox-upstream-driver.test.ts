@@ -94,6 +94,7 @@ import asyncio, importlib.util, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
+camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 env_calls = []
@@ -144,6 +145,7 @@ open(other_executable, "wb").close()
 try:
     options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
+    assert seen[0]["exclude_addons"] == [module.DefaultAddons.UBO]
     assert seen[0]["config"]["timezone"] == "UTC"
     expected_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(executable_path))), "Resources", "camoufox") if sys.platform == "darwin" else os.path.realpath(executable_path)
     assert seen[0]["executable_path"] == expected_config_path
@@ -252,6 +254,7 @@ import asyncio, hashlib, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
+camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
@@ -347,7 +350,7 @@ test("narrows file route scope and fails closed on replaced snapshot targets", (
   const script = `
 import asyncio, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -434,7 +437,7 @@ test("attributes downloads to one authorized request chain and bounds save clean
   const script = `
 import asyncio, hashlib, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -534,7 +537,7 @@ test("uses public Context.close and retains an un-converged Download task", () =
   const script = `
 import asyncio, importlib.util, os, sys, tempfile, time, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -598,7 +601,7 @@ test("keeps a Driver fenced while deferred Download cleanup converges", () => {
   const script = `
 import asyncio, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -669,6 +672,7 @@ import asyncio, importlib.util, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
+camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
@@ -768,6 +772,7 @@ import asyncio, importlib.util, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
+camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": __import__("json").dumps(config_map, separators=(",", ":"))}
@@ -949,6 +954,7 @@ import asyncio, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
+camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 utils.get_env_vars = lambda config_map, user_agent_os, path=None: {"CAMOU_CONFIG_1": "{}"}
@@ -1074,7 +1080,7 @@ test("dispatches close outside the ordinary Provider-operation lock", () => {
   const script = `
 import asyncio, importlib.util, json, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -1124,7 +1130,7 @@ test("surfaces Context.close and Playwright.stop failures without releasing the 
   const script = `
 import asyncio, importlib.util, os, shutil, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -1202,7 +1208,7 @@ test("keeps close and EOF reachable behind a bounded ordinary queue", () => {
   const script = `
 import asyncio, importlib.util, json, os, sys, threading, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
@@ -1288,7 +1294,7 @@ test("establishes the EOF close barrier before draining a dispatched command", (
   const script = `
 import asyncio, importlib.util, json, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
-camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
+camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []; camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {}
 camoufox.utils = utils; sys.modules["camoufox"] = camoufox; sys.modules["camoufox.utils"] = utils
 playwright = types.ModuleType("playwright"); playwright.__path__ = []

@@ -19,6 +19,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from camoufox import DefaultAddons
 from camoufox.utils import get_env_vars, launch_options
 from camoufox_bundle_validator import (
     BROWSER_VERSION_PIN,
@@ -330,6 +331,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
         config=config,
         locale=locale,
         proxy=proxy,
+        exclude_addons=[DefaultAddons.UBO],
     )
     options = json_safe_options(options)
     options["executable_path"] = executable
