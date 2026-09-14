@@ -110,6 +110,13 @@
       "P2 did not observe P1's marker and retained its own marker across restart",
       "cross-Profile file reference use rejected",
       "P1 failure and cleanup did not prevent P2's legal basic operation"
+    ],
+    "inflight_boundaries": [
+      "an owner revocation completed while a bounded wait was active; the admitted wait drained and the next operation rejected as managed_access_grant_unavailable/not_dispatched",
+      "a stop request submitted during a bounded wait took effect after the serialized wait drained and closed the Instance",
+      "a handoff request submitted during a bounded wait took effect after the serialized wait drained with control_owner user; no Agent fallback or implicit reacquisition occurred",
+      "a real CSV download response was discarded after response headers and before its body was consumed; querying only the derived original Run returned succeeded/dispatched and the server transfer counter increased exactly once",
+      "P2 completed a fresh legal basic operation after P1 handoff and stopped cleanly"
     ]
   },
   "real_agent": {
