@@ -1,12 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
-import { recoveryOperationRef } from './bundle.mjs';
+import { recoveryOperationRef, sha } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding, verifyCamoufoxUpstreamInstall, verifyInstalledCamoufox } from './provider-artifact.mjs';
+import {
+  CAMOUFOX_UPSTREAM_PINS,
+  PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+  PLAYWRIGHT_SHARED_RUNTIME_VERSION,
+  classifyCamoufoxBinding,
+  resolveCamoufoxSetupBinding,
+  resolvePlaywrightRuntimeSetupBinding,
+  verifyCamoufoxUpstreamInstall,
+  verifyInstalledCamoufox,
+  verifyPlaywrightRuntimeBinding
+} from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -48,6 +58,80 @@ test('derives the same recovery operation ref from an idempotency key', () => {
 
 test('leaves an ordinary setup without a Camoufox binding', async () => {
   assert.equal(await resolveCamoufoxSetupBinding({ existingInstallation: { coreEndpoint: 'http://127.0.0.1:1' }, hasUpstreamArguments: false }), null);
+});
+
+test('keeps the installed shared Playwright pairing strict and package-owned', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-playwright-runtime-test-'));
+  try {
+    const python = join(root, 'python');
+    await writeFile(python, '#!/bin/sh\nprintf "1.60.0\\n"\n');
+    await chmod(python, 0o700);
+    const binding = {
+      schema: PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+      provider: 'playwright_shared',
+      playwright_version: PLAYWRIGHT_SHARED_RUNTIME_VERSION,
+      python: { path: python, executable_sha256: sha(await readFile(python)) }
+    };
+    const verified = await resolvePlaywrightRuntimeSetupBinding({ existingInstallation: null, hasRuntimeArguments: true, runtimeInput: binding });
+    assert.deepEqual(verified, { ...binding, python: { ...binding.python, path: resolve(python) } });
+    assert.deepEqual(
+      await resolvePlaywrightRuntimeSetupBinding({ existingInstallation: { playwrightRuntime: binding }, hasRuntimeArguments: false }),
+      verified
+    );
+    assert.deepEqual(
+      await verifyPlaywrightRuntimeBinding({
+        schema: binding.schema,
+        provider: binding.provider,
+        playwright_version: binding.playwright_version,
+        python_path: binding.python.path,
+        python_executable_sha256: binding.python.executable_sha256
+      }),
+      verified
+    );
+    await assert.rejects(
+      verifyPlaywrightRuntimeBinding({ ...binding, python: { ...binding.python, executable_sha256: 'f'.repeat(64) } }),
+      /playwright_runtime_python_hash_mismatch/
+    );
+    await assert.rejects(
+      resolvePlaywrightRuntimeSetupBinding({ existingInstallation: { playwrightRuntime: { ...binding, schema: 'wrong' } }, hasRuntimeArguments: false }),
+      /playwright_runtime_schema_invalid/
+    );
+    await assert.rejects(
+      verifyPlaywrightRuntimeBinding({ ...binding, schema: 'wrong' }),
+      /playwright_runtime_schema_invalid/
+    );
+    await assert.rejects(
+      verifyPlaywrightRuntimeBinding({ ...binding, provider: undefined }),
+      /playwright_runtime_provider_invalid/
+    );
+    await assert.rejects(
+      verifyPlaywrightRuntimeBinding({ ...binding, unexpected: true }),
+      /playwright_runtime_binding_invalid/
+    );
+    await assert.rejects(
+      verifyPlaywrightRuntimeBinding({ ...binding, python: { ...binding.python, unexpected: true } }),
+      /playwright_runtime_binding_invalid/
+    );
+    await assert.rejects(
+      resolvePlaywrightRuntimeSetupBinding({ existingInstallation: { playwrightRuntime: 'malformed' }, hasRuntimeArguments: false }),
+      /playwright_runtime_binding_invalid/
+    );
+
+    const environment = installedRuntimeEnvironment({
+      parentEnvironment: {
+        HARBOR_PLAYWRIGHT_PYTHON: '/untrusted/python',
+        HARBOR_CHROME_PYTHON: '/untrusted/chrome-python',
+        HARBOR_CHROME_DRIVER: '/untrusted/driver'
+      },
+      dataDir: join(root, 'data'),
+      installRoot: join(root, 'install'),
+      playwrightBinding: { ...binding, python: { path: '/installed/python', executable_sha256: binding.python.executable_sha256 } }
+    });
+    assert.equal(environment.HARBOR_PLAYWRIGHT_PYTHON, '/installed/python');
+    assert.equal(environment.HARBOR_PLAYWRIGHT_RUNTIME_STATUS, 'verified');
+    assert.equal(environment.HARBOR_CHROME_PYTHON, undefined);
+    assert.equal(environment.HARBOR_CHROME_DRIVER, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('revalidates an existing upstream binding when setup has no new provider arguments', async (t) => {

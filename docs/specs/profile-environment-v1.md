@@ -549,7 +549,7 @@ Network／Console／controlled evaluation／viewer 等首批能力必须证明�
 
 ## 18. 首个正式环境生命周期合同（#499）
 
-版本：`harbor-profile-environment/v1`；owner：Harbor（配置、Instance 应用和观测）、Core（授权、Run、查询）。Provider-private 持久材料另见 [Camoufox 环境连续性 V1](camoufox-environment-continuity-v1.md)，不得出现在本公共结构中。
+版本：`harbor-profile-environment/v1`；owner：Harbor（配置、Instance 应用和观测）、Core（授权、Run、查询）。Provider-private 持久材料另见 [Camoufox 环境连续性 V1](camoufox-environment-continuity-v1.md)，不得出现在本公共结构中。当前已验证的 Provider 观测事实保持 Camoufox 原有字段形状；官方 Chrome 用 `provider_id: "chrome_official"` 区分并只公开已验证的 Playwright 版本（browser 版本若未由 Driver 回读则为 `null`）；两者均不公开启动材料。
 
 ### 18.1 调用和授权
 
@@ -571,8 +571,8 @@ Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environ
 | `pending` | 同形配置或 null；configured 尚未应用到活动 Instance 时为 configured，否则 null；没有活动 Instance 时，configured 等待下次启动 |
 | `observation_status` | `observed`、`unavailable` 或 `inactive`，不把读取失败伪装为空的成功观测 |
 | `observed` | 当前有界环境回读或 null，结构见下文；不会覆盖 configured |
-| `provider` | `{camoufox_version, browser_version, properties_sha256}` 或 null，仅来自已校验 Driver 回读 |
-| `bundle_hash` | 64 位小写十六进制摘要或 null；稳定身份材料摘要，不包含可变 timezone/locale/viewport，不授予重建身份的材料 |
+| `provider` | Camoufox 保持 `{camoufox_version, browser_version, properties_sha256}`；官方 Chrome 为 `{provider_id: "chrome_official", playwright_version, browser_version: string|null}`；或 null。只来自与已选 adapter 一致、已校验 Driver 的回读；默认 Camoufox reader 对缺失/错配字段仍严格拒绝 |
+| `bundle_hash` | 64 位小写十六进制摘要或 null；Camoufox 为稳定身份材料摘要，官方 Chrome 为 provider、固定 executable 与 Playwright 版本的稳定 binding 摘要；两者均不包含可变 timezone/locale/viewport/proxy，不授予重建身份的材料 |
 | `drift` | `{state: match\|drift\|unknown, checked_fields: string[], changed_fields: string[], unknown_fields: string[]}`；只对 checked_fields 宣称结果，不把 unknown 当成一致 |
 | `last_verified_at` | 当前 Instance 最近成功环境回读的 UTC ISO 时间或 null；仅证明该 Instance/Provider，不跨 Runtime 退出冒称仍新鲜 |
 | `support` | 已实现配置字段、实际可回读字段和明确限制；代理出口、geo、WebRTC 等未观测项不得标 verified |

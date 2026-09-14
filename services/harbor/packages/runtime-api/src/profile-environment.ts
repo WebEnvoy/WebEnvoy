@@ -23,10 +23,16 @@ export interface EnvironmentDrift {
   unknown_fields: string[];
 }
 
+/** Provider facts are public validation facts, not private launch material. */
+export type EnvironmentProvider =
+  | { camoufox_version: string; browser_version: string; properties_sha256: string }
+  | { provider_id: "chrome_official"; playwright_version: string; browser_version: string | null };
+export type EnvironmentProviderId = "camoufox" | "chrome_official";
+
 export interface EnvironmentObservation {
   status: "completed";
   observed_at: string;
-  provider: { camoufox_version: string; browser_version: string; properties_sha256: string };
+  provider: EnvironmentProvider;
   bundle_hash: string;
   observed: {
     language: string | null;
@@ -63,16 +69,39 @@ export function boundedEnvironmentUpdate(value: unknown): IdentityEnvironmentCon
   return { ...input } as IdentityEnvironmentConfigurationUpdate;
 }
 
+/**
+ * Preserve the historical Camoufox-only reader for existing callers. Shared
+ * adapters use the provider-aware reader below, with the provider id supplied
+ * by the already-selected adapter rather than by an untrusted observation.
+ */
 export function normalizeEnvironmentObservation(value: unknown): EnvironmentObservation | null {
+  return normalizeEnvironmentObservationForProvider(value, "camoufox");
+}
+
+export function normalizeEnvironmentObservationForProvider(
+  value: unknown,
+  providerId: EnvironmentProviderId
+): EnvironmentObservation | null {
   const raw = object(value), provider = object(raw?.provider), observed = object(raw?.observed);
   if (!raw || raw.status !== "completed" || !provider || !observed ||
     typeof raw.observed_at !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(raw.observed_at) || !Number.isFinite(Date.parse(raw.observed_at)) ||
-    !version(provider.camoufox_version) || !version(provider.browser_version) || !hash(provider.properties_sha256) || !hash(raw.bundle_hash)) return null;
+    !hash(raw.bundle_hash)) return null;
+  const providerFacts: EnvironmentProvider | null = providerId === "camoufox"
+    ? (provider.provider_id !== undefined && provider.provider_id !== "camoufox"
+      ? null
+      : version(provider.camoufox_version) && version(provider.browser_version) && hash(provider.properties_sha256)
+        ? { camoufox_version: provider.camoufox_version, browser_version: provider.browser_version, properties_sha256: provider.properties_sha256 }
+        : null)
+    : (provider.provider_id === "chrome_official" && version(provider.playwright_version) &&
+      (provider.browser_version === undefined || provider.browser_version === null || version(provider.browser_version))
+      ? { provider_id: "chrome_official", playwright_version: provider.playwright_version, browser_version: provider.browser_version ?? null }
+      : null);
+  if (!providerFacts) return null;
   const continuity = object(raw.continuity);
   const checked = fields(continuity?.checked_fields), changed = fields(continuity?.changed_fields).filter(key => checked.includes(key));
   return {
     status: "completed", observed_at: raw.observed_at,
-    provider: { camoufox_version: provider.camoufox_version, browser_version: provider.browser_version, properties_sha256: provider.properties_sha256 },
+    provider: providerFacts,
     bundle_hash: raw.bundle_hash,
     observed: {
       language: text(observed.language), languages: Array.isArray(observed.languages) ? observed.languages.slice(0, 16).map(text).filter((item): item is string => item !== null) : [],

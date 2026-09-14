@@ -9,7 +9,7 @@ const PRIVATE_PREFIXES = /^(WEBENVOY_|HARBOR_|CAMOUFOX_)/;
  * service values are added. Historical Camoufox paths are never accepted;
  * Harbor receives only the verified upstream binding facts.
  */
-export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' }, camoufoxBinding = null }) {
+export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' }, camoufoxBinding = null, playwrightBinding = null }) {
   const environment = { ...parentEnvironment };
   for (const key of Object.keys(environment)) if (PRIVATE_PREFIXES.test(key)) delete environment[key];
   Object.assign(environment, {
@@ -20,6 +20,7 @@ export function installedRuntimeEnvironment({ parentEnvironment = process.env, d
     WEBENVOY_CORE_RUNTIME_COMMAND: '', WEBENVOY_CORE_RUNTIME_PATH: '', WEBENVOY_CORE_RUNTIME_CWD: '',
     WEBENVOY_HARBOR_RUNTIME_COMMAND: '', WEBENVOY_HARBOR_RUNTIME_PATH: '', WEBENVOY_HARBOR_RUNTIME_CWD: '',
     WEBENVOY_DISABLE_PACKAGED_RUNTIME: '0', HARBOR_RUNTIME_PROVIDER: '',
+    HARBOR_PLAYWRIGHT_RUNTIME_STATUS: playwrightBinding ? 'verified' : 'unavailable',
     HARBOR_CAMOUFOX_LAUNCH_STATE: camoufoxLaunch.state,
     HARBOR_CAMOUFOX_LAUNCH_REASON: camoufoxLaunch.reason
   });
@@ -40,6 +41,9 @@ export function installedRuntimeEnvironment({ parentEnvironment = process.env, d
     // package-specific hashes remain separate validation facts.
     HARBOR_CAMOUFOX_SOURCE_SHA256: camoufoxBinding.source_sha256.browser,
     HARBOR_CAMOUFOX_PLAYWRIGHT_SOURCE_SHA256: camoufoxBinding.source_sha256.playwright
+  });
+  if (playwrightBinding) Object.assign(environment, {
+    HARBOR_PLAYWRIGHT_PYTHON: playwrightBinding.python.path
   });
   return environment;
 }

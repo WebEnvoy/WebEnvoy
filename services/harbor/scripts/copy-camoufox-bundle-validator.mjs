@@ -8,7 +8,9 @@ const sources = [
   // The hyphenated filename is retained for Profile recovery. The upstream
   // driver imports the same stdlib helper under Python's importable name.
   ["camoufox-bundle-validator.py", "camoufox_bundle_validator.py"],
-  ["camoufox-upstream-driver.py", "camoufox-upstream-driver.py"]
+  ["playwright_shared_driver.py", "playwright_shared_driver.py"],
+  ["camoufox-upstream-driver.py", "camoufox-upstream-driver.py"],
+  ["chrome_official_driver.py", "chrome_official_driver.py"]
 ];
 const targetDir = join(root, "..", "dist", "packages", "runtime-api", "src");
 const staleGeneratedFiles = [

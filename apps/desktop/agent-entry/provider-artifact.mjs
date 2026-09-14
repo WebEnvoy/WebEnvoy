@@ -25,6 +25,9 @@ export const CAMOUFOX_UPSTREAM_PINS = Object.freeze({
   playwright_source_sha256: '39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5'
 });
 
+export const PLAYWRIGHT_SHARED_RUNTIME_SCHEMA = 'webenvoy.playwright-shared-runtime/v1';
+export const PLAYWRIGHT_SHARED_RUNTIME_VERSION = '1.60.0';
+
 const RETIRED_BINDING_KEYS = ['camoufoxArtifact', 'native504', 'native510', 'camoufoxNativeArtifact', 'camoufoxNativeBinding'];
 
 function record(value) {
@@ -111,6 +114,56 @@ async function pythonPackageVersions(path) {
     if (error.message === 'camoufox_python_package_version_mismatch') throw error;
     reject('camoufox_python_packages_unavailable');
   }
+}
+
+async function pythonPlaywrightVersion(path) {
+  try {
+    const { stdout } = await execFile(path, ['-I', '-B', '-c', 'import importlib.metadata as m; print(m.version("playwright"))'], {
+      timeout: 5000,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }
+    });
+    exact(stdout.trim(), PLAYWRIGHT_SHARED_RUNTIME_VERSION, 'playwright_runtime_version_mismatch');
+  } catch (error) {
+    if (error.message === 'playwright_runtime_version_mismatch') throw error;
+    reject('playwright_runtime_unavailable');
+  }
+}
+
+/** Validate the neutral Python/Playwright runtime shared by public adapters. */
+export async function verifyPlaywrightRuntimeBinding(input) {
+  if (!record(input)) reject('playwright_runtime_binding_invalid');
+  const allowed = ['schema', 'provider', 'playwright_version', 'python_path', 'python_executable_sha256', 'python'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) reject('playwright_runtime_binding_invalid');
+  if (input.python !== undefined && !record(input.python)) reject('playwright_runtime_binding_invalid');
+  if (record(input.python) && Object.keys(input.python).some(key => !['path', 'executable_sha256'].includes(key))) reject('playwright_runtime_binding_invalid');
+  exact(input.schema, PLAYWRIGHT_SHARED_RUNTIME_SCHEMA, 'playwright_runtime_schema_invalid');
+  exact(input.provider, 'playwright_shared', 'playwright_runtime_provider_invalid');
+  exact(input.playwright_version, PLAYWRIGHT_SHARED_RUNTIME_VERSION, 'playwright_runtime_version_invalid');
+  if (input.python_path !== undefined && input.python?.path !== undefined && input.python_path !== input.python.path) reject('playwright_runtime_python_path_mismatch');
+  if (input.python_executable_sha256 !== undefined && input.python?.executable_sha256 !== undefined && input.python_executable_sha256 !== input.python.executable_sha256) reject('playwright_runtime_python_hash_mismatch');
+  const pythonPath = string(input.python_path ?? input.python?.path, 'playwright_runtime_python_path_required');
+  const python = await canonicalFile(pythonPath, 'playwright_runtime_python_invalid', true);
+  const declaredHash = string(input.python_executable_sha256 ?? input.python?.executable_sha256, 'playwright_runtime_python_hash_required');
+  hash(declaredHash, 'playwright_runtime_python_hash_invalid');
+  exact(declaredHash, python.sha256, 'playwright_runtime_python_hash_mismatch');
+  await pythonPlaywrightVersion(python.path);
+  return {
+    schema: PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+    provider: 'playwright_shared',
+    playwright_version: PLAYWRIGHT_SHARED_RUNTIME_VERSION,
+    python: { path: resolve(pythonPath), executable_sha256: python.sha256 }
+  };
+}
+
+export async function verifyInstalledPlaywrightRuntime(installation) {
+  if (!record(installation)) reject('installation_configuration_invalid');
+  if (!Object.hasOwn(installation, 'playwrightRuntime')) return null;
+  return verifyPlaywrightRuntimeBinding(installation.playwrightRuntime);
+}
+
+export async function resolvePlaywrightRuntimeSetupBinding({ existingInstallation, hasRuntimeArguments, runtimeInput }) {
+  if (hasRuntimeArguments) return verifyPlaywrightRuntimeBinding(runtimeInput);
+  return existingInstallation ? verifyInstalledPlaywrightRuntime(existingInstallation) : null;
 }
 
 /** Validate an owner-selected, already-installed official upstream combination. */

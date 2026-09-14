@@ -89,6 +89,7 @@ test("inherits popup origins only from a confirmed opener Page", () => {
 
 test("packages the Python validator under the importable upstream-driver name", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
+  const chromeDriver = join(dirname(fileURLToPath(import.meta.url)), "chrome_official_driver.py");
   const script = `
 import asyncio, importlib.util, os, sys, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
@@ -123,6 +124,12 @@ spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.ar
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.SOURCE_SHA256_PIN == "${CAMOUFOX_UPSTREAM_PINS.source_sha256}"
+assert module.parse_viewport({"width": 1280, "height": 900}) == {"width": 1280, "height": 900}
+try:
+    module.parse_viewport({"width": 1280, "height": 900, "unexpected": True})
+    raise AssertionError("unexpected viewport field accepted")
+except ValueError:
+    pass
 seen = []
 def fake_launch_options(**kwargs):
     seen.append(kwargs)
@@ -136,6 +143,12 @@ other_executable = os.path.join(executable_root, "other-camoufox")
 open(executable_path, "wb").close()
 open(other_executable, "wb").close()
 try:
+    chrome_spec = importlib.util.spec_from_file_location("chrome_official_driver", sys.argv[2])
+    chrome_module = importlib.util.module_from_spec(chrome_spec)
+    chrome_spec.loader.exec_module(chrome_module)
+    _, chrome_bundle_a, _, _ = chrome_module.ChromeOfficialAdapter.prepare({"browser_path": executable_path, "environment": {"timezone": "UTC", "viewport": {"width": 1280, "height": 900}}}, profile)
+    _, chrome_bundle_b, _, _ = chrome_module.ChromeOfficialAdapter.prepare({"browser_path": executable_path, "environment": {"timezone": "Europe/Paris", "viewport": {"width": 800, "height": 600}}}, profile)
+    assert chrome_bundle_a == chrome_bundle_b
     options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
     assert replay is False
     assert seen[0]["config"]["timezone"] == "UTC"
@@ -233,7 +246,7 @@ finally:
     __import__("shutil").rmtree(profile)
     __import__("shutil").rmtree(executable_root)
 `;
-  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver, chromeDriver], {
     encoding: "utf8",
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
   });
@@ -426,7 +439,7 @@ finally:
 test("attributes downloads to one authorized request chain and bounds save cleanup", () => {
   const driver = join(dirname(fileURLToPath(import.meta.url)), "camoufox-upstream-driver.py");
   const script = `
-import asyncio, importlib.util, os, sys, tempfile, types
+import asyncio, hashlib, importlib.util, os, sys, tempfile, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox"); camoufox.__path__ = []
 utils = types.ModuleType("camoufox.utils"); utils.launch_options = lambda **kwargs: {}; utils.get_env_vars = lambda *args, **kwargs: {"CAMOU_CONFIG_1": "{}"}
@@ -449,7 +462,8 @@ class Link:
     async def get_attribute(self, name): assert name == "href"; return "/expected.csv"
     async def click(self, timeout):
         request = Request(self.page, "https://files.test/expected.csv")
-        for listener in self.page.listeners.get("request", []): listener(request)
+        if self.page.emit_request:
+            for listener in self.page.listeners.get("request", []): listener(request)
         for item in (self.download, *self.extras):
             for listener in self.page.listeners.get("download", []): listener(item)
 class Download:
@@ -471,19 +485,19 @@ class Expectation:
     async def __aexit__(self, *args): return False
 class PageImpl:
     url = "https://files.test/"; main_frame = object()
-    def __init__(self, download, extras=()): self.download = download; self.link = Link(self, download, extras); self.listeners = {}
+    def __init__(self, download, extras=()): self.download = download; self.link = Link(self, download, extras); self.listeners = {}; self.emit_request = True
     def is_closed(self): return False
     async def title(self): return "Fixture"
     def on(self, event, listener): self.listeners.setdefault(event, []).append(listener)
     def remove_listener(self, event, listener): self.listeners.get(event, []).remove(listener)
     def expect_download(self, timeout): return Expectation(self.download)
-def make(download, extras=()):
-    page = PageImpl(download, extras); download.page = page; [setattr(item, "page", page) for item in extras]
+def make(download, extras=(), emit_request=True):
+    page = PageImpl(download, extras); page.emit_request = emit_request; download.page = page; [setattr(item, "page", page) for item in extras]
     state = module.PageState("page:1", page, ["https://files.test"]); state.controls["target"] = ("link", "Download", "/expected.csv", None, page.link)
     instance = object.__new__(module.Driver); instance.pages = {"page:1": state}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0; instance.close_requested = asyncio.Event()
     return instance, page
-def run(download, extras=(), timeout=1000, use_browser_temp=False):
-    instance, page = make(download, extras); staging = tempfile.mktemp(prefix="harbor-download-bound-")
+def run(download, extras=(), timeout=1000, use_browser_temp=False, emit_request=True):
+    instance, page = make(download, extras, emit_request); staging = tempfile.mktemp(prefix="harbor-download-bound-")
     temp_root = tempfile.mkdtemp(prefix="harbor-download-temp-") if use_browser_temp else None
     if temp_root is not None:
         instance.downloads_root = __import__("pathlib").Path(temp_root)
@@ -499,6 +513,11 @@ assert wrong["failure_class"] == "download_relation_unavailable" and wrong_downl
 first = Download(None, "https://files.test/expected.csv"); second = Download(None, "https://files.test/expected.csv")
 multiple, first, extras = run(first, (second,))
 assert multiple["failure_class"] == "download_relation_unavailable" and first.cancelled == second.cancelled == 1, multiple
+# Chromium can emit a Download for an <a download> without a Page request;
+# the transport event alone must not be claimed as a managed file.
+unobserved_download = Download(None, "https://files.test/expected.csv")
+unobserved, unobserved_download, _ = run(unobserved_download, emit_request=False)
+assert unobserved["failure_class"] == "download_relation_unavailable" and unobserved_download.cancelled == 1, unobserved
 oversize, oversized, _ = run(Download(None, "https://files.test/expected.csv", body=b"x" * (10 * 1024 * 1024 + 1)))
 assert oversize["failure_class"] == "file_limit_exceeded" and oversized.cancelled == 1, oversize
 timeout, slow, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2), timeout=20)

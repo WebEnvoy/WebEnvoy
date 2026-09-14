@@ -29,6 +29,12 @@ Harbor 提供 `GET /runtime/browser-provider-preference`、受 supervisor 保护
 
 已保存 Provider 后来失效时仍回读原 `provider_id`、`availability=unavailable|unsupported` 和原因；不能后台清除或替换。偏好文件属于 Harbor 管理 data root，0600 原子替换并随 Runtime／App 重启和安装更新继续存在。
 
+### 安装级共享 Playwright pairing（#528）
+
+`installation.json.playwrightRuntime` 是 Desktop owner 写入的可选、Provider-private 配对记录，schema 固定为 `webenvoy.playwright-shared-runtime/v1`，`provider` 固定为 `playwright_shared`，`playwright_version` 固定为 `1.60.0`，并包含 owner 管理的 Python executable `python: {path, executable_sha256}`。旧安装没有该字段仍可被读取；在已验证的 Camoufox upstream 安装中，service 可按同一已验证 Python/Playwright pairing 提供兼容事实，但不会从 Camoufox 资料派生 Chrome source、driver 或浏览器路径。Chrome 的可执行性只有在该中立 pairing 通过验证后才成立。
+
+这是安装事实，不是 Provider preference、Profile binding 或新的调度状态。reader 只接受上述字段（兼容读取旧的平面 `python_path`/`python_executable_sha256` 输入并规范化为嵌套 `python`），严格核对 canonical executable、regular/executable 文件、声明 SHA-256 和隔离 Python 的 Playwright 版本；未知字段、schema/provider/version、路径或 hash 不匹配均拒绝，不能回退到父进程 `HARBOR_*`、任意 Python、bundled Chromium、Camoufox driver 或用户默认 Profile。该 private 字段不投影给 Plugin。
+
 ## 创建快照、结果与并发
 
 Harbor 在 create 的 raw request idempotency receipt lookup 之后读取一次当前默认并物化请求。解析结果不在执行中再次读取。成功的 `harbor-identity-environment-mutation/v1` receipt 附：

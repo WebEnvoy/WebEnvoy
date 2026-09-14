@@ -30,6 +30,10 @@ import {
   launchCamoufoxUpstreamProvider,
   readCamoufoxUpstreamSourceFacts
 } from "./camoufox-upstream-driver.js";
+import {
+  isOfficialChromeLaunchRequest,
+  launchChromeOfficialProvider
+} from "./chrome-official-driver.js";
 import { isCanonicalDetailUrl } from "./detail-read-target.js";
 import type {
   BossJobDetailPublicSummary,
@@ -99,11 +103,27 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     ]);
   }
   const launchInput = persistedBinding && bindingBrowserPath ? { ...input, browser_path: bindingBrowserPath } : input;
+  // Resolve the persisted identity configuration before either shared adapter
+  // can start. In particular, Chrome must not turn a missing/invalid proxy
+  // resolver into an implicit direct connection.
+  const providerConfiguration = input.identity_environment
+    ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy)
+    : null;
+  if (input.identity_environment && !providerConfiguration &&
+    (isCamoufoxLaunchRequest(launchInput) || (input.operation_scope === "profile_management" && isOfficialChromeLaunchRequest(launchInput)))) {
+    return unavailable("unsupported", "Identity environment configuration cannot be resolved by the selected local provider.", providerBindingFacts(persistedBinding ?? null));
+  }
   // Camoufox is admitted only through the owner-provided official source and
   // fixed pins. All other Camoufox/native/legacy requests remain fail-closed
   // before detection, profile preparation, or provider fallback.
   if (isCamoufoxLaunchRequest(launchInput)) {
-    return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput) : retiredCamoufoxUnavailable();
+    return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput, providerConfiguration ?? undefined) : retiredCamoufoxUnavailable();
+  }
+  if (input.operation_scope === "profile_management" && isOfficialChromeLaunchRequest(launchInput)) {
+    if (!process.env.HARBOR_PLAYWRIGHT_PYTHON) {
+      return unavailable("provider_unavailable", "官方 Chrome 的固定 Playwright Driver 未由 installed owner 提供。", providerBindingFacts(persistedBinding ?? null));
+    }
+    return launchChromeOfficialProvider(launchInput, providerConfiguration ?? undefined);
   }
   const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);
@@ -113,9 +133,6 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
     return unavailable("provider_unavailable", diagnostic.app_summary, providerBindingFacts(providerBinding));
   }
   const profileStorage = await prepareProfileStorage(input.profile_storage_ref);
-  const providerConfiguration = input.identity_environment
-    ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy)
-    : null;
   if (input.identity_environment && !providerConfiguration) {
     return unavailable("unsupported", "Identity environment configuration cannot be resolved by the selected local provider.", [
       ...providerBindingFacts(providerBinding),

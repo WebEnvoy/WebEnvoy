@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
-import { boundedEnvironmentUpdate, normalizeEnvironmentObservation, trustEnvironmentProbe } from "./profile-environment.js";
+import {
+  boundedEnvironmentUpdate,
+  normalizeEnvironmentObservation,
+  normalizeEnvironmentObservationForProvider,
+  trustEnvironmentProbe
+} from "./profile-environment.js";
 import { startHarborRuntimeServer } from "./server.js";
 
 const root = mkdtempSync(join(tmpdir(), "harbor-environment-test-"));
@@ -32,6 +37,35 @@ test("bounds environment updates and observations without claiming unknown field
   assert.equal(facts.observed.device_memory, null);
   assert.equal(facts.observed.audio_hash, null);
   assert.equal(facts.continuity.state, "match");
+});
+
+test("normalizes Chrome observations through the selected provider while keeping Camoufox strict", () => {
+  const raw = {
+    status: "completed",
+    observed_at: "2026-09-09T18:00:00.000Z",
+    provider: { provider_id: "chrome_official", playwright_version: "1.60.0" },
+    bundle_hash: hash,
+    observed: {
+      timezone: "Asia/Shanghai",
+      language: "zh-CN",
+      languages: ["zh-CN"],
+      viewport: { width: 1280, height: 900 },
+      screen: { width: 1920, height: 1080 },
+      hardware_concurrency: 8
+    },
+    continuity: { state: "unknown", checked_fields: [], changed_fields: [], unknown_fields: [] }
+  };
+  assert.equal(normalizeEnvironmentObservation(raw), null);
+  const chrome = normalizeEnvironmentObservationForProvider(raw, "chrome_official");
+  assert.ok(chrome);
+  assert.deepEqual(chrome.provider, {
+    provider_id: "chrome_official",
+    playwright_version: "1.60.0",
+    browser_version: null
+  });
+  assert.equal(chrome.observed.timezone, "Asia/Shanghai");
+  assert.deepEqual(chrome.observed.viewport, { width: 1280, height: 900 });
+  assert.equal(normalizeEnvironmentObservationForProvider({ ...raw, provider: { provider_id: "camoufox", playwright_version: "1.60.0" } }, "chrome_official"), null);
 });
 
 test("requires Core supervisor authorization before environment lookup or mutation", async () => {

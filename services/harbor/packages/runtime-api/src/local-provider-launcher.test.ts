@@ -319,6 +319,52 @@ test("rejects incomplete persisted bindings without borrowing global provider se
   }
 });
 
+test("resolves Chrome identity proxy configuration before the shared driver early return", async () => {
+  const { createLocalIdentityEnvironmentFacts } = await import("./identity-environment.js");
+  const previousPlaywright = process.env.HARBOR_PLAYWRIGHT_PYTHON;
+  delete process.env.HARBOR_PLAYWRIGHT_PYTHON;
+  const browserPath = "/fixture/chrome-proxy-resolution";
+  const identity = createLocalIdentityEnvironmentFacts({
+    identity_environment_ref: "identity-env-chrome-proxy-resolution",
+    requested_provider_id: "chrome_official",
+    site: { site_id: "fixture", origin: "https://example.test", display_name: "Fixture" },
+    env: { HARBOR_CHROME_PATH: browserPath },
+    platform: "darwin",
+    arch: "arm64",
+    path_exists: candidate => candidate === browserPath,
+    is_executable: candidate => candidate === browserPath,
+    read_text: () => null,
+    list_dir: () => []
+  });
+  identity.environment.proxy = { state: "configured", proxy_ref: "proxy:required", label: "managed" };
+  const base = {
+    browser_path: "",
+    operation_scope: "profile_management" as const,
+    headless: true,
+    timeout_ms: 25,
+    url: "https://example.test/start",
+    profile_ref: identity.profile_ref,
+    profile_storage_ref: identity.browser_storage.profile_storage_ref,
+    provider_ref: "provider-chrome-proxy-resolution",
+    identity_environment: identity
+  };
+  for (const resolve_proxy of [
+    undefined,
+    () => null,
+    () => { throw new Error("resolver unavailable"); },
+    () => "https://proxy.example/invalid\n"
+  ]) {
+    const result = await launchLocalDedicatedProvider({ ...base, resolve_proxy });
+    assert.equal(result.status, "unavailable");
+    if (result.status === "unavailable") assert.equal(result.error.code, "unsupported");
+  }
+  const resolved = await launchLocalDedicatedProvider({ ...base, resolve_proxy: () => "socks5://proxy.example:1080/" });
+  assert.equal(resolved.status, "unavailable");
+  if (resolved.status === "unavailable") assert.equal(resolved.error.code, "provider_unavailable");
+  if (previousPlaywright === undefined) delete process.env.HARBOR_PLAYWRIGHT_PYTHON;
+  else process.env.HARBOR_PLAYWRIGHT_PYTHON = previousPlaywright;
+});
+
 test("#419 commit readback rejects decoy fields and scopes media to the unique composition", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 };
   let titleDecoy = false;

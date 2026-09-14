@@ -8,7 +8,14 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding } from './provider-artifact.mjs';
+import {
+  CAMOUFOX_UPSTREAM_PINS,
+  PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+  PLAYWRIGHT_SHARED_RUNTIME_VERSION,
+  classifyCamoufoxBinding,
+  resolveCamoufoxSetupBinding,
+  resolvePlaywrightRuntimeSetupBinding
+} from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -21,7 +28,11 @@ if (command === 'setup') {
   const installationPath = join(dataDir, 'installation.json');
   const existingInstallation = await readInstallation(installationPath);
   const legacyBinding = existingInstallation && ['camoufoxArtifact', 'native504', 'native510', 'camoufoxNativeArtifact', 'camoufoxNativeBinding'].some(key => Object.hasOwn(existingInstallation, key));
-  const upstreamArgs = ['--browser-install-root', '--browser-root', '--browser-executable', '--python-path', '--python', '--browser-version', '--camoufox-version', '--playwright-version', '--browser-source-path', '--browser-source', '--browser-archive', '--camoufox-source-path', '--camoufox-source', '--camoufox-wheel', '--playwright-source-path', '--playwright-source', '--playwright-wheel', '--browser-executable-sha256', '--python-executable-sha256'];
+  // `--playwright-version` is shared by both bindings. It only becomes a
+  // Camoufox argument when another Camoufox-specific argument is present;
+  // otherwise a standalone Playwright setup must not be forced through the
+  // Camoufox source-material reader.
+  const upstreamArgs = ['--browser-install-root', '--browser-root', '--browser-executable', '--python-path', '--python', '--browser-version', '--camoufox-version', '--browser-source-path', '--browser-source', '--browser-archive', '--camoufox-source-path', '--camoufox-source', '--camoufox-wheel', '--playwright-source-path', '--playwright-source', '--playwright-wheel', '--browser-executable-sha256', '--python-executable-sha256'];
   const hasUpstreamArguments = upstreamArgs.some(name => args.includes(name));
   if (args.includes('--camoufox-artifact') || legacyBinding && hasUpstreamArguments) throw new Error('camoufox_artifact_binding_retired');
   const upstream = legacyBinding ? null : await resolveCamoufoxSetupBinding({
@@ -42,6 +53,25 @@ if (command === 'setup') {
       ...(arg('--python-executable-sha256') ? { python_executable_sha256: arg('--python-executable-sha256') } : {})
     } : undefined
   });
+  const runtimeArgs = ['--playwright-python', '--playwright-python-executable-sha256'];
+  const hasRuntimeArguments = runtimeArgs.some(name => args.includes(name));
+  const playwrightRuntime = await resolvePlaywrightRuntimeSetupBinding({
+    existingInstallation,
+    hasRuntimeArguments,
+    runtimeInput: hasRuntimeArguments ? {
+      schema: PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+      provider: 'playwright_shared',
+      playwright_version: arg('--playwright-version') ?? PLAYWRIGHT_SHARED_RUNTIME_VERSION,
+      python_path: required('--playwright-python'),
+      ...(arg('--playwright-python-executable-sha256') ? { python_executable_sha256: arg('--playwright-python-executable-sha256') } : {})
+    } : undefined
+  });
+  const sharedRuntime = playwrightRuntime ?? (upstream ? {
+    schema: PLAYWRIGHT_SHARED_RUNTIME_SCHEMA,
+    provider: 'playwright_shared',
+    playwright_version: upstream.playwright_version,
+    python: upstream.python
+  } : null);
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -57,12 +87,14 @@ if (command === 'setup') {
   let installation = existingInstallation;
   if (!installation) {
     const ports = await Promise.all([reservePort(), reservePort()]);
-    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}`, ...(upstream ? { camoufoxUpstream: upstream } : {}) };
+    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}`, ...(upstream ? { camoufoxUpstream: upstream } : {}), ...(sharedRuntime ? { playwrightRuntime: sharedRuntime } : {}) };
   } else if (upstream && installation.camoufoxUpstream) {
     if (JSON.stringify(installation.camoufoxUpstream) !== JSON.stringify(upstream)) throw new Error('camoufox_upstream_binding_mismatch');
   } else if (upstream) {
     installation = { ...installation, camoufoxUpstream: upstream };
   }
+  if (sharedRuntime && installation.playwrightRuntime && JSON.stringify(installation.playwrightRuntime) !== JSON.stringify(sharedRuntime)) throw new Error('playwright_runtime_binding_mismatch');
+  if (sharedRuntime && !installation.playwrightRuntime) installation = { ...installation, playwrightRuntime: sharedRuntime };
   await mkdir(join(hostDir, '.agents/skills/webenvoy-browser'), { recursive: true });
   // A standalone profile file is reviewable; never edit the user's existing Codex configuration.
   const config = hostConfig(root, clientPath, args.includes('--approve-tools'), true);

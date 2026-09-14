@@ -211,6 +211,7 @@ function providerUnavailableReason(provider: BrowserProviderStatus): string {
   if (provider.install.status === "missing") return "provider_not_installed";
   if (provider.install.status === "path_invalid") return "provider_path_invalid";
   if (provider.install.launchability === "not_executable") return "provider_not_executable";
+  if (provider.install.reason?.includes("Playwright runtime")) return "provider_driver_unavailable";
   return "provider_not_launchable";
 }
 

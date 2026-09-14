@@ -84,3 +84,26 @@ test("rejects an unavailable replacement and preserves a saved value that later 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("projects an installed Chrome separately from its verified shared runtime", () => {
+  const detection = { ...available, env: { HARBOR_PLAYWRIGHT_RUNTIME_STATUS: "unavailable" } };
+  const directory = mkdtempSync(join(tmpdir(), "harbor-provider-preference-runtime-"));
+  const availableManager = new BrowserProviderPreferenceManager({
+    persistence_path: join(directory, "preference.json"),
+    provider_detection: available
+  });
+  try {
+    assert.equal(availableManager.mutate({ operation: "set", idempotency_key: "set-chrome-before-runtime", provider_id: "chrome_official" }).status, "completed");
+    const unavailableManager = new BrowserProviderPreferenceManager({
+      persistence_path: join(directory, "preference.json"),
+      provider_detection: detection
+    });
+    const catalog = unavailableManager.read();
+    assert.equal(catalog.user_creation_default.provider_id, "chrome_official");
+    assert.equal(catalog.user_creation_default.availability, "unavailable");
+    assert.equal(catalog.user_creation_default.unavailable_reason, "provider_driver_unavailable");
+    const result = unavailableManager.mutate({ operation: "set", idempotency_key: "set-chrome-without-runtime", provider_id: "chrome_official" });
+    assert.equal(result.status, "rejected");
+    assert.equal(result.failure?.code, "provider_unavailable");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

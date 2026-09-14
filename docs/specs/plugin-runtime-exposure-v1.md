@@ -46,6 +46,15 @@ Plugin/客户端可按 v2 的可选字段兼容规则忽略它，但不能把它
 已成功或已获得 Page 归属；installed/live/plugin 验收状态必须按对应的脱敏
 evidence record 逐项记录，#523 的受管文件 slice 不扩写为完整 Runtime 验收。
 
+对于 #528，`chrome_official` 的受管 `profile_management` Instance 也消费同一
+组 Page、文件、diagnostics、environment、ControlLease 和 lifecycle projection；
+不新增 Chrome 专属 MCP operation、Grant 维度或 Provider-private 输入。Chrome
+是否可执行仍由 persisted owner binding、安装级共享 Playwright runtime 配对和
+当前 Driver availability 分别决定；缺失或不可信时返回结构化 unavailable，不能
+静默切换到旧 CDP、其他 Provider 或用户日常 Profile。#528 的双 Provider G0
+证据只在实际通过相应门槛后提升 capability/Plugin 状态，不把“工具可见”当作
+Chrome 已完成资格核验；本轮脱敏结果见 [Provider execution reuse verification](../verification/provider-execution-reuse-v1.json)。
+
 ### Managed Browser Files 输入与结果
 
 `file.upload` 和 `file.download` 复用 `webenvoy_operation` 的既有

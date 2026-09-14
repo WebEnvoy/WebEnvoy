@@ -127,6 +127,13 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 先形成一张本WI内的迁移对应表：原函数/责任 → 共同实现 → 保留的适配差异 → 同一套回归。它不是另一状态台账。共同模块的操作逻辑不得按品牌分叉；必要引擎差异通过窄且可测的适配钩子表达，逐项解释依据，不能将整个文件/网络/控制流程委派回品牌模块。
 
+| 原函数/责任 | 共同实现 | adapter 保留差异 | 共同回归 |
+| --- | --- | --- | --- |
+| JSONL 请求、Page/文档归属、观察、交互、等待与 lifecycle | `playwright_shared_driver.py`、`playwright-shared-driver.ts` | 仅提供启动工厂、程序路径、资格 facts | `playwright-shared-driver.test.ts` 的同一参数化工厂 |
+| 首次请求前 guard、逐跳 redirect 检查、Network/Console metadata | `playwright_shared_driver.py` | 无品牌分叉 | Camoufox 既有请求保护测试与双 Provider G0 |
+| 上传、下载归属、hash、迟到结果与清理屏障 | `playwright_shared_driver.py` | 无品牌分叉 | Camoufox 既有文件反例测试与双 Provider G0 |
+| persistent Context 创建与环境应用 | 共享生命周期调用 adapter `prepare` | Camoufox 保留来源/pin/properties、完整 bundle/exact replay 和 Firefox 创建；Chrome 仅绑定的官方 executable、受管目录及 Chromium 公开 API | 同一工厂回归加各 Provider 资格拒绝测试 |
+
 一套确定性测试按Provider/启动工厂参数化运行，预先覆盖：全局路径污染、请求与binding冲突、旧绑定拒绝、Camoufox依赖泄漏、同名同址目标、scope收窄、撤销/代次、无关下载、文件取消/超限/迟到结果和不重放。不靠两份复制测试证明共享；不按品牌删除困难断言。
 
 运行代码冻结后构建一份支持两种适配器的正式安装。确定性安装客户端证明多页与metadata、文件失败恢复、10秒静默、原生UI接管交还、三种在途控制、P1不影响P2、正常重开和Runtime重启后的binding/材料/Run保持。
@@ -163,6 +170,11 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 本轮批准路线是现有正式程序的公开persistent-context适配。若该组合不能在既定安全条件下完成范围，保留未完成状态和可核对反例，不退回“每品牌复制一份”、关闭保护或换浏览器。架构要求是代码复用，不是让所有Provider原生能力完全相同。
 
 ## 12. 来源与证据边界
+
+本轮脱敏的实现、G0 A/B/C 结果和首个信任边界反例见
+[Provider execution reuse verification](../verification/provider-execution-reuse-v1.json)。该记录只
+绑定版本与 SHA-256、证据角色和限制，不包含临时正文、Profile 数据或 installed/live
+Plugin 完成声明。
 
 项目事实来源：本文件第2节列出的固定main源码，以及#516/#519/#523/#526和现行ADR0012/Runtime Capability Plane。以上支持“公共规则已存在、共同操作混在专用Driver、Chrome通用消费仍有缺口”，不支持“Chrome新路径已可用”。
 

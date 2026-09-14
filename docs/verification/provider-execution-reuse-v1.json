@@ -1,0 +1,92 @@
+{
+  "schema_version": "webenvoy.provider-execution-reuse-verification/v1",
+  "work_item": 528,
+  "recorded_at": "2026-09-14",
+  "status": "partial_g0_no_release",
+  "scope": "Sanitized implementation and bounded host evidence for shared provider execution; not an installed/live Plugin checkpoint.",
+  "shared_runtime": {
+    "binding_schema": "webenvoy.playwright-shared-runtime/v1",
+    "provider": "playwright_shared",
+    "playwright_version": "1.60.0",
+    "asset_sha256": {
+      "services/harbor/packages/runtime-api/src/playwright_shared_driver.py": "f027d43df0709825ac164c078acd20a7795b3870e75ff5f7195d9b7311f4b4fd",
+      "services/harbor/packages/runtime-api/src/playwright-shared-driver.ts": "5ef864bccfb9ab1e13808a5729c017be294136dd3a2ab832ce659d13e53e370b"
+    }
+  },
+  "providers": {
+    "camoufox": {
+      "camoufox_version": "0.5.6",
+      "browser_version": "152.0.4-beta.30",
+      "playwright_version": "1.60.0",
+      "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+      "source_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+      "adapter_asset_sha256": {
+        "services/harbor/packages/runtime-api/src/camoufox-upstream-driver.py": "1b63c784cc1356c8a45f4d8889c500c623418210d16af997ee5e6d00d7bc4831",
+        "services/harbor/packages/runtime-api/src/camoufox-upstream-driver.ts": "20575188914075a68b6c53c51ff4394694c28f82e91ef542b6382063900f27bc"
+      },
+      "config_chunk_pattern": "^CAMOU_CONFIG_(\\d+)$"
+    },
+    "chrome_official": {
+      "browser_version": "152.0.7977.84",
+      "playwright_version": "1.60.0",
+      "launch_api": "chromium.launch_persistent_context",
+      "binding": "owner-verified executable plus managed user-data-dir",
+      "camoufox_dependency": "none",
+      "adapter_asset_sha256": {
+        "services/harbor/packages/runtime-api/src/chrome_official_driver.py": "ca6f0c14e8e62c57ca62acd94fa12c61dce546a7ca0ed7f2093267c82ce44597",
+        "services/harbor/packages/runtime-api/src/chrome-official-driver.ts": "281a0afb5c38506667cf9c821ede8813e07791df1000744950e3fb8b8e8097b4"
+      }
+    }
+  },
+  "g0": {
+    "A": {
+      "status": "pass",
+      "evidence_role": "bounded public-API host probe plus one parameterized launch factory",
+      "facts": [
+        "Official Chrome 152.0.7977.84 launched with Playwright 1.60.0 and a managed empty profile.",
+        "The Chrome case remained launchable with invalid Camoufox-only environment values and did not use Camoufox fallback materials."
+      ]
+    },
+    "B": {
+      "status": "pass",
+      "evidence_role": "bounded real-browser file/guard probe on a controlled origin",
+      "facts": [
+        "PNG and ordinary same-page CSV transfer completed with stable hashes: png_sha256=696174f1d5b4a78320dcfeb82329a4f263b8fa86b3d1fdb127fe0e062394f725; csv_sha256=b83210619895382e6503972f12227777bc74d63fc203775e8b2bda84374fc8c1.",
+        "Direct and redirect guard checks recorded zero unauthorized-origin hits."
+      ]
+    },
+    "C": {
+      "status": "pass",
+      "evidence_role": "bounded real-browser delayed-event probe and #526 continuity-shaped check",
+      "facts": [
+        "A delayed event was observed after 10.5 seconds without an intervening read/snapshot; the silent 10.005-second check recorded work=1 and completion=1."
+      ]
+    }
+  },
+  "counterexamples": [
+    {
+      "case": "Chromium anchor with HTML download attribute",
+      "status": "preserved_fail_closed",
+      "failure_class": "download_relation_unavailable",
+      "evidence_role": "real Chromium observation plus deterministic regression",
+      "reason": "Chromium emitted Download but no Page request/route chain; the event is not sufficient to claim a managed file and no staging is committed."
+    },
+    {
+      "case": "redirect guard implemented with route.continue_",
+      "status": "rejected",
+      "evidence_role": "first trust-boundary counterexample",
+      "reason": "continue_ dispatched the unauthorized /private hop; the guarded implementation uses route.fetch(max_redirects=0) before dispatch and validates every hop."
+    }
+  ],
+  "evidence_roles": {
+    "source_and_assets": "relative packaged-source paths and SHA-256 values above; no temporary profile or payload is retained",
+    "deterministic": "parameterized Harbor launch/trust tests and strict installed-runtime pairing tests",
+    "host_probe": "bounded macOS Chrome probe; host-specific evidence only",
+    "plugin": "not run; no installed/live Agent completion is claimed"
+  },
+  "limits": [
+    "G0 results do not establish the full owner/control/Plugin checkpoint or release support.",
+    "Chrome evidence covers a managed empty profile and ordinary same-page HTTP(S) attachment; the download-attribute relation remains intentionally unsupported.",
+    "The shared pairing must remain owner-verified at installation time; missing, mismatched, or untrusted runtime facts are unavailable rather than a late driver failure."
+  ]
+}

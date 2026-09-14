@@ -326,7 +326,19 @@ function detectCloakBrowser(ctx: DetectionContext): BrowserProviderInstallFacts 
 }
 
 function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
-  return detectPath(ctx, chromeCandidates(ctx), "未在已知系统位置检测到官方 Chrome，且未配置覆盖路径。");
+  const detected = detectPath(ctx, chromeCandidates(ctx), "未在已知系统位置检测到官方 Chrome，且未配置覆盖路径。");
+  // A packaged Runtime carries this neutral marker after the installation
+  // service has verified (or rejected) the shared Python/Playwright pairing.
+  // Development/catalog callers without the marker retain the historical
+  // browser-install selection semantics used by #516.
+  if (detected.status === "installed" && ctx.env.HARBOR_PLAYWRIGHT_RUNTIME_STATUS === "unavailable") {
+    return {
+      ...detected,
+      launchability: "not_checked",
+      reason: "官方 Chrome 已安装，但共享 Playwright runtime 未通过 installed owner 验证。"
+    };
+  }
+  return detected;
 }
 
 function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
@@ -443,6 +455,7 @@ function diagnosticsFor(provider_id: BrowserProviderId, install: BrowserProvider
   if (install.status === "missing") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "not_installed", path: install.path })];
   if (install.status === "path_invalid") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "path_invalid", path: install.path })];
   if (install.launchability === "not_executable") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "permission_denied", path: install.path })];
+  if (install.reason?.includes("Playwright runtime")) return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "driver_unavailable", path: install.path, message: install.reason })];
   if (install.version_status === "unknown") return [diagnoseBrowserProviderFailure({ provider_id, failure_class: "version_unknown", path: install.path })];
   return [];
 }
