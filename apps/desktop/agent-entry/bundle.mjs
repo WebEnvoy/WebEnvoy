@@ -6,6 +6,7 @@ export const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const sha = value => createHash('sha256').update(value).digest('hex');
 export const recoveryOperationRef = (kind, idempotencyKey) => `recovery:${sha(`${kind}:${idempotencyKey}`).slice(0, 64)}`;
 export const REQUIRED_DRIVER_ASSETS = [
+  'dist-electron/runtime/harbor/dist/packages/runtime-api/src/playwright_shared_driver.py',
   'dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.py'
 ];
 export async function files(directory, prefix = '') {

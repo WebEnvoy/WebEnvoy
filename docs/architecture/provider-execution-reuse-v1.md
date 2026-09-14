@@ -1,12 +1,12 @@
 # Provider 执行复用设计 V1
 
 - 文档性质：规范性实施设计；包含本文件的 docs PR 经独立审查合并后生效。
-- 版本：1.0；日期：2026-09-14。
+- 版本：1.1；日期：2026-09-14。
 - Owner：Harbor Runtime；产品归口：[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
-- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)；关联 #471、#474、#477、#482。
+- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)、[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541)；关联 #471、#474、#477、#482。
 - 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
 - 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](runtime-capability-plane.md)。
-- 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#497 记录。
+- 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#541／#497 记录。
 
 ## 1. 产品决定
 
@@ -172,3 +172,11 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 - [Playwright Python Library](https://playwright.dev/python/docs/library)：async接口、线程与取消约束。
 
 这些是路线依据，不能替代固定SDK签名、本机原包、双Provider安全资格和installed验收。实际执行不得以文档最新版为理由更新固定依赖。
+
+## 13. 2026-09-14 分阶段交付决定
+
+[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541) 独立交付当前 Camoufox 的共同执行基线：正式安装包含并校验 `playwright_shared_driver.py` 与 Camoufox 薄 adapter，Camoufox 的 Page、文件、诊断、JSONL、事件循环和生命周期走共同实现；来源、固定版本、properties、完整环境 bundle、exact replay 与 persistent Context 创建仍留在 adapter。安装继续使用既有 `camoufoxUpstream` 对 Python/Camoufox/Playwright 和来源材料的严格配对，不新增 Chrome 私有字段或另一 Runtime。
+
+这个阶段不改变用户步骤、Profile/binding/default、Grant、ControlLease、Run/receipt、文件材料或 unknown 不重放语义。Chrome 新 adapter、generic `profile_management` launcher、availability/environment/support projection 和候选复现资产不进入 #541；main 上既有 Chrome 选择、默认、binding 与旧明确 scope 原样保留。
+
+#541 完成只表示 Camoufox 已无回归地正式消费共同实现，并允许后续 Runtime 开发复用该基线。#528 的双 Provider 用户目标、Chrome crash-free 资格、相同 Agent 流程和完成门保持不变；PR #530 继续 draft、未合并。#541 的直接对应表与脱敏证据见 [`provider-execution-reuse-541.json`](../verification/provider-execution-reuse-541.json)。

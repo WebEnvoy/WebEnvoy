@@ -70,6 +70,10 @@ material 分层。Provider error、stale Page、relation loss、撤销、过期�
 unknown outcome 原样暴露为结构化失败，`webenvoy_query` 只读原事实，不会重触发
 上传/下载。
 
+### #541 shared execution disposition
+
+#541 不修改 MCP operation、wire、Grant、文件结果或 Page/document schema；它把本节既有的精确 Page binding、单次 file scope、逐跳 guard 和 `not_dispatched`/`unknown_outcome` 语义落实到 Camoufox 的 shared Playwright execution path。shared module 只承载公共 Page、文件、诊断与生命周期行为，Camoufox adapter 只承载其已核验的 source/version/properties、persistent Context 和环境材料。Chrome adapter、generic launcher、availability/environment/support projection 以及 Chrome 复现证据不在本交付，不能由 shared code 的存在推导支持。
+
 ## SKILL 工具输入
 
 每次 `webenvoy_skills` 调用都要求 `idempotency_key`、`grant_id`、`operation`、`task_scope`；Connector 注入当前 `connection_id`。`task_scope` 必须恰好含 `operations`、`skill_refs`、`source_refs` 三组数组，数组项唯一且 operation 必须包含当前 operation。SKILL 请求不带 Profile、origin、runtime session、page、URL、路径、脚本或浏览器动作字段；未知字段拒绝。

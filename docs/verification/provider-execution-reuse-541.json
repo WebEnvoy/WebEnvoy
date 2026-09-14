@@ -1,0 +1,93 @@
+{
+  "schema_version": "webenvoy.provider-execution-reuse-541/v1",
+  "work_item": 541,
+  "recorded_at": "2026-09-14",
+  "status": "deterministic_gates_passed_install_pending",
+  "scope": "Camoufox shared execution closure only; no Chrome qualification or support claim.",
+  "implementation_map": [
+    {
+      "responsibility": "JSONL, Page, route, files, diagnostics and lifecycle",
+      "shared": [
+        "services/harbor/packages/runtime-api/src/playwright_shared_driver.py",
+        "services/harbor/packages/runtime-api/src/playwright-shared-driver.ts"
+      ],
+      "adapter": [
+        "services/harbor/packages/runtime-api/src/camoufox-upstream-driver.py",
+        "services/harbor/packages/runtime-api/src/camoufox-upstream-driver.ts"
+      ],
+      "regression": [
+        "services/harbor/packages/runtime-api/src/playwright-shared-driver.test.ts",
+        "services/harbor/packages/runtime-api/src/camoufox-upstream-driver.test.ts"
+      ]
+    },
+    {
+      "responsibility": "persistent Context and environment material",
+      "shared": "shared lifecycle launch",
+      "adapter": "Camoufox source, pins, properties, options and bundle only",
+      "regression": [
+        "services/harbor/packages/runtime-api/src/local-provider-launcher.ts",
+        "apps/desktop/agent-entry/installation.test.mjs"
+      ]
+    },
+    {
+      "responsibility": "Plugin task scope and Page binding",
+      "shared": "existing MCP and direct contract owner",
+      "adapter": "none",
+      "regression": [
+        "apps/desktop/agent-entry/client.test.mjs",
+        "apps/desktop/agent-entry/mcp.mjs"
+      ]
+    }
+  ],
+  "gates": {
+    "G0-A": {
+      "status": "passed_deterministic",
+      "evidence": [
+        "shared and adapter assets are both manifest-owned",
+        "shared module has no Camoufox import",
+        "missing, retired or mixed Camoufox binding is rejected before launch"
+      ]
+    },
+    "G0-B": {
+      "status": "passed_deterministic",
+      "evidence": [
+        "Camoufox upload/download hash and owner scope checks"
+      ]
+    },
+    "G0-C": {
+      "status": "passed_deterministic",
+      "evidence": [
+        "close, EOF and lifecycle control remain on the owning loop"
+      ]
+    }
+  },
+  "evidence_roles": {
+    "deterministic": {
+      "status": "passed",
+      "checks": [
+        "Harbor typecheck passed",
+        "Harbor tests: 349 passed, 0 failed, 1 platform-specific existing skip",
+        "Shared/Camoufox focused tests after the adapter-normalizer hook: 23 passed, 0 failed",
+        "Desktop typecheck, build:main and production build passed",
+        "Desktop installation/client tests: 10 passed, 0 failed",
+        "make py-compile passed for 3 files",
+        "workspace lint and conformance passed (23 schemas, 44 fixtures, 7 execution policy contracts, 8 Run Records)",
+        "JSON parse and git diff --check passed"
+      ]
+    },
+    "host_probe": "not_run",
+    "real_browser": "not_run",
+    "plugin": "not_run"
+  },
+  "excluded": [
+    "Chrome adapter",
+    "Chrome generic launcher",
+    "Chrome availability/environment/support projection",
+    "Chrome reproduction and candidate evidence"
+  ],
+  "non_claims": [
+    "No real browser was started here",
+    "No Chrome support or live/plugin verification is claimed",
+    "No profile database, dump, payload or credential content is retained"
+  ]
+}
