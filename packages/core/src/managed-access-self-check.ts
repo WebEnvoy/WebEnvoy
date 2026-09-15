@@ -57,8 +57,9 @@ try {
     const v2Principal = await stopped.registerPrincipal({ idempotency_key: "v2-principal", display_name: "v2 host", credential_hash: v2Digest });
     await stopped.connect(v2Digest);
     const v2ExpiresAt = new Date(Date.now() + 60_000).toISOString();
-    await stopped.setProfilePolicy({ idempotency_key: "v2-policy", profile_ref: "profile:v2", allowed_operations: ["instance.start", "instance.observe"], allowed_origins: ["https://example.com"] });
-    const source = await stopped.createGrant({ idempotency_key: "v2-source", principal_id: v2Principal.principal_id, profile_refs: ["profile:v2"], allowed_operations: ["instance.start", "instance.observe"], allowed_origins: ["https://example.com"], expires_at: v2ExpiresAt, creation_template: null, max_created_profiles: 0 });
+    const v2Operations = ["profile.list", "profile.read", "instance.start", "instance.observe", "recovery.inspect", "recovery.request", "recovery.status"];
+    await stopped.setProfilePolicy({ idempotency_key: "v2-policy", profile_ref: "profile:v2", allowed_operations: v2Operations, allowed_origins: ["https://example.com"] });
+    const source = await stopped.createGrant({ idempotency_key: "v2-source", principal_id: v2Principal.principal_id, profile_refs: ["profile:v2"], allowed_operations: v2Operations, allowed_origins: ["https://example.com"], expires_at: v2ExpiresAt, creation_template: null, max_created_profiles: 0 });
     const confirmationInput = {
       idempotency_key: "v2-confirm",
       source_grant_id: source.grant_id,
@@ -75,7 +76,7 @@ try {
       new_grant: {
         principal_id: v2Principal.principal_id,
         profile_refs: ["profile:v2"],
-        allowed_operations: ["instance.start", "instance.observe"],
+        allowed_operations: v2Operations,
         allowed_origins: ["https://example.com"],
         expires_at: v2ExpiresAt,
         creation_template: null,
@@ -83,7 +84,7 @@ try {
       },
       new_profile_policy: {
         profile_ref: "profile:v2",
-        allowed_operations: ["instance.start", "instance.observe"],
+        allowed_operations: v2Operations,
         allowed_origins: ["https://example.com"]
       }
     };
@@ -113,7 +114,20 @@ try {
     assert.equal((await stopped.list()).grants.find(item => item.grant_id === source.grant_id)?.scope_semantics, undefined);
     assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
     assert.deepEqual(await stopped.confirmAgentOperationsV2(confirmationInput), upgraded);
+    const legacyScope = { operations: ["profile.list"], profile_refs: ["profile:v2"], origins: ["https://example.com"] };
+    const legacyList = await stopped.checkAccess(v2Digest, { connection_id: (await stopped.list()).connections.find(item => item.principal_id === v2Principal.principal_id)!.connection_id, grant_id: source.grant_id, operation: "profile.list", task_scope: legacyScope });
+    assert.deepEqual(legacyList.grant.profile_refs, ["profile:v2"]);
+    const legacyProfileRead = await stopped.checkAccess(v2Digest, { connection_id: legacyList.connection.connection_id, grant_id: source.grant_id, operation: "profile.read", profile_ref: "profile:v2", task_scope: { operations: ["profile.read"], profile_refs: ["profile:v2"], origins: ["https://example.com"] } });
+    assert.equal(legacyProfileRead.profile_policy?.profile_ref, "profile:v2");
+    for (const operation of ["recovery.inspect", "recovery.status"] as const) {
+      const recoveryAccess = await stopped.checkAccess(v2Digest, { connection_id: legacyList.connection.connection_id, grant_id: source.grant_id, operation, profile_ref: "profile:v2", task_scope: { operations: [operation], profile_refs: ["profile:v2"], origins: ["https://example.com"] } });
+      assert.equal(recoveryAccess.profile_policy?.profile_ref, "profile:v2");
+    }
+    await rejected(stopped.checkAccess(v2Digest, { connection_id: legacyList.connection.connection_id, grant_id: source.grant_id, operation: "instance.start", profile_ref: "profile:v2", origin: "https://example.com", task_scope: { operations: ["instance.start"], profile_refs: ["profile:v2"], origins: ["https://example.com"] } }), "managed_access_scope_semantics_mismatch");
     await rejected(stopped.confirmAgentOperationsV2({ ...confirmationInput, idempotency_key: "v2-confirm-replay", confirmation: { ...confirmationInput.confirmation, idempotency_key: "v2-confirm-replay" } }), "managed_access_scope_confirmation_consumed");
+    const v2PolicyUpdate = await stopped.setProfilePolicy({ idempotency_key: "v2-legacy-update", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"] });
+    assert.equal(v2PolicyUpdate.scope_semantics, "agent_operations_v2");
+    assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
     await rejected(stopped.setProfilePolicy({ idempotency_key: "v2-direct", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"], scope_semantics: "agent_operations_v2" }), "managed_access_invalid_input");
   } finally { await rm(v2Directory, { recursive: true, force: true }); }
 

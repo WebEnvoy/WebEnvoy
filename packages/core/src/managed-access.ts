@@ -10,6 +10,7 @@ export const managedFileOperations = ["file.upload", "file.download"] as const;
 export const managedOperations = ["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
+const profileScopeIndependentReads: readonly ManagedOperation[] = ["profile.list", "profile.read", "recovery.inspect", "recovery.status"];
 export const managedScopeSemantics = ["legacy_request_guard_v1", "agent_operations_v2"] as const;
 export type ManagedScopeSemantics = typeof managedScopeSemantics[number];
 export const managedScopeConfirmationSchemaVersion = "webenvoy.agent-operations-v2-confirmation.v1" as const;
@@ -351,8 +352,15 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const parsed = policy(limits);
       if (parsed.scope_semantics === "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
       return transaction(state => receipt(state, "setProfilePolicy", input, () => {
+        const existing = state.profile_policies.find(item => item.profile_ref === parsed.profile_ref);
+        // A legacy-shaped owner update must not silently downgrade a v2
+        // Profile. Preserve the fixed instance semantics while allowing the
+        // existing owner policy update to change its limits.
+        const next = existing && scopeSemantics(existing.scope_semantics) === "agent_operations_v2"
+          ? { ...parsed, scope_semantics: "agent_operations_v2" as const }
+          : parsed;
         state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== parsed.profile_ref);
-        state.profile_policies.push(parsed); return parsed;
+        state.profile_policies.push(next); return next;
       }));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
@@ -411,12 +419,15 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }
       if (templateRef !== undefined) return fail("managed_access_invalid_input");
       if (op === "profile.list" && profileRef === undefined) {
-        return { ...result, authorized_origins: [...new Set(task.origins.filter(item => grant.allowed_origins.includes(item)))], grant: { ...grant, profile_refs: grant.profile_refs.filter(ref => task.profile_refs.includes(ref) && state.profile_policies.some(item => item.profile_ref === ref && item.allowed_operations.includes(op) && scopeSemantics(item.scope_semantics) === grantScope)) } };
+        return { ...result, authorized_origins: [...new Set(task.origins.filter(item => grant.allowed_origins.includes(item)))], grant: { ...grant, profile_refs: grant.profile_refs.filter(ref => task.profile_refs.includes(ref) && state.profile_policies.some(item => item.profile_ref === ref && item.allowed_operations.includes(op) && (profileScopeIndependentReads.includes(op) || scopeSemantics(item.scope_semantics) === grantScope))) } };
       }
       if (!profileRef || !grant.profile_refs.includes(profileRef) || !task.profile_refs.includes(profileRef)) return fail("managed_access_denied");
       const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
       if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
-      if (scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
+      // Read-only Profile/recovery metadata remains available through the
+      // historical Grant. Only browser execution (and recovery mutations)
+      // requires the Grant/Profile semantics pair.
+      if (!profileScopeIndependentReads.includes(op) && scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
       const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
       if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
       if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");

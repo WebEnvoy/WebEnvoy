@@ -110,7 +110,7 @@ MCP 工具固定可见；可见不意味着 Provider 支持或主体获授权。
 
 Core 只接受一个当前有效的 Principal/Connection/Grant。对浏览器 Page、navigation、interaction 和 diagnostics，effective origins 是 `Grant.allowed_origins ∩ ProfilePolicy.allowed_origins ∩ task_scope.origins`；请求的精确 `origin` 必须属于该交集。Core 不合并多个 Grant、多个 Profile 的 scope 或 Agent 自带 allowlist。对 SKILL 另取 `skill_scope={skill_refs,source_refs}`、task scope、批准清单和 compatibility 的交集。旧 Grant 缺少 `skill_scope` 时没有 SKILL 权限；不得以网页 Profile、origin、账号绑定或通用浏览器 Grant 推导 SKILL 权限，也不得以 SKILL 权限推导网页操作权。版本升级、旧 Grant 读取和旧严格 reader 的拒绝边界见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。
 
-浏览器 Grant 与 Profile policy 另以 owner 固定的 `scope_semantics` 配对：缺省为 `legacy_request_guard_v1`，显式 `agent_operations_v2` 只通过现有 owner 授权面的一次查看与确认生成。确认页展示 Profile、Agent、网站、操作和文件范围，并说明它控制 Agent 操作、不提供全浏览器网络隔离；只允许已停止 Profile，范围不得扩大，原 Grant 不改义。普通 Agent MCP schema 不包含该字段或确认入口，旧/新语义不匹配时在派发前拒绝。
+浏览器 Grant 与 Profile policy 另以 owner 固定的 `scope_semantics` 配对：缺省为 `legacy_request_guard_v1`，显式 `agent_operations_v2` 只通过现有 owner 授权面的一次查看与确认生成。确认页展示 Profile、Agent、网站、操作和文件范围，并说明它控制 Agent 操作、不提供全浏览器网络隔离；只允许已停止 Profile，范围不得扩大，原 Grant 不改义。普通 Agent MCP schema 不包含该字段或确认入口，旧/新语义不匹配时在浏览器派发前拒绝；原 Grant 已有的 Profile list/read 和 recovery inspect/status 仍可只读查询，不启动或改变浏览器。
 
 既有 `webenvoy_operation` 的 browser/environment task scope 继续使用 `operations`、`profile_refs`、`origins`，其授权和 Web scope 不因 SKILL 工具改变。SKILL 请求不携带网页范围；同一个连接仍须先通过 `webenvoy_connect`，撤销/过期在每次新管理或 read 前重新检查。
 
