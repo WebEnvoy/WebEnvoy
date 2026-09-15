@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.metadata
+import os
 import re
 import signal
 import socket
@@ -20,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from playwright_shared_driver import async_playwright, canonical_executable_path, main
 
@@ -88,11 +90,69 @@ def _validate_proxy(value: Any) -> str:
     return value
 
 
+def _timezone_from_path(path: Path) -> str | None:
+    try:
+        resolved = path.resolve(strict=True).as_posix()
+    except OSError:
+        return None
+    marker = "/zoneinfo/"
+    if marker not in resolved:
+        return None
+    value = resolved.split(marker, 1)[1].removeprefix("posix/").removeprefix("right/")
+    if value in {"Etc/UTC", "Etc/GMT", "GMT"}:
+        value = "UTC"
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    return value
+
+
+def _host_timezone() -> str | None:
+    configured = os.environ.get("TZ")
+    if configured:
+        value = configured.removeprefix(":")
+        value = _timezone_from_path(Path(value)) if value.startswith("/") else value
+        if value in {"Etc/UTC", "Etc/GMT", "GMT"}:
+            value = "UTC"
+        if value:
+            try:
+                ZoneInfo(value)
+                return value
+            except (ZoneInfoNotFoundError, ValueError):
+                return None
+    return _timezone_from_path(Path("/etc/localtime"))
+
+
+def _validate_timezone(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 128 or any(ord(char) < 0x20 or ord(char) == 0x7f for char in value):
+        raise ValueError("Official Chrome timezone configuration is unsupported.")
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("Official Chrome timezone configuration is unsupported.") from error
+    return value
+
+
+async def verify_timezone_readback(context: Any, timezone: str | None) -> None:
+    if timezone is None:
+        return
+    pages = getattr(context, "pages", None)
+    if not isinstance(pages, (list, tuple)) or not pages:
+        raise ValueError("Official Chrome timezone readback has no Page.")
+    try:
+        observed = await pages[0].evaluate("() => Intl.DateTimeFormat().resolvedOptions().timeZone || null")
+    except BaseException as error:
+        raise ValueError("Official Chrome timezone readback is unavailable.") from error
+    if observed != timezone:
+        raise ValueError("Official Chrome timezone readback did not match the configured host timezone.")
+
+
 def chrome_launch_flags(request: dict[str, Any]) -> list[str]:
     """Build the small set of managed Chrome launch flags.
 
-    Timezone and viewport are intentionally rejected because a public CDP
-    attach cannot apply and verify them as persistent Context options.
+    Timezone is accepted only when it is the host's actual IANA timezone;
+    viewport remains unsupported for a public CDP attach.
     """
     environment = request.get("environment")
     if environment is None:
@@ -106,7 +166,9 @@ def chrome_launch_flags(request: dict[str, Any]) -> list[str]:
         flags.append(f"--lang={_validate_language(language)}")
     timezone = environment.get("timezone")
     if timezone is not None:
-        raise ValueError("Official Chrome public connection cannot apply timezone configuration.")
+        timezone = _validate_timezone(timezone)
+        if timezone != _host_timezone():
+            raise ValueError("Official Chrome public connection only supports the host's actual IANA timezone.")
     viewport = environment.get("viewport")
     if viewport is not None:
         raise ValueError("Official Chrome public connection cannot apply viewport configuration.")
@@ -413,7 +475,10 @@ class ChromeOfficialAdapter:
             contexts = getattr(self.browser, "contexts", None)
             if not isinstance(contexts, (list, tuple)) or len(contexts) != 1:
                 raise ValueError("Official Chrome did not expose exactly one default Context.")
-            return contexts[0]
+            context = contexts[0]
+            timezone = request.get("environment", {}).get("timezone")
+            await verify_timezone_readback(context, timezone)
+            return context
         except BaseException as error:
             try:
                 await self.close_owned_resources()

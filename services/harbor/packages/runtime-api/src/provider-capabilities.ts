@@ -31,7 +31,7 @@ export function chromeCapabilities(official = false): BrowserProviderCapabilityF
     capability("persistent_profile", "supported", "validation_evidence", "owner 验证的官方 Chrome 配对使用 Harbor 管理的持久化 Profile。"),
     capability("independent_user_data_dir", "supported", "validation_evidence", "任务使用独立 managed Profile，不复用用户日常 Chrome 数据。"),
     capability("proxy", "limited", "configured", "当前公开 Chrome adapter 可接收代理启动配置，但不宣称 provider 原生一致性。"),
-    capability("timezone", "unsupported", "derived", "当前公开 Chrome adapter 不应用时区配置。"),
+    capability("timezone", "limited", "configured", "公开 Chrome 不提供时区覆盖；仅接受与宿主实际 IANA 时区一致的配置，并在启动后回读验证。"),
     capability("locale", "limited", "configured", "当前公开 Chrome adapter 可接收语言配置；独立地区伪装不受支持。"),
     capability("viewport", "unsupported", "derived", "当前公开 Chrome adapter 不应用 viewport 配置。"),
     capability("extensions", "limited", "configured", "扩展能力取决于官方 Chrome 启动策略和用户配置。"),
@@ -112,7 +112,7 @@ export function chromeLimitations(official = false): string[] {
   if (official) return [
     "仅 owner 验证的 official_release Chrome、可执行文件和 Playwright exact pairing 进入核心支持范围。",
     "本批通过 managed Profile 复用共享 Page、Files、diagnostics 与 lifecycle；不扩展为站点成功或完整 Runtime 承诺。",
-    "当前公开 Chrome 路径不支持 timezone、viewport、原生指纹控制或反检测二进制补丁。"
+    "timezone 仅在与宿主实际 IANA 时区一致时受限支持；公开 Chrome 路径仍不支持 viewport、原生指纹控制或反检测二进制补丁。"
   ];
   return [
     "仅在 CloakBrowser 缺失或不可用时作为受限后备。",
@@ -156,7 +156,7 @@ export function chromeDownloadGuide(official = false): BrowserProviderDownloadGu
     install_hint: "请由 owner 提供并核验 official_release Chrome、可执行文件和 Playwright exact pairing；Harbor 只管理独立 Profile 与共享 Runtime 能力。",
     missing_impacts: [
       "缺少完整 owner pairing 时，官方 Chrome 仅保留普通系统检测范围，不进入核心能力候选。",
-      "timezone、viewport 和原生指纹控制不属于当前公开 Chrome 路径。"
+      "timezone 仅在与宿主实际 IANA 时区一致时受限支持；viewport 和原生指纹控制不属于当前公开 Chrome 路径。"
     ]
   };
   return {

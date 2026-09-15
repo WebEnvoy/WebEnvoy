@@ -25,6 +25,26 @@ export const CHROME_OFFICIAL_PAIRING = Object.freeze({
 
 export type ChromeOfficialPairing = typeof CHROME_OFFICIAL_PAIRING;
 
+export function hostTimezone(): string | null {
+  try {
+    const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timezone === "string" && timezone ? timezone : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isHostTimezone(value: string | null | undefined): boolean {
+  if (!value) return true;
+  const host = hostTimezone();
+  if (!host) return false;
+  try {
+    return value === new Intl.DateTimeFormat("en", { timeZone: value }).resolvedOptions().timeZone && value === host;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A Chrome launch is admitted only from an owner-persisted, exact pairing.
  * Older Chrome bindings remain readable for management, but cannot spawn this
@@ -72,6 +92,12 @@ export async function launchChromeOfficialProvider(
 ): Promise<LocalProviderLaunchResult> {
   if (!isOfficialChromeLaunchRequest(input)) {
     return unavailable("unsupported", "官方 Chrome 仅允许由 owner 提供并验证 exact installed pairing 的 managed binding 启动。", []);
+  }
+  const timezone = resolvedIdentityEnvironmentConfiguration
+    ? resolvedIdentityEnvironmentConfiguration.timezone
+    : input.identity_environment?.environment.timezone;
+  if (!isHostTimezone(timezone)) {
+    return unavailable("unsupported", "官方 Chrome 公开连接仅支持与宿主实际 IANA 时区一致的配置。", []);
   }
   const binding = input.identity_environment!.provider_binding;
   const install = binding.selected_provider!.install;

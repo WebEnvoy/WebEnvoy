@@ -49,7 +49,8 @@ test("detects exact Chrome facts only when the complete owner pairing is present
   assert.equal(exact.capabilities.find(capability => capability.key === "snapshot_refs")?.state, "limited");
   assert.equal(exact.capabilities.find(capability => capability.key === "evidence_refs")?.state, "limited");
   assert.equal(exact.capabilities.find(capability => capability.key === "cookie_persistence")?.source, "configured");
-  assert.equal(exact.capabilities.find(capability => capability.key === "timezone")?.state, "unsupported");
+  assert.equal(exact.capabilities.find(capability => capability.key === "timezone")?.state, "limited");
+  assert.match(exact.capabilities.find(capability => capability.key === "timezone")?.note ?? "", /宿主实际 IANA/);
   assert.equal(exact.capabilities.find(capability => capability.key === "viewport")?.state, "unsupported");
   assert.equal(exact.capabilities.find(capability => capability.key === "native_fingerprint_control")?.state, "unsupported");
   assert.equal(exact.limitations.some(limitation => limitation.includes("核心支持范围")), true);

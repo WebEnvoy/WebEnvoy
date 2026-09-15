@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import { createLocalIdentityEnvironmentFacts } from "./identity-environment.js";
 import {
   CHROME_OFFICIAL_PAIRING,
+  hostTimezone,
   isOfficialChromeLaunchRequest,
+  isHostTimezone,
   launchChromeOfficialProvider,
   readChromeOfficialPairingFacts
 } from "./chrome-official-driver.js";
@@ -62,6 +64,21 @@ test("admits only the exact owner-verified Chrome pairing and reaches shared lau
   };
   assert.deepEqual(readChromeOfficialPairingFacts(identity.provider_binding), CHROME_OFFICIAL_PAIRING);
   assert.equal(isOfficialChromeLaunchRequest(input), true);
+  const timezone = hostTimezone();
+  assert.ok(timezone);
+  assert.equal(isHostTimezone(timezone), true);
+  const mismatchedTimezone = ["UTC", "Asia/Shanghai", "America/New_York", "Europe/Paris", "Asia/Tokyo"]
+    .find(candidate => !isHostTimezone(candidate));
+  assert.ok(mismatchedTimezone);
+  const mismatchedTimezoneResult = await launchChromeOfficialProvider(input, {
+    provider_id: "chrome_official",
+    proxy_server: null,
+    language: null,
+    timezone: mismatchedTimezone,
+    viewport: null
+  });
+  assert.equal(mismatchedTimezoneResult.status, "unavailable");
+  if (mismatchedTimezoneResult.status === "unavailable") assert.equal(mismatchedTimezoneResult.error.code, "unsupported");
   for (const scope of [undefined, "legacy_request_guard_v1" as const]) {
     const withoutV2 = { ...input, scope_semantics: scope };
     assert.equal(isOfficialChromeLaunchRequest(withoutV2), false);
@@ -99,7 +116,13 @@ test("admits only the exact owner-verified Chrome pairing and reaches shared lau
   process.env.HARBOR_PROFILE_STORAGE_ROOT = root;
   delete process.env.HARBOR_PLAYWRIGHT_PYTHON;
   try {
-    const result = await launchChromeOfficialProvider(input);
+    const result = await launchChromeOfficialProvider(input, {
+      provider_id: "chrome_official",
+      proxy_server: null,
+      language: null,
+      timezone,
+      viewport: null
+    });
     assert.equal(result.status, "unavailable");
     if (result.status === "unavailable") {
       // The shared launcher, rather than a Chrome-specific Page/Files path,
@@ -157,7 +180,31 @@ assert module._validate_pairing(pairing) == pairing
 module.importlib.metadata.version = lambda _name: module.PLAYWRIGHT_VERSION
 module._sha256_file = lambda _path: module.EXECUTABLE_SHA256
 assert module.ChromeOfficialAdapter.verify(request)[-1]["value"] == module.CONNECTION
+host_timezone = module._host_timezone()
+assert isinstance(host_timezone, str) and host_timezone
+request["environment"] = {**request["environment"], "timezone": host_timezone}
 assert module.chrome_launch_flags(request) == ["--lang=zh-CN", "--proxy-server=http://127.0.0.1:8080"]
+mismatched_timezone = next(candidate for candidate in ("UTC", "Asia/Shanghai", "America/New_York", "Europe/Paris", "Asia/Tokyo") if candidate != host_timezone)
+rejected_timezone = dict(request, environment={"timezone": mismatched_timezone})
+try:
+    module.chrome_launch_flags(rejected_timezone)
+    raise AssertionError("mismatched timezone was accepted")
+except ValueError as error:
+    assert "timezone" in str(error)
+
+class Page:
+    async def evaluate(self, _expression): return host_timezone
+
+class Context:
+    def __init__(self): self.pages = [Page()]
+
+asyncio.run(module.verify_timezone_readback(Context(), host_timezone))
+try:
+    asyncio.run(module.verify_timezone_readback(types.SimpleNamespace(pages=[]), host_timezone))
+    raise AssertionError("missing timezone readback was accepted")
+except ValueError as error:
+    assert "readback" in str(error)
+
 for scope in (None, "legacy_request_guard_v1"):
     old_scope = request.pop("scope_semantics", None)
     if scope is not None: request["scope_semantics"] = scope
@@ -183,7 +230,7 @@ for output in ("p1000\nn0.0.0.0:43123\n", "p1001\nn127.0.0.1:43123\n"):
         pass
 module.subprocess.run = real_subprocess_run
 for key in ("timezone", "viewport"):
-    rejected = dict(request, environment={key: "UTC" if key == "timezone" else {"width": 800, "height": 600}})
+    rejected = dict(request, environment={key: mismatched_timezone if key == "timezone" else {"width": 800, "height": 600}})
     try:
         module.chrome_launch_flags(rejected)
         raise AssertionError(key + " was accepted")
@@ -231,7 +278,7 @@ async def endpoint_closed(endpoint): events.append(("endpoint_closed", endpoint)
 module.wait_for_endpoint_closed = endpoint_closed
 
 class Browser:
-    def __init__(self, process): self.contexts = [object()]; self.process = process; self.close_calls = 0
+    def __init__(self, process): self.contexts = [Context()]; self.process = process; self.close_calls = 0
     async def close(self): self.close_calls += 1; events.append("browser.close")
 class Chromium:
     def __init__(self): self.browser = None; self.calls = 0
