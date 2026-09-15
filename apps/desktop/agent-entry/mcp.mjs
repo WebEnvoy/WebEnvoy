@@ -7,7 +7,8 @@ const client = await readClient(process.argv[2]);
 let connection;
 const managedOperationIds = ['profile.create','profile.list','profile.read','provider.preference.read','provider.preference.set','provider.preference.clear','instance.start','instance.observe','instance.diagnostics','environment.read','environment.update','instance.navigate','instance.read','page.list','page.open','page.activate','page.close','page.navigate','page.reload','page.back','page.forward','instance.snapshot','instance.click','instance.input','instance.press','instance.scroll','instance.wait','instance.handoff','instance.stop','file.upload','file.download'];
 const managedFileOperationIds = ['file.upload', 'file.download'];
-const managedOperationDescription = 'Submit one authorized Provider preference, management, environment, Page, public-read, diagnostic, controlled-page, or managed file operation. File upload/download accepts only an opaque file_ref and a bound Page target; for both file operations include fresh profile_ref, runtime_session_ref, exact origin, page_id, page_ref, document_generation, observation_ref, and target_ref from the same current Page/document observation. Upload additionally requires file_ref and matching task_scope.file_refs; download omits file_ref and uses task_scope.file_refs: []. Local paths, file bodies, arbitrary URLs, and business commit are never exposed. Preference writes, Profile creation, and browser/file actions never retry; query the original Run when an outcome is unknown. task_scope describes this submitted operation only; submit later workflow steps separately. task_scope.file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation, even when a later step will use a file. Operation-specific origin inputs are significant: instance.start requires the exact authorized origin as a top-level origin field (task_scope.origins alone is insufficient); url is optional and, when supplied, must be on that origin. Other operations require origin only where their contract says so.';
+const managedOriginOperationIds = ['instance.start','instance.observe','instance.diagnostics','environment.read','environment.update','instance.navigate','instance.read','page.open','page.navigate','instance.snapshot','instance.click','instance.input','instance.press','instance.scroll','instance.wait','file.upload','file.download'];
+const managedOperationDescription = 'Submit one authorized Provider preference, management, environment, Page, public-read, diagnostic, controlled-page, or managed file operation. File upload/download accepts only an opaque file_ref and a bound Page target; for both file operations include fresh profile_ref, runtime_session_ref, exact origin, page_id, page_ref, document_generation, observation_ref, and target_ref from the same current Page/document observation. Upload additionally requires file_ref and matching task_scope.file_refs; download omits file_ref and uses task_scope.file_refs: []. Local paths, file bodies, arbitrary URLs, and business commit are never exposed. Preference writes, Profile creation, and browser/file actions never retry; query the original Run when an outcome is unknown. task_scope describes this submitted operation only; submit later workflow steps separately. task_scope.file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation, even when a later step will use a file. Operation-specific origin inputs are significant: instance.start, instance.observe, instance.diagnostics, environment.read/update, instance.navigate/read, page.open/navigate, instance.snapshot/click/input/press/scroll/wait, and file.upload/download require the exact authorized origin as a top-level origin field (task_scope.origins alone is insufficient); url is optional for instance.start and, when supplied, must be on that origin. Other operations require origin only where their contract says so.';
 const managedTaskScopeProperties = {
   operations: { type: 'array', description: 'Operations in the scope for this submitted operation; include the current operation and do not use later workflow steps to justify fields in this request.', items: { type: 'string' } },
   profile_refs: { type: 'array', items: { type: 'string' } },
@@ -31,7 +32,7 @@ const managedOperationSchema = {
     provider_id: { type: 'string', enum: ['cloakbrowser','chrome_official','camoufox'] },
     profile_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the authorized Profile for the current Instance.' },
     runtime_session_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the original Instance; do not substitute another session.' },
-    origin: { type: 'string', description: 'For file.upload/file.download, required exact authorized origin for the current Page.' },
+    origin: { type: 'string', description: 'Required exact authorized origin for instance.start, instance.observe, instance.diagnostics, environment.read/update, instance.navigate/read, page.open/navigate, controlled interaction operations, and file.upload/file.download; task_scope.origins is only the allowed set and cannot replace this selected target.' },
     url: { type: 'string' },
     file_ref: { type: 'string', description: 'Only for file.upload: the owner-registered opaque ref matching task_scope.file_refs; omit for file.download.', pattern: '^attachment:runtime/[0-9a-f-]{36}$' },
     configuration: { type: 'object', properties: { timezone: { type: 'string', minLength: 1, maxLength: 128 }, language: { type: 'string', minLength: 1, maxLength: 128 }, viewport: { type: 'string', minLength: 1, maxLength: 128 } }, additionalProperties: false, minProperties: 1 },
@@ -54,6 +55,9 @@ const managedOperationSchema = {
     if: { required: ['operation'], properties: { operation: { enum: managedFileOperationIds } } },
     then: { properties: { task_scope: managedTaskScopeSchema(true) } },
     else: { properties: { task_scope: managedTaskScopeSchema(false) } }
+  }, {
+    if: { required: ['operation'], properties: { operation: { enum: managedOriginOperationIds } } },
+    then: { required: ['origin'] }
   }]
 };
 const tools = [
@@ -100,6 +104,7 @@ async function call(name, args) {
     if (!tools[3].inputSchema.properties.operation.enum.includes(args.operation) || Object.keys(args).some(k => !(k in tools[3].inputSchema.properties))) throw new Error('operation_input_refused');
     const scope = args.task_scope;
     if (!managedFileOperationIds.includes(args.operation) && scope && typeof scope === 'object' && !Array.isArray(scope) && Object.hasOwn(scope, 'file_refs')) throw new Error('operation_input_refused');
+    if (managedOriginOperationIds.includes(args.operation) && typeof args.origin !== 'string') throw new Error('operation_input_refused');
     return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
   }
   if (name === 'webenvoy_recovery') {
