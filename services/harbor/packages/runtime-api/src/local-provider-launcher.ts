@@ -30,6 +30,10 @@ import {
   launchCamoufoxUpstreamProvider,
   readCamoufoxUpstreamSourceFacts
 } from "./camoufox-upstream-driver.js";
+import {
+  isOfficialChromeLaunchRequest,
+  launchChromeOfficialProvider
+} from "./chrome-official-driver.js";
 import { isCanonicalDetailUrl } from "./detail-read-target.js";
 import type {
   BossJobDetailPublicSummary,
@@ -112,6 +116,21 @@ export async function launchLocalDedicatedProvider(input: LocalProviderLaunchInp
   // before detection, profile preparation, or provider fallback.
   if (isCamoufoxLaunchRequest(launchInput)) {
     return isOfficialCamoufoxLaunchRequest(launchInput) ? launchCamoufoxUpstreamProvider(launchInput, providerConfiguration ?? undefined) : retiredCamoufoxUnavailable();
+  }
+  if (input.operation_scope === "profile_management" && persistedBinding?.selected_provider_id === "chrome_official") {
+    if (input.scope_semantics !== "agent_operations_v2") {
+      return unavailable("provider_unavailable", "官方 Chrome 共享执行路径要求 Core 明确签发 agent_operations_v2 语义；缺省或 legacy 请求不会派发。", providerBindingFacts(persistedBinding));
+    }
+    if (!isOfficialChromeLaunchRequest(launchInput)) {
+      return unavailable("identity_environment_unavailable", "官方 Chrome binding 缺少或不匹配 owner 验证的固定来源、版本、hash 或 Playwright pairing。", providerBindingFacts(persistedBinding));
+    }
+    if (input.identity_environment && !providerConfiguration) {
+      return unavailable("unsupported", "官方 Chrome 的已配置环境无法由公开启动参数准确应用。", providerBindingFacts(persistedBinding));
+    }
+    if (!process.env.HARBOR_PLAYWRIGHT_PYTHON) {
+      return unavailable("provider_unavailable", "官方 Chrome 的固定 Playwright Driver 未由 installed owner 提供。", providerBindingFacts(persistedBinding));
+    }
+    return launchChromeOfficialProvider(launchInput, providerConfiguration ?? undefined);
   }
   const providerBinding = persistedBinding ?? (explicitBrowserPath ? null : resolveRuntimeProviderBinding(undefined));
   if (input.operation_scope === "profile_management") return unavailable("provider_unavailable", "This Provider does not support guarded management navigation.", []);

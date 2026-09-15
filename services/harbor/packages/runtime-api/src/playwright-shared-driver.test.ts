@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -134,4 +135,154 @@ test("packages the shared driver and the thin Camoufox adapter", async () => {
   }
   const shared = await readFile(join(DRIVER_DIR, "playwright_shared_driver.py"), "utf8");
   assert.doesNotMatch(shared, /camoufox|CAMOU|PROPERTIES|CAMOUFOX_VERSION_PIN/i);
+});
+
+test("uses one owned-resource close seam for an attached Context", async () => {
+  const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
+  const script = `
+import asyncio, importlib.util, os, shutil, sys, tempfile, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+async_api = types.ModuleType("playwright.async_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_api.TimeoutError = TimeoutError
+async_api.async_playwright = lambda: None
+playwright.async_api = async_api
+sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
+spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+events = []
+class FakePage:
+    url = "about:blank"
+    def on(self, *_args): pass
+
+class FakeContext:
+    def __init__(self): self.pages = [FakePage()]; self.close_calls = 0
+    def on(self, *_args): pass
+    async def close(self): self.close_calls += 1; events.append("context.close")
+
+class FakePlaywright:
+    def __init__(self): self.stop_calls = 0
+    async def stop(self): self.stop_calls += 1; events.append("playwright.stop")
+
+class Factory:
+    def __init__(self, playwright): self.playwright = playwright
+    async def start(self): return self.playwright
+
+class Adapter:
+    def __init__(self): self.context = FakeContext(); self.playwright = FakePlaywright(); self.owned_close_calls = 0
+    def verify(self, _request): return []
+    def prepare(self, _request, _profile): return {}, {}, False, {}
+    def playwright_factory(self): return Factory(self.playwright)
+    async def create_context(self, _playwright, _request, _profile):
+        events.append("create_context"); return self.context
+    async def close_owned_resources(self):
+        self.owned_close_calls += 1; events.append("owned.close")
+
+async def no_navigation(_driver, _state, _url, _origins, _scope): pass
+module.Driver.navigate = no_navigation
+
+async def run():
+    root = tempfile.mkdtemp(prefix="shared-attached-close-")
+    adapter = Adapter()
+    request = {"profile_dir": root, "browser_path": "/managed/chrome", "url": "https://example.test/start", "timeout_ms": 1000, "scope_semantics": "agent_operations_v2"}
+    instance = module.Driver(request, adapter)
+    await instance.start()
+    assert events == ["create_context"], events
+    assert instance.downloads_root is None
+    await instance.close_context_for_download()
+    assert events[-2:] == ["context.close", "owned.close"], events
+    assert adapter.owned_close_calls == 1
+    await instance.close()
+    assert adapter.owned_close_calls == 1, adapter.owned_close_calls
+    assert adapter.playwright.stop_calls == 1, adapter.playwright.stop_calls
+    assert instance._close_completed is True
+    shutil.rmtree(root)
+
+asyncio.run(run())
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("keeps an owned-resource close failure sticky without retrying the adapter", async () => {
+  const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
+  const script = `
+import asyncio, importlib.util, os, shutil, sys, tempfile, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+async_api = types.ModuleType("playwright.async_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_api.TimeoutError = TimeoutError
+async_api.async_playwright = lambda: None
+playwright.async_api = async_api
+sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
+spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+class Context:
+    def __init__(self): self.close_calls = 0
+    async def close(self): self.close_calls += 1
+
+class Playwright:
+    def __init__(self): self.stop_calls = 0
+    async def stop(self): self.stop_calls += 1
+
+class Adapter:
+    def __init__(self): self.close_calls = 0
+    async def close_owned_resources(self):
+        self.close_calls += 1
+        raise RuntimeError("owned close failed")
+
+async def run():
+    root = tempfile.mkdtemp(prefix="shared-owned-close-failure-")
+    try:
+        context, playwright, adapter = Context(), Playwright(), Adapter()
+        instance = object.__new__(module.Driver)
+        instance.close_requested = asyncio.Event()
+        instance.close_lock = asyncio.Lock()
+        instance.context = context
+        instance.playwright = playwright
+        instance.adapter = adapter
+        instance.downloads_root = None
+        instance.download_operations = set()
+        instance.download_settling = set()
+        try:
+            await instance.close_context_for_download()
+            raise AssertionError("owned close failure was hidden")
+        except RuntimeError as error:
+            assert str(error) == "owned close failed"
+        try:
+            await instance.close()
+            raise AssertionError("Driver.close hid the original owned close failure")
+        except RuntimeError as error:
+            assert str(error) == "owned close failed"
+        assert adapter.close_calls == 1, adapter.close_calls
+        assert context.close_calls == 1, context.close_calls
+        assert playwright.stop_calls == 1, playwright.stop_calls
+        try:
+            await instance.close()
+            raise AssertionError("sticky close failure was not preserved")
+        except RuntimeError as error:
+            assert str(error) == "owned close failed"
+        assert adapter.close_calls == 1, adapter.close_calls
+        assert playwright.stop_calls == 1, playwright.stop_calls
+    finally:
+        shutil.rmtree(root)
+
+asyncio.run(run())
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
 });

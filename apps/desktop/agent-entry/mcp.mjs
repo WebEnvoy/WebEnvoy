@@ -73,6 +73,7 @@ async function call(name, args) {
     const publicStatus = { ...status };
     delete publicStatus.camoufoxArtifact;
     delete publicStatus.camoufoxUpstream;
+    delete publicStatus.chromeOfficial;
     if (publicStatus.camoufox_launch && publicStatus.camoufox_launch.state === 'retired' && ['retired_binding', 'unqualified'].includes(publicStatus.camoufox_launch.reason)) {
       publicStatus.camoufox_launch = { state: 'retired', reason: publicStatus.camoufox_launch.reason };
     } else {

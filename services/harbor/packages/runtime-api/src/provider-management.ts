@@ -1,6 +1,6 @@
 import { constants, existsSync, readFileSync, readdirSync, statSync, accessSync } from "node:fs";
 import { arch as hostArch, homedir, platform as hostPlatform } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import {
   CLOAKBROWSER_FREE_VERSIONS,
   cloakBrowserBinaryPath,
@@ -83,7 +83,11 @@ export interface BrowserProviderInstallFacts {
   reason: string | null;
   /** Owner-verified provenance fields used by the original Camoufox path. */
   source?: "official_release";
+  /** Owner-verified macOS app signature for the exact Chrome executable. */
+  signature_status?: "apple_codesign_verified";
   source_sha256?: string;
+  /** Owner-verified hash of the exact executable selected by the binding. */
+  executable_sha256?: string;
   camoufox_version?: string;
   browser_version?: string;
   playwright_version?: string;
@@ -185,11 +189,12 @@ interface ProviderPathCandidate {
 export function detectBrowserProviders(input: BrowserProviderDetectionInput = {}): BrowserProviderCatalog {
   const ctx = context(input);
   const cloakExternal = Boolean(resolveCloakBrowserOverride(ctx.env));
+  const chrome = detectChrome(ctx);
   return {
     schema_version: HARBOR_BROWSER_PROVIDER_STATUS_SCHEMA,
     providers: [
       providerStatus("cloakbrowser", "CloakBrowser", "primary", detectCloakBrowser(ctx), cloakExternal ? "external" : "managed"),
-      providerStatus("chrome_official", "Google Chrome", "restricted_fallback", detectChrome(ctx), "system"),
+      providerStatus("chrome_official", "Google Chrome", chrome.source === "official_release" ? "qualification" : "restricted_fallback", chrome, "system"),
       providerStatus("camoufox", "Camoufox", "qualification", detectCamoufox(ctx), "external")
     ],
     excluded_providers: [
@@ -226,7 +231,7 @@ export function bindIdentityEnvironmentDefaultProvider(input: IdentityEnvironmen
     ]);
   }
   if (requested && isLaunchable(requested)) {
-    return binding(input, requested, null, fromUserDefault ? "user_default_available" : "requested_provider_available", requested.provider_id === "chrome_official");
+    return binding(input, requested, null, fromUserDefault ? "user_default_available" : "requested_provider_available", requested.role === "restricted_fallback");
   }
   if (requested && !isLaunchable(requested)) {
     return binding(input, null, null, fromUserDefault ? "user_default_unavailable" : "requested_provider_unavailable", true, [
@@ -310,13 +315,13 @@ function providerStatus(
     default_for_identity_environment: false,
     management_mode: managementMode,
     install,
-    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities(install.source === "official_release") : chromeCapabilities(),
-    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations(install.source === "official_release") : chromeLimitations(),
+    capabilities: provider_id === "cloakbrowser" ? cloakCapabilities() : provider_id === "camoufox" ? camoufoxCapabilities(install.source === "official_release") : chromeCapabilities(install.source === "official_release"),
+    limitations: provider_id === "cloakbrowser" ? cloakLimitations() : provider_id === "camoufox" ? camoufoxLimitations(install.source === "official_release") : chromeLimitations(install.source === "official_release"),
     download_guide: provider_id === "cloakbrowser"
       ? managementMode === "external"
         ? { ...cloakDownloadGuide(), action: "external_management", install_hint: "该覆盖路径由外部管理；请在外部更新或移除覆盖后重新检查。" }
         : cloakDownloadGuide()
-      : provider_id === "camoufox" ? camoufoxDownloadGuide(install.source === "official_release") : chromeDownloadGuide(),
+      : provider_id === "camoufox" ? camoufoxDownloadGuide(install.source === "official_release") : chromeDownloadGuide(install.source === "official_release"),
     diagnostics: diagnosticsFor(provider_id, install)
   };
 }
@@ -326,8 +331,41 @@ function detectCloakBrowser(ctx: DetectionContext): BrowserProviderInstallFacts 
 }
 
 function detectChrome(ctx: DetectionContext): BrowserProviderInstallFacts {
-  return detectPath(ctx, chromeCandidates(ctx), "未在已知系统位置检测到官方 Chrome，且未配置覆盖路径。");
+  const detected = detectPath(ctx, chromeCandidates(ctx), "未在已知系统位置检测到官方 Chrome，且未配置覆盖路径。");
+  const exact = readChromeOfficialPairingFacts(ctx, detected);
+  return exact ? { ...detected, ...exact } : detected;
 }
+
+const CHROME_OFFICIAL_PAIRING = Object.freeze({
+  source: "official_release" as const,
+  signature_status: "apple_codesign_verified" as const,
+  source_sha256: "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3",
+  executable_sha256: "83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2",
+  browser_version: "153.0.8010.37",
+  playwright_version: "1.60.0"
+});
+
+function readChromeOfficialPairingFacts(ctx: DetectionContext, detected: BrowserProviderInstallFacts): Pick<BrowserProviderInstallFacts, "version" | "version_status" | "source" | "signature_status" | "source_sha256" | "executable_sha256" | "browser_version" | "playwright_version" | "install_root"> | null {
+  const executable = ctx.env.HARBOR_CHROME_OFFICIAL_PATH;
+  const installRoot = ctx.env.HARBOR_CHROME_OFFICIAL_INSTALL_ROOT;
+  const verifiedVersion = detected.version ?? ctx.env.HARBOR_CHROME_OFFICIAL_BROWSER_VERSION;
+  if (detected.status !== "installed" || detected.launchability !== "launchable" || (detected.version_status === "known" && detected.version !== CHROME_OFFICIAL_PAIRING.browser_version) || verifiedVersion !== CHROME_OFFICIAL_PAIRING.browser_version ||
+    !executable || !installRoot || detected.path !== executable || !isPathInside(installRoot, executable) ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_SOURCE !== CHROME_OFFICIAL_PAIRING.source ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_SIGNATURE_STATUS !== CHROME_OFFICIAL_PAIRING.signature_status ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_SOURCE_SHA256 !== CHROME_OFFICIAL_PAIRING.source_sha256 ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_EXECUTABLE_SHA256 !== CHROME_OFFICIAL_PAIRING.executable_sha256 ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_BROWSER_VERSION !== CHROME_OFFICIAL_PAIRING.browser_version ||
+    ctx.env.HARBOR_CHROME_OFFICIAL_PLAYWRIGHT_VERSION !== CHROME_OFFICIAL_PAIRING.playwright_version) return null;
+  return { ...CHROME_OFFICIAL_PAIRING, version: CHROME_OFFICIAL_PAIRING.browser_version, version_status: "known", install_root: installRoot };
+}
+
+function isPathInside(root: string, path: string): boolean {
+  const relativePath = relative(resolve(root), resolve(path));
+  return relativePath !== "" && relativePath !== ".." && !relativePath.startsWith(`..${requirePathSeparator()}`);
+}
+
+function requirePathSeparator(): string { return process.platform === "win32" ? "\\" : "/"; }
 
 function detectCamoufox(ctx: DetectionContext): BrowserProviderInstallFacts {
   const detected = detectPath(ctx, camoufoxCandidates(ctx), "未检测到 Camoufox 可执行文件，且未配置覆盖路径。");

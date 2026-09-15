@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { recoveryOperationRef } from './bundle.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding, verifyCamoufoxUpstreamInstall, verifyInstalledCamoufox } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, CHROME_OFFICIAL_INSTALL_SCHEMA, CHROME_OFFICIAL_PINS, assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, readStoredChromeOfficialBinding, resolveCamoufoxSetupBinding, verifyCamoufoxUpstreamInstall, verifyChromeOfficialInstall, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 
 test('managed A→B, modified-file preservation, uninstall/reinstall and symlink refusal', async () => {
@@ -48,6 +48,162 @@ test('derives the same recovery operation ref from an idempotency key', () => {
 
 test('leaves an ordinary setup without a Camoufox binding', async () => {
   assert.equal(await resolveCamoufoxSetupBinding({ existingInstallation: { coreEndpoint: 'http://127.0.0.1:1' }, hasUpstreamArguments: false }), null);
+});
+
+test('keeps Chrome exact pairing separate from Camoufox and projects only verified facts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-chrome-pairing-test-'));
+  try {
+    const binding = {
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA,
+      provider: CHROME_OFFICIAL_PINS.provider,
+      source: CHROME_OFFICIAL_PINS.source,
+      signature_status: CHROME_OFFICIAL_PINS.signature_status,
+      browser_version: CHROME_OFFICIAL_PINS.browser_version,
+      playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+      browser: {
+        install_root: join(root, 'Google Chrome.app'),
+        executable: join(root, 'Google Chrome.app/Contents/MacOS/Google Chrome'),
+        version: CHROME_OFFICIAL_PINS.browser_version,
+        executable_sha256: CHROME_OFFICIAL_PINS.executable_sha256
+      },
+      python: { path: join(root, 'python'), executable_sha256: 'a'.repeat(64) },
+      sources: { browser: { path: join(root, 'Chrome.dmg'), sha256: CHROME_OFFICIAL_PINS.source_sha256 } },
+      source_sha256: { browser: CHROME_OFFICIAL_PINS.source_sha256 }
+    };
+    assert.deepEqual(classifyChromeOfficialBinding({ chromeOfficial: binding }), { state: 'qualified', reason: 'official_upstream' });
+    assert.deepEqual(readStoredChromeOfficialBinding(binding), binding);
+    const missingPython = { ...binding }; delete missingPython.python;
+    assert.throws(() => readStoredChromeOfficialBinding(missingPython), /chrome_stored_binding_python_missing/);
+    assert.throws(() => readStoredChromeOfficialBinding({ ...binding, unexpected: true }), /chrome_stored_binding_unknown_field/);
+    assert.throws(() => readStoredChromeOfficialBinding({ ...binding, browser: { ...binding.browser, version: '153.0.8010.38' } }), /chrome_stored_browser_version_conflict/);
+    assert.throws(() => readStoredChromeOfficialBinding({ ...binding, source_sha256: { browser: '0'.repeat(64) } }), /chrome_stored_source_hash_conflict/);
+    assert.throws(() => readStoredChromeOfficialBinding({ ...binding, schema: 'webenvoy.chrome-official/v0' }), /chrome_stored_binding_version_unsupported/);
+    await assert.rejects(verifyChromeOfficialInstall({
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA, provider: CHROME_OFFICIAL_PINS.provider, source: CHROME_OFFICIAL_PINS.source,
+      browser_version: CHROME_OFFICIAL_PINS.browser_version, playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+      browser_install_root: join(root, 'one.app'), browser_root: join(root, 'other.app'), browser_executable: binding.browser.executable,
+      python_path: binding.python.path, browser_source_path: binding.sources.browser.path
+    }), /chrome_browser_root_conflict/);
+    assert.deepEqual(classifyChromeOfficialBinding({ chromeOfficial: { schema: 'webenvoy.chrome-official/v0' } }), { state: 'retired', reason: 'unqualified' });
+    assert.equal(await verifyInstalledChromeOfficial({ chrome: { path: '/legacy/chrome' } }), null);
+    const environment = installedRuntimeEnvironment({
+      parentEnvironment: {
+        HARBOR_BROWSER_PATH: '/untrusted', HARBOR_PLAYWRIGHT_PYTHON: '/untrusted/python', WEBENVOY_DEV_STORE: '/untrusted'
+      },
+      dataDir: join(root, 'data'), installRoot: join(root, 'install'), chromeLaunch: { state: 'qualified', reason: 'official_upstream' }, chromeBinding: binding
+    });
+    assert.equal(environment.HARBOR_BROWSER_PROVIDER, 'chrome_official');
+    assert.equal(environment.HARBOR_BROWSER_PATH, binding.browser.executable);
+    assert.equal(environment.HARBOR_CHROME_PATH, binding.browser.executable);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_INSTALL_ROOT, binding.browser.install_root);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_SIGNATURE_STATUS, CHROME_OFFICIAL_PINS.signature_status);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_SOURCE_SHA256, CHROME_OFFICIAL_PINS.source_sha256);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_EXECUTABLE_SHA256, CHROME_OFFICIAL_PINS.executable_sha256);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_BROWSER_VERSION, CHROME_OFFICIAL_PINS.browser_version);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_PLAYWRIGHT_VERSION, CHROME_OFFICIAL_PINS.playwright_version);
+    assert.equal(environment.HARBOR_PLAYWRIGHT_PYTHON, binding.python.path);
+    assert.equal(environment.HARBOR_CAMOUFOX_PATH, undefined);
+    assert.equal(environment.WEBENVOY_DEV_STORE, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('rejects an incomplete Chrome v1 record before it can qualify a launch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-chrome-incomplete-test-'));
+  try {
+    const appRoot = join(root, 'Google Chrome.app');
+    const executable = join(appRoot, 'Contents/MacOS/Google Chrome');
+    await mkdir(join(appRoot, 'Contents/MacOS'), { recursive: true });
+    await writeFile(executable, '#!/bin/sh\n');
+    await import('node:fs/promises').then(({ chmod }) => chmod(executable, 0o755));
+    await assert.rejects(verifyChromeOfficialInstall({
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA,
+      provider: CHROME_OFFICIAL_PINS.provider,
+      source: CHROME_OFFICIAL_PINS.source,
+      browser_version: CHROME_OFFICIAL_PINS.browser_version,
+      playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+      browser_install_root: appRoot,
+      browser_executable: executable,
+      python_path: join(root, 'python'),
+      browser_source_path: join(root, 'Chrome.dmg')
+    }), /chrome_executable_hash_mismatch/);
+    assert.throws(() => readStoredChromeOfficialBinding({ schema: 'webenvoy.chrome-official/v0' }), /chrome_stored_binding_version_unsupported/);
+    await assert.rejects(verifyInstalledChromeOfficial({ chromeOfficial: { schema: 'webenvoy.chrome-official/v0' } }), /chrome_stored_binding_version_unsupported/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('rechecks the persisted Chrome Python executable hash before qualification', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-chrome-python-hash-test-'));
+  try {
+    const appRoot = join(root, 'Google Chrome.app');
+    const executable = join(appRoot, 'Contents/MacOS/Google Chrome');
+    const python = join(root, 'python');
+    const source = join(root, 'Chrome.dmg');
+    await mkdir(join(appRoot, 'Contents/MacOS'), { recursive: true });
+    await writeFile(executable, 'chrome fixture');
+    await writeFile(python, '#!/bin/sh\n');
+    await writeFile(source, 'source fixture');
+    await chmod(executable, 0o755);
+    await chmod(python, 0o755);
+    const currentPythonHash = 'f'.repeat(64);
+    const command = async (file) => {
+      if (file === '/usr/bin/plutil') return { stdout: `${CHROME_OFFICIAL_PINS.browser_version}\n` };
+      if (file === '/usr/bin/codesign') return { stdout: '' };
+      if (file.endsWith('/python')) return { stdout: `${CHROME_OFFICIAL_PINS.playwright_version}\n` };
+      throw new Error(`unexpected command: ${file}`);
+    };
+    const hashFile = path => path.endsWith('/Google Chrome') ? CHROME_OFFICIAL_PINS.executable_sha256 : path.endsWith('/python') ? currentPythonHash : CHROME_OFFICIAL_PINS.source_sha256;
+    const binding = {
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA,
+      provider: CHROME_OFFICIAL_PINS.provider,
+      source: CHROME_OFFICIAL_PINS.source,
+      signature_status: CHROME_OFFICIAL_PINS.signature_status,
+      browser_version: CHROME_OFFICIAL_PINS.browser_version,
+      playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+      browser: { install_root: appRoot, executable, version: CHROME_OFFICIAL_PINS.browser_version, executable_sha256: CHROME_OFFICIAL_PINS.executable_sha256 },
+      python: { path: python, executable_sha256: 'e'.repeat(64) },
+      sources: { browser: { path: source, sha256: CHROME_OFFICIAL_PINS.source_sha256 } },
+      source_sha256: { browser: CHROME_OFFICIAL_PINS.source_sha256 }
+    };
+    const options = { platform: 'darwin', execFile: command, hashFile };
+    await assert.rejects(verifyInstalledChromeOfficial({ chromeOfficial: binding }, options), /chrome_python_hash_mismatch/);
+    const verified = await verifyInstalledChromeOfficial({ chromeOfficial: { ...binding, python: { path: python, executable_sha256: currentPythonHash } } }, options);
+    assert.equal(verified.python.executable_sha256, currentPythonHash);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('keeps provider-specific facts when both exact bindings share one Python runtime', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-provider-pairing-test-'));
+  try {
+    const python = { path: join(root, 'python'), executable_sha256: 'b'.repeat(64) };
+    const chromeBinding = {
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA, provider: CHROME_OFFICIAL_PINS.provider, source: CHROME_OFFICIAL_PINS.source,
+      signature_status: CHROME_OFFICIAL_PINS.signature_status, browser_version: CHROME_OFFICIAL_PINS.browser_version,
+      playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+      browser: { install_root: join(root, 'Chrome.app'), executable: join(root, 'Chrome.app/Contents/MacOS/Google Chrome'), version: CHROME_OFFICIAL_PINS.browser_version, executable_sha256: CHROME_OFFICIAL_PINS.executable_sha256 },
+      python,
+      sources: { browser: { path: join(root, 'Chrome.dmg'), sha256: CHROME_OFFICIAL_PINS.source_sha256 } },
+      source_sha256: { browser: CHROME_OFFICIAL_PINS.source_sha256 }
+    };
+    const camoufoxBinding = {
+      browser: { install_root: join(root, 'Camoufox.app'), executable: join(root, 'Camoufox.app/Contents/MacOS/camoufox') },
+      python, source: 'official_release', properties_sha256: CAMOUFOX_UPSTREAM_PINS.properties_sha256,
+      camoufox_version: CAMOUFOX_UPSTREAM_PINS.camoufox_version, browser_version: CAMOUFOX_UPSTREAM_PINS.browser_version,
+      playwright_version: CAMOUFOX_UPSTREAM_PINS.playwright_version,
+      source_sha256: { browser: CAMOUFOX_UPSTREAM_PINS.browser_source_sha256, playwright: CAMOUFOX_UPSTREAM_PINS.playwright_source_sha256 }
+    };
+    assert.doesNotThrow(() => assertProviderPythonPairing(camoufoxBinding, chromeBinding));
+    const environment = installedRuntimeEnvironment({
+      parentEnvironment: {}, dataDir: join(root, 'data'), installRoot: join(root, 'install'),
+      camoufoxLaunch: { state: 'qualified', reason: 'official_upstream' }, camoufoxBinding,
+      chromeLaunch: { state: 'qualified', reason: 'official_upstream' }, chromeBinding
+    });
+    assert.equal(environment.HARBOR_BROWSER_PROVIDER, 'camoufox');
+    assert.equal(environment.HARBOR_BROWSER_PATH, camoufoxBinding.browser.executable);
+    assert.equal(environment.HARBOR_CAMOUFOX_PYTHON, python.path);
+    assert.equal(environment.HARBOR_PLAYWRIGHT_PYTHON, python.path);
+    assert.equal(environment.HARBOR_CHROME_OFFICIAL_PATH, chromeBinding.browser.executable);
+    assert.throws(() => assertProviderPythonPairing(camoufoxBinding, { ...chromeBinding, python: { path: join(root, 'other-python'), executable_sha256: 'c'.repeat(64) } }), /provider_playwright_python_pairing_mismatch/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('revalidates an existing upstream binding when setup has no new provider arguments', async (t) => {

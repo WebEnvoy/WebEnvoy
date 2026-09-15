@@ -8,7 +8,7 @@ import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
-import { CAMOUFOX_UPSTREAM_PINS, classifyCamoufoxBinding, resolveCamoufoxSetupBinding } from './provider-artifact.mjs';
+import { CAMOUFOX_UPSTREAM_PINS, CHROME_OFFICIAL_INSTALL_SCHEMA, CHROME_OFFICIAL_PINS, classifyCamoufoxBinding, classifyChromeOfficialBinding, resolveCamoufoxSetupBinding, resolveChromeOfficialSetupBinding } from './provider-artifact.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 const linkedData = await readFile(join(root, '../webenvoy-installation.json'), 'utf8').then(JSON.parse).catch(error => { if (error.code !== 'ENOENT') throw error; return {}; });
@@ -42,6 +42,24 @@ if (command === 'setup') {
       ...(arg('--python-executable-sha256') ? { python_executable_sha256: arg('--python-executable-sha256') } : {})
     } : undefined
   });
+  const chromeArgs = ['--chrome-install-root', '--chrome-browser-root', '--chrome-executable', '--chrome-python-path', '--chrome-python', '--chrome-version', '--chrome-playwright-version', '--chrome-source-path', '--chrome-source', '--chrome-archive', '--chrome-executable-sha256'];
+  const hasChromeArguments = chromeArgs.some(name => args.includes(name));
+  const chrome = await resolveChromeOfficialSetupBinding({
+    existingInstallation,
+    hasOfficialArguments: hasChromeArguments,
+    officialInput: hasChromeArguments ? {
+      schema: CHROME_OFFICIAL_INSTALL_SCHEMA,
+      provider: CHROME_OFFICIAL_PINS.provider,
+      source: CHROME_OFFICIAL_PINS.source,
+      browser_install_root: requiredAny('--chrome-install-root', '--chrome-browser-root'),
+      browser_executable: required('--chrome-executable'),
+      python_path: requiredAny('--chrome-python-path', '--chrome-python'),
+      browser_version: arg('--chrome-version') ?? CHROME_OFFICIAL_PINS.browser_version,
+      playwright_version: arg('--chrome-playwright-version') ?? CHROME_OFFICIAL_PINS.playwright_version,
+      browser_source_path: requiredAny('--chrome-source-path', '--chrome-source', '--chrome-archive'),
+      ...(arg('--chrome-executable-sha256') ? { executable_sha256: arg('--chrome-executable-sha256') } : {})
+    } : undefined
+  });
   if (linkedData.data_dir && linkedData.data_dir !== dataDir) throw new Error('This installation already belongs to another data directory');
   if (!linkedData.data_dir) await writeFile(join(root, '../webenvoy-installation.json'), JSON.stringify({ data_dir: dataDir }), { mode: 0o600, flag: 'wx' });
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -57,11 +75,16 @@ if (command === 'setup') {
   let installation = existingInstallation;
   if (!installation) {
     const ports = await Promise.all([reservePort(), reservePort()]);
-    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}`, ...(upstream ? { camoufoxUpstream: upstream } : {}) };
+    installation = { coreEndpoint: `http://127.0.0.1:${ports[0]}`, harborEndpoint: `http://127.0.0.1:${ports[1]}`, ...(upstream ? { camoufoxUpstream: upstream } : {}), ...(chrome ? { chromeOfficial: chrome } : {}) };
   } else if (upstream && installation.camoufoxUpstream) {
     if (JSON.stringify(installation.camoufoxUpstream) !== JSON.stringify(upstream)) throw new Error('camoufox_upstream_binding_mismatch');
   } else if (upstream) {
     installation = { ...installation, camoufoxUpstream: upstream };
+  }
+  if (chrome && installation.chromeOfficial) {
+    if (JSON.stringify(installation.chromeOfficial) !== JSON.stringify(chrome)) throw new Error('chrome_official_binding_mismatch');
+  } else if (chrome) {
+    installation = { ...installation, chromeOfficial: chrome };
   }
   await mkdir(join(hostDir, '.agents/skills/webenvoy-browser'), { recursive: true });
   // A standalone profile file is reviewable; never edit the user's existing Codex configuration.
@@ -84,7 +107,7 @@ if (command === 'setup') {
     legacyFiles
   });
   if (!existingInstallation || JSON.stringify(installation) !== JSON.stringify(existingInstallation)) await atomicWrite(installationPath, JSON.stringify(installation));
-  console.log(JSON.stringify({ installed: true, camoufox_launch: classifyCamoufoxBinding(installation), credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
+  console.log(JSON.stringify({ installed: true, camoufox_launch: classifyCamoufoxBinding(installation), chrome_launch: classifyChromeOfficialBinding(installation), credential_fingerprint: sha(client.credential), host_configuration: join(hostDir, 'webenvoy.config.toml'), next: 'Install this isolated Codex profile, open App with the same --data-dir, then explicitly register this fingerprint and grant access.' }));
 } else if (command === 'access') {
   const action = args[0];
   const status = await ensureRuntime(dataDir);
