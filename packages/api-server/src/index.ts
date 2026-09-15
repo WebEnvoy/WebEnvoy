@@ -94,11 +94,15 @@ if (import.meta.url === entrypoint) {
               if (error instanceof ManagedAccessError) throw error;
               throw new ManagedAccessError("managed_access_profile_state_unavailable");
             }
+            let actionFailed = false;
             try {
               return await action();
+            } catch (error) {
+              actionFailed = true;
+              throw error;
             } finally {
-                const response = await fetch(new URL(`/runtime/profile-scope-transition-reservations/${encodeURIComponent(reservationRef)}/release`, managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef }) }).catch(() => null);
-                if (!response?.ok) throw new ManagedAccessError("managed_access_profile_state_unavailable");
+              const response = await fetch(new URL(`/runtime/profile-scope-transition-reservations/${encodeURIComponent(reservationRef)}/release`, managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef }) }).catch(() => null);
+              if (!response?.ok && !actionFailed) throw new ManagedAccessError("managed_access_profile_state_unavailable");
             }
           }
         })
