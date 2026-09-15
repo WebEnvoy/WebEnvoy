@@ -54,8 +54,9 @@
       "redirected_download_sha256": "8440bc02e883dcf37ed0e1f1c99a14ebaac7c9be64b6ef97dd813515fb07eda4",
       "redirected_download_run_id": "managed-fca0c8dd971aa1cae5e5bb7bdb1e18cd3815ea7001936c0684bd11c3d450f46d",
       "owner_export_verified": true,
-      "silent_window_ms": 15370,
-      "delayed_completion_without_browser_commands": true
+      "configured_silent_window_ms": 10050,
+      "delayed_completion_without_browser_commands": true,
+      "measurement_note": "The retained local script output reported 15370 ms because its timer was read only after later stop/start, P2, and export work. The script itself awaited 10050 ms before the next browser command; the repository record does not treat 15370 as the silent interval."
     },
     "runtime_restart": {
       "marker_present_without_recreation": true,
