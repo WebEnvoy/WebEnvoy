@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileManagedAccessStore, ManagedAccessError, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
+import { createFileManagedAccessStore, managedScopeConfirmationSchemaVersion, ManagedAccessError, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
 
 const directory = await mkdtemp(join(tmpdir(), "managed-access-check-"));
 try {
@@ -49,6 +49,82 @@ try {
   await rejected(reloaded.checkAccess(digest, { ...access, connection_id: reconnect.connection_id, profile_ref: "profile:b" }), "managed_access_grant_unavailable");
   await store.revokeConnection({ idempotency_key: "disconnect", connection_id: reconnect.connection_id });
   await rejected(reloaded.checkAccess(digest, { ...access, connection_id: reconnect.connection_id }), "managed_access_connection_unavailable");
+
+  const v2Directory = await mkdtemp(join(tmpdir(), "managed-access-v2-check-"));
+  try {
+    const stopped = createFileManagedAccessStore({ directory: v2Directory, withStoppedProfile: async (profileRef, _operationRef, action) => ["profile:v2", "profile:revoked"].includes(profileRef) ? action() : Promise.reject(new ManagedAccessError("managed_access_profile_not_stopped")) });
+    const v2Digest = createHash("sha256").update("v2-test-credential").digest("hex");
+    const v2Principal = await stopped.registerPrincipal({ idempotency_key: "v2-principal", display_name: "v2 host", credential_hash: v2Digest });
+    await stopped.connect(v2Digest);
+    const v2ExpiresAt = new Date(Date.now() + 60_000).toISOString();
+    await stopped.setProfilePolicy({ idempotency_key: "v2-policy", profile_ref: "profile:v2", allowed_operations: ["instance.start", "instance.observe"], allowed_origins: ["https://example.com"] });
+    const source = await stopped.createGrant({ idempotency_key: "v2-source", principal_id: v2Principal.principal_id, profile_refs: ["profile:v2"], allowed_operations: ["instance.start", "instance.observe"], allowed_origins: ["https://example.com"], expires_at: v2ExpiresAt, creation_template: null, max_created_profiles: 0 });
+    const confirmationInput = {
+      idempotency_key: "v2-confirm",
+      source_grant_id: source.grant_id,
+      profile_ref: "profile:v2",
+      confirmation: {
+        schema_version: managedScopeConfirmationSchemaVersion,
+        confirmation_ref: "confirmation:v2",
+        profile_ref: "profile:v2",
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: "owner",
+        idempotency_key: "v2-confirm",
+        decision: "apply"
+      },
+      new_grant: {
+        principal_id: v2Principal.principal_id,
+        profile_refs: ["profile:v2"],
+        allowed_operations: ["instance.start", "instance.observe"],
+        allowed_origins: ["https://example.com"],
+        expires_at: v2ExpiresAt,
+        creation_template: null,
+        max_created_profiles: 0
+      },
+      new_profile_policy: {
+        profile_ref: "profile:v2",
+        allowed_operations: ["instance.start", "instance.observe"],
+        allowed_origins: ["https://example.com"]
+      }
+    };
+    const active = createFileManagedAccessStore({ directory: v2Directory, withStoppedProfile: async () => { throw new ManagedAccessError("managed_access_profile_not_stopped"); } });
+    await rejected(active.confirmAgentOperationsV2(confirmationInput), "managed_access_profile_not_stopped");
+    await rejected(stopped.confirmAgentOperationsV2({
+      ...confirmationInput,
+      idempotency_key: "v2-file-expansion",
+      confirmation: { ...confirmationInput.confirmation, confirmation_ref: "confirmation:file-expansion", idempotency_key: "v2-file-expansion" },
+      new_grant: { ...confirmationInput.new_grant, file_scope: { upload_refs: ["attachment:runtime/00000000-0000-0000-0000-000000000001"], allowed_mime_types: ["image/png"], max_file_bytes: 1024 } }
+    }), "managed_access_scope_confirmation_expands_scope");
+    await stopped.setProfilePolicy({ idempotency_key: "revoked-policy", profile_ref: "profile:revoked", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"] });
+    const revokedSource = await stopped.createGrant({ idempotency_key: "revoked-source", principal_id: v2Principal.principal_id, profile_refs: ["profile:revoked"], allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"], expires_at: v2ExpiresAt, creation_template: null, max_created_profiles: 0 });
+    await stopped.revokeGrant({ idempotency_key: "revoke-source", grant_id: revokedSource.grant_id });
+    await rejected(stopped.confirmAgentOperationsV2({
+      ...confirmationInput,
+      idempotency_key: "revoked-confirm",
+      source_grant_id: revokedSource.grant_id,
+      profile_ref: "profile:revoked",
+      confirmation: { ...confirmationInput.confirmation, confirmation_ref: "confirmation:revoked", profile_ref: "profile:revoked", idempotency_key: "revoked-confirm" },
+      new_grant: { ...confirmationInput.new_grant, profile_refs: ["profile:revoked"], allowed_operations: ["instance.start"] },
+      new_profile_policy: { ...confirmationInput.new_profile_policy, profile_ref: "profile:revoked", allowed_operations: ["instance.start"] }
+    }), "managed_access_scope_confirmation_source_invalid");
+    const upgraded = await stopped.confirmAgentOperationsV2(confirmationInput);
+    assert.equal(upgraded.scope_semantics, "agent_operations_v2");
+    assert.equal(upgraded.source_grant_id, source.grant_id);
+    assert.equal((await stopped.list()).grants.find(item => item.grant_id === source.grant_id)?.scope_semantics, undefined);
+    assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
+    assert.deepEqual(await stopped.confirmAgentOperationsV2(confirmationInput), upgraded);
+    await rejected(stopped.confirmAgentOperationsV2({ ...confirmationInput, idempotency_key: "v2-confirm-replay", confirmation: { ...confirmationInput.confirmation, idempotency_key: "v2-confirm-replay" } }), "managed_access_scope_confirmation_consumed");
+    await rejected(stopped.setProfilePolicy({ idempotency_key: "v2-direct", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"], scope_semantics: "agent_operations_v2" }), "managed_access_invalid_input");
+  } finally { await rm(v2Directory, { recursive: true, force: true }); }
+
+  const strictDirectory = await mkdtemp(join(tmpdir(), "managed-access-v0-strict-check-"));
+  try {
+    const legacy = JSON.parse(await readFile(join(directory, "managed-access.json"), "utf8"));
+    legacy.grants[0].creation_template.permission_ceiling.scope_semantics = "agent_operations_v2";
+    await writeFile(join(strictDirectory, "managed-access.json"), JSON.stringify(legacy));
+    await rejected(createFileManagedAccessStore({ directory: strictDirectory }).list(), "managed_access_store_invalid");
+  } finally { await rm(strictDirectory, { recursive: true, force: true }); }
+
   assert.equal(JSON.stringify(await store.list()).includes(digest), false);
   assert.equal((await readFile(join(directory, "managed-access.json"), "utf8")).includes("test-only-credential"), false);
   await store.revokePrincipal({ idempotency_key: "remove-host", principal_id: principal.principal_id });

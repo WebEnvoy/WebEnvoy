@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 import {
   createFileRunRecordStore,
@@ -15,7 +16,8 @@ import {
   createHttpManagedFileOwnerClient,
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
-  recoverInterruptedCoreTaskSessions
+  recoverInterruptedCoreTaskSessions,
+  ManagedAccessError
 } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 
@@ -76,8 +78,33 @@ if (import.meta.url === entrypoint) {
   if (runRecordStore && harborRuntimeClient) {
     await recoverInterruptedCoreTaskSessions(runRecordStore, harborRuntimeClient);
   }
+  const managedAccessHarborUrl = process.env.WEBENVOY_HARBOR_RUNTIME_URL;
   const managedAccessStore = runRecordStore
-    ? createFileManagedAccessStore({ directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? `${runRecordStore.directory}.managed-access` })
+    ? createFileManagedAccessStore({
+        directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? `${runRecordStore.directory}.managed-access`,
+        ...(managedAccessHarborUrl === undefined ? {} : {
+          withStoppedProfile: async <T>(profileRef: string, operationRef: string, action: () => Promise<T> | T) => {
+            const headers = { authorization: `Bearer ${process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? ""}` };
+            const reservationRef = `scope:${createHash("sha256").update(operationRef).digest("hex")}`;
+            let reserved = false;
+            try {
+              const response = await fetch(new URL("/runtime/profile-scope-transition-reservations", managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef, reservation_ref: reservationRef }) });
+              const result = await response.json() as { status?: unknown };
+              if (!response.ok || result.status !== "held") throw new ManagedAccessError("managed_access_profile_not_stopped");
+              reserved = true;
+              return await action();
+            } catch (error) {
+              if (error instanceof ManagedAccessError) throw error;
+              throw new ManagedAccessError("managed_access_profile_state_unavailable");
+            } finally {
+              if (reserved) {
+                const response = await fetch(new URL(`/runtime/profile-scope-transition-reservations/${encodeURIComponent(reservationRef)}/release`, managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef }) }).catch(() => null);
+                if (!response?.ok) throw new ManagedAccessError("managed_access_profile_state_unavailable");
+              }
+            }
+          }
+        })
+      })
     : undefined;
   const managedRecoveryService = runRecordStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })

@@ -888,6 +888,62 @@ asyncio.run(driver.route(allowed))
 assert allowed.aborted is None
 assert allowed.fulfilled.status == 200
 
+v2_page = FakePage()
+v2_page.url = "https://other.test/private/path?token=secret"
+v2_state = module.PageState("page:v2", v2_page, ["https://s1.test"], scope_semantics="agent_operations_v2")
+redacted = asyncio.run(v2_state.facts())
+assert redacted["current_url"] == "https://other.test" and redacted["title"] == ""
+
+class RacingPage(FakePage):
+    async def title(self):
+        self.url = "https://other.test/private?token=secret"
+        racing_state.generation += 1
+        return "Private title"
+    async def evaluate(self, expression):
+        self.url = "https://other.test/private?token=secret"
+        racing_state.generation += 1
+        return {"current_url": "https://s1.test/old", "title": "Private title", "ready_state": "complete", "stable_id": None}
+
+racing_page = RacingPage()
+racing_state = module.PageState("page:race", racing_page, ["https://s1.test"], scope_semantics="agent_operations_v2")
+driver.pages["page:race"] = racing_state
+racing_facts = asyncio.run(racing_state.facts())
+assert racing_facts["current_url"] == "https://other.test" and racing_facts["title"] == ""
+racing_page.url = "https://s1.test/old"
+racing_state.generation = 1
+racing_observation = asyncio.run(driver.observe({"provider_page_ref": "page:race", "scope_semantics": "agent_operations_v2"}))
+assert racing_observation["observation"]["current_url"] == "https://other.test"
+assert racing_observation["observation"]["title"] == ""
+
+class UnauthorizedReadPage(FakePage):
+    url = "https://other.test/private?token=secret"
+    async def title(self): raise AssertionError("unauthorized title read")
+    async def evaluate(self, expression): raise AssertionError("unauthorized document read")
+
+unauthorized_page = UnauthorizedReadPage()
+unauthorized_state = module.PageState("page:unauthorized", unauthorized_page, ["https://s1.test"], scope_semantics="agent_operations_v2")
+driver.pages["page:unauthorized"] = unauthorized_state
+unauthorized_observation = asyncio.run(driver.observe({"provider_page_ref": "page:unauthorized", "scope_semantics": "agent_operations_v2"}))
+assert unauthorized_observation["current_url"] == "https://other.test"
+assert unauthorized_observation["title"] == ""
+
+class BouncingBodyPage(FakePage):
+    url = "https://s1.test/start"
+    def locator(self, selector): return self
+    async def inner_text(self, timeout):
+        self.url = "https://other.test/private?token=secret"
+        bouncing_state.generation += 1
+        self.url = "https://s1.test/return"
+        bouncing_state.generation += 1
+        return "private intermediate content"
+
+bouncing_page = BouncingBodyPage()
+bouncing_state = module.PageState("page:bounce", bouncing_page, ["https://s1.test"], scope_semantics="agent_operations_v2")
+driver.pages["page:bounce"] = bouncing_state
+bouncing_result = asyncio.run(driver.public_page({"provider_page_ref": "page:bounce", "scope_semantics": "agent_operations_v2", "expected_origin": "https://s1.test"}))
+assert bouncing_result["status"] == "unavailable"
+assert "text" not in bouncing_result
+
 popup = FakePage()
 popup.url = "https://popup.test/"
 popup._opener = page
@@ -1006,7 +1062,7 @@ class FakeContext:
 
 class FakeBrowserType:
     async def launch_persistent_context(self, **kwargs):
-        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers"), kwargs.get("downloads_path")))
+        events.append(("launch", kwargs.get("offline"), kwargs.get("service_workers"), kwargs.get("downloads_path"), set(kwargs)))
         return current_context
 
 class FakePlaywright:
@@ -1033,6 +1089,17 @@ assert os.path.isdir(events[launch_index][3])
 assert launch_index < route_index < offline_index < goto_index
 asyncio.run(instance.close())
 assert not os.path.exists(events[launch_index][3])
+
+events.clear()
+current_context = FakeContext(FakePage())
+v2_request = {**request, "scope_semantics": "agent_operations_v2"}
+instance = asyncio.run(module.Driver.create(v2_request))
+v2_launch = next(value for value in events if isinstance(value, tuple) and value[0] == "launch")
+assert "offline" not in v2_launch[4] and "service_workers" not in v2_launch[4]
+assert ("context.route", "**/*") not in events
+assert not any(isinstance(value, tuple) and value[0] == "context.offline" for value in events)
+assert "goto" in events
+asyncio.run(instance.close())
 
 events.clear()
 current_context = FakeContext(FakePage(), fail_online=True)

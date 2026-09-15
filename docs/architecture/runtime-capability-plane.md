@@ -180,6 +180,8 @@ Agent intent
 
 改变页面、请求、存储或浏览器状态的动作，不能绕过 Run／operation 和 dispatch state。HTTP 成功或工具调用成功不等于业务结果成功。
 
+浏览器能力、默认 Agent 授权与增强网络隔离是三层独立责任。默认授权控制 Agent 可读取/操作的 Profile、Page、origin、文件和动作，并保留下述归属、控制与结果边界；它不默认承诺浏览器启动至退出的全部后台联网都被隔离。全生命周期请求白名单、异常断连后的持续封锁等增强能力单独规划，未实现不反向删除已获资格的基础 Page/Files 能力。
+
 ### 6.2 只读观察
 
 语义 snapshot、页面事实、Network metadata、Console error 等只读观察通常不需要取得输入 ControlLease，但仍需要：
@@ -204,6 +206,8 @@ Page operation / page lifecycle
 ```
 
 请求元数据、选定响应内容、请求修改是不同能力；Console error 和任意 JS 执行也是不同能力。不得用一个笼统 `debug` 权限覆盖全部深层能力。
+
+Network observation 与 Network interception 也必须分开。`legacy_request_guard_v1` 保留现有逐请求保护；显式 owner 创建的 `agent_operations_v2` 以 Agent 操作/读取范围为授权边界，普通资源和 redirect 不依赖全局 route。两种语义不在活动 Instance 内热切换，诊断仍只投影授权 Page 的有界脱敏元数据。
 
 ### 6.4 Controlled evaluation
 

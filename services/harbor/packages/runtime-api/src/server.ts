@@ -21,6 +21,7 @@ import {
 } from "./identity-environment-mutation-http.js";
 import { ManualAuthenticationAuthorizer } from "./manual-authentication-authorization.js";
 import { isManagedProviderOperationInput } from "./managed-provider-lifecycle.js";
+import { managedScopeSemantics } from "./managed-scope-semantics.js";
 import {
   ProviderLifecycleIdempotencyStore,
   type ProviderLifecycleIdempotencyOptions
@@ -151,6 +152,24 @@ async function route(
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     writeJson(response, 200, { runtime_session: runtime.getActiveManagedIdentitySession(parts[2]) }); return;
   }
+  if (method === "POST" && url.pathname === "/runtime/profile-scope-transition-reservations") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => !["profile_ref", "reservation_ref"].includes(key))) throw new BadRequest("Invalid Profile scope transition reservation.");
+    const input = body as Record<string, unknown>;
+    if (!boundedManagedRef(input.profile_ref) || !boundedManagedRef(input.reservation_ref)) throw new BadRequest("Invalid Profile scope transition reservation.");
+    const result = runtime.reserveStoppedProfileScopeTransition(input.profile_ref, input.reservation_ref);
+    writeJson(response, result.status === "held" ? 201 : 409, result); return;
+  }
+  if (method === "POST" && parts[0] === "runtime" && parts[1] === "profile-scope-transition-reservations" && parts[2] && parts[3] === "release" && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "profile_ref")) throw new BadRequest("Invalid Profile scope transition release.");
+    const input = body as Record<string, unknown>;
+    if (!boundedManagedRef(input.profile_ref)) throw new BadRequest("Invalid Profile scope transition release.");
+    const result = runtime.releaseStoppedProfileScopeTransition(input.profile_ref, parts[2]);
+    writeJson(response, result.status === "released" ? 200 : 409, result); return;
+  }
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
   }
@@ -270,13 +289,13 @@ async function route(
           if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("invalid_target");
         } catch { throw new BadRequest("Invalid profile management target."); }
       }
-      const allowed = ["identity_environment_ref", "operation_scope", "url", "reuse_existing", "control_owner", "holder_ref", "headless", "timeout_ms"];
+      const allowed = ["identity_environment_ref", "operation_scope", "url", "reuse_existing", "control_owner", "holder_ref", "headless", "timeout_ms", "scope_semantics"];
       if (body.operation_scope !== "profile_management" || !body.identity_environment_ref || body.control_owner !== "core_task" ||
         !boundedManagedRef(body.holder_ref) || !boundedManagedRef(body.identity_environment_ref) ||
         (body.url !== undefined && (typeof body.url !== "string" || body.url.length > 2048)) ||
         (body.headless !== undefined && typeof body.headless !== "boolean") ||
         (body.reuse_existing !== undefined && typeof body.reuse_existing !== "boolean") ||
-        (body.timeout_ms !== undefined && (!Number.isSafeInteger(body.timeout_ms) || body.timeout_ms <= 0 || body.timeout_ms > 120_000)) ||
+        (body.timeout_ms !== undefined && (!Number.isSafeInteger(body.timeout_ms) || body.timeout_ms <= 0 || body.timeout_ms > 120_000)) || !managedScopeSemantics(body.scope_semantics) ||
         Object.keys(body).some(key => !allowed.includes(key))) throw new BadRequest("Invalid profile management session request.");
     }
     if (body.identity_environment_ref) {
@@ -492,6 +511,8 @@ async function routeSession(
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     const body = await readJson<Record<string, unknown>>(request, {});
     const operation = typeof body.operation === "string" ? body.operation : "page.list";
+    const scopeSemantics = managedScopeSemantics(body.scope_semantics);
+    if (!scopeSemantics) throw new BadRequest("Invalid Page scope semantics.");
     const result = await runtime.operateManagedPage(runtimeSessionRef, {
       operation: operation as import("./page-navigation.js").ManagedPageOperation,
       operation_ref: typeof body.operation_ref === "string" ? body.operation_ref : undefined,
@@ -501,7 +522,8 @@ async function routeSession(
       page_ref: typeof body.page_ref === "string" ? body.page_ref : undefined,
       document_generation: typeof body.document_generation === "number" ? body.document_generation : undefined,
       url: typeof body.url === "string" ? body.url : undefined,
-      authorized_origins: Array.isArray(body.authorized_origins) && body.authorized_origins.every(item => typeof item === "string") ? body.authorized_origins as string[] : []
+      authorized_origins: Array.isArray(body.authorized_origins) && body.authorized_origins.every(item => typeof item === "string") ? body.authorized_origins as string[] : [],
+      scope_semantics: scopeSemantics
     });
     writeJson(response, "failure_class" in result ? result.failure_class === "session_missing" ? 404 : 409 : 200, result);
     return;

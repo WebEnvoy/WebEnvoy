@@ -305,6 +305,7 @@ export async function launchSharedPlaywrightProvider(
       headless: input.headless,
       url: input.url,
       timeout_ms: input.timeout_ms,
+      scope_semantics: input.scope_semantics ?? "legacy_request_guard_v1",
       environment: launchEnvironment(providerConfiguration)
     }, input.timeout_ms);
     const launched = object(result);
@@ -365,8 +366,8 @@ export async function launchSharedPlaywrightProvider(
       facts: [...providerFacts, ...profileStorage.facts, ...arrayFacts(launched.facts), { key: "browser.launch", source: "observed" as const, value: "ready" }],
       close,
       captureScreenshot: async () => screenshot(context),
-      openUrl: async (url: string) => {
-        const page = await callPage(context, "navigate", { provider_page_ref: context.current, action: "navigate", url, authorized_origins: [new URL(url).origin] });
+      openUrl: async (url: string, _operation_scope?: "profile_management", scope_semantics = input.scope_semantics ?? "legacy_request_guard_v1") => {
+        const page = await callPage(context, "navigate", { provider_page_ref: context.current, action: "navigate", url, authorized_origins: [new URL(url).origin], scope_semantics });
         context.current = page.provider_page_ref;
         return toPageFacts(page);
       },
@@ -414,8 +415,8 @@ function createPageController(context: SharedDriverContext): LocalProviderPageCo
       return context.pages;
     },
     unattributedRequestRejectionCount: () => context.unattributedRequestRejectionCount,
-    openPage: async (url, authorized_origins) => {
-      const page = providerPage(await context.driver.request("page_open", { url: url ?? null, authorized_origins: authorized_origins ?? [] }));
+    openPage: async (url, authorized_origins, scope_semantics) => {
+      const page = providerPage(await context.driver.request("page_open", { url: url ?? null, authorized_origins: authorized_origins ?? [], scope_semantics: scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1" }));
       context.pages = [...context.pages.filter(item => item.provider_page_ref !== page.provider_page_ref), page];
       context.current = page.provider_page_ref;
       return page;
@@ -434,8 +435,8 @@ function createPageController(context: SharedDriverContext): LocalProviderPageCo
       else if (safe_return_provider_page_ref && context.pages.some(item => item.provider_page_ref === safe_return_provider_page_ref && item.status !== "closed")) context.current = safe_return_provider_page_ref;
       return context.pages;
     },
-    navigatePage: async (provider_page_ref, action, url, authorized_origins) => {
-      const page = providerPage(await context.driver.request("page_navigate", { provider_page_ref, action, url: url ?? null, authorized_origins: authorized_origins ?? [] }));
+    navigatePage: async (provider_page_ref, action, url, authorized_origins, scope_semantics) => {
+      const page = providerPage(await context.driver.request("page_navigate", { provider_page_ref, action, url: url ?? null, authorized_origins: authorized_origins ?? [], scope_semantics: scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1" }));
       context.pages = context.pages.map(item => item.provider_page_ref === page.provider_page_ref ? page : item);
       context.current = page.provider_page_ref;
       return page;
@@ -465,6 +466,7 @@ async function interact(context: SharedDriverContext, input: ManagedInteractionI
     action: input.action,
     expected_origin: input.expected_origin,
     authorized_origins: input.authorized_origins ?? [],
+    scope_semantics: input.scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1",
     target_ref: input.target_ref ?? null,
     text: input.text ?? null,
     key: input.key ?? null,
@@ -490,6 +492,7 @@ async function fileOperation(context: SharedDriverContext, input: LocalProviderF
     operation: input.operation,
     expected_origin: input.expected_origin,
     authorized_origins: input.authorized_origins,
+    scope_semantics: input.scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1",
     target_ref: input.target_ref,
     ...(input.source_path === undefined ? {} : { source_path: input.source_path }),
     ...(input.staging_path === undefined ? {} : { staging_path: input.staging_path }),
@@ -527,7 +530,7 @@ async function fileOperation(context: SharedDriverContext, input: LocalProviderF
 async function readPublicPage(context: SharedDriverContext, input: ManagedPublicPageInput): Promise<ManagedPublicPageResult> {
   const pageRef = input.provider_page_ref ?? context.current;
   if (!context.pages.some(page => page.provider_page_ref === pageRef)) return { status: "unavailable", failure_class: "page_relation_unavailable", retryable: false };
-  const raw = object(await context.driver.request("read_public_page", { provider_page_ref: pageRef, expected_origin: input.expected_origin, url: input.url ?? null }));
+  const raw = object(await context.driver.request("read_public_page", { provider_page_ref: pageRef, expected_origin: input.expected_origin, url: input.url ?? null, scope_semantics: input.scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1" }));
   const page = raw?.page ? toPageFacts(providerPage(raw.page)) : undefined;
   if (raw?.status !== "completed") return { status: "unavailable", failure_class: typeof raw?.failure_class === "string" ? raw.failure_class : "provider_unavailable", retryable: raw?.retryable === true, ...(page ? { page } : {}) };
   return { status: "completed", page: page ?? toPageFacts(context.pages.find(item => item.provider_page_ref === pageRef)!), ...(typeof raw.text === "string" ? { text: raw.text.slice(0, 64 * 1024), truncated: raw.truncated === true } : {}) };
@@ -535,7 +538,7 @@ async function readPublicPage(context: SharedDriverContext, input: ManagedPublic
 
 async function diagnostics(context: SharedDriverContext, input: RuntimeDiagnosticsInput): Promise<RuntimeDiagnosticsResponse> {
   const pageRef = input.provider_page_ref ?? context.current;
-  const raw = await context.driver.request("diagnostics", { ...input, provider_page_ref: pageRef });
+  const raw = await context.driver.request("diagnostics", { ...input, scope_semantics: input.scope_semantics ?? context.input.scope_semantics ?? "legacy_request_guard_v1", provider_page_ref: pageRef });
   return normalizeRuntimeDiagnostics(raw, { runtime_session_ref: `runtime:${context.input.profile_ref}`, profile_ref: context.input.profile_ref });
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createLatestRequestGate } from "./latestRequestGate";
 import {
-  allowAgentManagement, fetchAgentManagementPolicy, agentManagementScope, createAgentGrantInput, fetchAgentAccess, mutateAgentAccess, queryAgentAccessOperation,
+  allowAgentManagement, fetchAgentManagementPolicy, agentManagementScope, createAgentGrantInput, createAgentOperationsV2Input, fetchAgentAccess, mutateAgentAccess, queryAgentAccessOperation,
   agentOperations, defaultAgentOperations, createProfilePolicyInput, type AgentScopeInput, type AgentAccessState,
 } from "./agentAccessClient";
 
@@ -107,6 +107,9 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
   const disabled = busy || Boolean(pending) || state === null;
   const activePrincipals = state?.principals.filter(item => item.revoked_at === null) ?? [];
   const principalName = (id: string) => state?.principals.find(item => item.principal_id === id)?.display_name ?? id;
+  const v2Candidates = state?.grants.flatMap(grant => grant.scope_semantics === "legacy_request_guard_v1" && grant.revoked_at === null && Date.parse(grant.expires_at) > Date.now()
+    ? grant.profile_refs.map(profileRef => ({ grant, policy: state.profile_policies.find(policy => policy.profile_ref === profileRef && policy.scope_semantics === "legacy_request_guard_v1") })).filter(item => item.policy !== undefined)
+    : []) ?? [];
   return <section className="settings-group" aria-label="Agent 接入管理">
     <header className="settings-group-header">
       <h2>Agent 接入与授权</h2>
@@ -166,14 +169,27 @@ export function AgentAccessPanel({ endpoint }: { endpoint: string }) {
       {state?.grants.length === 0 && <p>尚无授权。</p>}
       {state?.grants.map(item => <div className="settings-row we-settings-row" key={item.grant_id}><div>
         <strong>{principalName(item.principal_id)} · {item.revoked_at ? "已撤销" : Date.parse(item.expires_at) <= Date.now() ? "已过期" : "有效"}</strong>
-        <span>{item.grant_id}</span><span>有效至 {new Date(item.expires_at).toLocaleString()} · {item.allowed_origins.join("、") || "无站点授权"}</span>
+        <span>{item.grant_id}</span><span>{item.scope_semantics === "agent_operations_v2" ? "控制 Agent 操作（v2）" : "兼容请求保护（legacy）"} · 有效至 {new Date(item.expires_at).toLocaleString()} · {item.allowed_origins.join("、") || "无站点授权"}</span>
         <span>允许操作：{item.allowed_operations.join("、")}</span><span>{item.creation_template ? item.creation_template.provider_id ?? "动态 Provider" : "无创建模板"} · 已创建 {item.created_profile_refs.length} / {item.max_created_profiles} 个 Profile</span>
         <span>已授权 Profile：{[...new Set([...item.profile_refs, ...item.created_profile_refs])].join("、") || "尚无"}</span>
         <button className="save-button" type="button" disabled={disabled || item.revoked_at !== null} onClick={() => void mutate(`/agent-access/grants/${encodeURIComponent(item.grant_id)}/revoke`, key => ({ idempotency_key: key }))}>撤销授权</button>
       </div></div>)}
+      <h3>启用新版 Agent 操作边界</h3>
+      <p>这会控制所选 Agent 的页面读取、操作、文件使用与明确导航；不提供整个浏览器的全生命周期网络隔离。只处理已停止的所选 Profile，不修改原授权或其它 Profile。</p>
+      {v2Candidates.length === 0 && <p>没有可确认的 legacy Profile 授权。</p>}
+      {v2Candidates.map(({ grant, policy }) => <div className="settings-row we-settings-row" key={`${grant.grant_id}:${policy!.profile_ref}`}><div>
+        <strong>{principalName(grant.principal_id)} · {policy!.profile_ref}</strong>
+        <span>网站：{grant.allowed_origins.filter(origin => policy!.allowed_origins.includes(origin)).join("、") || "无"}</span>
+        <span>操作：{grant.allowed_operations.filter(operation => operation !== "profile.create" && policy!.allowed_operations.includes(operation)).join("、") || "无"}</span>
+        <span>文件：{grant.file_scope ? `${grant.file_scope.upload_refs.length} 个上传材料，${grant.file_scope.allowed_mime_types.join("、")}，上限 ${grant.file_scope.max_file_bytes} bytes` : "未授权"}</span>
+        <button className="save-button" type="button" disabled={disabled} onClick={() => {
+          if (!window.confirm(`确认让 ${principalName(grant.principal_id)} 在 ${policy!.profile_ref} 使用新版 Agent 操作边界？这不提供全浏览器网络隔离。`)) return;
+          void mutate("/agent-access/scope-confirmations", key => createAgentOperationsV2Input(grant, policy!, key));
+        }}>确认启用新版边界</button>
+      </div></div>)}
       <h3>Profile 权限上限</h3>
       {state?.profile_policies.length === 0 && <p>尚无受此授权管理的 Profile。</p>}
-      {state?.profile_policies.map(item => <div className="settings-row we-settings-row" key={item.profile_ref}><div><strong>{item.profile_ref}</strong><span>{item.allowed_origins.join("、")}</span><span>{item.allowed_operations.join("、")}</span><span>受控交互 origin：{item.controlled_interaction_origins.join("、") || "未声明"}</span></div></div>)}
+      {state?.profile_policies.map(item => <div className="settings-row we-settings-row" key={item.profile_ref}><div><strong>{item.profile_ref}</strong><span>{item.scope_semantics === "agent_operations_v2" ? "Agent 操作边界 v2" : "legacy 请求保护"}</span><span>{item.allowed_origins.join("、")}</span><span>{item.allowed_operations.join("、")}</span><span>受控交互 origin：{item.controlled_interaction_origins.join("、") || "未声明"}</span></div></div>)}
     </div>
   </section>;
 }

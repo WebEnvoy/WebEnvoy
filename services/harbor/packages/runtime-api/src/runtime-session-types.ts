@@ -2,6 +2,7 @@ import type { LocalIdentityEnvironmentFacts, LocalIdentityEnvironmentInput } fro
 import type { BrowserProviderId } from "./provider-management.js";
 import type { ControlOwner, InputCapability, TakeoverUnavailableReason, ViewerAccessMode, ViewerAvailability, ViewerTransport } from "./viewer-control.js";
 import type { RuntimeDiagnosticsInput, RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
+import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const HARBOR_RUNTIME_FACTS_SCHEMA = "harbor-runtime-facts/v0";
 export const HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA = "harbor-validation-runtime-facts/v0";
@@ -171,6 +172,8 @@ export interface CreateRuntimeSessionInput {
   control_owner?: ControlOwner;
   holder_ref?: string;
   managed_identity_environment?: LocalIdentityEnvironmentFacts;
+  /** Core-derived only; Agent/task requests cannot set this field. */
+  scope_semantics?: ManagedScopeSemantics;
 }
 
 export interface OpenIdentityEnvironmentSessionInput extends CreateRuntimeSessionInput {
@@ -195,6 +198,8 @@ export interface LocalProviderLaunchInput {
   provider_ref: string;
   provider_id?: BrowserProviderId;
   identity_environment?: LocalIdentityEnvironmentFacts;
+  /** Core-derived only; never accepted from Agent/task payloads. */
+  scope_semantics?: ManagedScopeSemantics;
   resolve_proxy?: (proxy_ref: string) => string | null;
 }
 
@@ -226,7 +231,7 @@ export interface LocalProviderPageController {
   listPages: () => Promise<LocalProviderPageState[]>;
   /** Instance-level count only; no URL, Page, opener, or request identity is inferred. */
   unattributedRequestRejectionCount?: () => number;
-  openPage: (url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
+  openPage: (url?: string, authorized_origins?: readonly string[], scope_semantics?: ManagedScopeSemantics) => Promise<LocalProviderPageState>;
   activatePage: (provider_page_ref: string) => Promise<LocalProviderPageState>;
   /**
    * Close a Page. Providers that can atomically select a caller-supplied safe
@@ -234,7 +239,7 @@ export interface LocalProviderPageController {
    * as the sole active selection in the resulting list.
    */
   closePage: (provider_page_ref: string, safe_return_provider_page_ref?: string) => Promise<LocalProviderPageState[]>;
-  navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[]) => Promise<LocalProviderPageState>;
+  navigatePage: (provider_page_ref: string, action: "navigate" | "reload" | "back" | "forward", url?: string, authorized_origins?: readonly string[], scope_semantics?: ManagedScopeSemantics) => Promise<LocalProviderPageState>;
 }
 
 /** Harbor-only File operation input. File paths are resolved by Harbor and are
@@ -248,6 +253,7 @@ export interface LocalProviderFileOperationInput {
   source_path?: string;
   staging_path?: string;
   timeout_ms?: number;
+  scope_semantics?: ManagedScopeSemantics;
 }
 
 export type LocalProviderFileOperationResult =

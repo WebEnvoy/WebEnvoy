@@ -98,6 +98,17 @@ def validated_origins(value: Any) -> set[str]:
     return set(value)
 
 
+SCOPE_SEMANTICS = frozenset({"legacy_request_guard_v1", "agent_operations_v2"})
+
+
+def validated_scope_semantics(value: Any, default: str = "legacy_request_guard_v1") -> str:
+    if value is None:
+        value = default
+    if not isinstance(value, str) or value not in SCOPE_SEMANTICS:
+        raise ValueError("Managed scope semantics are invalid.")
+    return value
+
+
 def redirect_target(response_url: str, status: int, headers: Any) -> str | None:
     """Resolve one redirect without permitting a non-web or malformed URL."""
     if status not in REDIRECT_STATUSES or not hasattr(headers, "items"):
@@ -166,11 +177,12 @@ def canonical_executable_path(value: Any) -> str:
 
 
 class PageState:
-    def __init__(self, ref: str, page: Page, origins: list[str], opener: str | None = None):
+    def __init__(self, ref: str, page: Page, origins: list[str], opener: str | None = None, scope_semantics: str = "legacy_request_guard_v1"):
         self.ref = ref
         self.page = page
         self.origins = set(origins)
         self.opener = opener
+        self.scope_semantics = validated_scope_semantics(scope_semantics)
         self.generation = 1
         # The optional fifth tuple member is the exact ElementHandle captured
         # by snapshot.  Four-member tuples remain accepted for old generic
@@ -194,6 +206,7 @@ class PageState:
             closed = self.page.is_closed()
         except PlaywrightError:
             closed = None
+        generation = self.generation
         try:
             current = safe_url(self.page.url)
         except PlaywrightError:
@@ -203,7 +216,11 @@ class PageState:
             except PlaywrightError:
                 closed = None
         title = ""
-        if closed is not True:
+        if closed is not True and not (
+            self.scope_semantics == "agent_operations_v2"
+            and current is not None
+            and origin_of(current) not in self.origins
+        ):
             try:
                 title = safe_text(await self.page.title(), 256)
             except PlaywrightError:
@@ -216,6 +233,18 @@ class PageState:
                     closed = self.page.is_closed()
                 except PlaywrightError:
                     closed = None
+                try:
+                    current = safe_url(self.page.url)
+                except PlaywrightError:
+                    current = None
+                if self.generation != generation:
+                    title = ""
+        if self.scope_semantics == "agent_operations_v2" and current is not None and origin_of(current) not in self.origins:
+            # A natural click may leave the authorized origin. Keep the
+            # boundary observable without exposing path/query/title content.
+            current_origin = origin_of(current)
+            current = current_origin if current_origin is not None else "unknown"
+            title = ""
         return {
             "provider_page_ref": self.ref,
             "current_url": current,
@@ -280,6 +309,7 @@ class Driver:
             raise ValueError("Provider adapter is unavailable.")
         self.provider_facts = list(verify(request))
         self.request = request
+        self.scope_semantics = validated_scope_semantics(request.get("scope_semantics"))
         self.profile_dir = profile_dir
         prepare = getattr(adapter, "prepare", None)
         if not callable(prepare):
@@ -342,28 +372,33 @@ class Driver:
         # task-owned directory. The async bounded monitor watches it together
         # with Harbor staging during the complete Download lifecycle.
         launch["downloads_path"] = str(self.downloads_root)
-        launch["offline"] = True
-        launch["service_workers"] = "block"
+        if self.scope_semantics == "legacy_request_guard_v1":
+            launch["offline"] = True
+            launch["service_workers"] = "block"
         browser_type = getattr(self.adapter, "browser_type", None)
         browser = getattr(self.playwright, browser_type, None)
         if browser is None:
             raise ValueError("Provider adapter browser type is unavailable.")
         self.context = await browser.launch_persistent_context(**launch)
         self.context.on("page", self.on_page)
-        await self.context.route("**/*", self.route)
+        if self.scope_semantics == "legacy_request_guard_v1":
+            await self.context.route("**/*", self.route)
         page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        await self.context.set_offline(False)
+        if self.scope_semantics == "legacy_request_guard_v1":
+            await self.context.set_offline(False)
         initial_origin = origin_of(str(self.request.get("url", "")))
         state = next((item for item in self.pages.values() if item.page == page), None)
         if state is None:
-            state = self.register(page, [initial_origin] if initial_origin else [])
+            state = self.register(page, [initial_origin] if initial_origin else [], scope_semantics=self.scope_semantics)
         else:
             state.origins.update([initial_origin] if initial_origin else [])
+            state.scope_semantics = self.scope_semantics
         self.current = state.ref
-        await self.navigate(state, str(self.request.get("url", "about:blank")), [initial_origin] if initial_origin else [])
+        await self.navigate(state, str(self.request.get("url", "about:blank")), [initial_origin] if initial_origin else [], self.scope_semantics)
 
-    def register(self, page: Page, origins: list[str], opener: str | None = None) -> PageState:
-        state = PageState(f"page:{self.next_ref}", page, [origin for origin in origins if origin])
+    def register(self, page: Page, origins: list[str], opener: str | None = None, scope_semantics: str | None = None) -> PageState:
+        driver_scope = getattr(self, "scope_semantics", "legacy_request_guard_v1")
+        state = PageState(f"page:{self.next_ref}", page, [origin for origin in origins if origin], opener, validated_scope_semantics(scope_semantics, driver_scope))
         self.next_ref += 1
         self.pages[state.ref] = state
         page.on("framenavigated", lambda frame: self.on_navigate(state, frame))
@@ -380,7 +415,7 @@ class Driver:
             if existing.relation_pending:
                 await self.resolve_page_opener(existing, page)
             return
-        state = self.register(page, [], None)
+        state = self.register(page, [], None, self.scope_semantics)
         await self.resolve_page_opener(state, page)
 
     async def resolve_page_opener(self, state: PageState, page: Page) -> None:
@@ -398,6 +433,12 @@ class Driver:
             state.opener = opener_ref
             state.origins.update(opener_origins)
         state.relation_pending = False
+
+    def request_scope(self, state: PageState, request: dict[str, Any]) -> str:
+        requested = validated_scope_semantics(request.get("scope_semantics"), state.scope_semantics)
+        if requested != state.scope_semantics:
+            raise ValueError("Managed scope semantics cannot change after Instance start.")
+        return requested
 
     async def route(self, route: Route) -> None:
         request = route.request
@@ -511,17 +552,21 @@ class Driver:
             except Exception:
                 pass
 
-    async def navigate(self, state: PageState, url: str, origins: list[str]) -> dict[str, Any]:
-        scope = self.apply_page_scope(state, origins, require_current=False)
+    async def navigate(self, state: PageState, url: str, origins: list[str], scope_semantics: str | None = None) -> dict[str, Any]:
+        scope = self.apply_page_scope(state, origins, require_current=False, scope_semantics=scope_semantics)
         target_origin = origin_of(url)
         if not target_origin or target_origin not in scope:
             raise ValueError("Page navigation origin is not authorized.")
         await state.page.goto(url, wait_until="domcontentloaded", timeout=int(self.request.get("timeout_ms", 60_000)))
         return await state.facts(task_selected=state.ref == self.current)
 
-    def apply_page_scope(self, state: PageState, origins: Any, require_current: bool = True) -> set[str]:
+    def apply_page_scope(self, state: PageState, origins: Any, require_current: bool = True, scope_semantics: str | None = None) -> set[str]:
         if state.relation_rejection and not state.origins:
             raise ValueError("Page relation is unavailable.")
+        if scope_semantics is not None:
+            requested = validated_scope_semantics(scope_semantics, state.scope_semantics)
+            if requested != state.scope_semantics:
+                raise ValueError("Managed scope semantics cannot change after Instance start.")
         scope = validated_origins(origins)
         state.origins = scope
         if require_current and origin_of(state.page.url) not in scope:
@@ -540,6 +585,7 @@ class Driver:
 
     async def interact(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
+        scope_semantics = self.request_scope(state, request)
         action = request.get("action")
         expected = request.get("expected_origin")
         scope = validated_origins(request.get("authorized_origins"))
@@ -549,7 +595,7 @@ class Driver:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
         else:
             try:
-                scope = self.apply_page_scope(state, request.get("authorized_origins"))
+                scope = self.apply_page_scope(state, request.get("authorized_origins"), scope_semantics=scope_semantics)
             except ValueError:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
             if not isinstance(expected, str) or expected not in scope or current_origin != expected:
@@ -721,20 +767,41 @@ class Driver:
 
     async def observe(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
-        raw = await state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
-        raw["document_generation"] = state.generation
-        return {**(await state.facts(task_selected=state.ref == self.current)), "observation": raw}
+        self.request_scope(state, request)
+        generation = state.generation
+        current = safe_url(state.page.url)
+        if state.scope_semantics == "agent_operations_v2" and origin_of(current or "") not in state.origins:
+            raw = {"current_url": origin_of(current or "") or "unknown", "title": "", "ready_state": "loading", "stable_id": None}
+        else:
+            raw = await state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
+        if state.generation != generation:
+            current = safe_url(state.page.url)
+            raw = {"current_url": current, "title": "", "ready_state": "loading", "stable_id": None}
+        if state.scope_semantics == "agent_operations_v2" and isinstance(raw.get("current_url"), str) and origin_of(raw["current_url"]) not in state.origins:
+            current_origin = origin_of(raw["current_url"])
+            raw = {**raw, "current_url": current_origin if current_origin is not None else "unknown", "title": ""}
+        page_facts = await state.facts(task_selected=state.ref == self.current)
+        if state.generation != generation or page_facts["document_generation"] != generation:
+            raw = {"current_url": page_facts["current_url"] or "unknown", "title": "", "ready_state": "loading", "stable_id": None}
+        raw["document_generation"] = page_facts["document_generation"]
+        return {**page_facts, "observation": raw}
 
     async def public_page(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
+        self.request_scope(state, request)
         expected = request.get("expected_origin")
         if not isinstance(expected, str) or expected not in state.origins or origin_of(state.page.url) != expected:
             return {"status": "unavailable", "failure_class": "wrong_page", "retryable": False, "page": await state.facts()}
+        generation = state.generation
         text = safe_text(await state.page.locator("body").inner_text(timeout=5_000))
-        return {"status": "completed", "page": await state.facts(), "text": text, "truncated": len(text) >= MAX_TEXT}
+        page_facts = await state.facts()
+        if state.generation != generation or page_facts["document_generation"] != generation or page_facts["origin"] != expected:
+            return {"status": "unavailable", "failure_class": "wrong_page", "retryable": False, "page": page_facts}
+        return {"status": "completed", "page": page_facts, "text": text, "truncated": len(text) >= MAX_TEXT}
 
     async def diagnostics(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
+        self.request_scope(state, request)
         expected = request.get("origin")
         if not isinstance(expected, str) or expected not in state.origins or origin_of(state.page.url) != expected:
             return {"status": "unavailable", "failure_class": "wrong_page", "retryable": False}
@@ -1084,7 +1151,8 @@ class Driver:
             # File operations have their own exact origin intersection. Apply
             # it before any validation or dispatch so a narrower request can
             # never inherit a prior broad route guard scope.
-            scope = self.apply_page_scope(state, request.get("authorized_origins"))
+            scope_semantics = self.request_scope(state, request)
+            scope = self.apply_page_scope(state, request.get("authorized_origins"), scope_semantics=scope_semantics)
         except ValueError:
             scope = set()
         if not isinstance(expected, str) or expected not in scope or origin_of(state.page.url) != expected:
@@ -1421,12 +1489,15 @@ async def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     if op == "page_list": return {"pages": await driver.list_pages(), "rejected_unattributed_count": driver.unattributed_rejection_count}
     if op == "page_open":
         origins = list(validated_origins(request.get("authorized_origins")))
+        scope_semantics = validated_scope_semantics(request.get("scope_semantics"), driver.scope_semantics)
+        if scope_semantics != driver.scope_semantics:
+            raise ValueError("Managed scope semantics cannot change after Instance start.")
         page = await driver.context.new_page()
-        state = next((item for item in driver.pages.values() if item.page == page), None) or driver.register(page, origins)
+        state = next((item for item in driver.pages.values() if item.page == page), None) or driver.register(page, origins, scope_semantics=scope_semantics)
         state.origins = set(origins)
         driver.current = state.ref
         if request.get("url"):
-            await driver.navigate(state, request["url"], origins)
+            await driver.navigate(state, request["url"], origins, scope_semantics)
         return await state.facts(task_selected=True)
     if op == "page_activate":
         state = driver.state(request)
@@ -1445,16 +1516,17 @@ async def dispatch(driver: Driver, request: dict[str, Any]) -> Any:
     if op == "page_navigate":
         state = driver.state(request)
         origins = list(validated_origins(request.get("authorized_origins")))
+        scope_semantics = driver.request_scope(state, request)
         if request.get("action") == "reload":
-            driver.apply_page_scope(state, origins)
+            driver.apply_page_scope(state, origins, scope_semantics=scope_semantics)
             await state.page.reload()
         elif request.get("action") == "back":
-            driver.apply_page_scope(state, origins)
+            driver.apply_page_scope(state, origins, scope_semantics=scope_semantics)
             await state.page.go_back()
         elif request.get("action") == "forward":
-            driver.apply_page_scope(state, origins)
+            driver.apply_page_scope(state, origins, scope_semantics=scope_semantics)
             await state.page.go_forward()
-        else: await driver.navigate(state, str(request.get("url", "")), origins)
+        else: await driver.navigate(state, str(request.get("url", "")), origins, scope_semantics)
         return await state.facts(task_selected=state.ref == driver.current)
     if op == "observe": return await driver.observe(request)
     if op == "observe_identity": return (await driver.observe(request)).get("observation", {})

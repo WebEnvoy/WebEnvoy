@@ -1,5 +1,6 @@
 import { boundedManagedRef, managedPublicOrigin } from "./managed-observation.js";
 import type { ManagedInteractionInput } from "./managed-interaction.js";
+import { managedScopeSemantics } from "./managed-scope-semantics.js";
 
 export type ManagedInteractionRequest = Omit<ManagedInteractionInput, "control_generation"> & {
   holder_ref: string; operation_ref: string; controlled_origin: string;
@@ -9,7 +10,7 @@ export type ManagedInteractionRequest = Omit<ManagedInteractionInput, "control_g
 export function parseManagedInteractionRequest(value: unknown): ManagedInteractionRequest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
-  const common = ["action", "expected_origin", "authorized_origins", "controlled_origin", "holder_ref", "operation_ref"];
+  const common = ["action", "expected_origin", "authorized_origins", "scope_semantics", "controlled_origin", "holder_ref", "operation_ref"];
   const byAction: Record<string, string[]> = {
     snapshot: ["page_ref"], click: ["page_ref", "observation_ref", "target_ref"],
     input: ["page_ref", "observation_ref", "target_ref", "text"],
@@ -30,6 +31,8 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
   // Core's fresh intersection is authoritative. The expected origin must be
   // a member of it; never widen an explicitly supplied set for compatibility.
   if (!authorizedOrigins || !authorizedOrigins.includes(input.expected_origin)) return null;
+  const scope = managedScopeSemantics(input.scope_semantics);
+  if (!scope) return null;
   if (input.page_ref !== undefined && !boundedManagedRef(input.page_ref)) return null;
   if (input.action !== "snapshot" && (!boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref))) return null;
   if (["click", "input", "press"].includes(input.action) && !boundedManagedRef(input.target_ref)) return null;
@@ -42,5 +45,5 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
     if (input.wait_for === "enabled" ? !boundedManagedRef(input.target_ref) : input.target_ref !== undefined) return null;
     if (input.wait_for === "text" ? typeof input.text !== "string" || !input.text.length || input.text.length > 256 || /[\u0000-\u001f\u007f]/.test(input.text) : input.text !== undefined) return null;
   }
-  return { ...input, authorized_origins: authorizedOrigins } as unknown as ManagedInteractionRequest;
+  return { ...input, authorized_origins: authorizedOrigins, scope_semantics: scope } as unknown as ManagedInteractionRequest;
 }

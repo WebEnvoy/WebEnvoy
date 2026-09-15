@@ -1,4 +1,6 @@
 import type { RuntimePageStatus } from "./runtime-session-types.js";
+import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
+import { managedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA = "harbor-runtime-diagnostics/v1";
 const MAX_EVENTS = 64;
@@ -50,6 +52,7 @@ export interface RuntimeDiagnosticsInput {
   origin: string;
   /** Core-derived Profile ∩ Grant ∩ task origin set; never Agent supplied. */
   authorized_origins?: string[];
+  scope_semantics?: ManagedScopeSemantics;
   page_ref?: string;
   document_generation?: number;
   cursor?: string;
@@ -76,7 +79,7 @@ export interface RuntimeDiagnosticsResult {
 
 export interface RuntimeDiagnosticsUnavailable {
   status: "unavailable";
-  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "page_selection_required" | "wrong_page" | "stale_page" | "stale_document" | "cursor_stale" | "page_relation_unavailable" | "provider_unavailable";
+  failure_class: "invalid_request" | "session_missing" | "session_not_ready" | "page_selection_required" | "wrong_page" | "stale_page" | "stale_document" | "cursor_stale" | "page_relation_unavailable" | "provider_unavailable" | "scope_semantics_mismatch";
   message: string;
   retryable: boolean;
 }
@@ -94,13 +97,15 @@ export function diagnosticsUnavailable(
 export function boundedDiagnosticsInput(value: unknown): RuntimeDiagnosticsInput | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["origin", "authorized_origins", "page_ref", "document_generation", "cursor", "limit"].includes(key)) || typeof input.origin !== "string" || input.origin.length > MAX_REF) return null;
+  if (Object.keys(input).some(key => !["origin", "authorized_origins", "scope_semantics", "page_ref", "document_generation", "cursor", "limit"].includes(key)) || typeof input.origin !== "string" || input.origin.length > MAX_REF) return null;
   if (!isOrigin(input.origin)) return null;
   if (input.authorized_origins !== undefined && (!Array.isArray(input.authorized_origins) || input.authorized_origins.length > 64 || !input.authorized_origins.every(item => typeof item === "string" && isOrigin(item)))) return null;
   for (const key of ["page_ref", "cursor"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key] || input[key].length > MAX_REF)) return null;
   if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return null;
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > MAX_EVENTS)) return null;
-  return { origin: input.origin, ...(Array.isArray(input.authorized_origins) ? { authorized_origins: [...new Set(input.authorized_origins)] } : {}), ...(typeof input.page_ref === "string" ? { page_ref: input.page_ref } : {}), ...(typeof input.document_generation === "number" ? { document_generation: input.document_generation } : {}), ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}), ...(typeof input.limit === "number" ? { limit: input.limit } : {}) };
+  const scope = managedScopeSemantics(input.scope_semantics);
+  if (!scope) return null;
+  return { origin: input.origin, scope_semantics: scope, ...(Array.isArray(input.authorized_origins) ? { authorized_origins: [...new Set(input.authorized_origins)] } : {}), ...(typeof input.page_ref === "string" ? { page_ref: input.page_ref } : {}), ...(typeof input.document_generation === "number" ? { document_generation: input.document_generation } : {}), ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}), ...(typeof input.limit === "number" ? { limit: input.limit } : {}) };
 }
 
 export function isOrigin(value: string): boolean {

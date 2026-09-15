@@ -7,6 +7,7 @@ import type {
   RuntimePageFacts,
   RuntimePageStatus
 } from "./runtime-session-types.js";
+import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const HARBOR_PAGE_NAVIGATION_SCHEMA = "harbor-page-navigation/v1";
 export const HARBOR_PAGE_LIST_SCHEMA = "harbor-page-list/v2";
@@ -80,6 +81,7 @@ export type ManagedPageUnavailableClass =
   | "stale_document"
   | "no_safe_return_page"
   | "control_lock_conflict"
+  | "scope_semantics_mismatch"
   | "navigation_origin_denied"
   | "navigation_beforeunload_blocked"
   | "page_capacity_exceeded"
@@ -111,6 +113,7 @@ export interface ManagedPageOperationInput {
   document_generation?: number;
   url?: string;
   authorized_origins?: string[];
+  scope_semantics?: ManagedScopeSemantics;
 }
 
 interface PageRecord {
@@ -292,7 +295,7 @@ export class PageRegistry {
         if (!origin || !allowed.has(origin)) return this.unavailable("navigation_origin_denied", "Page origin is not authorized.", false, input);
         if (this.livePageCount() >= MAX_PAGE_OBJECTS) return this.unavailable("page_capacity_exceeded", "The Page Registry has reached its bounded object capacity.", false, input);
         dispatch();
-        const state = await this.controller.openPage(input.url, input.authorized_origins ?? []);
+        const state = await this.controller.openPage(input.url, input.authorized_origins ?? [], input.scope_semantics);
         this.sync(await this.controller.listPages());
         const record = this.byProvider.get(state.provider_page_ref);
         if (record && record.present && !record.closed) this.taskPageId = record.page_id;
@@ -320,7 +323,7 @@ export class PageRegistry {
         if (!origin || !allowed.has(origin)) return this.unavailable("navigation_origin_denied", "Page origin is not authorized.", false, input, record);
       }
       dispatch();
-      const state = await this.controller.navigatePage(record.provider_page_ref, action, input.url, input.authorized_origins ?? []);
+      const state = await this.controller.navigatePage(record.provider_page_ref, action, input.url, input.authorized_origins ?? [], input.scope_semantics);
       this.sync(await this.controller.listPages());
       const current = this.byProvider.get(state.provider_page_ref) ?? record;
       this.taskPageId = current.page_id;

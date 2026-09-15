@@ -1,7 +1,7 @@
 # 受管浏览器文件闭环 V1：#523 实施合同
 
 > 状态：Accepted / #523 实现合同已冻结；固定 Provider 资格门、正式 installed/live 验收和真实 Agent 短闭环均已通过，证据以本节及 Issue/PR readback 为准。
-> 版本：v1.0；日期：2026-09-13。
+> 版本：v1.1；日期：2026-09-15。
 > Owning Work Item：[#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，M23；消费 #474，环境 #471，安装 #477，最终验收 #482。
 > 基线：`95b415bc6924529adc25d9129e678ad0a2d67212`；以实际最新 main 集成，不降版。
 > 依据：canonical v1.5、ADR0012、Browser Runtime Capabilities V1 §10、现有 Page/Navigation、Grant/Plugin/Run 合同。本文件不扩大完整 V1，也不将全部 Files 组压缩成本切片。
@@ -15,7 +15,7 @@
 本批支持两条普通路径：
 
 1. 主文档中能由现有语义观察产生可信目标的标准单文件 `input[type=file]`。以正常可见控件为首批验收对象；无法可靠发现或关联的隐藏控件不靠猜 selector 处理。
-2. 同一已登记 Page 中，观察到确定 HTTP(S) href 的普通下载链接，点击后由原生浏览器 GET 下载；redirect 仍逐跳按现有 guard 核验。
+2. 同一已登记 Page 中，观察到确定 HTTP(S) href 的普通下载链接，点击后由原生浏览器 GET 下载。`legacy_request_guard_v1` 逐跳按现有 guard 核验；`agent_operations_v2` 允许浏览器使用普通 redirect/CDN 交付，但不授予该主机的页面读取权，也不放宽下述 Page/target/download 归属和文件校验。
 
 每次一个文件；上传为 **1 byte 至 10 MiB（10,485,760 bytes）**，不是至少1 MiB。下载可为空，成功提交/导出内容上限同为10 MiB。允许 PNG、JPEG、PDF、UTF-8 TXT、UTF-8 CSV；格式判断区分声明的 MIME、扩展名及有界内容识别，冲突拒绝。文本不得有 NUL/无效 UTF-8；空文本下载可依批准类型和后缀表示空报表。格式检查不是杀毒、秘密检测或内容可信证明。
 
@@ -95,7 +95,7 @@ upload_refs只接受本owner登记的精确ref，无路径/通配符；最多32�
 
 上传有效条件：主体/连接/Grant/任务 ∩ Profile上限 ∩ 精确上传ref ∩ 文件归属/有效状态 ∩ 类型/大小更窄限制 ∩ Page/document/目标新鲜度 ∩ Instance控制权。注册文件不授权发送，页面/点击权限不授权发本地文件；set_input_files触发change即可发生外传，不以“尚未提交表单”降低风险。
 
-下载触发须有单独file.download授权、明确Profile/原Page/target和更窄类型/大小限制。新下载结果先归原Principal/Profile/Run；返回受管摘要不授予读正文、跨主体访问或再次上传。再次上传只有owner明确将该ref加入相应Grant才可能获准，不能由“这是我下载的”自动推导。
+下载触发须有单独file.download授权、明确Profile/原Page/target和更窄类型/大小限制。新下载结果先归原Principal/Profile/Run；返回受管摘要不授予读正文、跨主体访问或再次上传。再次上传只有owner明确将该ref加入相应Grant才可能获准，不能由“这是我下载的”自动推导。Grant/Profile 的 `scope_semantics` 必须匹配并在 Instance 创建时固定；缺省仍为 legacy，v2 只能由 owner 确认生成。
 
 每次新操作重新核对有效期/撤销。检查与派发之间撤销或控制变化应阻止派发；已派发不能宣称网站收到的内容被撤回。异步完成及历史query必须准确保留旧事实，不得为了重新检查权限而把已发生动作改写成从未派发。
 
@@ -134,7 +134,7 @@ Agent不提交selector、脚本、原生句柄、原始路径、bytes、headers/
 
 在同一已授权动作内登记期待后点击，不要求Agent先点再订阅。每个Instance最多一个在途Files派发，复用现有控制/派发串行机制，不增加新tab租约。与人工/其他动作的控制竞态按当前规则处理。
 
-download事件只表示开始。必须有真实Page对象、事件URL与获准请求链的对应；不能只依据时间/文件名/磁盘文件出现、拿第一个事件、或一个“期待”就推导因果。无法唯一关联或多候选则准确失败/unknown，不冒认。已有guard对每个外部请求先授权，download.page不能替先发出的请求补授权。
+download事件只表示开始。必须有真实Page对象、观察到的目标和本次操作对应；不能只依据时间/文件名/磁盘文件出现、拿第一个事件、或一个“期待”就推导因果。无法唯一关联或多候选则准确失败/unknown，不冒认。legacy 继续要求获准请求链并逐跳保护；v2 不要求完整网络链作为统一前置，但浏览器公开事实不足以确认 Page/target/download 关系时仍不得发布结果。
 
 Provider完成+有界保存+size/hash/格式校验+原子提交后才发布结果file_ref。建议文件名是不可信输入，磁盘路径不由它决定。输出只到受管材料目录，再由owner明确export。
 

@@ -1,4 +1,5 @@
 import { parseManagedInteractionRequest } from "./managed-interaction-request.js";
+import { managedScopeSemantics } from "./managed-scope-semantics.js";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
@@ -54,7 +55,7 @@ import {
 import { opaqueRef } from "./refs.js";
 import { boundedEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
 import { withProfileBackedLocalMaterial } from "./profile-backed-local-material.js";
-import { profileStorageHasExternalLock, profileStoragePathExists } from "./profile-storage.js";
+import { acquireProfileStorageOwnership, profileStorageHasExternalLock, profileStoragePathExists, type ProfileStorageOwnershipLock } from "./profile-storage.js";
 import {
   consumeManualAuthenticationAuthorizationGrant,
   type ManualAuthenticationAuthorizationGrant
@@ -531,6 +532,7 @@ export class HarborRuntime {
   private readonly managedFiles: ManagedFileStore;
   private readonly providerLifecycle: ManagedProviderLifecycle;
   private readonly profileRecovery: ProfileRecoveryManager;
+  private readonly profileScopeTransitionReservations = new Map<string, { profile_ref: string; ownership: ProfileStorageOwnershipLock }>();
 
   constructor(
     launcher: LocalProviderLauncher = launchLocalDedicatedProvider,
@@ -635,7 +637,7 @@ export class HarborRuntime {
     });
     if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("file_operation_invalid");
     const input = value as Record<string, unknown>;
-    const allowed = ["operation", "operation_ref", "idempotency_key", "holder_ref", "principal_id", "profile_ref", "expected_origin", "authorized_origins", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref", "max_file_bytes", "allowed_mime_types", "timeout_ms"];
+    const allowed = ["operation", "operation_ref", "idempotency_key", "holder_ref", "principal_id", "profile_ref", "expected_origin", "authorized_origins", "scope_semantics", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref", "max_file_bytes", "allowed_mime_types", "timeout_ms"];
     if (Object.keys(input).some(key => !allowed.includes(key)) || !["file.upload", "file.download"].includes(String(input.operation)) ||
       typeof input.operation_ref !== "string" || typeof input.idempotency_key !== "string" || typeof input.holder_ref !== "string" || typeof input.principal_id !== "string" || typeof input.profile_ref !== "string" ||
       typeof input.expected_origin !== "string" || !Array.isArray(input.authorized_origins) || !input.authorized_origins.every(item => typeof item === "string") ||
@@ -643,7 +645,7 @@ export class HarborRuntime {
       typeof input.observation_ref !== "string" || typeof input.target_ref !== "string" ||
       !Number.isSafeInteger(input.max_file_bytes) || Number(input.max_file_bytes) < 1 || Number(input.max_file_bytes) > MANAGED_FILE_MAX_BYTES ||
       !Array.isArray(input.allowed_mime_types) || !input.allowed_mime_types.length || input.allowed_mime_types.some(item => typeof item !== "string" || !(MANAGED_FILE_MIME_TYPES as readonly string[]).includes(item)) || new Set(input.allowed_mime_types).size !== input.allowed_mime_types.length ||
-      (input.operation === "file.upload" ? typeof input.file_ref !== "string" : input.file_ref !== undefined)) return invalid("file_operation_invalid");
+      (input.operation === "file.upload" ? typeof input.file_ref !== "string" : input.file_ref !== undefined) || !managedScopeSemantics(input.scope_semantics)) return invalid("file_operation_invalid");
     if (!boundedManagedRef(input.operation_ref) || !boundedManagedRef(input.idempotency_key) || !boundedManagedRef(input.holder_ref) || !boundedManagedRef(input.principal_id) || !boundedManagedRef(input.profile_ref) ||
       !boundedManagedRef(input.page_id) || !boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref) || !boundedManagedRef(input.target_ref) ||
       !managedPublicOrigin(input.expected_origin) || !(input.authorized_origins as string[]).includes(input.expected_origin)) return invalid("file_operation_invalid");
@@ -678,6 +680,7 @@ export class HarborRuntime {
         document_generation: input.document_generation as number,
         observation_ref: input.observation_ref,
         target_ref: input.target_ref,
+        scope_semantics: managedScopeSemantics(input.scope_semantics)!,
         ...(material ? { source_path: material.path } : {}),
         ...(stagingPath ? { staging_path: stagingPath } : {}),
         ...(typeof input.timeout_ms === "number" ? { timeout_ms: input.timeout_ms } : {})
@@ -767,6 +770,8 @@ export class HarborRuntime {
     if (!Array.isArray(authorized) || !authorized.every(item => typeof item === "string")) {
       return invalid("Authorized origin facts are required.");
     }
+    const scope = managedScopeSemantics(request.scope_semantics);
+    if (!scope) return invalid("Invalid scope semantics.");
     const inputRecord = {
       operation: request.operation as ManagedPageOperation,
       ...(typeof request.operation_ref === "string" ? { operation_ref: request.operation_ref } : {}),
@@ -776,7 +781,8 @@ export class HarborRuntime {
       ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
       ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {}),
       ...(typeof request.url === "string" ? { url: request.url } : {}),
-      authorized_origins: authorized
+      authorized_origins: authorized,
+      scope_semantics: scope
     };
     return this.runtimeSessions.operateManagedPage(runtime_session_ref, inputRecord);
   }
@@ -796,13 +802,13 @@ export class HarborRuntime {
   async operateManagedPublicPage(runtime_session_ref: string, input: unknown, navigate: boolean) {
     if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
     const request = input as Record<string, unknown>;
-    const allowed = navigate ? ["holder_ref", "expected_origin", "url", "page_id", "page_ref", "document_generation"] : ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation"];
+    const allowed = navigate ? ["holder_ref", "expected_origin", "url", "page_id", "page_ref", "document_generation", "scope_semantics"] : ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation", "scope_semantics"];
     if (Object.keys(request).some(key => !allowed.includes(key)) || typeof request.holder_ref !== "string" || typeof request.expected_origin !== "string" ||
       !boundedManagedRef(request.holder_ref) || !managedPublicOrigin(request.expected_origin) ||
       (request.page_id !== undefined && !boundedManagedRef(request.page_id)) ||
       (request.page_ref !== undefined && !boundedManagedRef(request.page_ref)) ||
       (request.document_generation !== undefined && (!Number.isSafeInteger(request.document_generation) || Number(request.document_generation) < 1)) ||
-      (navigate ? typeof request.url !== "string" : request.url !== undefined)) return managedUnavailable("managed_public_origin_denied");
+      (navigate ? typeof request.url !== "string" : request.url !== undefined) || !managedScopeSemantics(request.scope_semantics)) return managedUnavailable("managed_public_origin_denied");
     if (navigate) {
       try {
         const url = new URL(request.url as string);
@@ -820,20 +826,22 @@ export class HarborRuntime {
         ...(navigate ? { url: request.url as string } : {}),
         ...(typeof request.page_id === "string" ? { page_id: request.page_id } : {}),
         ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
-        ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {}) });
+        ...(typeof request.document_generation === "number" ? { document_generation: request.document_generation } : {}),
+        scope_semantics: managedScopeSemantics(request.scope_semantics)! });
   }
 
   async observeManagedSession(runtime_session_ref: string, input: unknown): Promise<ManagedObservation | ManagedObservationUnavailable> {
     if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
     const request = input as Record<string, unknown>;
-    const allowed = ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation"];
+    const allowed = ["holder_ref", "expected_origin", "page_id", "page_ref", "document_generation", "scope_semantics"];
     if (Object.keys(request).some(key => !allowed.includes(key)) || !boundedManagedRef(request.holder_ref) ||
       (request.expected_origin !== undefined && !managedPublicOrigin(request.expected_origin)) ||
       (request.page_id !== undefined && !boundedManagedRef(request.page_id)) ||
       (request.page_ref !== undefined && !boundedManagedRef(request.page_ref)) ||
-      (request.document_generation !== undefined && (!Number.isSafeInteger(request.document_generation) || Number(request.document_generation) < 1))) return managedUnavailable("invalid_request");
+      (request.document_generation !== undefined && (!Number.isSafeInteger(request.document_generation) || Number(request.document_generation) < 1)) || !managedScopeSemantics(request.scope_semantics)) return managedUnavailable("invalid_request");
     return this.runtimeSessions.observeManagedSession(runtime_session_ref, {
       holder_ref: request.holder_ref,
+      scope_semantics: managedScopeSemantics(request.scope_semantics)!,
       ...(typeof request.expected_origin === "string" ? { expected_origin: request.expected_origin } : {}),
       ...(typeof request.page_id === "string" ? { page_id: request.page_id } : {}),
       ...(typeof request.page_ref === "string" ? { page_ref: request.page_ref } : {}),
@@ -1011,6 +1019,37 @@ export class HarborRuntime {
     return this.runtimeSessions.getActiveIdentityEnvironmentSession(identity_environment_ref);
   }
 
+  reserveStoppedProfileScopeTransition(profile_ref: string, reservation_ref: string) {
+    const existing = this.profileScopeTransitionReservations.get(reservation_ref);
+    if (existing) return existing.profile_ref === profile_ref
+      ? { status: "held" as const, profile_ref, reservation_ref }
+      : { status: "unavailable" as const, failure_class: "reservation_conflict" };
+    const identity = this.identityEnvironments.list().find(item => item.refs.profile_ref === profile_ref);
+    if (!identity) return { status: "unavailable" as const, failure_class: "profile_missing" };
+    const facts = this.identityEnvironments.getFacts(identity.identity_environment_ref);
+    if (!facts) return { status: "unavailable" as const, failure_class: "profile_missing" };
+    let ownership: ProfileStorageOwnershipLock;
+    try { ownership = acquireProfileStorageOwnership([facts.browser_storage.profile_storage_ref]); }
+    catch { return { status: "unavailable" as const, failure_class: "profile_active" }; }
+    if (this.runtimeSessions.isIdentityEnvironmentInUse(facts.identity_environment_ref) ||
+        this.runtimeSessions.isProfileStorageInUse(facts.browser_storage.profile_storage_ref) ||
+        profileStorageHasExternalLock(facts.browser_storage.profile_storage_ref)) {
+      ownership.release();
+      return { status: "unavailable" as const, failure_class: "profile_active" };
+    }
+    this.profileScopeTransitionReservations.set(reservation_ref, { profile_ref, ownership });
+    return { status: "held" as const, profile_ref, reservation_ref };
+  }
+
+  releaseStoppedProfileScopeTransition(profile_ref: string, reservation_ref: string) {
+    const existing = this.profileScopeTransitionReservations.get(reservation_ref);
+    if (!existing) return { status: "released" as const, profile_ref, reservation_ref };
+    if (existing.profile_ref !== profile_ref) return { status: "unavailable" as const, failure_class: "reservation_conflict" };
+    existing.ownership.release();
+    this.profileScopeTransitionReservations.delete(reservation_ref);
+    return { status: "released" as const, profile_ref, reservation_ref };
+  }
+
   getIdentityEnvironmentMutationResult(idempotency_key: string): IdentityEnvironmentMutationResult | null {
     return this.identityEnvironments.getMutationResult(idempotency_key);
   }
@@ -1151,6 +1190,9 @@ export class HarborRuntime {
         }
       };
     }
+    if ([...this.profileScopeTransitionReservations.values()].some(item => item.profile_ref === identity_environment.profile_ref)) {
+      return profileScopeTransitionUnavailable();
+    }
     const session = await this.runtimeSessions.openIdentityEnvironmentSession({ ...input, identity_environment });
     if (input.operation_scope === "profile_management") return session;
     const rebindFailure = await this.bindPersistedAuthenticationToHeadedUserSession(identity_environment, session, input);
@@ -1174,6 +1216,9 @@ export class HarborRuntime {
           retryable: true
         }
       };
+    }
+    if ([...this.profileScopeTransitionReservations.values()].some(item => item.profile_ref === identity_environment.profile_ref)) {
+      return profileScopeTransitionUnavailable();
     }
     const session = await this.runtimeSessions.openIdentityEnvironmentSession({
       ...input,
@@ -2012,6 +2057,17 @@ function persistedAuthenticationUnavailable(): RuntimeSessionUnavailable {
     message,
     retryable: true,
     current_error: { code: "identity_environment_unavailable", message, retryable: true }
+  };
+}
+
+function profileScopeTransitionUnavailable(): RuntimeSessionUnavailable {
+  const message = "Profile scope semantics are being changed while the Profile is stopped.";
+  return {
+    status: "unavailable",
+    failure_class: "session_locked",
+    message,
+    retryable: true,
+    current_error: { code: "profile_locked", message, retryable: true }
   };
 }
 
