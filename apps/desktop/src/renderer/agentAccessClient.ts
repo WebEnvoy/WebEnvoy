@@ -36,6 +36,8 @@ export const agentOperations = [
 export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "environment.read", "instance.read"];
 export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 集合和必要操作。Profile 管理权不隐含网页输入权限。";
 export type AgentScopeInput = { origin: string; origins?: string[]; operations: string[]; controlled: boolean; controlledOrigins?: string[] };
+export const agentFileMimeTypes = ["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"] as const;
+export const agentFileMaxBytes = 10 * 1024 * 1024;
 
 function selectedScope(input: AgentScopeInput) {
   const origins = [...new Set((input.origins?.length ? input.origins : [input.origin]).map(value => value.trim()).filter(Boolean))];
@@ -97,6 +99,7 @@ export function createAgentOperationsV2DirectGrantInput(principalId: string, pol
   if (!principalId || policy.scope_semantics !== "agent_operations_v2" || !policy.policy_digest) throw new Error("请选择有效 Principal 与带有当前摘要的 v2 Profile。");
   const selected = selectedScope(input);
   if (!selected.allowed_operations.length || !selected.allowed_origins.length || ![1, 24, 168].includes(hours)) throw new Error("请选择有效的 v2 授权范围与时限。");
+  validateFileScope(selected.allowed_operations, fileScope);
   return {
     idempotency_key: key,
     principal_id: principalId,
@@ -118,6 +121,7 @@ export function createAgentOperationsV2GrantInput(grant: AgentGrant, policy: Age
   if (!selected.allowed_operations.length || !selected.allowed_origins.length) throw new Error("该 v2 Grant 与 Profile 没有可签发的共同范围。");
   const hours = options.hours ?? 24;
   if (![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 授权时限。");
+  validateFileScope(selected.allowed_operations, options.fileScope);
   return {
     idempotency_key: key,
     source_grant_id: grant.grant_id,
@@ -144,11 +148,22 @@ export async function fetchAgentOwnerFiles(endpoint: string): Promise<AgentOwner
   if (result.ok !== true) throw new Error("无法读取 owner 文件材料。");
   return list(result.files, value => {
     const item = record(value);
-    if (!Number.isSafeInteger(item.byte_length) || Number(item.byte_length) < 0) throw new Error("Core 返回的文件材料大小无效。");
+    if (!Number.isSafeInteger(item.byte_length) || Number(item.byte_length) < 0 || Number(item.byte_length) > agentFileMaxBytes) throw new Error("Core 返回的文件材料大小无效。");
     const status = item.status;
     if (status !== "available" && status !== "revoked" && status !== "expired" && status !== "deleted") throw new Error("Core 返回的文件材料状态无效。");
-    return { file_ref: text(item.file_ref), profile_ref: text(item.profile_ref), status, display_name: text(item.display_name), mime_type: text(item.mime_type), byte_length: Number(item.byte_length), expires_at: date(item.expires_at) };
+    const mimeType = text(item.mime_type);
+    if (!agentFileMimeTypes.includes(mimeType as typeof agentFileMimeTypes[number])) throw new Error("Core 返回的文件材料 MIME 无效。");
+    return { file_ref: text(item.file_ref), profile_ref: text(item.profile_ref), status, display_name: text(item.display_name), mime_type: mimeType, byte_length: Number(item.byte_length), expires_at: date(item.expires_at) };
   });
+}
+
+function validateFileScope(operations: string[], fileScope: AgentGrant["file_scope"] | undefined) {
+  const hasFileOperation = operations.some(operation => operation === "file.upload" || operation === "file.download");
+  if (fileScope === undefined) {
+    if (hasFileOperation) throw new Error("选择文件操作时必须明确 file_scope、MIME 和文件大小上限。");
+    return;
+  }
+  if (!fileScope.allowed_mime_types.length || fileScope.allowed_mime_types.some(mime => !agentFileMimeTypes.includes(mime as typeof agentFileMimeTypes[number])) || new Set(fileScope.allowed_mime_types).size !== fileScope.allowed_mime_types.length || !Number.isSafeInteger(fileScope.max_file_bytes) || fileScope.max_file_bytes < 1 || fileScope.max_file_bytes > agentFileMaxBytes || fileScope.upload_refs.some(ref => !/^attachment:runtime\/[0-9a-f-]{36}$/.test(ref)) || operations.includes("file.upload") && fileScope.upload_refs.length === 0) throw new Error("请明确有效的文件 ref、MIME 集合和大小上限；上传操作至少需要一个材料。");
 }
 
 function record(value: unknown): Record<string, unknown> {
