@@ -218,12 +218,29 @@ except ValueError as error:
     assert "timezone" in str(error)
 
 class Page:
-    async def evaluate(self, _expression): return host_timezone
+    async def evaluate(self, _expression, expected):
+        assert "resolvedOptions().timeZone" in _expression
+        assert expected in (host_timezone, "Asia/Kolkata", "Europe/Kyiv", "US/Eastern")
+        return True
 
 class Context:
     def __init__(self): self.pages = [Page()]
 
 asyncio.run(module.verify_timezone_readback(Context(), host_timezone))
+for raw_timezone, alias in mismatched_aliases:
+    class AliasPage:
+        async def evaluate(self, _expression, expected):
+            assert "resolvedOptions().timeZone" in _expression
+            assert expected == raw_timezone
+            return True
+    asyncio.run(module.verify_timezone_readback(types.SimpleNamespace(pages=[AliasPage()]), raw_timezone))
+class MismatchPage:
+    async def evaluate(self, _expression, _expected): return False
+try:
+    asyncio.run(module.verify_timezone_readback(types.SimpleNamespace(pages=[MismatchPage()]), "Asia/Kolkata"))
+    raise AssertionError("mismatched timezone readback was accepted")
+except ValueError as error:
+    assert "readback" in str(error)
 try:
     asyncio.run(module.verify_timezone_readback(types.SimpleNamespace(pages=[]), host_timezone))
     raise AssertionError("missing timezone readback was accepted")

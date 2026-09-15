@@ -141,10 +141,20 @@ async def verify_timezone_readback(context: Any, timezone: str | None) -> None:
     if not isinstance(pages, (list, tuple)) or not pages:
         raise ValueError("Official Chrome timezone readback has no Page.")
     try:
-        observed = await pages[0].evaluate("() => Intl.DateTimeFormat().resolvedOptions().timeZone || null")
+        matched = await pages[0].evaluate(
+            """expected => {
+                const canonical = value => {
+                    try { return value ? new Intl.DateTimeFormat('en', { timeZone: value }).resolvedOptions().timeZone || null : null; }
+                    catch (_) { return null; }
+                };
+                const observed = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+                return canonical(expected) !== null && canonical(expected) === canonical(observed);
+            }""",
+            timezone,
+        )
     except BaseException as error:
         raise ValueError("Official Chrome timezone readback is unavailable.") from error
-    if observed != timezone:
+    if matched is not True:
         raise ValueError("Official Chrome timezone readback did not match the configured host timezone.")
 
 
