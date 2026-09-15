@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import {
   launchSharedPlaywrightProvider,
   unavailable
@@ -8,7 +9,10 @@ import type {
   RuntimeFact
 } from "./runtime-session-types.js";
 import type { IdentityEnvironmentProviderBinding } from "./provider-management.js";
-import type { ResolvedIdentityEnvironmentLaunchConfiguration } from "./identity-environment-configuration.js";
+import {
+  resolveIdentityEnvironmentLaunchConfiguration,
+  type ResolvedIdentityEnvironmentLaunchConfiguration
+} from "./identity-environment-configuration.js";
 
 export const CHROME_OFFICIAL_PLAYWRIGHT_VERSION = "1.60.0";
 export const CHROME_OFFICIAL_BROWSER_VERSION = "153.0.8010.37";
@@ -26,23 +30,49 @@ export const CHROME_OFFICIAL_PAIRING = Object.freeze({
 export type ChromeOfficialPairing = typeof CHROME_OFFICIAL_PAIRING;
 
 export function hostTimezone(): string | null {
+  const configured = process.env.TZ;
+  if (configured) return rawTimezone(configured);
+  return timezoneFromPath("/etc/localtime") ?? canonicalTimezone();
+}
+
+function rawTimezone(value: string): string | null {
+  const candidate = value.replace(/^:/, "");
+  const timezone = candidate.startsWith("/") ? timezoneFromPath(candidate) : candidate;
+  return timezone && canonicalTimezone(timezone) ? normalizeUtc(timezone) : null;
+}
+
+function timezoneFromPath(path: string): string | null {
   try {
-    const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const resolved = realpathSync(path);
+    const marker = "/zoneinfo/";
+    const suffix = resolved.includes(marker) ? resolved.split(marker, 2)[1] : null;
+    if (!suffix) return null;
+    const timezone = suffix.replace(/^(?:posix|right)\//, "");
+    return timezone && canonicalTimezone(timezone) ? normalizeUtc(timezone) : null;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalTimezone(value?: string): string | null {
+  try {
+    const timezone = new Intl.DateTimeFormat("en", value ? { timeZone: value } : undefined).resolvedOptions().timeZone;
     return typeof timezone === "string" && timezone ? timezone : null;
   } catch {
     return null;
   }
 }
 
+function normalizeUtc(value: string): string {
+  return ["Etc/UTC", "Etc/GMT", "GMT"].includes(value) ? "UTC" : value;
+}
+
 export function isHostTimezone(value: string | null | undefined): boolean {
-  if (!value) return true;
+  if (value == null) return true;
+  if (!value) return false;
   const host = hostTimezone();
   if (!host) return false;
-  try {
-    return value === new Intl.DateTimeFormat("en", { timeZone: value }).resolvedOptions().timeZone && value === host;
-  } catch {
-    return false;
-  }
+  return canonicalTimezone(value) === canonicalTimezone(host);
 }
 
 /**
@@ -93,12 +123,17 @@ export async function launchChromeOfficialProvider(
   if (!isOfficialChromeLaunchRequest(input)) {
     return unavailable("unsupported", "官方 Chrome 仅允许由 owner 提供并验证 exact installed pairing 的 managed binding 启动。", []);
   }
-  const timezone = resolvedIdentityEnvironmentConfiguration
-    ? resolvedIdentityEnvironmentConfiguration.timezone
-    : input.identity_environment?.environment.timezone;
+  const configuration = resolvedIdentityEnvironmentConfiguration
+    ?? (input.identity_environment ? resolveIdentityEnvironmentLaunchConfiguration(input.identity_environment, input.resolve_proxy) : undefined)
+    ?? undefined;
+  const timezone = configuration ? configuration.timezone : input.identity_environment?.environment.timezone;
   if (!isHostTimezone(timezone)) {
     return unavailable("unsupported", "官方 Chrome 公开连接仅支持与宿主实际 IANA 时区一致的配置。", []);
   }
+  const host = hostTimezone();
+  const normalizedConfiguration = configuration && timezone && host
+    ? { ...configuration, timezone: host }
+    : configuration;
   const binding = input.identity_environment!.provider_binding;
   const install = binding.selected_provider!.install;
   const browserPath = install.path!;
@@ -114,7 +149,7 @@ export async function launchChromeOfficialProvider(
     facts: () => chromeFacts(browserPath),
     normalizeEnvironmentObservation: () => null,
     screenshotUnavailableMessage: "Official Chrome screenshot is unavailable."
-  }, resolvedIdentityEnvironmentConfiguration);
+  }, normalizedConfiguration);
 }
 
 function chromeFacts(path: string): RuntimeFact[] {

@@ -17,6 +17,21 @@ import {
 
 const DRIVER_DIR = dirname(fileURLToPath(import.meta.url));
 
+test("keeps IANA timezone aliases consistent at the Chrome adapter boundary", () => {
+  const previousTimezone = process.env.TZ;
+  try {
+    for (const [host, alias] of [["Asia/Kolkata", "Asia/Calcutta"], ["Europe/Kyiv", "Europe/Kiev"], ["US/Eastern", "America/New_York"]] as const) {
+      process.env.TZ = host;
+      assert.equal(hostTimezone(), host);
+      assert.equal(isHostTimezone(host), true);
+      assert.equal(isHostTimezone(alias), true);
+    }
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
+});
+
 function chromeIdentity(browserPath = "/fixture/Google Chrome") {
   const identity = createLocalIdentityEnvironmentFacts({
     identity_environment_ref: "identity:chrome-official-adapter-test",
@@ -184,6 +199,16 @@ host_timezone = module._host_timezone()
 assert isinstance(host_timezone, str) and host_timezone
 request["environment"] = {**request["environment"], "timezone": host_timezone}
 assert module.chrome_launch_flags(request) == ["--lang=zh-CN", "--proxy-server=http://127.0.0.1:8080"]
+mismatched_aliases = (("Asia/Kolkata", "Asia/Calcutta"), ("Europe/Kyiv", "Europe/Kiev"), ("US/Eastern", "America/New_York"))
+previous_timezone = os.environ.get("TZ")
+try:
+    for raw_timezone, _alias in mismatched_aliases:
+        os.environ["TZ"] = raw_timezone
+        assert module._host_timezone() == raw_timezone
+        assert module.chrome_launch_flags(dict(request, environment={"timezone": raw_timezone})) == []
+finally:
+    if previous_timezone is None: os.environ.pop("TZ", None)
+    else: os.environ["TZ"] = previous_timezone
 mismatched_timezone = next(candidate for candidate in ("UTC", "Asia/Shanghai", "America/New_York", "Europe/Paris", "Asia/Tokyo") if candidate != host_timezone)
 rejected_timezone = dict(request, environment={"timezone": mismatched_timezone})
 try:
