@@ -25,6 +25,24 @@ export const CAMOUFOX_UPSTREAM_PINS = Object.freeze({
   playwright_source_sha256: '39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5'
 });
 
+export const CHROME_OFFICIAL_INSTALL_SCHEMA = 'webenvoy.chrome-official/v1';
+export const CHROME_OFFICIAL_PINS = Object.freeze({
+  provider: 'chrome_official',
+  source: 'official_release',
+  browser_version: '153.0.8010.37',
+  playwright_version: '1.60.0',
+  source_sha256: '6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3',
+  executable_sha256: '83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2',
+  signature_status: 'apple_codesign_verified'
+});
+
+const CHROME_STORED_KEYS = ['schema', 'provider', 'source', 'signature_status', 'browser_version', 'playwright_version', 'browser', 'python', 'sources', 'source_sha256'];
+const CHROME_STORED_BROWSER_KEYS = ['install_root', 'executable', 'version', 'executable_sha256'];
+const CHROME_STORED_PYTHON_KEYS = ['path', 'executable_sha256'];
+const CHROME_STORED_SOURCES_KEYS = ['browser'];
+const CHROME_STORED_SOURCE_KEYS = ['path', 'sha256'];
+const CHROME_STORED_SOURCE_HASH_KEYS = ['browser'];
+
 const RETIRED_BINDING_KEYS = ['camoufoxArtifact', 'native504', 'native510', 'camoufoxNativeArtifact', 'camoufoxNativeBinding'];
 
 function record(value) {
@@ -42,6 +60,29 @@ export function classifyCamoufoxBinding(installation) {
     : record(installation.camoufoxUpstream) && installation.camoufoxUpstream.schema === CAMOUFOX_UPSTREAM_INSTALL_SCHEMA
       ? { state: QUALIFIED_STATE, reason: OFFICIAL_REASON }
     : { state: RETIRED_STATE, reason: UNQUALIFIED_REASON };
+}
+
+/**
+ * Classify the owner-persisted Chrome record without treating an old or
+ * incomplete record as a new shared-execution qualification.
+ */
+export function classifyChromeOfficialBinding(installation) {
+  if (!record(installation)) throw new Error('installation_configuration_invalid');
+  try {
+    readStoredChromeOfficialBinding(installation.chromeOfficial);
+    return { state: QUALIFIED_STATE, reason: OFFICIAL_REASON };
+  } catch {
+    return { state: RETIRED_STATE, reason: UNQUALIFIED_REASON };
+  }
+}
+
+/** A shared installed Python must identify the same runtime for both adapters. */
+export function assertProviderPythonPairing(camoufoxBinding, chromeBinding) {
+  if (!camoufoxBinding || !chromeBinding) return;
+  if (camoufoxBinding.python?.path !== chromeBinding.python?.path ||
+    camoufoxBinding.python?.executable_sha256 !== chromeBinding.python?.executable_sha256) {
+    reject('provider_playwright_python_pairing_mismatch');
+  }
 }
 
 function reject(code) { throw new Error(code); }
@@ -63,13 +104,63 @@ async function directory(path, code) {
 function string(value, code) { if (typeof value !== 'string' || !value.trim()) reject(code); return value; }
 function hash(value, code) { if (!HASH.test(value ?? '')) reject(code); return value; }
 function exact(value, expected, code) { if (value !== expected) reject(code); return value; }
+function aliasValue(input, names, code) {
+  const values = names.map(name => input[name]).filter(value => value !== undefined);
+  if (values.length > 1 && values.some(value => value !== values[0])) reject(`${code}_conflict`);
+  return values[0];
+}
 
-async function canonicalFile(path, code, executable = false) {
+function storedRecord(value, keys, code) {
+  if (!record(value)) reject(`${code}_invalid`);
+  if (Object.keys(value).some(key => !keys.includes(key))) reject(`${code}_unknown_field`);
+  for (const key of keys) if (!Object.hasOwn(value, key)) reject(`${code}_${key}_missing`);
+  return value;
+}
+
+/**
+ * Read only the canonical owner-persisted Chrome binding. Setup accepts
+ * aliases, but a stored record has one exact shape so old or mixed records
+ * cannot silently qualify the shared adapter.
+ */
+export function readStoredChromeOfficialBinding(binding) {
+  if (!record(binding)) reject('chrome_stored_binding_invalid');
+  if (binding.schema !== CHROME_OFFICIAL_INSTALL_SCHEMA) reject('chrome_stored_binding_version_unsupported');
+  storedRecord(binding, CHROME_STORED_KEYS, 'chrome_stored_binding');
+  exact(binding.provider, CHROME_OFFICIAL_PINS.provider, 'chrome_stored_provider_invalid');
+  exact(binding.source, CHROME_OFFICIAL_PINS.source, 'chrome_stored_source_invalid');
+  exact(binding.signature_status, CHROME_OFFICIAL_PINS.signature_status, 'chrome_stored_signature_status_invalid');
+  exact(binding.browser_version, CHROME_OFFICIAL_PINS.browser_version, 'chrome_stored_browser_version_invalid');
+  exact(binding.playwright_version, CHROME_OFFICIAL_PINS.playwright_version, 'chrome_stored_playwright_version_invalid');
+
+  const browser = storedRecord(binding.browser, CHROME_STORED_BROWSER_KEYS, 'chrome_stored_browser');
+  string(browser.install_root, 'chrome_stored_browser_install_root_invalid');
+  string(browser.executable, 'chrome_stored_browser_executable_invalid');
+  exact(browser.version, binding.browser_version, 'chrome_stored_browser_version_conflict');
+  exact(browser.executable_sha256, CHROME_OFFICIAL_PINS.executable_sha256, 'chrome_stored_executable_hash_invalid');
+
+  const python = storedRecord(binding.python, CHROME_STORED_PYTHON_KEYS, 'chrome_stored_python');
+  string(python.path, 'chrome_stored_python_path_invalid');
+  hash(python.executable_sha256, 'chrome_stored_python_hash_invalid');
+
+  const sources = storedRecord(binding.sources, CHROME_STORED_SOURCES_KEYS, 'chrome_stored_sources');
+  const browserSource = storedRecord(sources.browser, CHROME_STORED_SOURCE_KEYS, 'chrome_stored_browser_source');
+  string(browserSource.path, 'chrome_stored_browser_source_path_invalid');
+  exact(browserSource.sha256, CHROME_OFFICIAL_PINS.source_sha256, 'chrome_stored_browser_source_hash_invalid');
+  const sourceHashes = storedRecord(binding.source_sha256, CHROME_STORED_SOURCE_HASH_KEYS, 'chrome_stored_source_hashes');
+  exact(sourceHashes.browser, browserSource.sha256, 'chrome_stored_source_hash_conflict');
+  exact(sourceHashes.browser, CHROME_OFFICIAL_PINS.source_sha256, 'chrome_stored_source_hash_invalid');
+  return binding;
+}
+
+const defaultFileHash = (_path, bytes) => sha(bytes);
+
+async function canonicalFile(path, code, executable = false, hashFile = defaultFileHash) {
   string(path, code);
   let canonical;
   try { canonical = await realpath(path); } catch (error) { if (error.code === 'ENOENT') reject(code); throw error; }
   await regular(canonical, code, executable);
-  return { path: resolve(path), canonical, sha256: sha(await readFile(canonical)) };
+  const bytes = await readFile(canonical);
+  return { path: resolve(path), canonical, sha256: hashFile(canonical, bytes) };
 }
 
 function inside(root, path, code) {
@@ -93,8 +184,8 @@ async function browserPropertiesHash(appRoot, canonicalRoot) {
   return properties.sha256;
 }
 
-async function sourceArchive(path, expected, code) {
-  const file = await canonicalFile(path, code);
+async function sourceArchive(path, expected, code, hashFile = defaultFileHash) {
+  const file = await canonicalFile(path, code, false, hashFile);
   exact(file.sha256, expected, `${code}_hash_mismatch`);
   return { path: file.path, sha256: file.sha256 };
 }
@@ -111,6 +202,90 @@ async function pythonPackageVersions(path) {
     if (error.message === 'camoufox_python_package_version_mismatch') throw error;
     reject('camoufox_python_packages_unavailable');
   }
+}
+
+async function pythonPlaywrightVersion(path, command = execFile) {
+  try {
+    const { stdout } = await command(path, ['-I', '-B', '-c', 'import importlib.metadata as m; print(m.version("playwright"))'], {
+      timeout: 5000,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' }
+    });
+    exact(stdout.trim(), CHROME_OFFICIAL_PINS.playwright_version, 'chrome_playwright_version_mismatch');
+  } catch (error) {
+    if (error.message === 'chrome_playwright_version_mismatch') throw error;
+    reject('chrome_playwright_package_unavailable');
+  }
+}
+
+async function chromeBundleVersion(appRoot, command = execFile) {
+  try {
+    const { stdout } = await command('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', join(appRoot, 'Contents/Info.plist')], { timeout: 5000 });
+    return stdout.trim();
+  } catch (error) {
+    if (error.code === 'ENOENT') reject('chrome_browser_version_missing');
+    reject('chrome_browser_version_unavailable');
+  }
+}
+
+async function verifyChromeSignature(appRoot, command = execFile, platform = process.platform) {
+  if (platform !== 'darwin') reject('chrome_signature_unavailable');
+  try {
+    await command('/usr/bin/codesign', ['--verify', '--deep', '--strict', appRoot], { timeout: 10000 });
+  } catch { reject('chrome_signature_invalid'); }
+  return CHROME_OFFICIAL_PINS.signature_status;
+}
+
+/** Validate an owner-selected, already-installed official Chrome combination. */
+export async function verifyChromeOfficialInstall(input, options = {}) {
+  if (!record(input)) reject('chrome_official_binding_invalid');
+  exact(input.schema, CHROME_OFFICIAL_INSTALL_SCHEMA, 'chrome_install_schema_invalid');
+  exact(input.provider, CHROME_OFFICIAL_PINS.provider, 'chrome_provider_invalid');
+  exact(input.source, CHROME_OFFICIAL_PINS.source, 'chrome_source_invalid');
+  exact(input.browser_version, CHROME_OFFICIAL_PINS.browser_version, 'chrome_browser_version_invalid');
+  exact(input.playwright_version, CHROME_OFFICIAL_PINS.playwright_version, 'chrome_playwright_version_invalid');
+  if (input.signature_status !== undefined) exact(input.signature_status, CHROME_OFFICIAL_PINS.signature_status, 'chrome_signature_status_invalid');
+  if (input.source_sha256 !== undefined) exact(input.source_sha256, CHROME_OFFICIAL_PINS.source_sha256, 'chrome_source_hash_invalid');
+  if (input.executable_sha256 !== undefined) exact(input.executable_sha256, CHROME_OFFICIAL_PINS.executable_sha256, 'chrome_executable_hash_invalid');
+  if (input.python_executable_sha256 !== undefined) hash(input.python_executable_sha256, 'chrome_python_hash_invalid');
+
+  const browserRoot = string(aliasValue(input, ['browser_install_root', 'browser_root', 'app_root'], 'chrome_browser_root'), 'chrome_browser_root_required');
+  const browserExecutable = string(aliasValue(input, ['browser_executable', 'executable'], 'chrome_browser_executable'), 'chrome_browser_executable_required');
+  const pythonPath = string(aliasValue(input, ['python_path', 'chrome_python_path', 'python'], 'chrome_python_path'), 'chrome_python_path_required');
+  const browserSourcePath = string(aliasValue(input, ['browser_source_path', 'browser_source', 'browser_archive', 'source_archive_path'], 'chrome_browser_source'), 'chrome_browser_source_required');
+  await directory(browserRoot, 'chrome_browser_root_invalid');
+  const canonicalRoot = await realpath(browserRoot);
+  await directory(canonicalRoot, 'chrome_browser_root_invalid');
+  if (!canonicalRoot.endsWith('.app')) reject('chrome_browser_root_invalid');
+
+  const fileHash = options.hashFile ?? defaultFileHash;
+  const browser = await canonicalFile(browserExecutable, 'chrome_browser_executable_invalid', true, fileHash);
+  inside(canonicalRoot, browser.canonical, 'chrome_browser_executable_outside_root');
+  exact(browser.sha256, CHROME_OFFICIAL_PINS.executable_sha256, 'chrome_executable_hash_mismatch');
+  const command = options.execFile ?? execFile;
+  exact(await chromeBundleVersion(canonicalRoot, command), CHROME_OFFICIAL_PINS.browser_version, 'chrome_browser_version_mismatch');
+  const signature_status = await verifyChromeSignature(canonicalRoot, command, options.platform ?? process.platform);
+  const python = await canonicalFile(pythonPath, 'chrome_python_invalid', true, fileHash);
+  if (input.python_executable_sha256 !== undefined && input.python_executable_sha256 !== python.sha256) reject('chrome_python_hash_mismatch');
+  await pythonPlaywrightVersion(python.path, command);
+  const source = await sourceArchive(browserSourcePath, CHROME_OFFICIAL_PINS.source_sha256, 'chrome_browser_source', fileHash);
+
+  return {
+    schema: CHROME_OFFICIAL_INSTALL_SCHEMA,
+    provider: CHROME_OFFICIAL_PINS.provider,
+    source: CHROME_OFFICIAL_PINS.source,
+    signature_status,
+    browser_version: CHROME_OFFICIAL_PINS.browser_version,
+    playwright_version: CHROME_OFFICIAL_PINS.playwright_version,
+    browser: {
+      install_root: resolve(browserRoot),
+      executable: resolve(browserExecutable),
+      version: CHROME_OFFICIAL_PINS.browser_version,
+      executable_sha256: browser.sha256
+    },
+    python: { path: resolve(pythonPath), executable_sha256: python.sha256 },
+    sources: { browser: source },
+    source_sha256: { browser: source.sha256 }
+  };
 }
 
 /** Validate an owner-selected, already-installed official upstream combination. */
@@ -188,13 +363,41 @@ export async function verifyInstalledCamoufox(installation) {
   }) : null;
 }
 
+export async function verifyInstalledChromeOfficial(installation, options = {}) {
+  if (!record(installation)) reject('installation_configuration_invalid');
+  const binding = installation.chromeOfficial;
+  if (binding === undefined) return null;
+  const stored = readStoredChromeOfficialBinding(binding);
+  return verifyChromeOfficialInstall({
+    schema: stored.schema,
+    provider: stored.provider,
+    source: stored.source,
+    signature_status: stored.signature_status,
+    browser_version: stored.browser_version,
+    playwright_version: stored.playwright_version,
+    browser_install_root: stored.browser.install_root,
+    browser_executable: stored.browser.executable,
+    python_path: stored.python.path,
+    python_executable_sha256: stored.python.executable_sha256,
+    browser_source_path: stored.sources.browser.path,
+    source_sha256: stored.source_sha256.browser,
+    executable_sha256: stored.browser.executable_sha256
+  }, options);
+}
+
 /** Resolve setup's optional binding without making ordinary installs provider-specific. */
 export async function resolveCamoufoxSetupBinding({ existingInstallation, hasUpstreamArguments, upstreamInput }) {
   if (hasUpstreamArguments) return verifyCamoufoxUpstreamInstall(upstreamInput);
   return record(existingInstallation?.camoufoxUpstream) ? verifyInstalledCamoufox(existingInstallation) : null;
 }
 
+export async function resolveChromeOfficialSetupBinding({ existingInstallation, hasOfficialArguments, officialInput }) {
+  if (hasOfficialArguments) return verifyChromeOfficialInstall(officialInput);
+  return record(existingInstallation?.chromeOfficial) ? verifyInstalledChromeOfficial(existingInstallation) : null;
+}
+
 export const CAMOUFOX_RETIRED_STATE = RETIRED_STATE;
 export const CAMOUFOX_RETIRED_BINDING_REASON = RETIRED_BINDING_REASON;
 export const CAMOUFOX_UNQUALIFIED_REASON = UNQUALIFIED_REASON;
 export const CAMOUFOX_QUALIFIED_STATE = QUALIFIED_STATE;
+export const CHROME_OFFICIAL_QUALIFIED_STATE = QUALIFIED_STATE;

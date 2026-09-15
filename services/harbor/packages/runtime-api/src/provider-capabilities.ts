@@ -26,7 +26,24 @@ export function cloakCapabilities(): BrowserProviderCapabilityFact[] {
   ];
 }
 
-export function chromeCapabilities(): BrowserProviderCapabilityFact[] {
+export function chromeCapabilities(official = false): BrowserProviderCapabilityFact[] {
+  if (official) return [
+    capability("persistent_profile", "supported", "validation_evidence", "owner 验证的官方 Chrome 配对使用 Harbor 管理的持久化 Profile。"),
+    capability("independent_user_data_dir", "supported", "validation_evidence", "任务使用独立 managed Profile，不复用用户日常 Chrome 数据。"),
+    capability("proxy", "limited", "configured", "当前公开 Chrome adapter 可接收代理启动配置，但不宣称 provider 原生一致性。"),
+    capability("timezone", "limited", "configured", "公开 Chrome 不提供时区覆盖；仅接受与宿主实际 IANA 时区一致的配置，并在启动后回读验证。"),
+    capability("locale", "limited", "configured", "当前公开 Chrome adapter 可接收语言配置；独立地区伪装不受支持。"),
+    capability("viewport", "unsupported", "derived", "当前公开 Chrome adapter 不应用 viewport 配置。"),
+    capability("extensions", "limited", "configured", "扩展能力取决于官方 Chrome 启动策略和用户配置。"),
+    capability("cookie_persistence", "limited", "configured", "Harbor 使用 managed Profile 保留浏览器存储；本批未单独验证 Cookie 持久化。"),
+    capability("cdp", "supported", "validation_evidence", "Harbor 通过官方公开 CDP 连接取得共享 Page；不暴露原始 endpoint。"),
+    capability("viewer", "limited", "configured", "Viewer 仍由 Harbor 中介，不能把原生窗口焦点当作任务 Page。"),
+    capability("snapshot_refs", "limited", "validation_evidence", "共享 Page 实现提供有界 snapshot refs，不暴露 raw DOM。"),
+    capability("evidence_refs", "limited", "validation_evidence", "共享 Files/diagnostics 实现提供有界 evidence refs。"),
+    capability("native_fingerprint_control", "unsupported", "derived", "官方 Chrome 不提供 provider 原生指纹控制。"),
+    capability("anti_detection_binary_patches", "unsupported", "derived", "官方 Chrome 没有 Harbor 可加载的反检测二进制补丁。"),
+    capability("automation_exposure_reduction", "unsupported", "derived", "当前公开 Chrome 路径不承诺降低自动化暴露。")
+  ];
   return [
     capability("persistent_profile", "limited", "configured", "Harbor 可使用专用 profile，但 Chrome 没有 provider 原生身份控制。"),
     capability("independent_user_data_dir", "supported", "configured", "专用 user data dir 可隔离 Harbor 与日常 Chrome。"),
@@ -91,7 +108,12 @@ export function cloakLimitations(): string[] {
   ];
 }
 
-export function chromeLimitations(): string[] {
+export function chromeLimitations(official = false): string[] {
+  if (official) return [
+    "仅 owner 验证的 official_release Chrome、可执行文件和 Playwright exact pairing 进入核心支持范围。",
+    "本批通过 managed Profile 复用共享 Page、Files、diagnostics 与 lifecycle；不扩展为站点成功或完整 Runtime 承诺。",
+    "timezone 仅在与宿主实际 IANA 时区一致时受限支持；公开 Chrome 路径仍不支持 viewport、原生指纹控制或反检测二进制补丁。"
+  ];
   return [
     "仅在 CloakBrowser 缺失或不可用时作为受限后备。",
     "没有原生指纹控制或反检测二进制补丁。",
@@ -127,7 +149,16 @@ export function cloakDownloadGuide(): BrowserProviderDownloadGuide {
   };
 }
 
-export function chromeDownloadGuide(): BrowserProviderDownloadGuide {
+export function chromeDownloadGuide(official = false): BrowserProviderDownloadGuide {
+  if (official) return {
+    action: "manual_install",
+    primary_url: "https://www.google.com/chrome/",
+    install_hint: "请由 owner 提供并核验 official_release Chrome、可执行文件和 Playwright exact pairing；Harbor 只管理独立 Profile 与共享 Runtime 能力。",
+    missing_impacts: [
+      "缺少完整 owner pairing 时，官方 Chrome 仅保留普通系统检测范围，不进入核心能力候选。",
+      "timezone 仅在与宿主实际 IANA 时区一致时受限支持；viewport 和原生指纹控制不属于当前公开 Chrome 路径。"
+    ]
+  };
   return {
     action: "manual_install",
     primary_url: "https://www.google.com/chrome/",

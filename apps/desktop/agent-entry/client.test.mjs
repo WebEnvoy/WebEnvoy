@@ -47,7 +47,8 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(operation);
     assert.match(operation.description, /task_scope describes this submitted operation only/);
     assert.match(operation.description, /file_refs is allowed only for the current file\.upload or file\.download operation/);
-    assert.match(operation.description, /instance\.start requires the exact authorized origin as a top-level origin field/);
+    assert.match(operation.description, /instance\.start, instance\.observe, instance\.diagnostics/);
+    assert.match(operation.description, /instance\.snapshot\/click\/input\/press\/scroll\/wait/);
     assert.equal(operation.inputSchema.required.includes('origin'), false);
     const fileScopeCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('file.upload'));
     assert.ok(fileScopeCondition);
@@ -60,12 +61,18 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);
+    const originCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('instance.snapshot'));
+    assert.ok(originCondition);
+    assert.ok(originCondition.if.properties.operation.enum.includes('file.upload'));
+    assert.deepEqual(originCondition.then.required, ['origin']);
+    assert.match(operation.inputSchema.properties.origin.description, /task_scope\.origins is only the allowed set/);
     for (const field of ['profile_ref', 'runtime_session_ref', 'origin', 'page_id', 'page_ref', 'document_generation', 'observation_ref', 'target_ref']) {
       assert.match(operation.inputSchema.properties[field].description, /file\.upload\/file\.download/);
     }
     assert.match(operation.inputSchema.properties.file_ref.description, /Only for file\.upload/);
     const skill = await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8');
-    assert.match(skill, /`instance\.start` specifically requires the exact authorized origin in the top-level `origin` field/);
+    assert.match(skill, /`instance\.start`, `instance\.observe`, `instance\.diagnostics`/);
+    assert.match(skill, /`instance\.snapshot\/click\/input\/press\/scroll\/wait`/);
     assert.match(skill, /The operation must carry the fresh same-observation `profile_ref`, `runtime_session_ref`, exact `origin`, `page_id`, `page_ref`, `document_generation`, `observation_ref`, and `target_ref`/);
     assert.match(skill, /omit `file_ref` and use `task_scope\.file_refs: \[\]`/);
   } finally {

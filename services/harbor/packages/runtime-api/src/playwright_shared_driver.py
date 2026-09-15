@@ -338,6 +338,12 @@ class Driver:
         self._close_finalized = False
         self._close_completed = False
         self._close_in_progress: asyncio.Task[Any] | None = None
+        # An adapter may own a browser process outside Playwright's Context
+        # (the official Chrome public-connection path).  Keep its shutdown
+        # behind one idempotent seam so Context.close, EOF and owner close all
+        # converge on the same resource boundary.
+        self._owned_resources_closed = False
+        self._owned_resources_close_error: BaseException | None = None
         # A Provider Download can outlive its public cancel call. Keep the
         # complete cleanup coroutine here so no later command can touch the
         # Page or temporary tree until the public objects have settled.
@@ -364,22 +370,33 @@ class Driver:
     async def start(self) -> None:
         playwright_factory = getattr(self.adapter, "playwright_factory", async_playwright)
         self.playwright = await playwright_factory().start()
-        self.downloads_root = Path(tempfile.mkdtemp(prefix=".webenvoy-downloads-", dir=self.profile_dir))
-        launch = dict(self.options)
-        launch.update(self.context_options)
-        launch["user_data_dir"] = self.profile_dir
-        # Keep the browser's original temporary download artifacts in this
-        # task-owned directory. The async bounded monitor watches it together
-        # with Harbor staging during the complete Download lifecycle.
-        launch["downloads_path"] = str(self.downloads_root)
-        if self.scope_semantics == "legacy_request_guard_v1":
-            launch["offline"] = True
-            launch["service_workers"] = "block"
-        browser_type = getattr(self.adapter, "browser_type", None)
-        browser = getattr(self.playwright, browser_type, None)
-        if browser is None:
-            raise ValueError("Provider adapter browser type is unavailable.")
-        self.context = await browser.launch_persistent_context(**launch)
+        create_context = getattr(self.adapter, "create_context", None)
+        if callable(create_context):
+            # Public connect_over_cdp attaches to a browser-owned default
+            # Context; it cannot accept launch_persistent_context's
+            # downloads_path.  The shared file operation still stages and
+            # hashes the public Download, but does not scan an ambient
+            # Downloads directory as a replacement for that relationship.
+            self.downloads_root = None
+            self.context = await create_context(self.playwright, self.request, self.profile_dir)
+        else:
+            self.downloads_root = Path(tempfile.mkdtemp(prefix=".webenvoy-downloads-", dir=self.profile_dir))
+            launch = dict(self.options)
+            launch.update(self.context_options)
+            launch["user_data_dir"] = self.profile_dir
+            # Keep the browser's original temporary download artifacts in
+            # this task-owned directory. The async bounded monitor watches it
+            # together with Harbor staging during the complete Download
+            # lifecycle.
+            launch["downloads_path"] = str(self.downloads_root)
+            if self.scope_semantics == "legacy_request_guard_v1":
+                launch["offline"] = True
+                launch["service_workers"] = "block"
+            browser_type = getattr(self.adapter, "browser_type", None)
+            browser = getattr(self.playwright, browser_type, None)
+            if browser is None:
+                raise ValueError("Provider adapter browser type is unavailable.")
+            self.context = await browser.launch_persistent_context(**launch)
         self.context.on("page", self.on_page)
         if self.scope_semantics == "legacy_request_guard_v1":
             await self.context.route("**/*", self.route)
@@ -895,8 +912,32 @@ class Driver:
         except OSError:
             pass
 
+    async def close_owned_resources(self) -> None:
+        """Close resources owned by an adapter outside Playwright Context."""
+        if not hasattr(self, "_owned_resources_closed"):
+            self._owned_resources_closed = False
+        if not hasattr(self, "_owned_resources_close_error"):
+            self._owned_resources_close_error = None
+        if self._owned_resources_close_error is not None:
+            raise self._owned_resources_close_error
+        if self._owned_resources_closed:
+            return
+        # Mark the boundary before invoking the adapter.  A failed or
+        # cancelled close is still an attempted close: retrying an external
+        # process teardown can race the first attempt and obscure its error.
+        self._owned_resources_closed = True
+        close = getattr(getattr(self, "adapter", None), "close_owned_resources", None)
+        try:
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+        except BaseException as error:
+            self._owned_resources_close_error = error
+            raise
+
     async def close_context_for_download(self) -> None:
-        """Use the public Context.close as the final download interruption."""
+        """Use public Context.close and the adapter close seam as one barrier."""
         self.close_requested.set()
         if not hasattr(self, "_close_error"):
             self._close_error = None
@@ -916,18 +957,27 @@ class Driver:
             context = getattr(self, "_closing_context", None) or getattr(self, "context", None)
             self.context = None
             self._closing_context = context
-            if context is None:
-                return
+            context_error: BaseException | None = None
             try:
-                await context.close()
+                if context is not None:
+                    await context.close()
             except BaseException as error:
                 # Keep the failed Context isolated from reusable state. The
                 # download caller may continue bounded settling, but the
                 # owning Driver.close must surface this same sticky error.
                 self._close_error = error
-                raise
+                context_error = error
             else:
                 self._closing_context = None
+            try:
+                await self.close_owned_resources()
+            except BaseException as error:
+                if self._close_error is None:
+                    self._close_error = error
+                if context_error is None:
+                    raise
+            if context_error is not None:
+                raise context_error
 
     async def settle_download_call(self, action_task: asyncio.Task[Any], cancel: Any) -> tuple[asyncio.Task[Any], ...]:
         """Request public cancellation and converge both awaitables.
@@ -1416,6 +1466,15 @@ class Driver:
         if pending_operations:
             await asyncio.gather(*pending_operations, return_exceptions=True)
         await self.wait_download_cleanup()
+        # An adapter that owns an externally launched browser must close that
+        # browser while the Playwright transport is still usable. Existing
+        # persistent-context adapters have no external resource here, so this preserves their
+        # existing lifecycle while making the Chrome public connection
+        # graceful rather than a disconnect followed by SIGTERM.
+        try:
+            await self.close_owned_resources()
+        except BaseException as error:
+            close_errors.append(error)
         if playwright is not None:
             try:
                 await playwright.stop()

@@ -9,7 +9,7 @@ const PRIVATE_PREFIXES = /^(WEBENVOY_|HARBOR_|CAMOUFOX_)/;
  * service values are added. Historical Camoufox paths are never accepted;
  * Harbor receives only the verified upstream binding facts.
  */
-export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' }, camoufoxBinding = null }) {
+export function installedRuntimeEnvironment({ parentEnvironment = process.env, dataDir, installRoot, camoufoxLaunch = { state: 'retired', reason: 'unqualified' }, camoufoxBinding = null, chromeLaunch = { state: 'retired', reason: 'unqualified' }, chromeBinding = null }) {
   const environment = { ...parentEnvironment };
   for (const key of Object.keys(environment)) if (PRIVATE_PREFIXES.test(key)) delete environment[key];
   Object.assign(environment, {
@@ -21,7 +21,9 @@ export function installedRuntimeEnvironment({ parentEnvironment = process.env, d
     WEBENVOY_HARBOR_RUNTIME_COMMAND: '', WEBENVOY_HARBOR_RUNTIME_PATH: '', WEBENVOY_HARBOR_RUNTIME_CWD: '',
     WEBENVOY_DISABLE_PACKAGED_RUNTIME: '0', HARBOR_RUNTIME_PROVIDER: '',
     HARBOR_CAMOUFOX_LAUNCH_STATE: camoufoxLaunch.state,
-    HARBOR_CAMOUFOX_LAUNCH_REASON: camoufoxLaunch.reason
+    HARBOR_CAMOUFOX_LAUNCH_REASON: camoufoxLaunch.reason,
+    HARBOR_CHROME_OFFICIAL_LAUNCH_STATE: chromeLaunch.state,
+    HARBOR_CHROME_OFFICIAL_LAUNCH_REASON: chromeLaunch.reason
   });
   if (camoufoxBinding) Object.assign(environment, {
     HARBOR_BROWSER_PROVIDER: 'camoufox',
@@ -41,5 +43,22 @@ export function installedRuntimeEnvironment({ parentEnvironment = process.env, d
     HARBOR_CAMOUFOX_SOURCE_SHA256: camoufoxBinding.source_sha256.browser,
     HARBOR_CAMOUFOX_PLAYWRIGHT_SOURCE_SHA256: camoufoxBinding.source_sha256.playwright
   });
+  if (chromeBinding) Object.assign(environment, {
+    ...(camoufoxBinding ? {} : { HARBOR_BROWSER_PROVIDER: 'chrome_official', HARBOR_BROWSER_PATH: chromeBinding.browser.executable }),
+    HARBOR_CHROME_PATH: chromeBinding.browser.executable,
+    HARBOR_CHROME_OFFICIAL_PATH: chromeBinding.browser.executable,
+    HARBOR_CHROME_OFFICIAL_INSTALL_ROOT: chromeBinding.browser.install_root,
+    HARBOR_CHROME_OFFICIAL_SOURCE: chromeBinding.source,
+    HARBOR_CHROME_OFFICIAL_SIGNATURE_STATUS: chromeBinding.signature_status,
+    HARBOR_CHROME_OFFICIAL_SOURCE_SHA256: chromeBinding.source_sha256.browser,
+    HARBOR_CHROME_OFFICIAL_EXECUTABLE_SHA256: chromeBinding.browser.executable_sha256,
+    HARBOR_CHROME_OFFICIAL_BROWSER_VERSION: chromeBinding.browser_version,
+    HARBOR_CHROME_OFFICIAL_PLAYWRIGHT_VERSION: chromeBinding.playwright_version,
+    HARBOR_PLAYWRIGHT_PYTHON: chromeBinding.python.path
+  });
+  if (camoufoxBinding && chromeBinding) {
+    environment.HARBOR_BROWSER_PROVIDER = 'camoufox';
+    environment.HARBOR_BROWSER_PATH = camoufoxBinding.browser.executable;
+  }
   return environment;
 }

@@ -1,7 +1,7 @@
 # Profile Environment V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.0
+> 版本：1.1
 > 日期：2026-09-14
 > 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
@@ -355,6 +355,54 @@ Instance 不热改，timezone/language/viewport 的 owner 更新进入 pending�
 安全停止并按同 Profile 重启后才成为 effective；实际 Page readback 与
 bundle/Provider 摘要另列 observed/support。上述静态来源与固定材料是
 validation facts；installed/live/Plugin 证据必须继续按实际消费者和范围单独回读，不能仅由材料存在推导。
+
+### 11.1.1 官方 Chrome 安装配对与严格持久 reader（#528）
+
+官方 Chrome 的公开连接适配只消费 owner 写入的
+`installation.json.chromeOfficial`。该 Provider-private 记录固定为
+`webenvoy.chrome-official/v1`，只接受以下 canonical 字段；路径是私有
+安装事实，不投影给普通 Agent：
+
+```json
+{
+  "schema": "webenvoy.chrome-official/v1",
+  "provider": "chrome_official",
+  "source": "official_release",
+  "signature_status": "apple_codesign_verified",
+  "browser_version": "153.0.8010.37",
+  "playwright_version": "1.60.0",
+  "browser": {
+    "install_root": "<managed .app>",
+    "executable": "<executable inside install_root>",
+    "version": "153.0.8010.37",
+    "executable_sha256": "83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2"
+  },
+  "python": { "path": "<same installed Python>", "executable_sha256": "<sha256>" },
+  "sources": {
+    "browser": {
+      "path": "<owner-verified official archive>",
+      "sha256": "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3"
+    }
+  },
+  "source_sha256": {
+    "browser": "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3"
+  }
+}
+```
+
+Owner setup 的便利 parser 可以接受既有命令别名并归一化为上述形状；
+它不等于 stored reader。读取持久记录时严格拒绝缺字段、未知字段、别名
+字段、重复事实冲突、旧或未知 schema/version，以及任何版本、来源、签名、
+归档或 executable hash 不匹配。启动前重新计算实际 executable、source
+archive 和 Python executable 摘要；持久 Python 摘要必须与当前文件相同，
+否则拒绝，不通过重写记录、清理 Profile、下载或升级来修复。`browser.version`
+必须等于顶层 `browser_version`，`source_sha256.browser` 必须等于归档摘要。
+
+Playwright 必须由同一记录确认是 `1.60.0`。同一安装若同时存在精确的
+Camoufox 与 Chrome binding，两者必须使用相同的 Python path 和 executable
+SHA-256；不一致、缺少共同资产或新旧组件混装均在 spawn 前拒绝。旧记录
+不删除、不静默迁移，也不被新共享 Chrome adapter 消费；没有精确 v1 记录
+时不授予该新路径资格，既有 Camoufox binding 与其材料规则不改变。
 
 ### 11.2 历史正式启动机制（非当前支持）
 
