@@ -1,0 +1,126 @@
+{
+  "schema_version": "webenvoy.browser-operation-scope-semantics-v2-verification/v1",
+  "work_item": 544,
+  "recorded_at": "2026-09-15",
+  "status": "installed_and_agent_gates_passed_review_pending",
+  "scope": "Default Agent operation authorization, legacy request-guard compatibility, and Camoufox installed consumption; no Chrome qualification or support claim.",
+  "runtime_candidate": {
+    "commit": "89a3977418638a4784d0952bd409b707c87e9e2a",
+    "tree": "31ee8f5924acf9ab17b2af90ced10aa9ae2e1f8a",
+    "package_asset_sha256": "f8440bdc1eeb57964fc5c3df840ebf81ffdac9c1216220d02ff87a6449c3704d",
+    "candidate_build_ordinal": 7,
+    "candidate_note": "The first six packages are retained as non-final implementation evidence. Only this reviewer-frozen candidate was used for final installed and Agent verification."
+  },
+  "provider_pairing": {
+    "provider": "camoufox",
+    "camoufox_python": "0.5.6",
+    "browser": "152.0.4-beta.30",
+    "playwright": "1.60.0",
+    "browser_archive_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+    "browser_executable_sha256": "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33",
+    "camoufox_wheel_sha256": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+    "playwright_wheel_sha256": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5",
+    "change": "none; the source and hash qualification from #541 is reused"
+  },
+  "compatibility": {
+    "legacy_default": "Records without scope_semantics remain legacy_request_guard_v1.",
+    "v2_confirmation": "A stopped Profile is explicitly confirmed by the owner; the source Grant remains unchanged and a new agent_operations_v2 Grant is issued without widening its scope.",
+    "old_client_write": "A legacy-shaped policy update against a v2 Profile rejects with managed_access_scope_confirmation_required and leaves policy state unchanged.",
+    "read_only_exception": [
+      "profile.list",
+      "profile.read",
+      "recovery.inspect",
+      "recovery.status"
+    ],
+    "strict_operations": "Browser dispatch, start, Page, Files, diagnostics, interaction, recovery.request, and environment mutations require matching Grant/Profile semantics.",
+    "active_instance": "The effective semantics are fixed when the Instance starts and cannot be hot-switched."
+  },
+  "installed_verification": {
+    "owner_confirmation": {
+      "source_grant_preserved": true,
+      "receipt_reconciled_after_response_loss": true,
+      "agent_cannot_confirm": true,
+      "v2_profile": "profile_40edbc21eb442f33b971c92f",
+      "unchanged_legacy_profile": "profile_7cc807aa27f79e3cd2b136f9"
+    },
+    "authorization_and_page": [
+      "The old Grant can read the converted Profile but its browser dispatch rejects before a Run is created.",
+      "An explicit unauthorized page.open rejects before dispatch.",
+      "P1 directly observed its existing marker before and after stop/start; P2 directly observed its separate existing marker.",
+      "P1 and P2 remained isolated."
+    ],
+    "files_and_events": {
+      "upload_sha256": "653364e5aaffd0fddac995ab514fbd656150538f8d84651b42a7ca642521be7d",
+      "redirected_download_sha256": "8440bc02e883dcf37ed0e1f1c99a14ebaac7c9be64b6ef97dd813515fb07eda4",
+      "redirected_download_run_id": "managed-fca0c8dd971aa1cae5e5bb7bdb1e18cd3815ea7001936c0684bd11c3d450f46d",
+      "owner_export_verified": true,
+      "silent_window_ms": 15370,
+      "delayed_completion_without_browser_commands": true
+    },
+    "runtime_restart": {
+      "marker_present_without_recreation": true,
+      "original_results_preserved": true,
+      "download_material_export_preserved": true,
+      "authorization_semantics_preserved": true,
+      "old_unknown_preserved": true
+    }
+  },
+  "real_agent": {
+    "status": "passed",
+    "host": "Codex Desktop",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "max",
+    "thread": "01a0a45a-93e9-7011-8eae-26b3e8e0dd15",
+    "results": [
+      "Started the existing P1 Profile and directly observed its existing marker.",
+      "Filled the ordinary field, uploaded the approved PNG, and read the page receipt.",
+      "Downloaded the same-page CSV through the v2 CDN redirect and queried both original operation keys without replay.",
+      "Owner export independently matched sha256 8440bc02e883dcf37ed0e1f1c99a14ebaac7c9be64b6ef97dd813515fb07eda4.",
+      "The owner stopped the exact Instance after verification."
+    ]
+  },
+  "historical_result": {
+    "run_id": "managed-ef2931c0744697ee11c86f73118070325c4123a11cefc8f2d0cefab4c5757a30",
+    "status": "unknown_outcome",
+    "dispatch_state": "dispatched",
+    "file_ref": null,
+    "preserved_without_replay": true
+  },
+  "regression": {
+    "current_head_completed": [
+      "Core managed-access and managed-browser self-checks",
+      "API self-checks",
+      "Harbor runtime-api tests: 350 passed, 0 failed, 1 Windows-only skip",
+      "git diff --check"
+    ],
+    "final_exact_head_checks": "pending after this evidence-only commit",
+    "inherited_or_audited": [
+      "Unchanged Camoufox source qualification and shared execution installation evidence from #541",
+      "Unchanged native takeover/return evidence from #526",
+      "The complete #519/#516/#523/#526 matrices were not mechanically repeated"
+    ]
+  },
+  "review": {
+    "worker": {
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "max"
+    },
+    "early_and_freeze_reviewer": {
+      "model": "gpt-6-astra",
+      "reasoning_effort": "low",
+      "result": "The compatibility classification at 89a3977418638a4784d0952bd409b707c87e9e2a is acceptable for one formal candidate."
+    },
+    "final_exact_head_review": "pending"
+  },
+  "excluded": [
+    "Chrome qualification, adapter, installation, and Agent verification",
+    "Chrome crash or dump investigation",
+    "new browser or SDK versions",
+    "full browser-lifecycle network isolation"
+  ],
+  "non_claims": [
+    "This does not complete #528 or enable Chrome generic Page, Files, diagnostics, control, or recovery.",
+    "The v2 default controls Agent operations and reads; it is not a full browser network sandbox.",
+    "No Profile database, credential, browser package, or raw payload is committed."
+  ]
+}
