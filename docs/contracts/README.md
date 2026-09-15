@@ -19,7 +19,7 @@ Page/navigation、Network/Console 与已安装 SKILL 的正式 wire/投影合同
 | Provider Selection and Creation Default V1 | [provider-selection-v1.md](../specs/provider-selection-v1.md) | 项目推荐、用户新建默认、本次选择、Profile binding、Harbor preference/selection wire、Plugin/Grant、幂等与兼容边界。 |
 | Managed SKILL Library Lifecycle V1 | [skill-library-lifecycle-v1.md](../specs/skill-library-lifecycle-v1.md) | 可选固定来源 SKILL 的身份、受管 data-root 存储、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与重启持久性。 |
 | Managed Browser Files V1 (v1.1) | [browser-files-v1.md](../specs/browser-files-v1.md) | #523 owner 文件材料、固定 `file.upload`/`file.download` projection、Grant/Page/ControlLease 绑定、配额与保留、原子下载归属、结果/unknown 对账及 legacy/v2 归属边界。 |
-| Grant Wire Contract V1 (v1.4) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner一次确认、严格 reader、撤销/过期与 idempotency 语义。 |
+| Grant Wire Contract V1 (v1.4) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle（`/agent-access/v2/grants`、`/agent-access/v2/profile-policies`）、digest CAS、可信 stopped、严格 reader、撤销/过期与 idempotency 语义。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：
 

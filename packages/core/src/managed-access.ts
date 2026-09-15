@@ -151,6 +151,40 @@ function policy(value: unknown): ManagedProfilePolicy {
   const { profile_ref, ...limits } = obj;
   return { profile_ref: string(profile_ref), ...ceiling(limits) };
 }
+function v2Policy(value: unknown, profileRef: string): ManagedProfilePolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_access_invalid_input");
+  const raw = value as Record<string, unknown>;
+  const parsed = policy({ ...raw, scope_semantics: raw.scope_semantics ?? "agent_operations_v2" });
+  if (parsed.profile_ref !== profileRef || parsed.scope_semantics !== "agent_operations_v2") return fail("managed_access_scope_confirmation_invalid");
+  return parsed;
+}
+function policySnapshot(value: ManagedProfilePolicy): Record<string, unknown> {
+  return {
+    profile_ref: value.profile_ref,
+    allowed_operations: value.allowed_operations,
+    allowed_origins: value.allowed_origins,
+    controlled_interaction_origins: value.controlled_interaction_origins ?? [],
+    scope_semantics: scopeSemantics(value.scope_semantics)
+  };
+}
+function grantSnapshot(value: ManagedGrant): Record<string, unknown> {
+  return {
+    grant_id: value.grant_id,
+    principal_id: value.principal_id,
+    profile_refs: value.profile_refs,
+    allowed_operations: value.allowed_operations,
+    allowed_origins: value.allowed_origins,
+    expires_at: value.expires_at,
+    revoked_at: value.revoked_at,
+    creation_template: value.creation_template,
+    max_created_profiles: value.max_created_profiles,
+    created_profile_refs: value.created_profile_refs,
+    skill_scope: value.skill_scope ?? null,
+    file_scope: value.file_scope ?? null,
+    scope_semantics: scopeSemantics(value.scope_semantics)
+  };
+}
+function grantDigest(value: ManagedGrant): string { return hash(canonical(grantSnapshot(value))); }
 type ParsedGrant = {
   principal_id: string;
   profile_refs: string[];
@@ -322,6 +356,57 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         return grant;
       }));
     },
+    async issueAgentOperationsV2Grant(value: unknown): Promise<ManagedGrant> {
+      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "policy_digest", "allowed_operations", "allowed_origins", "expires_at"], ["source_grant_id", "source_grant_digest", "replaces_grant_id", "replaces_grant_digest", "skill_scope", "file_scope"]);
+      const principalId = string(input.principal_id), policyDigest = string(input.policy_digest);
+      if (!/^[a-f0-9]{64}$/.test(policyDigest)) return fail("managed_access_invalid_input");
+      const profileRefs = strings(input.profile_refs);
+      if (profileRefs.length !== 1) return fail("managed_access_invalid_input");
+      const profileRef = profileRefs[0]!;
+      const parsedOperations = operations(input.allowed_operations), parsedOrigins = strings(input.allowed_origins, origin), expiresAt = timestamp(input.expires_at);
+      const sourceGrantId = input.source_grant_id === undefined ? undefined : string(input.source_grant_id);
+      const sourceGrantDigest = input.source_grant_digest === undefined ? undefined : string(input.source_grant_digest);
+      if ((sourceGrantId === undefined) !== (sourceGrantDigest === undefined) || sourceGrantDigest !== undefined && !/^[a-f0-9]{64}$/.test(sourceGrantDigest)) return fail("managed_access_invalid_input");
+      const replaceGrantId = input.replaces_grant_id === undefined ? undefined : string(input.replaces_grant_id);
+      const replaceGrantDigest = input.replaces_grant_digest === undefined ? undefined : string(input.replaces_grant_digest);
+      if ((replaceGrantId === undefined) !== (replaceGrantDigest === undefined) || replaceGrantDigest !== undefined && !/^[a-f0-9]{64}$/.test(replaceGrantDigest)) return fail("managed_access_invalid_input");
+      const parsedSkillScope = input.skill_scope === undefined ? undefined : skillScope(input.skill_scope);
+      const parsedFileScope = input.file_scope === undefined ? undefined : fileScope(input.file_scope);
+      return transaction(state => receipt(state, "issueAgentOperationsV2Grant", input, () => {
+        const sourceGrant = sourceGrantId === undefined ? undefined : state.grants.find(item => item.grant_id === sourceGrantId);
+        if (sourceGrantId !== undefined && !sourceGrant) return fail("managed_access_v2_grant_source_invalid");
+        if (sourceGrant && (scopeSemantics(sourceGrant.scope_semantics) !== "agent_operations_v2" || !sourceGrant.profile_refs.includes(profileRef) || sourceGrant.principal_id !== principalId)) return fail("managed_access_v2_grant_source_invalid");
+        if (sourceGrant && sourceGrantDigest !== undefined && grantDigest(sourceGrant) !== sourceGrantDigest) return fail("managed_access_grant_conflict");
+        if (!state.principals.some(item => item.principal_id === principalId && item.revoked_at === null)) return fail("managed_access_authentication_required");
+        const profilePolicy = state.profile_policies.find(item => item.profile_ref === profileRef);
+        if (!profilePolicy || scopeSemantics(profilePolicy.scope_semantics) !== "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
+        if (hash(canonical(policySnapshot(profilePolicy))) !== policyDigest) return fail("managed_access_policy_conflict");
+        if (Date.parse(expiresAt) <= Date.parse(now()) || parsedOperations.includes("profile.create") ||
+          !operationSubset(parsedOperations, profilePolicy.allowed_operations) || !subset(parsedOrigins, profilePolicy.allowed_origins)) return fail("managed_access_scope_confirmation_expands_scope");
+        const replacement = replaceGrantId === undefined ? undefined : state.grants.find(item => item.grant_id === replaceGrantId);
+        if (replaceGrantId !== undefined && (!replacement || replacement.principal_id !== principalId || replacement.profile_refs.length !== 1 || replacement.profile_refs[0] !== profileRef || scopeSemantics(replacement.scope_semantics) !== "agent_operations_v2" || sourceGrant && (sourceGrant.profile_refs.length !== 1 || sourceGrant.revoked_at !== null || Date.parse(sourceGrant.expires_at) <= Date.parse(now())) || replacement.revoked_at !== null || Date.parse(replacement.expires_at) <= Date.parse(now()))) return fail("managed_access_v2_grant_replacement_invalid");
+        if (replacement && replaceGrantDigest !== undefined && grantDigest(replacement) !== replaceGrantDigest) return fail("managed_access_grant_conflict");
+        const grant: ManagedGrant = {
+          grant_id: `grant:${randomUUID()}`,
+          principal_id: principalId,
+          profile_refs: [profileRef],
+          allowed_operations: parsedOperations,
+          allowed_origins: parsedOrigins,
+          expires_at: expiresAt,
+          revoked_at: null,
+          creation_template: null,
+          max_created_profiles: 0,
+          created_profile_refs: [],
+          ...(parsedSkillScope === undefined ? {} : { skill_scope: parsedSkillScope }),
+          ...(parsedFileScope === undefined ? {} : { file_scope: parsedFileScope }),
+          scope_semantics: "agent_operations_v2"
+        };
+        state.schema_version = "webenvoy.managed-access.v1";
+        state.grants.push(grant);
+        if (replacement) replacement.revoked_at ??= now();
+        return grant;
+      }));
+    },
     async revokeGrant(value: unknown): Promise<ManagedGrant> {
       const input = object(value, ["idempotency_key", "grant_id"]), id = string(input.grant_id);
       return transaction(state => receipt(state, "revokeGrant", input, () => {
@@ -359,6 +444,26 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== parsed.profile_ref);
         state.profile_policies.push(parsed); return parsed;
       }));
+    },
+    async updateAgentOperationsV2ProfilePolicy(value: unknown): Promise<ManagedProfilePolicy> {
+      const input = object(value, ["idempotency_key", "profile_ref", "current_policy_digest", "allowed_operations", "allowed_origins", "controlled_interaction_origins"]);
+      const idempotencyKey = string(input.idempotency_key), profileRef = string(input.profile_ref);
+      const currentPolicyDigest = string(input.current_policy_digest);
+      if (!/^[a-f0-9]{64}$/.test(currentPolicyDigest)) return fail("managed_access_invalid_input");
+      const proposed = v2Policy({ profile_ref: profileRef, allowed_operations: input.allowed_operations, allowed_origins: input.allowed_origins, ...(input.controlled_interaction_origins === undefined ? {} : { controlled_interaction_origins: input.controlled_interaction_origins }) }, profileRef);
+      const previous = await completedReceipt<ManagedProfilePolicy>("updateAgentOperationsV2ProfilePolicy", input);
+      if (previous !== undefined) return previous;
+      if (!options.withStoppedProfile) return fail("managed_access_profile_state_unavailable");
+      return options.withStoppedProfile(profileRef, idempotencyKey, () => transaction(state => receipt(state, "updateAgentOperationsV2ProfilePolicy", input, () => {
+        const existing = state.profile_policies.find(item => item.profile_ref === profileRef);
+        if (!existing || scopeSemantics(existing.scope_semantics) !== "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
+        const actualSnapshot = policySnapshot(existing);
+        if (hash(canonical(actualSnapshot)) !== currentPolicyDigest) return fail("managed_access_policy_conflict");
+        state.schema_version = "webenvoy.managed-access.v1";
+        state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== profileRef);
+        state.profile_policies.push(proposed);
+        return proposed;
+      })));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
       const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "skill_ref", "source_ref", "revision_ref", "file_refs"]);
@@ -497,7 +602,12 @@ export function createFileManagedAccessStore(options: { directory: string; clock
     },
     async list() {
       const state = await read();
-      return { principals: state.principals.map(publicPrincipal), connections: state.connections, grants: state.grants, profile_policies: state.profile_policies };
+      return {
+        principals: state.principals.map(publicPrincipal),
+        connections: state.connections,
+        grants: state.grants.map(item => ({ ...item, grant_digest: grantDigest(item) })),
+        profile_policies: state.profile_policies.map(item => ({ ...item, policy_digest: hash(canonical(policySnapshot(item))) }))
+      };
     }
   };
 }

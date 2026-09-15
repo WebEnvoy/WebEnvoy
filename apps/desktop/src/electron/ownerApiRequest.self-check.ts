@@ -23,6 +23,12 @@ assert.equal(ownerSupervisorAuthorizationHeader(harborRequest, undefined, creden
 const profilePolicyRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/profile-policies", method: "POST" });
 assert(profilePolicyRequest.ok);
 assert.equal(profilePolicyRequest.method, "POST");
+const v2ProfilePolicyRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/v2/profile-policies", method: "POST" });
+assert(v2ProfilePolicyRequest.ok);
+assert.equal(v2ProfilePolicyRequest.method, "POST");
+const v2GrantRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/v2/grants", method: "POST" });
+assert(v2GrantRequest.ok);
+assert.equal(v2GrantRequest.method, "POST");
 const scopeConfirmationRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/scope-confirmations", method: "POST" });
 assert(scopeConfirmationRequest.ok);
 assert.equal(scopeConfirmationRequest.method, "POST");

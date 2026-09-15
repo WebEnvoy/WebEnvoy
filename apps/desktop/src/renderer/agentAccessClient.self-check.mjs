@@ -20,13 +20,14 @@ try {
       import React from "react";
       import {createRoot} from "react-dom/client";
       import {AgentAccessPanel} from "./AgentAccessPanel";
-      import {projectAgentAccess,createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,defaultAgentOperations} from "./agentAccessClient";
+      import {projectAgentAccess,createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,createAgentOperationsV2DirectGrantInput,createAgentOperationsV2GrantInput,createAgentOperationsV2PolicyInput,defaultAgentOperations} from "./agentAccessClient";
       window.check = {calls:[], rejection:true, unknown:false, receipt:false, reads:0};
-      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]},{grant_id:"grant:legacy",principal_id:"principal:one",profile_refs:["profile:isolated"],allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:null,max_created_profiles:0,created_profile_refs:[]}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"]}],secret:"never-render-this"};
+      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]},{grant_id:"grant:legacy",principal_id:"principal:one",profile_refs:["profile:isolated"],allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:null,max_created_profiles:0,created_profile_refs:[]}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"]}],secret:"never-render-this"};window.fixtureState=state;
       window.webenvoyShell = {requestOwnerJson:async request=>{
         if(request.path === "/agent-access/management-policy") { if(request.method === "PUT") window.check.policyMutation=request.body; return {ok:true,body:{ok:true,configuration:null}}; }
         window.check.calls.push(request);
         if(request.path.includes("/operations/")) return window.check.receipt ? {ok:true,body:{ok:true,operation:{status:"completed",result:{}}}} : {ok:false,status:404,error:"not_found"};
+        if(request.path === "/owner/files") return {ok:true,body:{ok:true,files:[{file_ref:"attachment:runtime/11111111-1111-4111-8111-111111111111",profile_ref:"profile:v2",status:"available",display_name:"可批准材料",mime_type:"text/plain",byte_length:12,expires_at:"2099-01-01T00:00:00.000Z"},{file_ref:"attachment:runtime/22222222-2222-4222-8222-222222222222",profile_ref:"profile:v2",status:"revoked",display_name:"不可用材料",mime_type:"text/plain",byte_length:12,expires_at:"2099-01-01T00:00:00.000Z"},{file_ref:"attachment:runtime/33333333-3333-4333-8333-333333333333",profile_ref:"profile:other",status:"available",display_name:"其它 Profile 材料",mime_type:"text/plain",byte_length:12,expires_at:"2099-01-01T00:00:00.000Z"}]}};
         if(request.method==="GET"){window.check.reads++;const snapshot=structuredClone(state);if(window.check.holdRead){window.check.holdRead=false;await new Promise(resolve=>window.check.releaseRead=resolve);}return {ok:true,body:snapshot};}
         if(window.check.unknown) throw new Error("response lost");
         if(window.check.rejection) return {ok:false,status:403,error:"denied"};
@@ -36,8 +37,9 @@ try {
       const root=createRoot(document.getElementById("root"));
       window.mount=()=>root.render(<AgentAccessPanel endpoint="http://core.invalid"/>);
       window.projected=projectAgentAccess(state);
+      window.v2Projected=projectAgentAccess({...state,grants:[{grant_id:"grant:v2",principal_id:"principal:one",profile_refs:["profile:isolated"],allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"],expires_at:"2020-01-01T00:00:00.000Z",revoked_at:"2026-09-09T01:00:00.000Z",creation_template:null,max_created_profiles:0,created_profile_refs:[],scope_semantics:"agent_operations_v2",grant_digest:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"],controlled_interaction_origins:[],scope_semantics:"agent_operations_v2",policy_digest:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]});
       window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false},"","camoufox");
-      window.check.inputs={createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,defaultAgentOperations};
+      window.check.inputs={createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,createAgentOperationsV2DirectGrantInput,createAgentOperationsV2GrantInput,createAgentOperationsV2PolicyInput,defaultAgentOperations};
       window.confirm=()=>true;
       window.mount();
     `,
@@ -77,6 +79,20 @@ try {
   assert.equal(v2Input.source_grant_id, "grant:legacy");
   assert.deepEqual(v2Input.new_grant.allowed_operations, ["instance.read"]);
   assert.equal(v2Input.new_grant.scope_semantics, undefined);
+  const lifecycleInput = await evaluate("window.check.inputs.createAgentOperationsV2GrantInput(window.v2Projected.grants[0],window.v2Projected.profile_policies[0],'v2-lifecycle-key')");
+  assert.equal(lifecycleInput.source_grant_id, 'grant:v2');
+  assert.equal(lifecycleInput.principal_id, 'principal:one');
+  assert.deepEqual(lifecycleInput.profile_refs, ['profile:isolated']);
+  assert.equal(lifecycleInput.policy_digest, 'b'.repeat(64));
+  const directV2Input = await evaluate("window.check.inputs.createAgentOperationsV2DirectGrantInput('principal:one',window.v2Projected.profile_policies[0],{origin:'https://public.invalid',operations:['instance.read'],controlled:false},'v2-direct-key',1)");
+  assert.equal(directV2Input.source_grant_id, undefined);
+  assert.equal(directV2Input.principal_id, 'principal:one');
+  assert.deepEqual(directV2Input.profile_refs, ['profile:isolated']);
+  assert.equal(directV2Input.policy_digest, 'b'.repeat(64));
+  assert.equal(Date.parse(directV2Input.expires_at) > Date.now(), true);
+  const policyV2Input = await evaluate("window.check.inputs.createAgentOperationsV2PolicyInput(window.v2Projected.profile_policies[0],{origin:'https://public.invalid',operations:['instance.read'],controlled:false},'policy-v2-key')");
+  assert.equal(policyV2Input.current_policy_digest, 'b'.repeat(64));
+  assert.deepEqual(policyV2Input.controlled_interaction_origins, []);
   assert.equal(await evaluate("window.check.inputs.defaultAgentOperations.includes('instance.input')"), false);
   assert.equal(await evaluate("document.querySelector('[name=controlled_origin]').checked"), false);
   assert.equal(await evaluate("(()=>{try{window.check.inputs.createAgentGrantInput('p',24,'k',{origin:'https://a.invalid/path',operations:['instance.read'],controlled:false});return false}catch{return true}})()"), true);
@@ -145,7 +161,40 @@ try {
   await waitFor("document.body.textContent.includes('尚不能确认')");
   assert.equal(await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/profile-policies'&&x.method==='POST').length"),policyPosts);
   assert.equal(await evaluate(`${button("保存 Profile 权限上限")}.disabled`),true);
-  console.log("Agent access UI: lists, refusal, revoke refresh, isolated mutation keys and query-only unknown recovery passed.");
+  await evaluate(`window.check.receipt=true;${button("查询原操作结果")}.click()`);
+  await waitFor("localStorage.length===0");
+  await evaluate(`window.fixtureState.grants=[];window.fixtureState.profile_policies=[{profile_ref:"profile:v2",allowed_operations:["instance.read","instance.input"],allowed_origins:["https://public.invalid","https://controlled.invalid"],controlled_interaction_origins:["https://controlled.invalid"],scope_semantics:"agent_operations_v2",policy_digest:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}];window.check.unknown=false;window.check.rejection=true;${button("刷新授权状态")}.click()`);
+  await waitFor(`document.querySelector('[name=grant_profile] option[value="profile:v2"]')`);
+  await evaluate(`const principalSelect=document.querySelector('[name=grant_principal]');principalSelect.value='principal:one';principalSelect.dispatchEvent(new Event('change',{bubbles:true}));const v2ProfileSelect=document.querySelector('[name=grant_profile]');v2ProfileSelect.value='profile:v2';v2ProfileSelect.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await waitFor("document.body.textContent.includes('可批准材料')");
+  assert.equal(await evaluate("window.check.calls.some(x=>x.path==='/owner/files'&&x.method==='GET')"), true);
+  assert.equal(await evaluate("document.body.textContent.includes('不可用材料')"), false);
+  assert.equal(await evaluate("document.body.textContent.includes('其它 Profile 材料')"), false);
+  await evaluate(`const v2Origin=document.querySelectorAll('[name=scope_origin_0]')[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(v2Origin,'https://public.invalid');v2Origin.dispatchEvent(new Event('input',{bubbles:true}));`);
+  await evaluate(`const directForm=[...document.querySelectorAll('form')].find(form=>form.textContent.includes('直接签发 v2 Grant'));const directFile=[...directForm.querySelectorAll('label')].find(label=>label.textContent.includes('可批准材料'))?.querySelector('input');directFile?.click();`);
+  await waitFor(`[...document.querySelectorAll('button')].some(el=>el.textContent==='确认签发 v2 Grant'&&!el.disabled)`);
+  await evaluate(`[...document.querySelectorAll('button')].find(el=>el.textContent==='确认签发 v2 Grant'&&!el.disabled).click()`);
+  await waitFor("document.body.textContent.includes('拒绝')");
+  const directPost = await evaluate("window.check.calls.filter(x=>x.path==='/agent-access/v2/grants'&&x.method==='POST').at(-1).body");
+  assert.equal(directPost.source_grant_id, undefined);
+  assert.equal(directPost.principal_id, 'principal:one');
+  assert.deepEqual(directPost.profile_refs, ['profile:v2']);
+  assert.equal(directPost.policy_digest, 'b'.repeat(64));
+  assert.deepEqual(directPost.allowed_origins, ['https://public.invalid']);
+  assert.deepEqual(directPost.file_scope.upload_refs, ['attachment:runtime/11111111-1111-4111-8111-111111111111']);
+  assert.deepEqual(directPost.file_scope.allowed_mime_types, ['text/plain']);
+  assert.equal(directPost.file_scope.max_file_bytes, 12);
+  await evaluate(`const policySelectV2=document.querySelector('select');policySelectV2.value='profile:v2';policySelectV2.dispatchEvent(new Event('change',{bubbles:true}));`);
+  await waitFor("document.body.textContent.includes('精确受控交互 origin')");
+  assert.equal(await evaluate("[...document.querySelectorAll('label')].some(el=>el.textContent.includes('允许受控交互：https://controlled.invalid'))"), true);
+  assert.equal(await evaluate("Boolean([...document.querySelectorAll('label')].find(el=>el.textContent.includes('允许受控交互：https://public.invalid'))?.querySelector('input')?.checked)"), false);
+  await waitFor(`!${button("确认调整 v2 权限上限")}.disabled`);
+  await evaluate(`${button("确认调整 v2 权限上限")}.click()`);
+  await waitFor("window.check.calls.some(x=>x.path==='/agent-access/v2/profile-policies')");
+  const v2PolicyPost = await evaluate("window.check.calls.find(x=>x.path==='/agent-access/v2/profile-policies').body");
+  assert.equal(v2PolicyPost.profile_ref, 'profile:v2');
+  assert.deepEqual(v2PolicyPost.controlled_interaction_origins, ['https://controlled.invalid']);
+  console.log("Agent access UI: legacy recovery, direct v2 grant, exact controlled origins and owner-file filtering passed.");
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

@@ -82,7 +82,7 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 ### 5.2 保护与结果
 
-保留 Profile ceiling、单个 Grant、task scope 与 Runtime 条件的交集；工具可见或适配器存在都不授予权限。Grant/Profile policy 的 `scope_semantics` 缺省为 `legacy_request_guard_v1`，显式 `agent_operations_v2` 只能由 owner 对已停止 Profile 通过现有 receipt/transaction 一次确认生成，且 Instance 启动后固定；Agent/task 不能指定、切换或扩大它。legacy 页面请求保护在受管外部导航前建立并逐跳验证；v2 对显式导航仍做 pre-dispatch origin 检查，但普通资源、CDN 和 redirect 不依赖全局 route guard，合法 click 的自然越界保持 `dispatched`。v2 后续 observe/read/input 只返回脱敏 origin 与 opaque Page ref；观察调用不扩大已有 scope。页面不可归属时局部拒绝，不按 URL、标题、事件先后或最后点击猜测。
+保留 Profile ceiling、单个 Grant、task scope 与 Runtime 条件的交集；工具可见或适配器存在都不授予权限。Grant/Profile policy 的 `scope_semantics` 缺省为 `legacy_request_guard_v1`，首次转换为显式 `agent_operations_v2` 只能由 owner 对已停止 Profile 通过现有 receipt/transaction 一次确认生成，且 Instance 启动后固定；之后的 owner Grant 续发、重签和有效单 Profile 原子替换不要求停止，只有 v2 policy 调整仍要求可信 stopped。Agent/task 不能指定、切换或扩大它。legacy 页面请求保护在受管外部导航前建立并逐跳验证；v2 对显式导航仍做 pre-dispatch origin 检查，但普通资源、CDN 和 redirect 不依赖全局 route guard，合法 click 的自然越界保持 `dispatched`。v2 后续 observe/read/input 只返回脱敏 origin 与 opaque Page ref；观察调用不扩大已有 scope。页面不可归属时局部拒绝，不按 URL、标题、事件先后或最后点击猜测。
 
 共享实现必须保留 Page/document/observation/control 代次与实际目标核验。原生可选焦点未知不影响可信 Page；原生坐标输入仍需正确窗口对应。接管不是换页、重开或复制现场，交还后重新观察；已派发 unknown 只能 query/reconcile，不重新点击、上传或下载。
 
