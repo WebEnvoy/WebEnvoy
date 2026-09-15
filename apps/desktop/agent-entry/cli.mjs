@@ -125,6 +125,20 @@ if (command === 'setup') {
     const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope', 'file_scope'];
     if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('access_grant_file_invalid');
     result = await requestOwner('/agent-access/grants', value);
+  } else if (action === 'grant-v2') {
+    if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
+    const value = await readJsonFile(required('--grant-file'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_grant_file_invalid');
+    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'file_scope', 'replaces_grant_id', 'replaces_grant_digest'];
+    if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('access_v2_grant_file_invalid');
+    result = await requestOwner('/agent-access/v2/grants', value);
+  } else if (action === 'policy-v2') {
+    if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
+    const value = await readJsonFile(required('--policy-file'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_policy_file_invalid');
+    const allowed = ['idempotency_key', 'profile_ref', 'current_policy_digest', 'allowed_operations', 'allowed_origins', 'controlled_interaction_origins'];
+    if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('access_v2_policy_file_invalid');
+    result = await requestOwner('/agent-access/v2/profile-policies', value);
   } else if (action === 'revoke') {
     const kind = required('--kind');
     if (!['principals', 'connections', 'grants'].includes(kind)) throw new Error('access_revoke_kind_invalid');
@@ -132,7 +146,7 @@ if (command === 'setup') {
     result = await requestOwner(`/agent-access/${kind}/${encodeURIComponent(id)}/revoke`, { idempotency_key: required('--idempotency-key') });
   } else if (action === 'operation') {
     result = await requestOwner(`/agent-access/operations/${encodeURIComponent(required('--operation-ref'))}`);
-  } else throw new Error('Use access list, register, grant, revoke or operation with --data-dir. Owner credentials stay local.');
+  } else throw new Error('Use access list, register, grant, grant-v2, policy-v2, revoke or operation with --data-dir. Owner credentials stay local.');
   console.log(JSON.stringify(result));
 } else if (command === 'files') {
   const action = args[0];

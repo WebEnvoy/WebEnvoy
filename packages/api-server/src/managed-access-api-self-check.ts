@@ -65,9 +65,34 @@ export async function assertManagedAccessApi(): Promise<void> {
     const v2Confirmed = await call("/agent-access/scope-confirmations", owner, v2Input);
     assert.equal(v2Confirmed.status, 201);
     assert.equal(v2Confirmed.body.grant.scope_semantics, "agent_operations_v2");
+    const v2PolicyState = (await call("/agent-access", owner)).body;
+    const v2Policy = v2PolicyState.profile_policies.find((item: Record<string, unknown>) => item.profile_ref === "profile:test");
+    const updatedV2Policy = await call("/agent-access/v2/profile-policies", owner, {
+      idempotency_key: "v2-policy-update",
+      profile_ref: "profile:test",
+      current_policy_digest: v2Policy.policy_digest,
+      allowed_operations: policy.allowed_operations,
+      allowed_origins: policy.allowed_origins,
+      controlled_interaction_origins: policy.controlled_interaction_origins
+    });
+    assert.equal(updatedV2Policy.status, 200);
+    assert.equal(updatedV2Policy.body.profile_policy.scope_semantics, "agent_operations_v2");
+    const lifecycleGrant = await call("/agent-access/v2/grants", owner, {
+      idempotency_key: "v2-lifecycle-issue",
+      source_grant_id: v2Confirmed.body.grant.grant_id,
+      source_grant_digest: v2PolicyState.grants.find((item: Record<string, unknown>) => item.grant_id === v2Confirmed.body.grant.grant_id).grant_digest,
+      principal_id: principal.principal_id,
+      profile_refs: ["profile:test"],
+      policy_digest: (await call("/agent-access", owner)).body.profile_policies.find((item: Record<string, unknown>) => item.profile_ref === "profile:test").policy_digest,
+      allowed_operations: policy.allowed_operations,
+      allowed_origins: policy.allowed_origins,
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    });
+    assert.equal(lifecycleGrant.status, 201);
+    assert.equal(lifecycleGrant.body.grant.scope_semantics, "agent_operations_v2");
     assert.equal((await call("/agent-access/operations/profile-policy", owner)).body.operation.status, "completed");
     const reconnected = await call("/agent-connections", agent, {});
-    assert.deepEqual(reconnected.body.grants, [grant.body.grant, v2Source.body.grant, v2Confirmed.body.grant]);
+    assert.deepEqual(reconnected.body.grants, [grant.body.grant, v2Source.body.grant, v2Confirmed.body.grant, lifecycleGrant.body.grant]);
     assert.notEqual(reconnected.body.connection.connection_id, connected.body.connection.connection_id);
     const secondCredential = "another-agent-credential-long-enough";
     await call("/agent-access/principals", owner, { ...input, idempotency_key: "register-second", credential_hash: createHash("sha256").update(secondCredential).digest("hex") });

@@ -8,6 +8,7 @@ export type AgentGrant = {
   creation_template: { template_ref: string; provider_id: string | null } | null;
   max_created_profiles: number; created_profile_refs: string[];
   scope_semantics: "legacy_request_guard_v1" | "agent_operations_v2";
+  grant_digest?: string;
   skill_scope?: { skill_refs: string[]; source_refs: string[] };
   file_scope?: { upload_refs: string[]; allowed_mime_types: string[]; max_file_bytes: number };
 };
@@ -15,7 +16,7 @@ export type AgentAccessState = {
   principals: AgentPrincipal[]; connections: AgentConnection[]; grants: AgentGrant[];
   profile_policies: AgentProfilePolicy[];
 };
-export type AgentProfilePolicy = { profile_ref: string; allowed_operations: string[]; allowed_origins: string[]; controlled_interaction_origins: string[]; scope_semantics: "legacy_request_guard_v1" | "agent_operations_v2" };
+export type AgentProfilePolicy = { profile_ref: string; allowed_operations: string[]; allowed_origins: string[]; controlled_interaction_origins: string[]; scope_semantics: "legacy_request_guard_v1" | "agent_operations_v2"; policy_digest?: string };
 
 export const agentOperations = [
   ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
@@ -29,11 +30,14 @@ export const agentOperations = [
   ["instance.snapshot", "观察受控页面控件"], ["instance.click", "点击"],
   ["instance.input", "填写非敏感字段"], ["instance.press", "按键"],
   ["instance.scroll", "滚动"], ["instance.wait", "等待页面变化"],
+  ["file.upload", "批准上传文件"], ["file.download", "批准下载文件"],
   ["recovery.inspect", "检查 Profile 恢复兼容性"], ["recovery.request", "请求恢复计划"], ["recovery.status", "查询恢复操作"],
 ] as const;
 export const defaultAgentOperations = ["profile.list", "profile.read", "instance.observe", "environment.read", "instance.read"];
 export const agentManagementScope = "只授权下方选择的 Profile、精确 origin 集合和必要操作。Profile 管理权不隐含网页输入权限。";
-export type AgentScopeInput = { origin: string; origins?: string[]; operations: string[]; controlled: boolean };
+export type AgentScopeInput = { origin: string; origins?: string[]; operations: string[]; controlled: boolean; controlledOrigins?: string[] };
+export const agentFileMimeTypes = ["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"] as const;
+export const agentFileMaxBytes = 10 * 1024 * 1024;
 
 function selectedScope(input: AgentScopeInput) {
   const origins = [...new Set((input.origins?.length ? input.origins : [input.origin]).map(value => value.trim()).filter(Boolean))];
@@ -44,7 +48,9 @@ function selectedScope(input: AgentScopeInput) {
   }
   if (!input.operations.length) throw new Error("请选择必要操作。");
   if (input.operations.some(operation => !agentOperations.some(([id]) => id === operation))) throw new Error("请选择有效操作。");
-  return { allowed_operations: [...input.operations], allowed_origins: origins, controlled_interaction_origins: input.controlled ? origins : [] };
+  const controlled = input.controlledOrigins === undefined ? (input.controlled ? origins : []) : [...new Set(input.controlledOrigins.map(value => value.trim()).filter(Boolean))];
+  if (controlled.some(value => !origins.includes(value))) throw new Error("受控交互 origin 必须来自已授权 origin。");
+  return { allowed_operations: [...input.operations], allowed_origins: origins, controlled_interaction_origins: controlled };
 }
 
 export function createProfilePolicyInput(profileRef: string, input: AgentScopeInput, key: string) {
@@ -86,6 +92,78 @@ export function createAgentOperationsV2Input(grant: AgentGrant, policy: AgentPro
     new_grant: { principal_id: grant.principal_id, profile_refs: [policy.profile_ref], allowed_operations: allowedOperations, allowed_origins: allowedOrigins, expires_at: grant.expires_at, creation_template: null, max_created_profiles: 0, ...(grant.skill_scope ? { skill_scope: grant.skill_scope } : {}), ...(grant.file_scope ? { file_scope: grant.file_scope } : {}) },
     new_profile_policy: { profile_ref: policy.profile_ref, allowed_operations: policy.allowed_operations, allowed_origins: policy.allowed_origins, ...(policy.controlled_interaction_origins.length ? { controlled_interaction_origins: policy.controlled_interaction_origins } : {}) }
   };
+}
+
+export type AgentV2GrantOptions = { scope?: AgentScopeInput; hours?: number; fileScope?: AgentGrant["file_scope"]; replaces?: boolean };
+export function createAgentOperationsV2DirectGrantInput(principalId: string, policy: AgentProfilePolicy, input: AgentScopeInput, key: string, hours = 24, fileScope?: AgentGrant["file_scope"]) {
+  if (!principalId || policy.scope_semantics !== "agent_operations_v2" || !policy.policy_digest) throw new Error("请选择有效 Principal 与带有当前摘要的 v2 Profile。");
+  const selected = selectedScope(input);
+  if (!selected.allowed_operations.length || !selected.allowed_origins.length || ![1, 24, 168].includes(hours)) throw new Error("请选择有效的 v2 授权范围与时限。");
+  validateFileScope(selected.allowed_operations, fileScope);
+  return {
+    idempotency_key: key,
+    principal_id: principalId,
+    profile_refs: [policy.profile_ref],
+    policy_digest: policy.policy_digest,
+    allowed_operations: selected.allowed_operations,
+    allowed_origins: selected.allowed_origins,
+    expires_at: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+    ...(fileScope === undefined ? {} : { file_scope: fileScope }),
+  };
+}
+
+export function createAgentOperationsV2GrantInput(grant: AgentGrant, policy: AgentProfilePolicy, key: string, options: AgentV2GrantOptions = {}) {
+  if (grant.scope_semantics !== "agent_operations_v2" || policy.scope_semantics !== "agent_operations_v2" || !grant.profile_refs.includes(policy.profile_ref) || !grant.grant_digest || !policy.policy_digest) throw new Error("请选择带有当前摘要的 v2 Grant 与 Profile。");
+  const selected = options.scope ? selectedScope(options.scope) : {
+    allowed_operations: grant.allowed_operations.filter(operation => operation !== "profile.create" && policy.allowed_operations.includes(operation)),
+    allowed_origins: grant.allowed_origins.filter(origin => policy.allowed_origins.includes(origin)),
+  };
+  if (!selected.allowed_operations.length || !selected.allowed_origins.length) throw new Error("该 v2 Grant 与 Profile 没有可签发的共同范围。");
+  const hours = options.hours ?? 24;
+  if (![1, 24, 168].includes(hours)) throw new Error("请选择 Agent 授权时限。");
+  validateFileScope(selected.allowed_operations, options.fileScope);
+  return {
+    idempotency_key: key,
+    source_grant_id: grant.grant_id,
+    source_grant_digest: grant.grant_digest,
+    principal_id: grant.principal_id,
+    profile_refs: [policy.profile_ref],
+    policy_digest: policy.policy_digest,
+    allowed_operations: selected.allowed_operations,
+    allowed_origins: selected.allowed_origins,
+    expires_at: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+    ...(options.fileScope === undefined ? {} : { file_scope: options.fileScope }),
+    ...(options.replaces ? { replaces_grant_id: grant.grant_id, replaces_grant_digest: grant.grant_digest } : {})
+  };
+}
+
+export function createAgentOperationsV2PolicyInput(policy: AgentProfilePolicy, input: AgentScopeInput, key: string) {
+  if (policy.scope_semantics !== "agent_operations_v2" || !policy.policy_digest) throw new Error("请选择带有当前摘要的 v2 Profile。");
+  return { idempotency_key: key, profile_ref: policy.profile_ref, current_policy_digest: policy.policy_digest, ...selectedScope(input) };
+}
+
+export type AgentOwnerFile = { file_ref: string; profile_ref: string; status: "available" | "revoked" | "expired" | "deleted"; display_name: string; mime_type: string; byte_length: number; expires_at: string };
+export async function fetchAgentOwnerFiles(endpoint: string): Promise<AgentOwnerFile[]> {
+  const result = record(await requestOwnerJson(endpoint, "/owner/files"));
+  if (result.ok !== true) throw new Error("无法读取 owner 文件材料。");
+  return list(result.files, value => {
+    const item = record(value);
+    if (!Number.isSafeInteger(item.byte_length) || Number(item.byte_length) < 0 || Number(item.byte_length) > agentFileMaxBytes) throw new Error("Core 返回的文件材料大小无效。");
+    const status = item.status;
+    if (status !== "available" && status !== "revoked" && status !== "expired" && status !== "deleted") throw new Error("Core 返回的文件材料状态无效。");
+    const mimeType = text(item.mime_type);
+    if (!agentFileMimeTypes.includes(mimeType as typeof agentFileMimeTypes[number])) throw new Error("Core 返回的文件材料 MIME 无效。");
+    return { file_ref: text(item.file_ref), profile_ref: text(item.profile_ref), status, display_name: text(item.display_name), mime_type: mimeType, byte_length: Number(item.byte_length), expires_at: date(item.expires_at) };
+  });
+}
+
+function validateFileScope(operations: string[], fileScope: AgentGrant["file_scope"] | undefined) {
+  const hasFileOperation = operations.some(operation => operation === "file.upload" || operation === "file.download");
+  if (fileScope === undefined) {
+    if (hasFileOperation) throw new Error("选择文件操作时必须明确 file_scope、MIME 和文件大小上限。");
+    return;
+  }
+  if (!fileScope.allowed_mime_types.length || fileScope.allowed_mime_types.some(mime => !agentFileMimeTypes.includes(mime as typeof agentFileMimeTypes[number])) || new Set(fileScope.allowed_mime_types).size !== fileScope.allowed_mime_types.length || !Number.isSafeInteger(fileScope.max_file_bytes) || fileScope.max_file_bytes < 1 || fileScope.max_file_bytes > agentFileMaxBytes || fileScope.upload_refs.some(ref => !/^attachment:runtime\/[0-9a-f-]{36}$/.test(ref)) || operations.includes("file.upload") && fileScope.upload_refs.length === 0) throw new Error("请明确有效的文件 ref、MIME 集合和大小上限；上传操作至少需要一个材料。");
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -134,13 +212,14 @@ export function projectAgentAccess(value: unknown): AgentAccessState {
         expires_at: date(item.expires_at), revoked_at: revoked(item.revoked_at),
         creation_template: template === null ? null : { template_ref: text(template.template_ref), provider_id: template.provider_id === null ? null : text(template.provider_id) },
         max_created_profiles: Number(item.max_created_profiles), created_profile_refs: list(item.created_profile_refs, text), scope_semantics: scopeSemantics(item.scope_semantics),
+        ...(item.grant_digest === undefined ? {} : { grant_digest: text(item.grant_digest) }),
         ...(item.skill_scope === undefined ? {} : { skill_scope: (() => { const value = record(item.skill_scope); return { skill_refs: list(value.skill_refs, text), source_refs: list(value.source_refs, text) }; })() }),
         ...(item.file_scope === undefined ? {} : { file_scope: (() => { const value = record(item.file_scope); if (!Number.isSafeInteger(value.max_file_bytes)) throw new Error("Core 返回的文件授权无效。"); return { upload_refs: list(value.upload_refs, text), allowed_mime_types: list(value.allowed_mime_types, text), max_file_bytes: Number(value.max_file_bytes) }; })() }),
       };
     }),
     profile_policies: list(source.profile_policies, value => {
       const item = record(value);
-      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text), controlled_interaction_origins: item.controlled_interaction_origins === undefined ? [] : list(item.controlled_interaction_origins, text), scope_semantics: scopeSemantics(item.scope_semantics) };
+      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text), controlled_interaction_origins: item.controlled_interaction_origins === undefined ? [] : list(item.controlled_interaction_origins, text), scope_semantics: scopeSemantics(item.scope_semantics), ...(item.policy_digest === undefined ? {} : { policy_digest: text(item.policy_digest) }) };
     }),
   };
 }

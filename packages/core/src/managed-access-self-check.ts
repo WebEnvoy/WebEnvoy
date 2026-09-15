@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileManagedAccessStore, managedScopeConfirmationSchemaVersion, ManagedAccessError, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
@@ -114,6 +115,186 @@ try {
     assert.equal((await stopped.list()).grants.find(item => item.grant_id === source.grant_id)?.scope_semantics, undefined);
     assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
     assert.deepEqual(await stopped.confirmAgentOperationsV2(confirmationInput), upgraded);
+
+    const v2State = await stopped.list();
+    const currentPolicy = v2State.profile_policies.find(item => item.profile_ref === "profile:v2")!;
+    const upgradedGrantDigest = v2State.grants.find(item => item.grant_id === upgraded.grant.grant_id)!.grant_digest;
+    const expandedPolicy = await stopped.updateAgentOperationsV2ProfilePolicy({
+      idempotency_key: "v2-policy-update",
+      profile_ref: "profile:v2",
+      current_policy_digest: currentPolicy.policy_digest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      controlled_interaction_origins: []
+    });
+    assert.equal(expandedPolicy.scope_semantics, "agent_operations_v2");
+    const expandedPolicyDigest = (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest;
+    await rejected(stopped.updateAgentOperationsV2ProfilePolicy({
+      idempotency_key: "v2-policy-cas-conflict",
+      profile_ref: "profile:v2",
+      current_policy_digest: currentPolicy.policy_digest,
+      allowed_operations: v2Operations,
+      allowed_origins: ["https://example.com"],
+      controlled_interaction_origins: []
+    }), "managed_access_policy_conflict");
+    const directInput = {
+      idempotency_key: "v2-direct-issue",
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: expandedPolicyDigest,
+      allowed_operations: v2Operations,
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    };
+    const sameKeyResults = await Promise.all([stopped.issueAgentOperationsV2Grant(directInput), stopped.issueAgentOperationsV2Grant(directInput)]);
+    const directGrant = sameKeyResults[0]!;
+    assert.equal(sameKeyResults[1]!.grant_id, directGrant.grant_id);
+    assert.equal((await stopped.list()).grants.filter(item => item.grant_id === directGrant.grant_id).length, 1);
+    assert.deepEqual(await stopped.getOwnerOperation("v2-direct-issue"), { status: "completed", result: directGrant });
+    assert.equal(directGrant.scope_semantics, "agent_operations_v2");
+    const lifecycleGrant = await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-lifecycle-issue",
+      source_grant_id: upgraded.grant.grant_id,
+      source_grant_digest: upgradedGrantDigest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: expandedPolicyDigest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+      file_scope: { upload_refs: ["attachment:runtime/00000000-0000-0000-0000-000000000001"], allowed_mime_types: ["image/png"], max_file_bytes: 1024 }
+    });
+    assert.equal(lifecycleGrant.scope_semantics, "agent_operations_v2");
+    assert.notEqual(lifecycleGrant.grant_id, upgraded.grant.grant_id);
+    assert.equal((await stopped.list()).grants.find(item => item.grant_id === upgraded.grant.grant_id)?.revoked_at, null);
+    assert.deepEqual(await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-lifecycle-issue",
+      source_grant_id: upgraded.grant.grant_id,
+      source_grant_digest: upgradedGrantDigest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: expandedPolicyDigest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      expires_at: lifecycleGrant.expires_at,
+      file_scope: { upload_refs: ["attachment:runtime/00000000-0000-0000-0000-000000000001"], allowed_mime_types: ["image/png"], max_file_bytes: 1024 }
+    }), lifecycleGrant);
+    await rejected(stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-lifecycle-issue",
+      source_grant_id: upgraded.grant.grant_id,
+      source_grant_digest: upgradedGrantDigest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: expandedPolicyDigest,
+      allowed_operations: ["profile.read"],
+      allowed_origins: ["https://example.com"],
+      expires_at: lifecycleGrant.expires_at,
+      file_scope: { upload_refs: ["attachment:runtime/00000000-0000-0000-0000-000000000001"], allowed_mime_types: ["image/png"], max_file_bytes: 1024 }
+    }), "managed_access_idempotency_conflict");
+    await stopped.revokeGrant({ idempotency_key: "v2-lifecycle-revoke", grant_id: lifecycleGrant.grant_id });
+    const reissuedGrant = await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-lifecycle-reissue",
+      source_grant_id: lifecycleGrant.grant_id,
+      source_grant_digest: (await stopped.list()).grants.find(item => item.grant_id === lifecycleGrant.grant_id)!.grant_digest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+      file_scope: { upload_refs: ["attachment:runtime/00000000-0000-0000-0000-000000000002"], allowed_mime_types: ["image/png"], max_file_bytes: 2048 }
+    });
+    assert.equal(reissuedGrant.scope_semantics, "agent_operations_v2");
+    assert.equal((await stopped.list()).grants.find(item => item.grant_id === lifecycleGrant.grant_id)?.revoked_at !== null, true);
+    const failedReplacement = {
+      idempotency_key: "v2-lifecycle-replace-write-failure",
+      source_grant_id: reissuedGrant.grant_id,
+      source_grant_digest: (await stopped.list()).grants.find(item => item.grant_id === reissuedGrant.grant_id)!.grant_digest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      replaces_grant_id: reissuedGrant.grant_id,
+      replaces_grant_digest: (await stopped.list()).grants.find(item => item.grant_id === reissuedGrant.grant_id)!.grant_digest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+      file_scope: reissuedGrant.file_scope
+    };
+    const beforeFailedReplacement = await stopped.list();
+    const nodeFs = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+    const originalWriteFile = nodeFs.promises.writeFile;
+    let failManagedAccessWrite = true;
+    nodeFs.promises.writeFile = (async (filePath: Parameters<typeof originalWriteFile>[0], ...args: Parameters<typeof originalWriteFile> extends [unknown, ...infer Rest] ? Rest : never) => {
+      if (failManagedAccessWrite && typeof filePath === "string" && filePath.startsWith(v2Directory) && /managed-access\.json\.[0-9a-f-]{36}\.tmp$/.test(filePath)) {
+        const error = new Error("test managed-access persistence failure");
+        Object.assign(error, { code: "EIO" });
+        throw error;
+      }
+      return originalWriteFile(filePath, ...args);
+    }) as typeof originalWriteFile;
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(stopped.issueAgentOperationsV2Grant(failedReplacement), (error: unknown) => error && typeof error === "object" && (error as { code?: string }).code === "EIO");
+    } finally {
+      failManagedAccessWrite = false;
+      nodeFs.promises.writeFile = originalWriteFile;
+      syncBuiltinESMExports();
+    }
+    const afterFailedReplacement = await stopped.list();
+    assert.deepEqual(afterFailedReplacement.grants, beforeFailedReplacement.grants);
+    assert.equal(afterFailedReplacement.grants.find(item => item.grant_id === reissuedGrant.grant_id)?.revoked_at, null);
+    assert.equal(await stopped.getOwnerOperation(failedReplacement.idempotency_key), undefined);
+    const replacedGrant = await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-lifecycle-replace",
+      source_grant_id: reissuedGrant.grant_id,
+      source_grant_digest: (await stopped.list()).grants.find(item => item.grant_id === reissuedGrant.grant_id)!.grant_digest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      replaces_grant_id: reissuedGrant.grant_id,
+      replaces_grant_digest: (await stopped.list()).grants.find(item => item.grant_id === reissuedGrant.grant_id)!.grant_digest,
+      allowed_operations: [...v2Operations, "file.upload"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+      file_scope: reissuedGrant.file_scope
+    });
+    assert.equal(replacedGrant.scope_semantics, "agent_operations_v2");
+    assert.equal((await stopped.list()).grants.find(item => item.grant_id === reissuedGrant.grant_id)?.revoked_at !== null, true);
+    const persistedV2State = JSON.parse(await readFile(join(v2Directory, "managed-access.json"), "utf8"));
+    persistedV2State.profile_policies.push({ profile_ref: "profile:v2-other", allowed_operations: v2Operations, allowed_origins: ["https://example.com"], controlled_interaction_origins: [], scope_semantics: "agent_operations_v2" });
+    persistedV2State.grants.push({ grant_id: "grant:v2-multi-source", principal_id: v2Principal.principal_id, profile_refs: ["profile:v2", "profile:v2-other"], allowed_operations: v2Operations, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 120_000).toISOString(), revoked_at: null, creation_template: null, max_created_profiles: 0, created_profile_refs: [], scope_semantics: "agent_operations_v2" });
+    await writeFile(join(v2Directory, "managed-access.json"), JSON.stringify(persistedV2State));
+    const multiSource = (await stopped.list()).grants.find(item => item.grant_id === "grant:v2-multi-source")!;
+    const multiPolicyDigest = (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest;
+    const multiSourceInput = {
+      idempotency_key: "v2-multi-source-issue",
+      source_grant_id: multiSource.grant_id,
+      source_grant_digest: multiSource.grant_digest,
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: multiPolicyDigest,
+      allowed_operations: v2Operations,
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    };
+    const multiProfileIssued = await stopped.issueAgentOperationsV2Grant(multiSourceInput);
+    assert.deepEqual(multiProfileIssued.profile_refs, ["profile:v2"]);
+    assert.equal((await stopped.list()).grants.find(item => item.grant_id === multiSource.grant_id)?.revoked_at, null);
+    const multiProfileBeforeReplacement = await stopped.list();
+    await rejected(stopped.issueAgentOperationsV2Grant({ ...multiSourceInput, idempotency_key: "v2-multi-source-replace", replaces_grant_id: multiSource.grant_id, replaces_grant_digest: multiSource.grant_digest }), "managed_access_v2_grant_replacement_invalid");
+    const multiProfileAfterReplacement = await stopped.list();
+    assert.equal(multiProfileAfterReplacement.grants.find(item => item.grant_id === multiSource.grant_id)?.revoked_at, null);
+    assert.equal(multiProfileAfterReplacement.grants.filter(item => item.grant_id === multiProfileIssued.grant_id).length, 1);
+    assert.equal(multiProfileAfterReplacement.grants.length, multiProfileBeforeReplacement.grants.length);
+    const concurrentPolicy = (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!;
+    const concurrentPolicyUpdates = await Promise.allSettled([
+      stopped.updateAgentOperationsV2ProfilePolicy({ idempotency_key: "v2-policy-concurrent-a", profile_ref: "profile:v2", current_policy_digest: concurrentPolicy.policy_digest, allowed_operations: v2Operations, allowed_origins: ["https://example.com"], controlled_interaction_origins: [] }),
+      stopped.updateAgentOperationsV2ProfilePolicy({ idempotency_key: "v2-policy-concurrent-b", profile_ref: "profile:v2", current_policy_digest: concurrentPolicy.policy_digest, allowed_operations: [...v2Operations, "file.download"], allowed_origins: ["https://example.com"], controlled_interaction_origins: [] })
+    ]);
+    assert.equal(concurrentPolicyUpdates.filter(item => item.status === "fulfilled").length, 1);
+    assert.equal(concurrentPolicyUpdates.filter(item => item.status === "rejected" && item.reason.code === "managed_access_policy_conflict").length, 1);
+    const winningPolicy = concurrentPolicyUpdates.find(item => item.status === "fulfilled")!.value;
+    assert.deepEqual((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.allowed_operations, winningPolicy.allowed_operations);
     const legacyScope = { operations: ["profile.list"], profile_refs: ["profile:v2"], origins: ["https://example.com"] };
     const legacyList = await stopped.checkAccess(v2Digest, { connection_id: (await stopped.list()).connections.find(item => item.principal_id === v2Principal.principal_id)!.connection_id, grant_id: source.grant_id, operation: "profile.list", task_scope: legacyScope });
     assert.deepEqual(legacyList.grant.profile_refs, ["profile:v2"]);

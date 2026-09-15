@@ -172,11 +172,17 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (path === "/agent-access/grants" && request.method === "POST") {
         send(response, 201, { ok: true, grant: await store.createGrant(await body(request)) }); return true;
       }
+      if (path === "/agent-access/v2/grants" && request.method === "POST") {
+        send(response, 201, { ok: true, grant: await store.issueAgentOperationsV2Grant(await body(request)) }); return true;
+      }
       if (path === "/agent-access/scope-confirmations" && request.method === "POST") {
         send(response, 201, { ok: true, ...await store.confirmAgentOperationsV2(await body(request)) }); return true;
       }
       if (path === "/agent-access/profile-policies" && request.method === "POST") {
         send(response, 200, { ok: true, profile_policy: await store.setProfilePolicy(await body(request)) }); return true;
+      }
+      if (path === "/agent-access/v2/profile-policies" && request.method === "POST") {
+        send(response, 200, { ok: true, profile_policy: await store.updateAgentOperationsV2ProfilePolicy(await body(request)) }); return true;
       }
       const revoke = /^\/agent-access\/(principals|connections|grants)\/([^/]+)\/revoke$/.exec(path);
       if (revoke && request.method === "POST") {
@@ -202,7 +208,8 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
     // submit returns admitted Run failures itself; access errors escaping it precede dispatch.
     const notDispatched = path === "/managed-browser/operations" && request.method === "POST" && error instanceof ManagedAccessError && code.startsWith("managed_access_");
-    reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : error instanceof ManagedAccessError ? 403 : 503, code, notDispatched);
+    const conflict = code === "managed_access_idempotency_conflict" || code === "managed_access_scope_conflict" || code === "managed_access_grant_conflict" || code === "managed_access_policy_conflict";
+    reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503, code, notDispatched);
   }
   return true;
 }

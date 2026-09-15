@@ -18,6 +18,19 @@ Grant 是管理授权的一层，每次操作还受 Profile 上限、任务范�
 
 人工接管只转移指定 Instance 的控制权。owner 明确交还后，Agent 再调用 start/observe，复用同一 Instance 重新观察；不会自动重复站点动作。
 
+## #547 v2 lifecycle 脱敏验证草稿
+
+状态：draft；本节只列可重复的本地验证和预期边界，不是 installed/live/plugin 证据。所有输入使用合成的 `principal:*`、`profile:*`、`grant:*`、`attachment:runtime/*` 和 digest；不得写入 token、Cookie、Profile 路径、文件正文、URL path/query、截图或完整页面现场。
+
+| 检查 | 入口 | 预期脱敏结果 |
+| --- | --- | --- |
+| 无 source 直接签发 | `POST /agent-access/v2/grants` 或 `access grant-v2 --confirm` | 只返回 Grant/receipt 的 opaque ref、范围摘要和 `grant_digest`；服务端固定 v2、单 Profile、无创建模板 |
+| 过期/撤销来源续发 | 同一 v2 Grant owner 入口，source digest 可选 | 新 Grant 成功，旧 `expires_at`/`revoked_at` 与历史 receipt 原样保留，不恢复来源 |
+| digest 与并发保护 | 两个相同 operation key 的提交、一个陈旧 digest | digest 冲突为可刷新 409；policy reservation 在全部持有者释放前不解除 |
+| 精确 policy 调整 | `POST /agent-access/v2/profile-policies` 或 `access policy-v2 --confirm` | 仅接受 current digest、完整 origin/operation/controlled 列表；活动 Profile 拒绝，列表不扩大 |
+
+最小命令：`pnpm --filter @webenvoy/core-runtime test`、`pnpm --filter @webenvoy/api-server test`、`pnpm --dir services/harbor test -- --test-name-pattern='stopped-scope|holds Profile lifecycle'`、`pnpm --dir apps/desktop typecheck`、`node --test apps/desktop/agent-entry/cli-contract.test.mjs`。Desktop UI 自检使用隐藏 Electron fixture，仅检查 owner files 可用材料过滤、direct v2 body 无 source、controlled origin checkbox 和 unknown/query 状态；不启动 Provider 或真实浏览器。
+
 ## 可运行验证
 
 - `pnpm --filter @webenvoy/core-runtime test`：权限交集、幂等、在途撤销保留结果、未知创建只读对账。

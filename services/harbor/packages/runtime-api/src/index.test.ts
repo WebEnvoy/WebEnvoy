@@ -2057,6 +2057,49 @@ test("holds Profile lifecycle ownership across a stopped-scope transition", asyn
   assert.equal(runtime.releaseStoppedProfileScopeTransition("profile_scope-transition", "scope:transition").status, "released");
 });
 
+test("keeps a shared stopped-scope reservation held until every reentrant owner releases it", async () => {
+  const launches: LocalProviderLaunchInput[] = [];
+  const runtime = new HarborRuntime(capturingLauncher(launches));
+  const identityInput = {
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
+    identity_environment_ref: "identity-env_scope-reentrant",
+    execution_identity_ref: "execution-identity_scope-reentrant",
+    profile_ref: "profile_scope-reentrant",
+    profile_storage_ref: "profile-storage_scope-reentrant",
+    site: { site_id: "scope-reentrant", origin: "https://example.com", display_name: "Scope reentrant" },
+    login_state: "logged_out" as const,
+    storage_state: "present" as const
+  } as const;
+  runtime.createLocalIdentityEnvironment(identityInput);
+
+  assert.equal(runtime.reserveStoppedProfileScopeTransition("profile_scope-reentrant", "scope:shared").status, "held");
+  assert.equal(runtime.reserveStoppedProfileScopeTransition("profile_scope-reentrant", "scope:shared").status, "held");
+  assert.equal((await runtime.openIdentityEnvironmentSession({
+    identity_environment: runtime.getLocalIdentityEnvironmentFacts(identityInput),
+    url: "https://example.com",
+    control_owner: "core_task",
+    holder_ref: "principal:scope"
+  })).current_error?.code, "profile_locked");
+  assert.equal(runtime.releaseStoppedProfileScopeTransition("profile_scope-reentrant", "scope:shared").status, "released");
+  assert.equal((await runtime.openIdentityEnvironmentSession({
+    identity_environment: runtime.getLocalIdentityEnvironmentFacts(identityInput),
+    url: "https://example.com",
+    control_owner: "core_task",
+    holder_ref: "principal:scope"
+  })).current_error?.code, "profile_locked");
+  assert.equal(runtime.releaseStoppedProfileScopeTransition("profile_scope-reentrant", "scope:shared").status, "released");
+  const opened = await runtime.openIdentityEnvironmentSession({
+    identity_environment: runtime.getLocalIdentityEnvironmentFacts(identityInput),
+    url: "https://example.com",
+    control_owner: "core_task",
+    holder_ref: "principal:scope"
+  });
+  assert.equal("status" in opened, false);
+  if (!("status" in opened)) await runtime.stopSession(opened.runtime_session_ref, { control_owner: "core_task" });
+  assert.equal(launches.length, 1);
+});
+
 test("reuses, locks, releases, and stops identity environment sessions", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const identity_environment = runtime.getLocalIdentityEnvironmentFacts({

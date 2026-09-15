@@ -532,7 +532,7 @@ export class HarborRuntime {
   private readonly managedFiles: ManagedFileStore;
   private readonly providerLifecycle: ManagedProviderLifecycle;
   private readonly profileRecovery: ProfileRecoveryManager;
-  private readonly profileScopeTransitionReservations = new Map<string, { profile_ref: string; ownership: ProfileStorageOwnershipLock }>();
+  private readonly profileScopeTransitionReservations = new Map<string, { profile_ref: string; ownership: ProfileStorageOwnershipLock; holders: number }>();
 
   constructor(
     launcher: LocalProviderLauncher = launchLocalDedicatedProvider,
@@ -1021,9 +1021,11 @@ export class HarborRuntime {
 
   reserveStoppedProfileScopeTransition(profile_ref: string, reservation_ref: string) {
     const existing = this.profileScopeTransitionReservations.get(reservation_ref);
-    if (existing) return existing.profile_ref === profile_ref
-      ? { status: "held" as const, profile_ref, reservation_ref }
-      : { status: "unavailable" as const, failure_class: "reservation_conflict" };
+    if (existing) {
+      if (existing.profile_ref !== profile_ref) return { status: "unavailable" as const, failure_class: "reservation_conflict" };
+      existing.holders += 1;
+      return { status: "held" as const, profile_ref, reservation_ref };
+    }
     const identity = this.identityEnvironments.list().find(item => item.refs.profile_ref === profile_ref);
     if (!identity) return { status: "unavailable" as const, failure_class: "profile_missing" };
     const facts = this.identityEnvironments.getFacts(identity.identity_environment_ref);
@@ -1037,7 +1039,7 @@ export class HarborRuntime {
       ownership.release();
       return { status: "unavailable" as const, failure_class: "profile_active" };
     }
-    this.profileScopeTransitionReservations.set(reservation_ref, { profile_ref, ownership });
+    this.profileScopeTransitionReservations.set(reservation_ref, { profile_ref, ownership, holders: 1 });
     return { status: "held" as const, profile_ref, reservation_ref };
   }
 
@@ -1045,6 +1047,10 @@ export class HarborRuntime {
     const existing = this.profileScopeTransitionReservations.get(reservation_ref);
     if (!existing) return { status: "released" as const, profile_ref, reservation_ref };
     if (existing.profile_ref !== profile_ref) return { status: "unavailable" as const, failure_class: "reservation_conflict" };
+    if (existing.holders > 1) {
+      existing.holders -= 1;
+      return { status: "released" as const, profile_ref, reservation_ref };
+    }
     existing.ownership.release();
     this.profileScopeTransitionReservations.delete(reservation_ref);
     return { status: "released" as const, profile_ref, reservation_ref };

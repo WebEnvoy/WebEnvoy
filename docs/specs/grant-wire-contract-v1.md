@@ -4,13 +4,38 @@
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`。这些扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；显式 `agent_operations_v2` 只能由 owner 对已停止 Profile 的一次确认生成，Agent/task 请求不能指定或升级它。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
 `scope_semantics` 只允许 `legacy_request_guard_v1` 或 `agent_operations_v2`。Grant 与对应 Profile policy 必须匹配，才能启动 Instance 或派发 Page、interaction、file、diagnostics、环境与 recovery mutation；Instance 启动时固定该值，后续调用只携带 Core 已核验的值，不能改变它。Profile list/read 和 recovery inspect/status 是不派发浏览器动作的只读元数据入口，转换后仍可按原 Grant 的既有范围查询。旧 `webenvoy.managed-access.v0` reader 遇到 Grant、policy 或 state 顶层未知字段必须拒绝；支持 v1.4 的 reader 可读 v0 并按缺省 legacy 处理，升级后的 state 使用 `webenvoy.managed-access.v1`，不把新字段静默写回 v0。现有 legacy-shaped owner policy 更新入口遇到已转换 Profile 必须明确拒绝；未来需要修改 v2 policy 时须另行定义 v2-aware owner 合同，旧 reader 仍不得直接读写 v1 store。
 
-Owner confirmation 使用现有原子 receipt/transaction：输入绑定一个 legacy source Grant、一个 Profile、`webenvoy.agent-operations-v2-confirmation.v1` confirmation、owner/apply、未来期限和新 Grant/policy。Harbor 可信事实必须证明该 Profile 没有活动 Runtime Session；请求中的停止布尔值不构成证明。新范围只能是 source Grant ∩ source policy 的子集，不能包含 `profile.create`、创建模板或新的 Profile/origin/operation；旧 Grant 不修改、不撤销、不复活，新 v2 Grant/policy 只产生一次。成功 receipt 可用原 idempotency key 重复查询；同一 confirmation_ref 的新 key 只读失败为 consumed，绝不重复升级。
+首次 legacy→v2 的 Owner confirmation 仍使用现有原子 receipt/transaction：输入绑定一个 legacy source Grant、一个 Profile、`webenvoy.agent-operations-v2-confirmation.v1` confirmation、owner/apply、未来期限和新 Grant/policy。Harbor 可信事实必须证明该 Profile 没有活动 Runtime Session；请求中的停止布尔值不构成证明。新范围只能是 source Grant ∩ source policy 的子集，不能包含 `profile.create`、创建模板或新的 Profile/origin/operation；旧 Grant 不修改、不撤销、不复活，新 v2 Grant/policy 只产生一次。成功 receipt 可用原 idempotency key 重复查询；同一 confirmation_ref 的新 key 只读失败为 consumed，绝不重复升级。
+
+## Owner v2 Grant/Profile lifecycle（v1.4 兼容修订）
+
+正式 owner API 为 `POST /agent-access/v2/grants` 与 `POST /agent-access/v2/profile-policies`；CLI 只提供 `access grant-v2` 与 `access policy-v2`，两者均须显式 `--confirm`。它们复用同一 managed-access store、transaction、receipt 和 idempotency；不新增权限系统，也不进入 Agent MCP。`GET /agent-access` 的 owner projection 为每个 Grant 加计算得到的 `grant_digest`、为每个 Profile policy 加计算得到的 `policy_digest`；digest 不持久化，按当前完整对象快照计算。
+
+`POST /agent-access/v2/grants` 必须提交最终完整的 `principal_id`、恰好一个 `profile_refs`、`policy_digest`、`allowed_operations`、`allowed_origins` 和未来的 `expires_at`。服务端固定 `scope_semantics: "agent_operations_v2"`、`creation_template: null`、`max_created_profiles: 0`；不从 source 推断最终范围。Principal 必须已登记且未撤销，目标 Profile 必须已有 v2 policy；服务端在同一事务内先按 `policy_digest` 做 CAS，再校验操作/origin 是目标 policy 的子集。`file_scope`、`skill_scope` 仍是显式范围，不从 source 或 policy 推导，并继续遵循各自既有文件材料／SKILL 合同的执行时校验。普通 Grant 签发、续发和替换不要求停止 Profile。
+
+`source_grant_id`/`source_grant_digest` 是可选的模板或历史关联：成对出现时必须核对当前 source 内容摘要，source 缺失、Principal/Profile/语义不匹配仍返回 `source_invalid`；它不是新授权的依据。省略 source 即可由 owner 为有效 Principal 和 v2 Profile 直接签发。来源已过期或已撤销时只能创建新的 Grant，不得通过它修改原 Grant 的 `revoked_at`。
+
+`replaces_grant_id`/`replaces_grant_digest` 是可选的原子替换请求。只有当前有效、同 Principal、v2、恰好单 Profile 且目标 Profile 相同的 replacement 才可接受；提交成功在同一事务创建新 Grant 并撤销旧 Grant，且不要求停止 Profile。多 Profile 来源只能作为新签发的可选模板，不能自动撤销或缩窄其它 Profile。source/replacement 不存在或语义不匹配分别返回 `managed_access_v2_grant_source_invalid`/`managed_access_v2_grant_replacement_invalid`；digest 与当前对象不符是可刷新确认的 `managed_access_grant_conflict`，HTTP 409。
+
+`POST /agent-access/v2/profile-policies` 必须提交完整的新 `allowed_operations`、`allowed_origins` 与 `controlled_interaction_origins`（显式 `[]` 也必须提交）以及当前 `current_policy_digest`。它只替换选定 Profile 的 v2 policy，不从 boolean 推导或扩大 controlled origin；当前 Profile 必须由 Harbor 可信地保持 stopped，活动 Runtime 时拒绝。digest 过期返回 `managed_access_policy_conflict`/HTTP 409。相同 operation key 的 reservation 直到所有同 key 持有者释放才解除，避免失败等待者使后续 policy CAS 失去 stopped 保护。
+
+无论来源是否存在，成功结果都保留旧 Grant、历史 Run、receipt 和撤销事实；撤销/过期来源不会复活。owner 刷新列表后应把最新 digest 和完整字段重新确认再提交；Agent 只需重新 `webenvoy_connect` 获取当前有效 Grant，不能自行续发、替换或调整 policy。
+
+### 用户场景→缺口→入口→验收
+
+| 用户场景 | 原有缺口 | 正式入口 | 验收边界 |
+| --- | --- | --- | --- |
+| 有效期到期后续发 | 旧 Grant 只能沿用初次签发，过期来源会被误当成可恢复对象 | App/`access grant-v2 --confirm`，可带 source digest | 只创建新 Grant；旧 Grant 保持 expired，不被复活或改写 |
+| 撤销后重新签发 | 撤销是历史事实，不能靠 replace 恢复 | 同一 v2 Grant API，source 可选且可指向 revoked Grant | 新 Grant 成功，旧 `revoked_at` 不变；replaces revoked source 被拒绝 |
+| 有效单 Profile 重签 | 缺少原子“新签发+旧撤销” | `replaces_grant_id`/`replaces_grant_digest` | 同一 transaction 原子替换；陈旧 digest 返回 409 |
+| 多 Profile 授权调整 | 直接替换会误撤销其它 Profile | 单一 `profile_refs` 的新签发 | 只新增目标 Profile Grant，原多 Profile Grant 不自动撤销 |
+| 调整 Profile 权限上限 | 完整字段与停止事实未绑定，controlled 列表可能被 boolean 扩大 | `access policy-v2 --confirm` / v2 policy API | current digest CAS、完整 origin/operation/controlled 列表、可信 stopped；活动 Profile 拒绝 |
+| owner 选择文件材料 | 手填 ref/path 会越过 owner 文件登记边界 | App 的 `/owner/files` 可用材料选择 | 只提交选中 opaque `file_ref`；状态/归属/大小由材料记录决定 |
 
 v2 不改变 Profile/Grant/task origin 交集、Page/document/ControlLease、文件归属、unknown/no-replay 或 explicit navigation 的 pre-dispatch origin 检查。合法 click 的自然越界可保持 `dispatched`；之后 observe/read/input 只允许返回脱敏 origin 与 opaque Page ref，不返回越界 URL path/query/title/text。普通资源、CDN 和 redirect 不以全局 route guard 作为 v2 的授权边界；它们仍受固定 Instance、Page relation、文件/ControlLease 和结果安全边界约束。legacy 继续使用既有逐跳 route guard。
 
