@@ -1,9 +1,9 @@
 # Provider 执行复用设计 V1
 
 - 文档性质：规范性实施设计；包含本文件的 docs PR 经独立审查合并后生效。
-- 版本：1.2；日期：2026-09-15。
+- 版本：1.3；日期：2026-09-15。
 - Owner：Harbor Runtime；产品归口：[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
-- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)、[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541)；关联 #471、#474、#477、#482。
+- 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)、[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541)、[#544](https://github.com/WebEnvoy/WebEnvoy/issues/544)；关联 #471、#474、#477、#482。
 - 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
 - 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](runtime-capability-plane.md)。
 - 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#541／#497 记录。
@@ -60,7 +60,7 @@
 
 Chrome 的通用用户结果固定，启动／连接接口由资格证据决定。旧候选使用公开 `playwright.chromium.launch_persistent_context` 启动 **该 Profile binding 所指向、由 owner 验证的官方 Chrome executable** 与受管 user-data-dir；它保留为历史失败证据，不再是当前采用路线，也不得成为新路线失败后的 fallback。
 
-2026-09-15 的新主候选是由 WebEnvoy 管理同一可信 executable、进程和受管 user-data-dir，再通过 Playwright Python 公开 `connect_over_cdp` 取得 default Context并交给共同执行实现。该候选必须先证明连接前没有恢复页、已有 Service Worker、未完成下载或其他受管请求越过 guard，并证明断连和正常停止不会留下无保护浏览器。公开接口存在不等于资格通过。
+2026-09-15 的新主候选是由 WebEnvoy 管理同一可信 executable、进程和受管 user-data-dir，再通过 Playwright Python 公开 `connect_over_cdp` 取得 default Context并交给共同执行实现。该候选必须证明 Agent 在授权、Page/控制归属和执行准备完成前不能派发操作，连接只属于任务管理的 loopback 端点，断连不冒充停止且正常停止会关闭确切进程；默认合同不再要求连接前的恢复页、Service Worker 或浏览器后台活动全部零联网。公开接口存在不等于资格通过。
 
 Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bundle。可使用同一已安装 Python 运行包，不要求为证明隔离而卸载其中的 Camoufox wheel；但 Chrome 启动模块不得导入该 SDK，也不得因 Camoufox 专用资料缺失而失败。
 
@@ -82,13 +82,22 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 ### 5.2 保护与结果
 
-保留 Profile ceiling、单个 Grant、task scope 与 Runtime 条件的交集；工具可见或适配器存在都不授予权限。页面请求保护在受管外部导航前建立，redirect 逐跳验证；观察调用不扩大已有 scope。页面不可归属时局部拒绝，不按 URL、标题、事件先后或最后点击猜测。
+保留 Profile ceiling、单个 Grant、task scope 与 Runtime 条件的交集；工具可见或适配器存在都不授予权限。Grant/Profile policy 的 `scope_semantics` 缺省为 `legacy_request_guard_v1`，显式 `agent_operations_v2` 只能由 owner 对已停止 Profile 通过现有 receipt/transaction 一次确认生成，且 Instance 启动后固定；Agent/task 不能指定、切换或扩大它。legacy 页面请求保护在受管外部导航前建立并逐跳验证；v2 对显式导航仍做 pre-dispatch origin 检查，但普通资源、CDN 和 redirect 不依赖全局 route guard，合法 click 的自然越界保持 `dispatched`。v2 后续 observe/read/input 只返回脱敏 origin 与 opaque Page ref；观察调用不扩大已有 scope。页面不可归属时局部拒绝，不按 URL、标题、事件先后或最后点击猜测。
 
 共享实现必须保留 Page/document/observation/control 代次与实际目标核验。原生可选焦点未知不影响可信 Page；原生坐标输入仍需正确窗口对应。接管不是换页、重开或复制现场，交还后重新观察；已派发 unknown 只能 query/reconcile，不重新点击、上传或下载。
 
 文件继续消费 [Files V1](../specs/browser-files-v1.md) 的 owner 不可变副本、`file_scope`、格式/大小/配额/期限、目标有效性、下载归属、取消清理、持久材料与结果分层。不得新建 Chrome 文件库。下载或 SDK 调用仍使用公开取消/关闭手段，不将取消 asyncio task 当作撤销浏览器效果。
 
-### 5.3 安装与兼容
+### 5.3 旧要求归位
+
+| 旧要求 | 现行处理 | 规范与直接检查 |
+| --- | --- | --- |
+| `allowed_origins` 同时充当网页操作范围与全部请求白名单 | legacy 保留；v2 只控制 Agent 页面读取、操作和显式导航 | Grant v1.4、Page/Network 合同；显式导航 pre-dispatch 与自然越界脱敏测试 |
+| 全局 route、offline、关闭 Service Worker 是所有 Provider 的默认准入 | 仅 legacy；增强全生命周期隔离后续独立规划 | 共享 Driver 启动测试断言 v2 不安装/设置这些条件 |
+| download redirect/CDN 必须属于页面操作 origin | legacy 保留；v2 允许浏览器交付，但仍要求真实 Page/target/download 归属和文件校验 | Files/Network 合同与受管下载反例 |
+| 撤权或断连等于整个浏览器立即断网/停止 | 移出默认承诺；只阻止新 Agent 派发并保留在途/unknown | lifecycle、Run、不重放与 stop 测试 |
+
+### 5.4 安装与兼容
 
 安装包必须包含共享模块和两种适配器及各自来源说明，禁止从 checkout 或未登记路径补缺。既有 `HARBOR_CAMOUFOX_*` 输入只属于 Camoufox，不能变成 Chrome 依赖或允许 Agent 选后端的通道。
 
@@ -113,9 +122,9 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 在完整抽取、全量审查、打包和真实 Agent前，先验证最可能推翻本路线的条件。基线可以使用现有受信任客户端与有界 spike；最终必须进入正式安装链。
 
-**G0-A：接入/依赖/共存。** 两个专用 Profile 使用各自程序和独立 Context；同一 Runtime安装级 Camoufox 配置不影响 Chrome。Chrome专用样本移除Camoufox配置/来源/properties后仍可启动；相同缺失对Camoufox仍准确拒绝。Chrome 外部受管启动候选必须在进程启动前开始计数，分别验证恢复页、redirect、已有 Service Worker和未完成下载在 guard ready 前零派发；连接后首次看到空 Page／Worker 列表不能冒充连接前保护。正常关闭须在 guard仍有效时先停止精确所属进程，再释放连接；异常断连须 fail-closed 并收敛该进程。任一条件缺少公开、可维护机制即停止候选，不先实现完整适配。
+**G0-A：接入/依赖/共存。** 两个专用 Profile 使用各自程序和独立 Context；同一 Runtime安装级 Camoufox 配置不影响 Chrome。Chrome专用样本移除Camoufox配置/来源/properties后仍可启动；相同缺失对Camoufox仍准确拒绝。Chrome 外部受管启动候选须核对确切 executable、Profile、PID 和私有 loopback 端点；Agent 在 ready 前零派发，连接失败不发布可用 Instance，断连不冒充停止，正常 stop 关闭自己的进程并确认端点消失。默认资格不再要求全部恢复页、Service Worker、历史下载或后台活动零联网。
 
-**G0-B：文件/归属/保护。** 同一脚本分别在两种Provider原页上传生成PNG，核对服务端hash；从同页普通链接下载CSV、关闭Context后检查保留结果hash。guard始终启用，未授权direct/redirect请求计数为零；无可信Page归属仍拒绝，不能按首个下载事件认领。
+**G0-B：文件/归属/可靠性。** 同一脚本分别在两种Provider原页上传生成PNG并核对服务端hash；从同页普通链接下载CSV、关闭Context后检查保留结果hash。Chrome 使用同一无账号长期 Profile 三次独立启动，后两次直接读取原 marker，下载后页面仍可用且正常退出；无可信Page/target/download归属仍拒绝，不能按首个事件、文件名或系统下载目录认领。
 
 **G0-C：事件/控制。** 复用#526方法：一次动作返回后10秒无read/snapshot/保活，页面1秒延迟任务及completion自然完成；在途wait时验证owner控制通道。1秒/10秒为测试参数，不是SLA。原生UI与真人分开记载，不以Provider click冒充静默期人工操作。
 
@@ -148,8 +157,8 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 | Trigger | 本实现任务判定 | Artifact/边界 |
 | --- | --- | --- |
 | DO-PLUGIN-EXPOSURE | triggered | 更新现有Plugin合同的Chrome支持投影和availability；工具及公共参数不另建一套 |
-| DO-GRANT-WIRE | not-triggered | 复用既有Grant/file_scope，无新维度；真正必须变化时先说明影响，不暗扩权 |
-| DO-NETWORK-CONTRACT | conditional | 纯实现迁移保持当前payload；若公共归属/事件/生命周期变化则同步正式合同 |
+| DO-GRANT-WIRE | triggered | `scope_semantics`、缺省 legacy、owner v2确认、严格reader与混装拒绝见 Grant Wire v1.4 |
+| DO-NETWORK-CONTRACT | triggered | 页面操作范围与可选请求限制分层；v2普通资源/redirect不再依赖全局route，诊断payload仍有界 |
 | DO-CONSOLE-CONTRACT | conditional | 同上，若公共结构或生命周期变化则同步正式合同 |
 | DO-PROVIDER-PRIVATE-SCHEMA | conditional | 新Chrome来源/安装配对持久字段，或既有bundle/启动结构改变时须先冻结规格/schema/兼容 |
 | DO-APP-IA | not-triggered | 复用最小owner/接管，不增加完整工作台 |

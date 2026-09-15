@@ -1,10 +1,18 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.3（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 与受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板和 browser-files 文件范围的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.4（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 与受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围和 managed-browser scope semantics 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`。这些扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。当前持久化 envelope 仍为 `webenvoy.managed-access.v0`，不要求给旧记录伪造字段，也没有第二套权限系统。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`。这些扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；显式 `agent_operations_v2` 只能由 owner 对已停止 Profile 的一次确认生成，Agent/task 请求不能指定或升级它。
+
+### Managed browser scope semantics
+
+`scope_semantics` 只允许 `legacy_request_guard_v1` 或 `agent_operations_v2`。Grant 与对应 Profile policy 必须匹配，才能启动 Instance 或派发 Page、interaction、file、diagnostics、环境与 recovery mutation；Instance 启动时固定该值，后续调用只携带 Core 已核验的值，不能改变它。Profile list/read 和 recovery inspect/status 是不派发浏览器动作的只读元数据入口，转换后仍可按原 Grant 的既有范围查询。旧 `webenvoy.managed-access.v0` reader 遇到 Grant、policy 或 state 顶层未知字段必须拒绝；支持 v1.4 的 reader 可读 v0 并按缺省 legacy 处理，升级后的 state 使用 `webenvoy.managed-access.v1`，不把新字段静默写回 v0。现有 legacy-shaped owner policy 更新入口遇到已转换 Profile 必须明确拒绝；未来需要修改 v2 policy 时须另行定义 v2-aware owner 合同，旧 reader 仍不得直接读写 v1 store。
+
+Owner confirmation 使用现有原子 receipt/transaction：输入绑定一个 legacy source Grant、一个 Profile、`webenvoy.agent-operations-v2-confirmation.v1` confirmation、owner/apply、未来期限和新 Grant/policy。Harbor 可信事实必须证明该 Profile 没有活动 Runtime Session；请求中的停止布尔值不构成证明。新范围只能是 source Grant ∩ source policy 的子集，不能包含 `profile.create`、创建模板或新的 Profile/origin/operation；旧 Grant 不修改、不撤销、不复活，新 v2 Grant/policy 只产生一次。成功 receipt 可用原 idempotency key 重复查询；同一 confirmation_ref 的新 key 只读失败为 consumed，绝不重复升级。
+
+v2 不改变 Profile/Grant/task origin 交集、Page/document/ControlLease、文件归属、unknown/no-replay 或 explicit navigation 的 pre-dispatch origin 检查。合法 click 的自然越界可保持 `dispatched`；之后 observe/read/input 只允许返回脱敏 origin 与 opaque Page ref，不返回越界 URL path/query/title/text。普通资源、CDN 和 redirect 不以全局 route guard 作为 v2 的授权边界；它们仍受固定 Instance、Page relation、文件/ControlLease 和结果安全边界约束。legacy 继续使用既有逐跳 route guard。
 
 ## Managed Browser Files Grant 与 task scope
 

@@ -2027,6 +2027,36 @@ test("routes registered inline identity facts through the managed session path",
   assert.notEqual(session.profile_ref, "profile_inline-bypass");
 });
 
+test("holds Profile lifecycle ownership across a stopped-scope transition", async () => {
+  const launches: LocalProviderLaunchInput[] = [];
+  const runtime = new HarborRuntime(capturingLauncher(launches));
+  const identityInput = {
+    ...providerFixture({ [chromePath]: { executable: true } }),
+    requested_provider_id: "chrome_official",
+    identity_environment_ref: "identity-env_scope-transition",
+    execution_identity_ref: "execution-identity_scope-transition",
+    profile_ref: "profile_scope-transition",
+    profile_storage_ref: "profile-storage_scope-transition",
+    site: { site_id: "scope-transition", origin: "https://example.com", display_name: "Scope transition" },
+    login_state: "logged_out" as const,
+    storage_state: "present" as const
+  } as const;
+  runtime.createLocalIdentityEnvironment(identityInput);
+  const reserved = runtime.reserveStoppedProfileScopeTransition("profile_scope-transition", "scope:transition");
+  assert.equal(reserved.status, "held");
+  const blocked = await runtime.openIdentityEnvironmentSession({
+    identity_environment: runtime.getLocalIdentityEnvironmentFacts(identityInput),
+    url: "https://example.com",
+    control_owner: "core_task",
+    holder_ref: "principal:scope"
+  });
+  assert.equal("status" in blocked, true);
+  if (!("status" in blocked)) throw new Error("reserved Profile must not start");
+  assert.equal(blocked.current_error.code, "profile_locked");
+  assert.equal(launches.length, 0);
+  assert.equal(runtime.releaseStoppedProfileScopeTransition("profile_scope-transition", "scope:transition").status, "released");
+});
+
 test("reuses, locks, releases, and stops identity environment sessions", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const identity_environment = runtime.getLocalIdentityEnvironmentFacts({
@@ -2050,6 +2080,32 @@ test("reuses, locks, releases, and stops identity environment sessions", async (
   });
   assert.equal("status" in opened, false);
   if ("status" in opened) throw new Error("initial session should open");
+
+  const sessions = (runtime as unknown as { runtimeSessions: {
+    listManagedPages: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+    operateManagedInteraction: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+    operateManagedFile: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+    operateManagedPublicPage: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+    observeManagedSession: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+    readRuntimeDiagnostics: (...args: unknown[]) => Promise<{ failure_class?: string }>;
+  } }).runtimeSessions;
+  const wrongScope = "agent_operations_v2";
+  assert.equal((await sessions.listManagedPages(opened.runtime_session_ref, [], "agent", wrongScope)).failure_class, "scope_semantics_mismatch");
+  assert.equal((await sessions.operateManagedInteraction(opened.runtime_session_ref, { action: "snapshot", expected_origin: "https://www.zhipin.com", authorized_origins: ["https://www.zhipin.com"], scope_semantics: wrongScope, controlled_origin: "https://www.zhipin.com", holder_ref: "agent", operation_ref: "operation:scope", page_ref: "page:scope" })).failure_class, "scope_semantics_mismatch");
+  assert.equal((await sessions.operateManagedFile(opened.runtime_session_ref, { operation: "download", operation_ref: "operation:file-scope", idempotency_key: "idempotency:file-scope", holder_ref: "agent", principal_id: "principal:scope", profile_ref: "profile_boss", expected_origin: "https://example.com", authorized_origins: ["https://example.com"], scope_semantics: wrongScope, page_id: "page-id:scope", page_ref: "page:scope", document_generation: 1, observation_ref: "observation:scope", target_ref: "target:scope", staging_path: "/tmp/scope" })).failure_class, "scope_semantics_mismatch");
+  assert.equal((await sessions.operateManagedPublicPage(opened.runtime_session_ref, "agent", { expected_origin: "https://www.zhipin.com", scope_semantics: wrongScope })).failure_class, "scope_semantics_mismatch");
+  assert.equal((await sessions.observeManagedSession(opened.runtime_session_ref, { holder_ref: "agent", scope_semantics: wrongScope })).failure_class, "scope_semantics_mismatch");
+  assert.equal((await sessions.readRuntimeDiagnostics(opened.runtime_session_ref, { origin: "https://www.zhipin.com", scope_semantics: wrongScope })).failure_class, "scope_semantics_mismatch");
+
+  const mismatchedScope = await runtime.openIdentityEnvironmentSession({
+    identity_environment,
+    url: "https://www.zhipin.com/web/geek/job",
+    control_owner: "agent",
+    scope_semantics: "agent_operations_v2"
+  });
+  assert.equal("status" in mismatchedScope, true);
+  if (!("status" in mismatchedScope)) throw new Error("an active session must not change scope semantics");
+  assert.equal(mismatchedScope.current_error.code, "unsupported");
 
   const reused = await runtime.openIdentityEnvironmentSession({
     identity_environment,

@@ -4,7 +4,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createManagedBrowserService, createFileRunRecordStore, createFileAuthorizationDecisionStore, createFileExecutionPolicyConfigStore, createFileManagedAccessStore } from "@webenvoy/core-runtime";
+import { createManagedBrowserService, createFileRunRecordStore, createFileAuthorizationDecisionStore, createFileExecutionPolicyConfigStore, createFileManagedAccessStore, managedScopeConfirmationSchemaVersion } from "@webenvoy/core-runtime";
 import { createApiServer } from "./server.js";
 import { listen, closeServer } from "./self-check-process-support.js";
 
@@ -13,7 +13,7 @@ export async function assertManagedAccessApi(): Promise<void> {
   const owner = "owner_test_credential_00000000000000000000";
   const agent = "agent_test_credential_00000000000000000000";
   const hash = createHash("sha256").update(agent).digest("hex");
-  const access = createFileManagedAccessStore({ directory });
+  const access = createFileManagedAccessStore({ directory, withStoppedProfile: async (_profileRef, _operationRef, action) => action() });
   let dispatches = 0;
   const server = createApiServer({ supervisorToken: owner, managedAccessStore: access, managedBrowserService: {
     async submit(credentialHash) { assert.equal(credentialHash, hash); dispatches++; return { ok: true, run_id: "managed-run", status: "succeeded" }; },
@@ -56,9 +56,18 @@ export async function assertManagedAccessApi(): Promise<void> {
     const ownerPolicy = await call("/agent-access/profile-policies", owner, policy);
     assert.equal(ownerPolicy.status, 200);
     assert.deepEqual(ownerPolicy.body.profile_policy.controlled_interaction_origins, policy.controlled_interaction_origins);
+    const v2Source = await call("/agent-access/grants", owner, { idempotency_key: "v2-source", principal_id: principal.principal_id, profile_refs: ["profile:test"], allowed_operations: policy.allowed_operations, allowed_origins: policy.allowed_origins, expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: null, max_created_profiles: 0 });
+    const v2Input = { idempotency_key: "v2-confirm", source_grant_id: v2Source.body.grant.grant_id, profile_ref: "profile:test",
+      confirmation: { schema_version: managedScopeConfirmationSchemaVersion, confirmation_ref: "confirmation:api", profile_ref: "profile:test", confirmed_at: new Date().toISOString(), confirmed_by: "owner", idempotency_key: "v2-confirm", decision: "apply" },
+      new_grant: { principal_id: principal.principal_id, profile_refs: ["profile:test"], allowed_operations: policy.allowed_operations, allowed_origins: policy.allowed_origins, expires_at: v2Source.body.grant.expires_at, creation_template: null, max_created_profiles: 0 },
+      new_profile_policy: { profile_ref: "profile:test", allowed_operations: policy.allowed_operations, allowed_origins: policy.allowed_origins, controlled_interaction_origins: policy.controlled_interaction_origins } };
+    assert.equal((await call("/agent-access/scope-confirmations", agent, v2Input)).status, 401);
+    const v2Confirmed = await call("/agent-access/scope-confirmations", owner, v2Input);
+    assert.equal(v2Confirmed.status, 201);
+    assert.equal(v2Confirmed.body.grant.scope_semantics, "agent_operations_v2");
     assert.equal((await call("/agent-access/operations/profile-policy", owner)).body.operation.status, "completed");
     const reconnected = await call("/agent-connections", agent, {});
-    assert.deepEqual(reconnected.body.grants, [grant.body.grant]);
+    assert.deepEqual(reconnected.body.grants, [grant.body.grant, v2Source.body.grant, v2Confirmed.body.grant]);
     assert.notEqual(reconnected.body.connection.connection_id, connected.body.connection.connection_id);
     const secondCredential = "another-agent-credential-long-enough";
     await call("/agent-access/principals", owner, { ...input, idempotency_key: "register-second", credential_hash: createHash("sha256").update(secondCredential).digest("hex") });

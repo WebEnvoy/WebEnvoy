@@ -32,12 +32,43 @@ class PageFailure extends ManagedAccessError {
 class FileFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super(typeof receipt.failure_class === "string" ? receipt.failure_class : "managed_file_outcome_unknown"); }
 }
+class ScopeBoundaryFailure extends ManagedAccessError {
+  constructor(readonly receipt: ObjectValue) { super("managed_browser_scope_boundary"); }
+}
 class CreationReceiptFailure extends ManagedAccessError {}
 function isDeterministicWaitTimeout(receipt: ObjectValue | undefined): boolean {
   return receipt?.status === "unavailable" && receipt.dispatch_state === "dispatched" && receipt.failure_class === "wait_condition_timeout";
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
+function pageRef(value: ObjectValue): string {
+  return typeof value.page_ref === "string" && value.page_ref.length > 0 ? value.page_ref : "page:opaque";
+}
+function redactedBoundaryReceipt(value: ObjectValue, fallbackPageRef?: string): ObjectValue {
+  const page = value.page && typeof value.page === "object" && !Array.isArray(value.page) ? object(value.page) : {};
+  let origin = "unknown";
+  if (typeof page.current_url === "string") {
+    try { origin = new URL(page.current_url).origin; } catch { /* opaque fallback below */ }
+  }
+  return { status: "unavailable", dispatch_state: value.dispatch_state === "dispatched" ? "dispatched" : "not_dispatched", failure_class: "managed_browser_scope_boundary",
+    ...(typeof value.operation_ref === "string" ? { operation_ref: value.operation_ref } : {}), ...(typeof value.runtime_session_ref === "string" ? { runtime_session_ref: value.runtime_session_ref } : {}),
+    page: { origin, page_ref: fallbackPageRef ?? pageRef(page) } };
+}
+function unauthorizedPage(value: ObjectValue, authorizedOrigins: readonly string[]): boolean {
+  const page = value.page && typeof value.page === "object" && !Array.isArray(value.page) ? object(value.page) : undefined;
+  if (!page || typeof page.current_url !== "string") return false;
+  try { return !authorizedOrigins.includes(new URL(page.current_url).origin); } catch { return true; }
+}
+function redactCompletedPage(value: ObjectValue, authorizedOrigins: readonly string[], fallbackPageRef?: string): ObjectValue {
+  if (!unauthorizedPage(value, authorizedOrigins)) return value;
+  throw new ScopeBoundaryFailure(redactedBoundaryReceipt(value, fallbackPageRef));
+}
+function redirectedSessionBoundary(value: ObjectValue, authorizedOrigins: readonly string[], fallbackPageRef?: string): ObjectValue | undefined {
+  const session = value.session && typeof value.session === "object" && !Array.isArray(value.session) ? object(value.session) : undefined;
+  const page = session?.current_page && typeof session.current_page === "object" && !Array.isArray(session.current_page) ? object(session.current_page) : undefined;
+  if (!page || !unauthorizedPage({ page }, authorizedOrigins)) return undefined;
+  return redactedBoundaryReceipt({ ...value, page, dispatch_state: "dispatched" }, fallbackPageRef);
+}
 function object(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_browser_invalid_input");
   return value as ObjectValue;
@@ -282,7 +313,7 @@ export function createManagedBrowserService(options: {
       await check();
       session = await harbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
         operation_scope: "profile_management", url: input.url ?? input.origin, reuse_existing: true,
-        control_owner: "core_task", holder_ref: holder, headless: false, timeout_ms: 60_000 });
+        control_owner: "core_task", holder_ref: holder, headless: false, timeout_ms: 60_000, scope_semantics: access.scope_semantics });
     }
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
@@ -306,7 +337,7 @@ export function createManagedBrowserService(options: {
         const pageAccess = await check();
         return await harbor(`/runtime/sessions/${ref}/pages`, {
           operation: input.operation, holder_ref: holder,
-          authorized_origins: pageAccess.authorized_origins
+          authorized_origins: pageAccess.authorized_origins, scope_semantics: pageAccess.scope_semantics
         });
       }
       const pageAccess = await acquireControlLease();
@@ -316,10 +347,11 @@ export function createManagedBrowserService(options: {
         operation: input.operation, holder_ref: holder, operation_ref: runId, idempotency_key: runId,
         ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}), ...(input.url ? { url: input.url } : {}),
-        authorized_origins: pageAccess.authorized_origins
+        authorized_origins: pageAccess.authorized_origins, scope_semantics: pageAccess.scope_semantics
       }, "page");
-      if (result.status !== "completed") throw new PageFailure(result);
-      return result;
+      const safeResult = pageAccess.scope_semantics === "agent_operations_v2" ? redactCompletedPage(result, pageAccess.authorized_origins, input.page_ref) : result;
+      if (safeResult.status !== "completed") throw new PageFailure(safeResult);
+      return safeResult;
     }
     if ((managedFileOperations as readonly string[]).includes(input.operation)) {
       const fileAccess = await acquireControlLease();
@@ -333,7 +365,7 @@ export function createManagedBrowserService(options: {
         principal_id: fileAccess.principal.principal_id,
         profile_ref: input.profile_ref!,
         expected_origin: input.origin!,
-        authorized_origins: fileAccess.authorized_origins,
+        authorized_origins: fileAccess.authorized_origins, scope_semantics: fileAccess.scope_semantics,
         page_id: input.page_id!,
         page_ref: input.page_ref!,
         document_generation: input.document_generation!,
@@ -343,14 +375,15 @@ export function createManagedBrowserService(options: {
         ...(fileAccess.grant.file_scope === undefined ? {} : { max_file_bytes: fileAccess.grant.file_scope.max_file_bytes, allowed_mime_types: fileAccess.grant.file_scope.allowed_mime_types }),
         ...(input.timeout_ms === undefined ? {} : { timeout_ms: input.timeout_ms })
       }, "file");
-      if (result.status !== "completed") throw new FileFailure(result);
-      return result;
+      const safeResult = fileAccess.scope_semantics === "agent_operations_v2" ? redactCompletedPage(result, fileAccess.authorized_origins, input.page_ref) : result;
+      if (safeResult.status !== "completed") throw new FileFailure(safeResult);
+      return safeResult;
     }
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
       const diagnosticsAccess = await check();
       return await harbor(`/runtime/sessions/${ref}/diagnostics`, {
-        origin: input.origin!, authorized_origins: diagnosticsAccess.authorized_origins, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
+        origin: input.origin!, authorized_origins: diagnosticsAccess.authorized_origins, scope_semantics: diagnosticsAccess.scope_semantics, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
       });
@@ -368,32 +401,39 @@ export function createManagedBrowserService(options: {
         // Harbor must enforce the Core-checked grant ∩ Profile ∩ task
         // intersection for every request/redirect, not re-derive trust from
         // Agent-supplied origin fields.
-        authorized_origins: interactionAccess.authorized_origins,
+        authorized_origins: interactionAccess.authorized_origins, scope_semantics: interactionAccess.scope_semantics,
         action: input.operation.slice("instance.".length),
         ...Object.fromEntries(["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
       }, "interaction");
-      if (result.status !== "completed") throw new InteractionFailure(result);
-      return result;
+      const safeResult = interactionAccess.scope_semantics === "agent_operations_v2" ? redactCompletedPage(result, interactionAccess.authorized_origins, input.page_ref) : result;
+      if (safeResult.status !== "completed") throw new InteractionFailure(safeResult);
+      return safeResult;
     }
     if (input.operation === "instance.navigate" || input.operation === "instance.read") {
       const pageBinding = { holder_ref: holder, expected_origin: input.origin,
+        scope_semantics: access.scope_semantics,
         ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}) };
       await harbor(`/runtime/sessions/${ref}/observe`, pageBinding);
       await check();
       const result = await harbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
-        holder_ref: holder, expected_origin: input.origin, ...(input.page_id ? { page_id: input.page_id } : {}),
+        holder_ref: holder, expected_origin: input.origin, scope_semantics: access.scope_semantics, ...(input.page_id ? { page_id: input.page_id } : {}),
         ...(input.page_ref ? { page_ref: input.page_ref } : {}), ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.url ? { url: input.url } : {}) });
+      const boundary = access.scope_semantics === "agent_operations_v2" ? redirectedSessionBoundary(result, access.authorized_origins, input.page_ref) : undefined;
+      if (boundary) throw new ScopeBoundaryFailure(boundary);
       return { session: publicSession(result.session), ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }), observed_at: result.observed_at };
     }
-    const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder, expected_origin: input.origin,
+    const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder, expected_origin: input.origin, scope_semantics: access.scope_semantics,
       ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
       ...(input.document_generation ? { document_generation: input.document_generation } : {}) });
     const page = object(observation.page);
     let observedOrigin: string;
     try { observedOrigin = new URL(text(page.current_url)).origin; } catch { return fail("managed_browser_observation_unknown"); }
-    if (observedOrigin !== input.origin) return fail("managed_browser_observed_origin_denied");
+    if (observedOrigin !== input.origin) {
+      if (access.scope_semantics === "agent_operations_v2") throw new ScopeBoundaryFailure(redactedBoundaryReceipt(observation, input.page_ref));
+      return fail("managed_browser_observed_origin_denied");
+    }
     if (input.operation === "account.bind") {
       await check();
       const bound = await harbor(`/runtime/identity-environments/${identity}/account-bindings`, {
@@ -440,18 +480,20 @@ export function createManagedBrowserService(options: {
           await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: result.dispatch_state } : {}), result } });
         } catch (error) {
           const current = (await store.getRunRecord(runId))!;
-          const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure ? error.receipt : undefined;
+          const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure || error instanceof ScopeBoundaryFailure ? error.receipt : undefined;
           const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]);
           const notDispatched = dispatchAware && (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched";
           const known = dispatchAware
             ? notDispatched ||
               (error instanceof InteractionFailure && isDeterministicWaitTimeout(receipt))
             : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown" && !(error instanceof CreationReceiptFailure);
+          const knownFailure = known || error instanceof ScopeBoundaryFailure;
           if (dispatchAware) await store.updateRunRecord(runId, { public_result_summary: {
             ...current.public_result_summary, dispatch_state: notDispatched ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
           } });
-          await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
-            failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : known ? "managed_browser_runtime_unavailable" : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
+          if (!dispatchAware && receipt) await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt } });
+          await completeRunWithFailure(store, runId, { status: knownFailure ? "failed" : "unknown_outcome",
+            failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : knownFailure ? "managed_browser_runtime_unavailable" : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
         }
         return response((await store.getRunRecord(runId))!);
       });

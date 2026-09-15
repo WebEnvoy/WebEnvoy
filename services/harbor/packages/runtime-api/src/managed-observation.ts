@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { LocalProviderPageFacts } from "./runtime-session-types.js";
+import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
@@ -31,7 +32,7 @@ export type ManagedProviderPageInput = {
   provider_page_ref?: string;
 };
 export type ManagedPageSelector = { page_id?: string; page_ref?: string; document_generation?: number };
-export type ManagedObservationInput = ManagedPageSelector & { holder_ref: string; expected_origin?: string };
+export type ManagedObservationInput = ManagedPageSelector & { holder_ref: string; expected_origin?: string; scope_semantics?: ManagedScopeSemantics };
 export type ManagedProviderObservation = { page: LocalProviderPageFacts; account: DiscoveredManagedAccount; provider_page_ref?: string };
 export type ManagedObservation = {
   status: "completed"; observation_ref: string; observed_at: string; runtime_session_ref: string;
@@ -97,6 +98,7 @@ export function hasManagedBindingConflict(records: Iterable<import("./identity-e
 export type ManagedPublicPageInput = ManagedPageSelector & {
   expected_origin: string;
   url?: string;
+  scope_semantics?: ManagedScopeSemantics;
   /** Harbor-only provider selector; never accepted from the Agent route. */
   provider_page_ref?: string;
 };

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvironmentState, type EnvironmentObservation, type EnvironmentProbe, type ProfileEnvironmentConfiguration } from "./profile-environment.js";
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
+import { managedScopeSemantics, type ManagedScopeSemantics } from "./managed-scope-semantics.js";
 import { isTrustedManagedPublicPageOperation, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedPublicOrigin, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
 import { assertNoUnfinishedProfileRecovery } from "./profile-recovery.js";
 import {
@@ -156,7 +157,7 @@ export interface RuntimeSessionRecord {
   read_operation_user_handoff: boolean;
   execution_surface: "local_provider" | "fixture" | "unknown";
   profile_ownership?: ProfileStorageOwnershipLock;
-  openUrl?: (url: string, operation_scope?: "profile_management") => Promise<LocalProviderPageFacts>;
+  openUrl?: (url: string, operation_scope?: "profile_management", scope_semantics?: ManagedScopeSemantics) => Promise<LocalProviderPageFacts>;
   clearPublicPageGuard?: () => Promise<void>;
   publicPage?: ManagedPublicPageOperation;
   interaction?: ManagedInteractionOperation;
@@ -170,6 +171,7 @@ export interface RuntimeSessionRecord {
   environment_observation?: EnvironmentObservation;
   managed_observations?: ManagedObservation[];
   page_registry?: PageRegistry;
+  scope_semantics?: ManagedScopeSemantics;
   probeReadOperation?: (input: LocalProviderReadProbeInput) => Promise<LocalProviderReadProbeResult>;
   probeSiteResource?: (input: LocalProviderSiteResourceProbeInput) => Promise<LocalProviderSiteResourceProbeResult>;
   probeWritePrecheck?: (input: LocalProviderWritePrecheckProbeInput) => Promise<LocalProviderWritePrecheckProbeResult>;
@@ -203,6 +205,7 @@ export type ManagedFileRuntimeInput = {
   source_path?: string;
   staging_path?: string;
   timeout_ms?: number;
+  scope_semantics?: import("./managed-scope-semantics.js").ManagedScopeSemantics;
 };
 
 export class RuntimeSessionStore {
@@ -225,6 +228,8 @@ export class RuntimeSessionStore {
   ) {}
 
   async createSession(input: CreateRuntimeSessionInput = {}): Promise<RuntimeSessionFacts> {
+    const scopeSemantics = managedScopeSemantics(input.scope_semantics);
+    if (!scopeSemantics) throw new Error("Invalid scope semantics.");
     const appliedEnvironment = input.managed_identity_environment ? profileEnvironmentConfiguration(input.managed_identity_environment) : undefined;
     const now = new Date().toISOString();
     const provider_ref = input.provider_ref ?? opaqueRef("provider");
@@ -266,6 +271,7 @@ export class RuntimeSessionStore {
           profile_storage_ref: input.profile_storage_ref,
           provider_ref,
           identity_environment: input.managed_identity_environment,
+          scope_semantics: scopeSemantics,
           resolve_proxy: this.launchOptions.resolve_proxy
         });
         if (result.status !== "ready" || (input.profile_storage_ref && profileStorageHasExternalLock(input.profile_storage_ref))) {
@@ -378,7 +384,8 @@ export class RuntimeSessionStore {
       executeFileOperation: ready ? launch.executeFileOperation : undefined,
       captureScreenshot: ready ? launch.captureScreenshot : undefined,
       close: ready ? launch.close : undefined,
-      page_registry: pageController ? new PageRegistry(runtime_session_ref, pageController, initialPages) : undefined
+      page_registry: pageController ? new PageRegistry(runtime_session_ref, pageController, initialPages) : undefined,
+      scope_semantics: scopeSemantics
     });
     if (ready && input.managed_identity_environment) await this.readProfileEnvironment(input.managed_identity_environment);
     return snapshot(facts);
@@ -454,9 +461,10 @@ export class RuntimeSessionStore {
     return this.records.get(runtime_session_ref);
   }
 
-  async listManagedPages(runtime_session_ref: string, authorized_origins: readonly string[] = [], holder_ref?: string): Promise<ManagedPageList | ManagedPageUnavailable> {
+  async listManagedPages(runtime_session_ref: string, authorized_origins: readonly string[] = [], holder_ref?: string, scope_semantics?: ManagedScopeSemantics): Promise<ManagedPageList | ManagedPageUnavailable> {
     const record = this.records.get(runtime_session_ref);
     if (!record) return pageUnavailable("session_missing", runtime_session_ref, true);
+    if (!sameScopeSemantics(record, scope_semantics)) return pageUnavailable("scope_semantics_mismatch", runtime_session_ref, false);
     if (!isRuntimeSessionReadable(record.facts)) return pageUnavailable("session_not_ready", runtime_session_ref, true);
     if (!record.page_registry) return pageUnavailable("provider_unavailable", runtime_session_ref, true);
     const releasedGeneration = record.control_generation;
@@ -480,9 +488,10 @@ export class RuntimeSessionStore {
   }
 
   async operateManagedPage(runtime_session_ref: string, input: ManagedPageOperationInput): Promise<ManagedPageOperationReceipt | ManagedPageList | ManagedPageUnavailable> {
-    if (input.operation === "page.list") return this.listManagedPages(runtime_session_ref, input.authorized_origins ?? [], input.holder_ref);
+    if (input.operation === "page.list") return this.listManagedPages(runtime_session_ref, input.authorized_origins ?? [], input.holder_ref, input.scope_semantics);
     const record = this.records.get(runtime_session_ref);
     if (!record) return pageUnavailable("session_missing", runtime_session_ref, true, input.operation_ref);
+    if (!sameScopeSemantics(record, input.scope_semantics)) return pageUnavailable("scope_semantics_mismatch", runtime_session_ref, false, input.operation_ref);
     if (!isRuntimeSessionReadable(record.facts)) return pageUnavailable("session_not_ready", runtime_session_ref, true, input.operation_ref);
     if (!record.page_registry) return pageUnavailable("provider_unavailable", runtime_session_ref, true, input.operation_ref);
     if (record.facts.control_owner !== "core_task" || record.facts.control_lock.state !== "held" ||
@@ -510,6 +519,8 @@ export class RuntimeSessionStore {
   }
 
   async openIdentityEnvironmentSession(input: OpenIdentityEnvironmentSessionInput): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    const scopeSemantics = managedScopeSemantics(input.scope_semantics);
+    if (!scopeSemantics) return unavailableSession("identity_environment_unavailable", error("unsupported", "Invalid scope semantics.", false));
     const urlError = validateRuntimeUrl(input.url);
     if (urlError) return unavailableSession("url_unreachable", urlError);
 
@@ -553,6 +564,9 @@ export class RuntimeSessionStore {
     if (existing?.facts.current_error?.code === "session_lost") {
       return unavailableSession("session_missing", existing.facts.current_error!);
     }
+    if (existing && (existing.scope_semantics ?? "legacy_request_guard_v1") !== scopeSemantics) {
+      return unavailableSession("identity_environment_unavailable", error("unsupported", "Runtime Session scope semantics are fixed for its lifetime.", false));
+    }
     if (
       existing?.facts.lifecycle_state === "disconnected" ||
       existing?.facts.current_error?.code === "session_cleanup_failed"
@@ -566,7 +580,7 @@ export class RuntimeSessionStore {
       const conflict = this.acquireControl(existing, owner, holder);
       if (conflict) return conflict;
       try {
-        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!, input.operation_scope)));
+        if (existing.openUrl) this.applyPageFacts(existing, input.url, await this.withProviderInteraction(existing, () => existing.openUrl!(input.url!, input.operation_scope, scopeSemantics)));
       } catch {
         this.markDriverLost(existing);
       }
@@ -896,6 +910,7 @@ export class RuntimeSessionStore {
       (input.operation === "download" && (!input.staging_path || input.source_path !== undefined))) return refused("file_operation_invalid");
     const record = this.records.get(runtime_session_ref);
     if (!record) return refused("session_missing");
+    if (!sameScopeSemantics(record, input.scope_semantics)) return refused("scope_semantics_mismatch");
     if (!isCoreLeaseHeld(record, input.holder_ref)) return refused("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     if (record.execution_surface !== "local_provider" || !isTrustedLocalProviderFileOperation(record.executeFileOperation)) return refused("provider_unavailable");
@@ -933,7 +948,8 @@ export class RuntimeSessionStore {
         target_ref: input.target_ref,
         ...(input.source_path === undefined ? {} : { source_path: input.source_path }),
         ...(input.staging_path === undefined ? {} : { staging_path: input.staging_path }),
-        timeout_ms: input.timeout_ms
+        timeout_ms: input.timeout_ms,
+        scope_semantics: input.scope_semantics ?? record.scope_semantics ?? "legacy_request_guard_v1"
       }));
       const current = record.page_registry?.binding({ page_id: input.page_id });
       if (record.control_generation !== generation || !isCoreLeaseHeld(record, input.holder_ref) || !current || current.facts.page_ref !== input.page_ref || current.facts.document_generation !== input.document_generation) {
@@ -969,6 +985,7 @@ export class RuntimeSessionStore {
     if (previous) return previous.request_hash === requestHash ? previous.result : refused("managed_interaction_idempotency_conflict");
     const record = this.records.get(runtime_session_ref);
     if (!record) return refused("session_missing");
+    if (!sameScopeSemantics(record, input.scope_semantics)) return refused("scope_semantics_mismatch");
     const coreLeaseHeld = isCoreLeaseHeld(record, input.holder_ref);
     const releasedForSnapshot = input.action === "snapshot" && isReleasedControl(record);
     if (!coreLeaseHeld && !releasedForSnapshot) return refused("control_lock_conflict");
@@ -1056,6 +1073,7 @@ export class RuntimeSessionStore {
   async operateManagedPublicPage(runtime_session_ref: string, holder_ref: string, input: ManagedPublicPageInput) {
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
+    if (!sameScopeSemantics(record, input.scope_semantics)) return managedUnavailable("scope_semantics_mismatch");
     const releasedForRead = input.url === undefined && isReleasedControl(record);
     if (!isCoreLeaseHeld(record, holder_ref) && !releasedForRead) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
@@ -1102,6 +1120,7 @@ export class RuntimeSessionStore {
     const expectedOrigin = typeof input === "string" ? undefined : input.expected_origin;
     const record = this.records.get(runtime_session_ref);
     if (!record || !boundedManagedRef(holder_ref)) return managedUnavailable("session_missing");
+    if (!sameScopeSemantics(record, typeof input === "string" ? undefined : input.scope_semantics)) return managedUnavailable("scope_semantics_mismatch");
     const releasedForObservation = isReleasedControl(record);
     if (!isCoreLeaseHeld(record, holder_ref) && !releasedForObservation) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
@@ -1146,6 +1165,7 @@ export class RuntimeSessionStore {
   async readRuntimeDiagnostics(runtime_session_ref: string, input: RuntimeDiagnosticsInput): Promise<RuntimeDiagnosticsResponse> {
     const record = this.records.get(runtime_session_ref);
     if (!record) return diagnosticsUnavailable("session_missing", "Runtime Session is missing.", true);
+    if (!sameScopeSemantics(record, input.scope_semantics)) return diagnosticsUnavailable("scope_semantics_mismatch", "Runtime Session scope semantics are fixed for its lifetime.");
     if (!["active", "idle", "locked"].includes(record.facts.lifecycle_state)) return diagnosticsUnavailable("session_not_ready", "Runtime Session is not ready for observation.", true);
     const probe = record.readDiagnostics;
     if (record.execution_surface !== "local_provider" || !isTrustedRuntimeDiagnosticsProbe(probe)) return diagnosticsUnavailable("provider_unavailable");
@@ -1626,6 +1646,11 @@ function isReleasedControl(record: RuntimeSessionRecord): boolean {
 function isCoreLeaseHeld(record: RuntimeSessionRecord, holder_ref: string): boolean {
   const lock = record.facts.control_lock;
   return !record.handoff_intent && record.facts.control_owner === "core_task" && lock.owner === "core_task" && lock.state === "held" && lock.holder_ref === holder_ref;
+}
+
+function sameScopeSemantics(record: RuntimeSessionRecord, value: unknown): boolean {
+  const requested = managedScopeSemantics(value);
+  return requested !== null && requested === (record.scope_semantics ?? "legacy_request_guard_v1");
 }
 
 function canPreserveReleasedSnapshotGeneration(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {

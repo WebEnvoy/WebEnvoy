@@ -1,10 +1,13 @@
 import type { LocalProviderPageFacts } from "./runtime-session-types.js";
+import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export type ManagedInteractionInput = {
   action: "snapshot" | "click" | "input" | "press" | "scroll" | "wait";
   expected_origin: string;
   /** Core-derived Profile ∩ Grant ∩ task ∩ Runtime origin set. */
   authorized_origins?: readonly string[];
+  /** Core-derived scope semantics; never accepted from the Agent route. */
+  scope_semantics?: ManagedScopeSemantics;
   control_generation: number;
   page_ref?: string;
   observation_ref?: string;

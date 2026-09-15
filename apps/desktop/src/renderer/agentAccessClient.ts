@@ -7,11 +7,15 @@ export type AgentGrant = {
   allowed_origins: string[]; expires_at: string; revoked_at: string | null;
   creation_template: { template_ref: string; provider_id: string | null } | null;
   max_created_profiles: number; created_profile_refs: string[];
+  scope_semantics: "legacy_request_guard_v1" | "agent_operations_v2";
+  skill_scope?: { skill_refs: string[]; source_refs: string[] };
+  file_scope?: { upload_refs: string[]; allowed_mime_types: string[]; max_file_bytes: number };
 };
 export type AgentAccessState = {
   principals: AgentPrincipal[]; connections: AgentConnection[]; grants: AgentGrant[];
-  profile_policies: { profile_ref: string; allowed_operations: string[]; allowed_origins: string[]; controlled_interaction_origins: string[] }[];
+  profile_policies: AgentProfilePolicy[];
 };
+export type AgentProfilePolicy = { profile_ref: string; allowed_operations: string[]; allowed_origins: string[]; controlled_interaction_origins: string[]; scope_semantics: "legacy_request_guard_v1" | "agent_operations_v2" };
 
 export const agentOperations = [
   ["profile.list", "列出 Profile"], ["profile.read", "读取 Profile"],
@@ -71,6 +75,19 @@ export function createAgentGrantInput(principalId: string, hours: number, key: s
   };
 }
 
+export function createAgentOperationsV2Input(grant: AgentGrant, policy: AgentProfilePolicy, key: string) {
+  if (grant.scope_semantics !== "legacy_request_guard_v1" || policy.scope_semantics !== "legacy_request_guard_v1" || grant.revoked_at !== null || Date.parse(grant.expires_at) <= Date.now() || !grant.profile_refs.includes(policy.profile_ref)) throw new Error("请选择当前有效的 legacy 授权与其 Profile。");
+  const allowedOperations = grant.allowed_operations.filter(operation => operation !== "profile.create" && policy.allowed_operations.includes(operation));
+  const allowedOrigins = grant.allowed_origins.filter(origin => policy.allowed_origins.includes(origin));
+  if (!allowedOperations.length) throw new Error("该授权与 Profile 没有可转换的共同操作。");
+  return {
+    idempotency_key: key, source_grant_id: grant.grant_id, profile_ref: policy.profile_ref,
+    confirmation: { schema_version: "webenvoy.agent-operations-v2-confirmation.v1", confirmation_ref: `confirmation:${crypto.randomUUID()}`, profile_ref: policy.profile_ref, confirmed_at: new Date().toISOString(), confirmed_by: "owner", idempotency_key: key, decision: "apply" },
+    new_grant: { principal_id: grant.principal_id, profile_refs: [policy.profile_ref], allowed_operations: allowedOperations, allowed_origins: allowedOrigins, expires_at: grant.expires_at, creation_template: null, max_created_profiles: 0, ...(grant.skill_scope ? { skill_scope: grant.skill_scope } : {}), ...(grant.file_scope ? { file_scope: grant.file_scope } : {}) },
+    new_profile_policy: { profile_ref: policy.profile_ref, allowed_operations: policy.allowed_operations, allowed_origins: policy.allowed_origins, ...(policy.controlled_interaction_origins.length ? { controlled_interaction_origins: policy.controlled_interaction_origins } : {}) }
+  };
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Core 返回的 Agent 接入数据无效。");
   return value as Record<string, unknown>;
@@ -85,6 +102,11 @@ function date(value: unknown): string {
   return result;
 }
 function revoked(value: unknown): string | null { return value === null ? null : date(value); }
+function scopeSemantics(value: unknown): "legacy_request_guard_v1" | "agent_operations_v2" {
+  if (value === undefined) return "legacy_request_guard_v1";
+  if (value !== "legacy_request_guard_v1" && value !== "agent_operations_v2") throw new Error("Core 返回的授权语义无效。");
+  return value;
+}
 function list<T>(value: unknown, parse: (item: unknown) => T): T[] {
   if (!Array.isArray(value) || value.length > 1024) throw new Error("Core 返回的 Agent 接入列表无效。");
   return value.map(parse);
@@ -111,12 +133,14 @@ export function projectAgentAccess(value: unknown): AgentAccessState {
         allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text),
         expires_at: date(item.expires_at), revoked_at: revoked(item.revoked_at),
         creation_template: template === null ? null : { template_ref: text(template.template_ref), provider_id: template.provider_id === null ? null : text(template.provider_id) },
-        max_created_profiles: Number(item.max_created_profiles), created_profile_refs: list(item.created_profile_refs, text),
+        max_created_profiles: Number(item.max_created_profiles), created_profile_refs: list(item.created_profile_refs, text), scope_semantics: scopeSemantics(item.scope_semantics),
+        ...(item.skill_scope === undefined ? {} : { skill_scope: (() => { const value = record(item.skill_scope); return { skill_refs: list(value.skill_refs, text), source_refs: list(value.source_refs, text) }; })() }),
+        ...(item.file_scope === undefined ? {} : { file_scope: (() => { const value = record(item.file_scope); if (!Number.isSafeInteger(value.max_file_bytes)) throw new Error("Core 返回的文件授权无效。"); return { upload_refs: list(value.upload_refs, text), allowed_mime_types: list(value.allowed_mime_types, text), max_file_bytes: Number(value.max_file_bytes) }; })() }),
       };
     }),
     profile_policies: list(source.profile_policies, value => {
       const item = record(value);
-      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text), controlled_interaction_origins: item.controlled_interaction_origins === undefined ? [] : list(item.controlled_interaction_origins, text) };
+      return { profile_ref: text(item.profile_ref), allowed_operations: list(item.allowed_operations, text), allowed_origins: list(item.allowed_origins, text), controlled_interaction_origins: item.controlled_interaction_origins === undefined ? [] : list(item.controlled_interaction_origins, text), scope_semantics: scopeSemantics(item.scope_semantics) };
     }),
   };
 }

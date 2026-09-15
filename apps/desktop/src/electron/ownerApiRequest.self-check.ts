@@ -23,6 +23,9 @@ assert.equal(ownerSupervisorAuthorizationHeader(harborRequest, undefined, creden
 const profilePolicyRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/profile-policies", method: "POST" });
 assert(profilePolicyRequest.ok);
 assert.equal(profilePolicyRequest.method, "POST");
+const scopeConfirmationRequest = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/scope-confirmations", method: "POST" });
+assert(scopeConfirmationRequest.ok);
+assert.equal(scopeConfirmationRequest.method, "POST");
 const adjacentSensitivePath = parseOwnerApiRequest({ base: "http://127.0.0.1:8787", path: "/agent-access/profile-policies/profile", method: "POST" });
 assert.equal(adjacentSensitivePath.ok, false);
 console.log("Validated isolated Core supervisor headers and existing Harbor protection.");

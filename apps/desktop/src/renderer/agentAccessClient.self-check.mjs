@@ -20,9 +20,9 @@ try {
       import React from "react";
       import {createRoot} from "react-dom/client";
       import {AgentAccessPanel} from "./AgentAccessPanel";
-      import {projectAgentAccess,createAgentGrantInput,createProfilePolicyInput,defaultAgentOperations} from "./agentAccessClient";
+      import {projectAgentAccess,createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,defaultAgentOperations} from "./agentAccessClient";
       window.check = {calls:[], rejection:true, unknown:false, receipt:false, reads:0};
-      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"]}],secret:"never-render-this"};
+      const state = {ok:true,principals:[{principal_id:"principal:one",display_name:"本地 Agent",revoked_at:null}],connections:[{connection_id:"connection:one",principal_id:"principal:one",connected_at:"2026-09-09T00:00:00.000Z",revoked_at:null}],grants:[{grant_id:"grant:one",principal_id:"principal:one",profile_refs:[],allowed_operations:["profile.create"],allowed_origins:["https://example.com"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:{template_ref:"template:one",provider_id:"camoufox"},max_created_profiles:2,created_profile_refs:[]},{grant_id:"grant:legacy",principal_id:"principal:one",profile_refs:["profile:isolated"],allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"],expires_at:"2099-01-01T00:00:00.000Z",revoked_at:null,creation_template:null,max_created_profiles:0,created_profile_refs:[]}],profile_policies:[{profile_ref:"profile:isolated",allowed_operations:["instance.read"],allowed_origins:["https://public.invalid"]}],secret:"never-render-this"};
       window.webenvoyShell = {requestOwnerJson:async request=>{
         if(request.path === "/agent-access/management-policy") { if(request.method === "PUT") window.check.policyMutation=request.body; return {ok:true,body:{ok:true,configuration:null}}; }
         window.check.calls.push(request);
@@ -36,8 +36,9 @@ try {
       const root=createRoot(document.getElementById("root"));
       window.mount=()=>root.render(<AgentAccessPanel endpoint="http://core.invalid"/>);
       window.projected=projectAgentAccess(state);
-      window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false});
-      window.check.inputs={createAgentGrantInput,createProfilePolicyInput,defaultAgentOperations};
+      window.grantInput=createAgentGrantInput("principal:one",24,"key",{origin:"http://127.0.0.1:43129",operations:["instance.read","instance.navigate"],controlled:false},"","camoufox");
+      window.check.inputs={createAgentGrantInput,createProfilePolicyInput,createAgentOperationsV2Input,defaultAgentOperations};
+      window.confirm=()=>true;
       window.mount();
     `,
   }});
@@ -70,6 +71,12 @@ try {
   assert.equal(await evaluate("window.grantInput.allowed_operations.includes('account.bind')"), false);
   assert.deepEqual(await evaluate("window.grantInput.allowed_origins"), ["http://127.0.0.1:43129"]);
   assert.deepEqual(await evaluate("window.grantInput.creation_template.permission_ceiling.controlled_interaction_origins"), []);
+  assert.equal(await evaluate("document.body.textContent.includes('不提供整个浏览器的全生命周期网络隔离')"), true);
+  assert.equal(await evaluate(`${button("确认启用新版边界")}!==undefined`), true);
+  const v2Input = await evaluate("window.check.inputs.createAgentOperationsV2Input(window.projected.grants[1],window.projected.profile_policies[0],'v2-key')");
+  assert.equal(v2Input.source_grant_id, "grant:legacy");
+  assert.deepEqual(v2Input.new_grant.allowed_operations, ["instance.read"]);
+  assert.equal(v2Input.new_grant.scope_semantics, undefined);
   assert.equal(await evaluate("window.check.inputs.defaultAgentOperations.includes('instance.input')"), false);
   assert.equal(await evaluate("document.querySelector('[name=controlled_origin]').checked"), false);
   assert.equal(await evaluate("(()=>{try{window.check.inputs.createAgentGrantInput('p',24,'k',{origin:'https://a.invalid/path',operations:['instance.read'],controlled:false});return false}catch{return true}})()"), true);
@@ -94,8 +101,8 @@ try {
   assert.equal(await evaluate(`${button("撤销授权")}.disabled`), true);
   await evaluate(`window.check.unknown=true;const select=document.querySelector('[name=grant_principal]');select.value='principal:one';select.dispatchEvent(new Event('change',{bubbles:true}));`);
   await waitFor(`!${button("授予所选范围")}.disabled`);
-  await evaluate(`const origin=document.querySelectorAll('[name=scope_origin]')[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(origin,'http://127.0.0.1:43129');origin.dispatchEvent(new Event('input',{bubbles:true}));`);
-  await waitFor("document.querySelectorAll('[name=scope_origin]')[1].value==='http://127.0.0.1:43129'");
+  await evaluate(`const origin=document.querySelectorAll('[name=scope_origin_0]')[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(origin,'http://127.0.0.1:43129');origin.dispatchEvent(new Event('input',{bubbles:true}));`);
+  await waitFor("document.querySelectorAll('[name=scope_origin_0]')[1].value==='http://127.0.0.1:43129'");
   await evaluate(`${button("授予所选范围")}.click()`);
   await waitFor("document.body.textContent.includes('结果未知')");
   assert.equal(await evaluate(`${button("授予所选范围")}.disabled`), true);
@@ -111,7 +118,7 @@ try {
   assert.equal(await evaluate("window.check.calls.filter(x=>x.method==='POST').length"), 3);
   await evaluate(`window.check.unknown=false;const policySelect=document.querySelector('select');policySelect.value='profile:isolated';policySelect.dispatchEvent(new Event('change',{bubbles:true}));`);
   await waitFor(`!${button("保存 Profile 权限上限")}.disabled`);
-  await evaluate(`const policyOrigin=document.querySelector('[name=scope_origin]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(policyOrigin,'http://127.0.0.1:43129');policyOrigin.dispatchEvent(new Event('input',{bubbles:true}));`);
+  await evaluate(`const policyOrigin=document.querySelector('[name=scope_origin_0]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(policyOrigin,'http://127.0.0.1:43129');policyOrigin.dispatchEvent(new Event('input',{bubbles:true}));`);
   await evaluate(`document.querySelector('[name=controlled_origin]').click();document.querySelector('[name="instance.input"]').click()`);
   await evaluate(`${button("保存 Profile 权限上限")}.click()`);
   await waitFor("window.check.calls.some(x=>x.path==='/agent-access/profile-policies')");

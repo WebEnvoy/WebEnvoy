@@ -134,7 +134,8 @@ function readGitObject(revision) {
 }
 
 function coreStartScript() {
-  return `import { mkdirSync } from "node:fs";
+  return `import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createApiServer } from "@webenvoy/api-server";
 import {
@@ -142,6 +143,7 @@ import {
   createFileExecutionPolicyConfigStore,
   createFileRunRecordStore,
   createFileManagedAccessStore,
+  ManagedAccessError,
   createFileSkillLibraryService,
   approvedSkillManifestSha256,
   createManagedBrowserService,
@@ -198,7 +200,31 @@ if (harborRuntimeClient) {
 }
 
 const managedAccessStore = createFileManagedAccessStore({
-  directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? runRecordDir + ".managed-access"
+  directory: process.env.WEBENVOY_MANAGED_ACCESS_DIR ?? runRecordDir + ".managed-access",
+  ...(harborRuntimeUrl ? {
+    withStoppedProfile: async (profileRef, operationRef, action) => {
+      const headers = { authorization: \`Bearer \${process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? ""}\` };
+      const reservationRef = \`scope:\${createHash("sha256").update(operationRef).digest("hex")}\`;
+      try {
+        const response = await fetch(new URL("/runtime/profile-scope-transition-reservations", harborRuntimeUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef, reservation_ref: reservationRef }) });
+        const result = await response.json();
+        if (!response.ok || result.status !== "held") throw new ManagedAccessError("managed_access_profile_not_stopped");
+      } catch (error) {
+        if (error instanceof ManagedAccessError) throw error;
+        throw new ManagedAccessError("managed_access_profile_state_unavailable");
+      }
+      let actionFailed = false;
+      try {
+        return await action();
+      } catch (error) {
+        actionFailed = true;
+        throw error;
+      } finally {
+        const response = await fetch(new URL(\`/runtime/profile-scope-transition-reservations/\${encodeURIComponent(reservationRef)}/release\`, harborRuntimeUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef }) }).catch(() => null);
+        if (!response?.ok && !actionFailed) throw new ManagedAccessError("managed_access_profile_state_unavailable");
+      }
+    }
+  } : {})
 });
 const skillLibraryDirectory = process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? runtimeDataDir;
 const skillAssetsPath = process.env.WEBENVOY_SKILL_ASSETS_PATH ?? join(process.cwd(), "agent-entry", "skill-assets");

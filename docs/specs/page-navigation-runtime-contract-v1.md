@@ -89,6 +89,8 @@ URL 只允许 `http` 或 `https`，拒绝 embedded credentials、控制字符和
 
 Core 根据一个当前有效 Grant、目标 Profile 的 permission ceiling 和 task scope origins 计算授权 origin 集：`Grant.allowed_origins ∩ ProfilePolicy.allowed_origins ∩ task_scope.origins`。Agent 输入不能声明或扩大该集合；同一请求不能合并多个 Grant 或跨 Profile 借用 origin。Harbor/Driver 对初始 URL 和每一个实际 redirect destination 重新检查该集合；允许同一 origin 或集合中的目标，集合外（例如 S3）在发出目标请求前阻断并返回 `navigation_origin_denied`。阻断不得把 S3 facts 伪装成成功或把旧 document 错当成新 document。
 
+当匹配的 Grant/Profile 使用 `agent_operations_v2` 时，显式 URL 导航仍在 dispatch 前执行上述 origin 检查，并在 Instance 生命周期内固定该语义。v2 的全局 route handler 不承担普通资源、CDN 或 redirect 的授权；合法 click 触发的自然跨 origin 导航可以发生，click receipt 仍为 `dispatched`。自然越界后的 observe/read/input 必须在 Core/Harbor 结果边界做后检：对未授权 Page 只保留 sanitized origin 与 opaque `page_ref`，移除 URL path/query、title、text、snapshot 和其它页面内容。`legacy_request_guard_v1` 保持原逐跳 guard 与失败语义。
+
 导航结果为 `completed`、`blocked`、`failed` 或 `unknown`，并包含 bounded redirect facts（origin、pathname、status；不含 query/fragment）。HTTP status、DOMContentLoaded 或 `goto` 返回都不代表站点业务成功。Guard 覆盖 document request、HTTP Location、meta refresh、script/location、form POST 和 popup request；未经授权的目标必须在发出目标请求前阻断。页面触发 `beforeunload` 或确认 dialog 时不自动接受，超时/拒绝返回 `navigation_beforeunload_blocked` 并保留旧 document。
 
 ## 4. Observation and stale refs

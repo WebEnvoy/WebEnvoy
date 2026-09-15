@@ -123,6 +123,8 @@ if (
   !packagedCoreRuntimeSource.includes("authorizationDecisionStore") ||
   !packagedCoreRuntimeSource.includes("createHttpHarborIdentityFactsReader") ||
   !packagedCoreRuntimeSource.includes("harborIdentityFactsReader") ||
+  !packagedCoreRuntimeSource.includes("withStoppedProfile") ||
+  !packagedCoreRuntimeSource.includes("/runtime/profile-scope-transition-reservations") ||
   !packagedCoreRuntimeSource.includes('modes: { read: "auto", prepare: "confirm", commit: "confirm", destructive: "confirm" }')
 ) {
   throw new Error("Packaged Core runtime smoke failed: thread, policy, authorization, identity-facts, or default-policy wiring is missing.");

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedInteractionOperations } from "./managed-access.js";
+import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
 import { createManagedBrowserService } from "./managed-browser.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
 import { createFileAuthorizationDecisionStore } from "./authorization-decision-store.js";
@@ -20,7 +20,7 @@ let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let dropResponse = false, omitProviderSelection = false;
-let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false;
+let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false, crossOriginInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
 const receipts = new Map<string, unknown>();
 let pageLists = 0, pageMutations = 0, dropPageResponse = false;
@@ -191,7 +191,10 @@ const server = createServer((req, res) => { void (async () => {
     value = timedOut
       ? { status: "unavailable", dispatch_state: "dispatched", failure_class: "wait_condition_timeout", operation_ref: input.operation_ref, runtime_session_ref: "session:one", page: { current_url: "http://127.0.0.1:18794/fixture", title: "Fixture", status: "ready" } }
       : { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
-        operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : { snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: "Ready", truncated: false } }) };
+        operation_ref: input.operation_ref, runtime_session_ref: "session:one", ...(refuseInteraction ? { failure_class: "managed_interaction_observation_stale" } : {
+          page: { page_ref: input.page_ref ?? "page:one", current_url: crossOriginInteraction ? "https://outside.example/private?token=secret" : input.expected_origin, title: crossOriginInteraction ? "Private title" : "Fixture" },
+          snapshot: { page_ref: input.page_ref ?? "page:one", observation_ref: `observation:${interactions}`, controls: [], text: crossOriginInteraction ? "Private body" : "Ready", truncated: false }
+        }) };
     receipts.set(input.operation_ref, value);
     if (dropInteractionResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/managed-interactions/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
@@ -201,7 +204,7 @@ const server = createServer((req, res) => { void (async () => {
 await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
 try {
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const accessStore = createFileManagedAccessStore({ directory: join(directory, "access") });
+  const accessStore = createFileManagedAccessStore({ directory: join(directory, "access"), withStoppedProfile: async (_profileRef, _operationRef, action) => action() });
   const runRecordStore = createFileRunRecordStore({ directory: join(directory, "runs") });
   const executionPolicyConfigStore = createFileExecutionPolicyConfigStore({ directory: join(directory, "policy") });
   await executionPolicyConfigStore.putGlobalConfiguration({ schema_version: executionPolicyMutationSchemaVersion, idempotency_key: "allow", expected_source_version: null, modes: { read: "auto", prepare: "confirm", commit: "auto", destructive: "deny" } });
@@ -630,6 +633,28 @@ try {
   const crossProfileResult = await actualRecoveryBrowser.submit(credentialHash, { ...recoveryStatusRequest, idempotency_key: "recovery-real-cross-profile", grant_id: crossProfileGrant.grant_id, profile_ref: "profile:other", operation_ref: actualInspection.operation_ref, task_scope: { operations: [...crossProfileRecoveryOperations], profile_refs: ["profile:other"], origins: [] } });
   assert.equal(crossProfileResult.status, "failed", JSON.stringify(crossProfileResult));
   assert.equal(crossProfileResult.failure?.code, "recovery_operation_not_found", JSON.stringify(crossProfileResult));
+
+  const v2ExpiresAt = new Date(Date.now() + 60_000).toISOString();
+  await accessStore.setProfilePolicy({ idempotency_key: "v2-browser-policy", profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] });
+  const v2Source = await accessStore.createGrant({ idempotency_key: "v2-browser-source", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: v2ExpiresAt, max_created_profiles: 0, creation_template: null });
+  const v2 = await accessStore.confirmAgentOperationsV2({
+    idempotency_key: "v2-browser-confirm", source_grant_id: v2Source.grant_id, profile_ref: "profile:1",
+    confirmation: { schema_version: managedScopeConfirmationSchemaVersion, confirmation_ref: "confirmation:browser-v2", profile_ref: "profile:1", confirmed_at: new Date().toISOString(), confirmed_by: "owner", idempotency_key: "v2-browser-confirm", decision: "apply" },
+    new_grant: { principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: v2ExpiresAt, max_created_profiles: 0, creation_template: null },
+    new_profile_policy: { profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] }
+  });
+  managedSession.control_owner = "core_task";
+  managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
+  managedSession.current_page = { current_url: origin };
+  crossOriginInteraction = true;
+  const boundary = await service.submit(credentialHash, { ...interactive, idempotency_key: "v2-natural-boundary", grant_id: v2.grant.grant_id });
+  crossOriginInteraction = false;
+  assert.equal(boundary.status, "failed", JSON.stringify(boundary));
+  assert.equal(boundary.dispatch_state, "dispatched");
+  assert.equal((boundary.result as { page: { origin: string } }).page.origin, "https://outside.example");
+  assert.equal(JSON.stringify(boundary).includes("token=secret"), false);
+  assert.equal(JSON.stringify(boundary).includes("Private title"), false);
+  assert.equal(JSON.stringify(boundary).includes("Private body"), false);
   console.log("managed browser Core HTTP boundary self-check passed");
 } finally {
   await new Promise<void>(resolve => server.close(() => resolve()));
