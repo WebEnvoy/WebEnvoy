@@ -74,6 +74,12 @@ unknown outcome 原样暴露为结构化失败，`webenvoy_query` 只读原事�
 
 #541 不修改 MCP operation、wire、Grant、文件结果或 Page/document schema；它把本节既有的精确 Page binding、单次 file scope、逐跳 guard 和 `not_dispatched`/`unknown_outcome` 语义落实到 Camoufox 的 shared Playwright execution path。shared module 只承载公共 Page、文件、诊断与生命周期行为，Camoufox adapter 只承载其已核验的 source/version/properties、persistent Context 和环境材料。Chrome adapter、generic launcher、availability/environment/support projection 以及 Chrome 复现证据不在本交付，不能由 shared code 的存在推导支持。
 
+### #528 Chrome shared execution disposition
+
+#528 在显式 `agent_operations_v2` Grant/Profile policy、严格 `webenvoy.chrome-official/v1` 安装配对及实际 Provider 资格同时成立时，将现有 `webenvoy_operation` 的普通 Page、文件、诊断、控制和查询投影给官方 Chrome；工具名、参数和结果不另建一套。Chrome adapter 受管启动 binding 指定的确切 executable/user-data-dir，并通过 Playwright Python 公开 `connect_over_cdp` 把 default Context交给同一 shared execution。调试地址、程序路径和后端选择不进入 Agent 输入；连接失败不发布 ready Instance，断连不表示 stop，正常 stop 必须关闭 owner 管理的确切进程。
+
+该投影不适用于缺省的 `legacy_request_guard_v1`、缺失/混装安装材料、未验证版本或普通 Chrome binding；这些情况保持精确 unavailable/restricted，不自动转 v2、不切换旧 CDP/站点路径、不创建替代 Profile。Chrome 的现有窄范围能力不因本投影消失。`origin` 仍是需要网站目标的每个 operation 的顶层必填输入，`task_scope.origins` 不能代替它；MCP schema、工具说明与 Core 的条件集合必须同步，缺失时在派发前拒绝。
+
 ## SKILL 工具输入
 
 每次 `webenvoy_skills` 调用都要求 `idempotency_key`、`grant_id`、`operation`、`task_scope`；Connector 注入当前 `connection_id`。`task_scope` 必须恰好含 `operations`、`skill_refs`、`source_refs` 三组数组，数组项唯一且 operation 必须包含当前 operation。SKILL 请求不带 Profile、origin、runtime session、page、URL、路径、脚本或浏览器动作字段；未知字段拒绝。

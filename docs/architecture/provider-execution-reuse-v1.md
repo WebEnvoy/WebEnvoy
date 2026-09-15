@@ -197,3 +197,11 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 因此 `--no-startup-window`、受管 loopback 和连接后再安装共同 guard 只能作为待验证的 fresh-profile 假设，不能证明任意长期 Profile 在连接前 fail-closed。CDP连接上的公开 `browser.close()` 只断开控制连接，外部 Chrome 还须由 owner 单独停止；若先断连再停进程，会主动形成 guard 空档。新增进程级网络屏障、系统权限、浏览器补丁或把范围缩成 disposable Profile 均超出 #528 当前合同。
 
 本候选据此在 G0-A 停止，未启动浏览器、未进入 G0-B/C、未写 Chrome 产品 adapter，也未改变 Camoufox、Grant、file_scope、ControlLease 或历史 Run。脱敏证据见 [`chrome-managed-cdp-qualification-v1.json`](../verification/chrome-managed-cdp-qualification-v1.json)。#528 保持未完成；恢复实施需要一个公开、可维护的接入能力，能够在进程启动前建立 fail-closed 保护，同时保留 persistent Context 的配置、下载与生命周期语义。
+
+## 15. 2026-09-15 新默认授权合同下的 Chrome 正式消费
+
+第14节保留旧 `legacy_request_guard_v1` 完成门下的当时静态结论，不改写为运行成功。#544 将默认 `agent_operations_v2` 从增强的全浏览器网络隔离中分离后，#528 以受管启动可信官方 Chrome、私有 loopback 和 Playwright Python 公开 `connect_over_cdp` 完成资格与正式接入。Agent 在 Instance ready 前不能派发；ready 后仍须通过 Profile、Grant、`scope_semantics`、Page/document/target、ControlLease 与文件材料检查。断开控制连接不冒充停止，正常 stop 由 owner 关闭确切进程并核对端点消失。该适配不暴露调试地址，不连接日常或未知浏览器，不在失败时切换旧路径、Provider 或 Profile。
+
+Chrome adapter 只负责可信 executable/user-data-dir、受管进程、公开连接、适用配置及生命周期差异；Page、观察、交互、等待、Network/Console 元数据、上传、下载、JSONL、事件循环与结果处理继续由 #541 已交付的共同实现承担。Camoufox 的官方来源、properties、完整环境 bundle、exact replay 与 persistent Context 创建仍留在其 adapter。两个 Provider 各有独立进程、Context、页面引用、队列、临时目录和控制状态，没有共享运行现场。
+
+正式资格覆盖 macOS arm64 的官方 Chrome `153.0.8010.37` 与 Playwright Python `1.60.0`：同一专用长期 Profile 三次独立启动均直接读到既有 marker，完成固定 CSV 下载、页面继续使用和 owner 正常关闭；正式安装还覆盖双 Profile 隔离、PNG 上传/页面 receipt、redirected CSV 下载、诊断、10 秒 Agent 静默事件推进、人工接管/交还、Runtime 重启后的 Run/材料查询与真实 Codex 短流程。该结果只证明 #528 的当前普通页面、标准文件、控制与恢复切片，不外推完整 Chrome V1、任意 Chrome/OS/网站或全生命周期网络隔离。来源、hash、运行次数、继承边界和脱敏证据见 [`provider-execution-reuse-528.json`](../verification/provider-execution-reuse-528.json)。

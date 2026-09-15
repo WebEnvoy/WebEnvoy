@@ -1,0 +1,177 @@
+{
+  "schema_version": "webenvoy.provider-execution-reuse-528/v1",
+  "work_item": 528,
+  "recorded_at": "2026-09-15",
+  "status": "installed_and_agent_gates_passed_final_review_pending",
+  "scope": "Official Chrome consumption of the existing shared Page, standard Files, diagnostics, control, and recovery slice under agent_operations_v2; not complete Chrome V1 or enhanced browser-lifecycle network isolation.",
+  "base": {
+    "commit": "c66be42ff00efc2637ab412b3bacd363b36c8445",
+    "source": "main after #544"
+  },
+  "runtime_candidate": {
+    "commit": "bd3664677420f630fa881cdb37a116ade7a1dc30",
+    "tree": "d748e5b3ae41296e525fca400fd49d4dd315e021",
+    "package_manifest_sha256": "f067458275726e279b43e0d4c9c0b1429a63df36f59ef58a83efe9ac0a6cb83e",
+    "package": "isolated WebEnvoy-Chrome-Test.app; shared and provider assets were loaded from the package without checkout fallback",
+    "builds": {
+      "formal_package_builds": 3,
+      "note": "The first package found a Profile creation configuration gap, the second froze the complete installed flow, and the third contains the final MCP input-contract correction. Earlier packages remain non-final evidence."
+    }
+  },
+  "provider_pairing": {
+    "chrome": {
+      "provider": "chrome_official",
+      "source": "official_release",
+      "browser": "153.0.8010.37",
+      "platform": "macOS arm64",
+      "browser_archive_sha256": "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3",
+      "browser_executable_sha256": "83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2",
+      "signature": "Apple code signature verified with deep strict validation"
+    },
+    "shared_python": {
+      "playwright": "1.60.0",
+      "python_executable_sha256": "a395f264e5612a2819662ed3e37fd30d39ed61179b98e5f86c3c783a008d8623",
+      "playwright_wheel_sha256": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+    },
+    "camoufox": {
+      "camoufox_python": "0.5.6",
+      "browser": "152.0.4-beta.30",
+      "browser_archive_sha256": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+      "browser_executable_sha256": "e468f25acba5085624da4d1ac809fd5679fa281ed2b0265f82efe63904900b33",
+      "camoufox_wheel_sha256": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+      "change": "none; shared runtime and v2 compatibility evidence from #541/#544 was rechecked only where affected"
+    }
+  },
+  "implementation_map": [
+    {
+      "responsibility": "Page, interaction, waits, Network/Console metadata, Files, JSONL, event loop and result handling",
+      "shared": [
+        "services/harbor/packages/runtime-api/src/playwright_shared_driver.py",
+        "services/harbor/packages/runtime-api/src/playwright-shared-driver.ts"
+      ],
+      "provider_adapter": "none"
+    },
+    {
+      "responsibility": "Chrome executable/Profile ownership, public connection, applicable environment readback and process lifecycle",
+      "shared": "existing Harbor Instance lifecycle and shared Playwright objects",
+      "provider_adapter": [
+        "services/harbor/packages/runtime-api/src/chrome_official_driver.py",
+        "services/harbor/packages/runtime-api/src/chrome-official-driver.ts"
+      ]
+    },
+    {
+      "responsibility": "Camoufox source/pins/properties, full environment bundle, exact replay and persistent Context creation",
+      "shared": "same shared execution module",
+      "provider_adapter": "existing Camoufox thin adapter"
+    }
+  ],
+  "g0": {
+    "browser_process_starts": 8,
+    "setup_measurement_failures": 1,
+    "effective_samples": 7,
+    "g0_a": [
+      "Exact official executable, task Profile, owned process and private loopback endpoint matched the trusted binding.",
+      "No Agent dispatch was admitted before ready; connection failure did not publish a usable Instance.",
+      "Disconnect and stop remained distinct; owner stop closed the exact process and endpoint."
+    ],
+    "g0_b": [
+      "One dedicated Profile completed three independent process starts with the same origin.",
+      "Run 2 and Run 3 directly observed the existing marker without recreation.",
+      "Each start completed one CSV download with sha256 a4df54827b90e5af3a02d5510222c6868c180382bcf938543575752ac6fed36a and a clean owner-requested close."
+    ],
+    "g0_c": [
+      "P1/P2 Page input, stale reference rejection, PNG upload, CSV download, diagnostics and isolation passed through the shared implementation.",
+      "The approved PNG was 30498 bytes with sha256 653364e5aaffd0fddac995ab514fbd656150538f8d84651b42a7ca642521be7d.",
+      "A 10-second interval without browser commands still allowed the delayed page event to complete."
+    ]
+  },
+  "installed_verification": {
+    "formal_chrome_process_starts": 13,
+    "candidate_transition": "The complete installed flow used runtime c0ccb350218b2261f3fc44399d82ad89911af742. The final bd3664677420f630fa881cdb37a116ade7a1dc30 package changed only the public MCP origin requirement projection and its tests/Skill; the same stopped Profiles and data were paired to it, then restart persistence and the real Agent flow were rerun.",
+    "chrome": [
+      "P1/P2 used separate long-lived Profiles and retained their pre-existing markers through normal stop/start.",
+      "P1 completed A/B Page observation and input, stale target rejection, approved PNG upload and page receipt, redirected ordinary CSV download, diagnostics, original Run query and owner export.",
+      "The downloaded CSV was 21 bytes with sha256 8440bc02e883dcf37ed0e1f1c99a14ebaac7c9be64b6ef97dd813515fb07eda4.",
+      "Native owner takeover blocked Agent input, P2 remained usable, return invalidated the old target, and fresh observation resumed the original P1 page.",
+      "Runtime restart preserved binding, policy, Grant, Run and file material; the original result remained queryable/exportable and a later download completed without replay."
+    ],
+    "camoufox": [
+      "The same installation paired the unchanged official Camoufox artifacts to the identical shared Python asset.",
+      "Input, stale target rejection, shared upload/download/diagnostics and stop/start marker continuity passed.",
+      "Provider-specific source, environment bundle and persistent Context creation remained in the Camoufox adapter."
+    ],
+    "not_dispatched_client_corrections": [
+      "One deterministic client omitted page_id after creating A/B pages; Core rejected page_selection_required before browser dispatch.",
+      "One deterministic client omitted task_scope.file_refs; Core rejected managed_access_file_scope_required before browser dispatch.",
+      "The first real Agent turn supplied an empty file_refs list to instance.start; MCP rejected operation_input_refused before Runtime.",
+      "The second real Agent turn omitted the top-level origin from instance.snapshot; Core rejected managed_access_origin_required before Page dispatch. The final package makes that existing requirement explicit in MCP schema, description and Skill."
+    ],
+    "evidence_sha256": {
+      "installed_provider_flow": "2d2d2fe96a4edb6154d710d381960179fb2cf15bcdd69492ca3126d6525a1128",
+      "handoff_flow": "db6f1523518189a73f734b1b61c1af55c10cd5ecfeae747b7dbb1075eeac98b8",
+      "runtime_restart": "ec1f5f9cfc21845ad153e1bebc80f2c2520b0483dd852c4fd93500197a49fb7b",
+      "agent_owner_verification": "52394d4c50c99e157d59a7198939de3d3d882a15ccdd90dc2c1ae66b20caeb3f"
+    }
+  },
+  "real_agent": {
+    "status": "passed",
+    "host": "Codex",
+    "model": "host default; the CLI result did not expose the exact model field, so no resolved model is inferred",
+    "thread": "01a0a525-4155-7bc0-970d-d3f4dfc0381a",
+    "profile": "profile_b79c7659781d09b3e0045650",
+    "results": [
+      "Started the assigned existing Chrome Profile and observed the original task page.",
+      "Filled the ordinary field, uploaded the approved PNG, and read its page receipt.",
+      "Downloaded the same-page CSV and queried the original upload/download Runs without replay.",
+      "Owner export independently matched sha256 8440bc02e883dcf37ed0e1f1c99a14ebaac7c9be64b6ef97dd813515fb07eda4, then stopped the exact browser."
+    ]
+  },
+  "historical_result": {
+    "chrome_152": "The retained original download Run remains unknown_outcome/dispatched with no file_ref.",
+    "preserved_without_replay_or_rewrite": true
+  },
+  "review": {
+    "worker": {
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "max"
+    },
+    "early_and_repackage_reviewers": {
+      "model": "gpt-6-astra",
+      "reasoning_effort": "low",
+      "result": "The adapter boundary, timezone canonicalization and final MCP input projection were accepted for packaging."
+    },
+    "final_exact_head_review": "pending after this evidence-only commit"
+  },
+  "checks": {
+    "ci_at_runtime_candidate": [
+      "packaged no-release evidence passed",
+      "Python compile passed",
+      "host attestation passed",
+      "workspace path matrix passed",
+      "Desktop build/typecheck passed",
+      "Harbor build/test/typecheck passed",
+      "workspace CI passed"
+    ],
+    "skipped": [
+      "The Core CI job was path-matrix skipped at the runtime candidate; it is not recorded as an executed success."
+    ],
+    "final_exact_head_checks": "pending after this evidence-only commit",
+    "inherited_or_audited": [
+      "Unchanged legacy/v2 authorization compatibility and Camoufox installed behavior from #544.",
+      "Unchanged native UI owner mechanism from #526; the Chrome installed takeover/return result was executed in this task.",
+      "The full #516/#519/#523/#526/#541 matrices were not mechanically repeated."
+    ]
+  },
+  "counts": {
+    "chrome_process_starts_total": 21,
+    "g0": 8,
+    "formal_installed_and_agent": 13,
+    "real_agent_turns": 3
+  },
+  "excluded_and_non_claims": [
+    "No browser, SDK, site-package or protocol implementation was modified.",
+    "No fallback to the old site/CDP path, another Provider or a replacement Profile exists.",
+    "This does not promise whole-browser lifecycle network isolation, arbitrary Chrome versions/platforms/sites, or complete Chrome V1.",
+    "No Profile database, credential, browser package, dump or raw payload is committed."
+  ]
+}
