@@ -1,7 +1,7 @@
 # Provider 执行复用设计 V1
 
 - 文档性质：规范性实施设计；包含本文件的 docs PR 经独立审查合并后生效。
-- 版本：1.1；日期：2026-09-14。
+- 版本：1.2；日期：2026-09-15。
 - Owner：Harbor Runtime；产品归口：[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
 - 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)、[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541)；关联 #471、#474、#477、#482。
 - 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
@@ -58,9 +58,9 @@
 
 ### 4.3 官方 Chrome 适配器
 
-使用同一已安装 Python/Playwright 运行资产，通过公开 `playwright.chromium.launch_persistent_context` 启动 **该 Profile binding 所指向、由 owner 验证的官方 Chrome executable** 与受管 user-data-dir。不以通用 `channel` 解析偷偷换程序，不自动安装 bundled Chromium，不接管用户默认或日常 Profile。
+Chrome 的通用用户结果固定，启动／连接接口由资格证据决定。旧候选使用公开 `playwright.chromium.launch_persistent_context` 启动 **该 Profile binding 所指向、由 owner 验证的官方 Chrome executable** 与受管 user-data-dir；它保留为历史失败证据，不再是当前采用路线，也不得成为新路线失败后的 fallback。
 
-Chrome `152.0.7977.84` 仅是 #516 的历史核对线索。G0 必须记录本机现有官方版本和来源；不同版本的证据不自动继承，不自动下载、升级、降级或换 Provider。Playwright 保持本任务固定版本。供应方文档存在该 API，不代表当前 Chrome/SDK 组合必然合格。
+2026-09-15 的新主候选是由 WebEnvoy 管理同一可信 executable、进程和受管 user-data-dir，再通过 Playwright Python 公开 `connect_over_cdp` 取得 default Context并交给共同执行实现。该候选必须先证明连接前没有恢复页、已有 Service Worker、未完成下载或其他受管请求越过 guard，并证明断连和正常停止不会留下无保护浏览器。公开接口存在不等于资格通过。
 
 Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bundle。可使用同一已安装 Python 运行包，不要求为证明隔离而卸载其中的 Camoufox wheel；但 Chrome 启动模块不得导入该 SDK，也不得因 Camoufox 专用资料缺失而失败。
 
@@ -68,7 +68,7 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 当前历史站点操作和其显式 scope 保留，不在本任务整仓迁移。新的通用 Chrome `profile_management` 和由该实例执行的 Page/Files/诊断必须进入共享实现；失败时明确拒绝，不切到旧站点/CDP路径，不在 Agent 工具中新增 Chrome 专属替代操作。
 
-不把“没有 CDP”当成目标；不同协议适配仍是允许工作。本轮不选 `connect_over_cdp` 作为新共同路径，也不在 persistent-context 路径失败后自动换协议。相同 Profile 只能由其现行管理入口持有，两个后端不能并发写入同一目录。既有 Instance 不热换后端。
+不同公开协议可以由窄适配器使用，但每个新 Instance 固定一种后端；失败时不自动切换，活动 Instance 不热换，相同 Profile 不并发写入。`connect_over_cdp` 只允许承担启动／连接差异，不能复制 raw CDP Page、Files、guard、诊断或恢复实现。
 
 ## 5. 必须保留的不变量
 
@@ -113,7 +113,7 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 在完整抽取、全量审查、打包和真实 Agent前，先验证最可能推翻本路线的条件。基线可以使用现有受信任客户端与有界 spike；最终必须进入正式安装链。
 
-**G0-A：接入/依赖/共存。** 两个专用 Profile 使用各自程序和 persistent Context；同一 Runtime安装级 Camoufox 配置不影响 Chrome。Chrome专用样本移除Camoufox配置/来源/properties后仍可启动；相同缺失对Camoufox仍准确拒绝。核对实际executable、目录和初始请求保护，不能只看catalog。
+**G0-A：接入/依赖/共存。** 两个专用 Profile 使用各自程序和独立 Context；同一 Runtime安装级 Camoufox 配置不影响 Chrome。Chrome专用样本移除Camoufox配置/来源/properties后仍可启动；相同缺失对Camoufox仍准确拒绝。Chrome 外部受管启动候选必须在进程启动前开始计数，分别验证恢复页、redirect、已有 Service Worker和未完成下载在 guard ready 前零派发；连接后首次看到空 Page／Worker 列表不能冒充连接前保护。正常关闭须在 guard仍有效时先停止精确所属进程，再释放连接；异常断连须 fail-closed 并收敛该进程。任一条件缺少公开、可维护机制即停止候选，不先实现完整适配。
 
 **G0-B：文件/归属/保护。** 同一脚本分别在两种Provider原页上传生成PNG，核对服务端hash；从同页普通链接下载CSV、关闭Context后检查保留结果hash。guard始终启用，未授权direct/redirect请求计数为零；无可信Page归属仍拒绝，不能按首个下载事件认领。
 
@@ -160,7 +160,7 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 
 不恢复浏览器/Playwright私有改写，不新增Provider marketplace、远程浏览器、自动更新平台、站点知识迁移或完整App；不新增第三个Provider、账号绑定/登录/交易、不使用日常Profile，不扩Files/Dialog/多行/frame/跨窗/popup成功/offscreen。
 
-本轮批准路线是现有正式程序的公开persistent-context适配。若该组合不能在既定安全条件下完成范围，保留未完成状态和可核对反例，不退回“每品牌复制一份”、关闭保护或换浏览器。架构要求是代码复用，不是让所有Provider原生能力完全相同。
+本轮允许按资格证据调整官方 Chrome 的公开启动／连接适配。若候选不能在既定安全条件下完成范围，保留未完成状态和可核对反例，不退回“每品牌复制一份”、关闭保护、静默 fallback或换浏览器。架构要求是代码复用，不是让所有Provider原生能力完全相同。
 
 ## 12. 来源与证据边界
 
@@ -180,3 +180,11 @@ Chrome 自有运行不得要求 Camoufox 程序、配置、pin/properties 或 bu
 这个阶段不改变用户步骤、Profile/binding/default、Grant、ControlLease、Run/receipt、文件材料或 unknown 不重放语义。Chrome 新 adapter、generic `profile_management` launcher、availability/environment/support projection 和候选复现资产不进入 #541；main 上既有 Chrome 选择、默认、binding 与旧明确 scope 原样保留。
 
 #541 完成只表示 Camoufox 已无回归地正式消费共同实现，并允许后续 Runtime 开发复用该基线。#528 的双 Provider 用户目标、Chrome crash-free 资格、相同 Agent 流程和完成门保持不变；PR #530 继续 draft、未合并。#541 的直接对应表与脱敏证据见 [`provider-execution-reuse-541.json`](../verification/provider-execution-reuse-541.json)。
+
+## 14. 2026-09-15 官方 Chrome 公开连接候选的资格结果
+
+固定 Playwright Python `1.60.0` 的公开 `connect_over_cdp` 只能连接已经运行的 Chrome default Context。其公开入口没有在 Chrome 进程启动前暂停恢复 Target、已有 Service Worker、未完成下载或网络的选项；`set_offline`、`route` 与 init script 均只能在连接后应用。default Context 也不能通过该入口补入 persistent Context 创建时的 `service_workers="block"`、timezone、locale、proxy 与 downloads path 等配置。
+
+因此 `--no-startup-window`、受管 loopback 和连接后再安装共同 guard 只能作为待验证的 fresh-profile 假设，不能证明任意长期 Profile 在连接前 fail-closed。CDP连接上的公开 `browser.close()` 只断开控制连接，外部 Chrome 还须由 owner 单独停止；若先断连再停进程，会主动形成 guard 空档。新增进程级网络屏障、系统权限、浏览器补丁或把范围缩成 disposable Profile 均超出 #528 当前合同。
+
+本候选据此在 G0-A 停止，未启动浏览器、未进入 G0-B/C、未写 Chrome 产品 adapter，也未改变 Camoufox、Grant、file_scope、ControlLease 或历史 Run。脱敏证据见 [`chrome-managed-cdp-qualification-v1.json`](../verification/chrome-managed-cdp-qualification-v1.json)。#528 保持未完成；恢复实施需要一个公开、可维护的接入能力，能够在进程启动前建立 fail-closed 保护，同时保留 persistent Context 的配置、下载与生命周期语义。

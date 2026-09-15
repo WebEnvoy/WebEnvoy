@@ -1,0 +1,50 @@
+{
+  "schema_version": "webenvoy.chrome-managed-cdp-qualification/v1",
+  "recorded_at": "2026-09-15",
+  "work_item": 528,
+  "baseline": {
+    "main": "2d9976c1fcc8318910c17610dd51479afd098f25",
+    "shared_execution": "541/542",
+    "frozen_candidate_pr": 530
+  },
+  "candidate": {
+    "provider_id": "chrome_official",
+    "browser": "Google Chrome 153.0.8010.37 macOS arm64 (retained official artifact; not launched in this qualification)",
+    "sdk": "Playwright Python 1.60.0",
+    "public_entry": "BrowserType.connect_over_cdp",
+    "managed_resources": ["official executable", "dedicated user-data-dir", "private loopback endpoint", "owned browser process"]
+  },
+  "verified_static_facts": [
+    "connect_over_cdp attaches after the external browser is already running",
+    "set_offline, route, and add_init_script are BrowserContext operations available only after connection",
+    "the public connect_over_cdp signature has no persistent-context creation options for service_workers, timezone, locale, proxy, viewport, or downloads_path",
+    "BrowserContext routing does not intercept requests already handled by Service Workers",
+    "for an external CDP connection, Playwright browser close disconnects its transport and does not own the external Chrome process"
+  ],
+  "qualification_gates": {
+    "g0_a": {
+      "status": "blocked_before_live",
+      "reason": "No public pre-connection fail-closed mechanism covers restored pages, existing Service Workers, unfinished downloads, and managed requests while preserving the long-term default Context.",
+      "live_browser_launches": 0
+    },
+    "g0_b": { "status": "not_run", "live_browser_launches": 0 },
+    "g0_c": { "status": "not_run", "live_browser_launches": 0 }
+  },
+  "rejected_shortcuts": [
+    "treating --no-startup-window as proof of zero background activity",
+    "installing the guard only after connecting",
+    "using a new non-persistent BrowserContext",
+    "clearing or rebuilding Profile state",
+    "adding a parallel raw-CDP execution path",
+    "disconnecting before the owned Chrome process has stopped",
+    "falling back to the historical launch_persistent_context or site-specific path"
+  ],
+  "unchanged": [
+    "Profile binding and user creation default",
+    "Grant and file_scope",
+    "Page, ControlLease, file material, Run, receipt, and unknown/no-replay semantics",
+    "Camoufox shared execution delivered by 541/542",
+    "the historical unknown_outcome/dispatched Chrome Run without file_ref"
+  ],
+  "next_decision": "Require a public, maintainable launch/connection capability that establishes fail-closed protection before browser startup while retaining persistent Context configuration, downloads, and lifecycle semantics; otherwise any network-layer or disposable-Profile alternative needs separate product scope and authorization."
+}
