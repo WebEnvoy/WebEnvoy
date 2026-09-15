@@ -354,13 +354,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       return transaction(state => receipt(state, "setProfilePolicy", input, () => {
         const existing = state.profile_policies.find(item => item.profile_ref === parsed.profile_ref);
         // A legacy-shaped owner update must not silently downgrade a v2
-        // Profile. Preserve the fixed instance semantics while allowing the
-        // existing owner policy update to change its limits.
-        const next = existing && scopeSemantics(existing.scope_semantics) === "agent_operations_v2"
-          ? { ...parsed, scope_semantics: "agent_operations_v2" as const }
-          : parsed;
+        // Profile. A v2-aware owner update is not part of this contract yet.
+        if (existing && scopeSemantics(existing.scope_semantics) === "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
         state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== parsed.profile_ref);
-        state.profile_policies.push(next); return next;
+        state.profile_policies.push(parsed); return parsed;
       }));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {

@@ -125,8 +125,7 @@ try {
     }
     await rejected(stopped.checkAccess(v2Digest, { connection_id: legacyList.connection.connection_id, grant_id: source.grant_id, operation: "instance.start", profile_ref: "profile:v2", origin: "https://example.com", task_scope: { operations: ["instance.start"], profile_refs: ["profile:v2"], origins: ["https://example.com"] } }), "managed_access_scope_semantics_mismatch");
     await rejected(stopped.confirmAgentOperationsV2({ ...confirmationInput, idempotency_key: "v2-confirm-replay", confirmation: { ...confirmationInput.confirmation, idempotency_key: "v2-confirm-replay" } }), "managed_access_scope_confirmation_consumed");
-    const v2PolicyUpdate = await stopped.setProfilePolicy({ idempotency_key: "v2-legacy-update", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"] });
-    assert.equal(v2PolicyUpdate.scope_semantics, "agent_operations_v2");
+    await rejected(stopped.setProfilePolicy({ idempotency_key: "v2-legacy-downgrade", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"] }), "managed_access_scope_confirmation_required");
     assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
     await rejected(stopped.setProfilePolicy({ idempotency_key: "v2-direct", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"], scope_semantics: "agent_operations_v2" }), "managed_access_invalid_input");
   } finally { await rm(v2Directory, { recursive: true, force: true }); }
