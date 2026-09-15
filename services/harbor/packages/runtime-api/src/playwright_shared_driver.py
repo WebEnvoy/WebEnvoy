@@ -1107,7 +1107,7 @@ class Driver:
         chain.reverse()
         return chain
 
-    def matching_download_chain(self, state: PageState, requests: list[Any], observed_href: str, download_url: str, scope: set[str], download: Any) -> bool:
+    def matching_download_chain(self, state: PageState, requests: list[Any], observed_href: str, download_url: str, scope: set[str], download: Any, scope_semantics: str) -> bool:
         observed_ids = {id(item) for item in requests}
         matches: list[tuple[tuple[str, ...], Any]] = []
         for candidate in requests:
@@ -1121,7 +1121,7 @@ class Driver:
             urls = list(route_urls) if route_urls is not None else [url for url in object_urls if url is not None]
             if not urls or urls[0] != observed_href or urls[-1] != download_url:
                 continue
-            if len(urls) > MAX_REDIRECT_HOPS + 1 or any(origin_of(url) not in scope for url in urls):
+            if len(urls) > MAX_REDIRECT_HOPS + 1 or origin_of(urls[0]) not in scope or (scope_semantics == "legacy_request_guard_v1" and any(origin_of(url) not in scope for url in urls)):
                 continue
             if any(self.request_page(item) is not state.page for item in chain):
                 continue
@@ -1263,7 +1263,7 @@ class Driver:
             if len(download_events) != 1 or download_events[0] is not download:
                 return await failure_result("download_relation_unavailable")
             download_url = safe_url(download.url)
-            if not download_url or origin_of(download_url) not in scope or not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download):
+            if not download_url or (scope_semantics == "legacy_request_guard_v1" and origin_of(download_url) not in scope) or not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download, scope_semantics):
                 return await failure_result("download_relation_unavailable")
             # save_as may wait for Playwright's original browser artifact before
             # copying it to staging. Monitor both public download storage and
@@ -1285,7 +1285,7 @@ class Driver:
                 return await failure_result(safe_text(failure, 128))
             if len(download_events) != 1 or download_events[0] is not download:
                 return await failure_result("download_relation_unavailable")
-            if not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download):
+            if not self.matching_download_chain(state, request_events, observed_resolved, download_url, scope, download, scope_semantics):
                 return await failure_result("download_relation_unavailable")
             staged = Path(staging)
             size = staged.stat().st_size

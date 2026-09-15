@@ -451,7 +451,7 @@ playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.mo
 spec = importlib.util.spec_from_file_location("camoufox_upstream_driver", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 
 class Request:
-    def __init__(self, page, url): self.frame = types.SimpleNamespace(page=page); self.url = url; self.redirected_from = None; self.method = "GET"; self.post_data = None
+    def __init__(self, page, url, redirected_from=None): self.frame = types.SimpleNamespace(page=page); self.url = url; self.redirected_from = redirected_from; self.method = "GET"; self.post_data = None
 class Link:
     def __init__(self, page, download, extras=()): self.page = page; self.download = download; self.extras = extras
     async def evaluate(self, expression): return True
@@ -460,6 +460,9 @@ class Link:
         request = Request(self.page, "https://files.test/expected.csv")
         if self.page.emit_request:
             for listener in self.page.listeners.get("request", []): listener(request)
+            if self.page.redirect_url:
+                request = Request(self.page, self.page.redirect_url, request)
+                for listener in self.page.listeners.get("request", []): listener(request)
         for item in (self.download, *self.extras):
             for listener in self.page.listeners.get("download", []): listener(item)
 class Download:
@@ -481,25 +484,30 @@ class Expectation:
     async def __aexit__(self, *args): return False
 class PageImpl:
     url = "https://files.test/"; main_frame = object()
-    def __init__(self, download, extras=()): self.download = download; self.link = Link(self, download, extras); self.listeners = {}; self.emit_request = True
+    def __init__(self, download, extras=()): self.download = download; self.link = Link(self, download, extras); self.listeners = {}; self.emit_request = True; self.redirect_url = None
     def is_closed(self): return False
     async def title(self): return "Fixture"
     def on(self, event, listener): self.listeners.setdefault(event, []).append(listener)
     def remove_listener(self, event, listener): self.listeners.get(event, []).remove(listener)
     def expect_download(self, timeout): return Expectation(self.download)
-def make(download, extras=(), emit_request=True):
+def make(download, extras=(), emit_request=True, scope_semantics="legacy_request_guard_v1", redirect_url=None):
     page = PageImpl(download, extras); page.emit_request = emit_request; download.page = page; [setattr(item, "page", page) for item in extras]
-    state = module.PageState("page:1", page, ["https://files.test"]); state.controls["target"] = ("link", "Download", "/expected.csv", None, page.link)
-    instance = object.__new__(module.Driver); instance.pages = {"page:1": state}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.unattributed_rejection_count = 0; instance.close_requested = asyncio.Event()
+    page.redirect_url = redirect_url
+    state = module.PageState("page:1", page, ["https://files.test"], scope_semantics=scope_semantics); state.controls["target"] = ("link", "Download", "/expected.csv", None, page.link)
+    instance = object.__new__(module.Driver); instance.pages = {"page:1": state}; instance.current = "page:1"; instance.request = {"timeout_ms": 1000}; instance.scope_semantics = scope_semantics; instance.unattributed_rejection_count = 0; instance.close_requested = asyncio.Event()
     return instance, page
-def run(download, extras=(), timeout=1000, use_browser_temp=False, emit_request=True):
-    instance, page = make(download, extras, emit_request); staging = tempfile.mktemp(prefix="harbor-download-bound-")
+def run(download, extras=(), timeout=1000, use_browser_temp=False, emit_request=True, scope_semantics="legacy_request_guard_v1", redirect_url=None):
+    instance, page = make(download, extras, emit_request, scope_semantics, redirect_url); staging = tempfile.mktemp(prefix="harbor-download-bound-")
     temp_root = tempfile.mkdtemp(prefix="harbor-download-temp-") if use_browser_temp else None
     if temp_root is not None:
         instance.downloads_root = __import__("pathlib").Path(temp_root)
         page.temp_path = os.path.join(temp_root, "download")
-    result = asyncio.run(instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://files.test", "authorized_origins": ["https://files.test"], "target_ref": "target", "staging_path": staging, "timeout_ms": timeout}))
-    assert not os.path.exists(staging)
+    result = asyncio.run(instance.file_operation({"provider_page_ref": "page:1", "operation": "download", "expected_origin": "https://files.test", "authorized_origins": ["https://files.test"], "scope_semantics": scope_semantics, "target_ref": "target", "staging_path": staging, "timeout_ms": timeout}))
+    if result.get("status") == "completed":
+        assert os.path.exists(staging)
+        os.unlink(staging)
+    else:
+        assert not os.path.exists(staging)
     if temp_root is not None:
         assert not os.listdir(temp_root), (result, os.listdir(temp_root))
         __import__("shutil").rmtree(temp_root)
@@ -514,6 +522,10 @@ assert multiple["failure_class"] == "download_relation_unavailable" and first.ca
 unobserved_download = Download(None, "https://files.test/expected.csv")
 unobserved, unobserved_download, _ = run(unobserved_download, emit_request=False)
 assert unobserved["failure_class"] == "download_relation_unavailable" and unobserved_download.cancelled == 1, unobserved
+legacy_redirect, legacy_redirect_download, _ = run(Download(None, "https://cdn.test/receipt.csv"), redirect_url="https://cdn.test/receipt.csv")
+assert legacy_redirect["failure_class"] == "download_relation_unavailable" and legacy_redirect_download.cancelled == 1, legacy_redirect
+v2_redirect, v2_redirect_download, _ = run(Download(None, "https://cdn.test/receipt.csv"), scope_semantics="agent_operations_v2", redirect_url="https://cdn.test/receipt.csv")
+assert v2_redirect["status"] == "completed" and v2_redirect_download.cancelled == 0, v2_redirect
 oversize, oversized, _ = run(Download(None, "https://files.test/expected.csv", body=b"x" * (10 * 1024 * 1024 + 1)))
 assert oversize["failure_class"] == "file_limit_exceeded" and oversized.cancelled == 1, oversize
 timeout, slow, _ = run(Download(None, "https://files.test/expected.csv", delay=0.2), timeout=20)
