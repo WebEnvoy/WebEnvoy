@@ -86,21 +86,19 @@ if (import.meta.url === entrypoint) {
           withStoppedProfile: async <T>(profileRef: string, operationRef: string, action: () => Promise<T> | T) => {
             const headers = { authorization: `Bearer ${process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? ""}` };
             const reservationRef = `scope:${createHash("sha256").update(operationRef).digest("hex")}`;
-            let reserved = false;
             try {
               const response = await fetch(new URL("/runtime/profile-scope-transition-reservations", managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef, reservation_ref: reservationRef }) });
               const result = await response.json() as { status?: unknown };
               if (!response.ok || result.status !== "held") throw new ManagedAccessError("managed_access_profile_not_stopped");
-              reserved = true;
-              return await action();
             } catch (error) {
               if (error instanceof ManagedAccessError) throw error;
               throw new ManagedAccessError("managed_access_profile_state_unavailable");
+            }
+            try {
+              return await action();
             } finally {
-              if (reserved) {
                 const response = await fetch(new URL(`/runtime/profile-scope-transition-reservations/${encodeURIComponent(reservationRef)}/release`, managedAccessHarborUrl), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ profile_ref: profileRef }) }).catch(() => null);
                 if (!response?.ok) throw new ManagedAccessError("managed_access_profile_state_unavailable");
-              }
             }
           }
         })
