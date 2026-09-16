@@ -19,8 +19,8 @@ let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
 const forwardedCapabilityOrigins: string[][] = [];
-  let capabilityDescriptionMode: "normal" | "human" | "stale" | "stopped" | "unknown" = "normal";
-  let capabilityDescriptionShape: "valid" | "wrong_schema" | "wrong_operation" | "wrong_profile" | "unknown_state" | "profile_missing" = "valid";
+  let capabilityDescriptionMode: "normal" | "human" | "stale" | "stopped" | "unknown" | "page_selection" = "normal";
+  let capabilityDescriptionShape: "valid" | "wrong_schema" | "wrong_operation" | "wrong_profile" | "unknown_state" | "profile_missing" | "provider_evidence_stale" = "valid";
   let afterCapabilityDescription: (() => Promise<void>) | undefined;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
@@ -69,10 +69,10 @@ const server = createServer((req, res) => { void (async () => {
       schema_version: capabilityDescriptionShape === "wrong_schema" ? "harbor-capability-description/v2" : "harbor-capability-description/v1",
       operation: capabilityDescriptionShape === "wrong_operation" ? "instance.read" : input.operation,
       profile_ref: capabilityDescriptionShape === "wrong_profile" ? "profile:other" : input.profile_ref,
-      provider: { state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : "supported", provider_id: "camoufox", reason_codes: state === "unknown" ? ["provider_not_qualified"] : capabilityDescriptionShape === "profile_missing" ? ["profile_missing"] : [], limitations: [], facts_at: "2026-09-09T00:00:00.000Z" },
+      provider: { state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" || capabilityDescriptionShape === "provider_evidence_stale" ? "unknown" : "supported", provider_id: "camoufox", reason_codes: state === "unknown" ? ["provider_not_qualified"] : capabilityDescriptionShape === "provider_evidence_stale" ? ["provider_evidence_stale"] : capabilityDescriptionShape === "profile_missing" ? ["profile_missing"] : [], limitations: [], facts_at: "2026-09-09T00:00:00.000Z" },
       availability: {
         state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : state === "normal" ? "no_known_blocker" : "blocked",
-        reason_codes: state === "human" ? ["human_control"] : state === "stale" ? ["stale_reference"] : state === "stopped" ? ["instance_not_running"] : state === "unknown" ? ["runtime_facts_unavailable"] : [],
+        reason_codes: state === "human" ? ["human_control"] : state === "stale" ? ["stale_reference"] : state === "page_selection" ? ["page_selection_required"] : state === "stopped" ? ["instance_not_running"] : state === "unknown" ? ["runtime_facts_unavailable"] : [],
         facts_at: "2026-09-09T00:00:00.000Z"
       },
       execution_checks: ["reauthorize", "verify_page_and_target"]
@@ -807,17 +807,41 @@ try {
   const allowedContext = { grant_id: allowedGrant.grant_id, profile_ref: "profile:2",
     task_scope: { operations: ["profile.read", "instance.observe"], profile_refs: ["profile:2"], origins: ["https://example.com"] } };
   const allowedArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
+  capabilityDescriptionShape = "provider_evidence_stale";
+  const staleProviderDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((staleProviderDescription.provider as { state: string }).state, "unknown");
+  assert.deepEqual((staleProviderDescription.provider as { reason_codes: string[] }).reason_codes, ["provider_evidence_stale"]);
+  assert.deepEqual(staleProviderDescription.next_steps, [{ code: "owner_review_provider", actor: "owner", operation: null, fields: [] }]);
+  capabilityDescriptionShape = "valid";
   for (const mode of ["human", "stale", "unknown"] as const) {
     capabilityDescriptionMode = mode;
     const described = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
     const availability = described.availability as { state: string; reason_codes: string[] };
     assert.equal(availability.state, mode === "unknown" ? "unknown" : "blocked");
     assert.equal(availability.reason_codes[0], mode === "human" ? "human_control" : mode === "stale" ? "stale_reference" : "runtime_facts_unavailable");
+    assert.deepEqual(described.next_steps, mode === "human"
+      ? [{ code: "wait_for_owner_return", actor: "owner", operation: "instance.observe", fields: [] }]
+      : mode === "stale"
+        ? [{ code: "observe_page", actor: "agent", operation: "instance.observe", fields: [] }]
+        : [{ code: "owner_review_provider", actor: "owner", operation: null, fields: [] }]);
   }
+  capabilityDescriptionMode = "page_selection";
+  const ambiguousDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((ambiguousDescription.availability as { state: string }).state, "blocked");
+  assert.deepEqual((ambiguousDescription.availability as { reason_codes: string[] }).reason_codes, ["page_selection_required"]);
+  assert.deepEqual(ambiguousDescription.next_steps, [{ code: "choose_page", actor: "agent", operation: "page.list", fields: [] }]);
+
+  const misplacedFileDraft = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "file.download",
+    arguments: { file_ref: "attachment:runtime/11111111-1111-4111-8111-111111111111" } });
+  assert.equal((misplacedFileDraft.inputs as { state: string }).state, "invalid");
+  assert.deepEqual((misplacedFileDraft.inputs as { invalid: { path: string; code: string }[] }).invalid, [{ path: "/arguments/file_ref", code: "unknown_field" }]);
+  assert.equal((misplacedFileDraft.next_steps as { fields: string[] }[])[0]?.fields.includes("/arguments/file_ref"), true);
+
   capabilityDescriptionMode = "stopped";
   const stoppedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
   assert.equal((stoppedDescription.availability as { state: string }).state, "blocked");
   assert.deepEqual((stoppedDescription.availability as { reason_codes: string[] }).reason_codes, ["instance_not_running"]);
+  assert.deepEqual(stoppedDescription.next_steps, [{ code: "start_profile", actor: "agent", operation: "instance.start", fields: ["/arguments/origin"] }]);
 
   capabilityDescriptionMode = "normal";
   afterCapabilityDescription = async () => { capabilityDescriptionMode = "stale"; };

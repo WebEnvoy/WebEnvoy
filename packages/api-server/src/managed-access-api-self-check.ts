@@ -168,6 +168,22 @@ async function assertManagementPolicyApi(): Promise<void> {
     const registered = await call("/agent-access/principals", owner, "POST", { idempotency_key: "register", display_name: "Policy Test", credential_hash: createHash("sha256").update(agent).digest("hex") });
     assert.equal(registered.status, 201);
     const connected = await call("/agent-connections", agent, "POST", {});
+    const described = await call("/managed-browser/capabilities/describe", agent, "POST", {
+      connection_id: connected.body.connection.connection_id,
+      operation: "file.download",
+      arguments: { file_ref: "attachment:runtime/11111111-1111-4111-8111-111111111111" }
+    });
+    assert.equal(described.status, 200, JSON.stringify(described.body));
+    assert.equal(described.body.inputs.state, "invalid");
+    assert.deepEqual(described.body.inputs.invalid, [{ path: "/arguments/file_ref", code: "unknown_field" }]);
+    assert.equal(described.body.next_steps[0].fields.includes("/arguments/file_ref"), true);
+    const rejectedDraftShell = await call("/managed-browser/capabilities/describe", agent, "POST", {
+      connection_id: connected.body.connection.connection_id,
+      operation: "file.download",
+      arguments: { file_ref: "attachment:runtime/11111111-1111-4111-8111-111111111111", grant_id: "grant:forbidden" }
+    });
+    assert.equal(rejectedDraftShell.status, 400);
+    assert.equal(rejectedDraftShell.body.error.code, "managed_browser_invalid_input");
     const granted = await call("/agent-access/grants", owner, "POST", { idempotency_key: "grant", principal_id: registered.body.principal.principal_id,
       profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1,
       creation_template: { template_ref: "template:policy", provider_id: "camoufox", site: { site_id: "public", origin: "https://example.com", display_name: "Public" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.read"], allowed_origins: ["https://example.com"] } } });

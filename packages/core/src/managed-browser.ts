@@ -34,7 +34,6 @@ type DiscoveryDimensionState = "supported" | "limited" | "unsupported" | "unknow
 type DiscoveryAvailabilityState = "no_known_blocker" | "blocked" | "unknown" | "not_evaluated";
 type DiscoveryAuthorizationState = "allowed" | "denied" | "unknown" | "not_evaluated";
 const discoveryOperationPattern = new RegExp(managedCapabilityDefinitions.operation_pattern);
-const discoveryEnvelopeFields = new Set(["idempotency_key", "connection_id", "grant_id", "operation", "task_scope"]);
 const discoveryNextStep = (code: string, operation: string | null, fields: string[] = []) => ({ code, actor: code.startsWith("owner_") || code === "wait_for_owner_return" ? "owner" : "agent", operation, fields });
 const isInteraction = (operation: string) => (managedInteractionOperations as readonly string[]).includes(operation);
 const isPageMutation = (operation: string) => (managedPageOperations as readonly string[]).includes(operation) && operation !== "page.list";
@@ -300,7 +299,7 @@ function parseDescribe(value: unknown): DescribeInput {
   let args: ObjectValue | undefined;
   if (input.arguments !== undefined) {
     args = object(input.arguments);
-    const fields = new Set(managedCapabilityInputFields(input.operation).filter(field => !discoveryEnvelopeFields.has(field) && field !== "profile_ref"));
+    const fields = new Set(Object.keys(managedCapabilityDefinitions.fields).filter(field => field !== "profile_ref"));
     if (Object.keys(args).some(key => !fields.has(key))) return fail("managed_browser_invalid_input");
     for (const [key, item] of Object.entries(args)) {
       if (key === "origin" && typeof item !== "string" || key === "origin" && !publicOrigin(item)) return fail("managed_browser_invalid_input");
@@ -677,7 +676,8 @@ export function createManagedBrowserService(options: {
       return result;
     };
     if (input.context === undefined) {
-      if (state === "defined" && exposure === "not_exposed") result.next_steps = [discoveryNextStep("not_exposed", null)];
+      if (exposure === "exposed" && (assessment.state === "incomplete" || assessment.state === "invalid")) result.next_steps = [discoveryNextStep("fill_inputs", input.operation, [...assessment.missing, ...assessment.invalid.map(issue => issue.path)])];
+      else if (state === "defined" && exposure === "not_exposed") result.next_steps = [discoveryNextStep("not_exposed", null)];
       else if (state === "out_of_scope") result.next_steps = [discoveryNextStep("use_existing_tool", null)];
       return finish();
     }
@@ -807,10 +807,13 @@ export function createManagedBrowserService(options: {
       return finish();
     }
     const availability = result.availability as ObjectValue;
-    if ((result.inputs as ObjectValue).state === "incomplete" || (result.inputs as ObjectValue).state === "invalid") result.next_steps = [discoveryNextStep("fill_inputs", input.operation, (result.inputs as ObjectValue).missing as string[])];
+    if ((result.inputs as ObjectValue).state === "incomplete" || (result.inputs as ObjectValue).state === "invalid") result.next_steps = [discoveryNextStep("fill_inputs", input.operation, [...assessment.missing, ...assessment.invalid.map(issue => issue.path)])];
     else if ((result.authorization as ObjectValue).state === "denied") result.next_steps = [discoveryNextStep("owner_authorize", input.operation)];
     else if (availability.state === "blocked" && (availability.reason_codes as string[]).includes("human_control")) result.next_steps = [discoveryNextStep("wait_for_owner_return", input.operation)];
     else if (availability.state === "blocked" && (availability.reason_codes as string[]).includes("instance_not_running")) result.next_steps = [discoveryNextStep("start_profile", "instance.start", ["/arguments/origin"])];
+    else if ((result.provider as ObjectValue).reason_codes && ((result.provider as ObjectValue).reason_codes as string[]).some(code => ["provider_not_qualified", "provider_evidence_stale"].includes(code))) result.next_steps = [discoveryNextStep("owner_review_provider", null)];
+    else if ((availability.reason_codes as string[]).includes("stale_reference")) result.next_steps = [discoveryNextStep("observe_page", "instance.observe")];
+    else if ((availability.reason_codes as string[]).includes("page_selection_required")) result.next_steps = [discoveryNextStep("choose_page", "page.list")];
     else if (availability.state === "unknown") result.next_steps = [discoveryNextStep("retry_description", input.operation)];
     return finish();
   }
