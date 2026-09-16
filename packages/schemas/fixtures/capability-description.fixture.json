@@ -1,0 +1,51 @@
+{
+  "$schema": "capability-description.schema.json",
+  "ok": true,
+  "schema_version": "webenvoy.capability-description/v1",
+  "operation": "instance.snapshot",
+  "assessed_at": "2026-09-16T00:00:00.000Z",
+  "definition_revision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "mode": "contextual",
+  "definition": { "state": "defined", "capability": "observation" },
+  "invocation": {
+    "exposure": "exposed",
+    "tool": "webenvoy_operation",
+    "input_schema": {
+      "type": "object",
+      "required": ["idempotency_key", "grant_id", "operation", "task_scope", "profile_ref", "origin", "runtime_session_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": { "type": "string" },
+        "grant_id": { "type": "string" },
+        "operation": { "type": "string", "enum": ["instance.snapshot"] },
+        "task_scope": { "type": "object", "required": ["operations", "profile_refs", "origins"], "additionalProperties": false, "properties": { "operations": { "type": "array" }, "profile_refs": { "type": "array" }, "origins": { "type": "array" } } },
+        "profile_ref": { "type": "string" },
+        "origin": { "type": "string" },
+        "runtime_session_ref": { "type": "string" },
+        "page_id": { "type": "string" },
+        "page_ref": { "type": "string" },
+        "document_generation": { "type": "integer" }
+      }
+    },
+    "field_guidance": [{
+      "path": "/runtime_session_ref",
+      "required_when": "always",
+      "source": "current Runtime Session",
+      "constraints": ["non-empty"]
+    }],
+    "example": {
+      "illustrative_only": true,
+      "operation": "instance.snapshot",
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example"
+    },
+    "query_tool": "webenvoy_query"
+  },
+  "provider": { "state": "limited", "provider_id": "chrome_official", "reason_codes": [], "limitations": [], "facts_at": null },
+  "authorization": { "state": "allowed", "reason_codes": [] },
+  "availability": { "state": "no_known_blocker", "reason_codes": [], "facts_at": null },
+  "inputs": { "state": "complete", "missing": [], "invalid": [] },
+  "execution_checks": ["reauthorize", "verify_page_and_target", "check_provider_runtime"],
+  "next_steps": []
+}

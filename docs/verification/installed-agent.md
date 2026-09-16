@@ -21,11 +21,11 @@ pnpm --filter @webenvoy/app package:agent '/tmp/webenvoy-test/WebEnvoy Test.app'
   --codex-profile webenvoy-test --approve-tools
 ```
 
-`setup` 会实际读取并校验 browser `application.ini`、Python 环境中的两个包版本，以及三个 owner 提供的来源文件 SHA-256；版本、来源和路径不匹配即拒绝。它写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中五个 WebEnvoy 工具的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
+`setup` 会实际读取并校验 browser `application.ini`、Python 环境中的两个包版本，以及三个 owner 提供的来源文件 SHA-256；版本、来源和路径不匹配即拒绝。它写入独立的 Codex 命名 profile，不改已有 `config.toml`。重名且内容不同时拒绝；相同安装可重复执行。`--approve-tools` 是用户对这个测试配置中八个 WebEnvoy 工具（包括可选帮助工具 `webenvoy_describe`）的显式宿主批准，不替代 Core Grant。省略它时按宿主自己的批准机制处理。只输出客户端凭据的 SHA-256 指纹，原始凭据留在 host-dir 的私有文件中。
 
 双击这个 App（或运行 `webenvoy app`），进入设置 → Agent 接入：登记名称与公开指纹，允许已授权的环境管理操作，再选择 Agent 并授予页面展示的管理范围。选择精确 origin、必要操作与有效期；可创建最多两个非生产 Camoufox Profile，或选择已受管 Profile。既有 Profile 上限在独立表单中显式保存，Grant 不会提升上限。默认只有读取操作。Core 的管理执行策略只作用于 `harbor:managed-browser`，不会修改网站策略。
 
-在 host-dir 运行 `codex -p webenvoy-test`。先调用 `webenvoy_skill` 读取实际安装的版本化 SKILL，再调用 `webenvoy_status`、`webenvoy_connect`。连接返回同一 Principal 的 Grant、模板和已创建 Profile，宿主无需读取 owner 文件、内部端口或复制凭据。之后使用 `webenvoy_operation` 与 `webenvoy_query`。
+在 host-dir 运行 `codex -p webenvoy-test`。先调用 `webenvoy_skill` 读取实际安装的版本化 SKILL，再调用 `webenvoy_status`、`webenvoy_connect`；需要确认某个 operation 的调用字段时，可选调用 `webenvoy_describe`，它不会启动或改变 Runtime/浏览器。连接返回同一 Principal 的 Grant、模板和已创建 Profile，宿主无需读取 owner 文件、内部端口或复制凭据。之后使用 `webenvoy_operation` 与 `webenvoy_query`。
 
 ## 生命周期和数据
 

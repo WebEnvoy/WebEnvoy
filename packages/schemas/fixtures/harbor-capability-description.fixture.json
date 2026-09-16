@@ -1,0 +1,9 @@
+{
+  "$schema": "harbor-capability-description.schema.json",
+  "schema_version": "harbor-capability-description/v1",
+  "operation": "instance.snapshot",
+  "profile_ref": "profile:fixture",
+  "provider": { "state": "supported", "provider_id": "chrome_official", "reason_codes": [], "limitations": [], "facts_at": "2026-09-16T00:00:00.000Z" },
+  "availability": { "state": "no_known_blocker", "reason_codes": [], "facts_at": "2026-09-16T00:00:00.000Z" },
+  "execution_checks": ["reauthorize", "verify_page_and_target", "check_provider_runtime"]
+}

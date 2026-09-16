@@ -173,6 +173,11 @@ async function route(
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
   }
+  if (method === "POST" && url.pathname === "/runtime/capabilities/describe") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const result = runtime.describeManagedCapability(await readJson<unknown>(request));
+    writeJson(response, result.error === "invalid_request" ? 400 : 200, result); return;
+  }
   if (method === "GET" && url.pathname === "/owner/files") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     writeJson(response, 200, { files: await runtime.inspectManagedFiles(url.searchParams.get("file_ref") ?? undefined) });

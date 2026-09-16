@@ -78,6 +78,7 @@ async function packageCoreRuntime(sourceRoot, outDir) {
   await mkdir(path.join(outDir, "node_modules", "@webenvoy"), { recursive: true });
   await copyPackage(path.join(sourceRoot, "packages", "api-server"), path.join(outDir, "node_modules", "@webenvoy", "api-server"));
   await copyPackage(path.join(sourceRoot, "packages", "core"), path.join(outDir, "node_modules", "@webenvoy", "core-runtime"));
+  await cp(path.join(sourceRoot, "packages", "core", "dist", "managed-capability-definitions.json"), path.join(appRoot, "agent-entry", "managed-capability-definitions.json"));
   await writeFile(path.join(outDir, "start-runtime.mjs"), coreStartScript());
   console.log(`Packaged Core runtime from ${sourceRoot} into ${outDir}`);
 }

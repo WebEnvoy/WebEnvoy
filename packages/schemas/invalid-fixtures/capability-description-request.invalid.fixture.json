@@ -1,0 +1,57 @@
+{
+  "schema": "capability-description-request.schema.json",
+  "cases": [
+    {
+      "name": "unknown top-level field",
+      "instance": {
+        "operation": "instance.snapshot",
+        "connection_id": "connection:example",
+        "grant_id": "grant:example"
+      }
+    },
+    {
+      "name": "invalid operation pattern",
+      "instance": {
+        "operation": "Instance.Snapshot",
+        "connection_id": "connection:example"
+      }
+    },
+    {
+      "name": "profile_ref belongs to context not arguments",
+      "instance": {
+        "operation": "instance.snapshot",
+        "connection_id": "connection:example",
+        "arguments": { "profile_ref": "profile:example" }
+      }
+    },
+    {
+      "name": "unknown context field",
+      "instance": {
+        "operation": "instance.snapshot",
+        "connection_id": "connection:example",
+        "context": {
+          "grant_id": "grant:example",
+          "profile_ref": "profile:example",
+          "task_scope": { "operations": [], "profile_refs": [], "origins": [] },
+          "provider_id": "camoufox"
+        }
+      }
+    },
+    {
+      "name": "configuration rejects nested extra fields",
+      "instance": {
+        "operation": "environment.update",
+        "connection_id": "connection:example",
+        "arguments": { "configuration": { "timezone": "UTC", "unexpected": "value" } }
+      }
+    },
+    {
+      "name": "zero scroll delta",
+      "instance": {
+        "operation": "instance.scroll",
+        "connection_id": "connection:example",
+        "arguments": { "delta_y": 0 }
+      }
+    }
+  ]
+}

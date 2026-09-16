@@ -118,7 +118,7 @@ HTTP 请求为 MCP 参数加 `connection_id`；所有顶层及 context/task_scop
 }
 ```
 
-上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。schema 文件与真实正反 fixtures 在 #539 实现 PR 中产生并从本规格链接，当前不虚构它们已经存在。
+上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。实现合同对应的 [Core→Agent request schema](../../packages/schemas/schemas/capability-description-request.schema.json)、[Core→Agent response schema](../../packages/schemas/schemas/capability-description.schema.json)、[Core→Harbor schema](../../packages/schemas/schemas/harbor-capability-description.schema.json)、[请求正例](../../packages/schemas/fixtures/capability-description-request.fixture.json)、[响应正例](../../packages/schemas/fixtures/capability-description.fixture.json)、[请求反例](../../packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json) 和 [响应反例](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json) 由 #539 实现 PR 固定并由 schema self-check 验证。
 
 | 字段 | 固定取值与解释 |
 | --- | --- |
@@ -227,6 +227,8 @@ Core 正式入口的形状校验与 MCP 条件 schema、describe 的 input_schem
 | D7 | 安装独立、版本匹配、旧Runtime明确不支持、重启后重新读事实 | installed确定性客户端；不依赖checkout或缓存。 |
 | D8 | 当前已支持的Chrome与Camoufox按各自现行配对返回事实、同一说明可以消费 | 同一安装客户端；复用当前有效测试Profile，必要最薄正常操作，不重做Provider资格。 |
 | D9 | 真实Agent只凭安装入口，描述→补齐输入→一次普通操作→查询原Run | 一个短任务，例如instance.input；采用合成非敏感字段，结果回读；无需再跑文件上传下载全矩阵。 |
+
+#539 的实现、正式安装、双 Provider、重启、短真实 Agent 与 D1—D9 证据记录在 [`docs/verification/capability-discovery-539.json`](../verification/capability-discovery-539.json)。该记录引用冻结的运行候选身份；文档收口本身不改变已验证安装内容。
 
 D8对未支持、混装、人工持有等负例主要用确定性测试；不用真实账号、新Provider、Chrome崩溃或全平台实验来凑齐状态。每条观察说明自己的事实来源与缺失，不允许用组件fixture冒称installed或plugin_verified。
 

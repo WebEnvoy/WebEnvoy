@@ -17,8 +17,14 @@ const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
+let capabilityDescriptions = 0;
+const forwardedCapabilityOrigins: string[][] = [];
+  let capabilityDescriptionMode: "normal" | "human" | "stale" | "stopped" | "unknown" = "normal";
+  let capabilityDescriptionShape: "valid" | "wrong_schema" | "wrong_operation" | "wrong_profile" | "unknown_state" | "profile_missing" = "valid";
+  let afterCapabilityDescription: (() => Promise<void>) | undefined;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
+let sessionStopped = false;
 let dropResponse = false, omitProviderSelection = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false, crossOriginInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
@@ -51,6 +57,27 @@ const server = createServer((req, res) => { void (async () => {
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
+  else if (req.url === "/runtime/capabilities/describe") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { operation: string; profile_ref: string; authorized_origins: string[]; runtime_session_ref?: string; page_id?: string; page_ref?: string; document_generation?: number };
+    forwardedCapabilityOrigins.push(input.authorized_origins);
+    capabilityDescriptions++;
+    const state = capabilityDescriptionMode;
+    await afterCapabilityDescription?.();
+    afterCapabilityDescription = undefined;
+    value = {
+      schema_version: capabilityDescriptionShape === "wrong_schema" ? "harbor-capability-description/v2" : "harbor-capability-description/v1",
+      operation: capabilityDescriptionShape === "wrong_operation" ? "instance.read" : input.operation,
+      profile_ref: capabilityDescriptionShape === "wrong_profile" ? "profile:other" : input.profile_ref,
+      provider: { state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : "supported", provider_id: "camoufox", reason_codes: state === "unknown" ? ["provider_not_qualified"] : capabilityDescriptionShape === "profile_missing" ? ["profile_missing"] : [], limitations: [], facts_at: "2026-09-09T00:00:00.000Z" },
+      availability: {
+        state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : state === "normal" ? "no_known_blocker" : "blocked",
+        reason_codes: state === "human" ? ["human_control"] : state === "stale" ? ["stale_reference"] : state === "stopped" ? ["instance_not_running"] : state === "unknown" ? ["runtime_facts_unavailable"] : [],
+        facts_at: "2026-09-09T00:00:00.000Z"
+      },
+      execution_checks: ["reauthorize", "verify_page_and_target"]
+    };
+  }
   else if (req.url === "/runtime/browser-provider-preference") {
     if (req.method === "POST") {
       let body = ""; for await (const chunk of req) body += chunk;
@@ -110,7 +137,9 @@ const server = createServer((req, res) => { void (async () => {
       }
       if (dropEnvironmentResponse) { req.socket.destroy(); return; }
     }
-  } else if (req.url === "/runtime/identity-environments/identity%3A1/session") { sessionReads++; value = { runtime_session: managedSession };
+  } else if (req.url === "/runtime/identity-environments/identity%3A1/session") {
+    sessionReads++;
+    value = sessionStopped ? { status: "unavailable", failure_class: "instance_not_running" } : { runtime_session: managedSession };
   } else if (req.url === "/runtime/profile-recovery/inspect") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body) as { profile_ref?: string };
@@ -217,8 +246,9 @@ try {
     request: async () => recoveryStatus,
     status: async (_input: unknown, expectedProfileRef?: string) => { recoveryExpectedProfileRef = expectedProfileRef; return recoveryStatus; }
   };
+  const authorizationDecisionStore = createFileAuthorizationDecisionStore({ directory: join(directory, "decisions"), runRecordStore });
   const service = createManagedBrowserService({ accessStore, runRecordStore, executionPolicyConfigStore,
-    authorizationDecisionStore: createFileAuthorizationDecisionStore({ directory: join(directory, "decisions"), runRecordStore }),
+    authorizationDecisionStore,
     harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
   const credentialHash = createHash("sha256").update("fixture-agent").digest("hex");
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
@@ -440,8 +470,8 @@ try {
   const pageOps = ["page.list", "page.open", "page.navigate"] as const;
   await accessStore.setProfilePolicy({ idempotency_key: "page-policy", profile_ref: "profile:1", allowed_operations: [...browserOps, ...pageOps], allowed_origins: ["https://example.com"] });
   const pageGrant = await accessStore.createGrant({ idempotency_key: "page-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: [...pageOps], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
-  const pageRequest = { idempotency_key: "page-list", connection_id: connection.connection_id, grant_id: pageGrant.grant_id, operation: "page.list" as const, profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", task_scope: { operations: [...pageOps], profile_refs: ["profile:1"], origins: ["https://example.com"] } };
-  const prepareDeniedPage = await service.submit(credentialHash, { ...pageRequest, idempotency_key: "page-prepare-denied", operation: "page.open" as const, url: "https://example.com/denied" });
+  const pageRequest = { idempotency_key: "page-list", connection_id: connection.connection_id, grant_id: pageGrant.grant_id, operation: "page.list" as const, profile_ref: "profile:1", runtime_session_ref: "session:one", task_scope: { operations: [...pageOps], profile_refs: ["profile:1"], origins: ["https://example.com"] } };
+  const prepareDeniedPage = await service.submit(credentialHash, { ...pageRequest, idempotency_key: "page-prepare-denied", operation: "page.open" as const, origin: "https://example.com", url: "https://example.com/denied" });
   assert.equal(prepareDeniedPage.status, "failed", JSON.stringify(prepareDeniedPage));
   assert.equal(prepareDeniedPage.failure?.code, "managed_browser_policy_refused");
   assert.equal(prepareDeniedPage.dispatch_state, "not_dispatched");
@@ -455,14 +485,14 @@ try {
   assert.equal((listedPages.result as { pages: unknown[] }).pages.length, 1);
   assert.equal(listedPages.dispatch_state, undefined, "page.list remains observation-only");
   assert.equal(lockAttempts, pageLockAttempts, "page.list must not acquire ControlLease");
-  const pageOpen = { ...pageRequest, idempotency_key: "page-open", operation: "page.open" as const, url: "https://example.com/two" };
+  const pageOpen = { ...pageRequest, idempotency_key: "page-open", operation: "page.open" as const, origin: "https://example.com", url: "https://example.com/two" };
   const openedPage = await service.submit(credentialHash, pageOpen);
   assert.equal(openedPage.status, "succeeded", JSON.stringify(openedPage));
   assert.equal(openedPage.dispatch_state, "dispatched");
   assert.equal(lockAttempts, pageLockAttempts + 1, "page.open acquires the Instance ControlLease after handback");
   assert.equal(managedSession.control_owner, "core_task");
   const openedPageFacts = (openedPage.result as { page: { page_ref: string } }).page;
-  const pageNavigate = { ...pageRequest, idempotency_key: "page-navigate", operation: "page.navigate" as const, page_ref: openedPageFacts.page_ref, url: "https://example.com/three" };
+  const pageNavigate = { ...pageRequest, idempotency_key: "page-navigate", operation: "page.navigate" as const, origin: "https://example.com", page_ref: openedPageFacts.page_ref, url: "https://example.com/three" };
   const navigatedPage = await service.submit(credentialHash, pageNavigate);
   assert.equal(navigatedPage.status, "succeeded", JSON.stringify(navigatedPage));
   assert.equal(navigatedPage.dispatch_state, "dispatched");
@@ -520,7 +550,7 @@ try {
   await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-task", task_scope: { ...environmentUpdate.task_scope, operations: ["environment.read"] } }), /managed_access_denied/);
   await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-profile", profile_ref: "profile:2" }), /managed_access_denied/);
   await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-denied-origin", origin: "https://denied.example" }), /managed_access_denied/);
-  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-missing-origin", origin: undefined }), /managed_access_origin_required/);
+  await assert.rejects(service.submit(credentialHash, { ...environmentUpdate, idempotency_key: "environment-missing-origin", origin: undefined }), /managed_browser_invalid_input/);
   const lostEnvironment = { ...environmentUpdate, idempotency_key: "environment-lost-response", configuration: { language: "zh-CN" } };
   dropEnvironmentResponse = true;
   const unknownEnvironment = await service.submit(credentialHash, lostEnvironment);
@@ -634,6 +664,41 @@ try {
   assert.equal(crossProfileResult.status, "failed", JSON.stringify(crossProfileResult));
   assert.equal(crossProfileResult.failure?.code, "recovery_operation_not_found", JSON.stringify(crossProfileResult));
 
+  // D5: a successful description is not a capability token. Stop or hand
+  // control to the user after help, then the original execution rechecks the
+  // current Runtime/Control facts and refuses dispatch.
+  const d5Origin = "http://127.0.0.1:18794";
+  const d5Operations = ["profile.read", "instance.input"] as const;
+  await accessStore.setProfilePolicy({ idempotency_key: "d5-policy", profile_ref: "profile:1", allowed_operations: [...d5Operations], allowed_origins: [d5Origin], controlled_interaction_origins: [d5Origin] });
+  const d5Grant = await accessStore.createGrant({ idempotency_key: "d5-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: [...d5Operations], allowed_origins: [d5Origin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const d5Context = { grant_id: d5Grant.grant_id, profile_ref: "profile:1",
+    task_scope: { operations: [...d5Operations], profile_refs: ["profile:1"], origins: [d5Origin] } };
+  const d5Arguments = { origin: d5Origin, runtime_session_ref: "session:one", page_ref: "page:one", observation_ref: "observation:1", target_ref: "target:one", text: "d5 test" };
+  const d5Execution = { idempotency_key: "d5-input", connection_id: connection.connection_id, grant_id: d5Grant.grant_id, operation: "instance.input" as const,
+    profile_ref: "profile:1", ...d5Arguments, task_scope: d5Context.task_scope };
+  capabilityDescriptionMode = "normal";
+  const beforeD5Runs = (await runRecordStore.listRunRecords()).length;
+  const d5Description = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.input", context: d5Context, arguments: d5Arguments });
+  assert.equal((d5Description.availability as { state: string }).state, "no_known_blocker");
+  assert.equal((await runRecordStore.listRunRecords()).length, beforeD5Runs, "describe must not create a Run before D5 state changes");
+  sessionStopped = true;
+  const stoppedExecution = await service.submit(credentialHash, { ...d5Execution, idempotency_key: "d5-after-stop" });
+  assert.equal(stoppedExecution.status, "failed", JSON.stringify(stoppedExecution));
+  assert.equal(stoppedExecution.failure?.code, "instance_not_running");
+  assert.equal(stoppedExecution.dispatch_state, "not_dispatched");
+  sessionStopped = false;
+  managedSession.control_owner = "user";
+  managedSession.control_lock = { state: "held", holder_ref: "human" };
+  const takeoverExecution = await service.submit(credentialHash, { ...d5Execution, idempotency_key: "d5-during-takeover" });
+  assert.equal(takeoverExecution.status, "failed", JSON.stringify(takeoverExecution));
+  assert.equal(takeoverExecution.failure?.code, "control_lock_conflict");
+  assert.equal(takeoverExecution.dispatch_state, "not_dispatched");
+  managedSession.control_owner = "core_task";
+  managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
+  await accessStore.setProfilePolicy({ idempotency_key: "d5-restore-policy", profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] });
+
   const v2ExpiresAt = new Date(Date.now() + 60_000).toISOString();
   await accessStore.setProfilePolicy({ idempotency_key: "v2-browser-policy", profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] });
   const v2Source = await accessStore.createGrant({ idempotency_key: "v2-browser-source", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: v2ExpiresAt, max_created_profiles: 0, creation_template: null });
@@ -655,6 +720,126 @@ try {
   assert.equal(JSON.stringify(boundary).includes("token=secret"), false);
   assert.equal(JSON.stringify(boundary).includes("Private title"), false);
   assert.equal(JSON.stringify(boundary).includes("Private body"), false);
+
+  // Capability description is read-only help. It may use a connected Agent
+  // without a metadata Grant, but it must never create a Run or decision.
+  const beforeHelpRuns = (await runRecordStore.listRunRecords()).length;
+  const beforeHelpDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
+  const beforeHelpLocks = lockAttempts;
+  const beforeHelpDescriptions = capabilityDescriptions;
+  const staticHelp = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot" });
+  assert.equal(staticHelp.mode, "definition_only");
+  assert.equal((staticHelp.provider as { state: string }).state, "not_evaluated");
+  assert.equal((staticHelp.authorization as { state: string }).state, "not_evaluated");
+  assert.equal(capabilityDescriptions, beforeHelpDescriptions, "definition-only help must not query Harbor");
+  assert.equal((await runRecordStore.listRunRecords()).length, beforeHelpRuns, "description must not create a Run");
+  assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeHelpDecisions, "description must not record a decision");
+  assert.equal(lockAttempts, beforeHelpLocks, "description must not acquire a ControlLease");
+  const helpExecution = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "after-static-help" });
+  assert.equal(helpExecution.status, "succeeded", "static help is not an execution gate");
+
+  await accessStore.setProfilePolicy({ idempotency_key: "discovery-policy", profile_ref: "profile:2",
+    allowed_operations: ["profile.read", "instance.observe"], allowed_origins: ["https://example.com"] });
+  const visibleGrant = await accessStore.createGrant({ idempotency_key: "discovery-visible-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:2"], allowed_operations: ["profile.read"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const context = { grant_id: visibleGrant.grant_id, profile_ref: "profile:2",
+    task_scope: { operations: ["profile.read", "instance.snapshot"], profile_refs: ["profile:2"], origins: ["https://example.com", "https://outside.example"] } };
+  const descriptionArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
+  const beforeDeniedRuns = (await runRecordStore.listRunRecords()).length;
+  const beforeDeniedDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
+  const beforeDeniedLocks = lockAttempts;
+  const beforeDeniedDescriptions = capabilityDescriptions;
+  const beforeDeniedOriginForwards = forwardedCapabilityOrigins.length;
+  const deniedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments });
+  assert.equal((deniedDescription.authorization as { state: string }).state, "denied", "visible Profile and target operation permission are separate");
+  assert.equal((deniedDescription.provider as { state: string }).state, "supported");
+  assert.equal(capabilityDescriptions, beforeDeniedDescriptions + 2, "visible denied target may still receive owner facts and a final Harbor recheck");
+  assert.deepEqual(forwardedCapabilityOrigins.slice(beforeDeniedOriginForwards), [["https://example.com"], ["https://example.com"]], "Harbor receives only the current Grant/Profile/task intersection");
+  assert.equal((await runRecordStore.listRunRecords()).length, beforeDeniedRuns);
+  assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeDeniedDecisions);
+  assert.equal(lockAttempts, beforeDeniedLocks);
+
+  await accessStore.setProfilePolicy({ idempotency_key: "discovery-list-policy", profile_ref: "profile:3",
+    allowed_operations: ["profile.list", "instance.snapshot"], allowed_origins: ["https://example.com"] });
+  const listGrant = await accessStore.createGrant({ idempotency_key: "discovery-list-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:3"], allowed_operations: ["profile.list", "instance.snapshot"], allowed_origins: ["https://example.com", "https://outside.example"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const listContext = { grant_id: listGrant.grant_id, profile_ref: "profile:3",
+    task_scope: { operations: ["profile.list", "instance.snapshot"], profile_refs: ["profile:3"], origins: ["https://example.com", "https://outside.example"] } };
+  const beforeListOriginForwards = forwardedCapabilityOrigins.length;
+  const listDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context: listContext,
+    arguments: { runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 } });
+  assert.equal((listDescription.authorization as { state: string }).state, "unknown", "missing target origin remains an execution-time input question");
+  assert.deepEqual(forwardedCapabilityOrigins.slice(beforeListOriginForwards), [["https://example.com"], ["https://example.com"]], "profile.list visibility also applies the Profile policy intersection");
+
+  for (const shape of ["wrong_schema", "wrong_operation", "wrong_profile"] as const) {
+    capabilityDescriptionShape = shape;
+    await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments }), /discovery_version_mismatch/);
+  }
+  capabilityDescriptionShape = "profile_missing";
+  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments }), /discovery_context_unavailable/);
+  capabilityDescriptionShape = "unknown_state";
+  const unknownHarborState = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments });
+  assert.equal((unknownHarborState.provider as { state: string }).state, "unknown");
+  capabilityDescriptionShape = "valid";
+
+  const invisibleContext = { ...context, profile_ref: "profile:hidden", task_scope: { ...context.task_scope, profile_refs: ["profile:hidden"] } };
+  const beforeInvisibleDescriptions = capabilityDescriptions;
+  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context: invisibleContext, arguments: descriptionArguments }), /discovery_context_unavailable/);
+  assert.equal(capabilityDescriptions, beforeInvisibleDescriptions, "invisible Profile must not reach Harbor");
+  assert.equal(JSON.stringify(invisibleContext).includes("provider"), false);
+
+  const otherCredential = "other-discovery-agent";
+  const otherHash = createHash("sha256").update(otherCredential).digest("hex");
+  const otherPrincipal = await accessStore.registerPrincipal({ idempotency_key: "register-discovery-other", display_name: "Other Discovery Agent", credential_hash: otherHash });
+  const otherGrant = await accessStore.createGrant({ idempotency_key: "discovery-other-grant", principal_id: otherPrincipal.principal_id,
+    profile_refs: ["profile:2"], allowed_operations: ["profile.read"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const beforeCrossPrincipalDescriptions = capabilityDescriptions;
+  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot",
+    context: { ...context, grant_id: otherGrant.grant_id }, arguments: descriptionArguments }), /discovery_context_unavailable/);
+  assert.equal(capabilityDescriptions, beforeCrossPrincipalDescriptions, "cross-principal context must not reach Harbor");
+
+  const allowedGrant = await accessStore.createGrant({ idempotency_key: "discovery-allowed-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:2"], allowed_operations: ["profile.read", "instance.observe"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const allowedContext = { grant_id: allowedGrant.grant_id, profile_ref: "profile:2",
+    task_scope: { operations: ["profile.read", "instance.observe"], profile_refs: ["profile:2"], origins: ["https://example.com"] } };
+  const allowedArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
+  for (const mode of ["human", "stale", "unknown"] as const) {
+    capabilityDescriptionMode = mode;
+    const described = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+    const availability = described.availability as { state: string; reason_codes: string[] };
+    assert.equal(availability.state, mode === "unknown" ? "unknown" : "blocked");
+    assert.equal(availability.reason_codes[0], mode === "human" ? "human_control" : mode === "stale" ? "stale_reference" : "runtime_facts_unavailable");
+  }
+  capabilityDescriptionMode = "stopped";
+  const stoppedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((stoppedDescription.availability as { state: string }).state, "blocked");
+  assert.deepEqual((stoppedDescription.availability as { reason_codes: string[] }).reason_codes, ["instance_not_running"]);
+
+  capabilityDescriptionMode = "normal";
+  afterCapabilityDescription = async () => { capabilityDescriptionMode = "stale"; };
+  const changedControlDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((changedControlDescription.availability as { state: string }).state, "unknown");
+  assert.deepEqual((changedControlDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
+
+  capabilityDescriptionMode = "normal";
+  afterCapabilityDescription = async () => {
+    await accessStore.revokeGrant({ idempotency_key: "revoke-discovery-replaced", grant_id: allowedGrant.grant_id });
+    await accessStore.createGrant({ idempotency_key: "discovery-replacement", principal_id: principal.principal_id,
+      profile_refs: ["profile:2"], allowed_operations: ["profile.read", "instance.observe"], allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  };
+  const changedGrantDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((changedGrantDescription.availability as { state: string }).state, "unknown");
+  assert.deepEqual((changedGrantDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
+  await accessStore.revokeGrant({ idempotency_key: "revoke-discovery-allowed", grant_id: allowedGrant.grant_id });
+  await assert.rejects(() => service.submit(credentialHash, { idempotency_key: "after-discovery-revoke", connection_id: connection.connection_id,
+    grant_id: allowedGrant.grant_id, operation: "instance.observe", profile_ref: "profile:2", origin: "https://example.com", runtime_session_ref: "session:one",
+    page_id: "page-id:one", page_ref: "page:one", document_generation: 1,
+    task_scope: { operations: ["instance.observe"], profile_refs: ["profile:2"], origins: ["https://example.com"] } }), /grant_unavailable/);
   console.log("managed browser Core HTTP boundary self-check passed");
 } finally {
   await new Promise<void>(resolve => server.close(() => resolve()));

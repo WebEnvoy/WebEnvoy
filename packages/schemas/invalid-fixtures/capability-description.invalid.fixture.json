@@ -1,0 +1,62 @@
+{
+  "schema": "capability-description.schema.json",
+  "cases": [
+    {
+      "name": "definition revision must be a real sha256 shape",
+      "instance": {
+        "ok": true,
+        "schema_version": "webenvoy.capability-description/v1",
+        "operation": "instance.snapshot",
+        "assessed_at": "2026-09-16T00:00:00.000Z",
+        "definition_revision": "sha256:not-a-digest",
+        "mode": "definition_only",
+        "definition": { "state": "defined", "capability": null },
+        "invocation": { "exposure": "not_exposed", "tool": null, "input_schema": null, "field_guidance": [], "example": null, "query_tool": null },
+        "provider": { "state": "not_evaluated", "provider_id": null, "reason_codes": [], "limitations": [], "facts_at": null },
+        "authorization": { "state": "not_evaluated", "reason_codes": [] },
+        "availability": { "state": "not_evaluated", "reason_codes": [], "facts_at": null },
+        "inputs": { "state": "not_provided", "missing": [], "invalid": [] },
+        "execution_checks": [],
+        "next_steps": []
+      }
+    },
+    {
+      "name": "not exposed cannot publish a tool",
+      "instance": {
+        "ok": true,
+        "schema_version": "webenvoy.capability-description/v1",
+        "operation": "account.bind",
+        "assessed_at": "2026-09-16T00:00:00.000Z",
+        "definition_revision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "mode": "definition_only",
+        "definition": { "state": "defined", "capability": "account_management" },
+        "invocation": { "exposure": "not_exposed", "tool": "private", "input_schema": null, "field_guidance": [], "example": null, "query_tool": null },
+        "provider": { "state": "not_evaluated", "provider_id": null, "reason_codes": [], "limitations": [], "facts_at": null },
+        "authorization": { "state": "not_evaluated", "reason_codes": [] },
+        "availability": { "state": "not_evaluated", "reason_codes": [], "facts_at": null },
+        "inputs": { "state": "not_provided", "missing": [], "invalid": [] },
+        "execution_checks": [],
+        "next_steps": []
+      }
+    },
+    {
+      "name": "exposed definitions require usable invocation guidance",
+      "instance": {
+        "ok": true,
+        "schema_version": "webenvoy.capability-description/v1",
+        "operation": "instance.snapshot",
+        "assessed_at": "2026-09-16T00:00:00.000Z",
+        "definition_revision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "mode": "definition_only",
+        "definition": { "state": "defined", "capability": "controlled_page" },
+        "invocation": { "exposure": "exposed", "tool": null, "input_schema": {}, "field_guidance": [], "example": null, "query_tool": null },
+        "provider": { "state": "not_evaluated", "provider_id": null, "reason_codes": [], "limitations": [], "facts_at": null },
+        "authorization": { "state": "not_evaluated", "reason_codes": [] },
+        "availability": { "state": "not_evaluated", "reason_codes": [], "facts_at": null },
+        "inputs": { "state": "not_provided", "missing": [], "invalid": [] },
+        "execution_checks": [],
+        "next_steps": []
+      }
+    }
+  ]
+}

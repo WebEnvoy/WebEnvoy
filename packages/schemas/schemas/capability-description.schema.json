@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/capability-description.schema.json",
+  "title": "WebEnvoy capability description",
+  "description": "The bounded static or contextual description returned by webenvoy_describe.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "schema_version", "operation", "assessed_at", "definition_revision", "mode", "definition", "invocation", "provider", "authorization", "availability", "inputs", "execution_checks", "next_steps"],
+  "properties": {
+    "ok": { "const": true },
+    "schema_version": { "const": "webenvoy.capability-description/v1" },
+    "operation": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "assessed_at": { "type": "string", "format": "date-time" },
+    "definition_revision": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "mode": { "enum": ["definition_only", "contextual"] },
+    "definition": {
+      "type": "object", "additionalProperties": false, "required": ["state", "capability"],
+      "properties": { "state": { "enum": ["defined", "unknown", "out_of_scope"] }, "capability": { "type": ["string", "null"] } }
+    },
+    "invocation": {
+      "type": "object", "additionalProperties": false, "required": ["exposure", "tool", "input_schema", "field_guidance", "example", "query_tool"],
+      "properties": {
+        "exposure": { "enum": ["exposed", "not_exposed"] },
+        "tool": { "type": ["string", "null"] },
+        "input_schema": { "type": ["object", "null"] },
+        "field_guidance": {
+          "type": "array", "maxItems": 128,
+          "items": { "type": "object", "additionalProperties": false, "required": ["path", "required_when", "source", "constraints"], "properties": {
+            "path": { "type": "string", "maxLength": 256 }, "required_when": { "type": "string", "maxLength": 256 }, "source": { "type": "string", "maxLength": 256 }, "constraints": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } }
+          } }
+        },
+        "example": { "type": ["object", "null"] },
+        "query_tool": { "type": ["string", "null"] }
+      }
+    },
+    "provider": { "$ref": "#/$defs/provider" },
+    "authorization": {
+      "type": "object", "additionalProperties": false, "required": ["state", "reason_codes"],
+      "properties": { "state": { "enum": ["allowed", "denied", "unknown", "not_evaluated"] }, "reason_codes": { "$ref": "#/$defs/reason_codes" } }
+    },
+    "availability": {
+      "type": "object", "additionalProperties": false, "required": ["state", "reason_codes", "facts_at"],
+      "properties": { "state": { "enum": ["no_known_blocker", "blocked", "unknown", "not_evaluated"] }, "reason_codes": { "$ref": "#/$defs/reason_codes" }, "facts_at": { "type": ["string", "null"], "format": "date-time" } }
+    },
+    "inputs": {
+      "type": "object", "additionalProperties": false, "required": ["state", "missing", "invalid"],
+      "properties": {
+        "state": { "enum": ["not_provided", "incomplete", "invalid", "complete"] },
+        "missing": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 256 } },
+        "invalid": { "type": "array", "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "required": ["path", "code"], "properties": { "path": { "type": "string", "maxLength": 256 }, "code": { "type": "string", "maxLength": 128 } } } }
+      }
+    },
+    "execution_checks": { "type": "array", "maxItems": 16, "items": { "enum": ["reauthorize", "verify_page_and_target", "verify_file_material", "acquire_control_if_required", "check_provider_runtime"] } },
+    "next_steps": {
+      "type": "array", "maxItems": 8,
+      "items": { "type": "object", "additionalProperties": false, "required": ["code", "actor", "operation", "fields"], "properties": {
+        "code": { "enum": ["fill_inputs", "connect", "start_profile", "choose_page", "observe_page", "owner_authorize", "owner_review_provider", "wait_for_owner_return", "retry_description", "query_original_run", "use_existing_tool", "not_exposed"] },
+        "actor": { "enum": ["agent", "owner"] }, "operation": { "type": ["string", "null"] }, "fields": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } }
+      } }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "invocation": { "properties": { "exposure": { "const": "exposed" } } } } },
+      "then": { "properties": { "invocation": { "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "input_schema": { "type": "object", "minProperties": 1 },
+        "field_guidance": { "minItems": 1 },
+        "example": { "type": "object", "minProperties": 1 },
+        "query_tool": { "type": "string", "minLength": 1 }
+      } } } }
+    },
+    {
+      "if": { "properties": { "invocation": { "properties": { "exposure": { "const": "not_exposed" } } } } },
+      "then": { "properties": { "invocation": { "properties": { "tool": { "const": null }, "input_schema": { "const": null }, "field_guidance": { "maxItems": 0 }, "example": { "const": null }, "query_tool": { "const": null } } } } }
+    }
+  ],
+  "$defs": {
+    "reason_codes": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 128 } },
+    "provider": {
+      "type": "object", "additionalProperties": false, "required": ["state", "provider_id", "reason_codes", "limitations", "facts_at"],
+      "properties": {
+        "state": { "enum": ["supported", "limited", "unsupported", "unknown", "not_applicable", "not_evaluated"] },
+        "provider_id": { "type": ["string", "null"] },
+        "reason_codes": { "$ref": "#/$defs/reason_codes" },
+        "limitations": { "type": "array", "maxItems": 16, "items": { "type": "object", "additionalProperties": false, "required": ["code", "summary"], "properties": { "code": { "type": "string", "maxLength": 128 }, "summary": { "type": "string", "maxLength": 256 } } } },
+        "facts_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted",
+    "compatibility_boundary": "WebEnvoy Agent describe response v1; dynamic facts remain owner-projected",
+    "schema_version": "webenvoy.capability-description/v1",
+    "source_adrs": ["docs/specs/capability-discovery-v1.md", "docs/adr/0012-runtime-capability-plane-and-plugin-first.md"]
+  }
+}

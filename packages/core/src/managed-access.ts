@@ -334,6 +334,13 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async authenticateCredential(credentialHash: unknown): Promise<ManagedPrincipal> { return publicPrincipal(authenticated(await read(), credentialHash)); },
+    /** Read-only connection ownership check used by optional capability help. */
+    async checkConnection(credentialHash: unknown, connectionId: unknown): Promise<{ principal: ManagedPrincipal; connection: ManagedConnection }> {
+      const state = await read(), principal = authenticated(state, credentialHash), id = string(connectionId);
+      const connection = state.connections.find(item => item.connection_id === id && item.principal_id === principal.principal_id && item.revoked_at === null);
+      if (!connection) return fail("managed_access_connection_unavailable");
+      return { principal: publicPrincipal(principal), connection };
+    },
     async listAgentGrants(credentialHash: unknown): Promise<ManagedGrant[]> {
       const state = await read(), principal = authenticated(state, credentialHash);
       return state.grants.filter(grant => grant.principal_id === principal.principal_id);

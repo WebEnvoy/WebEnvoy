@@ -109,9 +109,8 @@ async function assertLocalSchemaFixtures(): Promise<{ schemaCount: number; fixtu
     const schema = schemasByFile.get(basename(schemaRef));
     assert(schema, `${file} must reference a local schema file`);
 
-    const fixtureVersion = asString(fixture.schema_version, `${file}.schema_version`);
     const schemaVersion = asString(asObject(schema["x-webenvoy"], `${schemaRef}.x-webenvoy`).schema_version, `${schemaRef}.schema_version`);
-    assert.equal(fixtureVersion, schemaVersion, `${file} schema_version must match ${schemaRef}`);
+    if (fixture.schema_version !== undefined) assert.equal(asString(fixture.schema_version, `${file}.schema_version`), schemaVersion, `${file} schema_version must match ${schemaRef}`);
 
     for (const field of Array.isArray(schema.required) ? schema.required : []) {
       const key = asString(field, `${schemaRef}.required[]`);

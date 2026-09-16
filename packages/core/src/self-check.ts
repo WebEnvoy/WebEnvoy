@@ -1,5 +1,6 @@
 import "./managed-access-self-check.js";
 import "./managed-browser-self-check.js";
+import "./managed-capabilities-self-check.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
