@@ -221,7 +221,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
   }
 });
 
-test('MCP rejects capability descriptions with unknown state values', async () => {
+test('MCP validates capability description states and forwards correction guidance', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-description-state-test-'));
   const bundleRoot = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-description-state-bundle-'));
   const socketPath = join(dataDir, 'runtime.sock');
@@ -241,7 +241,9 @@ test('MCP rejects capability descriptions with unknown state values', async () =
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(root, name), target);
     }
-    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
+    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0',
+      host: { electron_version: process.versions.electron ?? null, executable_sha256: sha(await readFile(process.execPath)) },
+      files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
     await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
     const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
@@ -261,6 +263,7 @@ test('MCP rejects capability descriptions with unknown state values', async () =
       inputs: { state: 'not_provided' }
     };
     let unknownState;
+    let correction = false;
     server = createServer(socket => socket.once('data', chunk => {
       const path = chunk.toString('utf8').split('\r\n', 1)[0].split(' ')[1];
       const payload = path === '/status'
@@ -270,6 +273,11 @@ test('MCP rejects capability descriptions with unknown state values', async () =
         : path === '/managed-browser/capabilities/describe'
           ? (() => {
             const value = JSON.parse(JSON.stringify(base));
+            if (correction) {
+              value.operation = 'file.download';
+              value.inputs = { state: 'invalid', missing: [], invalid: [{ path: '/arguments/file_ref', code: 'unknown_field' }] };
+              value.next_steps = [{ code: 'fill_inputs', actor: 'agent', operation: 'file.download', fields: ['/arguments/file_ref'] }];
+            }
             if (unknownState === 'definition') value.definition.state = 'future_state';
             if (unknownState === 'exposure') value.invocation.exposure = 'future_state';
             if (unknownState === 'provider') value.provider.state = 'future_state';
@@ -296,6 +304,11 @@ test('MCP rejects capability descriptions with unknown state values', async () =
       unknownState = field;
       assert.deepEqual(await call(3, 'webenvoy_describe', { operation: 'instance.snapshot' }), { ok: false, error: { code: 'discovery_version_mismatch' } }, field);
     }
+    unknownState = undefined;
+    correction = true;
+    const corrected = await call(4, 'webenvoy_describe', { operation: 'file.download', arguments: { file_ref: 'attachment:runtime/11111111-1111-4111-8111-111111111111' } });
+    assert.deepEqual(corrected.inputs.invalid, [{ path: '/arguments/file_ref', code: 'unknown_field' }]);
+    assert.equal(corrected.next_steps[0].fields.includes('/arguments/file_ref'), true);
   } finally {
     await stopChild(child);
     if (server) await new Promise(resolve => server.close(resolve));
