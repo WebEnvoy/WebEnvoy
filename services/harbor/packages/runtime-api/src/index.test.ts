@@ -361,7 +361,7 @@ test("describes known control, page selection, stale, and unknown page facts", a
   const session = await runtime.openIdentityEnvironmentSession({ identity_environment: identity, url: "https://example.com", control_owner: "user" });
   assert.equal("status" in session, false);
   if ("status" in session) throw new Error("describe state fixture should open");
-  const controlled = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
+  const controlled = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin] }) as { availability: { state: string; reason_codes: string[] } };
   assert.deepEqual(controlled.availability, { state: "blocked", reason_codes: ["human_control"], facts_at: session.last_seen_at });
 
   const internal = runtime as unknown as { runtimeSessions: { getRecord: (ref: string) => { page_registry: { sync: (pages: unknown[]) => void; legacyBindings: () => Array<{ facts: Record<string, unknown>; provider_page_ref: string }>; relationFresh: boolean } } | undefined } };
@@ -373,24 +373,27 @@ test("describes known control, page selection, stale, and unknown page facts", a
     ...currentPages,
     { provider_page_ref: "provider-page-other", current_url: "https://other.example/b", title: "Other", status: "ready", origin: "https://other.example", active: false, document_generation: 1, facts: [] }
   ]);
-  const oneVisible = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { reason_codes: string[] } };
+  const noAuthorizedOrigins = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
+  assert.equal(noAuthorizedOrigins.availability.state, "unknown");
+  assert.deepEqual(noAuthorizedOrigins.availability.reason_codes, ["page_visibility_unknown"]);
+  const oneVisible = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin] }) as { availability: { reason_codes: string[] } };
   assert.equal(oneVisible.availability.reason_codes.includes("page_selection_required"), false);
   const pagesWithOtherOrigin = record!.page_registry.legacyBindings().map(page => ({ ...page.facts, provider_page_ref: page.provider_page_ref }));
   record!.page_registry.sync([
     ...pagesWithOtherOrigin,
     { provider_page_ref: "provider-page-visible", current_url: "https://example.com/c", title: "Visible", status: "ready", origin: "https://example.com", active: false, document_generation: 1, facts: [] }
   ]);
-  const ambiguous = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
+  const ambiguous = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin] }) as { availability: { state: string; reason_codes: string[] } };
   assert.deepEqual(ambiguous.availability.reason_codes, ["page_selection_required"]);
-  const stale = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  const stale = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin], page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
   assert.equal(stale.availability.state, "blocked");
   assert.deepEqual(stale.availability.reason_codes, ["stale_reference"]);
   record!.page_registry.relationFresh = false;
-  const unknown = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  const unknown = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin], page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
   assert.equal(unknown.availability.state, "unknown");
   assert.deepEqual(unknown.availability.reason_codes, ["page_relation_unavailable"]);
   runtime.lockSession(session.runtime_session_ref, { control_owner: "user", holder_ref: "human" });
-  const humanWins = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  const humanWins = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin], page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
   assert.equal(humanWins.availability.state, "blocked");
   assert.deepEqual(humanWins.availability.reason_codes, ["human_control"]);
 });

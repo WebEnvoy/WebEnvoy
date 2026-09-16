@@ -17,7 +17,7 @@
     "limit": { "type": "integer", "minimum": 1, "maximum": 64, "description": "A bounded diagnostics result limit." },
     "target_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The visible target reference from the same fresh observation; required by file.upload/file.download." },
     "file_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^attachment:runtime/[0-9a-f-]{36}$", "description": "Only for file.upload: the opaque owner-registered file reference; omit for file.download." },
-    "text": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Non-empty text input for the selected interaction or wait condition." },
+    "text": { "type": "string", "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Text input for instance.input may be empty to clear a field; wait_for=text requires non-empty text." },
     "key": { "type": "string", "enum": ["Enter", "Tab", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Space", "Backspace", "Delete", "Escape"], "description": "The bounded key accepted by instance.press." },
     "delta_y": { "type": "integer", "minimum": -2000, "maximum": 2000, "not": { "const": 0 }, "description": "The non-zero bounded scroll delta." },
     "wait_for": { "type": "string", "enum": ["page_changed", "text", "enabled"], "description": "The wait condition." },

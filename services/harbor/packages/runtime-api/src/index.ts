@@ -602,10 +602,17 @@ export class HarborRuntime {
   describeManagedCapability(input: unknown): Record<string, unknown> {
     if (!input || typeof input !== "object" || Array.isArray(input)) return { error: "invalid_request" };
     const value = input as Record<string, unknown>;
-    const allowed = ["operation", "profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"];
+    const allowed = ["operation", "profile_ref", "authorized_origins", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.operation !== "string" || typeof value.profile_ref !== "string" ||
-      Object.entries(value).some(([key, item]) => key !== "document_generation" && item !== undefined && typeof item !== "string") ||
+      Object.entries(value).some(([key, item]) => !["document_generation", "authorized_origins"].includes(key) && item !== undefined && typeof item !== "string") ||
       value.document_generation !== undefined && (!Number.isSafeInteger(value.document_generation) || Number(value.document_generation) < 1)) return { error: "invalid_request" };
+    const authorizedOrigins = value.authorized_origins === undefined ? null : Array.isArray(value.authorized_origins) && value.authorized_origins.length <= 1024 &&
+      value.authorized_origins.every(item => {
+        if (typeof item !== "string") return false;
+        try { const origin = new URL(item); return ["http:", "https:"].includes(origin.protocol) && origin.origin === item && !origin.username && !origin.password; }
+        catch { return false; }
+      }) ? [...new Set(value.authorized_origins as string[])] : undefined;
+    if (authorizedOrigins === undefined) return { error: "invalid_request" };
     const operation = value.operation as string;
     const profile = this.identityEnvironments.list().find(item => item.refs.profile_ref === value.profile_ref);
     if (!profile) return {
@@ -682,18 +689,21 @@ export class HarborRuntime {
       if (!["active", "idle", "locked"].includes(session.lifecycle_state)) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; }
       const humanControl = controlRequiredOperations.includes(operation) && session.control_owner === "user";
       if (humanControl) { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
-      const pageRelationFresh = record?.page_registry ? (() => {
-        try { record.page_registry.list([facts.site_binding.origin]); return true; }
+      const pageRelationFresh = record?.page_registry && authorizedOrigins !== null ? (() => {
+        try { record.page_registry.list(authorizedOrigins); return true; }
         catch { return false; }
       })() : null;
-      const pageCount = pageRelationFresh ? record?.page_registry?.legacyBindings([facts.site_binding.origin]).length ?? null : null;
+      const pageCount = pageRelationFresh ? record?.page_registry?.legacyBindings(authorizedOrigins ?? []).length ?? null : null;
       if (pageSelectionRequiredOnAmbiguousSession && value.page_id === undefined && value.page_ref === undefined) {
-        if (pageRelationFresh === false && !humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
+        if (authorizedOrigins === null && !humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_visibility_unknown"]; }
+        else if (pageRelationFresh === false && !humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
         else if (pageCount !== null && pageCount > 1 && !humanControl) { availabilityState = "blocked"; availabilityReasons = ["page_selection_required"]; }
       }
       if (value.page_id !== undefined || value.page_ref !== undefined) {
-        const binding = record?.page_registry?.binding({ page_id: value.page_id as string | undefined, page_ref: value.page_ref as string | undefined });
-        if (pageRelationFresh === false) {
+        const binding = authorizedOrigins === null ? undefined : record?.page_registry?.binding({ page_id: value.page_id as string | undefined, page_ref: value.page_ref as string | undefined });
+        if (authorizedOrigins === null) {
+          if (!humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_visibility_unknown"]; }
+        } else if (pageRelationFresh === false) {
           if (!humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
         } else if (!binding && !humanControl) {
           availabilityState = "blocked"; availabilityReasons = ["stale_reference"];

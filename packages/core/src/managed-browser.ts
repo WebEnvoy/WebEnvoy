@@ -717,6 +717,7 @@ export function createManagedBrowserService(options: {
       harborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
         operation: input.operation,
         profile_ref: context.profile_ref,
+        authorized_origins: context.task_scope.origins,
         ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
         ...(input.arguments?.page_id === undefined ? {} : { page_id: input.arguments.page_id }),
         ...(input.arguments?.page_ref === undefined ? {} : { page_ref: input.arguments.page_ref }),
@@ -780,6 +781,7 @@ export function createManagedBrowserService(options: {
         const finalHarborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
           operation: input.operation,
           profile_ref: context.profile_ref,
+          authorized_origins: context.task_scope.origins,
           ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
           ...(input.arguments?.page_id === undefined ? {} : { page_id: input.arguments.page_id }),
           ...(input.arguments?.page_ref === undefined ? {} : { page_ref: input.arguments.page_ref }),

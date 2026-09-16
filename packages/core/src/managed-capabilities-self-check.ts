@@ -152,8 +152,8 @@ const waitTextEmpty = { ...wait, wait_for: "text", text: "", target_ref: undefin
 assert.ok(managedCapabilityInputShapeIssues(waitTextEmpty).invalid.some(issue => issue.field === "text"));
 assert.throws(() => parseManagedBrowserRequest(waitTextEmpty), /managed_browser_invalid_input/);
 const inputTextEmpty = { ...parserFixture(managedCapabilityDefinition("instance.input")!), text: "" };
-assert.ok(managedCapabilityInputShapeIssues(inputTextEmpty).invalid.some(issue => issue.field === "text"));
-assert.throws(() => parseManagedBrowserRequest(inputTextEmpty), /managed_browser_invalid_input/);
+assert.deepEqual(managedCapabilityInputShapeIssues(inputTextEmpty), { missing: [], invalid: [] });
+assert.doesNotThrow(() => parseManagedBrowserRequest(inputTextEmpty));
 assert.throws(() => parseManagedBrowserRequest({ ...wait, wait_for: "enabled", text: "unexpected" }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...wait, wait_for: "text", target_ref: fixtureTarget }), /managed_browser_invalid_input/);
 const closeWithoutPage = parserFixture(managedCapabilityDefinition("page.close")!);
