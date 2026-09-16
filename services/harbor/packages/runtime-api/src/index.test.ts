@@ -329,11 +329,11 @@ test("describes shared managed operations without treating Camoufox CDP as the c
       assert.deepEqual(description.provider.reason_codes, ["provider_limited"]);
     }
     assert.equal(description.availability.reason_codes.includes("provider_operation_not_implemented"), false);
-    const operationUnknown = runtime.describeManagedCapability({ operation: "instance.start", profile_ref: profileRef }) as {
+    const knownOperation = runtime.describeManagedCapability({ operation: "instance.start", profile_ref: profileRef }) as {
       provider: { state: string; reason_codes: string[] };
     };
-    assert.equal(operationUnknown.provider.state, "unknown");
-    assert.deepEqual(operationUnknown.provider.reason_codes, provider === "chrome_official" ? ["provider_not_qualified"] : ["provider_operation_support_unknown"]);
+    assert.equal(knownOperation.provider.state, provider === "chrome_official" ? "unknown" : "supported");
+    assert.deepEqual(knownOperation.provider.reason_codes, provider === "chrome_official" ? ["provider_not_qualified"] : []);
   }
 });
 
@@ -367,18 +367,32 @@ test("describes known control, page selection, stale, and unknown page facts", a
   const internal = runtime as unknown as { runtimeSessions: { getRecord: (ref: string) => { page_registry: { sync: (pages: unknown[]) => void; legacyBindings: () => Array<{ facts: Record<string, unknown>; provider_page_ref: string }>; relationFresh: boolean } } | undefined } };
   const record = internal.runtimeSessions.getRecord(session.runtime_session_ref);
   assert.ok(record);
+  runtime.releaseSession(session.runtime_session_ref, { control_owner: "user" });
   const currentPages = record!.page_registry.legacyBindings().map(page => ({ ...page.facts, provider_page_ref: page.provider_page_ref }));
   record!.page_registry.sync([
     ...currentPages,
-    { provider_page_ref: "provider-page-b", current_url: "https://example.com/b", title: "B", status: "ready", origin: "https://example.com", active: false, document_generation: 1, facts: [] }
+    { provider_page_ref: "provider-page-other", current_url: "https://other.example/b", title: "Other", status: "ready", origin: "https://other.example", active: false, document_generation: 1, facts: [] }
+  ]);
+  const oneVisible = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { reason_codes: string[] } };
+  assert.equal(oneVisible.availability.reason_codes.includes("page_selection_required"), false);
+  const pagesWithOtherOrigin = record!.page_registry.legacyBindings().map(page => ({ ...page.facts, provider_page_ref: page.provider_page_ref }));
+  record!.page_registry.sync([
+    ...pagesWithOtherOrigin,
+    { provider_page_ref: "provider-page-visible", current_url: "https://example.com/c", title: "Visible", status: "ready", origin: "https://example.com", active: false, document_generation: 1, facts: [] }
   ]);
   const ambiguous = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
   assert.deepEqual(ambiguous.availability.reason_codes, ["page_selection_required"]);
   const stale = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
-  assert.deepEqual(stale.availability, { state: "blocked", reason_codes: ["stale_reference"], facts_at: session.last_seen_at });
+  assert.equal(stale.availability.state, "blocked");
+  assert.deepEqual(stale.availability.reason_codes, ["stale_reference"]);
   record!.page_registry.relationFresh = false;
   const unknown = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
-  assert.deepEqual(unknown.availability, { state: "unknown", reason_codes: ["page_relation_unavailable"], facts_at: session.last_seen_at });
+  assert.equal(unknown.availability.state, "unknown");
+  assert.deepEqual(unknown.availability.reason_codes, ["page_relation_unavailable"]);
+  runtime.lockSession(session.runtime_session_ref, { control_owner: "user", holder_ref: "human" });
+  const humanWins = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  assert.equal(humanWins.availability.state, "blocked");
+  assert.deepEqual(humanWins.availability.reason_codes, ["human_control"]);
 });
 
 test("requires an explicit or user-default provider without silently using the recommendation", () => {

@@ -16,6 +16,23 @@ function canonical(value) {
   return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
 }
 const installedDefinitionRevision = `sha256:${createHash('sha256').update(canonical(capabilityDefinitions)).digest('hex')}`;
+const capabilityDescriptionStates = {
+  definition: new Set(['defined', 'unknown', 'out_of_scope']),
+  exposure: new Set(['exposed', 'not_exposed']),
+  provider: new Set(['supported', 'limited', 'unsupported', 'unknown', 'not_applicable', 'not_evaluated']),
+  authorization: new Set(['allowed', 'denied', 'unknown', 'not_evaluated']),
+  availability: new Set(['no_known_blocker', 'blocked', 'unknown', 'not_evaluated']),
+  inputs: new Set(['not_provided', 'incomplete', 'invalid', 'complete'])
+};
+function hasKnownCapabilityDescriptionStates(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) return false;
+  return capabilityDescriptionStates.definition.has(value.definition?.state) &&
+    capabilityDescriptionStates.exposure.has(value.invocation?.exposure) &&
+    capabilityDescriptionStates.provider.has(value.provider?.state) &&
+    capabilityDescriptionStates.authorization.has(value.authorization?.state) &&
+    capabilityDescriptionStates.availability.has(value.availability?.state) &&
+    capabilityDescriptionStates.inputs.has(value.inputs?.state);
+}
 const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
 const managedOperationIds = capabilityOperations.map(definition => definition.id);
 const managedOperationSet = new Set(managedOperationIds);
@@ -156,7 +173,7 @@ async function call(name, args) {
       if (result?.error?.code === 'runtime_unavailable_query_without_replay') return { ok: false, error: { code: 'runtime_unavailable' } };
       if (result?.error?.code === 'managed_access_route_not_found' || result?.error?.code === 'not_found') return { ok: false, error: { code: 'discovery_not_available' } };
       if (result?.error) return result;
-      if (result?.schema_version !== 'webenvoy.capability-description/v1' || result?.definition_revision !== installedDefinitionRevision) return { ok: false, error: { code: 'discovery_version_mismatch' } };
+      if (result?.schema_version !== 'webenvoy.capability-description/v1' || result?.definition_revision !== installedDefinitionRevision || !hasKnownCapabilityDescriptionStates(result)) return { ok: false, error: { code: 'discovery_version_mismatch' } };
       return result;
     } catch (error) {
       if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET'].includes(error?.code)) return { ok: false, error: { code: 'runtime_unavailable' } };

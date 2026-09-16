@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -33,6 +34,12 @@ async function stopChild(child) {
     child.kill('SIGKILL');
     await waitForExit(1000);
   }
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
 }
 
 test('localRequest preserves UTF-8 when a socket response splits a code point', async () => {
@@ -127,7 +134,9 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(navigateCondition.then.required.includes('url'));
     const waitCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.const === 'instance.wait');
     assert.ok(waitCondition.then.allOf.some(condition => condition.if?.properties?.wait_for?.const === 'enabled' && condition.then.required.includes('target_ref')));
-    assert.equal(waitCondition.then.allOf.find(condition => condition.if?.properties?.wait_for?.const === 'text').then.properties.text.maxLength, 256);
+    const textWaitCondition = waitCondition.then.allOf.find(condition => condition.if?.properties?.wait_for?.const === 'text');
+    assert.equal(textWaitCondition.then.properties.text.minLength, 1);
+    assert.equal(textWaitCondition.then.properties.text.maxLength, 256);
     const uploadCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.const === 'file.upload');
     assert.deepEqual(uploadCondition.then['x-webenvoy-equals'], { left: 'task_scope.file_refs[0]', right: 'file_ref' });
     const uploadScopeCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('file.upload') && condition.then?.properties?.task_scope?.properties?.file_refs?.minItems === 1);
@@ -205,6 +214,88 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
     assert.equal(stoppedRuntime.error.code, 'runtime_unavailable');
     assert.deepEqual(requests, ['/status', '/agent-connections', '/managed-browser/capabilities/describe'], 'describe must not call status or a fallback route');
     await assert.rejects(lstat(socketPath), error => error?.code === 'ENOENT');
+  } finally {
+    await stopChild(child);
+    if (server) await new Promise(resolve => server.close(resolve));
+    await Promise.all([rm(dataDir, { recursive: true, force: true }), rm(bundleRoot, { recursive: true, force: true })]);
+  }
+});
+
+test('MCP rejects capability descriptions with unknown state values', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-description-state-test-'));
+  const bundleRoot = await mkdtemp(join(tmpdir(), 'webenvoy-mcp-description-state-bundle-'));
+  const socketPath = join(dataDir, 'runtime.sock');
+  const clientPath = join(dataDir, 'client.json');
+  const files = [
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    ...REQUIRED_AGENT_ASSETS,
+    'agent-entry/skills/webenvoy-browser/SKILL.md',
+    'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
+    ...REQUIRED_DRIVER_ASSETS
+  ];
+  let server;
+  let child;
+  try {
+    for (const name of files) {
+      const target = join(bundleRoot, name);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(join(root, name), target);
+    }
+    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
+    await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
+    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
+    const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
+    const revision = `sha256:${createHash('sha256').update(canonical(definitions)).digest('hex')}`;
+    const base = {
+      ok: true,
+      schema_version: 'webenvoy.capability-description/v1',
+      operation: 'instance.snapshot',
+      assessed_at: '2026-09-16T00:00:00.000Z',
+      definition_revision: revision,
+      mode: 'definition_only',
+      definition: { state: 'defined', capability: 'observation' },
+      invocation: { exposure: 'exposed' },
+      provider: { state: 'not_evaluated' },
+      authorization: { state: 'not_evaluated' },
+      availability: { state: 'not_evaluated' },
+      inputs: { state: 'not_provided' }
+    };
+    let unknownState;
+    server = createServer(socket => socket.once('data', chunk => {
+      const path = chunk.toString('utf8').split('\r\n', 1)[0].split(' ')[1];
+      const payload = path === '/status'
+        ? { ready: true, assets: { digest: sha(JSON.stringify(manifest)) } }
+        : path === '/agent-connections'
+        ? { ok: true, connection: { connection_id: 'connection:fixture' }, grants: [] }
+        : path === '/managed-browser/capabilities/describe'
+          ? (() => {
+            const value = JSON.parse(JSON.stringify(base));
+            if (unknownState === 'definition') value.definition.state = 'future_state';
+            if (unknownState === 'exposure') value.invocation.exposure = 'future_state';
+            if (unknownState === 'provider') value.provider.state = 'future_state';
+            if (unknownState === 'authorization') value.authorization.state = 'future_state';
+            if (unknownState === 'availability') value.availability.state = 'future_state';
+            if (unknownState === 'inputs') value.inputs.state = 'future_state';
+            return value;
+          })()
+          : { ok: false, error: { code: 'unexpected_request' } };
+      const body = Buffer.from(JSON.stringify(payload));
+      socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
+    }));
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
+    const call = async (id, name, args = {}) => {
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+      const line = await lines.next();
+      return JSON.parse(JSON.parse(line.value).result.content[0].text);
+    };
+    assert.equal((await call(1, 'webenvoy_connect')).ok, true);
+    assert.equal((await call(2, 'webenvoy_describe', { operation: 'instance.snapshot' })).ok, true);
+    for (const field of ['definition', 'exposure', 'provider', 'authorization', 'availability', 'inputs']) {
+      unknownState = field;
+      assert.deepEqual(await call(3, 'webenvoy_describe', { operation: 'instance.snapshot' }), { ok: false, error: { code: 'discovery_version_mismatch' } }, field);
+    }
   } finally {
     await stopChild(child);
     if (server) await new Promise(resolve => server.close(resolve));

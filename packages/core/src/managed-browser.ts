@@ -18,9 +18,9 @@ import {
   managedCapabilityDefinitionState,
   managedCapabilityExample,
   managedCapabilityExecutionInputSchema,
-  managedCapabilityFieldMatches,
   managedCapabilityFieldGuidance,
   managedCapabilityInputFields,
+  managedCapabilityInputShapeIssues,
   validateManagedCapabilityInputShape
 } from "./managed-capabilities.js";
 
@@ -315,16 +315,12 @@ function describeInputAssessment(input: DescribeInput, context: DescribeContext 
   if (context === undefined) missing.push("/context/grant_id", "/context/task_scope");
   if (definition.context === "profile" && context === undefined) missing.push("/context/profile_ref");
   const draft = { ...input.arguments, operation: input.operation, ...(context === undefined ? {} : { grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope }) } as ObjectValue;
-  for (const field of definition.required) if (draft[field] === undefined) missing.push(context === undefined && field === "profile_ref" ? "/context/profile_ref" : `/arguments/${field}`);
-  for (const [field, value] of Object.entries(input.arguments)) {
-    const fieldSchema = managedCapabilityDefinitions.fields[field];
-    if (fieldSchema && !managedCapabilityFieldMatches(value, fieldSchema)) invalid.push({ path: `/arguments/${field}`, code: "invalid_value" });
-  }
-  if (definition.file_scope !== undefined && context?.task_scope.file_refs === undefined) missing.push("/context/task_scope/file_refs");
-  if (definition.file_scope === "upload" && input.arguments.file_ref !== undefined && context?.task_scope.file_refs !== undefined && (context.task_scope.file_refs.length !== 1 || context.task_scope.file_refs[0] !== input.arguments.file_ref)) invalid.push({ path: "/context/task_scope/file_refs", code: "must_equal_file_ref" });
-  if (invalid.length === 0) {
-    try { validateManagedCapabilityInputShape(draft, { partial: true }); } catch { invalid.push({ path: "/arguments", code: "invalid_combination" }); }
-  }
+  const pathFor = (field: string) => field.startsWith("task_scope.")
+    ? `/context/${field.replace(".", "/")}`
+    : context === undefined && field === "profile_ref" ? "/context/profile_ref" : `/arguments/${field}`;
+  const shape = managedCapabilityInputShapeIssues(draft);
+  for (const field of shape.missing) missing.push(pathFor(field));
+  for (const issue of shape.invalid) invalid.push({ path: pathFor(issue.field), code: issue.code });
   return { state: invalid.length ? "invalid" : missing.length ? "incomplete" : "complete", missing, invalid };
 }
 function publicProfile(value: unknown): ObjectValue {

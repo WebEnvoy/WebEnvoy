@@ -3,7 +3,7 @@ import { isTrustedEnvironmentProbe, profileEnvironmentConfiguration, profileEnvi
 import { isTrustedManagedInteractionOperation, type ManagedInteractionOperation, type ManagedInteractionResult } from "./managed-interaction.js";
 import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { managedScopeSemantics, type ManagedScopeSemantics } from "./managed-scope-semantics.js";
-import { isTrustedManagedPublicPageOperation, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedPublicOrigin, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
+import { isTrustedManagedPublicPageOperation, managedOperationCatalog, type ManagedPageSelector, type ManagedPublicPageInput, type ManagedPublicPageOperation, boundedManagedRef, isTrustedManagedPageObserver, managedPublicOrigin, managedUnavailable, type ManagedObservation, type ManagedObservationInput, type ManagedObservationUnavailable, type ManagedProviderObservation, type ManagedProviderPageInput } from "./managed-observation.js";
 import { assertNoUnfinishedProfileRecovery } from "./profile-recovery.js";
 import {
   createLocalIdentityEnvironmentFacts,
@@ -179,6 +179,90 @@ export interface RuntimeSessionRecord {
   executeFileOperation?: (input: LocalProviderFileOperationInput) => Promise<LocalProviderFileOperationResult>;
   captureScreenshot?: () => Promise<LocalProviderScreenshotFacts | RuntimeErrorFact>;
   close?: () => Promise<void>;
+}
+
+/**
+ * The single execution-owner routing used by Runtime Session. This describes
+ * which existing adapter/registry surface owns an operation; it is not a
+ * provider capability matrix.
+ */
+export type ManagedOperationOwner =
+  | "runtime"
+  | "observation"
+  | "interaction"
+  | "public_page"
+  | "diagnostics"
+  | "page"
+  | "file"
+  | "environment"
+  | "unknown";
+
+export function managedOperationOwner(operation: string): ManagedOperationOwner {
+  switch (operation) {
+    case "instance.observe":
+    case "controlled-page.observe":
+      return "observation";
+    case "instance.snapshot":
+    case "instance.click":
+    case "instance.input":
+    case "instance.press":
+    case "instance.scroll":
+    case "instance.wait":
+    case "controlled-page.interact":
+      return "interaction";
+    case "instance.navigate":
+    case "instance.read":
+      return "public_page";
+    case "instance.diagnostics":
+      return "diagnostics";
+    case "page.list":
+    case "page.open":
+    case "page.activate":
+    case "page.close":
+    case "page.navigate":
+    case "page.reload":
+    case "page.back":
+    case "page.forward":
+      return "page";
+    case "file.upload":
+    case "file.download":
+      return "file";
+    case "environment.read":
+    case "environment.update":
+      return "environment";
+    default:
+      return managedOperationCatalog.operations.some(item => item.operation_id === operation) ? "runtime" : "unknown";
+  }
+}
+
+/**
+ * Read the current Runtime Session owner for an operation. `undefined` means
+ * that no live local adapter fact is available (for example before start or
+ * for a fixture); it must not be treated as proof of support or refusal.
+ */
+export function managedOperationAdapterAvailable(record: RuntimeSessionRecord | undefined, operation: string): boolean | undefined {
+  const owner = managedOperationOwner(operation);
+  if (!record || owner === "unknown" || record.execution_surface !== "local_provider") return undefined;
+  switch (owner) {
+    case "runtime":
+      return true;
+    case "observation":
+      return isTrustedManagedPageObserver(record.observePage);
+    case "interaction":
+      return isTrustedManagedInteractionOperation(record.interaction);
+    case "public_page":
+      return isTrustedManagedPublicPageOperation(record.publicPage);
+    case "diagnostics":
+      return isTrustedRuntimeDiagnosticsProbe(record.readDiagnostics);
+    case "page":
+      return record.page_registry !== undefined;
+    case "file":
+      return isTrustedLocalProviderFileOperation(record.executeFileOperation);
+    case "environment":
+      return operation === "environment.update" || isTrustedEnvironmentProbe(record.readEnvironment);
+    default:
+      return undefined;
+  }
 }
 
 const baselineFacts: RuntimeFact[] = [
@@ -395,11 +479,12 @@ export class RuntimeSessionStore {
     const session = this.getActiveIdentityEnvironmentSession(identity.identity_environment_ref);
     const record = session ? this.records.get(session.runtime_session_ref) : undefined;
     const active = record && ["active", "locked", "idle"].includes(record.facts.lifecycle_state) ? record : undefined;
+    const readEnvironment = active?.readEnvironment;
     let observation: EnvironmentObservation | null = null;
-    if (active && active.execution_surface === "local_provider" && !active.active_provider_interactions && isTrustedEnvironmentProbe(active.readEnvironment)) {
+    if (active && !active.active_provider_interactions && managedOperationAdapterAvailable(active, "environment.read") === true && isTrustedEnvironmentProbe(readEnvironment)) {
       active.active_provider_interactions += 1;
       try {
-        observation = await active.readEnvironment();
+        observation = await readEnvironment();
         if (observation) active.environment_observation = observation;
       } catch { observation = null; }
       finally { active.active_provider_interactions -= 1; }
@@ -913,7 +998,7 @@ export class RuntimeSessionStore {
     if (!sameScopeSemantics(record, input.scope_semantics)) return refused("scope_semantics_mismatch");
     if (!isCoreLeaseHeld(record, input.holder_ref)) return refused("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
-    if (record.execution_surface !== "local_provider" || !isTrustedLocalProviderFileOperation(record.executeFileOperation)) return refused("provider_unavailable");
+    if (managedOperationAdapterAvailable(record, `file.${input.operation}`) !== true) return refused("provider_unavailable");
     const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return refused(relationFailure);
@@ -991,7 +1076,7 @@ export class RuntimeSessionStore {
     if (!coreLeaseHeld && !releasedForSnapshot) return refused("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const operation = record.interaction;
-    if (record.execution_surface !== "local_provider" || !isTrustedManagedInteractionOperation(operation)) return refused("managed_interaction_provider_unavailable");
+    if (managedOperationAdapterAvailable(record, `instance.${input.action}`) !== true || !isTrustedManagedInteractionOperation(operation)) return refused("managed_interaction_provider_unavailable");
     const authorizedOrigins = input.authorized_origins === undefined
       ? [input.expected_origin]
       : [...new Set(input.authorized_origins)];
@@ -1078,7 +1163,7 @@ export class RuntimeSessionStore {
     if (!isCoreLeaseHeld(record, holder_ref) && !releasedForRead) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return managedUnavailable("session_not_ready");
     const operation = record.publicPage;
-    if (record.execution_surface !== "local_provider" || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
+    if (managedOperationAdapterAvailable(record, input.url === undefined ? "instance.read" : "instance.navigate") !== true || !isTrustedManagedPublicPageOperation(operation)) return managedUnavailable("managed_public_page_unavailable");
     const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
@@ -1125,7 +1210,7 @@ export class RuntimeSessionStore {
     if (!isCoreLeaseHeld(record, holder_ref) && !releasedForObservation) return managedUnavailable("control_lock_conflict");
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state) || !record.facts.identity_environment_ref) return managedUnavailable("session_not_ready");
     const observe = record.observePage;
-    if (record.execution_surface !== "local_provider" || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
+    if (managedOperationAdapterAvailable(record, "instance.observe") !== true || !isTrustedManagedPageObserver(observe)) return managedUnavailable("managed_observation_unavailable");
     const generation = record.control_generation;
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return managedUnavailable(relationFailure);
@@ -1168,7 +1253,7 @@ export class RuntimeSessionStore {
     if (!sameScopeSemantics(record, input.scope_semantics)) return diagnosticsUnavailable("scope_semantics_mismatch", "Runtime Session scope semantics are fixed for its lifetime.");
     if (!["active", "idle", "locked"].includes(record.facts.lifecycle_state)) return diagnosticsUnavailable("session_not_ready", "Runtime Session is not ready for observation.", true);
     const probe = record.readDiagnostics;
-    if (record.execution_surface !== "local_provider" || !isTrustedRuntimeDiagnosticsProbe(probe)) return diagnosticsUnavailable("provider_unavailable");
+    if (managedOperationAdapterAvailable(record, "instance.diagnostics") !== true || !isTrustedRuntimeDiagnosticsProbe(probe)) return diagnosticsUnavailable("provider_unavailable");
     const relationFailure = await this.refreshPageRelation(record);
     if (relationFailure) return diagnosticsUnavailable(relationFailure === "page_relation_unavailable" ? relationFailure : "provider_unavailable", "The Provider Page relation is unavailable.", true);
     try {

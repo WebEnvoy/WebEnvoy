@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { managedCapabilityDefinition, managedCapabilityDefinitions, managedCapabilityExample, managedCapabilityExecutionInputSchema, managedCapabilityFieldMatches, managedCapabilityInputFields } from "./managed-capabilities.js";
+import { managedCapabilityDefinition, managedCapabilityDefinitions, managedCapabilityExample, managedCapabilityExecutionInputSchema, managedCapabilityFieldMatches, managedCapabilityInputFields, managedCapabilityInputShapeIssues } from "./managed-capabilities.js";
 import { parseManagedBrowserRequest } from "./managed-browser.js";
 
 const fixtureProfile = "profile:fixture";
@@ -118,6 +118,10 @@ assert.equal(managedCapabilityDefinition("account.bind")?.exposure, "not_exposed
 for (const definition of managedCapabilityDefinitions.operations.filter(item => item.exposure === "exposed")) {
   const fixture = parserFixture(definition);
   assert.doesNotThrow(() => parseManagedBrowserRequest(fixture), `${definition.id} parser fixture`);
+  assert.deepEqual(managedCapabilityInputShapeIssues(fixture), { missing: [], invalid: [] }, `${definition.id} complete draft`);
+  const unknownFieldDraft = { ...fixture, capability_test_unknown: true };
+  assert.ok(managedCapabilityInputShapeIssues(unknownFieldDraft).invalid.some(issue => issue.field === "capability_test_unknown"), `${definition.id} invalid draft`);
+  assert.throws(() => parseManagedBrowserRequest(unknownFieldDraft), /managed_browser_invalid_input/, `${definition.id} invalid parser draft`);
   const example = managedCapabilityExample(definition.id);
   assert.ok(example, `${definition.id} illustrative example`);
   const exampleEnvelope = parserFixture(definition);
@@ -130,6 +134,7 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
   for (const field of definition.required) {
     const missing = { ...fixture };
     delete missing[field];
+    assert.ok(managedCapabilityInputShapeIssues(missing).missing.includes(field), `${definition.id} missing ${field} draft`);
     assert.throws(() => parseManagedBrowserRequest(missing), /managed_browser_invalid_input/, `${definition.id} missing ${field}`);
   }
   if (definition.file_scope === "upload") assert.deepEqual(inputSchema["x-webenvoy-equals"], { left: "task_scope.file_refs[0]", right: "file_ref" });
@@ -140,8 +145,30 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
 const wait = parserFixture(managedCapabilityDefinition("instance.wait")!);
 assert.doesNotThrow(() => parseManagedBrowserRequest({ ...wait, wait_for: "enabled", target_ref: fixtureTarget, text: undefined }));
 assert.doesNotThrow(() => parseManagedBrowserRequest({ ...wait, wait_for: "page_changed", text: undefined }));
+const waitTextMissing = { ...wait, wait_for: "text", text: undefined, target_ref: undefined };
+assert.ok(managedCapabilityInputShapeIssues(waitTextMissing).missing.includes("text"));
+assert.throws(() => parseManagedBrowserRequest(waitTextMissing), /managed_browser_invalid_input/);
+const waitTextEmpty = { ...wait, wait_for: "text", text: "", target_ref: undefined };
+assert.ok(managedCapabilityInputShapeIssues(waitTextEmpty).invalid.some(issue => issue.field === "text"));
+assert.throws(() => parseManagedBrowserRequest(waitTextEmpty), /managed_browser_invalid_input/);
+const inputTextEmpty = { ...parserFixture(managedCapabilityDefinition("instance.input")!), text: "" };
+assert.ok(managedCapabilityInputShapeIssues(inputTextEmpty).invalid.some(issue => issue.field === "text"));
+assert.throws(() => parseManagedBrowserRequest(inputTextEmpty), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...wait, wait_for: "enabled", text: "unexpected" }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...wait, wait_for: "text", target_ref: fixtureTarget }), /managed_browser_invalid_input/);
+const closeWithoutPage = parserFixture(managedCapabilityDefinition("page.close")!);
+delete closeWithoutPage.page_id;
+delete closeWithoutPage.page_ref;
+assert.ok(managedCapabilityInputShapeIssues(closeWithoutPage).missing.includes("page_id|page_ref"));
+assert.throws(() => parseManagedBrowserRequest(closeWithoutPage), /managed_browser_invalid_input/);
+const emptySession = parserFixture(managedCapabilityDefinition("instance.observe")!);
+emptySession.runtime_session_ref = "";
+assert.ok(managedCapabilityInputShapeIssues(emptySession).invalid.some(issue => issue.field === "runtime_session_ref"));
+assert.throws(() => parseManagedBrowserRequest(emptySession), /managed_browser_invalid_input/);
+const startCrossOrigin = parserFixture(managedCapabilityDefinition("instance.start")!);
+startCrossOrigin.url = "https://other.example/";
+assert.ok(managedCapabilityInputShapeIssues(startCrossOrigin).invalid.some(issue => issue.field === "url"));
+assert.throws(() => parseManagedBrowserRequest(startCrossOrigin), /managed_browser_invalid_input/);
 const pageNavigate = parserFixture(managedCapabilityDefinition("page.navigate")!);
 assert.throws(() => parseManagedBrowserRequest({ ...pageNavigate, page_id: undefined, page_ref: undefined }), /managed_browser_invalid_input/);
 const pageOpenWithoutUrl = parserFixture(managedCapabilityDefinition("page.open")!);

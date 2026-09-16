@@ -144,34 +144,42 @@ export function managedCapabilityFieldMatches(value: unknown, schema: ManagedCap
   return true;
 }
 
-function validateConditions(value: JsonObject, definition: ManagedCapabilityDefinition, partial = false): void {
+export type ManagedCapabilityShapeIssues = { missing: string[]; invalid: { field: string; code: string }[] };
+
+function validateConditions(value: JsonObject, definition: ManagedCapabilityDefinition, partial: boolean, issues: ManagedCapabilityShapeIssues): void {
+  const invalid = (field: string, code = "invalid_combination") => issues.invalid.push({ field, code });
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && conditionMatches(value, condition)) {
-      if (!partial && (condition.required ?? []).some(field => value[field] === undefined) || (condition.forbidden ?? []).some(field => value[field] !== undefined)) {
-        throw new ManagedAccessError("managed_browser_invalid_input");
+      for (const field of condition.required ?? []) if (value[field] === undefined) {
+        if (partial) issues.missing.push(field); else invalid(field);
       }
+      for (const field of condition.forbidden ?? []) if (value[field] !== undefined) invalid(field);
       for (const [field, constraints] of Object.entries(condition.constraints ?? {})) {
         const item = value[field];
-        if (typeof item === "string" && constraints.maxLength !== undefined && item.length > constraints.maxLength) throw new ManagedAccessError("managed_browser_invalid_input");
+        const fieldSchema = document.fields[field];
+        if (item !== undefined && (!fieldSchema || !managedCapabilityFieldMatches(item, { ...fieldSchema, ...constraints }))) invalid(field);
       }
     }
     if (condition.kind === "page_selector" && condition.when === "always" &&
-      !partial && (condition.required_any ?? []).every(field => value[field] === undefined)) throw new ManagedAccessError("managed_browser_invalid_input");
+      (condition.required_any ?? []).every(field => value[field] === undefined)) {
+      if (partial) issues.missing.push((condition.required_any ?? []).join("|")); else invalid((condition.required_any ?? []).join("|"));
+    }
     if (condition.kind === "same_origin" && value[condition.field ?? ""] !== undefined) {
       const target = value[condition.field ?? ""], origin = value[condition.with ?? ""];
-      if (origin === undefined && partial) continue;
-      if (typeof target !== "string" || typeof origin !== "string") throw new ManagedAccessError("managed_browser_invalid_input");
+      if (origin === undefined && partial) { issues.missing.push(condition.with ?? "origin"); continue; }
+      if (typeof target !== "string" || typeof origin !== "string") { invalid(condition.field ?? "url"); continue; }
       try {
-        if (new URL(target).origin !== origin) throw new Error("origin_mismatch");
-      } catch { throw new ManagedAccessError("managed_browser_invalid_input"); }
+        if (new URL(target).origin !== origin) invalid(condition.field ?? "url");
+      } catch { invalid(condition.field ?? "url"); }
     }
     if (condition.kind === "file_scope") {
       const refs = pathValue(value, condition.path ?? "task_scope.file_refs");
-      if (refs === undefined && partial) continue;
-      if (!Array.isArray(refs)) throw new ManagedAccessError("managed_browser_invalid_input");
-      if (condition.exact_length !== undefined && refs.length !== condition.exact_length) throw new ManagedAccessError("managed_browser_invalid_input");
-      if (condition.exact !== undefined && canonical(refs) !== canonical(condition.exact)) throw new ManagedAccessError("managed_browser_invalid_input");
-      if (condition.equals !== undefined && refs[0] !== value[condition.equals]) throw new ManagedAccessError("managed_browser_invalid_input");
+      if (refs === undefined && partial) { issues.missing.push(condition.path ?? "task_scope.file_refs"); continue; }
+      if (!Array.isArray(refs)) { invalid(condition.path ?? "task_scope.file_refs"); continue; }
+      if (condition.exact_length !== undefined && refs.length !== condition.exact_length) invalid(condition.path ?? "task_scope.file_refs");
+      if (condition.exact !== undefined && canonical(refs) !== canonical(condition.exact)) invalid(condition.path ?? "task_scope.file_refs");
+      if (condition.equals !== undefined && value[condition.equals] === undefined && partial) issues.missing.push(condition.equals);
+      else if (condition.equals !== undefined && refs[0] !== value[condition.equals]) invalid(condition.path ?? "task_scope.file_refs", "must_equal_file_ref");
     }
   }
 }
@@ -196,29 +204,40 @@ export function managedCapabilityInputFields(operation: unknown): string[] {
   return [...envelopeFields, ...operationFields, ...outOfScopeExecutionFields];
 }
 
-/** Validate the operation-specific shape before any access, run, or Harbor work. */
-export function validateManagedCapabilityInputShape(value: JsonObject, options: { partial?: boolean } = {}): void {
+function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: boolean): ManagedCapabilityShapeIssues {
+  const issues: ManagedCapabilityShapeIssues = { missing: [], invalid: [] };
   const definition = managedCapabilityDefinition(value.operation);
-  if (!definition || definition.exposure !== "exposed") return;
+  if (!definition || definition.exposure !== "exposed") return issues;
   const allowed = new Set(managedCapabilityInputFields(value.operation));
-  if (Object.keys(value).some(key => value[key] !== undefined && !allowed.has(key))) throw new ManagedAccessError("managed_browser_invalid_input");
+  for (const key of Object.keys(value)) if (value[key] !== undefined && !allowed.has(key)) issues.invalid.push({ field: key, code: "unknown_field" });
   const scope = value.task_scope;
   if (scope !== undefined) {
-    if (!scope || typeof scope !== "object" || Array.isArray(scope)) throw new ManagedAccessError("managed_browser_invalid_input");
-    const scopeObject = scope as JsonObject;
-    if (definition.file_scope === undefined && scopeObject.file_refs !== undefined) throw new ManagedAccessError("managed_browser_invalid_input");
-    if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) throw new ManagedAccessError("managed_browser_invalid_input");
-    if (definition.file_scope === "upload" && scopeObject.file_refs !== undefined && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 1)) throw new ManagedAccessError("managed_browser_invalid_input");
+    if (!scope || typeof scope !== "object" || Array.isArray(scope)) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
+    else {
+      const scopeObject = scope as JsonObject;
+      if (definition.file_scope === undefined && scopeObject.file_refs !== undefined) issues.invalid.push({ field: "task_scope.file_refs", code: "forbidden_field" });
+      if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
+      if (definition.file_scope === "upload" && scopeObject.file_refs !== undefined && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 1)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
+    }
   }
   for (const field of definition.allowed) {
-    if (value[field] !== undefined && !managedCapabilityFieldMatches(value[field], document.fields[field]!)) throw new ManagedAccessError("managed_browser_invalid_input");
+    if (value[field] !== undefined && !managedCapabilityFieldMatches(value[field], document.fields[field]!)) issues.invalid.push({ field, code: "invalid_value" });
   }
-  if (options.partial) {
-    validateConditions(value, definition, true);
-    return;
+  for (const field of definition.required) if (value[field] === undefined) {
+    if (partial) issues.missing.push(field); else issues.invalid.push({ field, code: "missing_required" });
   }
-  for (const field of definition.required) if (value[field] === undefined) throw new ManagedAccessError("managed_browser_invalid_input");
-  validateConditions(value, definition);
+  validateConditions(value, definition, partial, issues);
+  return issues;
+}
+
+export function managedCapabilityInputShapeIssues(value: JsonObject): ManagedCapabilityShapeIssues {
+  return collectManagedCapabilityInputShapeIssues(value, true);
+}
+
+/** Validate the operation-specific shape before any access, run, or Harbor work. */
+export function validateManagedCapabilityInputShape(value: JsonObject, options: { partial?: boolean } = {}): void {
+  const issues = collectManagedCapabilityInputShapeIssues(value, options.partial === true);
+  if (issues.invalid.length || (!options.partial && issues.missing.length)) throw new ManagedAccessError("managed_browser_invalid_input");
 }
 
 export function managedCapabilityExample(operation: string): JsonObject | null {

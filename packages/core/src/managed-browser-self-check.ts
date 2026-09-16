@@ -23,6 +23,7 @@ let capabilityDescriptions = 0;
   let afterCapabilityDescription: (() => Promise<void>) | undefined;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
+let sessionStopped = false;
 let dropResponse = false, omitProviderSelection = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false, crossOriginInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
@@ -134,7 +135,9 @@ const server = createServer((req, res) => { void (async () => {
       }
       if (dropEnvironmentResponse) { req.socket.destroy(); return; }
     }
-  } else if (req.url === "/runtime/identity-environments/identity%3A1/session") { sessionReads++; value = { runtime_session: managedSession };
+  } else if (req.url === "/runtime/identity-environments/identity%3A1/session") {
+    sessionReads++;
+    value = sessionStopped ? { status: "unavailable", failure_class: "instance_not_running" } : { runtime_session: managedSession };
   } else if (req.url === "/runtime/profile-recovery/inspect") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body) as { profile_ref?: string };
@@ -658,6 +661,41 @@ try {
   const crossProfileResult = await actualRecoveryBrowser.submit(credentialHash, { ...recoveryStatusRequest, idempotency_key: "recovery-real-cross-profile", grant_id: crossProfileGrant.grant_id, profile_ref: "profile:other", operation_ref: actualInspection.operation_ref, task_scope: { operations: [...crossProfileRecoveryOperations], profile_refs: ["profile:other"], origins: [] } });
   assert.equal(crossProfileResult.status, "failed", JSON.stringify(crossProfileResult));
   assert.equal(crossProfileResult.failure?.code, "recovery_operation_not_found", JSON.stringify(crossProfileResult));
+
+  // D5: a successful description is not a capability token. Stop or hand
+  // control to the user after help, then the original execution rechecks the
+  // current Runtime/Control facts and refuses dispatch.
+  const d5Origin = "http://127.0.0.1:18794";
+  const d5Operations = ["profile.read", "instance.input"] as const;
+  await accessStore.setProfilePolicy({ idempotency_key: "d5-policy", profile_ref: "profile:1", allowed_operations: [...d5Operations], allowed_origins: [d5Origin], controlled_interaction_origins: [d5Origin] });
+  const d5Grant = await accessStore.createGrant({ idempotency_key: "d5-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: [...d5Operations], allowed_origins: [d5Origin],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const d5Context = { grant_id: d5Grant.grant_id, profile_ref: "profile:1",
+    task_scope: { operations: [...d5Operations], profile_refs: ["profile:1"], origins: [d5Origin] } };
+  const d5Arguments = { origin: d5Origin, runtime_session_ref: "session:one", page_ref: "page:one", observation_ref: "observation:1", target_ref: "target:one", text: "d5 test" };
+  const d5Execution = { idempotency_key: "d5-input", connection_id: connection.connection_id, grant_id: d5Grant.grant_id, operation: "instance.input" as const,
+    profile_ref: "profile:1", ...d5Arguments, task_scope: d5Context.task_scope };
+  capabilityDescriptionMode = "normal";
+  const beforeD5Runs = (await runRecordStore.listRunRecords()).length;
+  const d5Description = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.input", context: d5Context, arguments: d5Arguments });
+  assert.equal((d5Description.availability as { state: string }).state, "no_known_blocker");
+  assert.equal((await runRecordStore.listRunRecords()).length, beforeD5Runs, "describe must not create a Run before D5 state changes");
+  sessionStopped = true;
+  const stoppedExecution = await service.submit(credentialHash, { ...d5Execution, idempotency_key: "d5-after-stop" });
+  assert.equal(stoppedExecution.status, "failed", JSON.stringify(stoppedExecution));
+  assert.equal(stoppedExecution.failure?.code, "instance_not_running");
+  assert.equal(stoppedExecution.dispatch_state, "not_dispatched");
+  sessionStopped = false;
+  managedSession.control_owner = "user";
+  managedSession.control_lock = { state: "held", holder_ref: "human" };
+  const takeoverExecution = await service.submit(credentialHash, { ...d5Execution, idempotency_key: "d5-during-takeover" });
+  assert.equal(takeoverExecution.status, "failed", JSON.stringify(takeoverExecution));
+  assert.equal(takeoverExecution.failure?.code, "control_lock_conflict");
+  assert.equal(takeoverExecution.dispatch_state, "not_dispatched");
+  managedSession.control_owner = "core_task";
+  managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
+  await accessStore.setProfilePolicy({ idempotency_key: "d5-restore-policy", profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] });
 
   const v2ExpiresAt = new Date(Date.now() + 60_000).toISOString();
   await accessStore.setProfilePolicy({ idempotency_key: "v2-browser-policy", profile_ref: "profile:1", allowed_operations: interactionOps, allowed_origins: [origin], controlled_interaction_origins: [origin] });

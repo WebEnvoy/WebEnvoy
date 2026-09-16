@@ -89,6 +89,8 @@ import {
 import {
   HARBOR_RUNTIME_FACTS_SCHEMA,
   HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA,
+  managedOperationAdapterAvailable,
+  managedOperationOwner,
   RuntimeSessionStore,
   type CreateRuntimeSessionInput,
   type LocalProviderLauncher,
@@ -619,31 +621,6 @@ export class HarborRuntime {
       availability: { state: "unknown", reason_codes: ["runtime_facts_unavailable"], facts_at: profile.updated_at },
       execution_checks: ["reauthorize"]
     };
-    const selected = facts.provider_binding.selected_provider;
-    const providerFactsAt = profile.updated_at;
-    // Runtime transport is an implementation detail.  The public operation
-    // contract is shared by Chrome and Camoufox, so do not infer operation
-    // support from the provider's optional CDP transport fact.  Only use an
-    // owner capability where it is directly relevant to this operation.
-    const providerCapabilityKey = operation === "instance.snapshot" || operation === "instance.observe"
-      ? "snapshot_refs"
-      : operation === "instance.diagnostics" ? "evidence_refs" : undefined;
-    const providerCapability = providerCapabilityKey === undefined ? undefined : selected?.capabilities.find(item => item.key === providerCapabilityKey);
-    const qualificationReason = !selected ? "provider_not_qualified"
-      : selected.provider_id === "chrome_official" && !readChromeOfficialPairingFacts(facts.provider_binding)
-        ? selected.install.version_status === "known" ? "provider_evidence_stale" : "provider_not_qualified"
-        : selected.provider_id === "camoufox" && !readCamoufoxUpstreamSourceFacts({}, selected.install as unknown as Record<string, unknown>)
-          ? typeof selected.install.source_sha256 === "string" ? "provider_evidence_stale" : "provider_not_qualified"
-          : null;
-    const providerState = qualificationReason ? "unknown" : !providerCapability ? "unknown" : providerCapability.state === "unsupported" ? "unsupported" : providerCapability.state === "requires_validation" ? "unknown" : providerCapability.state === "limited" || providerCapability.state === "provider_claim" ? "limited" : "supported";
-    const providerReasons = qualificationReason ? [qualificationReason] : !providerCapability ? providerCapabilityKey === undefined ? ["provider_operation_support_unknown"] : ["capability_missing"] : providerCapability.state === "unsupported" ? ["provider_operation_not_implemented"] : providerCapability.state === "requires_validation" ? ["provider_not_qualified"] : providerCapability.state === "provider_claim" ? ["provider_evidence_stale"] : providerCapability.state === "limited" ? ["provider_limited"] : [];
-    const provider = {
-      state: providerState,
-      provider_id: facts.provider_binding.selected_provider_id,
-      reason_codes: providerReasons,
-      limitations: (selected?.limitations ?? []).slice(0, 16).map((summary, index) => ({ code: `provider_limitation_${index + 1}`, summary: String(summary).slice(0, 256) })),
-      facts_at: providerFactsAt
-    };
     const needsSession = !["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "instance.start"].includes(operation);
     const requestedSessionRef = typeof value.runtime_session_ref === "string" ? value.runtime_session_ref : undefined;
     const record = requestedSessionRef ? this.runtimeSessions.getRecord(requestedSessionRef) : (() => {
@@ -651,6 +628,48 @@ export class HarborRuntime {
       return active ? this.runtimeSessions.getRecord(active.runtime_session_ref) : undefined;
     })();
     const session = record?.facts;
+    const selected = facts.provider_binding.selected_provider;
+    const providerFactsAt = profile.updated_at;
+    const owner = managedOperationOwner(operation);
+    const adapterAvailable = managedOperationAdapterAvailable(record, operation);
+    // Runtime transport is an implementation detail.  The public operation
+    // contract is shared by Chrome and Camoufox. Exact provider capability
+    // facts are used only where they own a distinct evidence surface; the
+    // remaining known operations use the canonical execution owner above.
+    const providerCapabilityKey = operation === "instance.snapshot" || operation === "instance.observe"
+      ? "snapshot_refs"
+      : operation === "instance.diagnostics" ? "evidence_refs" : undefined;
+    const providerCapability = providerCapabilityKey === undefined ? undefined : selected?.capabilities.find(item => item.key === providerCapabilityKey);
+    const chromePairing = selected?.provider_id === "chrome_official" ? readChromeOfficialPairingFacts(facts.provider_binding) : null;
+    const camoufoxSource = selected?.provider_id === "camoufox" ? readCamoufoxUpstreamSourceFacts({}, selected.install as unknown as Record<string, unknown>) : null;
+    const qualificationReason = !selected ? "provider_not_qualified"
+      : selected.provider_id === "chrome_official" && !chromePairing ? selected.role === "qualification" ? "provider_evidence_stale" : "provider_not_qualified"
+      : selected.provider_id === "camoufox" && !camoufoxSource ? selected.role === "qualification" ? "provider_evidence_stale" : "provider_not_qualified"
+      : null;
+    const providerState = qualificationReason ? "unknown"
+      : adapterAvailable === false ? "unsupported"
+      : providerCapabilityKey !== undefined && !providerCapability ? "unknown"
+      : providerCapability?.state === "unsupported" ? "unsupported"
+      : providerCapability?.state === "requires_validation" ? "unknown"
+      : providerCapability?.state === "limited" || providerCapability?.state === "provider_claim" ? "limited"
+      : owner === "unknown" ? "unknown"
+      : "supported";
+    const providerReasons = qualificationReason ? [qualificationReason]
+      : adapterAvailable === false ? ["provider_operation_not_implemented"]
+      : providerCapabilityKey !== undefined && !providerCapability ? ["capability_missing"]
+      : providerCapability?.state === "unsupported" ? ["provider_operation_not_implemented"]
+      : providerCapability?.state === "requires_validation" ? ["provider_not_qualified"]
+      : providerCapability?.state === "provider_claim" ? ["provider_evidence_stale"]
+      : providerCapability?.state === "limited" ? ["provider_limited"]
+      : owner === "unknown" ? ["provider_operation_support_unknown"]
+      : [];
+    const provider = {
+      state: providerState,
+      provider_id: facts.provider_binding.selected_provider_id,
+      reason_codes: providerReasons,
+      limitations: (selected?.limitations ?? []).slice(0, 16).map((summary, index) => ({ code: `provider_limitation_${index + 1}`, summary: String(summary).slice(0, 256) })),
+      facts_at: providerFactsAt
+    };
     const controlRequiredOperations = ["instance.start", "instance.navigate", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.stop", "instance.handoff", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"];
     const pageSelectionRequiredOnAmbiguousSession = ["instance.observe", "instance.read", "instance.snapshot", "instance.navigate", "instance.diagnostics"].includes(operation);
     let availabilityState: "no_known_blocker" | "blocked" | "unknown" = providerState === "unsupported" ? "blocked" : providerState === "unknown" ? "unknown" : "no_known_blocker";
@@ -661,18 +680,26 @@ export class HarborRuntime {
     else if (session) {
       availabilityFactsAt = session.last_seen_at;
       if (!["active", "idle", "locked"].includes(session.lifecycle_state)) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; }
-      if (controlRequiredOperations.includes(operation) && session.control_owner === "user") { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
-      const pageRelationFresh = record?.page_registry ? (() => { try { record.page_registry.list([]); return true; } catch { return false; } })() : null;
-      const pageCount = pageRelationFresh ? record?.page_registry?.legacyBindings().length ?? null : null;
-      if (pageSelectionRequiredOnAmbiguousSession && value.page_id === undefined && value.page_ref === undefined && pageCount !== null && pageCount > 1) {
-        availabilityState = "blocked";
-        availabilityReasons = ["page_selection_required"];
+      const humanControl = controlRequiredOperations.includes(operation) && session.control_owner === "user";
+      if (humanControl) { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
+      const pageRelationFresh = record?.page_registry ? (() => {
+        try { record.page_registry.list([facts.site_binding.origin]); return true; }
+        catch { return false; }
+      })() : null;
+      const pageCount = pageRelationFresh ? record?.page_registry?.legacyBindings([facts.site_binding.origin]).length ?? null : null;
+      if (pageSelectionRequiredOnAmbiguousSession && value.page_id === undefined && value.page_ref === undefined) {
+        if (pageRelationFresh === false && !humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
+        else if (pageCount !== null && pageCount > 1 && !humanControl) { availabilityState = "blocked"; availabilityReasons = ["page_selection_required"]; }
       }
       if (value.page_id !== undefined || value.page_ref !== undefined) {
         const binding = record?.page_registry?.binding({ page_id: value.page_id as string | undefined, page_ref: value.page_ref as string | undefined });
-        if (pageRelationFresh === false) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
-        else if (!binding) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
-        else if (value.document_generation !== undefined && binding.facts.document_generation !== value.document_generation) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
+        if (pageRelationFresh === false) {
+          if (!humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
+        } else if (!binding && !humanControl) {
+          availabilityState = "blocked"; availabilityReasons = ["stale_reference"];
+        } else if (!humanControl && binding && value.document_generation !== undefined && binding.facts.document_generation !== value.document_generation) {
+          availabilityState = "blocked"; availabilityReasons = ["stale_reference"];
+        }
       }
     }
     const executionChecks = ["reauthorize"];
