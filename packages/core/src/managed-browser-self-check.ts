@@ -760,6 +760,19 @@ try {
   assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeDeniedDecisions);
   assert.equal(lockAttempts, beforeDeniedLocks);
 
+  await accessStore.setProfilePolicy({ idempotency_key: "discovery-list-policy", profile_ref: "profile:3",
+    allowed_operations: ["profile.list", "instance.snapshot"], allowed_origins: ["https://example.com"] });
+  const listGrant = await accessStore.createGrant({ idempotency_key: "discovery-list-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:3"], allowed_operations: ["profile.list", "instance.snapshot"], allowed_origins: ["https://example.com", "https://outside.example"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const listContext = { grant_id: listGrant.grant_id, profile_ref: "profile:3",
+    task_scope: { operations: ["profile.list", "instance.snapshot"], profile_refs: ["profile:3"], origins: ["https://example.com", "https://outside.example"] } };
+  const beforeListOriginForwards = forwardedCapabilityOrigins.length;
+  const listDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context: listContext,
+    arguments: { runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 } });
+  assert.equal((listDescription.authorization as { state: string }).state, "unknown", "missing target origin remains an execution-time input question");
+  assert.deepEqual(forwardedCapabilityOrigins.slice(beforeListOriginForwards), [["https://example.com"], ["https://example.com"]], "profile.list visibility also applies the Profile policy intersection");
+
   for (const shape of ["wrong_schema", "wrong_operation", "wrong_profile"] as const) {
     capabilityDescriptionShape = shape;
     await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments }), /discovery_version_mismatch/);

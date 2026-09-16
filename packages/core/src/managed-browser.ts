@@ -609,7 +609,7 @@ export function createManagedBrowserService(options: {
           connection_id: connectionId,
           grant_id: context.grant_id,
           operation,
-          ...(operation === "profile.read" ? { profile_ref: context.profile_ref } : {}),
+          profile_ref: context.profile_ref,
           task_scope: { operations: [operation], profile_refs: [context.profile_ref], origins: context.task_scope.origins }
         });
         if (operation === "profile.list" && !access.grant.profile_refs.includes(context.profile_ref)) continue;
