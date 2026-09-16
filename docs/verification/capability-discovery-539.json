@@ -61,8 +61,8 @@
       "evidence": "Plugin tests prove describe branches before ensureRuntime. Installed before/after snapshots for both Providers and after restart showed unchanged Run, authorization-decision, lease, session, browser-process and Runtime-service counts."
     },
     "D7": {
-      "status": "passed_installed",
-      "evidence": "Installed auxiliary checks cover startup/discovery, old Runtime and mismatch refusal. The formal package reports the frozen workspace identity; an explicit stop/start changed runtime_id and both Provider descriptions reread persisted facts."
+      "status": "passed_deterministic_and_installed",
+      "evidence": "Desktop client tests cover describe against an old Runtime and discovery definition/response mismatch. Installed auxiliary checks cover package assets, startup and general version refusal. The formal package reports the frozen workspace identity; an explicit stop/start changed runtime_id and both Provider descriptions reread persisted facts."
     },
     "D8": {
       "status": "passed_installed",
