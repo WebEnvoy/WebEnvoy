@@ -21,6 +21,18 @@
     "package_build_ordinal": 3,
     "package_integrity": "verified"
   },
+  "correction": {
+    "pull_request": 551,
+    "base_commit": "0122d0f42209a60f56b48f732cbc389e9223b9a2",
+    "runtime_commit": "96fa0785c8996ec328a4a14a304cd80cdfe5a36d",
+    "runtime_tree": "c06a1be86bc39afc25e84043a269ae30100939a0",
+    "scope": "Complete actionable next_steps and preserve ordinary misplaced draft fields for structured input guidance; execution parsing, authorization, Harbor and Provider behavior are unchanged.",
+    "package_build_attempts": 3,
+    "package_integrity": "verified",
+    "installed_entry_check": "passed",
+    "inherited_evidence": "The #550 dual-Provider installation and real-Agent results remain applicable because the correction changes only Core description composition and installed MCP response forwarding; no browser, Provider or execution path was changed.",
+    "independent_review": "Recorded on correction PR #551 before merge"
+  },
   "contracts": {
     "agent_request": "packages/schemas/schemas/capability-description-request.schema.json",
     "agent_response": "packages/schemas/schemas/capability-description.schema.json",
@@ -38,7 +50,7 @@
   "acceptance": {
     "D1": {
       "status": "passed_deterministic",
-      "evidence": "The canonical static definition drives Core shape validation, MCP conditional schema and help; all first-batch operations and the missing-session/origin/file_refs counterexamples pass Core and schema self-checks."
+      "evidence": "The canonical static definition drives Core shape validation, MCP conditional schema and help; all first-batch operations and the missing-session/origin/file_refs counterexamples pass Core and schema self-checks. PR #551 additionally proves that a known field misplaced in a different operation reaches the formal describe assessment and returns its exact invalid path while execution still rejects it."
     },
     "D2": {
       "status": "passed_deterministic",
@@ -46,7 +58,7 @@
     },
     "D3": {
       "status": "passed_deterministic",
-      "evidence": "Core, Harbor and Plugin tests distinguish defined, unknown, out_of_scope, not_exposed, limited, denied, human_control, stopped, stale and unknown states."
+      "evidence": "Core, Harbor and Plugin tests distinguish defined, unknown, out_of_scope, not_exposed, limited, denied, human_control, stopped, stale and unknown states. PR #551 also asserts actionable mappings for stale_reference, page_selection_required, provider_not_qualified and provider_evidence_stale."
     },
     "D4": {
       "status": "passed_deterministic",
@@ -116,6 +128,7 @@
     "local": [
       "Core full self-check and 5 tests passed",
       "Desktop 17 tests passed",
+      "Correction PR #551 passed the Core and API formal description checks, retained the execution-parser rejection, and passed one installed Electron MCP forwarding check without starting Runtime or a browser",
       "Harbor full suite passed on the runtime candidate lineage with one existing Windows-only skip; the one transient lifecycle timing failure passed on isolated rerun and exact-head CI passed",
       "Schema validation passed: 26 schemas, 47 positive fixtures and 10 negative fixture sets",
       "API and conformance checks passed; the offline exact-pin vertical slice reported structured_unavailable and exited successfully, so it is not claimed as an available external checkout verification"
