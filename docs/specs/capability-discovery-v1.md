@@ -1,6 +1,6 @@
 # Capability Discovery and Operation Guidance V1
 
-状态：Proposed（已完成实施规格，待独立审查接受）；版本：1.0。owner：Core（定义、授权与结果组合）、Harbor（Provider 与当前实例事实）、Desktop Agent entry（实际工具投影）。产品归口：[#539](https://github.com/WebEnvoy/WebEnvoy/issues/539)，parent [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)，关联 [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
+状态：Accepted；版本：1.0。owner：Core（定义、授权与结果组合）、Harbor（Provider 与当前实例事实）、Desktop Agent entry（实际工具投影）。产品归口：[#539](https://github.com/WebEnvoy/WebEnvoy/issues/539)，parent [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)，关联 [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
 
 依据：[Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md)、[Page/Document V1](page-navigation-runtime-contract-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)。本规格是 #539 的实施合同，不表示工具或能力已经发布；实际支持与证据仍由 owning Work Item 维护。
 

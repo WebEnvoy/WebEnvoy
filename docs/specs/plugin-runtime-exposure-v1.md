@@ -6,15 +6,15 @@
 
 > **2026-09-14 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成其声明的原任务页协作与私有补丁退役范围；官方固定 Camoufox／Playwright 路径仍按 `limited` 暴露：只接受 owner 核验的 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 组合，popup 首请求无法在派发前建立可信 Page 归属时局部返回 `page_relation_unavailable`，不先发请求、不猜测、不重放。受管浏览器文件的标准单文件 Plugin slice 由 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)／[PR #524](https://github.com/WebEnvoy/WebEnvoy/pull/524) 单独归档；工具可见、能力存在、Grant 授权和当前可执行性仍是独立事实，不能把局部 `plugin_verified` 证据扩写成完整 V1。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仅作历史／恢复事实，Plugin 不 fallback 或隐藏拒绝原因。
 
-## #539 能力发现与调用说明（v1.3 提案）
+## #539 能力发现与调用说明（v1.3 已接受兼容修订）
 
-[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md) 冻结本次实施所需的单 operation 查询、参数说明、Profile 可见性、五维状态、只读快照、版本兼容和验收。该补充待独立审查接受；本段不表示 `webenvoy_describe` 已部署，#539 仍须实现和验收。
+[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md) 冻结本次实施所需的单 operation 查询、参数说明、Profile 可见性、五维状态、只读快照、版本兼容和验收。该兼容修订已接受；本段不表示 `webenvoy_describe` 已部署，#539 仍须实现和验收。
 
 固定新增一个 MCP 只读工具 `webenvoy_describe`，经 Agent credential 与已有 Connection 调用 Core `POST /managed-browser/capabilities/describe`；Core 仅在资源可见性通过后取得 Harbor 已有管理事实。静态帮助不要求有执行该 operation 的权限，具体 Profile 说明复用已有 `profile.read`/`profile.list` 可见性，不增加 Grant 维度。Core–Harbor 窄只读投影使用 supervisor-only `POST /runtime/capabilities/describe`。
 
 查询在 `ensureRuntime` 前分流，不自动启动服务、Profile、浏览器，不建立或刷新 Connection，不派发 Provider 命令、不读取网页内容、不获取租约、不创建 Run/receipt/新目标。结果不是执行许可：可以说明 `no_known_blocker`，但无法只读证明的页面/文件新鲜度仍在执行时校验。缺少帮助或旧 Runtime 不提供查询，不得阻断原有合法操作。
 
-静态参数定义、Core形状校验、MCP条件schema和帮助示例采用同一归口；Provider支持、授权和现场仍各由现有owner提供，不在Plugin复制动态矩阵。#540观察续读、权限扩围、Chrome资格和全生命周期网络隔离不在本补充范围。已接受后本补充为 exposure v1.3；既有工具、Grant与operation结果合同保持，未知discovery版本准确拒绝而不fallback。
+静态参数定义、Core形状校验、MCP条件schema和帮助示例采用同一归口；Provider支持、授权和现场仍各由现有owner提供，不在Plugin复制动态矩阵。#540观察续读、权限扩围、Chrome资格和全生命周期网络隔离不在本补充范围。本补充为 exposure v1.3；既有工具、Grant与operation结果合同保持，未知discovery版本准确拒绝而不fallback。
 
 ## 固定工具与投影
 
