@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/capability-description-request.v1.schema.json",
+  "title": "WebEnvoy capability description request",
+  "description": "The Core HTTP request for the optional webenvoy_describe help query. connection_id is injected by the installed Agent entry; context and arguments remain read-only drafts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation", "connection_id"],
+  "properties": {
+    "operation": { "type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
+    "connection_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grant_id", "profile_ref", "task_scope"],
+      "properties": {
+        "grant_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "task_scope": { "$ref": "#/$defs/task_scope" }
+      }
+    },
+    "arguments": {
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": false,
+      "description": "A partial operation draft. Envelope and context fields, including profile_ref, are not accepted here.",
+      "properties": {
+        "origin": { "type": "string", "format": "webenvoy-public-origin" },
+        "template_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "url": { "type": "string", "format": "webenvoy-public-http-target", "maxLength": 2048 },
+        "runtime_session_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "observation_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "page_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "page_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "document_generation": { "type": "integer", "minimum": 1 },
+        "cursor": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "target_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "file_ref": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$" },
+        "text": { "type": "string", "maxLength": 512 },
+        "key": { "type": "string", "enum": ["Enter", "Tab", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Space", "Backspace", "Delete", "Escape"] },
+        "delta_y": { "type": "integer", "minimum": -2000, "maximum": 2000, "not": { "const": 0 } },
+        "wait_for": { "type": "string", "enum": ["page_changed", "text", "enabled"] },
+        "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "configuration": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "language": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "viewport": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "provider_id": { "type": "string", "enum": ["cloakbrowser", "chrome_official", "camoufox"] }
+      }
+    }
+  },
+  "$defs": {
+    "task_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations", "profile_refs", "origins"],
+      "properties": {
+        "operations": { "$ref": "#/$defs/refs" },
+        "profile_refs": { "$ref": "#/$defs/refs" },
+        "origins": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "type": "string", "format": "webenvoy-public-origin" } },
+        "file_refs": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$" } }
+      }
+    },
+    "refs": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+  },
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted",
+    "schema_version": "webenvoy.capability-description-request/v1",
+    "compatibility_boundary": "Core capability description request; operation-specific authorization, file scope, Page selection, and same-origin conditions remain validated by the shared Core definition and parser.",
+    "source_adrs": ["docs/specs/capability-discovery-v1.md", "docs/adr/0012-runtime-capability-plane-and-plugin-first.md"]
+  }
+}

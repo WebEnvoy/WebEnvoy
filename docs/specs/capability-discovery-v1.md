@@ -118,7 +118,7 @@ HTTP 请求为 MCP 参数加 `connection_id`；所有顶层及 context/task_scop
 }
 ```
 
-上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。实现合同对应的 [Core→Agent schema](../../packages/schemas/schemas/capability-description.schema.json)、[Core→Harbor schema](../../packages/schemas/schemas/harbor-capability-description.schema.json)、[正例](../../packages/schemas/fixtures/capability-description.fixture.json) 和 [反例](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json) 由 #539 实现 PR 固定并由 schema self-check 验证。
+上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。实现合同对应的 [Core→Agent request schema](../../packages/schemas/schemas/capability-description-request.schema.json)、[Core→Agent response schema](../../packages/schemas/schemas/capability-description.schema.json)、[Core→Harbor schema](../../packages/schemas/schemas/harbor-capability-description.schema.json)、[请求正例](../../packages/schemas/fixtures/capability-description-request.fixture.json)、[响应正例](../../packages/schemas/fixtures/capability-description.fixture.json)、[请求反例](../../packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json) 和 [响应反例](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json) 由 #539 实现 PR 固定并由 schema self-check 验证。
 
 | 字段 | 固定取值与解释 |
 | --- | --- |

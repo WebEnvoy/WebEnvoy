@@ -46,6 +46,8 @@ import {
   type IdentityEnvironmentProviderBinding,
   type IdentityEnvironmentProviderBindingInput
 } from "./provider-management.js";
+import { readCamoufoxUpstreamSourceFacts } from "./camoufox-upstream-driver.js";
+import { readChromeOfficialPairingFacts } from "./chrome-official-driver.js";
 import {
   BrowserProviderPreferenceManager,
   resolveBrowserProviderPreferenceStorePath,
@@ -625,10 +627,16 @@ export class HarborRuntime {
     // owner capability where it is directly relevant to this operation.
     const providerCapabilityKey = operation === "instance.snapshot" || operation === "instance.observe"
       ? "snapshot_refs"
-      : operation === "instance.diagnostics" ? "evidence_refs" : "persistent_profile";
-    const providerCapability = selected?.capabilities.find(item => item.key === providerCapabilityKey);
-    const providerState = !selected ? "unknown" : providerCapability?.state === "unsupported" ? "unsupported" : providerCapability?.state === "requires_validation" ? "unknown" : providerCapability?.state === "limited" || providerCapability?.state === "provider_claim" ? "limited" : "supported";
-    const providerReasons = !selected ? ["provider_not_qualified"] : providerCapability?.state === "unsupported" ? ["provider_operation_not_implemented"] : providerCapability?.state === "requires_validation" ? ["provider_not_qualified"] : providerCapability?.state === "provider_claim" ? ["provider_evidence_stale"] : providerCapability?.state === "limited" ? ["provider_limited"] : [];
+      : operation === "instance.diagnostics" ? "evidence_refs" : undefined;
+    const providerCapability = providerCapabilityKey === undefined ? undefined : selected?.capabilities.find(item => item.key === providerCapabilityKey);
+    const qualificationReason = !selected ? "provider_not_qualified"
+      : selected.provider_id === "chrome_official" && !readChromeOfficialPairingFacts(facts.provider_binding)
+        ? selected.install.version_status === "known" ? "provider_evidence_stale" : "provider_not_qualified"
+        : selected.provider_id === "camoufox" && !readCamoufoxUpstreamSourceFacts({}, selected.install as unknown as Record<string, unknown>)
+          ? typeof selected.install.source_sha256 === "string" ? "provider_evidence_stale" : "provider_not_qualified"
+          : null;
+    const providerState = qualificationReason ? "unknown" : !providerCapability ? "unknown" : providerCapability.state === "unsupported" ? "unsupported" : providerCapability.state === "requires_validation" ? "unknown" : providerCapability.state === "limited" || providerCapability.state === "provider_claim" ? "limited" : "supported";
+    const providerReasons = qualificationReason ? [qualificationReason] : !providerCapability ? providerCapabilityKey === undefined ? ["provider_operation_support_unknown"] : ["capability_missing"] : providerCapability.state === "unsupported" ? ["provider_operation_not_implemented"] : providerCapability.state === "requires_validation" ? ["provider_not_qualified"] : providerCapability.state === "provider_claim" ? ["provider_evidence_stale"] : providerCapability.state === "limited" ? ["provider_limited"] : [];
     const provider = {
       state: providerState,
       provider_id: facts.provider_binding.selected_provider_id,
@@ -643,26 +651,34 @@ export class HarborRuntime {
       return active ? this.runtimeSessions.getRecord(active.runtime_session_ref) : undefined;
     })();
     const session = record?.facts;
+    const controlRequiredOperations = ["instance.start", "instance.navigate", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.stop", "instance.handoff", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"];
+    const pageSelectionRequiredOnAmbiguousSession = ["instance.observe", "instance.read", "instance.snapshot", "instance.navigate", "instance.diagnostics"].includes(operation);
     let availabilityState: "no_known_blocker" | "blocked" | "unknown" = providerState === "unsupported" ? "blocked" : providerState === "unknown" ? "unknown" : "no_known_blocker";
-    let availabilityReasons: string[] = providerState === "unsupported" ? ["provider_operation_not_implemented"] : providerState === "unknown" ? ["provider_not_qualified"] : [];
+    let availabilityReasons: string[] = [...providerReasons];
     let availabilityFactsAt: string | null = providerFactsAt;
     if (requestedSessionRef && (!session || session.profile_ref !== value.profile_ref)) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; availabilityFactsAt = null; }
     else if (needsSession && !session) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; availabilityFactsAt = providerFactsAt; }
     else if (session) {
       availabilityFactsAt = session.last_seen_at;
       if (!["active", "idle", "locked"].includes(session.lifecycle_state)) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; }
-      const mutating = ["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.stop", "instance.handoff", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation);
-      if (mutating && session.control_owner === "user") { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
+      if (controlRequiredOperations.includes(operation) && session.control_owner === "user") { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
+      const pageRelationFresh = record?.page_registry ? (() => { try { record.page_registry.list([]); return true; } catch { return false; } })() : null;
+      const pageCount = pageRelationFresh ? record?.page_registry?.legacyBindings().length ?? null : null;
+      if (pageSelectionRequiredOnAmbiguousSession && value.page_id === undefined && value.page_ref === undefined && pageCount !== null && pageCount > 1) {
+        availabilityState = "blocked";
+        availabilityReasons = ["page_selection_required"];
+      }
       if (value.page_id !== undefined || value.page_ref !== undefined) {
         const binding = record?.page_registry?.binding({ page_id: value.page_id as string | undefined, page_ref: value.page_ref as string | undefined });
-        if (!binding) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
+        if (pageRelationFresh === false) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
+        else if (!binding) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
         else if (value.document_generation !== undefined && binding.facts.document_generation !== value.document_generation) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
       }
     }
     const executionChecks = ["reauthorize"];
     if (needsSession || value.page_id !== undefined || value.page_ref !== undefined) executionChecks.push("verify_page_and_target");
     if (operation.startsWith("file.")) executionChecks.push("verify_file_material");
-    if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation)) executionChecks.push("acquire_control_if_required");
+    if (controlRequiredOperations.includes(operation)) executionChecks.push("acquire_control_if_required");
     if (needsSession) executionChecks.push("check_provider_runtime");
     return {
       schema_version: "harbor-capability-description/v1", operation: value.operation, profile_ref: value.profile_ref,

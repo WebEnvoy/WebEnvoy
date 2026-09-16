@@ -55,7 +55,8 @@ const conditionThen = definition => {
     if: { required: [condition.when.field], properties: { [condition.when.field]: condition.when.equals !== undefined ? { const: condition.when.equals } : { enum: condition.when.in } } },
     then: {
       ...(condition.required?.length ? { required: condition.required } : {}),
-      ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {})
+      ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
+      ...(Object.keys(condition.constraints ?? {}).length ? { properties: Object.fromEntries(Object.entries(condition.constraints).map(([field, constraints]) => [field, { ...capabilityDefinitions.fields[field], ...constraints }])) } : {})
     }
   }));
   const metadata = (definition.conditions ?? []).filter(condition => condition.kind === 'page_selector' || condition.kind === 'same_origin');
@@ -114,7 +115,7 @@ const tools = [
         required: ['grant_id', 'profile_ref', 'task_scope'],
         additionalProperties: false
       },
-      arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }
+      arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope and context fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).filter(([name]) => name !== 'profile_ref').map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }
     },
     required: ['operation'],
     additionalProperties: false
@@ -126,6 +127,7 @@ const tools = [
 ];
 const operationTool = tools.find(tool => tool.name === 'webenvoy_operation');
 const describeOperationPattern = new RegExp(capabilityDefinitions.operation_pattern);
+const describeArgumentFields = new Set(Object.keys(capabilityDefinitions.fields).filter(name => name !== 'profile_ref'));
 function validateDescribeInput(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.operation !== 'string' || !describeOperationPattern.test(args.operation)) throw new Error('describe_input_refused');
   if (Object.keys(args).some(key => !['operation', 'context', 'arguments'].includes(key))) throw new Error('describe_input_refused');
@@ -139,7 +141,7 @@ function validateDescribeInput(args) {
   }
   if (args.arguments !== undefined) {
     const draft = args.arguments;
-    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some(key => !(key in capabilityDefinitions.fields))) throw new Error('describe_input_refused');
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some(key => !describeArgumentFields.has(key))) throw new Error('describe_input_refused');
   }
 }
 async function call(name, args) {

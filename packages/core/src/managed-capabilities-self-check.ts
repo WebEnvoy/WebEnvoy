@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { managedCapabilityDefinition, managedCapabilityDefinitions, managedCapabilityExample, managedCapabilityExecutionInputSchema, managedCapabilityInputFields } from "./managed-capabilities.js";
+import { managedCapabilityDefinition, managedCapabilityDefinitions, managedCapabilityExample, managedCapabilityExecutionInputSchema, managedCapabilityFieldMatches, managedCapabilityInputFields } from "./managed-capabilities.js";
 import { parseManagedBrowserRequest } from "./managed-browser.js";
 
 const fixtureProfile = "profile:fixture";
@@ -118,6 +118,11 @@ assert.equal(managedCapabilityDefinition("account.bind")?.exposure, "not_exposed
 for (const definition of managedCapabilityDefinitions.operations.filter(item => item.exposure === "exposed")) {
   const fixture = parserFixture(definition);
   assert.doesNotThrow(() => parseManagedBrowserRequest(fixture), `${definition.id} parser fixture`);
+  const example = managedCapabilityExample(definition.id);
+  assert.ok(example, `${definition.id} illustrative example`);
+  const exampleEnvelope = parserFixture(definition);
+  for (const [field, value] of Object.entries(example!)) if (field !== "illustrative_only") exampleEnvelope[field] = value;
+  assert.doesNotThrow(() => parseManagedBrowserRequest(exampleEnvelope), `${definition.id} assembled illustrative envelope`);
   const inputSchema = managedCapabilityExecutionInputSchema(definition.id) as Record<string, any>;
   assert.deepEqual(inputSchema.properties.operation.enum, [definition.id]);
   assert.deepEqual(inputSchema.required, ["idempotency_key", "grant_id", "operation", "task_scope", ...definition.required]);
@@ -130,7 +135,6 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
   if (definition.file_scope === "upload") assert.deepEqual(inputSchema["x-webenvoy-equals"], { left: "task_scope.file_refs[0]", right: "file_ref" });
   if (definition.file_scope === "download") assert.equal(inputSchema.properties.task_scope.properties.file_refs.maxItems, 0);
   for (const condition of definition.conditions ?? []) assert.ok((inputSchema["x-webenvoy-conditions"] as unknown[]).some(item => JSON.stringify(item) === JSON.stringify(condition)), `${definition.id} generated condition`);
-  if (definition.id !== "account.bind") assert.ok(managedCapabilityExample(definition.id), `${definition.id} illustrative example`);
 }
 
 const wait = parserFixture(managedCapabilityDefinition("instance.wait")!);
@@ -143,3 +147,13 @@ assert.throws(() => parseManagedBrowserRequest({ ...pageNavigate, page_id: undef
 const pageOpenWithoutUrl = parserFixture(managedCapabilityDefinition("page.open")!);
 delete pageOpenWithoutUrl.url;
 assert.doesNotThrow(() => parseManagedBrowserRequest(pageOpenWithoutUrl));
+const scroll = parserFixture(managedCapabilityDefinition("instance.scroll")!);
+assert.throws(() => parseManagedBrowserRequest({ ...scroll, delta_y: 0 }), /managed_browser_invalid_input/);
+assert.equal(managedCapabilityFieldMatches(0, managedCapabilityDefinitions.fields.delta_y!), false);
+const environment = parserFixture(managedCapabilityDefinition("environment.update")!);
+assert.throws(() => parseManagedBrowserRequest({ ...environment, configuration: { timezone: "UTC", unexpected: "value" } }), /managed_browser_invalid_input/);
+assert.equal(managedCapabilityFieldMatches({ timezone: "UTC", unexpected: "value" }, managedCapabilityDefinitions.fields.configuration!), false);
+const navigate = parserFixture(managedCapabilityDefinition("page.navigate")!);
+assert.throws(() => parseManagedBrowserRequest({ ...navigate, url: "https://other.example/" }), /managed_browser_invalid_input/);
+const longWait = { ...wait, wait_for: "text", text: "x".repeat(257), target_ref: undefined };
+assert.throws(() => parseManagedBrowserRequest(longWait), /managed_browser_invalid_input/);

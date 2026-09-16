@@ -316,15 +316,69 @@ test("describes shared managed operations without treating Camoufox CDP as the c
       profile_ref: profileRef,
       site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" }
     });
-    const description = runtime.describeManagedCapability({ operation: "instance.start", profile_ref: profileRef }) as {
+    const description = runtime.describeManagedCapability({ operation: "instance.snapshot", profile_ref: profileRef }) as {
       provider: { state: string; provider_id: string | null; reason_codes: string[] };
       availability: { reason_codes: string[] };
     };
     assert.equal(description.provider.provider_id, provider);
-    assert.notEqual(description.provider.state, "unsupported");
-    assert.equal(description.provider.reason_codes.includes("provider_operation_not_implemented"), false);
+    if (provider === "chrome_official") {
+      assert.equal(description.provider.state, "unknown");
+      assert.deepEqual(description.provider.reason_codes, ["provider_not_qualified"]);
+    } else {
+      assert.equal(description.provider.state, "limited");
+      assert.deepEqual(description.provider.reason_codes, ["provider_limited"]);
+    }
     assert.equal(description.availability.reason_codes.includes("provider_operation_not_implemented"), false);
+    const operationUnknown = runtime.describeManagedCapability({ operation: "instance.start", profile_ref: profileRef }) as {
+      provider: { state: string; reason_codes: string[] };
+    };
+    assert.equal(operationUnknown.provider.state, "unknown");
+    assert.deepEqual(operationUnknown.provider.reason_codes, provider === "chrome_official" ? ["provider_not_qualified"] : ["provider_operation_support_unknown"]);
   }
+});
+
+test("describes known control, page selection, stale, and unknown page facts", async () => {
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+  const browserPath = "/private/tmp/camoufox-describe-state/browser";
+  const identity = {
+    ...providerFixture({ [browserPath]: { executable: true } }),
+    env: {
+      HARBOR_CAMOUFOX_PATH: browserPath,
+      HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+      HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+      HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+      HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+      HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+    },
+    requested_provider_id: "camoufox" as const,
+    identity_environment_ref: "identity-env_describe-state",
+    execution_identity_ref: "execution-identity_describe-state",
+    profile_ref: "profile_describe-state",
+    profile_storage_ref: "profile-storage_describe-state",
+    site: { site_id: "fixture", origin: "https://example.com" }
+  };
+  runtime.createLocalIdentityEnvironment(identity);
+  const session = await runtime.openIdentityEnvironmentSession({ identity_environment: identity, url: "https://example.com", control_owner: "user" });
+  assert.equal("status" in session, false);
+  if ("status" in session) throw new Error("describe state fixture should open");
+  const controlled = runtime.describeManagedCapability({ operation: "instance.navigate", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
+  assert.deepEqual(controlled.availability, { state: "blocked", reason_codes: ["human_control"], facts_at: session.last_seen_at });
+
+  const internal = runtime as unknown as { runtimeSessions: { getRecord: (ref: string) => { page_registry: { sync: (pages: unknown[]) => void; legacyBindings: () => Array<{ facts: Record<string, unknown>; provider_page_ref: string }>; relationFresh: boolean } } | undefined } };
+  const record = internal.runtimeSessions.getRecord(session.runtime_session_ref);
+  assert.ok(record);
+  const currentPages = record!.page_registry.legacyBindings().map(page => ({ ...page.facts, provider_page_ref: page.provider_page_ref }));
+  record!.page_registry.sync([
+    ...currentPages,
+    { provider_page_ref: "provider-page-b", current_url: "https://example.com/b", title: "B", status: "ready", origin: "https://example.com", active: false, document_generation: 1, facts: [] }
+  ]);
+  const ambiguous = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref }) as { availability: { state: string; reason_codes: string[] } };
+  assert.deepEqual(ambiguous.availability.reason_codes, ["page_selection_required"]);
+  const stale = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  assert.deepEqual(stale.availability, { state: "blocked", reason_codes: ["stale_reference"], facts_at: session.last_seen_at });
+  record!.page_registry.relationFresh = false;
+  const unknown = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, page_ref: "page:missing" }) as { availability: { state: string; reason_codes: string[] } };
+  assert.deepEqual(unknown.availability, { state: "unknown", reason_codes: ["page_relation_unavailable"], facts_at: session.last_seen_at });
 });
 
 test("requires an explicit or user-default provider without silently using the recommendation", () => {

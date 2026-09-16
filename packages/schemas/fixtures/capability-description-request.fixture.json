@@ -1,0 +1,21 @@
+{
+  "$schema": "capability-description-request.schema.json",
+  "operation": "instance.snapshot",
+  "connection_id": "connection:example",
+  "context": {
+    "grant_id": "grant:example",
+    "profile_ref": "profile:example",
+    "task_scope": {
+      "operations": ["profile.read", "instance.snapshot"],
+      "profile_refs": ["profile:example"],
+      "origins": ["https://example.com"]
+    }
+  },
+  "arguments": {
+    "origin": "https://example.com",
+    "runtime_session_ref": "session:example",
+    "page_id": "page:example",
+    "page_ref": "page-ref:example",
+    "document_generation": 1
+  }
+}

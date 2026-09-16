@@ -15,9 +15,11 @@ export type ManagedCapabilityField = {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  not?: { const?: unknown };
   enum?: string[];
   properties?: Record<string, ManagedCapabilityField>;
   additionalProperties?: boolean;
+  items?: ManagedCapabilityField;
   minItems?: number;
   maxItems?: number;
   minProperties?: number;
@@ -101,10 +103,51 @@ function conditionMatches(value: JsonObject, condition: ManagedCapabilityConditi
   return Array.isArray(when.in) && when.in.includes(actual);
 }
 
-function validateConditions(value: JsonObject, definition: ManagedCapabilityDefinition): void {
+function publicOrigin(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) && parsed.origin === value && !parsed.username && !parsed.password;
+  } catch { return false; }
+}
+
+/** The one static field matcher used by execution parsing and describe drafts. */
+export function managedCapabilityFieldMatches(value: unknown, schema: ManagedCapabilityField): boolean {
+  if (schema.not?.const !== undefined && value === schema.not.const) return false;
+  if (schema.type === "string") {
+    if (typeof value !== "string") return false;
+    if (schema.minLength !== undefined && value.length < schema.minLength || schema.maxLength !== undefined && value.length > schema.maxLength) return false;
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) return false;
+    if (schema.format === "webenvoy-public-origin" && !publicOrigin(value)) return false;
+    if (schema.format === "webenvoy-public-http-target") {
+      try {
+        const parsed = new URL(value);
+        if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return false;
+      } catch { return false; }
+    }
+  } else if (schema.type === "integer") {
+    if (!Number.isSafeInteger(value)) return false;
+  } else if (schema.type === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  } else if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const entries = Object.entries(value as JsonObject);
+    if (schema.minProperties !== undefined && entries.length < schema.minProperties) return false;
+    if (schema.additionalProperties === false && entries.some(([key]) => !schema.properties?.[key])) return false;
+    if (schema.properties && entries.some(([key, item]) => schema.properties![key] !== undefined && !managedCapabilityFieldMatches(item, schema.properties![key]!))) return false;
+  } else if (schema.type === "array") {
+    if (!Array.isArray(value)) return false;
+    if (schema.minItems !== undefined && value.length < schema.minItems || schema.maxItems !== undefined && value.length > schema.maxItems) return false;
+    if (schema.items && value.some(item => !managedCapabilityFieldMatches(item, schema.items!))) return false;
+  } else return false;
+  if (schema.enum !== undefined && !schema.enum.includes(String(value))) return false;
+  if (typeof value === "number" && (schema.minimum !== undefined && value < schema.minimum || schema.maximum !== undefined && value > schema.maximum)) return false;
+  return true;
+}
+
+function validateConditions(value: JsonObject, definition: ManagedCapabilityDefinition, partial = false): void {
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && conditionMatches(value, condition)) {
-      if ((condition.required ?? []).some(field => value[field] === undefined) || (condition.forbidden ?? []).some(field => value[field] !== undefined)) {
+      if (!partial && (condition.required ?? []).some(field => value[field] === undefined) || (condition.forbidden ?? []).some(field => value[field] !== undefined)) {
         throw new ManagedAccessError("managed_browser_invalid_input");
       }
       for (const [field, constraints] of Object.entries(condition.constraints ?? {})) {
@@ -113,9 +156,18 @@ function validateConditions(value: JsonObject, definition: ManagedCapabilityDefi
       }
     }
     if (condition.kind === "page_selector" && condition.when === "always" &&
-      (condition.required_any ?? []).every(field => value[field] === undefined)) throw new ManagedAccessError("managed_browser_invalid_input");
+      !partial && (condition.required_any ?? []).every(field => value[field] === undefined)) throw new ManagedAccessError("managed_browser_invalid_input");
+    if (condition.kind === "same_origin" && value[condition.field ?? ""] !== undefined) {
+      const target = value[condition.field ?? ""], origin = value[condition.with ?? ""];
+      if (origin === undefined && partial) continue;
+      if (typeof target !== "string" || typeof origin !== "string") throw new ManagedAccessError("managed_browser_invalid_input");
+      try {
+        if (new URL(target).origin !== origin) throw new Error("origin_mismatch");
+      } catch { throw new ManagedAccessError("managed_browser_invalid_input"); }
+    }
     if (condition.kind === "file_scope") {
       const refs = pathValue(value, condition.path ?? "task_scope.file_refs");
+      if (refs === undefined && partial) continue;
       if (!Array.isArray(refs)) throw new ManagedAccessError("managed_browser_invalid_input");
       if (condition.exact_length !== undefined && refs.length !== condition.exact_length) throw new ManagedAccessError("managed_browser_invalid_input");
       if (condition.exact !== undefined && canonical(refs) !== canonical(condition.exact)) throw new ManagedAccessError("managed_browser_invalid_input");
@@ -158,7 +210,13 @@ export function validateManagedCapabilityInputShape(value: JsonObject, options: 
     if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) throw new ManagedAccessError("managed_browser_invalid_input");
     if (definition.file_scope === "upload" && scopeObject.file_refs !== undefined && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 1)) throw new ManagedAccessError("managed_browser_invalid_input");
   }
-  if (options.partial) return;
+  for (const field of definition.allowed) {
+    if (value[field] !== undefined && !managedCapabilityFieldMatches(value[field], document.fields[field]!)) throw new ManagedAccessError("managed_browser_invalid_input");
+  }
+  if (options.partial) {
+    validateConditions(value, definition, true);
+    return;
+  }
   for (const field of definition.required) if (value[field] === undefined) throw new ManagedAccessError("managed_browser_invalid_input");
   validateConditions(value, definition);
 }
@@ -208,6 +266,7 @@ function fieldConstraints(field: ManagedCapabilityField): string[] {
     field.maxLength === undefined ? undefined : `maxLength=${field.maxLength}`,
     field.minimum === undefined ? undefined : `minimum=${field.minimum}`,
     field.maximum === undefined ? undefined : `maximum=${field.maximum}`,
+    field.not?.const === undefined ? undefined : `not=${JSON.stringify(field.not.const)}`,
     field.enum === undefined ? undefined : `enum=${field.enum.join(",")}`
   ].filter((value): value is string => value !== undefined);
 }
@@ -238,9 +297,11 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && condition.when && typeof condition.when === "object" && typeof (condition.when as JsonObject).field === "string") {
       const when = condition.when as JsonObject;
+      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...document.fields[field], ...constraints }]));
       allOf.push({ if: { properties: { [String(when.field)]: { const: when.equals } }, required: [String(when.field)] }, then: {
         ...(condition.required?.length ? { required: condition.required } : {}),
-        ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {})
+        ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
+        ...(Object.keys(constrainedProperties).length ? { properties: constrainedProperties } : {})
       } });
     }
     if (condition.kind === "page_selector" && condition.when === "always") {

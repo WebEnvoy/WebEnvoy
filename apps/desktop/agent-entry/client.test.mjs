@@ -127,11 +127,15 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(navigateCondition.then.required.includes('url'));
     const waitCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.const === 'instance.wait');
     assert.ok(waitCondition.then.allOf.some(condition => condition.if?.properties?.wait_for?.const === 'enabled' && condition.then.required.includes('target_ref')));
+    assert.equal(waitCondition.then.allOf.find(condition => condition.if?.properties?.wait_for?.const === 'text').then.properties.text.maxLength, 256);
     const uploadCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.const === 'file.upload');
     assert.deepEqual(uploadCondition.then['x-webenvoy-equals'], { left: 'task_scope.file_refs[0]', right: 'file_ref' });
     const uploadScopeCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('file.upload') && condition.then?.properties?.task_scope?.properties?.file_refs?.minItems === 1);
     assert.equal(uploadScopeCondition.then.properties.task_scope.required.includes('file_refs'), true);
     assert.match(operation.inputSchema.properties.origin.description, /task_scope\.origins is only the allowed set/);
+    assert.deepEqual(operation.inputSchema.properties.delta_y.not, { const: 0 });
+    assert.equal(operation.inputSchema.properties.configuration.additionalProperties, false);
+    assert.ok(operation.inputSchema.allOf.find(condition => condition.if?.properties?.operation?.const === 'page.navigate').then['x-webenvoy-conditions'].some(condition => condition.kind === 'same_origin'));
     for (const field of ['profile_ref', 'runtime_session_ref', 'origin', 'page_id', 'page_ref', 'document_generation', 'observation_ref', 'target_ref']) {
       assert.equal(typeof operation.inputSchema.properties[field].description, 'string');
       assert.ok(operation.inputSchema.properties[field].description.length > 0);

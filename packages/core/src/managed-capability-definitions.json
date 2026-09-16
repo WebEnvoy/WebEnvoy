@@ -19,7 +19,7 @@
     "file_ref": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$", "description": "Only for file.upload: the opaque owner-registered file reference; omit for file.download." },
     "text": { "type": "string", "maxLength": 512, "description": "Text input for the selected interaction or wait condition." },
     "key": { "type": "string", "enum": ["Enter", "Tab", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Space", "Backspace", "Delete", "Escape"], "description": "The bounded key accepted by instance.press." },
-    "delta_y": { "type": "integer", "minimum": -2000, "maximum": 2000, "description": "The non-zero bounded scroll delta." },
+    "delta_y": { "type": "integer", "minimum": -2000, "maximum": 2000, "not": { "const": 0 }, "description": "The non-zero bounded scroll delta." },
     "wait_for": { "type": "string", "enum": ["page_changed", "text", "enabled"], "description": "The wait condition." },
     "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "The bounded wait timeout." },
     "configuration": { "type": "object", "description": "The bounded environment configuration update.", "properties": { "timezone": { "type": "string", "minLength": 1, "maxLength": 128 }, "language": { "type": "string", "minLength": 1, "maxLength": 128 }, "viewport": { "type": "string", "minLength": 1, "maxLength": 128 } }, "additionalProperties": false, "minProperties": 1 },
@@ -27,7 +27,7 @@
   },
   "operations": [
     { "id": "profile.create", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "unsupported", "allowed": ["template_ref", "provider_id"], "required": ["template_ref"], "summary": "Create a Profile from the owner-registered template." },
-    { "id": "profile.list", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "unsupported", "allowed": [], "required": [], "summary": "List the Profiles visible to the authorized operation." },
+    { "id": "profile.list", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": [], "summary": "List the Profiles visible to the authorized operation; omit profile_ref for the global list." },
     { "id": "profile.read", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": ["profile_ref"], "summary": "Read one visible Profile summary." },
     { "id": "provider.preference.read", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": [], "required": [], "summary": "Read the current Provider preference." },
     { "id": "provider.preference.set", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": ["provider_id"], "required": ["provider_id"], "summary": "Set the owner-managed Provider preference." },

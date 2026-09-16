@@ -18,7 +18,9 @@ let creates = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
-let capabilityDescriptionMode: "normal" | "human" | "stale" | "unknown" = "normal";
+  let capabilityDescriptionMode: "normal" | "human" | "stale" | "stopped" | "unknown" = "normal";
+  let capabilityDescriptionShape: "valid" | "wrong_schema" | "wrong_operation" | "wrong_profile" | "unknown_state" | "profile_missing" = "valid";
+  let afterCapabilityDescription: (() => Promise<void>) | undefined;
 const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let dropResponse = false, omitProviderSelection = false;
@@ -58,14 +60,16 @@ const server = createServer((req, res) => { void (async () => {
     const input = JSON.parse(body) as { operation: string; profile_ref: string; runtime_session_ref?: string; page_id?: string; page_ref?: string; document_generation?: number };
     capabilityDescriptions++;
     const state = capabilityDescriptionMode;
+    await afterCapabilityDescription?.();
+    afterCapabilityDescription = undefined;
     value = {
-      schema_version: "harbor-capability-description/v1",
-      operation: input.operation,
-      profile_ref: input.profile_ref,
-      provider: { state: state === "unknown" ? "unknown" : "supported", provider_id: "camoufox", reason_codes: state === "unknown" ? ["provider_not_qualified"] : [], limitations: [], facts_at: "2026-09-09T00:00:00.000Z" },
+      schema_version: capabilityDescriptionShape === "wrong_schema" ? "harbor-capability-description/v2" : "harbor-capability-description/v1",
+      operation: capabilityDescriptionShape === "wrong_operation" ? "instance.read" : input.operation,
+      profile_ref: capabilityDescriptionShape === "wrong_profile" ? "profile:other" : input.profile_ref,
+      provider: { state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : "supported", provider_id: "camoufox", reason_codes: state === "unknown" ? ["provider_not_qualified"] : capabilityDescriptionShape === "profile_missing" ? ["profile_missing"] : [], limitations: [], facts_at: "2026-09-09T00:00:00.000Z" },
       availability: {
-        state: state === "unknown" ? "unknown" : state === "normal" ? "no_known_blocker" : "blocked",
-        reason_codes: state === "human" ? ["human_control"] : state === "stale" ? ["stale_reference"] : state === "unknown" ? ["runtime_facts_unavailable"] : [],
+        state: capabilityDescriptionShape === "unknown_state" ? "future_state" : state === "unknown" ? "unknown" : state === "normal" ? "no_known_blocker" : "blocked",
+        reason_codes: state === "human" ? ["human_control"] : state === "stale" ? ["stale_reference"] : state === "stopped" ? ["instance_not_running"] : state === "unknown" ? ["runtime_facts_unavailable"] : [],
         facts_at: "2026-09-09T00:00:00.000Z"
       },
       execution_checks: ["reauthorize", "verify_page_and_target"]
@@ -701,7 +705,7 @@ try {
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const context = { grant_id: visibleGrant.grant_id, profile_ref: "profile:2",
     task_scope: { operations: ["profile.read", "instance.snapshot"], profile_refs: ["profile:2"], origins: ["https://example.com"] } };
-  const descriptionArguments = { profile_ref: "profile:2", origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
+  const descriptionArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
   const beforeDeniedRuns = (await runRecordStore.listRunRecords()).length;
   const beforeDeniedDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
   const beforeDeniedLocks = lockAttempts;
@@ -709,14 +713,25 @@ try {
   const deniedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments });
   assert.equal((deniedDescription.authorization as { state: string }).state, "denied", "visible Profile and target operation permission are separate");
   assert.equal((deniedDescription.provider as { state: string }).state, "supported");
-  assert.equal(capabilityDescriptions, beforeDeniedDescriptions + 1, "visible denied target may still receive owner facts");
+  assert.equal(capabilityDescriptions, beforeDeniedDescriptions + 2, "visible denied target may still receive owner facts and a final Harbor recheck");
   assert.equal((await runRecordStore.listRunRecords()).length, beforeDeniedRuns);
   assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeDeniedDecisions);
   assert.equal(lockAttempts, beforeDeniedLocks);
 
+  for (const shape of ["wrong_schema", "wrong_operation", "wrong_profile"] as const) {
+    capabilityDescriptionShape = shape;
+    await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments }), /discovery_version_mismatch/);
+  }
+  capabilityDescriptionShape = "profile_missing";
+  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments }), /discovery_context_unavailable/);
+  capabilityDescriptionShape = "unknown_state";
+  const unknownHarborState = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments });
+  assert.equal((unknownHarborState.provider as { state: string }).state, "unknown");
+  capabilityDescriptionShape = "valid";
+
   const invisibleContext = { ...context, profile_ref: "profile:hidden", task_scope: { ...context.task_scope, profile_refs: ["profile:hidden"] } };
   const beforeInvisibleDescriptions = capabilityDescriptions;
-  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context: invisibleContext, arguments: { ...descriptionArguments, profile_ref: "profile:hidden" } }), /discovery_context_unavailable/);
+  await assert.rejects(() => service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context: invisibleContext, arguments: descriptionArguments }), /discovery_context_unavailable/);
   assert.equal(capabilityDescriptions, beforeInvisibleDescriptions, "invisible Profile must not reach Harbor");
   assert.equal(JSON.stringify(invisibleContext).includes("provider"), false);
 
@@ -736,7 +751,7 @@ try {
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const allowedContext = { grant_id: allowedGrant.grant_id, profile_ref: "profile:2",
     task_scope: { operations: ["profile.read", "instance.observe"], profile_refs: ["profile:2"], origins: ["https://example.com"] } };
-  const allowedArguments = { profile_ref: "profile:2", origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
+  const allowedArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
   for (const mode of ["human", "stale", "unknown"] as const) {
     capabilityDescriptionMode = mode;
     const described = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
@@ -744,8 +759,27 @@ try {
     assert.equal(availability.state, mode === "unknown" ? "unknown" : "blocked");
     assert.equal(availability.reason_codes[0], mode === "human" ? "human_control" : mode === "stale" ? "stale_reference" : "runtime_facts_unavailable");
   }
+  capabilityDescriptionMode = "stopped";
+  const stoppedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((stoppedDescription.availability as { state: string }).state, "blocked");
+  assert.deepEqual((stoppedDescription.availability as { reason_codes: string[] }).reason_codes, ["instance_not_running"]);
+
   capabilityDescriptionMode = "normal";
-  await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  afterCapabilityDescription = async () => { capabilityDescriptionMode = "stale"; };
+  const changedControlDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((changedControlDescription.availability as { state: string }).state, "unknown");
+  assert.deepEqual((changedControlDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
+
+  capabilityDescriptionMode = "normal";
+  afterCapabilityDescription = async () => {
+    await accessStore.revokeGrant({ idempotency_key: "revoke-discovery-replaced", grant_id: allowedGrant.grant_id });
+    await accessStore.createGrant({ idempotency_key: "discovery-replacement", principal_id: principal.principal_id,
+      profile_refs: ["profile:2"], allowed_operations: ["profile.read", "instance.observe"], allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  };
+  const changedGrantDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.observe", context: allowedContext, arguments: allowedArguments });
+  assert.equal((changedGrantDescription.availability as { state: string }).state, "unknown");
+  assert.deepEqual((changedGrantDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
   await accessStore.revokeGrant({ idempotency_key: "revoke-discovery-allowed", grant_id: allowedGrant.grant_id });
   await assert.rejects(() => service.submit(credentialHash, { idempotency_key: "after-discovery-revoke", connection_id: connection.connection_id,
     grant_id: allowedGrant.grant_id, operation: "instance.observe", profile_ref: "profile:2", origin: "https://example.com", runtime_session_ref: "session:one",

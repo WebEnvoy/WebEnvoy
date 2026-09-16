@@ -18,6 +18,7 @@ import {
   managedCapabilityDefinitionState,
   managedCapabilityExample,
   managedCapabilityExecutionInputSchema,
+  managedCapabilityFieldMatches,
   managedCapabilityFieldGuidance,
   managedCapabilityInputFields,
   validateManagedCapabilityInputShape
@@ -68,6 +69,75 @@ function isDeterministicWaitTimeout(receipt: ObjectValue | undefined): boolean {
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
+const harborCapabilityDescriptionSchemaVersion = "harbor-capability-description/v1";
+const harborProviderStates = new Set(["supported", "limited", "unsupported", "unknown", "not_applicable", "not_evaluated"]);
+const harborAvailabilityStates = new Set(["no_known_blocker", "blocked", "unknown", "not_evaluated"]);
+const harborExecutionChecks = new Set(["reauthorize", "verify_page_and_target", "verify_file_material", "acquire_control_if_required", "check_provider_runtime"]);
+function harborContractObject(value: unknown): ObjectValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail("discovery_version_mismatch");
+  return value as ObjectValue;
+}
+function harborContractString(value: unknown, maxLength: number): string {
+  if (typeof value !== "string" || !value.length || value.length > maxLength || /[\u0000-\u001f\u007f]/.test(value)) return fail("discovery_version_mismatch");
+  return value;
+}
+function harborContractTime(value: unknown): string | null {
+  if (value === null) return null;
+  const result = harborContractString(value, 64);
+  if (!Number.isFinite(Date.parse(result)) || new Date(result).toISOString() !== result) return fail("discovery_version_mismatch");
+  return result;
+}
+function harborContractStrings(value: unknown, maxLength: number): string[] {
+  if (!Array.isArray(value) || value.length > 16) return fail("discovery_version_mismatch");
+  return value.map(item => harborContractString(item, maxLength));
+}
+function normalizeHarborCapabilityDescription(value: unknown, operation: string, profileRef: string): ObjectValue {
+  const input = harborContractObject(value);
+  if (input.schema_version !== harborCapabilityDescriptionSchemaVersion || input.operation !== operation || input.profile_ref !== profileRef ||
+      Object.keys(input).some(key => !["schema_version", "operation", "profile_ref", "provider", "availability", "execution_checks"].includes(key))) return fail("discovery_version_mismatch");
+  const provider = harborContractObject(input.provider);
+  if (Object.keys(provider).some(key => !["state", "provider_id", "reason_codes", "limitations", "facts_at"].includes(key)) ||
+      !Object.hasOwn(provider, "state") || !Object.hasOwn(provider, "provider_id") || !Object.hasOwn(provider, "reason_codes") || !Object.hasOwn(provider, "limitations") || !Object.hasOwn(provider, "facts_at")) return fail("discovery_version_mismatch");
+  const providerStateKnown = harborProviderStates.has(String(provider.state));
+  const providerId = provider.provider_id === null ? null : harborContractString(provider.provider_id, 512);
+  const providerReasons = harborContractStrings(provider.reason_codes, 128);
+  if (!Array.isArray(provider.limitations) || provider.limitations.length > 16) return fail("discovery_version_mismatch");
+  const normalizedLimitations = provider.limitations.map(item => {
+    const limitation = harborContractObject(item);
+    if (Object.keys(limitation).some(key => !["code", "summary"].includes(key)) || !Object.hasOwn(limitation, "code") || !Object.hasOwn(limitation, "summary")) return fail("discovery_version_mismatch");
+    return { code: harborContractString(limitation.code, 128), summary: harborContractString(limitation.summary, 256) };
+  });
+  const providerFactsAt = harborContractTime(provider.facts_at);
+  const normalizedProvider = {
+    state: providerStateKnown ? provider.state : "unknown",
+    provider_id: providerStateKnown ? providerId : null,
+    reason_codes: [...new Set(providerStateKnown ? providerReasons : [...providerReasons, "runtime_facts_unavailable"])],
+    limitations: normalizedLimitations,
+    facts_at: providerFactsAt
+  };
+  const availability = harborContractObject(input.availability);
+  if (Object.keys(availability).some(key => !["state", "reason_codes", "facts_at"].includes(key)) ||
+      !Object.hasOwn(availability, "state") || !Object.hasOwn(availability, "reason_codes") || !Object.hasOwn(availability, "facts_at")) return fail("discovery_version_mismatch");
+  const availabilityStateKnown = harborAvailabilityStates.has(String(availability.state));
+  const availabilityReasons = harborContractStrings(availability.reason_codes, 128);
+  const normalizedAvailability = {
+    state: availabilityStateKnown ? availability.state : "unknown",
+    reason_codes: [...new Set(availabilityStateKnown ? availabilityReasons : [...availabilityReasons, "runtime_facts_unavailable"])],
+    facts_at: harborContractTime(availability.facts_at)
+  };
+  if (normalizedProvider.reason_codes.includes("profile_missing") || normalizedAvailability.reason_codes.includes("profile_missing")) return fail("discovery_context_unavailable");
+  if (!Array.isArray(input.execution_checks) || input.execution_checks.length > 16 || input.execution_checks.some(check => !harborExecutionChecks.has(String(check)))) return fail("discovery_version_mismatch");
+  return { schema_version: harborCapabilityDescriptionSchemaVersion, operation, profile_ref: profileRef, provider: normalizedProvider, availability: normalizedAvailability, execution_checks: [...input.execution_checks] };
+}
+function accessFingerprint(access: { principal: { principal_id: string }; connection: { connection_id: string }; grant: unknown; profile_policy?: unknown; scope_semantics: string }): string {
+  return digest(JSON.stringify({ principal_id: access.principal.principal_id, connection_id: access.connection.connection_id, grant: access.grant, profile_policy: access.profile_policy ?? null, scope_semantics: access.scope_semantics }));
+}
+function describeAuthorizationError(code: string): { state: "denied" | "unknown"; reason_codes: string[] } {
+  return {
+    state: code === "managed_access_origin_required" ? "unknown" : "denied",
+    reason_codes: [code === "managed_access_scope_semantics_mismatch" ? "scope_semantics_mismatch" : code === "managed_access_origin_required" ? "origin_required" : code === "managed_access_controlled_origin_required" ? "controlled_origin_denied" : "scope_denied"]
+  };
+}
 function pageRef(value: ObjectValue): string {
   return typeof value.page_ref === "string" && value.page_ref.length > 0 ? value.page_ref : "page:opaque";
 }
@@ -230,50 +300,30 @@ function parseDescribe(value: unknown): DescribeInput {
   let args: ObjectValue | undefined;
   if (input.arguments !== undefined) {
     args = object(input.arguments);
-    const fields = new Set(managedCapabilityInputFields(input.operation).filter(field => !discoveryEnvelopeFields.has(field)));
+    const fields = new Set(managedCapabilityInputFields(input.operation).filter(field => !discoveryEnvelopeFields.has(field) && field !== "profile_ref"));
     if (Object.keys(args).some(key => !fields.has(key))) return fail("managed_browser_invalid_input");
     for (const [key, item] of Object.entries(args)) {
-      if (key === "profile_ref" && context && item !== context.profile_ref) return fail("managed_browser_invalid_input");
       if (key === "origin" && typeof item !== "string" || key === "origin" && !publicOrigin(item)) return fail("managed_browser_invalid_input");
     }
   }
   return { operation: input.operation, connection_id: text(input.connection_id), ...(context === undefined ? {} : { context }), ...(args === undefined ? {} : { arguments: args }) };
 }
-function valueMatchesField(value: unknown, schema: { type: string; format?: string; pattern?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; enum?: string[] }): boolean {
-  if (schema.type === "string" && typeof value !== "string") return false;
-  if (schema.type === "integer" && (!Number.isSafeInteger(value))) return false;
-  if (schema.type === "object" && (!value || typeof value !== "object" || Array.isArray(value))) return false;
-  if (schema.enum && !schema.enum.includes(String(value))) return false;
-  if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength || schema.maxLength !== undefined && value.length > schema.maxLength) return false;
-    if (schema.pattern && !new RegExp(schema.pattern).test(value)) return false;
-    if (schema.format === "webenvoy-public-origin" && !publicOrigin(value)) return false;
-    if (schema.format === "webenvoy-public-http-target") {
-      try { const url = new URL(value); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return false; } catch { return false; }
-    }
-  }
-  if (typeof value === "number" && (schema.minimum !== undefined && value < schema.minimum || schema.maximum !== undefined && value > schema.maximum)) return false;
-  return true;
-}
 function describeInputAssessment(input: DescribeInput, context: DescribeContext | undefined, definition: ReturnType<typeof managedCapabilityDefinition>): { state: "not_provided" | "incomplete" | "invalid" | "complete"; missing: string[]; invalid: { path: string; code: string }[] } {
   if (input.arguments === undefined) return { state: "not_provided", missing: [], invalid: [] };
   const missing: string[] = [], invalid: { path: string; code: string }[] = [];
-  if (context === undefined) {
-    missing.push("/context/grant_id", "/context/task_scope");
-    if (definition?.context === "profile") missing.push("/context/profile_ref");
-  } else if (definition) {
-    const draft = { ...input.arguments, operation: input.operation, grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope } as ObjectValue;
-    for (const field of definition.required) if (draft[field] === undefined) missing.push(`/arguments/${field}`);
-    for (const [field, value] of Object.entries(input.arguments)) {
-      const fieldSchema = managedCapabilityDefinitions.fields[field];
-      if (fieldSchema && !valueMatchesField(value, fieldSchema)) invalid.push({ path: `/arguments/${field}`, code: "invalid_value" });
-    }
-    if (definition.file_scope === "upload" && context.task_scope.file_refs === undefined) missing.push("/context/task_scope/file_refs");
-    if (definition.file_scope === "download" && context.task_scope.file_refs === undefined) missing.push("/context/task_scope/file_refs");
-    if (definition.file_scope === "upload" && input.arguments.file_ref !== undefined && context.task_scope.file_refs !== undefined && (context.task_scope.file_refs.length !== 1 || context.task_scope.file_refs[0] !== input.arguments.file_ref)) invalid.push({ path: "/context/task_scope/file_refs", code: "must_equal_file_ref" });
-    if (missing.length === 0 && invalid.length === 0) {
-      try { validateManagedCapabilityInputShape(draft); } catch { invalid.push({ path: "/arguments", code: "invalid_combination" }); }
-    }
+  if (!definition) return { state: "invalid", missing, invalid: [{ path: "/operation", code: "operation_not_defined" }] };
+  if (context === undefined) missing.push("/context/grant_id", "/context/task_scope");
+  if (definition.context === "profile" && context === undefined) missing.push("/context/profile_ref");
+  const draft = { ...input.arguments, operation: input.operation, ...(context === undefined ? {} : { grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope }) } as ObjectValue;
+  for (const field of definition.required) if (draft[field] === undefined) missing.push(context === undefined && field === "profile_ref" ? "/context/profile_ref" : `/arguments/${field}`);
+  for (const [field, value] of Object.entries(input.arguments)) {
+    const fieldSchema = managedCapabilityDefinitions.fields[field];
+    if (fieldSchema && !managedCapabilityFieldMatches(value, fieldSchema)) invalid.push({ path: `/arguments/${field}`, code: "invalid_value" });
+  }
+  if (definition.file_scope !== undefined && context?.task_scope.file_refs === undefined) missing.push("/context/task_scope/file_refs");
+  if (definition.file_scope === "upload" && input.arguments.file_ref !== undefined && context?.task_scope.file_refs !== undefined && (context.task_scope.file_refs.length !== 1 || context.task_scope.file_refs[0] !== input.arguments.file_ref)) invalid.push({ path: "/context/task_scope/file_refs", code: "must_equal_file_ref" });
+  if (invalid.length === 0) {
+    try { validateManagedCapabilityInputShape(draft, { partial: true }); } catch { invalid.push({ path: "/arguments", code: "invalid_combination" }); }
   }
   return { state: invalid.length ? "invalid" : missing.length ? "incomplete" : "complete", missing, invalid };
 }
@@ -555,6 +605,7 @@ export function createManagedBrowserService(options: {
     return { session: publicSession(session), observation };
   }
   async function readProfileVisibility(credentialHash: string, connectionId: string, context: DescribeContext) {
+    if (!context.task_scope.profile_refs.includes(context.profile_ref)) return fail("discovery_context_unavailable");
     const candidates = ["profile.read", "profile.list"].filter(operation => context.task_scope.operations.includes(operation as ManagedAccessRequest["operation"]));
     for (const operation of candidates) {
       try {
@@ -637,6 +688,7 @@ export function createManagedBrowserService(options: {
     if (definition?.context === "unsupported") return fail("discovery_context_not_supported");
     const context = input.context;
     const visible = await readProfileVisibility(credentialHash, connection.connection.connection_id, context);
+    const visibilitySnapshot = accessFingerprint(visible);
     if (definition?.context !== "profile") {
       result.provider = { state: "not_evaluated", provider_id: null, reason_codes: [], limitations: [], facts_at: null };
       result.authorization = { state: "not_evaluated", reason_codes: [] };
@@ -648,18 +700,25 @@ export function createManagedBrowserService(options: {
     const target = { idempotency_key: "describe", connection_id: connection.connection.connection_id, operation: input.operation,
       grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope, ...(input.arguments ?? {}) } as Request;
     let targetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
+    let targetAuthorizationAssessed = false;
+    let targetAuthorizationState: "allowed" | "denied" | "unknown" | undefined;
     if (!assessment.invalid.some(item => item.path.includes("file_ref")) && !assessment.missing.some(path => path.includes("file_refs"))) {
+      targetAuthorizationAssessed = true;
       try {
         targetAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
         result.authorization = { state: "allowed", reason_codes: [] };
+        targetAuthorizationState = "allowed";
       } catch (error) {
         const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
         if (["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)) throw error;
-        result.authorization = { state: code === "managed_access_origin_required" ? "unknown" : "denied", reason_codes: [code === "managed_access_scope_semantics_mismatch" ? "scope_semantics_mismatch" : code === "managed_access_origin_required" ? "origin_required" : code === "managed_access_controlled_origin_required" ? "controlled_origin_denied" : "scope_denied"] };
+        const authorization = describeAuthorizationError(code);
+        result.authorization = authorization;
+        targetAuthorizationState = authorization.state;
       }
     }
+    let harborFacts: ObjectValue | undefined;
     try {
-      const harborFacts = await harbor("/runtime/capabilities/describe", {
+      harborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
         operation: input.operation,
         profile_ref: context.profile_ref,
         ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
@@ -668,15 +727,17 @@ export function createManagedBrowserService(options: {
         ...(input.arguments?.document_generation === undefined ? {} : { document_generation: input.arguments.document_generation }),
         ...(input.arguments?.observation_ref === undefined ? {} : { observation_ref: input.arguments.observation_ref }),
         ...(input.arguments?.target_ref === undefined ? {} : { target_ref: input.arguments.target_ref })
-      });
+      }), input.operation, context.profile_ref);
       if (harborFacts.provider && typeof harborFacts.provider === "object") result.provider = harborFacts.provider;
       if (harborFacts.availability && typeof harborFacts.availability === "object") result.availability = harborFacts.availability;
       if (Array.isArray(harborFacts.execution_checks)) result.execution_checks = [...new Set([...checks, ...harborFacts.execution_checks])];
     } catch (error) {
+      if (error instanceof ManagedAccessError && ["discovery_context_unavailable", "discovery_version_mismatch"].includes(error.code)) throw error;
       const code = error instanceof ManagedAccessError ? error.code : "runtime_facts_unavailable";
       result.provider = { state: "unknown", provider_id: null, reason_codes: ["runtime_facts_unavailable"], limitations: [], facts_at: null };
       result.availability = { state: "unknown", reason_codes: [code === "managed_browser_runtime_refused" ? "runtime_facts_unavailable" : code], facts_at: null };
     }
+    let initialPolicyState: string | undefined;
     if (result.authorization && (result.authorization as ObjectValue).state === "denied") {
       const authorizationReasons = (result.authorization as ObjectValue).reason_codes;
       result.availability = { state: "blocked", reason_codes: [Array.isArray(authorizationReasons) && typeof authorizationReasons[0] === "string" ? authorizationReasons[0] : "scope_denied"], facts_at: (result.availability as ObjectValue).facts_at ?? null };
@@ -684,14 +745,65 @@ export function createManagedBrowserService(options: {
     if (targetAccess && (result.inputs as ObjectValue).state === "complete") {
       try {
         const evaluation = await evaluatePolicy(targetAccess, target, `managed-description:${digest(`${context.grant_id}:${context.profile_ref}:${input.operation}`)}`);
+        initialPolicyState = evaluation === undefined ? "unavailable" : `${evaluation.status}:${evaluation.next_step}`;
         if (!evaluation) result.availability = { state: "unknown", reason_codes: ["execution_policy_unavailable"], facts_at: (result.availability as ObjectValue).facts_at ?? null };
         else if (evaluation.status !== "evaluated" || evaluation.next_step !== "execute") result.availability = { state: "blocked", reason_codes: ["execution_policy_denied"], facts_at: (result.availability as ObjectValue).facts_at ?? null };
       } catch { result.availability = { state: "unknown", reason_codes: ["execution_policy_unavailable"], facts_at: (result.availability as ObjectValue).facts_at ?? null }; }
     }
-    // Facts may change while Harbor is being read. Do not return contextual
-    // details after the Connection or the one Profile visibility grant changed.
-    await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
-    await readProfileVisibility(credentialHash, connection.connection.connection_id, context);
+    // Facts may change while Harbor is being read. Recheck the Connection,
+    // visibility Grant, target authorization, policy, and Harbor's narrow
+    // control/runtime snapshot before returning contextual details.
+    let factsChanged = false;
+    try {
+      const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
+      const finalVisible = await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, context);
+      if (finalConnection.principal.principal_id !== connection.principal.principal_id ||
+          finalConnection.connection.connection_id !== connection.connection.connection_id ||
+          accessFingerprint(finalVisible) !== visibilitySnapshot) factsChanged = true;
+      if (!factsChanged && targetAuthorizationAssessed) {
+        let finalTargetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
+        let finalAuthorizationState: "allowed" | "denied" | "unknown" = "unknown";
+        try {
+          finalTargetAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
+          finalAuthorizationState = "allowed";
+        } catch (error) {
+          const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
+          finalAuthorizationState = ["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)
+            ? "unknown" : describeAuthorizationError(code).state;
+        }
+        if (finalAuthorizationState !== targetAuthorizationState || targetAccess && (!finalTargetAccess || accessFingerprint(finalTargetAccess) !== accessFingerprint(targetAccess))) factsChanged = true;
+        if (!factsChanged && finalTargetAccess && (result.inputs as ObjectValue).state === "complete") {
+          try {
+            const evaluation = await evaluatePolicy(finalTargetAccess, target, `managed-description-final:${digest(`${context.grant_id}:${context.profile_ref}:${input.operation}`)}`);
+            const finalPolicyState = evaluation === undefined ? "unavailable" : `${evaluation.status}:${evaluation.next_step}`;
+            if (finalPolicyState !== initialPolicyState) factsChanged = true;
+          } catch { factsChanged = true; }
+        }
+      }
+      if (!factsChanged && harborFacts) {
+        const finalHarborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
+          operation: input.operation,
+          profile_ref: context.profile_ref,
+          ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
+          ...(input.arguments?.page_id === undefined ? {} : { page_id: input.arguments.page_id }),
+          ...(input.arguments?.page_ref === undefined ? {} : { page_ref: input.arguments.page_ref }),
+          ...(input.arguments?.document_generation === undefined ? {} : { document_generation: input.arguments.document_generation }),
+          ...(input.arguments?.observation_ref === undefined ? {} : { observation_ref: input.arguments.observation_ref }),
+          ...(input.arguments?.target_ref === undefined ? {} : { target_ref: input.arguments.target_ref })
+        }), input.operation, context.profile_ref);
+        if (JSON.stringify(finalHarborFacts) !== JSON.stringify(harborFacts)) factsChanged = true;
+      }
+    } catch (error) {
+      if (error instanceof ManagedAccessError && ["discovery_context_unavailable", "discovery_version_mismatch"].includes(error.code)) throw error;
+      factsChanged = true;
+    }
+    if (factsChanged) {
+      result.provider = { state: "unknown", provider_id: null, reason_codes: ["facts_changed"], limitations: [], facts_at: null };
+      result.authorization = { state: "unknown", reason_codes: ["facts_changed"] };
+      result.availability = { state: "unknown", reason_codes: ["facts_changed"], facts_at: null };
+      result.next_steps = [discoveryNextStep("retry_description", input.operation)];
+      return finish();
+    }
     const availability = result.availability as ObjectValue;
     if ((result.inputs as ObjectValue).state === "incomplete" || (result.inputs as ObjectValue).state === "invalid") result.next_steps = [discoveryNextStep("fill_inputs", input.operation, (result.inputs as ObjectValue).missing as string[])];
     else if ((result.authorization as ObjectValue).state === "denied") result.next_steps = [discoveryNextStep("owner_authorize", input.operation)];

@@ -120,9 +120,8 @@ for (const file of fixtureFiles) {
   const schemaRef = asString(fixture.$schema, `${file}.$schema`);
   const schema = schemasByFile.get(basename(schemaRef));
   assert(schema, `${file} must reference a local schema file`);
-  const fixtureVersion = asString(fixture.schema_version, `${file}.schema_version`);
   const metadata = asObject(schema["x-webenvoy"], `${schemaRef}.x-webenvoy`);
-  assert.equal(fixtureVersion, asString(metadata.schema_version, `${schemaRef}.schema_version`));
+  if (fixture.schema_version !== undefined) assert.equal(asString(fixture.schema_version, `${file}.schema_version`), asString(metadata.schema_version, `${schemaRef}.schema_version`));
   const validate = ajv.getSchema(asString(schema.$id, `${schemaRef}.$id`));
   assert(validate, `${schemaRef} must compile as Draft 2020-12 JSON Schema`);
   const { $schema: _fixtureSchemaRef, ...instance } = fixture;
