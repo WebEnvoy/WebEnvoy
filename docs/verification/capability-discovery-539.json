@@ -7,7 +7,7 @@
   "specification": {
     "pull_request": 549,
     "merge_commit": "09843eb5b38f32f97df50a0ccc14ea09a2f8c655",
-    "merge_tree": "5b3c5ccdb9400b0452415c444702cf8889fac824",
+    "merge_tree": "5b3c5cc652824a95cac6ac6ad44597490dddd5b6",
     "independent_review": "APPROVE"
   },
   "implementation": {
@@ -32,8 +32,7 @@
     ],
     "negative_fixtures": [
       "packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json",
-      "packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json",
-      "packages/schemas/invalid-fixtures/harbor-capability-description.invalid.fixture.json"
+      "packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json"
     ]
   },
   "acceptance": {
