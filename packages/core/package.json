@@ -9,7 +9,7 @@
     "./internal/task-thread-store": "./dist/task-thread-store.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && cp src/managed-capability-definitions.json dist/managed-capability-definitions.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node dist/self-check.js && node --test dist/profile-recovery.test.js dist/skill-library.test.js",
     "lint": "tsc -p tsconfig.json --noEmit"

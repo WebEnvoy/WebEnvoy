@@ -1,77 +1,166 @@
 import { createInterface } from 'node:readline';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { root, sha, verifyBundle } from './bundle.mjs';
 import { ensureRuntime, localRequest, readClient } from './client.mjs';
 const client = await readClient(process.argv[2]);
 let connection;
-const managedOperationIds = ['profile.create','profile.list','profile.read','provider.preference.read','provider.preference.set','provider.preference.clear','instance.start','instance.observe','instance.diagnostics','environment.read','environment.update','instance.navigate','instance.read','page.list','page.open','page.activate','page.close','page.navigate','page.reload','page.back','page.forward','instance.snapshot','instance.click','instance.input','instance.press','instance.scroll','instance.wait','instance.handoff','instance.stop','file.upload','file.download'];
-const managedFileOperationIds = ['file.upload', 'file.download'];
-const managedOriginOperationIds = ['instance.start','instance.observe','instance.diagnostics','environment.read','environment.update','instance.navigate','instance.read','page.open','page.navigate','instance.snapshot','instance.click','instance.input','instance.press','instance.scroll','instance.wait','file.upload','file.download'];
-const managedOperationDescription = 'Submit one authorized Provider preference, management, environment, Page, public-read, diagnostic, controlled-page, or managed file operation. File upload/download accepts only an opaque file_ref and a bound Page target; for both file operations include fresh profile_ref, runtime_session_ref, exact origin, page_id, page_ref, document_generation, observation_ref, and target_ref from the same current Page/document observation. Upload additionally requires file_ref and matching task_scope.file_refs; download omits file_ref and uses task_scope.file_refs: []. Local paths, file bodies, arbitrary URLs, and business commit are never exposed. Preference writes, Profile creation, and browser/file actions never retry; query the original Run when an outcome is unknown. task_scope describes this submitted operation only; submit later workflow steps separately. task_scope.file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation, even when a later step will use a file. Operation-specific origin inputs are significant: instance.start, instance.observe, instance.diagnostics, environment.read/update, instance.navigate/read, page.open/navigate, instance.snapshot/click/input/press/scroll/wait, and file.upload/download require the exact authorized origin as a top-level origin field (task_scope.origins alone is insufficient); url is optional for instance.start and, when supplied, must be on that origin. Other operations require origin only where their contract says so.';
+async function readCapabilityDefinitions() {
+  return JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
+}
+const capabilityDefinitions = await readCapabilityDefinitions();
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+}
+const installedDefinitionRevision = `sha256:${createHash('sha256').update(canonical(capabilityDefinitions)).digest('hex')}`;
+const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
+const managedOperationIds = capabilityOperations.map(definition => definition.id);
+const managedOperationSet = new Set(managedOperationIds);
+const managedFileOperationIds = capabilityOperations.filter(definition => definition.file_scope).map(definition => definition.id);
+const managedOriginOperationIds = capabilityOperations.filter(definition => definition.required.includes('origin')).map(definition => definition.id);
+const managedOperationDescription = `Submit one authorized operation using the static WebEnvoy input definition. ${capabilityOperations.map(definition => `${definition.id}: ${definition.summary}`).join(' ')} task_scope describes this submitted operation only; submit later workflow steps separately. File upload/download accepts only opaque owner references and a fresh Page target; file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation. Operation-specific origin inputs are significant: ${managedOriginOperationIds.join(', ')} require the exact authorized origin as a top-level origin field; task_scope.origins cannot replace it. Preference, Profile, Page, environment and browser actions never retry; query the original Run when an outcome is unknown. This tool executes only the submitted operation; it does not describe later workflow steps.`;
 const managedTaskScopeProperties = {
   operations: { type: 'array', description: 'Operations in the scope for this submitted operation; include the current operation and do not use later workflow steps to justify fields in this request.', items: { type: 'string' } },
   profile_refs: { type: 'array', items: { type: 'string' } },
   origins: { type: 'array', items: { type: 'string' } }
 };
-const managedTaskScopeSchema = includeFileRefs => ({
+const managedTaskScopeSchema = fileScope => ({
   type: 'object',
-  description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. For file.upload/file.download, keep file_refs tied to this operation and use the fresh Page/document fields required by the operation.',
-  properties: { ...managedTaskScopeProperties, ...(includeFileRefs ? { file_refs: { type: 'array', description: 'Only for the current file.upload or file.download operation: upload carries its one current file ref; download carries []. Omit this field for every non-file operation, even if a later workflow step uses a file.', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, maxItems: 32 } } : {}) },
-  required: ['operations', 'profile_refs', 'origins'],
+  description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File refs belong only to the current file operation.',
+  properties: {
+    ...managedTaskScopeProperties,
+    ...(fileScope ? { file_refs: { type: 'array', description: fileScope === 'upload' ? 'The one current owner-registered file ref for upload; it must equal the top-level file_ref. Omit this field for every non-file operation.' : fileScope === 'download' ? 'Download carries an explicit empty array. Omit this field for every non-file operation.' : 'File operations carry only their current file refs. Omit this field for every non-file operation.', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, ...(fileScope === 'download' ? { minItems: 0, maxItems: 0 } : fileScope === 'upload' ? { minItems: 1, maxItems: 1 } : { maxItems: 32 }) } } : {})
+  },
+  required: ['operations', 'profile_refs', 'origins', ...(fileScope === 'upload' || fileScope === 'download' ? ['file_refs'] : [])],
   additionalProperties: false
 });
+const managedOperationProperties = Object.fromEntries([
+  ['idempotency_key', { type: 'string', description: 'A new idempotency key for this submitted operation.' }],
+  ['grant_id', { type: 'string', description: 'The one owner-issued Grant for this submitted operation.' }],
+  ['operation', { type: 'string', enum: managedOperationIds, pattern: capabilityDefinitions.operation_pattern, description: 'One exposed operation name.' }],
+  ['task_scope', { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation.' }],
+  ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])
+]);
+const forbiddenFor = definition => Object.keys(capabilityDefinitions.fields).filter(field => !definition.allowed.includes(field));
+const conditionThen = definition => {
+  const then = {
+    required: [...definition.required],
+    ...(forbiddenFor(definition).length ? { not: { anyOf: forbiddenFor(definition).map(field => ({ required: [field] })) } } : {})
+  };
+  const conditional = (definition.conditions ?? []).filter(condition => condition.kind === 'conditional_fields' && condition.when?.field);
+  if (conditional.length) then.allOf = conditional.map(condition => ({
+    if: { required: [condition.when.field], properties: { [condition.when.field]: condition.when.equals !== undefined ? { const: condition.when.equals } : { enum: condition.when.in } } },
+    then: {
+      ...(condition.required?.length ? { required: condition.required } : {}),
+      ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {})
+    }
+  }));
+  const metadata = (definition.conditions ?? []).filter(condition => condition.kind === 'page_selector' || condition.kind === 'same_origin');
+  if (metadata.length) then['x-webenvoy-conditions'] = metadata;
+  const fileCondition = (definition.conditions ?? []).find(condition => condition.kind === 'file_scope' && condition.equals);
+  if (fileCondition) then['x-webenvoy-equals'] = { left: `${fileCondition.path}[0]`, right: fileCondition.equals };
+  const explicitSelector = (definition.conditions ?? []).find(condition => condition.kind === 'page_selector' && condition.when === 'always');
+  if (explicitSelector) then.anyOf = explicitSelector.required_any.map(field => ({ required: [field] }));
+  return then;
+};
+const operationConditions = capabilityOperations.map(definition => ({
+  if: { required: ['operation'], properties: { operation: { const: definition.id } } },
+  then: conditionThen(definition)
+}));
 const managedOperationSchema = {
   type: 'object',
-  properties: {
-    idempotency_key: { type: 'string' },
-    grant_id: { type: 'string' },
-    operation: { type: 'string', enum: managedOperationIds },
-    task_scope: { type: 'object', description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File operations use only their own fresh Page/document binding and file_refs.', properties: managedTaskScopeProperties, required: ['operations', 'profile_refs', 'origins'] },
-    template_ref: { type: 'string' },
-    provider_id: { type: 'string', enum: ['cloakbrowser','chrome_official','camoufox'] },
-    profile_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the authorized Profile for the current Instance.' },
-    runtime_session_ref: { type: 'string', description: 'For file.upload/file.download, required and must identify the original Instance; do not substitute another session.' },
-    origin: { type: 'string', description: 'Required exact authorized origin for instance.start, instance.observe, instance.diagnostics, environment.read/update, instance.navigate/read, page.open/navigate, controlled interaction operations, and file.upload/file.download; task_scope.origins is only the allowed set and cannot replace this selected target.' },
-    url: { type: 'string' },
-    file_ref: { type: 'string', description: 'Only for file.upload: the owner-registered opaque ref matching task_scope.file_refs; omit for file.download.', pattern: '^attachment:runtime/[0-9a-f-]{36}$' },
-    configuration: { type: 'object', properties: { timezone: { type: 'string', minLength: 1, maxLength: 128 }, language: { type: 'string', minLength: 1, maxLength: 128 }, viewport: { type: 'string', minLength: 1, maxLength: 128 } }, additionalProperties: false, minProperties: 1 },
-    page_id: { type: 'string', description: 'For file.upload/file.download, required fresh Page identity from the same current observation.' },
-    page_ref: { type: 'string', description: 'For file.upload/file.download, required fresh Page/document ref from the same current snapshot.' },
-    document_generation: { type: 'integer', description: 'For file.upload/file.download, required fresh document generation matching page_ref.', minimum: 1 },
-    cursor: { type: 'string' },
-    limit: { type: 'integer', minimum: 1, maximum: 64 },
-    observation_ref: { type: 'string', description: 'For file.upload/file.download, required fresh observation ref that contains the bound Page and target.' },
-    target_ref: { type: 'string', description: 'For file.upload/file.download, required visible target_ref from that same fresh observation.' },
-    text: { type: 'string', maxLength: 512 },
-    key: { type: 'string', enum: ['Enter','Tab','ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End','Space','Backspace','Delete','Escape'] },
-    delta_y: { type: 'integer', minimum: -2000, maximum: 2000 },
-    wait_for: { type: 'string', enum: ['page_changed','text','enabled'] },
-    timeout_ms: { type: 'integer', minimum: 1, maximum: 10000 }
-  },
+  properties: managedOperationProperties,
   required: ['idempotency_key', 'grant_id', 'operation', 'task_scope'],
   additionalProperties: false,
-  allOf: [{
-    if: { required: ['operation'], properties: { operation: { enum: managedFileOperationIds } } },
-    then: { properties: { task_scope: managedTaskScopeSchema(true) } },
-    else: { properties: { task_scope: managedTaskScopeSchema(false) } }
-  }, {
-    if: { required: ['operation'], properties: { operation: { enum: managedOriginOperationIds } } },
-    then: { required: ['origin'] }
-  }]
+  allOf: [
+    {
+      if: { required: ['operation'], properties: { operation: { enum: managedFileOperationIds } } },
+      then: { properties: { task_scope: { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation. file_refs is allowed only for the current file.upload or file.download operation; upload carries one ref equal to file_ref and download carries []. Omit this field for every non-file operation.' } } },
+      else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+    },
+    {
+      if: { required: ['operation'], properties: { operation: { enum: ['file.upload'] } } },
+      then: { properties: { task_scope: managedTaskScopeSchema('upload') }, 'x-webenvoy-equals': { left: 'task_scope.file_refs[0]', right: 'file_ref' } }
+    },
+    {
+      if: { required: ['operation'], properties: { operation: { enum: ['file.download'] } } },
+      then: { properties: { task_scope: managedTaskScopeSchema('download') } }
+    },
+    {
+      if: { required: ['operation'], properties: { operation: { enum: managedOriginOperationIds } } },
+      then: { required: ['origin'] }
+    },
+    ...operationConditions
+  ]
 };
 const tools = [
   { name: 'webenvoy_status', description: 'Verify installed Runtime and SKILL assets; return actual versions, readiness, and safe recovery guidance.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'webenvoy_skill', description: 'Read the actual installed, integrity-verified WebEnvoy management/controlled browser SKILL before operating.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'webenvoy_connect', description: 'Connect the already registered Agent Principal. Cannot register or grant permissions.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'webenvoy_describe', description: 'Read the current static operation definition and, when explicitly supplied, the one authorized Profile/Provider/Runtime context. This is optional help: it never starts Runtime, opens a Page, acquires control, creates a Run, or grants permission.', inputSchema: {
+    type: 'object',
+    properties: {
+      operation: { type: 'string', pattern: capabilityDefinitions.operation_pattern, description: 'One operation name; unknown and out-of-scope names receive an explicit definition state.' },
+      context: {
+        type: 'object',
+        properties: {
+          grant_id: { type: 'string' },
+          profile_ref: { type: 'string' },
+          task_scope: { type: 'object', properties: { ...managedTaskScopeProperties, file_refs: { type: 'array', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, description: 'Only for file operations; upload carries one ref and download carries an empty array.' } }, required: ['operations', 'profile_refs', 'origins'], additionalProperties: false }
+        },
+        required: ['grant_id', 'profile_ref', 'task_scope'],
+        additionalProperties: false
+      },
+      arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }
+    },
+    required: ['operation'],
+    additionalProperties: false
+  } },
   { name: 'webenvoy_operation', description: managedOperationDescription, inputSchema: managedOperationSchema },
   { name: 'webenvoy_query', description: 'Query a prior Run without replay. If the response was lost, reconnect and query the original idempotency_key.', inputSchema: { type: 'object', properties: { run_id: { type: 'string', pattern: '^managed-[a-f0-9]{64}$' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false } },
   { name: 'webenvoy_recovery', description: 'Inspect or request owner-managed recovery for a granted Profile, or query an existing recovery operation. This tool cannot backup, confirm, or apply a recovery.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['recovery.inspect','recovery.request','recovery.status'] }, task_scope: { type: 'object' }, profile_ref: { type: 'string' }, backup_ref: { type: 'string' }, operation_ref: { type: 'string' } }, required: ['idempotency_key','grant_id','operation','task_scope','profile_ref'], additionalProperties: false } },
   { name: 'webenvoy_skills', description: 'List, inspect, install, enable, read, update, rollback, or disable an explicitly authorized fixed SKILL revision. Reads return the verified content once; query returns only the durable receipt and summary.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['skill.list','skill.inspect','skill.install','skill.enable','skill.read','skill.update','skill.rollback','skill.disable'] }, task_scope: { type: 'object', properties: { operations: { type: 'array', items: { type: 'string' } }, skill_refs: { type: 'array', items: { type: 'string' } }, source_refs: { type: 'array', items: { type: 'string' } } }, required: ['operations','skill_refs','source_refs'], additionalProperties: false }, skill_ref: { type: 'string' }, source_ref: { type: 'string' }, revision_ref: { type: 'string' }, target_revision_ref: { type: 'string' }, expected_revision_ref: { type: ['string','null'] }, expected_current_revision_ref: { type: ['string','null'] }, expected_record_version: { type: 'integer', minimum: 0 } }, required: ['idempotency_key','grant_id','operation','task_scope'], additionalProperties: false } },
 ];
+const operationTool = tools.find(tool => tool.name === 'webenvoy_operation');
+const describeOperationPattern = new RegExp(capabilityDefinitions.operation_pattern);
+function validateDescribeInput(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.operation !== 'string' || !describeOperationPattern.test(args.operation)) throw new Error('describe_input_refused');
+  if (Object.keys(args).some(key => !['operation', 'context', 'arguments'].includes(key))) throw new Error('describe_input_refused');
+  if (args.context !== undefined) {
+    const context = args.context;
+    if (!context || typeof context !== 'object' || Array.isArray(context) || Object.keys(context).some(key => !['grant_id', 'profile_ref', 'task_scope'].includes(key)) ||
+      typeof context.grant_id !== 'string' || typeof context.profile_ref !== 'string' || !context.task_scope || typeof context.task_scope !== 'object' || Array.isArray(context.task_scope)) throw new Error('describe_input_refused');
+    const scope = context.task_scope;
+    const scopeKeys = ['operations', 'profile_refs', 'origins', ...(managedFileOperationIds.includes(args.operation) ? ['file_refs'] : [])];
+    if (Object.keys(scope).some(key => !scopeKeys.includes(key)) || !Array.isArray(scope.operations) || !Array.isArray(scope.profile_refs) || !Array.isArray(scope.origins)) throw new Error('describe_input_refused');
+  }
+  if (args.arguments !== undefined) {
+    const draft = args.arguments;
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some(key => !(key in capabilityDefinitions.fields))) throw new Error('describe_input_refused');
+  }
+}
 async function call(name, args) {
   await verifyBundle();
   if (name === 'webenvoy_skill') return { skill: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8') };
+  const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  if (name === 'webenvoy_describe') {
+    validateDescribeInput(args);
+    if (!connection) return { ok: false, error: { code: 'connect_first' } };
+    try {
+      const result = await request('/managed-browser/capabilities/describe', { ...args, connection_id: connection.connection_id });
+      if (result?.error?.code === 'runtime_unavailable_query_without_replay') return { ok: false, error: { code: 'runtime_unavailable' } };
+      if (result?.error?.code === 'managed_access_route_not_found' || result?.error?.code === 'not_found') return { ok: false, error: { code: 'discovery_not_available' } };
+      if (result?.error) return result;
+      if (result?.schema_version !== 'webenvoy.capability-description/v1' || result?.definition_revision !== installedDefinitionRevision) return { ok: false, error: { code: 'discovery_version_mismatch' } };
+      return result;
+    } catch (error) {
+      if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET'].includes(error?.code)) return { ok: false, error: { code: 'runtime_unavailable' } };
+      throw error;
+    }
+  }
   const status = await ensureRuntime(client.data_dir);
   if (name === 'webenvoy_status') {
     const publicStatus = { ...status };
@@ -85,7 +174,6 @@ async function call(name, args) {
     }
     return publicStatus;
   }
-  const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
   if (name === 'webenvoy_connect') { const result = await request('/agent-connections', {}); connection = result.connection; return result; }
   if (name === 'webenvoy_query') {
     let runId = args.run_id;
@@ -101,7 +189,7 @@ async function call(name, args) {
   }
   if (name === 'webenvoy_operation') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    if (!tools[3].inputSchema.properties.operation.enum.includes(args.operation) || Object.keys(args).some(k => !(k in tools[3].inputSchema.properties))) throw new Error('operation_input_refused');
+    if (!managedOperationSet.has(args.operation) || Object.keys(args).some(k => !(k in operationTool.inputSchema.properties))) throw new Error('operation_input_refused');
     const scope = args.task_scope;
     if (!managedFileOperationIds.includes(args.operation) && scope && typeof scope === 'object' && !Array.isArray(scope) && Object.hasOwn(scope, 'file_refs')) throw new Error('operation_input_refused');
     if (managedOriginOperationIds.includes(args.operation) && typeof args.origin !== 'string') throw new Error('operation_input_refused');

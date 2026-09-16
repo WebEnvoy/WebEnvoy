@@ -6,7 +6,7 @@ export type ManagedAccessApiOptions = {
   supervisorToken?: string;
   managedAccessStore?: FileManagedAccessStore;
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
-    Partial<Pick<ReturnType<typeof createManagedBrowserService>, "getManagementPolicy" | "putManagementPolicy">>;
+    Partial<Pick<ReturnType<typeof createManagedBrowserService>, "describe" | "getManagementPolicy" | "putManagementPolicy">>;
   managedSkillService?: Pick<ReturnType<typeof createFileSkillLibraryService>, "submit" | "query">;
   managedRecoveryService?: Pick<ReturnType<typeof createManagedRecoveryService>, "inspect" | "backup" | "plan" | "apply" | "status" | "request">;
   managedFileService?: {
@@ -36,7 +36,7 @@ function equalToken(value: string, expected: string): boolean {
   return supplied.length === owner.length && timingSafeEqual(supplied, owner);
 }
 function agentRoute(path: string): boolean {
-  return path === "/agent-connections" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path);
+  return path === "/agent-connections" || path === "/managed-browser/capabilities/describe" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path);
 }
 function ownerRecoveryRoute(path: string): boolean {
   return path === "/owner/recovery/inspect" || path === "/owner/recovery/backup" || path === "/owner/recovery/plan" || path === "/owner/recovery/apply" || /^\/owner\/recovery\/status\/[^/]+$/.test(path);
@@ -127,6 +127,11 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (path === "/agent-connections" && request.method === "POST") {
         send(response, 201, { ok: true, connection: await store.connect(credentialHash), grants: await store.listAgentGrants(credentialHash) }); return true;
       }
+      if (path === "/managed-browser/capabilities/describe" && request.method === "POST") {
+        const service = options.managedBrowserService;
+        if (!service?.describe) { reject(response, 503, "managed_browser_unavailable"); return true; }
+        send(response, 200, await service.describe(credentialHash, await body(request))); return true;
+      }
       if (path === "/managed-browser/operations" && request.method === "POST") {
         const service = options.managedBrowserService;
         if (!service) { reject(response, 503, "managed_browser_unavailable"); return true; }
@@ -209,7 +214,9 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     // submit returns admitted Run failures itself; access errors escaping it precede dispatch.
     const notDispatched = path === "/managed-browser/operations" && request.method === "POST" && error instanceof ManagedAccessError && code.startsWith("managed_access_");
     const conflict = code === "managed_access_idempotency_conflict" || code === "managed_access_scope_conflict" || code === "managed_access_grant_conflict" || code === "managed_access_policy_conflict";
-    reject(response, code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503, code, notDispatched);
+    const isDiscovery = path === "/managed-browser/capabilities/describe" && request.method === "POST";
+    const discoveryStatus: number | undefined = isDiscovery ? (code === "discovery_context_unavailable" ? 404 : code === "discovery_context_not_supported" || code === "managed_browser_invalid_input" ? 400 : ["managed_access_connection_unavailable", "managed_access_authentication_required", "managed_access_invalid_credential"].includes(code) ? 401 : ["managed_browser_runtime_refused", "runtime_facts_unavailable", "execution_policy_unavailable"].includes(code) ? 503 : undefined) : undefined;
+    reject(response, discoveryStatus ?? (code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503), code, notDispatched);
   }
   return true;
 }

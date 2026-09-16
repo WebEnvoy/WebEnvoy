@@ -590,6 +590,88 @@ export class HarborRuntime {
     return this.runtimeSessions.getSession(runtime_session_ref);
   }
 
+  /**
+   * Read the existing Profile/Provider/Runtime/Page facts needed by Core's
+   * optional capability description. This method deliberately does not
+   * refresh a Provider Page relation, start a session, or acquire a lease.
+   */
+  describeManagedCapability(input: unknown): Record<string, unknown> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) return { error: "invalid_request" };
+    const value = input as Record<string, unknown>;
+    const allowed = ["operation", "profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"];
+    if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.operation !== "string" || typeof value.profile_ref !== "string" ||
+      Object.entries(value).some(([key, item]) => key !== "document_generation" && item !== undefined && typeof item !== "string") ||
+      value.document_generation !== undefined && (!Number.isSafeInteger(value.document_generation) || Number(value.document_generation) < 1)) return { error: "invalid_request" };
+    const operation = value.operation as string;
+    const profile = this.identityEnvironments.list().find(item => item.refs.profile_ref === value.profile_ref);
+    if (!profile) return {
+      schema_version: "harbor-capability-description/v1", operation: value.operation, profile_ref: value.profile_ref,
+      provider: { state: "unknown", provider_id: null, reason_codes: ["profile_missing"], limitations: [], facts_at: null },
+      availability: { state: "blocked", reason_codes: ["stale_reference"], facts_at: null },
+      execution_checks: ["reauthorize"]
+    };
+    const facts = this.identityEnvironments.getFacts(profile.identity_environment_ref);
+    if (!facts) return {
+      schema_version: "harbor-capability-description/v1", operation: value.operation, profile_ref: value.profile_ref,
+      provider: { state: "unknown", provider_id: null, reason_codes: ["profile_facts_unavailable"], limitations: [], facts_at: profile.updated_at },
+      availability: { state: "unknown", reason_codes: ["runtime_facts_unavailable"], facts_at: profile.updated_at },
+      execution_checks: ["reauthorize"]
+    };
+    const selected = facts.provider_binding.selected_provider;
+    const providerFactsAt = profile.updated_at;
+    // Runtime transport is an implementation detail.  The public operation
+    // contract is shared by Chrome and Camoufox, so do not infer operation
+    // support from the provider's optional CDP transport fact.  Only use an
+    // owner capability where it is directly relevant to this operation.
+    const providerCapabilityKey = operation === "instance.snapshot" || operation === "instance.observe"
+      ? "snapshot_refs"
+      : operation === "instance.diagnostics" ? "evidence_refs" : "persistent_profile";
+    const providerCapability = selected?.capabilities.find(item => item.key === providerCapabilityKey);
+    const providerState = !selected ? "unknown" : providerCapability?.state === "unsupported" ? "unsupported" : providerCapability?.state === "requires_validation" ? "unknown" : providerCapability?.state === "limited" || providerCapability?.state === "provider_claim" ? "limited" : "supported";
+    const providerReasons = !selected ? ["provider_not_qualified"] : providerCapability?.state === "unsupported" ? ["provider_operation_not_implemented"] : providerCapability?.state === "requires_validation" ? ["provider_not_qualified"] : providerCapability?.state === "provider_claim" ? ["provider_evidence_stale"] : providerCapability?.state === "limited" ? ["provider_limited"] : [];
+    const provider = {
+      state: providerState,
+      provider_id: facts.provider_binding.selected_provider_id,
+      reason_codes: providerReasons,
+      limitations: (selected?.limitations ?? []).slice(0, 16).map((summary, index) => ({ code: `provider_limitation_${index + 1}`, summary: String(summary).slice(0, 256) })),
+      facts_at: providerFactsAt
+    };
+    const needsSession = !["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "instance.start"].includes(operation);
+    const requestedSessionRef = typeof value.runtime_session_ref === "string" ? value.runtime_session_ref : undefined;
+    const record = requestedSessionRef ? this.runtimeSessions.getRecord(requestedSessionRef) : (() => {
+      const active = this.runtimeSessions.getActiveIdentityEnvironmentSession(profile.identity_environment_ref);
+      return active ? this.runtimeSessions.getRecord(active.runtime_session_ref) : undefined;
+    })();
+    const session = record?.facts;
+    let availabilityState: "no_known_blocker" | "blocked" | "unknown" = providerState === "unsupported" ? "blocked" : providerState === "unknown" ? "unknown" : "no_known_blocker";
+    let availabilityReasons: string[] = providerState === "unsupported" ? ["provider_operation_not_implemented"] : providerState === "unknown" ? ["provider_not_qualified"] : [];
+    let availabilityFactsAt: string | null = providerFactsAt;
+    if (requestedSessionRef && (!session || session.profile_ref !== value.profile_ref)) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; availabilityFactsAt = null; }
+    else if (needsSession && !session) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; availabilityFactsAt = providerFactsAt; }
+    else if (session) {
+      availabilityFactsAt = session.last_seen_at;
+      if (!["active", "idle", "locked"].includes(session.lifecycle_state)) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; }
+      const mutating = ["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.stop", "instance.handoff", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation);
+      if (mutating && session.control_owner === "user") { availabilityState = "blocked"; availabilityReasons = ["human_control"]; }
+      if (value.page_id !== undefined || value.page_ref !== undefined) {
+        const binding = record?.page_registry?.binding({ page_id: value.page_id as string | undefined, page_ref: value.page_ref as string | undefined });
+        if (!binding) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
+        else if (value.document_generation !== undefined && binding.facts.document_generation !== value.document_generation) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; }
+      }
+    }
+    const executionChecks = ["reauthorize"];
+    if (needsSession || value.page_id !== undefined || value.page_ref !== undefined) executionChecks.push("verify_page_and_target");
+    if (operation.startsWith("file.")) executionChecks.push("verify_file_material");
+    if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation)) executionChecks.push("acquire_control_if_required");
+    if (needsSession) executionChecks.push("check_provider_runtime");
+    return {
+      schema_version: "harbor-capability-description/v1", operation: value.operation, profile_ref: value.profile_ref,
+      provider,
+      availability: { state: availabilityState, reason_codes: [...new Set(availabilityReasons)], facts_at: availabilityFactsAt },
+      execution_checks: [...new Set(executionChecks)]
+    };
+  }
+
   async clearManagedPublicPageGuard(runtime_session_ref: string) {
     return this.runtimeSessions.clearManagedPublicPageGuard(runtime_session_ref);
   }

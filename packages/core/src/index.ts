@@ -365,6 +365,22 @@ export {
 } from "./task-turn-input-policy.js";
 
 export { createFileManagedAccessStore, ManagedAccessError, managedOperations, managedFileOperations, managedSkillOperations, managedScopeSemantics, managedScopeConfirmationSchemaVersion, type FileManagedAccessStore, type ManagedFileScope, type ManagedSkillOperation, type ManagedSkillScope, type ManagedScopeSemantics } from "./managed-access.js";
+export {
+  managedCapabilityDefinitions,
+  managedCapabilityDefinition,
+  managedCapabilityDefinitionRevision,
+  managedCapabilityDefinitionState,
+  managedCapabilityEnvelopeFields,
+  managedCapabilityExample,
+  managedCapabilityExecutionInputSchema,
+  managedCapabilityFieldGuidance,
+  managedCapabilityInputFields,
+  managedCapabilityInputSchema,
+  validateManagedCapabilityInputShape,
+  type ManagedCapabilityDefinition,
+  type ManagedCapabilityField,
+  type ManagedCapabilityFieldGuidance
+} from "./managed-capabilities.js";
 export { createManagedBrowserService } from "./managed-browser.js";
 export { createHttpManagedFileOwnerClient, type ManagedFileOwnerClient } from "./managed-file-owner.js";
 export {

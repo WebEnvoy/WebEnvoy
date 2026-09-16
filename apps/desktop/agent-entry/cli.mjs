@@ -270,7 +270,7 @@ function requiredAny(...names) { for (const name of names) { const value = arg(n
 async function readJsonFile(path) { try { return JSON.parse(await readFile(resolve(path), 'utf8')); } catch { throw new Error('recovery_json_file_invalid'); } }
 function hostConfig(installRoot, clientPath, approveTools, includeRecovery, executable = process.execPath) {
   let config = `[mcp_servers.webenvoy]\ncommand = ${JSON.stringify(executable)}\nargs = ${JSON.stringify([join(installRoot, 'agent-entry/mcp.mjs'), clientPath])}\nstartup_timeout_sec = 30\ntool_timeout_sec = 100\n[mcp_servers.webenvoy.env]\nELECTRON_RUN_AS_NODE = "1"\n`;
-  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_operation', 'webenvoy_query', 'webenvoy_skills', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
+  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_describe', 'webenvoy_operation', 'webenvoy_query', 'webenvoy_skills', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
   return config;
 }
 async function verifyPrevious(rootPath) {

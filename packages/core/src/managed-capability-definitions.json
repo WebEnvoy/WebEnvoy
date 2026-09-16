@@ -1,0 +1,304 @@
+{
+  "schema_version": "webenvoy.capability-input-definition/v1",
+  "operation_tool": "webenvoy_operation",
+  "query_tool": "webenvoy_query",
+  "operation_pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+  "fields": {
+    "profile_ref": { "type": "string", "description": "The one authorized Profile reference for this operation; file.upload/file.download must use the Profile bound to the current Instance." },
+    "origin": { "type": "string", "format": "webenvoy-public-origin", "description": "The exact authorized target origin; task_scope.origins is only the allowed set and is not a substitute." },
+    "template_ref": { "type": "string", "description": "The owner-registered Profile creation template reference." },
+    "url": { "type": "string", "format": "webenvoy-public-http-target", "description": "An HTTP(S) target on the selected authorized origin." },
+    "runtime_session_ref": { "type": "string", "description": "The current Runtime Session reference; file.upload/file.download must use the original Instance." },
+    "observation_ref": { "type": "string", "description": "A fresh observation reference for the selected Page and target; required by file.upload/file.download." },
+    "page_id": { "type": "string", "description": "The stable Page identity from the current Page observation; required by file.upload/file.download." },
+    "page_ref": { "type": "string", "description": "The document-bound Page reference from the current observation; required by file.upload/file.download." },
+    "document_generation": { "type": "integer", "minimum": 1, "description": "The document generation matching page_ref; required by file.upload/file.download." },
+    "cursor": { "type": "string", "description": "A bounded continuation cursor for diagnostics." },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 64, "description": "A bounded diagnostics result limit." },
+    "target_ref": { "type": "string", "description": "The visible target reference from the same fresh observation; required by file.upload/file.download." },
+    "file_ref": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$", "description": "Only for file.upload: the opaque owner-registered file reference; omit for file.download." },
+    "text": { "type": "string", "maxLength": 512, "description": "Text input for the selected interaction or wait condition." },
+    "key": { "type": "string", "enum": ["Enter", "Tab", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Space", "Backspace", "Delete", "Escape"], "description": "The bounded key accepted by instance.press." },
+    "delta_y": { "type": "integer", "minimum": -2000, "maximum": 2000, "description": "The non-zero bounded scroll delta." },
+    "wait_for": { "type": "string", "enum": ["page_changed", "text", "enabled"], "description": "The wait condition." },
+    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "The bounded wait timeout." },
+    "configuration": { "type": "object", "description": "The bounded environment configuration update.", "properties": { "timezone": { "type": "string", "minLength": 1, "maxLength": 128 }, "language": { "type": "string", "minLength": 1, "maxLength": 128 }, "viewport": { "type": "string", "minLength": 1, "maxLength": 128 } }, "additionalProperties": false, "minProperties": 1 },
+    "provider_id": { "type": "string", "enum": ["cloakbrowser", "chrome_official", "camoufox"], "description": "The owner-selected Provider for Profile creation or preference set." }
+  },
+  "operations": [
+    { "id": "profile.create", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "unsupported", "allowed": ["template_ref", "provider_id"], "required": ["template_ref"], "summary": "Create a Profile from the owner-registered template." },
+    { "id": "profile.list", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "unsupported", "allowed": [], "required": [], "summary": "List the Profiles visible to the authorized operation." },
+    { "id": "profile.read", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": ["profile_ref"], "summary": "Read one visible Profile summary." },
+    { "id": "provider.preference.read", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": [], "required": [], "summary": "Read the current Provider preference." },
+    { "id": "provider.preference.set", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": ["provider_id"], "required": ["provider_id"], "summary": "Set the owner-managed Provider preference." },
+    { "id": "provider.preference.clear", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": [], "required": [], "summary": "Clear the owner-managed Provider preference." },
+    { "id": "instance.start", "definition": "defined", "exposure": "exposed", "capability": "instance_management", "context": "profile", "allowed": ["profile_ref", "origin", "url"], "required": ["profile_ref", "origin"], "summary": "Start or reuse the Profile Runtime Session; runtime_session_ref is not required first." },
+    { "id": "instance.observe", "definition": "defined", "exposure": "exposed", "capability": "observation", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Read the current session and selected Page facts." },
+    { "id": "instance.diagnostics", "definition": "defined", "exposure": "exposed", "capability": "observation", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "document_generation", "cursor", "limit"], "required": ["profile_ref", "origin", "runtime_session_ref"], "summary": "Read bounded diagnostic metadata without browser mutation." },
+    { "id": "environment.read", "definition": "defined", "exposure": "exposed", "capability": "environment", "context": "profile", "allowed": ["profile_ref", "origin"], "required": ["profile_ref", "origin"], "summary": "Read the Profile environment summary." },
+    { "id": "environment.update", "definition": "defined", "exposure": "exposed", "capability": "environment", "context": "profile", "allowed": ["profile_ref", "origin", "configuration"], "required": ["profile_ref", "origin", "configuration"], "summary": "Update the owner-authorized Profile environment configuration." },
+    { "id": "instance.navigate", "definition": "defined", "exposure": "exposed", "capability": "public_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "url"], "required": ["profile_ref", "origin", "runtime_session_ref", "url"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }, { "kind": "same_origin", "field": "url", "with": "origin" }], "summary": "Navigate the selected current Page after rechecking its binding." },
+    { "id": "instance.read", "definition": "defined", "exposure": "exposed", "capability": "public_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Read bounded public text from the selected current Page." },
+    { "id": "instance.snapshot", "definition": "defined", "exposure": "exposed", "capability": "observation", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Capture the selected Page observation for later interaction." },
+    { "id": "instance.click", "definition": "defined", "exposure": "exposed", "capability": "controlled_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "observation_ref", "target_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Click a target from a fresh Page observation." },
+    { "id": "instance.input", "definition": "defined", "exposure": "exposed", "capability": "controlled_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "text"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "observation_ref", "target_ref", "text"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Input bounded text into a target from a fresh observation." },
+    { "id": "instance.press", "definition": "defined", "exposure": "exposed", "capability": "controlled_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "key"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "observation_ref", "target_ref", "key"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Press one bounded key on a fresh target." },
+    { "id": "instance.scroll", "definition": "defined", "exposure": "exposed", "capability": "controlled_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "delta_y"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "observation_ref", "delta_y"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Scroll a bounded delta from a fresh Page observation." },
+    { "id": "instance.wait", "definition": "defined", "exposure": "exposed", "capability": "controlled_page", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "text", "wait_for", "timeout_ms"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "observation_ref", "wait_for"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }, { "kind": "conditional_fields", "when": { "field": "wait_for", "equals": "enabled" }, "required": ["target_ref"], "forbidden": ["text"], "summary": "enabled waits require the fresh target_ref and do not accept text." }, { "kind": "conditional_fields", "when": { "field": "wait_for", "equals": "text" }, "required": ["text"], "forbidden": ["target_ref"], "constraints": { "text": { "maxLength": 256 } }, "summary": "text waits require bounded text and do not accept target_ref." }, { "kind": "conditional_fields", "when": { "field": "wait_for", "equals": "page_changed" }, "forbidden": ["target_ref", "text"], "summary": "page_changed waits do not accept target_ref or text." }], "summary": "Wait for one bounded condition from a fresh Page observation." },
+    { "id": "instance.handoff", "definition": "defined", "exposure": "exposed", "capability": "instance_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref"], "required": ["profile_ref", "runtime_session_ref"], "summary": "Hand the current Runtime Session back to the owner." },
+    { "id": "instance.stop", "definition": "defined", "exposure": "exposed", "capability": "instance_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref"], "required": ["profile_ref", "runtime_session_ref"], "summary": "Stop the current Runtime Session." },
+    { "id": "page.list", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref"], "required": ["profile_ref", "runtime_session_ref"], "summary": "List currently registered Pages for the selected session." },
+    { "id": "page.open", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "url"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "same_origin", "field": "url", "with": "origin", "when": "provided" }], "summary": "Open a new Page; an authorized URL may be supplied." },
+    { "id": "page.activate", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Activate an explicitly selected registered Page." },
+    { "id": "page.close", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Close an explicitly selected registered Page." },
+    { "id": "page.navigate", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "url"], "required": ["profile_ref", "origin", "runtime_session_ref", "url"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }, { "kind": "same_origin", "field": "url", "with": "origin" }], "summary": "Navigate an explicitly selected Page to an authorized URL." },
+    { "id": "page.reload", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Reload an explicitly selected Page." },
+    { "id": "page.back", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Navigate the selected Page back in history." },
+    { "id": "page.forward", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Navigate the selected Page forward in history." },
+    { "id": "file.upload", "definition": "defined", "exposure": "exposed", "capability": "managed_file", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref"], "file_scope": "upload", "conditions": [{ "kind": "file_scope", "path": "task_scope.file_refs", "exact_length": 1, "equals": "file_ref", "summary": "Upload task_scope.file_refs must contain exactly the top-level file_ref." }], "summary": "Upload one owner-registered file to a fresh Page target." },
+    { "id": "file.download", "definition": "defined", "exposure": "exposed", "capability": "managed_file", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"], "file_scope": "download", "conditions": [{ "kind": "file_scope", "path": "task_scope.file_refs", "exact": [], "summary": "Download task_scope.file_refs must be an explicit empty array." }], "summary": "Download from a fresh Page target; no file_ref is accepted." },
+    { "id": "account.bind", "definition": "defined", "exposure": "not_exposed", "capability": "account_management", "context": "unsupported", "allowed": [], "required": [], "summary": "An existing Core definition that is not exposed by this Plugin." }
+  ],
+  "out_of_scope_prefixes": ["recovery.", "skill.", "owner."],
+  "out_of_scope_operations": ["account.bind"],
+  "illustrative_example": {
+    "profile.create": {
+      "template_ref": "template:example",
+      "provider_id": "camoufox",
+      "illustrative_only": true
+    },
+    "profile.list": {
+      "illustrative_only": true
+    },
+    "profile.read": {
+      "profile_ref": "profile:example",
+      "illustrative_only": true
+    },
+    "provider.preference.read": {
+      "illustrative_only": true
+    },
+    "provider.preference.set": {
+      "provider_id": "camoufox",
+      "illustrative_only": true
+    },
+    "provider.preference.clear": {
+      "illustrative_only": true
+    },
+    "instance.start": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "url": "https://example.com/",
+      "illustrative_only": true
+    },
+    "instance.observe": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "instance.diagnostics": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "cursor": "cursor:example",
+      "limit": 8,
+      "illustrative_only": true
+    },
+    "environment.read": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "illustrative_only": true
+    },
+    "environment.update": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "configuration": { "timezone": "UTC" },
+      "illustrative_only": true
+    },
+    "instance.navigate": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "url": "https://example.com/next",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "instance.read": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "instance.snapshot": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "instance.click": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "target_ref": "target:example",
+      "illustrative_only": true
+    },
+    "instance.input": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "target_ref": "target:example",
+      "text": "example text",
+      "illustrative_only": true
+    },
+    "instance.press": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "target_ref": "target:example",
+      "key": "Enter",
+      "illustrative_only": true
+    },
+    "instance.scroll": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "delta_y": 100,
+      "illustrative_only": true
+    },
+    "instance.wait": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "wait_for": "text",
+      "text": "ready",
+      "timeout_ms": 1000,
+      "illustrative_only": true
+    },
+    "instance.handoff": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "illustrative_only": true
+    },
+    "instance.stop": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "illustrative_only": true
+    },
+    "page.list": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "illustrative_only": true
+    },
+    "page.open": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "url": "https://example.com/",
+      "illustrative_only": true
+    },
+    "page.activate": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "page.close": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "page.navigate": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "url": "https://example.com/next",
+      "illustrative_only": true
+    },
+    "page.reload": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "page.back": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "page.forward": {
+      "profile_ref": "profile:example",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "illustrative_only": true
+    },
+    "file.upload": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "target_ref": "target:example",
+      "file_ref": "attachment:runtime/11111111-1111-4111-8111-111111111111",
+      "illustrative_only": true
+    },
+    "file.download": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "target_ref": "target:example",
+      "illustrative_only": true
+    }
+  }
+}

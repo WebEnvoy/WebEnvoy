@@ -37,7 +37,7 @@ const server = createServer(async (req, res) => {
       (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
       ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
       (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/v2/grants', '/agent-access/profile-policies', '/agent-access/v2/profile-policies', '/agent-access/scope-confirmations'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url)));
-    const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
+    const agentRoute = (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
       (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
     if (!ownerRoute && !agentRoute) return send(res, 403, { ok: false, error: { code: 'agent_route_denied' } });
     if (req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === 'authorization').length !== 1) return send(res, 401, { ok: false, error: { code: ownerRoute ? 'owner_authentication_required' : 'agent_authentication_required' } });

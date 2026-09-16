@@ -296,6 +296,37 @@ test("detects registered provider status without promoting Camoufox to the defau
   assert.equal(camoufox.capabilities.find((capability) => capability.key === "cdp")?.state, "unsupported");
 });
 
+test("describes shared managed operations without treating Camoufox CDP as the capability", () => {
+  for (const provider of ["chrome_official", "camoufox"] as const) {
+    const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+    const browserPath = `/private/tmp/${provider}/browser`;
+    const profileRef = `profile_describe_${provider}`;
+    runtime.createLocalIdentityEnvironment({
+      ...providerFixture({ [browserPath]: { executable: true } }),
+      env: provider === "chrome_official" ? { HARBOR_CHROME_PATH: browserPath } : {
+        HARBOR_CAMOUFOX_PATH: browserPath,
+        HARBOR_CAMOUFOX_SOURCE: CAMOUFOX_UPSTREAM_PINS.source,
+        HARBOR_CAMOUFOX_SOURCE_SHA256: CAMOUFOX_UPSTREAM_PINS.source_sha256,
+        HARBOR_CAMOUFOX_VERSION: CAMOUFOX_UPSTREAM_PINS.camoufox_version,
+        HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
+        HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
+      },
+      requested_provider_id: provider,
+      identity_environment_ref: `identity-env_describe_${provider}`,
+      profile_ref: profileRef,
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com" }
+    });
+    const description = runtime.describeManagedCapability({ operation: "instance.start", profile_ref: profileRef }) as {
+      provider: { state: string; provider_id: string | null; reason_codes: string[] };
+      availability: { reason_codes: string[] };
+    };
+    assert.equal(description.provider.provider_id, provider);
+    assert.notEqual(description.provider.state, "unsupported");
+    assert.equal(description.provider.reason_codes.includes("provider_operation_not_implemented"), false);
+    assert.equal(description.availability.reason_codes.includes("provider_operation_not_implemented"), false);
+  }
+});
+
 test("requires an explicit or user-default provider without silently using the recommendation", () => {
   const selectionRequired = bindIdentityEnvironmentDefaultProvider(providerFixture({
     [cloakPath]: { executable: true },

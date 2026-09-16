@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/harbor-capability-description.schema.json",
+  "title": "Harbor capability description",
+  "description": "The narrow supervisor-only Core-to-Harbor read projection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "profile_ref", "provider", "availability", "execution_checks"],
+  "properties": {
+    "schema_version": { "const": "harbor-capability-description/v1" },
+    "operation": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "provider": {
+      "type": "object", "additionalProperties": false, "required": ["state", "provider_id", "reason_codes", "limitations", "facts_at"],
+      "properties": {
+        "state": { "enum": ["supported", "limited", "unsupported", "unknown", "not_applicable", "not_evaluated"] },
+        "provider_id": { "type": ["string", "null"] },
+        "reason_codes": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 128 } },
+        "limitations": { "type": "array", "maxItems": 16, "items": { "type": "object", "additionalProperties": false, "required": ["code", "summary"], "properties": { "code": { "type": "string", "maxLength": 128 }, "summary": { "type": "string", "maxLength": 256 } } } },
+        "facts_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "availability": {
+      "type": "object", "additionalProperties": false, "required": ["state", "reason_codes", "facts_at"],
+      "properties": {
+        "state": { "enum": ["no_known_blocker", "blocked", "unknown", "not_evaluated"] },
+        "reason_codes": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 128 } },
+        "facts_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "execution_checks": { "type": "array", "maxItems": 16, "items": { "enum": ["reauthorize", "verify_page_and_target", "verify_file_material", "acquire_control_if_required", "check_provider_runtime"] } }
+  },
+  "x-webenvoy": {
+    "owner": "Harbor Runtime",
+    "status": "accepted",
+    "compatibility_boundary": "Supervisor-only Harbor capability description v1",
+    "schema_version": "harbor-capability-description/v1",
+    "source_adrs": ["docs/specs/capability-discovery-v1.md", "docs/adr/0010-core-harbor-ownership-migration-v0.md"]
+  }
+}
