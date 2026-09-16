@@ -379,6 +379,11 @@ test("describes known control, page selection, stale, and unknown page facts", a
   const oneVisible = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin] }) as { availability: { reason_codes: string[] } };
   assert.equal(oneVisible.availability.reason_codes.includes("page_selection_required"), false);
   const pagesWithOtherOrigin = record!.page_registry.legacyBindings().map(page => ({ ...page.facts, provider_page_ref: page.provider_page_ref }));
+  const otherPageRef = record!.page_registry.legacyBindings().find(page => page.facts.origin === "https://other.example")?.facts.page_ref;
+  assert.equal(typeof otherPageRef, "string");
+  const hiddenReference = runtime.describeManagedCapability({ operation: "instance.observe", profile_ref: identity.profile_ref, authorized_origins: [identity.site.origin], page_ref: otherPageRef }) as { availability: { state: string; reason_codes: string[] } };
+  assert.equal(hiddenReference.availability.state, "blocked");
+  assert.deepEqual(hiddenReference.availability.reason_codes, ["stale_reference"]);
   record!.page_registry.sync([
     ...pagesWithOtherOrigin,
     { provider_page_ref: "provider-page-visible", current_url: "https://example.com/c", title: "Visible", status: "ready", origin: "https://example.com", active: false, document_generation: 1, facts: [] }

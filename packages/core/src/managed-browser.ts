@@ -610,7 +610,7 @@ export function createManagedBrowserService(options: {
           grant_id: context.grant_id,
           operation,
           ...(operation === "profile.read" ? { profile_ref: context.profile_ref } : {}),
-          task_scope: { operations: [operation], profile_refs: [context.profile_ref], origins: [] }
+          task_scope: { operations: [operation], profile_refs: [context.profile_ref], origins: context.task_scope.origins }
         });
         if (operation === "profile.list" && !access.grant.profile_refs.includes(context.profile_ref)) continue;
         return access;
@@ -712,12 +712,13 @@ export function createManagedBrowserService(options: {
         targetAuthorizationState = authorization.state;
       }
     }
+    const authorizedOrigins = targetAccess?.authorized_origins ?? visible.authorized_origins;
     let harborFacts: ObjectValue | undefined;
     try {
       harborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
         operation: input.operation,
         profile_ref: context.profile_ref,
-        authorized_origins: context.task_scope.origins,
+        authorized_origins: authorizedOrigins,
         ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
         ...(input.arguments?.page_id === undefined ? {} : { page_id: input.arguments.page_id }),
         ...(input.arguments?.page_ref === undefined ? {} : { page_ref: input.arguments.page_ref }),
@@ -751,12 +752,14 @@ export function createManagedBrowserService(options: {
     // visibility Grant, target authorization, policy, and Harbor's narrow
     // control/runtime snapshot before returning contextual details.
     let factsChanged = false;
+    let finalAuthorizedOrigins = authorizedOrigins;
     try {
       const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
       const finalVisible = await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, context);
       if (finalConnection.principal.principal_id !== connection.principal.principal_id ||
           finalConnection.connection.connection_id !== connection.connection.connection_id ||
           accessFingerprint(finalVisible) !== visibilitySnapshot) factsChanged = true;
+      finalAuthorizedOrigins = finalVisible.authorized_origins;
       if (!factsChanged && targetAuthorizationAssessed) {
         let finalTargetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
         let finalAuthorizationState: "allowed" | "denied" | "unknown" = "unknown";
@@ -768,6 +771,7 @@ export function createManagedBrowserService(options: {
           finalAuthorizationState = ["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)
             ? "unknown" : describeAuthorizationError(code).state;
         }
+        finalAuthorizedOrigins = finalTargetAccess?.authorized_origins ?? finalVisible.authorized_origins;
         if (finalAuthorizationState !== targetAuthorizationState || targetAccess && (!finalTargetAccess || accessFingerprint(finalTargetAccess) !== accessFingerprint(targetAccess))) factsChanged = true;
         if (!factsChanged && finalTargetAccess && (result.inputs as ObjectValue).state === "complete") {
           try {
@@ -781,7 +785,7 @@ export function createManagedBrowserService(options: {
         const finalHarborFacts = normalizeHarborCapabilityDescription(await harbor("/runtime/capabilities/describe", {
           operation: input.operation,
           profile_ref: context.profile_ref,
-          authorized_origins: context.task_scope.origins,
+          authorized_origins: finalAuthorizedOrigins,
           ...(input.arguments?.runtime_session_ref === undefined ? {} : { runtime_session_ref: input.arguments.runtime_session_ref }),
           ...(input.arguments?.page_id === undefined ? {} : { page_id: input.arguments.page_id }),
           ...(input.arguments?.page_ref === undefined ? {} : { page_ref: input.arguments.page_ref }),

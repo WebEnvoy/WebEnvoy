@@ -705,7 +705,7 @@ export class HarborRuntime {
           if (!humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_visibility_unknown"]; }
         } else if (pageRelationFresh === false) {
           if (!humanControl) { availabilityState = "unknown"; availabilityReasons = ["page_relation_unavailable"]; }
-        } else if (!binding && !humanControl) {
+        } else if ((!binding || typeof binding.facts.origin !== "string" || !authorizedOrigins.includes(binding.facts.origin)) && !humanControl) {
           availabilityState = "blocked"; availabilityReasons = ["stale_reference"];
         } else if (!humanControl && binding && value.document_generation !== undefined && binding.facts.document_generation !== value.document_generation) {
           availabilityState = "blocked"; availabilityReasons = ["stale_reference"];

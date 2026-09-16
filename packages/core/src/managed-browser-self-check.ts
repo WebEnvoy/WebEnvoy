@@ -18,6 +18,7 @@ let creates = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
+const forwardedCapabilityOrigins: string[][] = [];
   let capabilityDescriptionMode: "normal" | "human" | "stale" | "stopped" | "unknown" = "normal";
   let capabilityDescriptionShape: "valid" | "wrong_schema" | "wrong_operation" | "wrong_profile" | "unknown_state" | "profile_missing" = "valid";
   let afterCapabilityDescription: (() => Promise<void>) | undefined;
@@ -58,7 +59,8 @@ const server = createServer((req, res) => { void (async () => {
   };
   else if (req.url === "/runtime/capabilities/describe") {
     let body = ""; for await (const chunk of req) body += chunk;
-    const input = JSON.parse(body) as { operation: string; profile_ref: string; runtime_session_ref?: string; page_id?: string; page_ref?: string; document_generation?: number };
+    const input = JSON.parse(body) as { operation: string; profile_ref: string; authorized_origins: string[]; runtime_session_ref?: string; page_id?: string; page_ref?: string; document_generation?: number };
+    forwardedCapabilityOrigins.push(input.authorized_origins);
     capabilityDescriptions++;
     const state = capabilityDescriptionMode;
     await afterCapabilityDescription?.();
@@ -742,16 +744,18 @@ try {
     profile_refs: ["profile:2"], allowed_operations: ["profile.read"], allowed_origins: ["https://example.com"],
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const context = { grant_id: visibleGrant.grant_id, profile_ref: "profile:2",
-    task_scope: { operations: ["profile.read", "instance.snapshot"], profile_refs: ["profile:2"], origins: ["https://example.com"] } };
+    task_scope: { operations: ["profile.read", "instance.snapshot"], profile_refs: ["profile:2"], origins: ["https://example.com", "https://outside.example"] } };
   const descriptionArguments = { origin: "https://example.com", runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1 };
   const beforeDeniedRuns = (await runRecordStore.listRunRecords()).length;
   const beforeDeniedDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
   const beforeDeniedLocks = lockAttempts;
   const beforeDeniedDescriptions = capabilityDescriptions;
+  const beforeDeniedOriginForwards = forwardedCapabilityOrigins.length;
   const deniedDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "instance.snapshot", context, arguments: descriptionArguments });
   assert.equal((deniedDescription.authorization as { state: string }).state, "denied", "visible Profile and target operation permission are separate");
   assert.equal((deniedDescription.provider as { state: string }).state, "supported");
   assert.equal(capabilityDescriptions, beforeDeniedDescriptions + 2, "visible denied target may still receive owner facts and a final Harbor recheck");
+  assert.deepEqual(forwardedCapabilityOrigins.slice(beforeDeniedOriginForwards), [["https://example.com"], ["https://example.com"]], "Harbor receives only the current Grant/Profile/task intersection");
   assert.equal((await runRecordStore.listRunRecords()).length, beforeDeniedRuns);
   assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeDeniedDecisions);
   assert.equal(lockAttempts, beforeDeniedLocks);
