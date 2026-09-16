@@ -1,0 +1,160 @@
+{
+  "schema_version": "webenvoy.capability-discovery-539-evidence/v1",
+  "work_item": 539,
+  "recorded_at": "2026-09-16",
+  "status": "passed",
+  "scope": "One-operation capability guidance through the installed Agent entry; no new permission dimension, Provider, SDK, browser patch, account workflow, release or deployment.",
+  "specification": {
+    "pull_request": 549,
+    "merge_commit": "09843eb5b38f32f97df50a0ccc14ea09a2f8c655",
+    "merge_tree": "5b3c5ccdb9400b0452415c444702cf8889fac824",
+    "independent_review": "APPROVE"
+  },
+  "implementation": {
+    "pull_request": 550,
+    "runtime_commit": "0be9c43b117fac76331668b1c223cfc4e3e3a1b3",
+    "runtime_tree": "6e619a6dd135958cd7201e61087a2f115b09fc7f",
+    "core_tree": "78a8969ff8a7927a2823a01efd185118660cb0d2",
+    "harbor_tree": "0ffe901970e35160ed6dbbbe03bb322fa1c0d7bb",
+    "definition_revision": "sha256:9eb799ed847131a741008b76fd6300ceeb79791b19ff8d3857d0bfb24a9bc69a",
+    "static_definition": "packages/core/src/managed-capability-definitions.json",
+    "package_build_ordinal": 3,
+    "package_integrity": "verified"
+  },
+  "contracts": {
+    "agent_request": "packages/schemas/schemas/capability-description-request.schema.json",
+    "agent_response": "packages/schemas/schemas/capability-description.schema.json",
+    "harbor_response": "packages/schemas/schemas/harbor-capability-description.schema.json",
+    "positive_fixtures": [
+      "packages/schemas/fixtures/capability-description-request.fixture.json",
+      "packages/schemas/fixtures/capability-description.fixture.json",
+      "packages/schemas/fixtures/harbor-capability-description.fixture.json"
+    ],
+    "negative_fixtures": [
+      "packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json",
+      "packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json",
+      "packages/schemas/invalid-fixtures/harbor-capability-description.invalid.fixture.json"
+    ]
+  },
+  "acceptance": {
+    "D1": {
+      "status": "passed_deterministic",
+      "evidence": "The canonical static definition drives Core shape validation, MCP conditional schema and help; all first-batch operations and the missing-session/origin/file_refs counterexamples pass Core and schema self-checks."
+    },
+    "D2": {
+      "status": "passed_deterministic",
+      "evidence": "Core distinguishes visible Profile metadata from target-operation authorization; invisible Profiles stop before Harbor. Both profile.read and exact profile.list use the existing Grant/Profile/task owner intersection."
+    },
+    "D3": {
+      "status": "passed_deterministic",
+      "evidence": "Core, Harbor and Plugin tests distinguish defined, unknown, out_of_scope, not_exposed, limited, denied, human_control, stopped, stale and unknown states."
+    },
+    "D4": {
+      "status": "passed_deterministic",
+      "evidence": "Harbor's existing control owner remains authoritative; static guidance stays readable and human_control wins over weaker Page uncertainty without inventing a restriction for control_owner=none."
+    },
+    "D5": {
+      "status": "passed_deterministic",
+      "evidence": "After a successful description, stop and human takeover make the subsequent execution fail/not_dispatched; fresh Grant, visibility, target authorization, policy and Harbor facts are rechecked before return and again during execution."
+    },
+    "D6": {
+      "status": "passed_deterministic_and_installed",
+      "evidence": "Plugin tests prove describe branches before ensureRuntime. Installed before/after snapshots for both Providers and after restart showed unchanged Run, authorization-decision, lease, session, browser-process and Runtime-service counts."
+    },
+    "D7": {
+      "status": "passed_installed",
+      "evidence": "Installed auxiliary checks cover startup/discovery, old Runtime and mismatch refusal. The formal package reports the frozen workspace identity; an explicit stop/start changed runtime_id and both Provider descriptions reread persisted facts."
+    },
+    "D8": {
+      "status": "passed_installed",
+      "evidence": "The same installed client and public operation definition described camoufox and chrome_official as supported/allowed/no_known_blocker, then each completed instance.start, instance.observe, original-Run query and instance.stop on one local non-sensitive page."
+    },
+    "D9": {
+      "status": "passed_real_agent",
+      "evidence": "A short Codex Agent used only the installed MCP: connect, contextual describe for instance.input, start, observe/snapshot, one text input, query the original input Run, and stop. The input Run and query both returned succeeded; no execution retry occurred."
+    }
+  },
+  "formal_installation": {
+    "camoufox": {
+      "state": "qualified",
+      "source": "official_upstream",
+      "browser_version": "152.0.4-beta.30",
+      "camoufox_version": "0.5.6",
+      "playwright_version": "1.60.0"
+    },
+    "chrome_official": {
+      "state": "qualified",
+      "source": "official_upstream",
+      "browser_version": "153.0.8010.37",
+      "playwright_version": "1.60.0",
+      "browser_source_sha256": "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3",
+      "executable_sha256": "83dfc7d9e4fde4272ced1c0cc8d3584d3b5d3d3bdac46978ee05031e8c2ae3c2"
+    },
+    "live_evidence_sha256": "99c006f7e25907c684399cc78a7556a0717576be41161ff5331a1632c7c12966",
+    "restart_evidence_sha256": "104c83406bb31e53da958f710a190008145ff72d3c6a83d03cc8263cd8cd01c3"
+  },
+  "real_agent": {
+    "status": "passed",
+    "host": "Codex CLI",
+    "requested_and_accepted_model": "gpt-5.6-luna",
+    "requested_and_accepted_reasoning_effort": "low",
+    "thread": "01a0a98e-9137-7d80-a930-e32236164843",
+    "result_sha256": "8349322168bb272d73a6a4ff4814aa2f0706c94ce85372e2a14c8ebe6c0613b8",
+    "operation_retries": 0
+  },
+  "regression": {
+    "exact_runtime_head_ci": [
+      "Core build, test, typecheck and lint",
+      "Desktop build and typecheck",
+      "Harbor build, test and typecheck",
+      "Packaged no-release evidence",
+      "host attestation evidence",
+      "Python compile",
+      "Lode runtime pins",
+      "workspace path matrix",
+      "workspace-ci"
+    ],
+    "local": [
+      "Core full self-check and 5 tests passed",
+      "Desktop 17 tests passed",
+      "Harbor full suite passed on the runtime candidate lineage with one existing Windows-only skip; the one transient lifecycle timing failure passed on isolated rerun and exact-head CI passed",
+      "Schema validation passed: 26 schemas, 47 positive fixtures and 10 negative fixture sets",
+      "API and conformance checks passed; the offline exact-pin vertical slice reported structured_unavailable and exited successfully, so it is not claimed as an available external checkout verification"
+    ]
+  },
+  "review": {
+    "worker": {
+      "requested_and_accepted_model": "gpt-5.6-luna",
+      "requested_and_accepted_reasoning_effort": "max",
+      "session": "01a0a8e2-7c0a-7a73-acf5-8cd690f774c0"
+    },
+    "independent_reviewer": {
+      "requested_and_accepted_model": "gpt-6-astra",
+      "requested_and_accepted_reasoning_effort": "low",
+      "session": "/root/spec_reviewer",
+      "runtime_candidate_verdict": "APPROVE",
+      "final_exact_head_evidence_review": "recorded on implementation PR before merge"
+    },
+    "hidden_backend_resolution": "not_visible_and_not_inferred"
+  },
+  "retained_failures": [
+    "The first live-client request used a nonexistent destructive management-policy category and stopped before Agent/Profile/browser work.",
+    "Two client-only assumptions were corrected before browser work: a missing optional access-store file and a public response field not present in the accepted schema.",
+    "The first contextual request omitted profile.read from the description task scope and correctly returned discovery_context_unavailable.",
+    "The first Chrome Profile used UTC instead of the host IANA timezone and instance.start correctly returned unsupported; the retained failed Run was not rewritten or replayed. The corrected dedicated Chrome Profile used Asia/Shanghai."
+  ],
+  "cleanup": {
+    "test_grants": "revoked",
+    "test_connections": "revoked",
+    "runtime": "stopped",
+    "local_page_server": "stopped",
+    "retained": ["formal installation", "dedicated Profiles", "Run records", "redacted evidence", "failed evidence"]
+  },
+  "excluded": [
+    "Work Item #540 and Chrome crash diagnostics",
+    "new Provider or SDK",
+    "real account or third-party business workflow",
+    "full App capability platform or new permission system",
+    "release or deployment"
+  ]
+}

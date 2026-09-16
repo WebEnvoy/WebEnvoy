@@ -228,6 +228,8 @@ Core 正式入口的形状校验与 MCP 条件 schema、describe 的 input_schem
 | D8 | 当前已支持的Chrome与Camoufox按各自现行配对返回事实、同一说明可以消费 | 同一安装客户端；复用当前有效测试Profile，必要最薄正常操作，不重做Provider资格。 |
 | D9 | 真实Agent只凭安装入口，描述→补齐输入→一次普通操作→查询原Run | 一个短任务，例如instance.input；采用合成非敏感字段，结果回读；无需再跑文件上传下载全矩阵。 |
 
+#539 的实现、正式安装、双 Provider、重启、短真实 Agent 与 D1—D9 证据记录在 [`docs/verification/capability-discovery-539.json`](../verification/capability-discovery-539.json)。该记录引用冻结的运行候选身份；文档收口本身不改变已验证安装内容。
+
 D8对未支持、混装、人工持有等负例主要用确定性测试；不用真实账号、新Provider、Chrome崩溃或全平台实验来凑齐状态。每条观察说明自己的事实来源与缺失，不允许用组件fixture冒称installed或plugin_verified。
 
 实施顺序：先证明既有漏参及只读副作用反例 → 同一静态定义与只读评估 → 参数化一致性 → 运行候选冻结 → 一份正式安装及短Agent闭环 → 最终独立review/checks → 合并并回读#539/#474。改运行代码才重验受影响路径；文档本身不要求浏览器live。
