@@ -13,16 +13,16 @@
   },
   "implementation": {
     "pull_request": 553,
-    "runtime_commit": "9d92895d9046661034604a0eaf1bb14a9b75731a",
-    "runtime_tree": "eb7a117da82335e1139385a85d49f78ee858bb57",
-    "core_tree": "b08f55084cc5756c82b717159dfdcf37fa316ad8",
-    "harbor_tree": "0c470ee286597f5c59aa4b1dba9075e6b170544f",
+    "runtime_commit": "c4a1fff27a97a34d7513e5c3a9516c55cf5e3764",
+    "runtime_tree": "26dbf7c9c4b2014de528f21bb71f52a6d6d2d8d5",
+    "core_tree": "6539b03343ca07ba7057725c933a71b37e11a85d",
+    "harbor_tree": "4014ec85a6e86087b78545b66dc49e304cca501b",
     "base_commit": "4d0fb2ea2d8fef4f8c020766afaa5c19eff634fa",
     "static_definition": "packages/core/src/managed-capability-definitions.json",
-    "package_builds": 2,
-    "final_package_assets_digest": "cb8c0222370a17e3e033c3ea715779c73b83026e9835843f88f0f9a186abfff6",
+    "package_builds": 3,
+    "final_package_assets_digest": "92d80becd47bddf9e7d778bb9f080cafc7509cb3d15b3211d17690c445724e65",
     "package_integrity": "verified",
-    "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package contains the fix and is the only accepted runtime candidate. Later repository changes are evidence links only."
+    "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package proved the initial live flow. The third and final package adds the independent review fixes for first-batch consistency, incomplete enumeration and effective form semantics; later repository changes are evidence-only."
   },
   "contracts": {
     "request_schema": "packages/schemas/schemas/harbor-observation-targets-request.schema.json",
@@ -40,7 +40,7 @@
   "g0": {
     "baseline": "docs/verification/540/g0-baseline.md",
     "enumeration": "The base path returned only 128 of 160 controls and had no continuation; the fixed shared-driver regression returns one frozen 128+32 batch with retained handles.",
-    "semantics": "Hand-written expectations cover label-for, wrapping labels, aria-labelledby, aria-label, descriptions, named groups, same-name buttons and observable textarea/select/contenteditable without using DOM order to recover identity.",
+    "semantics": "Hand-written expectations cover label-for, wrapping labels, aria-labelledby, aria-label, descriptions, named groups, same-name buttons and observable textarea/select/contenteditable. A Camoufox public-Locator probe proved get_by_label/get_by_role and aria_snapshot names while element_handle equality tied every result back to the original retained object, without DOM-order alignment.",
     "identity": "Replacement nodes, retained nodes with changed role/name/form or disambiguating description, unrelated clock changes and enabled waits are checked separately before Provider dispatch."
   },
   "acceptance": {
@@ -54,7 +54,7 @@
     },
     "O3": {
       "status": "passed_deterministic",
-      "evidence": "Hand-written semantic fixtures cover standard labels and ARIA precedence, prevent textbox values/password material from becoming names, and keep textarea/select observation distinct from newly supported actions."
+      "evidence": "Hand-written semantic fixtures and the public-Locator identity probe cover standard labels and ARIA precedence, prevent textbox values/password material from becoming names, preserve the original ElementHandle, and keep textarea/select observation distinct from newly supported actions."
     },
     "O4": {
       "status": "passed_deterministic_installed_and_agent",
@@ -82,21 +82,21 @@
     },
     "O10": {
       "status": "passed_installed_and_real_agent",
-      "evidence": "The same final package completed long-form continuation, contextual Save, unrelated updates, stale-old-target refusal, fresh continuation and original-Run query separately in Chrome and Camoufox. A real Codex task independently found the late field, filled it, selected the invoice Save, refreshed, continued, queried the original click Run and stopped the Camoufox Instance."
+      "evidence": "The third and final package completed long-form continuation, contextual Save, unrelated updates, stale-old-target refusal, fresh continuation and original-Run query separately in Chrome and Camoufox. A real Codex task independently found the late field, filled it, selected the invoice Save, refreshed, continued, queried the original click Run and stopped the Camoufox Instance."
     }
   },
   "deterministic_regression": {
     "core": "full build/self-check/test/typecheck/lint passed",
-    "harbor": "366 tests: 365 passed and one Windows-only ZIP test skipped; the post-live parser correction passed its 19 affected tests",
+    "harbor": "366 tests: 365 passed and one Windows-only ZIP test skipped; focused first-batch consistency, public semantic identity, incomplete enumeration and form-submitter regressions also passed",
     "desktop": "15 passed; two official-upstream fixture checks skipped because those fixture directories were absent on the test host",
     "schemas": "28 schemas, 50 positive fixtures and 12 negative fixture sets passed",
     "python": "affected shared-driver source compiled and ran through the Harbor regressions",
     "skips": "Skipped tests are recorded as skipped, not as successful execution."
   },
   "formal_installation": {
-    "candidate_commit": "9d92895d9046661034604a0eaf1bb14a9b75731a",
-    "candidate_tree": "eb7a117da82335e1139385a85d49f78ee858bb57",
-    "live_evidence_sha256": "33f3dd2afa48fe727f2fa7f570dd00755516ce819d00770173dc7a60f4bc94e3",
+    "candidate_commit": "c4a1fff27a97a34d7513e5c3a9516c55cf5e3764",
+    "candidate_tree": "26dbf7c9c4b2014de528f21bb71f52a6d6d2d8d5",
+    "live_evidence_sha256": "ac33d2fc11cabd4d2083bcd1be07fcd80c8d564caf42bb15171e40446c1213f6",
     "camoufox": {
       "combination": "Camoufox 0.5.6 / browser 152.0.4-beta.30 / Playwright 1.60.0",
       "long_form": "128+32, 160 unique targets in one observation",
@@ -107,7 +107,8 @@
       "combination": "Chrome 153.0.8010.37 / Playwright 1.60.0",
       "long_form": "128+32, 160 unique targets in one observation",
       "same_name_selection": "invoice context selected; shipping unchanged",
-      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued"
+      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued",
+      "installation_note": "The earlier dedicated Chrome.app auto-updated to 153.0.8010.48. The owner binding was refreshed to a fresh copy of the already approved 153.0.8010.37 source with the pinned executable hash; an exact driver launch and the final installed client both passed. No browser or SDK upgrade was performed."
     },
     "cleanup": "Both installed-client sessions stopped; two Grants and the connection were revoked; both Profile policies were restored."
   },
@@ -116,18 +117,18 @@
     "host": "Codex CLI 0.154.0-alpha.6.2",
     "actual_model": "gpt-5.6-sol",
     "actual_reasoning_effort": "low",
-    "successful_thread": "01a0ad29-03a4-7d52-b8e5-c82570508af7",
+    "successful_thread": "01a0ad63-95d4-78a0-9a49-cd5b498ad85e",
     "successful_provider": "camoufox",
-    "successful_result_sha256": "495c1927a09c8dbc338cd2ee4e30d3db83bb7cb070b5cdbc16a3088132a01400",
+    "successful_result_sha256": "d125935d3baba81feb8b2f542cb68450bff89cd1d96a5e91f85e6b28de6461e9",
     "result": "late field filled; invoice Save selected; local update followed by fresh snapshot; Continue clicked; original click Run succeeded/completed/dispatched; Instance stopped",
-    "retained_failure": "The first Chrome Agent task made one start request, received launch_failed, queried that failed Run and stopped without retrying or acting on the page. Chrome's product path is separately proven by the deterministic installed client on the same candidate; the failed Agent run is not rewritten as success.",
+    "retained_failure": "The first Chrome Agent task made one start request, received launch_failed, queried that failed Run and stopped without retrying or acting on the page. Readback later proved that its persisted binding still named 153.0.8010.37 while the old app path had auto-updated to 153.0.8010.48 and changed executable hash. The failure is retained; after an owner-scoped binding refresh to the original pinned source, the final installed Chrome client passed.",
     "retained_failure_sha256": "c2fcacfccb8195db5ed00df4eb9c80d02874fd8a628ef6ea86190bebe6da5be9"
   },
   "review_configuration": {
     "worker": {
       "requested_model": "gpt-5.6-luna",
       "requested_reasoning_effort": "max",
-      "sessions": ["/root/core_projection", "/root/correction_worker", "/root/harbor_implementation"]
+      "sessions": ["/root/core_projection", "/root/harbor_fix", "/root/540_review_fixes", "/root/540_accessibility_probe", "/root/540_agent_failure"]
     },
     "independent_reviewer": {
       "requested_model": "gpt-6-astra",
@@ -140,7 +141,7 @@
   },
   "evidence_classification": {
     "deterministic": "Executed locally on the runtime candidate lineage.",
-    "installed": "Executed through the second and final packaged application with both Providers.",
+    "installed": "Executed through the third and final packaged application with both Providers.",
     "real_agent": "Executed through the installed MCP by a separate Codex task; the successful task used Camoufox.",
     "ui_automation": "Not rerun; only the unchanged owner/native handoff path is inherited from existing formal evidence.",
     "independent_review": "The reviewer reruns selected deterministic checks and audits installed/Agent originals; no duplicate live run is implied."
@@ -150,6 +151,7 @@
     "test_connections": "revoked",
     "profile_policies": "restored",
     "provider_sessions": "stopped",
+    "runtime_and_local_page_server": "stopped",
     "retained": ["formal installation", "dedicated Profiles", "Run records and receipts", "redacted success and failure evidence"]
   },
   "excluded": [
