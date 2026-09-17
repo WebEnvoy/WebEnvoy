@@ -4,6 +4,13 @@
 
 产品方向、V1 约束和决策状态以组织级 [canonical v1.5 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。
 
+## 可选模型辅助的执行边界
+
+- [#558](https://github.com/WebEnvoy/WebEnvoy/issues/558) 为独立条件性后续，首个采用验证为 [#559](https://github.com/WebEnvoy/WebEnvoy/issues/559)；不扩大当前 V1 完成门，不把 #555/#556/#557 改成模型接入任务。
+- 具体采用边界见 [ADR 0013](docs/adr/0013-optional-model-assisted-browser-tasks.md)，用户行为见 [Model Usage V1](docs/specs/model-usage-v1.md)。Proposed 文档须先与组织级 canonical 修订一起完成接受流程，不能当作模型运行、费用或外发授权。
+- 使用通用 Model Provider；通用连接优先采用 TanStack AI 正式能力。原生 evaluation 不满足条件时不默认自建 bridge、不伪装成 TextAdapter，不预建通用模型／任务平台。
+- 模型可以完成一段有界循环，但不拥有授权、浏览器现场或业务结果。每次派发复用现有 owner；DONE 不等于业务成功，交回宿主也不能重放 unknown 写入。凭据、数据外发、停止和迟到回复的边界必须沿正式合同验收。
+
 ## 实施原则
 
 - 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。

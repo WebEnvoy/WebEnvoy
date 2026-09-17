@@ -14,6 +14,8 @@
 
 > **2026-09-14 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。#523／PR #524 的受管文件单文件 Plugin slice 有独立 `plugin_verified` 证据，但不把其他能力或完整 V1 扩写为 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 
+> **可选模型辅助的边界（Proposed，#558）**：[Model Usage V1](model-usage-v1.md) 与 [ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md) 描述后续模型如何消费已有 Runtime。它不是第十三类浏览器基础能力，也不改变本文件的十二类 V1 目标。Model Provider 不等于 Browser Provider；模型 evaluation 不等于本文件的 Controlled evaluation（受控网页脚本执行）。Harbor 继续拥有现场、目标与控制，Core 继续拥有授权和结果；模型输出只是待检查的建议。该方向未接受／未配置／不可用不影响原有合法路径，不把后续模型验证变成本规格统一前置。
+
 ## 1. 目标
 
 成熟的 WebEnvoy Runtime 应让已授权 Agent 即使没有网站 SKILL，也能在受管 Profile 的原 Instance 中完成现代网页任务所需的主要浏览器操作。

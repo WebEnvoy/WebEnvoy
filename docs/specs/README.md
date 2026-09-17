@@ -8,6 +8,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 | 规格 | 归口 | 作用 |
 | --- | --- | --- |
+| [Model Usage V1](model-usage-v1.md) | [产品 FR #558](https://github.com/WebEnvoy/WebEnvoy/issues/558)、[条件验证 #559](https://github.com/WebEnvoy/WebEnvoy/issues/559) | Proposed：通用模型配置、用途、外发与费用、有界网页循环、DONE/BLOCKED、接管／交回和结果核验；非 V1 发布阻塞，不表示模型已支持。 |
 | [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 定义 V1 Browser Runtime capability 类别、支持／证据状态、权限、数据边界、恢复和完成条件。 |
 | [Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510) | 冻结同一 Instance 内多 Page、document generation、popup/opener、URL/origin authorization、redirect、bounded close tombstone、native tab handoff 的 Page/ref 连续性、旧观察失效、receipt 与关系异常安全暂停语义。 |
 | [Profile Environment V1](profile-environment-v1.md) | [Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471) | 定义长期 Profile 环境的 configured／effective／pending／observed／drift、Provider owner、连续性和验证。 |
@@ -23,6 +24,13 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) | [Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定可选 SKILL 的来源身份、受管 data-root 生命周期、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与恢复语义。 |
 | [Managed Browser Files V1](browser-files-v1.md) | [Work Item #523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，授权语义 [#544](https://github.com/WebEnvoy/WebEnvoy/issues/544) | 冻结 owner 文件材料、`file.upload`/`file.download` 的 Page/ControlLease/Grant 绑定、受限格式与配额、原子持久化、结果/对账、撤销/过期，以及 legacy/v2 下载归属边界。 |
 | [Grant Wire Contract V1 (v1.4)](grant-wire-contract-v1.md) | [Work Items #505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、[#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、[#544](https://github.com/WebEnvoy/WebEnvoy/issues/544)、[#547](https://github.com/WebEnvoy/WebEnvoy/issues/547) | 固定 recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle、digest CAS、可信 stopped、严格 reader 拒绝和历史兼容边界。 |
+
+## 可选模型辅助的设计义务（Proposed）
+
+- #558/#559：方向与行为由 [ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md) 和 [Model Usage V1](model-usage-v1.md) 承接，正式接受须先完成 canonical 对应修订；不以文档接受、SDK 接口或模型目录可见冒充功能完成。
+- 正式模型能力发现／任务委托／查询／退出投影形成时，`DO-PLUGIN-EXPOSURE = triggered`；新增可委托模型使用、数据外发或持久跨进程授权字段时，`DO-GRANT-WIRE = triggered`，不能继承 #555 的 `not-triggered`。
+- 完整模型设置、导航或活动工作台改变时，`DO-APP-IA = triggered`；无论是否触发完整 IA，最小 owner 配置、外发、费用和停止入口都必须定义并验收。Browser、Network、Console 和 Provider-private schema 未实际改变时不扩围，实际改变时重判。
+- 本轮仅建立语义和采用边界，不新增运行依赖、字段枚举、空 schema/fixture、持续监控或空验证报告；#555/#556/#557 独立推进，模型方向不增加当前 V1 发布阻塞。
 
 ## 使用规则
 

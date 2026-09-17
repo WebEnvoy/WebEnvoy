@@ -6,6 +6,12 @@
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 
+## 与可选模型辅助的关系（Proposed）
+
+[ADR 0013](0013-optional-model-assisted-browser-tasks.md) 为 [#558](https://github.com/WebEnvoy/WebEnvoy/issues/558) 提议可选模型辅助边界，正式接受以组织级 canonical 对应修订为前提。该方向不改变本 ADR 的 Browser Runtime、Plugin-first、Core 授权／结果与 Harbor 现场职责，也不新增 V1 必须完成项。
+
+模型可以在明确范围内连续消费现有浏览器操作；Plugin 仍保持薄层。模型连接、用途和调用协调不进入 Browser Provider／Profile binding，不由 Harbor 决定业务下一步。当前与后续采用条件、用户外发同意及结果核验见 [Model Usage V1](../specs/model-usage-v1.md)，不得据 SDK 的循环、审批或恢复接口绕过现有授权与 unknown 不重放。
+
 ## 背景
 
 [ADR 0011](0011-v1-managed-browser-and-skill-delivery.md) 终止了按对象、预测性合同和单站点形态横向铺设的实施方式，确立了围绕真实用户结果、受管 Profile、统一授权、同实例协作和 SKILL 纵向路径推进 V1 的原则。该决策仍然有效。
