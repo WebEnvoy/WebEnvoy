@@ -16,6 +16,8 @@
 
 静态参数定义、Core形状校验、MCP条件schema和帮助示例采用同一归口；Provider支持、授权和现场仍各由现有owner提供，不在Plugin复制动态矩阵。#540观察续读、权限扩围、Chrome资格和全生命周期网络隔离不在本补充范围。本补充为 exposure v1.3；既有工具、Grant与operation结果合同保持，未知discovery版本准确拒绝而不fallback。
 
+#540 的 snapshot projection 以已接受的 [Observation Completeness and Target Identity V1](observation-targets-v1.md) 为优先边界；`observe` 只提供页面事实，不产生 target。
+
 ## 固定工具与投影
 
 已安装、完整性核验的 Plugin 通过下列固定工具消费 Runtime；Plugin 不建立授权、不直接调用 Harbor/Provider、不把浏览器协议作为回退路径。
