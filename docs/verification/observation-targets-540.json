@@ -25,6 +25,24 @@
     "package_integrity": "verified",
     "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package proved the initial live flow. The third package added first-batch consistency, incomplete enumeration and effective form semantics. The fourth and final package fixes the reviewed MCP limit projection and preserves private effective form-action identity; later repository changes are evidence-only."
   },
+  "budget_correction": {
+    "pull_request": 554,
+    "base_commit": "71b5e953ec8db0c67b56a1cd3192630a66a3a96a",
+    "candidate_commit": "4dc81e97364f28e62223f590da55b0842368409f",
+    "candidate_tree": "380db47f0dab66f69dcd450f3e054d4f6c64b062",
+    "package_builds": 1,
+    "package_assets_digest": "a861318b2fd1ecd4c695d5546db4520251bb40b4dc244cf375fbb3d8c9c21ff0",
+    "root_cause": "Capture stopped retaining records at the 2 MiB public-metadata budget, but the stable-batch verification pass compared the retained prefix against an uncapped candidate set and misclassified the count difference as observation_changed.",
+    "fix": "Capture and verification now consume the same public projection and metadata/scan/capture boundaries. Budget-skipped candidates do not enter the retained batch, while real retained-object, order and semantic differences still fail consistency checks.",
+    "deterministic": "The production shared-driver regression uses 800 hand-authored long-metadata controls. It returns an incomplete metadata_truncated batch with total null, advances every retained target exactly once through finite continuation, and separately preserves observation_cursor_stale for a real semantic change. Capture-limit, scan-limit, 128+32 and retained-handle disposal assertions also pass.",
+    "installed_projection": {
+      "status": "passed",
+      "evidence_sha256": "ee3fdf2d254287256260e62af1e88f876e6c16339a8e9fd3131c5b55b46b9cd6",
+      "result": "The exact packaged MCP accepted and forwarded a two-segment harbor-observation-targets/v1 response with metadata_truncated, enumeration_complete false, total null and complete false; continuation ended with next_cursor null without changing observation identity.",
+      "scope": "A synthetic Core socket response isolates installed Plugin format/projection. The production collector itself is covered by the direct shared-driver regression; the unchanged Chrome/Camoufox live and real-Agent evidence remains inherited from PR #553."
+    },
+    "retained_non_acceptance_attempt": "An additional Camoufox stress page with hundreds of maximum-length descriptions exceeded the existing 60-second operation boundary and returned unknown_outcome. It is retained as a failed exploratory setup, not cited as correction success; its temporary Grant and connection were revoked, policy restored, and task Runtime/page server stopped."
+  },
   "contracts": {
     "request_schema": "packages/schemas/schemas/harbor-observation-targets-request.schema.json",
     "response_schema": "packages/schemas/schemas/harbor-observation-targets.schema.json",
@@ -50,8 +68,8 @@
       "evidence": "Shared-driver tests cover 160 controls as 128+32 with one observation and no duplicate target; text/control completeness combinations and empty results are separate. Both installed Providers repeated 128+32."
     },
     "O2": {
-      "status": "passed_deterministic_and_schema",
-      "evidence": "Tests and negative fixtures cover limit bounds, UTF-8/response bytes, scan/capture ceilings, repeated and invalid cursors, exact last-segment invariants and unknown totals without generating expected results from the production collector. The installed MCP schema accepted snapshot 128 and diagnostics 64 while rejecting snapshot 129, diagnostics 65 and observe with limit."
+      "status": "passed_after_budget_correction",
+      "evidence": "PR #554 adds the missing production-method boundary case: a stable 800-control synthetic page crosses the 2 MiB metadata budget, returns metadata_truncated with unknown total, and finishes the retained batch without duplicates or observation_changed. Separate capture/scan ceilings and a real semantic change retain their prior behavior. The exact installed MCP accepts and forwards both incomplete segments; request limit/schema evidence from PR #553 remains applicable."
     },
     "O3": {
       "status": "passed_deterministic",
@@ -130,14 +148,14 @@
     "worker": {
       "requested_model": "gpt-5.6-luna",
       "requested_reasoning_effort": "max",
-      "sessions": ["/root/core_projection", "/root/harbor_fix", "/root/540_review_fixes", "/root/540_accessibility_probe", "/root/540_agent_failure"]
+      "sessions": ["/root/core_projection", "/root/harbor_fix", "/root/540_review_fixes", "/root/540_accessibility_probe", "/root/540_agent_failure", "/root/540_budget_worker", "/root/540_budget_probe"]
     },
     "independent_reviewer": {
       "requested_model": "gpt-6-astra",
       "requested_reasoning_effort": "low",
       "session": "/root/correction_reviewer",
       "spec_verdict": "APPROVE",
-      "implementation_verdict": "pending exact-head review"
+      "implementation_verdict": "PR #553 approved; PR #554 exact-head review pending"
     },
     "host_visibility": "The host accepted the requested spawn configuration. Hidden backend resolution is not visible and is not inferred."
   },

@@ -139,6 +139,12 @@ class Handle:
         self.fills = []
         self.presses = []
         self.disposals = 0
+        self.dom_identity = object()
+    def clone(self):
+        clone = object.__new__(Handle)
+        clone.__dict__ = self.__dict__.copy()
+        clone.disposals = 0
+        return clone
     def metadata(self):
         return {
             "role": self.role,
@@ -157,7 +163,7 @@ class Handle:
     async def evaluate(self, expression, *args):
         if expression == "e => Boolean(e.isConnected)": return self.connected
         if expression == "e => e.files ? e.files.length : 0": return 0
-        if expression == "(e, other) => e === other": return bool(args) and args[0] is self
+        if expression == "(e, other) => e === other": return bool(args) and args[0].dom_identity is self.dom_identity
         if expression == "(e, form) => e.form === form": return bool(args) and args[0] is self.form_token
         if "getBoundingClientRect" in expression: return self.metadata()
         raise AssertionError("unexpected handle expression: " + expression)
@@ -176,16 +182,19 @@ class Body:
     async def inner_text(self, timeout=None): return self.page.text
 
 class ControlLocator:
-    def __init__(self, page, handles):
+    def __init__(self, page, handles, fresh=False):
         self.page = page
         self.handles = handles
+        self.fresh = fresh
     def nth(self, index):
-        return ControlLocator(self.page, self.handles[index:index + 1])
+        return ControlLocator(self.page, self.handles[index:index + 1], self.fresh)
     async def count(self): return len(self.handles)
     async def element_handle(self):
-        return self.handles[0] if self.handles else None
+        if not self.handles:
+            return None
+        return self.handles[0].clone() if self.fresh else self.handles[0]
     async def aria_snapshot(self):
-        handle = await self.element_handle()
+        handle = self.handles[0] if self.handles else None
         return None if handle is None else "- " + handle.public_role + " " + json.dumps(handle.public_name)
 
 class Mouse:
@@ -202,6 +211,9 @@ class PageImpl:
         self.locator_mismatch_index = None
         self.wait_ticks = 0
         self.mouse = Mouse()
+        self.fresh_after_first_query = False
+        self.query_count = 0
+        self.last_query_handles = []
     @staticmethod
     def make_handles():
         values = [
@@ -229,9 +241,25 @@ class PageImpl:
         first.context = []
         first.placeholder = None
         return [first] + [Handle(index, name="Action " + str(index)) for index in range(1, 2049)]
+    @staticmethod
+    def make_metadata_limited_handles():
+        handles = []
+        for index in range(800):
+            handle = Handle(index, name="名" * 256, description="说明" * 128)
+            handle.public_name = "名" * 256
+            handle.context = [{"kind": "form", "name": "模块" * 64}, {"kind": "region", "name": "区域" * 64}]
+            handle.placeholder = "提示" * 64
+            handles.append(handle)
+        return handles
     def is_closed(self): return False
     async def title(self): return "Fixture"
-    async def query_selector_all(self, selector): return list(self.handles)
+    async def query_selector_all(self, selector):
+        self.query_count += 1
+        handles = list(self.handles)
+        if self.fresh_after_first_query and self.query_count > 1:
+            handles = [handle.clone() for handle in handles]
+            self.last_query_handles = handles
+        return handles
     async def evaluate(self, expression):
         if "document.body" in expression:
             text = self.text
@@ -247,12 +275,29 @@ class PageImpl:
         if self.locator_mismatch_index is not None:
             index = self.locator_mismatch_index
             handles[index] = Handle(index, name=self.handles[index].name)
-        return ControlLocator(self, handles)
+        return ControlLocator(self, handles, self.fresh_after_first_query and self.query_count > 1)
     def get_by_role(self, role, name, exact):
         return ControlLocator(self, [handle for handle in self.handles if handle.public_role == role and handle.public_name == name])
     async def wait_for_timeout(self, milliseconds):
         self.wait_ticks += 1
         await asyncio.sleep(0)
+
+class EmptyLocator:
+    def nth(self, index): return self
+    async def element_handle(self): return None
+
+class ScanHandle:
+    def __init__(self): self.disposals = 0
+    async def evaluate(self, expression, *args): raise AssertionError("scan sentinel is not a control")
+    async def dispose(self): self.disposals += 1
+
+class ScanPage:
+    url = "https://example.test/form"
+    main_frame = object()
+    def __init__(self): self.handles = [ScanHandle() for _ in range(module.MAX_OBSERVATION_ELEMENTS + 1)]
+    async def query_selector_all(self, selector): return list(self.handles)
+    def locator(self, selector): return EmptyLocator()
+    async def evaluate(self, expression): return "short body"
 
 async def run():
     page = PageImpl()
@@ -341,6 +386,7 @@ async def run():
     page.handles = PageImpl.make_incomplete_handles()
     incomplete_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     assert incomplete_batch["coverage"]["controls"]["enumeration_complete"] is False, incomplete_batch["coverage"]["controls"]
+    assert "capture_limit_reached" in incomplete_batch["coverage"]["controls"]["reason_codes"], incomplete_batch["coverage"]["controls"]
     incomplete_ref = incomplete_batch["controls"][0]["target_ref"]
     assert incomplete_batch["controls"][0]["disambiguation"] == "ambiguous", incomplete_batch["controls"][0]
     incomplete_action = await instance.interact(dict(common, action="click", observation_ref=incomplete_batch["observation_ref"], target_ref=incomplete_ref))
@@ -348,6 +394,19 @@ async def run():
     assert incomplete_action["dispatch_state"] == "not_dispatched", incomplete_action
     assert incomplete_action["failure_class"] == "target_ambiguous", incomplete_action
     assert page.handles[0].clicks == 0, page.handles[0].clicks
+
+    scan_page = ScanPage()
+    scan_state = module.PageState("page:scan", scan_page, ["https://example.test"])
+    scan_batch = await instance.snapshot(scan_state, {"page_ref": "page:scan", "page_id": "page:scan", "document_generation": 1, "limit": 128})
+    scan_controls = scan_batch["coverage"]["controls"]
+    assert scan_batch["controls"] == [], scan_batch
+    assert scan_controls["enumeration_complete"] is False, scan_controls
+    assert scan_controls["captured_count"] == 0, scan_controls
+    assert scan_controls["total"] is None, scan_controls
+    assert scan_controls["reason_codes"] == ["scan_limit_reached"], scan_controls
+    assert scan_batch["continuation"]["has_more"] is False, scan_batch
+    assert scan_controls["complete"] is False, scan_controls
+    assert all(handle.disposals > 0 for handle in scan_page.handles), "scan-limit handles were not released"
 
     page.handles = PageImpl.make_ambiguous_handles()
     ambiguous_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
@@ -362,7 +421,60 @@ async def run():
     assert other["status"] == "completed" and other["dispatch_state"] == "dispatched", other
     assert page.handles[2].clicks == 1, page.handles[2].clicks
 
+    # Regression: the metadata budget makes the captured batch incomplete;
+    # unchanged candidates must still pass the same-budget consistency check.
+    page.handles = PageImpl.make_metadata_limited_handles()
+    page.fresh_after_first_query = True
+    page.query_count = 0
+    metadata_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    metadata_verification_handles = list(page.last_query_handles)
+    metadata_controls = metadata_batch["coverage"]["controls"]
+    assert metadata_controls["enumeration_complete"] is False, metadata_controls
+    assert metadata_controls["captured_count"] < 800, metadata_controls
+    assert metadata_controls["total"] is None, metadata_controls
+    assert "metadata_truncated" in metadata_controls["reason_codes"], metadata_controls
+    assert metadata_batch["coverage"]["semantics"]["complete"] is False, metadata_batch
+    assert "metadata_truncated" in metadata_batch["coverage"]["semantics"]["reason_codes"], metadata_batch
+    assert metadata_batch["continuation"]["has_more"] is True, metadata_batch
+    assert metadata_batch["continuation"]["returned_count"] == len(metadata_batch["controls"]) > 0, metadata_batch
+    assert all(handle.disposals == 1 for handle in metadata_verification_handles), "fresh consistency handles were not released"
+    metadata_cursor = metadata_batch["continuation"]["next_cursor"]
+    metadata_continuation = metadata_batch
+    metadata_refs = [control["target_ref"] for control in metadata_batch["controls"]]
+    metadata_segments = 1
+    while metadata_continuation["continuation"]["has_more"]:
+        assert metadata_segments < 16, "metadata continuation did not make progress"
+        metadata_cursor_result = await instance.interact(dict(common, action="snapshot", observation_ref=metadata_batch["observation_ref"], cursor=metadata_cursor, limit=128))
+        assert metadata_cursor_result["status"] == "completed", metadata_cursor_result
+        metadata_continuation = metadata_cursor_result["snapshot"]
+        assert metadata_continuation["observation_ref"] == metadata_batch["observation_ref"], metadata_continuation
+        assert metadata_continuation["captured_at"] == metadata_batch["captured_at"], metadata_continuation
+        assert metadata_continuation["coverage"]["controls"]["reason_codes"] == metadata_controls["reason_codes"], metadata_continuation
+        assert metadata_continuation["continuation"]["returned_count"] == len(metadata_continuation["controls"]) > 0, metadata_continuation
+        metadata_refs.extend(control["target_ref"] for control in metadata_continuation["controls"])
+        metadata_segments += 1
+        metadata_cursor = metadata_continuation["continuation"]["next_cursor"]
+    assert metadata_continuation["continuation"]["has_more"] is False, metadata_continuation
+    assert metadata_continuation["continuation"]["next_cursor"] is None, metadata_continuation
+    assert metadata_continuation["coverage"]["controls"]["complete"] is False, metadata_continuation
+    assert metadata_continuation["coverage"]["controls"]["returned_through"] == metadata_controls["captured_count"], metadata_continuation
+    retained_count = metadata_controls["captured_count"]
+    assert len(metadata_refs) == retained_count, metadata_refs
+    assert len(set(metadata_refs)) == retained_count, metadata_refs
+    assert state.snapshot_batch["records"][0]["handle"] is page.handles[0], (state.snapshot_batch["records"][0]["handle"], page.handles[0])
+    assert metadata_verification_handles[0] is not page.handles[0], (metadata_verification_handles[0], page.handles[0])
+    assert all(handle.disposals == 0 for handle in page.handles[:retained_count]), [(index, handle.disposals) for index, handle in enumerate(page.handles[:retained_count]) if handle.disposals][:5]
+    assert all(handle.disposals > 0 for handle in page.handles[retained_count:]), "unretained handles were not released"
+
+    page.handles[0].description = "变化后的描述"
+    metadata_changed = await instance.interact(dict(common, action="snapshot", observation_ref=metadata_batch["observation_ref"], cursor=metadata_batch["continuation"]["next_cursor"], limit=128))
+    assert metadata_changed["status"] == "unavailable", metadata_changed
+    assert metadata_changed["dispatch_state"] == "not_dispatched", metadata_changed
+    assert metadata_changed["failure_class"] == "observation_cursor_stale", metadata_changed
+    assert all(handle.disposals == 1 for handle in page.last_query_handles), "changed-page consistency handles were not released"
+
     page.handles = PageImpl.make_handles()
+    page.fresh_after_first_query = False
     changed_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     changed_first = page.handles[0]
     changed_first.description = "Changed after capture"
