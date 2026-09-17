@@ -18,6 +18,16 @@
 
 #540 的 snapshot projection 以已接受的 [Observation Completeness and Target Identity V1](observation-targets-v1.md) 为优先边界；`observe` 只提供页面事实，不产生 target。
 
+## 可选模型辅助的后续投影边界（Proposed，#558）
+
+[Model Usage V1](model-usage-v1.md) 定义首个有界网页辅助用途；[ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md) 定义采用与 owner 边界。正式接受以组织级 canonical 对应修订为前提。本段不新增当前 MCP 工具、operation、参数、schema 或安装支持声明，也不改变 #539/#540 与 #555/#557 的独立范围。
+
+未来正式 Plugin 消费须能委托一段明确任务、查询原进度／动作／结果、停止和准确交接；不要求 Host Agent 逐步批准或每次 DONE 再调用大模型。Plugin 仅投影同一 Core/Harbor 事实，不保存密钥、复制授权表或另起浏览器／Run 状态机。
+
+开始须具备网页权限、获准模型用途与外发／费用范围；工具可见或连接测试成功均不替代这些决定。DONE 只结束模型循环，业务结果按实际证据核验；BLOCKED 可交回实际宿主，无宿主则待处理。新鲜度、ControlLease、迟到回复拒绝、停止及 unknown 不重放沿原 owner 执行，不能借 SDK resume 或交回宿主重复写入。
+
+正式投影形成前必须触发并完成 `DO-PLUGIN-EXPOSURE`，冻结真实入口、版本、过滤、错误和兼容；新增可委托权限或持久跨进程授权字段时同时触发 `DO-GRANT-WIRE`。这些实现合同实际形成后再链接，不在本 docs PR 预建空 schema。旧安装不能消费辅助能力时局部报告，继续保留原有浏览器与管理路径。
+
 ## 固定工具与投影
 
 已安装、完整性核验的 Plugin 通过下列固定工具消费 Runtime；Plugin 不建立授权、不直接调用 Harbor/Provider、不把浏览器协议作为回退路径。
