@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/harbor-observation-targets.schema.json",
+  "title": "Harbor observation targets",
+  "description": "The bounded public snapshot segment for controls retained by one Page observation batch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "page_id", "page_ref", "document_generation", "observation_ref", "captured_at", "controls", "text", "truncated", "coverage", "continuation"],
+  "properties": {
+    "schema_version": { "const": "harbor-observation-targets/v1" },
+    "page_id": { "$ref": "#/$defs/ref" },
+    "page_ref": { "$ref": "#/$defs/ref" },
+    "document_generation": { "type": "integer", "minimum": 1 },
+    "observation_ref": { "$ref": "#/$defs/ref" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "controls": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/control" } },
+    "text": { "type": "string", "maxLength": 65536 },
+    "truncated": { "type": "boolean" },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "continuation": { "$ref": "#/$defs/continuation" }
+  },
+  "$defs": {
+    "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9:_./-]+$"
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_ref", "role", "name", "enabled", "name_source", "description", "context", "hints", "disambiguation", "truncated_fields"],
+      "properties": {
+        "target_ref": { "$ref": "#/$defs/ref" },
+        "role": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 256 },
+        "enabled": { "type": "boolean" },
+        "name_source": { "enum": ["provider_accessibility", "html_label", "aria_labelledby", "aria_label", "content", "alt", "title", "none"] },
+        "description": { "type": ["string", "null"], "maxLength": 256 },
+        "context": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "enum": ["form", "group", "dialog", "region", "heading"] },
+              "name": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          }
+        },
+        "hints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["placeholder", "input_type", "multiline", "editable"],
+          "properties": {
+            "placeholder": { "type": ["string", "null"], "maxLength": 128 },
+            "input_type": { "type": ["string", "null"], "maxLength": 128 },
+            "multiline": { "type": ["boolean", "null"] },
+            "editable": { "type": ["boolean", "null"] }
+          }
+        },
+        "disambiguation": { "enum": ["unique", "contextual", "ambiguous"] },
+        "truncated_fields": { "type": "array", "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "excluded", "controls", "text", "semantics"],
+      "properties": {
+        "scope": { "const": "main_document_light_dom" },
+        "excluded": { "type": "array", "items": { "enum": ["child_frames", "shadow_roots", "virtualized_not_in_dom"] } },
+        "controls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enumeration_complete", "captured_count", "total", "returned_through", "complete", "reason_codes"],
+          "properties": {
+            "enumeration_complete": { "type": "boolean" },
+            "captured_count": { "type": "integer", "minimum": 0, "maximum": 2048 },
+            "total": { "type": ["integer", "null"], "minimum": 0, "maximum": 2048 },
+            "returned_through": { "type": "integer", "minimum": 0, "maximum": 2048 },
+            "complete": { "type": "boolean" },
+            "reason_codes": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/coverage_reason" } }
+          }
+        },
+        "text": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "returned_bytes"],
+          "properties": {
+            "state": { "enum": ["complete", "truncated", "omitted_on_continuation", "unavailable"] },
+            "returned_bytes": { "type": "integer", "minimum": 0, "maximum": 65536 }
+          }
+        },
+        "semantics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["complete", "reason_codes"],
+          "properties": {
+            "complete": { "type": "boolean" },
+            "reason_codes": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/coverage_reason" } }
+          }
+        }
+      }
+    },
+    "coverage_reason": { "enum": ["scan_limit_reached", "capture_limit_reached", "semantic_unavailable", "metadata_truncated", "text_unavailable"] },
+    "continuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "returned_count", "has_more", "next_cursor"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0, "maximum": 2048 },
+        "returned_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "has_more": { "type": "boolean" },
+        "next_cursor": { "type": ["string", "null"], "maxLength": 256, "pattern": "^[A-Za-z0-9:_./-]+$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "has_more": { "const": true } }, "required": ["has_more"] },
+          "then": { "properties": { "next_cursor": { "$ref": "#/$defs/ref" } }, "required": ["next_cursor"] }
+        },
+        {
+          "if": { "properties": { "has_more": { "const": false } }, "required": ["has_more"] },
+          "then": { "properties": { "next_cursor": { "type": "null" } } }
+        }
+      ]
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Harbor observation owner with Core/Plugin public projection",
+    "status": "accepted-v1",
+    "schema_version": "harbor-observation-targets/v1",
+    "compatibility_boundary": "One bounded instance.snapshot segment from one Page observation batch. It never exposes Provider handles, raw DOM, values, or a second Page identity.",
+    "source_adrs": [
+      "docs/specs/observation-targets-v1.md",
+      "docs/specs/page-navigation-runtime-contract-v1.md"
+    ]
+  },
+  "x-webenvoy-observation-targets": true
+}

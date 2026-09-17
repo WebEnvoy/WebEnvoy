@@ -193,7 +193,7 @@ function parse(value: unknown): Request {
   if (input.provider_id !== undefined && !["cloakbrowser", "chrome_official", "camoufox"].includes(String(input.provider_id))) return fail("managed_browser_invalid_input");
   for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "cursor", "target_ref", "file_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return fail("managed_browser_invalid_input");
-  if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 64)) return fail("managed_browser_invalid_input");
+  if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 128)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
     let url: URL;
     try { url = new URL(text(input.url)); } catch { return fail("managed_browser_invalid_input"); }
@@ -222,10 +222,10 @@ function parse(value: unknown): Request {
     if (input.cursor !== undefined || input.limit !== undefined || input.document_generation !== undefined && operation === "page.list" ||
       input.observation_ref !== undefined || input.target_ref !== undefined || input.text !== undefined || input.key !== undefined || input.delta_y !== undefined || input.wait_for !== undefined || input.timeout_ms !== undefined || input.configuration !== undefined || input.account_ref !== undefined || input.account_system_ref !== undefined || input.template_ref !== undefined) return fail("managed_browser_invalid_input");
   } else if (isInteraction(String(input.operation))) {
-    if (input.cursor !== undefined || input.limit !== undefined) return fail("managed_browser_invalid_input");
+    if (input.cursor !== undefined && input.operation !== "instance.snapshot" || input.limit !== undefined && !["instance.snapshot", "instance.diagnostics"].includes(String(input.operation))) return fail("managed_browser_invalid_input");
     const action = String(input.operation).slice("instance.".length);
-    const fields: Record<string, string[]> = { snapshot: ["page_ref"], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
-    const all = ["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "account_ref", "account_system_ref", "url", "template_ref"];
+    const fields: Record<string, string[]> = { snapshot: ["page_ref", "observation_ref", "cursor", "limit"], click: ["page_ref", "observation_ref", "target_ref"], input: ["page_ref", "observation_ref", "target_ref", "text"], press: ["page_ref", "observation_ref", "target_ref", "key"], scroll: ["page_ref", "observation_ref", "delta_y"], wait: ["page_ref", "observation_ref", "wait_for", "target_ref", "text", "timeout_ms"] };
+    const all = ["page_ref", "observation_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "account_ref", "account_system_ref", "url", "template_ref"];
     if (all.some(key => input[key] !== undefined && !fields[action]!.includes(key))) return fail("managed_browser_invalid_input");
     if (action !== "snapshot") { text(input.page_ref); text(input.observation_ref); }
     if (["click", "input", "press"].includes(action)) text(input.target_ref);
@@ -559,7 +559,7 @@ export function createManagedBrowserService(options: {
         // Agent-supplied origin fields.
         authorized_origins: interactionAccess.authorized_origins, scope_semantics: interactionAccess.scope_semantics,
         action: input.operation.slice("instance.".length),
-        ...Object.fromEntries(["page_ref", "observation_ref", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
+        ...Object.fromEntries(["page_id", "page_ref", "document_generation", "observation_ref", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].filter(key => input[key as keyof Request] !== undefined).map(key => [key, input[key as keyof Request]]))
       }, "interaction");
       const safeResult = interactionAccess.scope_semantics === "agent_operations_v2" ? redactCompletedPage(result, interactionAccess.authorized_origins, input.page_ref) : result;
       if (safeResult.status !== "completed") throw new InteractionFailure(safeResult);

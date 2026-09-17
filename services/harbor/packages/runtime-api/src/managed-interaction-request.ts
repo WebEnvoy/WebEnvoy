@@ -12,7 +12,7 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
   const input = value as Record<string, unknown>;
   const common = ["action", "expected_origin", "authorized_origins", "scope_semantics", "controlled_origin", "holder_ref", "operation_ref"];
   const byAction: Record<string, string[]> = {
-    snapshot: ["page_ref"], click: ["page_ref", "observation_ref", "target_ref"],
+    snapshot: ["page_id", "document_generation", "page_ref", "observation_ref", "cursor", "limit"], click: ["page_ref", "observation_ref", "target_ref"],
     input: ["page_ref", "observation_ref", "target_ref", "text"],
     press: ["page_ref", "observation_ref", "target_ref", "key"],
     scroll: ["page_ref", "observation_ref", "delta_y"],
@@ -36,6 +36,16 @@ export function parseManagedInteractionRequest(value: unknown): ManagedInteracti
   if (input.page_ref !== undefined && !boundedManagedRef(input.page_ref)) return null;
   if (input.action !== "snapshot" && (!boundedManagedRef(input.page_ref) || !boundedManagedRef(input.observation_ref))) return null;
   if (["click", "input", "press"].includes(input.action) && !boundedManagedRef(input.target_ref)) return null;
+  if (input.page_id !== undefined && !boundedManagedRef(input.page_id)) return null;
+  if (input.document_generation !== undefined && (!Number.isSafeInteger(input.document_generation) || Number(input.document_generation) < 1)) return null;
+  if (input.cursor !== undefined && !boundedManagedRef(input.cursor)) return null;
+  if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > (input.action === "snapshot" ? 128 : 0))) return null;
+  if (input.action === "snapshot") {
+    const continuation = input.cursor !== undefined;
+    if (continuation
+      ? (typeof input.page_id !== "string" || typeof input.page_ref !== "string" || typeof input.document_generation !== "number" || typeof input.observation_ref !== "string")
+      : input.observation_ref !== undefined) return null;
+  } else if (input.page_id !== undefined || input.document_generation !== undefined || input.cursor !== undefined || input.limit !== undefined) return null;
   if (input.action === "input" && (typeof input.text !== "string" || input.text.length > 512 || /[\u0000-\u001f\u007f]/.test(input.text))) return null;
   if (input.action === "press" && !["Enter", "Tab", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Space", "Backspace", "Delete", "Escape"].includes(String(input.key))) return null;
   if (input.action === "scroll" && (!Number.isSafeInteger(input.delta_y) || Math.abs(Number(input.delta_y)) > 2000 || input.delta_y === 0)) return null;

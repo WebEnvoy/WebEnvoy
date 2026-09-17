@@ -264,6 +264,7 @@ test('MCP validates capability description states and forwards correction guidan
     };
     let unknownState;
     let correction = false;
+    let operationResponse;
     server = createServer(socket => socket.once('data', chunk => {
       const path = chunk.toString('utf8').split('\r\n', 1)[0].split(' ')[1];
       const payload = path === '/status'
@@ -286,6 +287,8 @@ test('MCP validates capability description states and forwards correction guidan
             if (unknownState === 'inputs') value.inputs.state = 'future_state';
             return value;
           })()
+          : path === '/managed-browser/operations'
+            ? operationResponse
           : { ok: false, error: { code: 'unexpected_request' } };
       const body = Buffer.from(JSON.stringify(payload));
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
@@ -309,6 +312,20 @@ test('MCP validates capability description states and forwards correction guidan
     const corrected = await call(4, 'webenvoy_describe', { operation: 'file.download', arguments: { file_ref: 'attachment:runtime/11111111-1111-4111-8111-111111111111' } });
     assert.deepEqual(corrected.inputs.invalid, [{ path: '/arguments/file_ref', code: 'unknown_field' }]);
     assert.equal(corrected.next_steps[0].fields.includes('/arguments/file_ref'), true);
+    const snapshotInput = { idempotency_key: 'snapshot-format', grant_id: 'grant:fixture', operation: 'instance.snapshot',
+      task_scope: { operations: ['instance.snapshot'], profile_refs: ['profile:fixture'], origins: ['https://example.test'] },
+      profile_ref: 'profile:fixture', origin: 'https://example.test', runtime_session_ref: 'session:fixture' };
+    operationResponse = { ok: true, run_id: `managed-${'a'.repeat(64)}`, status: 'succeeded', result: { snapshot: { page_ref: 'page:old', observation_ref: 'observation:old', controls: [], text: '', truncated: false } } };
+    assert.equal((await call(5, 'webenvoy_operation', snapshotInput)).error.code, 'observation_format_unavailable');
+    operationResponse = { ok: true, run_id: `managed-${'b'.repeat(64)}`, status: 'succeeded', result: { snapshot: {
+      schema_version: 'harbor-observation-targets/v1', page_id: 'page:fixture', page_ref: 'page-ref:fixture', document_generation: 1,
+      observation_ref: 'observation:fixture', captured_at: '2026-09-17T00:00:00.000Z', controls: [], text: '', truncated: false,
+      coverage: { scope: 'main_document_light_dom', excluded: ['child_frames', 'shadow_roots', 'virtualized_not_in_dom'],
+        controls: { enumeration_complete: true, captured_count: 0, total: 0, returned_through: 0, complete: true, reason_codes: [] },
+        text: { state: 'complete', returned_bytes: 0 }, semantics: { complete: true, reason_codes: [] } },
+      continuation: { offset: 0, returned_count: 0, has_more: false, next_cursor: null }
+    } } };
+    assert.equal((await call(6, 'webenvoy_operation', { ...snapshotInput, idempotency_key: 'snapshot-format-valid' })).ok, true);
   } finally {
     await stopChild(child);
     if (server) await new Promise(resolve => server.close(resolve));

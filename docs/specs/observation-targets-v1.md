@@ -182,9 +182,9 @@ role最多64字符，name最多256字符；保留现有脱敏规则，不回显�
 
 公共snapshot新增上述schema标识；外层interaction/Page/Run协议保持原版本。旧请求不带cursor仍可做首段观察，旧`truncated`不改义；旧消费者忽略新增字段不意味着已具备本项完整性能力。新版Plugin必须验证新snapshot形状与coverage一致性，缺失时显示观察格式/能力未提供，不能默认complete=true。新cursor不得被旧Runtime忽略后偷偷变成新观察；旧入口应明确拒绝未知字段/版本。错误只影响相应操作，不堵住管理、查询或已支持的独立能力。
 
-Core/Harbor/共享Python的内部snapshot字段、cursor映射与严格reader在同一安装候选更新并由manifest核验；不得依赖未登记工作树文件或新TS+旧Python静默混装。新增schema和正反fixture在实现PR实际存在后再从本文件/索引链接，不在本docs PR虚构已存在的文件。
+Core/Harbor/共享Python的内部snapshot字段、cursor映射与严格reader在同一安装候选更新并由manifest核验；不得依赖未登记工作树文件或新TS+旧Python静默混装。正式合同为 [snapshot request schema](../../packages/schemas/schemas/harbor-observation-targets-request.schema.json) 与 [snapshot response schema](../../packages/schemas/schemas/harbor-observation-targets.schema.json)；可执行样本包括 [new request](../../packages/schemas/fixtures/harbor-observation-targets-request.fixture.json)、[continuation request](../../packages/schemas/fixtures/harbor-observation-targets-request-continuation.fixture.json)、[response](../../packages/schemas/fixtures/harbor-observation-targets.fixture.json) 及 [request](../../packages/schemas/invalid-fixtures/harbor-observation-targets-request.invalid.fixture.json)／[response](../../packages/schemas/invalid-fixtures/harbor-observation-targets.invalid.fixture.json) 反例。
 
-本文件按文首声明形成Page/Plugin正式补充，索引须双向可发现；Page/Plugin的短引用已在本PR加入，真实schema/fixture由实现PR补入，不在本docs PR虚构。实现PR只在旧的snapshot参数列表、截断/目标说明处添加必要引用/修订，不复制整篇规格；旧#519/#541历史状态及未涉及的导航语义不重写。
+本文件按文首声明形成Page/Plugin正式补充，索引须双向可发现；Page/Plugin的短引用已加入，上述 schema/fixture 由实现PR建立。实现PR只在旧的snapshot参数列表、截断/目标说明处添加必要引用/修订，不复制整篇规格；旧#519/#541历史状态及未涉及的导航语义不重写。
 
 Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`（snapshot/describe投影及版本）；Page/Observation合同由本文件冻结；`DO-GRANT-WIRE=not-triggered`（无新增授权维度）；Network/Console=not-triggered（不改payload/政策）；Provider-private-schema=not-triggered（无新增环境持久结构；内部消息与安装配对仍必须同步）；App IA=not-triggered（沿用最小owner入口）。
 

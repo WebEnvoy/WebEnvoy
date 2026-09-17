@@ -1,0 +1,159 @@
+{
+  "schema": "harbor-observation-targets.schema.json",
+  "cases": [
+    {
+      "name": "continuation must carry a cursor when more controls remain",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 0, "total": 0, "returned_through": 0, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 0, "has_more": true, "next_cursor": null }
+      }
+    },
+    {
+      "name": "completed continuation cannot carry a next cursor",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 0, "total": 0, "returned_through": 0, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 0, "has_more": false, "next_cursor": "cursor:stale" }
+      }
+    },
+    {
+      "name": "public controls cannot include raw HTML",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [{ "target_ref": "target:fixture", "role": "button", "name": "保存", "enabled": true, "name_source": "content", "description": null, "context": [], "hints": { "placeholder": null, "input_type": null, "multiline": false, "editable": false }, "disambiguation": "unique", "truncated_fields": [], "raw_html": "<button>保存</button>" }],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 1, "total": 1, "returned_through": 1, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 1, "has_more": false, "next_cursor": null }
+      }
+    },
+    {
+      "name": "controls length must equal returned count",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 1, "total": 1, "returned_through": 1, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 1, "has_more": false, "next_cursor": null }
+      }
+    },
+    {
+      "name": "returned through must equal offset plus returned count",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 0, "total": 0, "returned_through": 0, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 1, "returned_count": 0, "has_more": false, "next_cursor": null }
+      }
+    },
+    {
+      "name": "complete enumeration must report its captured total",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 1, "total": 0, "returned_through": 0, "complete": false, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 0, "has_more": false, "next_cursor": null }
+      }
+    },
+    {
+      "name": "complete must require enumeration and full captured coverage",
+      "instance": {
+        "schema_version": "harbor-observation-targets/v1",
+        "page_id": "page:fixture",
+        "page_ref": "page-ref:fixture",
+        "document_generation": 1,
+        "observation_ref": "observation:fixture",
+        "captured_at": "2026-09-17T00:00:00.000Z",
+        "controls": [],
+        "text": "",
+        "truncated": false,
+        "coverage": {
+          "scope": "main_document_light_dom",
+          "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+          "controls": { "enumeration_complete": true, "captured_count": 1, "total": 1, "returned_through": 0, "complete": true, "reason_codes": [] },
+          "text": { "state": "complete", "returned_bytes": 0 },
+          "semantics": { "complete": true, "reason_codes": [] }
+        },
+        "continuation": { "offset": 0, "returned_count": 0, "has_more": false, "next_cursor": null }
+      }
+    }
+  ]
+}

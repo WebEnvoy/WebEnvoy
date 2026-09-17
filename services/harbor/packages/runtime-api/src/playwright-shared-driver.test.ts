@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { CAMOUFOX_UPSTREAM_PINS, launchCamoufoxUpstreamProvider } from "./camoufox-upstream-driver.js";
+import { launchSharedPlaywrightProvider, type SharedProviderAdapter } from "./playwright-shared-driver.js";
 import type { LocalProviderLaunchInput } from "./runtime-session-types.js";
 
 const DRIVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +99,350 @@ for await (const line of rl) {
   } finally {
     for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
     for (const [key, value] of Object.entries(previous)) process.env[key] = value;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("covers #540 G0 enumeration, semantics, identity, and bounded waits in the shared driver", () => {
+  const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
+  const script = String.raw`
+import asyncio, importlib.util, json, os, sys, time, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+async_api = types.ModuleType("playwright.async_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_api.TimeoutError = TimeoutError; async_api.async_playwright = lambda: None
+playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
+spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+class Handle:
+    def __init__(self, index, role="button", name=None, name_source="none", description=None):
+        self.index = index
+        self.role = role
+        self.name = name if name is not None else "Action " + str(index)
+        self.name_source = name_source
+        self.description = description
+        self.form_token = object()
+        self.form_action = "/compose"
+        self.connected = True
+        self.clicks = 0
+        self.fills = []
+        self.presses = []
+        self.disposals = 0
+    def metadata(self):
+        return {
+            "role": self.role,
+            "name": self.name,
+            "name_source": self.name_source,
+            "description": self.description,
+            "description_source": "aria-describedby" if self.description else None,
+            "context": [{"kind": "form", "name": "Composer"}],
+            "hints": {"placeholder": "Save value", "input_type": None, "multiline": False, "editable": False},
+            "href": None,
+            "action": {"href": None, "download": None, "target": None, "form": {"action": self.form_action, "method": "post"}},
+            "enabled": True,
+            "dom_index": self.index,
+            "truncated_fields": [],
+        }
+    async def evaluate(self, expression, *args):
+        if expression == "e => Boolean(e.isConnected)": return self.connected
+        if expression == "e => e.files ? e.files.length : 0": return 0
+        if expression == "(e, other) => e === other": return bool(args) and args[0] is self
+        if expression == "(e, form) => e.form === form": return bool(args) and args[0] is self.form_token
+        if "getBoundingClientRect" in expression: return self.metadata()
+        raise AssertionError("unexpected handle expression: " + expression)
+    async def evaluate_handle(self, expression):
+        assert expression == "e => e.form"
+        return self.form_token
+    async def is_visible(self): return self.connected
+    async def is_enabled(self): return self.connected
+    async def click(self, timeout=None): self.clicks += 1
+    async def fill(self, text, timeout=None): self.fills.append(text)
+    async def press(self, key, timeout=None): self.presses.append(key)
+    async def dispose(self): self.disposals += 1
+
+class Body:
+    def __init__(self, page): self.page = page
+    async def inner_text(self, timeout=None): return self.page.text
+
+class Mouse:
+    def __init__(self): self.wheels = []
+    async def wheel(self, x, y): self.wheels.append((x, y))
+
+class PageImpl:
+    url = "https://example.test/form"
+    main_frame = object()
+    def __init__(self):
+        self.text = "short body"
+        self.handles = self.make_handles()
+        self.wait_ticks = 0
+        self.mouse = Mouse()
+    @staticmethod
+    def make_handles():
+        values = [
+            # Same role/name/context; only aria-describedby distinguishes these
+            # controls, so the public result must not fall back to ambiguity.
+            Handle(0, name="Save", name_source="html_label", description="Primary action"),
+            Handle(1, name="Save", name_source="aria_labelledby", description="Secondary action"),
+            Handle(2, name="Save", name_source="aria_label", description="Tertiary action"),
+        ]
+        values.extend(Handle(index) for index in range(3, 160))
+        # Keep this same-name group across the 128/32 response boundary.
+        values[127] = Handle(127, name="Save", name_source="content", description="Fourth action")
+        values[128] = Handle(128, name="Save", name_source="content", description="Fifth action")
+        return values
+    @staticmethod
+    def make_ambiguous_handles():
+        values = PageImpl.make_handles()
+        values[0] = Handle(0, name="Save", name_source="html_label", description="Same action")
+        values[1] = Handle(1, name="Save", name_source="aria_labelledby", description="Same action")
+        values[2] = Handle(2, name="Other", name_source="aria_label", description="Other action")
+        return values
+    def is_closed(self): return False
+    async def title(self): return "Fixture"
+    async def query_selector_all(self, selector): return list(self.handles)
+    async def evaluate(self, expression):
+        if "document.body" in expression: return self.text
+        raise AssertionError("unexpected page expression: " + expression)
+    def locator(self, selector):
+        assert selector == "body"
+        return Body(self)
+    def get_by_role(self, role, name, exact):
+        raise AssertionError("fallback role lookup must not replace the captured ElementHandle")
+    async def wait_for_timeout(self, milliseconds):
+        self.wait_ticks += 1
+        await asyncio.sleep(0)
+
+async def run():
+    page = PageImpl()
+    state = module.PageState("page:1", page, ["https://example.test"])
+    instance = object.__new__(module.Driver)
+    instance.pages = {"page:1": state}
+    instance.current = "page:1"
+    instance.request = {"timeout_ms": 1000}
+    instance.close_requested = asyncio.Event()
+    common = {"provider_page_ref": "page:1", "page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
+
+    first = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    assert first["schema_version"] == "harbor-observation-targets/v1", first
+    assert len(first["controls"]) == 128, len(first["controls"])
+    assert first["coverage"]["controls"]["captured_count"] == 160, first
+    assert first["coverage"]["controls"]["returned_through"] == 128, first
+    assert first["continuation"]["has_more"] is True, first
+    assert first["controls"][0]["name_source"] == "html_label", first["controls"][0]
+    assert first["controls"][1]["name_source"] == "aria_labelledby", first["controls"][1]
+    assert first["controls"][2]["name_source"] == "aria_label", first["controls"][2]
+    assert first["controls"][0]["description"] == "Primary action", first["controls"][0]
+    assert "value" not in first["controls"][0], first["controls"][0]
+    assert first["controls"][0]["context"] == [{"kind": "form", "name": "Composer"}], first["controls"][0]
+    assert first["controls"][0]["disambiguation"] == "contextual", first["controls"][0]
+
+    first_ref = first["controls"][0]["target_ref"]
+    first_handle = page.handles[0]
+    assert await instance.control_handle(state, first_ref) is first_handle
+    assert await instance.locator(state, {"target_ref": first_ref, "observation_ref": first["observation_ref"], "document_generation": 1}) is first_handle
+
+    continuation = dict(common, action="snapshot", observation_ref=first["observation_ref"], cursor=first["continuation"]["next_cursor"], limit=128)
+    second_result = await instance.interact(continuation)
+    assert second_result["status"] == "completed", second_result
+    second = second_result["snapshot"]
+    assert second["observation_ref"] == first["observation_ref"], second
+    assert second["captured_at"] == first["captured_at"], second
+    assert len(second["controls"]) == 32, second
+    assert second["continuation"]["has_more"] is False, second
+    assert second["controls"][0]["name"] == "Save", second["controls"][0]
+    assert second["controls"][0]["disambiguation"] == "contextual", second["controls"][0]
+    assert await instance.control_handle(state, first_ref) is first_handle
+    assert await instance.locator(state, {"target_ref": first_ref, "observation_ref": first["observation_ref"], "document_generation": 1}) is first_handle
+
+    clicked = await instance.interact(dict(common, action="click", observation_ref=first["observation_ref"], target_ref=first_ref))
+    assert clicked["status"] == "completed" and clicked["dispatch_state"] == "dispatched", clicked
+    assert first_handle.clicks == 1, first_handle.clicks
+
+    page.handles = PageImpl.make_ambiguous_handles()
+    ambiguous_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    ambiguous_ref = ambiguous_batch["controls"][0]["target_ref"]
+    ambiguous = await instance.interact(dict(common, action="click", observation_ref=ambiguous_batch["observation_ref"], target_ref=ambiguous_ref))
+    assert ambiguous["status"] == "unavailable", ambiguous
+    assert ambiguous["dispatch_state"] == "not_dispatched", ambiguous
+    assert ambiguous["failure_class"] == "target_ambiguous", ambiguous
+    assert page.handles[0].clicks == 0, page.handles[0].clicks
+    other_ref = ambiguous_batch["controls"][2]["target_ref"]
+    other = await instance.interact(dict(common, action="click", observation_ref=ambiguous_batch["observation_ref"], target_ref=other_ref))
+    assert other["status"] == "completed" and other["dispatch_state"] == "dispatched", other
+    assert page.handles[2].clicks == 1, page.handles[2].clicks
+
+    page.handles = PageImpl.make_handles()
+    changed_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    changed_first = page.handles[0]
+    changed_first.description = "Changed after capture"
+    semantic_action = await instance.interact(dict(common, action="click", observation_ref=changed_batch["observation_ref"], target_ref=changed_batch["controls"][0]["target_ref"]))
+    assert semantic_action["status"] == "unavailable", semantic_action
+    assert semantic_action["dispatch_state"] == "not_dispatched", semantic_action
+    assert semantic_action["failure_class"] == "target_semantics_changed", semantic_action
+    assert changed_first.clicks == 0, changed_first.clicks
+    cursor_stale = await instance.interact(dict(common, action="snapshot", observation_ref=changed_batch["observation_ref"], cursor=changed_batch["continuation"]["next_cursor"], limit=128))
+    assert cursor_stale["status"] == "unavailable", cursor_stale
+    assert cursor_stale["dispatch_state"] == "not_dispatched", cursor_stale
+    assert cursor_stale["failure_class"] == "observation_cursor_stale", cursor_stale
+
+    page.handles = PageImpl.make_handles()
+    form_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    form_first = page.handles[0]
+    form_first.form_action = "/different-form"
+    form_action = await instance.interact(dict(common, action="click", observation_ref=form_batch["observation_ref"], target_ref=form_batch["controls"][0]["target_ref"]))
+    assert form_action["status"] == "unavailable", form_action
+    assert form_action["dispatch_state"] == "not_dispatched", form_action
+    assert form_action["failure_class"] == "target_semantics_changed", form_action
+    assert form_first.clicks == 0, form_first.clicks
+
+    page.handles = PageImpl.make_handles()
+    replacement_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    replacement_ref = replacement_batch["controls"][0]["target_ref"]
+    replaced = page.handles[0]
+    replacement = Handle(0, name="Save", name_source="html_label", description="Primary action")
+    page.handles[0] = replacement
+    replaced.connected = False
+    stale_action = await instance.interact(dict(common, action="click", observation_ref=replacement_batch["observation_ref"], target_ref=replacement_ref))
+    assert stale_action["status"] == "unavailable", stale_action
+    assert stale_action["dispatch_state"] == "not_dispatched", stale_action
+    assert stale_action["failure_class"] == "target_stale", stale_action
+    assert replaced.clicks == 0 and replacement.clicks == 0, (replaced.clicks, replacement.clicks)
+
+    page.handles = PageImpl.make_handles()
+    stable_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    stable_first = page.handles[0]
+    page.text = "unrelated countdown 10:01"
+    stable_action = await instance.interact(dict(common, action="click", observation_ref=stable_batch["observation_ref"], target_ref=stable_batch["controls"][0]["target_ref"]))
+    assert stable_action["status"] == "completed" and stable_action["dispatch_state"] == "dispatched", stable_action
+    assert stable_first.clicks == 1, stable_first.clicks
+
+    page.handles = PageImpl.make_handles()
+    old_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    page.handles = PageImpl.make_handles()
+    new_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    old_cursor = await instance.interact(dict(common, action="snapshot", observation_ref=old_batch["observation_ref"], cursor=old_batch["continuation"]["next_cursor"], limit=128))
+    assert old_cursor["status"] == "unavailable", old_cursor
+    assert old_cursor["dispatch_state"] == "not_dispatched", old_cursor
+    assert old_cursor["failure_class"] == "observation_cursor_stale", old_cursor
+    assert new_batch["observation_ref"] != old_batch["observation_ref"], (old_batch, new_batch)
+
+    page.handles = PageImpl.make_handles()
+    navigation_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    await instance.on_navigate(state, page.main_frame)
+    navigation_cursor = await instance.interact(dict(common, action="snapshot", observation_ref=navigation_batch["observation_ref"], cursor=navigation_batch["continuation"]["next_cursor"], limit=128))
+    assert navigation_cursor["status"] == "unavailable", navigation_cursor
+    assert navigation_cursor["dispatch_state"] == "not_dispatched", navigation_cursor
+    assert navigation_cursor["failure_class"] == "observation_cursor_stale", navigation_cursor
+
+    page.handles = PageImpl.make_handles()
+    list_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 2, "limit": 128})
+    page.handles = PageImpl.make_handles()
+    list_cursor = await instance.interact(dict(common, action="snapshot", document_generation=2, observation_ref=list_batch["observation_ref"], cursor=list_batch["continuation"]["next_cursor"], limit=128))
+    assert list_cursor["status"] == "unavailable", list_cursor
+    assert list_cursor["dispatch_state"] == "not_dispatched", list_cursor
+    assert list_cursor["failure_class"] == "observation_cursor_stale", list_cursor
+
+    page.handles = PageImpl.make_handles()
+    wait_start = time.monotonic()
+    wait_result = await instance.interact(dict(common, action="wait", document_generation=2, wait_for="text", text="never present", timeout_ms=75))
+    assert wait_result["status"] == "unavailable", wait_result
+    assert wait_result["dispatch_state"] == "dispatched", wait_result
+    assert wait_result["failure_class"] == "wait_condition_timeout", wait_result
+    assert page.wait_ticks > 0, page.wait_ticks
+    assert time.monotonic() - wait_start < 1.0
+
+    # Public field caps make a single control too small to trigger the
+    # response ceiling; keep the deterministic guard and exercise the
+    # multi-byte 64 KiB text boundary instead.
+    page.text = "界" * 32768
+    bounded = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 2, "limit": 128})
+    assert len(bounded["controls"]) == 128, len(bounded["controls"])
+    assert len(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) < 256 * 1024
+    assert bounded["truncated"] is True, bounded
+    assert bounded["coverage"]["text"]["state"] == "truncated", bounded
+    assert len(bounded["text"].encode("utf-8")) == 65535, len(bounded["text"].encode("utf-8"))
+    assert "\ufffd" not in bounded["text"], "UTF-8 truncation split a code point"
+
+asyncio.run(run())
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
+test("keeps Camoufox and Chrome on the shared public observation projection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harbor-shared-observation-probe-"));
+  const helper = join(root, "fixture-driver.mjs");
+  await writeFile(helper, `import readline from "node:readline";
+const page = { provider_page_ref: "page:1", current_url: "https://example.test/form", title: "Fixture", status: "ready", origin: "https://example.test", active: true, document_generation: 1, task_selected: true, facts: [] };
+const snapshot = { schema_version: "harbor-observation-targets/v1", page_id: "page-id", document_generation: 1, captured_at: "2026-09-17T00:00:00.000Z", page_ref: "page-id", observation_ref: "observation:1", controls: [{ target_ref: "target:save", role: "button", name: "Save", name_source: "aria_labelledby", description: "Primary action", context: [{ kind: "form", name: "Composer" }], hints: { placeholder: null, input_type: null, multiline: false, editable: false }, disambiguation: "unique", enabled: true, truncated_fields: [] }], text: "short body", truncated: false, coverage: { controls: { enumeration_complete: true, captured_count: 1, total: 1, returned_through: 1, complete: true, reason_codes: [] }, text: { state: "complete", returned_bytes: 10 }, semantics: { state: "complete", reason_codes: [] } }, continuation: { has_more: false, next_cursor: null } };
+const rl = readline.createInterface({ input: process.stdin });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  let result;
+  if (request.op === "launch") result = { status: "ready", driver_ref: "fixture-shared", page, pages: [page], viewer_entry: { availability: "unsupported", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [] };
+  else if (request.op === "interact") result = request.action === "snapshot" ? { status: "completed", dispatch_state: "not_dispatched", page, snapshot } : { status: "completed", dispatch_state: "dispatched", page: { ...page, facts: [{ key: "fixture.target", source: "observed", value: String(request.target_ref ?? "") }] } };
+  else if (request.op === "close") result = { closed: true };
+  else result = page;
+  process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
+}`);
+  await chmod(helper, 0o700);
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = join(root, "profiles");
+  try {
+    for (const provider_id of ["camoufox", "chrome_official"] as const) {
+      const input = {
+        operation_scope: "profile_management",
+        browser_path: `/managed/${provider_id}`,
+        provider_id,
+        headless: true,
+        timeout_ms: 1_000,
+        url: "https://example.test/form",
+        profile_ref: `profile:${provider_id}`,
+        profile_storage_ref: `storage:${provider_id}`,
+        provider_ref: `provider:${provider_id}`,
+        scope_semantics: "agent_operations_v2"
+      } as LocalProviderLaunchInput;
+      const adapter: SharedProviderAdapter = {
+        provider_id,
+        driver_filename: "fixture-driver.mjs",
+        pythonPath: () => process.execPath,
+        driverPath: () => helper,
+        browserPath: () => input.browser_path,
+        launchFields: () => ({}),
+        facts: () => [],
+        normalizeEnvironmentObservation: () => null
+      };
+      const launched = await launchSharedPlaywrightProvider(input, adapter);
+      try {
+        assert.equal(launched.status, "ready", `${provider_id} did not reach shared launch: ${JSON.stringify(launched)}`);
+        if (launched.status !== "ready") continue;
+        assert.ok(launched.interaction);
+        const observed = await launched.interaction({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1 });
+        assert.equal(observed.status, "completed", `${provider_id} snapshot was not completed`);
+        const publicSnapshot = observed.snapshot as unknown as { schema_version?: string; controls?: Array<Record<string, unknown>> };
+        const firstControl = publicSnapshot.controls?.[0];
+        assert.equal(publicSnapshot.schema_version, "harbor-observation-targets/v1");
+        assert.equal(firstControl?.name_source, "aria_labelledby");
+        assert.equal(firstControl?.description, "Primary action");
+        assert.deepEqual(firstControl?.context, [{ kind: "form", name: "Composer" }]);
+        const clicked = await launched.interaction({ action: "click", expected_origin: "https://example.test", control_generation: 1, target_ref: "target:save" });
+        assert.equal(clicked.status, "completed");
+        assert.equal(clicked.dispatch_state, "dispatched");
+        assert.equal(clicked.page?.facts.find(fact => fact.key === "fixture.target")?.value, "target:save");
+      } finally {
+        if (launched.status === "ready") await launched.close();
+      }
+    }
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
     await rm(root, { recursive: true, force: true });
   }
 });
