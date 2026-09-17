@@ -229,4 +229,4 @@ Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`（snapshot/describe投影及
 - [Playwright aria snapshots](https://playwright.dev/python/docs/aria-snapshots)：可访问树摘要，并非稳定元素身份协议。
 - [W3C Accessible Name 1.2](https://www.w3.org/TR/accname-1.2/) 与 [WAI-ARIA 1.2](https://www.w3.org/TR/wai-aria-1.2/)：标签、名称来源与角色语义参考；本批不宣称完整标准合规。
 
-本spec未运行浏览器、安装或真实Agent；现有源码审阅不代替O1—O10。实际能力、失败、已接受修订、exact head及安装证据由#540和其实现PR维护。
+本spec本身未运行浏览器、安装或真实Agent；源码审阅也不代替O1—O10。实现后的分层结果、失败边界、运行候选和安装身份记录在 [#540 verification evidence](../verification/observation-targets-540.json)，最终 exact head、独立审查与合并事实仍由#540和其实现PR维护。
