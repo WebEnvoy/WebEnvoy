@@ -3,7 +3,7 @@ import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { identityInput, isolateProfileStorage } from "./identity-environment-mutation-test-helpers.js";
 import { trustManagedInteractionOperation, type ManagedInteractionInput, type ManagedInteractionResult } from "./managed-interaction.js";
-import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
+import { parseManagedInteractionRequest, type ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { RuntimeSessionStore } from "./runtime-session.js";
 import { startHarborRuntimeServer } from "./server.js";
 
@@ -75,6 +75,7 @@ test("Core snapshot page_ref is accepted and stale Page refs are refused before 
 
 test("fixture HTTP interaction rejects unprivileged callers and malformed scope/actions without dispatch; receipts require supervisor", async () => {
   const f = await setup();
+  assert.equal(parseManagedInteractionRequest(f.request("input", { page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:one", target_ref: "target:one", text: "ordinary" }))?.page_id, "page-id:one");
   const token = Buffer.alloc(32, 23).toString("base64url");
   const server = await startHarborRuntimeServer({ port: 0, runtime: f.runtime, manual_authentication_supervisor_token: token });
   const path = `${server.url}/runtime/sessions/${encodeURIComponent(f.a)}/interactions`;
@@ -338,4 +339,146 @@ test("fixture dispatched exception preserves unknown receipt and requires a fres
     assert.notEqual(fresh.observation_ref, observed.observation_ref);
     assert.equal(f.calls.filter(call => call.input.action === "input").length, 1);
   } finally { await server.close(); await f.close(); }
+});
+
+function observationFixtureSnapshot(profile: string, batch: number, continuation: boolean) {
+  const target = continuation ? `target:second:${batch}` : `target:first:${batch}`;
+  return {
+    schema_version: "harbor-observation-targets/v1" as const,
+    page_id: `page-id:${profile}`,
+    page_ref: `provider-page:${profile}`,
+    document_generation: 1,
+    observation_ref: `observation:${profile}:${batch}`,
+    captured_at: `2026-09-17T00:00:0${batch}.000Z`,
+    controls: [{ target_ref: target, role: "button", name: continuation ? "Second" : "First", enabled: true,
+      name_source: "content", description: null, context: [{ kind: "form", name: "Fixture" }],
+      hints: { placeholder: null, input_type: null, multiline: false, editable: false },
+      disambiguation: "unique" as const, truncated_fields: [] }],
+    text: continuation ? "" : "fixture form",
+    truncated: false,
+    coverage: {
+      scope: "main_document_light_dom",
+      excluded: ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+      controls: { enumeration_complete: true, captured_count: 2, total: 2, returned_through: continuation ? 2 : 1, complete: continuation, reason_codes: [] },
+      text: { state: continuation ? "omitted_on_continuation" as const : "complete" as const, returned_bytes: continuation ? 0 : 12 },
+      semantics: { complete: true, reason_codes: [] }
+    },
+    continuation: continuation
+      ? { offset: 1, returned_count: 1, has_more: false, next_cursor: null }
+      : { offset: 0, returned_count: 1, has_more: true, next_cursor: `cursor:${profile}:${batch}:1` }
+  };
+}
+
+async function openContinuationFixture() {
+  let batch = 0;
+  const f = await setup(undefined, action => {
+    if (action.action !== "snapshot") return {
+      status: "completed",
+      dispatch_state: "dispatched",
+      page: { current_url: `${origin}/fixture`, title: "fixture", status: "ready", facts: [], document_generation: 1 }
+    };
+    if (action.cursor === undefined) batch++;
+    return {
+      status: "completed",
+      dispatch_state: "not_dispatched",
+      page: { current_url: `${origin}/fixture`, title: "fixture", status: "ready", facts: [], document_generation: 1 },
+      snapshot: observationFixtureSnapshot("profile:a", batch, action.cursor !== undefined)
+    };
+  });
+  const firstResult = await f.runtime.operateManagedInteraction(f.a, f.request("snapshot"));
+  assert.equal(firstResult.status, "completed");
+  assert.ok("snapshot" in firstResult && firstResult.snapshot);
+  const first = firstResult.snapshot;
+  assert.ok(first.page_id && first.page_ref && first.document_generation && first.continuation?.next_cursor);
+  const continuation = (operation_ref: string) => ({
+    ...scope,
+    operation_ref,
+    action: "snapshot" as const,
+    page_id: first.page_id,
+    page_ref: first.page_ref,
+    document_generation: first.document_generation,
+    observation_ref: first.observation_ref,
+    cursor: first.continuation!.next_cursor,
+    limit: 1
+  });
+  return { f, first, continuation };
+}
+
+test("Harbor snapshot continuation retains the batch and front target until a real action", async () => {
+  const { f, first, continuation } = await openContinuationFixture();
+  try {
+    const store = (f.runtime as unknown as { runtimeSessions: RuntimeSessionStore }).runtimeSessions;
+    const record = store.getRecord(f.a)!;
+    const beforeContinuation = record.interaction_snapshot;
+    assert.equal(beforeContinuation?.observation_ref, first.observation_ref);
+    const request = continuation("operation:continuation:first");
+    const continued = await f.runtime.operateManagedInteraction(f.a, request);
+    assert.equal(continued.status, "completed");
+    assert.ok("snapshot" in continued && continued.snapshot);
+    assert.equal(continued.snapshot.observation_ref, first.observation_ref);
+    assert.equal(continued.snapshot.captured_at, first.captured_at);
+    assert.equal(continued.snapshot.continuation?.offset, 1);
+    assert.equal(record.interaction_snapshot?.observation_ref, first.observation_ref, "continuation must not run ordinary interaction cleanup");
+
+    const replay = await f.runtime.operateManagedInteraction(f.a, request);
+    assert.deepEqual(replay, continued, "same operation reference replays its receipt without a second Provider call");
+    const repeatedCursor = await f.runtime.operateManagedInteraction(f.a, continuation("operation:continuation:repeat"));
+    assert.equal(repeatedCursor.status, "completed");
+    assert.ok("snapshot" in repeatedCursor && repeatedCursor.snapshot);
+    assert.deepEqual(repeatedCursor.snapshot, continued.snapshot, "repeating an opaque cursor must return the same frozen segment");
+    assert.equal(f.calls.filter(call => call.input.action === "snapshot").length, 3);
+
+    const input = await f.runtime.operateManagedInteraction(f.a, f.request("input", {
+      page_ref: first.page_ref, observation_ref: first.observation_ref, target_ref: "target:first:1", text: "kept"
+    }));
+    assert.equal(input.status, "completed");
+    assert.equal(f.calls.at(-1)?.input.target_ref, "target:first:1");
+    assert.equal(record.interaction_snapshot, undefined, "ordinary input may invalidate the batch after the front target is used");
+  } finally { await f.close(); }
+});
+
+test("Harbor rejects an old snapshot continuation after a new snapshot, navigation, control-generation change, or revocation", async () => {
+  const runCase = async (mutate: (fixture: Awaited<ReturnType<typeof openContinuationFixture>>) => Promise<void>) => {
+    const fixture = await openContinuationFixture();
+    try {
+      await mutate(fixture);
+      const callsBefore = fixture.f.calls.length;
+      const stale = await fixture.f.runtime.operateManagedInteraction(fixture.f.a, fixture.continuation(`operation:continuation:stale:${callsBefore}`));
+      refused(stale, "observation_cursor_stale");
+      assert.equal(fixture.f.calls.length, callsBefore, "stale continuation must not reach the Provider");
+    } finally { await fixture.f.close(); }
+  };
+
+  await runCase(async ({ f }) => {
+    const replacement = await f.runtime.operateManagedInteraction(f.a, f.request("snapshot"));
+    assert.equal(replacement.status, "completed");
+    assert.ok("snapshot" in replacement && replacement.snapshot);
+    assert.notEqual(replacement.snapshot.observation_ref, "observation:profile:a:1");
+  });
+
+  await runCase(async ({ f, first }) => {
+    const navigated = await f.runtime.operateManagedPage(f.a, {
+      operation: "page.navigate",
+      operation_ref: "operation:navigate:continuation",
+      holder_ref: holder,
+      page_id: first.page_id,
+      page_ref: first.page_ref,
+      document_generation: first.document_generation,
+      url: `${origin}/navigated`,
+      authorized_origins: [origin]
+    });
+    assert.ok("operation_ref" in navigated && navigated.status === "completed");
+  });
+
+  await runCase(async ({ f }) => {
+    const released = f.runtime.releaseSession(f.a, { control_owner: "core_task" });
+    assert.ok(!("status" in released));
+    const relocked = f.runtime.lockSession(f.a, { control_owner: "core_task", holder_ref: holder });
+    assert.ok(!("status" in relocked));
+  });
+
+  await runCase(async ({ f }) => {
+    const released = f.runtime.releaseSession(f.a, { control_owner: "core_task" });
+    assert.ok(!("status" in released));
+  });
 });

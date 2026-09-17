@@ -7,6 +7,7 @@ import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:f
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
+import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
 import { localRequest } from './client.mjs';
 import { REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
@@ -87,6 +88,16 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(describe.inputSchema.properties.operation.enum, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.operation, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.connection_id, undefined);
+    const validateOperation = new Ajv2020({ allErrors: true, strict: false }).compile(operation.inputSchema);
+    const snapshotSchemaFixture = {
+      idempotency_key: 'schema-snapshot-limit', grant_id: 'grant:fixture', operation: 'instance.snapshot',
+      task_scope: { operations: ['instance.snapshot'], profile_refs: ['profile:fixture'], origins: ['https://example.com'] },
+      profile_ref: 'profile:fixture', origin: 'https://example.com', runtime_session_ref: 'session:fixture', limit: 128
+    };
+    assert.equal(validateOperation(snapshotSchemaFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 64 }), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-over-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 65 }), false);
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-observe-limit', operation: 'instance.observe', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.observe'] }, limit: 1 }), false);
     const operationConditions = operation.inputSchema.allOf.filter(condition => condition.if?.properties?.operation?.const);
     for (const definition of definitions.operations.filter(item => item.exposure === 'exposed')) {
       const condition = operationConditions.find(item => item.if.properties.operation.const === definition.id);
@@ -264,6 +275,7 @@ test('MCP validates capability description states and forwards correction guidan
     };
     let unknownState;
     let correction = false;
+    let operationResponse;
     server = createServer(socket => socket.once('data', chunk => {
       const path = chunk.toString('utf8').split('\r\n', 1)[0].split(' ')[1];
       const payload = path === '/status'
@@ -286,6 +298,8 @@ test('MCP validates capability description states and forwards correction guidan
             if (unknownState === 'inputs') value.inputs.state = 'future_state';
             return value;
           })()
+          : path === '/managed-browser/operations'
+            ? operationResponse
           : { ok: false, error: { code: 'unexpected_request' } };
       const body = Buffer.from(JSON.stringify(payload));
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
@@ -309,6 +323,20 @@ test('MCP validates capability description states and forwards correction guidan
     const corrected = await call(4, 'webenvoy_describe', { operation: 'file.download', arguments: { file_ref: 'attachment:runtime/11111111-1111-4111-8111-111111111111' } });
     assert.deepEqual(corrected.inputs.invalid, [{ path: '/arguments/file_ref', code: 'unknown_field' }]);
     assert.equal(corrected.next_steps[0].fields.includes('/arguments/file_ref'), true);
+    const snapshotInput = { idempotency_key: 'snapshot-format', grant_id: 'grant:fixture', operation: 'instance.snapshot',
+      task_scope: { operations: ['instance.snapshot'], profile_refs: ['profile:fixture'], origins: ['https://example.test'] },
+      profile_ref: 'profile:fixture', origin: 'https://example.test', runtime_session_ref: 'session:fixture' };
+    operationResponse = { ok: true, run_id: `managed-${'a'.repeat(64)}`, status: 'succeeded', result: { snapshot: { page_ref: 'page:old', observation_ref: 'observation:old', controls: [], text: '', truncated: false } } };
+    assert.equal((await call(5, 'webenvoy_operation', snapshotInput)).error.code, 'observation_format_unavailable');
+    operationResponse = { ok: true, run_id: `managed-${'b'.repeat(64)}`, status: 'succeeded', result: { snapshot: {
+      schema_version: 'harbor-observation-targets/v1', page_id: 'page:fixture', page_ref: 'page-ref:fixture', document_generation: 1,
+      observation_ref: 'observation:fixture', captured_at: '2026-09-17T00:00:00.000Z', controls: [], text: '', truncated: false,
+      coverage: { scope: 'main_document_light_dom', excluded: ['child_frames', 'shadow_roots', 'virtualized_not_in_dom'],
+        controls: { enumeration_complete: true, captured_count: 0, total: 0, returned_through: 0, complete: true, reason_codes: [] },
+        text: { state: 'complete', returned_bytes: 0 }, semantics: { complete: true, reason_codes: [] } },
+      continuation: { offset: 0, returned_count: 0, has_more: false, next_cursor: null }
+    } } };
+    assert.equal((await call(6, 'webenvoy_operation', { ...snapshotInput, idempotency_key: 'snapshot-format-valid' })).ok, true);
   } finally {
     await stopChild(child);
     if (server) await new Promise(resolve => server.close(resolve));

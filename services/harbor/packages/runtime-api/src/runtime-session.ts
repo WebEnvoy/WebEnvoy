@@ -161,7 +161,17 @@ export interface RuntimeSessionRecord {
   clearPublicPageGuard?: () => Promise<void>;
   publicPage?: ManagedPublicPageOperation;
   interaction?: ManagedInteractionOperation;
-  interaction_snapshot?: { page_ref: string; provider_snapshot_ref?: string; observation_ref: string; control_generation: number; holder_ref: string };
+  interaction_snapshot?: {
+    page_id?: string;
+    page_ref: string;
+    document_generation?: number;
+    provider_snapshot_ref?: string;
+    observation_ref: string;
+    captured_at?: string;
+    limit?: number;
+    control_generation: number;
+    holder_ref: string;
+  };
   /** The last lease-free Page list explicitly requested by a Core holder. */
   released_page_list?: { control_generation: number; holder_ref: string };
   observePage?: (input?: ManagedProviderPageInput) => Promise<ManagedProviderObservation>;
@@ -1092,6 +1102,8 @@ export class RuntimeSessionStore {
     }
     if (record.active_provider_interactions || !["active", "locked", "idle"].includes(record.facts.lifecycle_state)) return refused("session_not_ready");
     const observed = record.interaction_snapshot;
+    const continuation = input.action === "snapshot" && input.cursor !== undefined;
+    const continuationFailure = continuation ? "observation_cursor_stale" : "managed_interaction_observation_stale";
     let pageBinding: { facts: ManagedPageFacts; provider_page_ref: string } | undefined;
     if (record.page_registry) {
       try {
@@ -1099,14 +1111,23 @@ export class RuntimeSessionStore {
         else {
           const pages = record.page_registry.list(authorizedOrigins).pages;
           if (pages.length === 1) pageBinding = record.page_registry.binding({ page_id: pages[0]!.page_id });
-          else if (pages.length > 1) return refused("page_selection_required");
+          else if (pages.length > 1) return refused(continuation ? "observation_cursor_stale" : "page_selection_required");
         }
-      } catch { return refused("managed_interaction_provider_unavailable"); }
-      if (!pageBinding) return refused(input.page_ref ? "managed_interaction_observation_stale" : "page_selection_required");
+      } catch { return refused(continuation ? "observation_cursor_stale" : "managed_interaction_provider_unavailable"); }
+      if (!pageBinding) return refused(continuation ? "observation_cursor_stale" : input.page_ref ? "managed_interaction_observation_stale" : "page_selection_required");
       if (pageBinding.facts.origin !== input.expected_origin || !authorizedOrigins.includes(pageBinding.facts.origin)) return refused("managed_interaction_origin_denied");
+      if ((input.page_id !== undefined && pageBinding.facts.page_id !== input.page_id) ||
+        (input.document_generation !== undefined && pageBinding.facts.document_generation !== input.document_generation)) {
+        return refused(continuationFailure);
+      }
     }
     if (input.action !== "snapshot" && (!observed || observed.control_generation !== generation || observed.holder_ref !== input.holder_ref ||
       observed.page_ref !== input.page_ref || observed.observation_ref !== input.observation_ref)) return refused("managed_interaction_observation_stale");
+    if (continuation && (!observed || observed.control_generation !== generation || observed.holder_ref !== input.holder_ref ||
+      observed.page_ref !== input.page_ref || observed.observation_ref !== input.observation_ref ||
+      observed.page_id !== input.page_id || observed.document_generation !== input.document_generation)) {
+      return refused(continuationFailure);
+    }
     // Retain receipts until Runtime exit: eviction would allow a duplicate input.
     const receipt = { request_hash: requestHash, result: { status: "unknown_outcome" as const, dispatch_state: "dispatched" as const,
       failure_class: "managed_interaction_in_progress", operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() } as ManagedInteractionResult & { operation_ref: string; runtime_session_ref: string; observed_at: string } };
@@ -1136,21 +1157,31 @@ export class RuntimeSessionStore {
           projected = {
             ...result,
             ...(result.page ? { page: { ...result.page, ...current.facts } } : {}),
-            ...(result.snapshot ? { snapshot: { ...result.snapshot, page_ref: current.facts.page_ref } } : {})
+            ...(result.snapshot ? { snapshot: {
+              ...result.snapshot,
+              page_ref: current.facts.page_ref,
+              ...(current.facts.page_id ? { page_id: current.facts.page_id } : {}),
+              ...(current.facts.document_generation ? { document_generation: current.facts.document_generation } : {})
+            } } : {})
           };
           if (result.page?.current_url && new URL(result.page.current_url).origin === input.expected_origin) this.applyPageFacts(record, result.page.current_url, { ...result.page, page_ref: current.facts.page_ref, page_id: current.facts.page_id, document_generation: current.facts.document_generation });
         } else if (result.page?.current_url && new URL(result.page.current_url).origin === input.expected_origin) this.applyPageFacts(record, result.page.current_url, result.page);
         receipt.result = { ...projected, operation_ref: input.operation_ref, runtime_session_ref, observed_at: new Date().toISOString() };
         if (result.status === "completed" && result.snapshot) record.interaction_snapshot = {
+          ...(pageBinding?.facts.page_id || result.snapshot.page_id ? { page_id: pageBinding?.facts.page_id ?? result.snapshot.page_id } : {}),
           page_ref: pageBinding?.facts.page_ref ?? result.snapshot.page_ref,
           ...(pageBinding ? { provider_snapshot_ref: result.snapshot.page_ref } : {}),
-          observation_ref: result.snapshot.observation_ref, control_generation: generation, holder_ref: input.holder_ref
+          ...(pageBinding?.facts.document_generation || result.snapshot.document_generation ? { document_generation: pageBinding?.facts.document_generation ?? result.snapshot.document_generation } : {}),
+          observation_ref: result.snapshot.observation_ref,
+          ...(result.snapshot.captured_at ? { captured_at: result.snapshot.captured_at } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : observed?.limit !== undefined ? { limit: observed.limit } : {}),
+          control_generation: generation, holder_ref: input.holder_ref
         };
-        else delete record.interaction_snapshot;
+        else if (input.action !== "snapshot") delete record.interaction_snapshot;
       }
     } catch {
       receipt.result = { ...receipt.result, failure_class: "managed_interaction_outcome_unknown" };
-      delete record.interaction_snapshot;
+      if (input.action !== "snapshot") delete record.interaction_snapshot;
     }
     return receipt.result;
   }

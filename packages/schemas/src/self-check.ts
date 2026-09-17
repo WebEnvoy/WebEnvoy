@@ -61,6 +61,44 @@ function assertValid(validate: ValidateFunction, value: unknown, label: string):
   assert(validate(value), `${label} failed Draft 2020-12 validation: ${JSON.stringify(validate.errors)}`);
 }
 
+function assertObservationTargetShape(value: JsonObject, label: string): void {
+  if (value.schema_version !== "harbor-observation-targets/v1") return;
+  const coverage = asObject(value.coverage, `${label}.coverage`);
+  const controlCoverage = asObject(coverage.controls, `${label}.coverage.controls`);
+  const continuation = asObject(value.continuation, `${label}.continuation`);
+  const controls = value.controls;
+  assert(Array.isArray(controls), `${label}.controls must be an array`);
+  assert.equal(controls.length, continuation.returned_count, `${label}.controls.length must equal continuation.returned_count`);
+  const offset = continuation.offset as number;
+  const returnedCount = continuation.returned_count as number;
+  const returnedThrough = controlCoverage.returned_through as number;
+  const capturedCount = controlCoverage.captured_count as number;
+  assert.equal(offset + returnedCount, returnedThrough, `${label}.returned_through must equal offset + returned_count`);
+  assert(returnedThrough <= capturedCount, `${label}.returned_through must not exceed captured_count`);
+  assert.equal(controlCoverage.complete, controlCoverage.enumeration_complete && controlCoverage.returned_through === controlCoverage.captured_count, `${label}.complete must reflect enumeration and returned coverage`);
+  if (controlCoverage.enumeration_complete) assert.equal(controlCoverage.total, controlCoverage.captured_count, `${label}.total must equal captured_count when enumeration is complete`);
+  else assert.equal(controlCoverage.total, null, `${label}.total must be null when enumeration is incomplete`);
+  if (continuation.has_more) assert.equal(typeof continuation.next_cursor, "string", `${label}.next_cursor required when has_more`);
+  else assert.equal(continuation.next_cursor, null, `${label}.next_cursor must be null at the end`);
+  assert.equal(continuation.has_more, returnedThrough < capturedCount, `${label}.has_more must reflect remaining captured controls`);
+  if (continuation.has_more) assert(returnedCount > 0, `${label}.a continued segment must make progress`);
+  const textCoverage = asObject(coverage.text, `${label}.coverage.text`);
+  assert.equal(textCoverage.returned_bytes, Buffer.byteLength(String(value.text), "utf8"), `${label}.text returned_bytes must match UTF-8 text`);
+  if (offset > 0) {
+    assert.equal(value.text, "", `${label}.continuation must omit text`);
+    assert.equal(textCoverage.state, "omitted_on_continuation", `${label}.continuation text state must be omitted_on_continuation`);
+  }
+}
+
+function observationTargetShapeValid(value: unknown): boolean {
+  try {
+    assertObservationTargetShape(asObject(value, "observation target"), "observation target");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const schemaFiles = await jsonFiles(schemaDir);
 const fixtureFiles = await jsonFiles(fixtureDir);
 const invalidFixtureFiles = await jsonFiles(invalidFixtureDir);
@@ -80,6 +118,12 @@ ajv.addKeyword({
   type: "object",
   schemaType: "boolean",
   validate: (enabled: boolean, value: unknown) => !enabled || authorizationDecisionTimeOrderValid(value)
+});
+ajv.addKeyword({
+  keyword: "x-webenvoy-observation-targets",
+  type: "object",
+  schemaType: "boolean",
+  validate: (enabled: boolean, value: unknown) => !enabled || observationTargetShapeValid(value)
 });
 ajv.addFormat("webenvoy-public-http-target", { type: "string", validate: (value: string) => normalizePublicHttpTarget(value).ok });
 ajv.addFormat("webenvoy-public-origin", { type: "string", validate: (value: string) => normalizePublicOrigin(value) !== undefined });
@@ -126,6 +170,7 @@ for (const file of fixtureFiles) {
   assert(validate, `${schemaRef} must compile as Draft 2020-12 JSON Schema`);
   const { $schema: _fixtureSchemaRef, ...instance } = fixture;
   assertValid(validate, instance, file);
+  assertObservationTargetShape(instance, file);
 }
 
 const validateTaskThread = ajv.getSchema(taskThreadSchemaId);

@@ -382,15 +382,10 @@ class PageImpl:
         self.first = Handle("First")
         self.second = Handle("Second")
         self.handles = [self.first, self.second]
-        self.reordered = False
     def is_closed(self): return False
     async def title(self): return "Fixture"
     async def query_selector_all(self, selector):
-        values = list(self.handles)
-        if not self.reordered:
-            self.reordered = True
-            self.handles = list(reversed(self.handles))
-        return values
+        return list(self.handles)
     async def evaluate(self, expression):
         if "document.body" in expression: return ""
         if "document.querySelectorAll" in expression: raise AssertionError("snapshot metadata must use the exact ElementHandle")

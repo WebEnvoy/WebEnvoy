@@ -1,0 +1,61 @@
+{
+  "schema": "harbor-observation-targets-request.schema.json",
+  "cases": [
+    {
+      "name": "continuation requires the same page and observation bindings",
+      "instance": {
+        "idempotency_key": "snapshot-invalid-continuation",
+        "connection_id": "connection:fixture",
+        "grant_id": "grant:fixture",
+        "operation": "instance.snapshot",
+        "task_scope": { "operations": ["instance.snapshot"], "profile_refs": ["profile:fixture"], "origins": ["https://example.com"] },
+        "profile_ref": "profile:fixture",
+        "origin": "https://example.com",
+        "runtime_session_ref": "session:fixture",
+        "cursor": "cursor:fixture",
+        "observation_ref": "observation:fixture"
+      }
+    },
+    {
+      "name": "new observation cannot carry an observation reference",
+      "instance": {
+        "idempotency_key": "snapshot-invalid-new",
+        "connection_id": "connection:fixture",
+        "grant_id": "grant:fixture",
+        "operation": "instance.snapshot",
+        "task_scope": { "operations": ["instance.snapshot"], "profile_refs": ["profile:fixture"], "origins": ["https://example.com"] },
+        "profile_ref": "profile:fixture",
+        "origin": "https://example.com",
+        "runtime_session_ref": "session:fixture",
+        "observation_ref": "observation:fixture"
+      }
+    },
+    {
+      "name": "snapshot limit cannot exceed 128",
+      "instance": {
+        "idempotency_key": "snapshot-invalid-limit",
+        "connection_id": "connection:fixture",
+        "grant_id": "grant:fixture",
+        "operation": "instance.snapshot",
+        "task_scope": { "operations": ["instance.snapshot"], "profile_refs": ["profile:fixture"], "origins": ["https://example.com"] },
+        "profile_ref": "profile:fixture",
+        "origin": "https://example.com",
+        "runtime_session_ref": "session:fixture",
+        "limit": 129
+      }
+    },
+    {
+      "name": "snapshot rejects file scope fields",
+      "instance": {
+        "idempotency_key": "snapshot-invalid-file-scope",
+        "connection_id": "connection:fixture",
+        "grant_id": "grant:fixture",
+        "operation": "instance.snapshot",
+        "task_scope": { "operations": ["instance.snapshot"], "profile_refs": ["profile:fixture"], "origins": ["https://example.com"], "file_refs": [] },
+        "profile_ref": "profile:fixture",
+        "origin": "https://example.com",
+        "runtime_session_ref": "session:fixture"
+      }
+    }
+  ]
+}

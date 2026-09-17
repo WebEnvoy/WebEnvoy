@@ -1,0 +1,17 @@
+{
+  "$schema": "../schemas/harbor-observation-targets-request.schema.json",
+  "idempotency_key": "snapshot-continue",
+  "connection_id": "connection:fixture",
+  "grant_id": "grant:fixture",
+  "operation": "instance.snapshot",
+  "task_scope": { "operations": ["instance.snapshot"], "profile_refs": ["profile:fixture"], "origins": ["https://example.com"] },
+  "profile_ref": "profile:fixture",
+  "origin": "https://example.com",
+  "runtime_session_ref": "session:fixture",
+  "page_id": "page:fixture",
+  "page_ref": "page-ref:fixture",
+  "document_generation": 3,
+  "observation_ref": "observation:fixture",
+  "cursor": "cursor:fixture",
+  "limit": 32
+}

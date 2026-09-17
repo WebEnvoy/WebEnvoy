@@ -35,6 +35,11 @@ MAX_REDIRECT_HOPS = 10
 REDIRECT_STATUSES = frozenset({300, 301, 302, 303, 307, 308})
 MAX_WAIT_MS = 10_000
 WAIT_POLL_MS = 50
+MAX_SNAPSHOT_LIMIT = 128
+MAX_OBSERVATION_ELEMENTS = 20_000
+MAX_OBSERVATION_CONTROLS = 2_048
+MAX_OBSERVATION_METADATA_BYTES = 2 * 1024 * 1024
+MAX_OBSERVATION_RESPONSE_BYTES = 256 * 1024
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
 MAX_DOWNLOAD_TEMP_BYTES = MAX_DOWNLOAD_BYTES * 2
 MAX_DOWNLOAD_TIMEOUT_MS = 120_000
@@ -43,6 +48,25 @@ DOWNLOAD_CANCEL_GRACE_S = 0.25
 DOWNLOAD_SETTLE_GRACE_S = 5.0
 REF = re.compile(r"^[A-Za-z0-9:_./-]{1,256}$")
 SENSITIVE = re.compile(r"(?:bearer\s+\S+|(?:token|cookie|password|secret|authorization)\s*[:=]\s*[^\s,}]+)", re.I)
+OBSERVATION_ROLES = frozenset({
+    "button", "link", "textbox", "searchbox", "checkbox", "radio", "switch", "combobox",
+    "listbox", "option", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "slider",
+    "spinbutton", "treeitem", "file"
+})
+OBSERVATION_SELECTOR = 'button,a[href],input,textarea,select,[role],[contenteditable="true"],[contenteditable=""]'
+ARIA_SNAPSHOT_ROOT = re.compile(r'^-\s+([A-Za-z][A-Za-z0-9_-]*)(?:\s+"((?:[^"\\]|\\.)*)")?(?::.*)?$')
+
+
+class ObservationFailure(Exception):
+    def __init__(self, failure_class: str):
+        super().__init__(failure_class)
+        self.failure_class = failure_class
+
+
+class TargetFailure(Exception):
+    def __init__(self, failure_class: str):
+        super().__init__(failure_class)
+        self.failure_class = failure_class
 
 
 class DownloadTimeout(Exception):
@@ -147,6 +171,144 @@ def safe_text(value: Any, limit: int = MAX_TEXT) -> str:
     return " ".join(text.split())[:limit]
 
 
+def safe_text_bytes(value: Any, limit: int = MAX_TEXT) -> tuple[str, bool]:
+    """Return sanitized text bounded by UTF-8 bytes, at a codepoint boundary."""
+    text = value if isinstance(value, str) else str(value or "")
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    if SENSITIVE.search(text):
+        text = "[redacted]"
+    else:
+        text = re.sub(r"([?&][^=\s&]+)=([^\s&#]*)", r"\1=<redacted>", text)
+    text = " ".join(text.split())
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, False
+    return encoded[:limit].decode("utf-8", "ignore"), True
+
+
+def private_fingerprint(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+# This is deliberately a small DOM projection, not an accessible-name engine.
+# It reads only the element being retained and its bounded label/description
+# references.  The original ElementHandle remains the action identity.
+CONTROL_SEMANTICS_SCRIPT = r"""e => {
+  const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const bounded = (value, limit) => clean(String(value ?? '').slice(0, limit + 1));
+  const idsText = value => clean(String(value ?? '').split(/\s+/).filter(Boolean).map(id => {
+    const node = document.getElementById(id);
+    return node ? bounded(node.textContent, 513) : '';
+  }).filter(Boolean).join(' '));
+  const attrName = node => {
+    const labelledby = node.getAttribute('aria-labelledby');
+    if (labelledby && idsText(labelledby)) return ['aria_labelledby', idsText(labelledby)];
+    const aria = node.getAttribute('aria-label');
+    if (aria && clean(aria)) return ['aria_label', clean(aria)];
+    const labels = node.labels ? Array.from(node.labels).map(label => clean(label.textContent)).filter(Boolean).join(' ') : '';
+    if (labels) return ['html_label', labels];
+    const tag = node.tagName.toLowerCase();
+    const role = (node.getAttribute('role') || '').trim().split(/\s+/)[0].toLowerCase();
+    const contentRoles = new Set(['button', 'link', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio']);
+    const content = tag === 'button' || contentRoles.has(role) || (tag === 'input' && ['button', 'submit', 'reset', 'image'].includes(node.type))
+      ? clean(node.innerText || node.textContent || node.value || '') : '';
+    if (content) return ['content', content];
+    const image = node.querySelector ? node.querySelector('img[alt], [role="img"][aria-label]') : null;
+    const alt = image ? clean(image.getAttribute('alt') || image.getAttribute('aria-label')) : clean(node.getAttribute('alt'));
+    if (alt) return ['alt', alt];
+    const title = clean(node.getAttribute('title'));
+    if (title) return ['title', title];
+    return ['none', ''];
+  };
+  const named = node => attrName(node)[1];
+  const contextName = node => {
+    const direct = attrName(node)[1];
+    if (direct) return direct;
+    const legend = node.tagName.toLowerCase() === 'fieldset' ? node.querySelector('legend') : null;
+    if (legend) return clean(legend.textContent);
+    if (node.tagName.toLowerCase() === 'form') return clean(node.getAttribute('name'));
+    const heading = node.querySelector ? node.querySelector(':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6') : null;
+    return heading ? clean(heading.textContent) : '';
+  };
+  const context = [];
+  const seen = new Set();
+  const ancestors = [];
+  for (let node = e.parentElement; node; node = node.parentElement) ancestors.push(node);
+  for (const node of ancestors.reverse()) {
+    const tag = node.tagName.toLowerCase();
+    const role = (node.getAttribute('role') || '').trim().split(/\s+/)[0].toLowerCase();
+    let kind = null;
+    if (tag === 'form') kind = 'form';
+    else if (tag === 'fieldset') kind = 'group';
+    else if (['group', 'dialog', 'region'].includes(role)) kind = role;
+    else if (/^h[1-6]$/.test(tag)) kind = 'heading';
+    if (!kind) continue;
+    const name = contextName(node);
+    if (!name || seen.has(`${kind}:${name}`)) continue;
+    seen.add(`${kind}:${name}`);
+    context.push({kind, name: bounded(name, 129)});
+    if (context.length === 2) break;
+  }
+  const explicitRole = (e.getAttribute('role') || '').trim().split(/\s+/)[0].toLowerCase();
+  const tag = e.tagName.toLowerCase();
+  const inputType = tag === 'input' ? String(e.type || 'text').toLowerCase() : null;
+  let role = explicitRole;
+  if (!role) {
+    if (tag === 'button' || (tag === 'input' && ['button', 'submit', 'reset', 'image'].includes(inputType))) role = 'button';
+    else if (tag === 'a' && e.hasAttribute('href')) role = 'link';
+    else if (tag === 'input' && inputType === 'file') role = 'file';
+    else if (tag === 'textarea' || (tag === 'input' && !['checkbox', 'radio', 'file', 'hidden', 'button', 'submit', 'reset', 'image'].includes(inputType))) role = 'textbox';
+    else if (tag === 'input' && inputType === 'checkbox') role = 'checkbox';
+    else if (tag === 'input' && inputType === 'radio') role = 'radio';
+    else if (tag === 'select') role = 'combobox';
+    else if (e.isContentEditable) role = 'textbox';
+  }
+  const allowed = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'switch', 'combobox', 'listbox', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'slider', 'spinbutton', 'treeitem', 'file']);
+  if (!allowed.has(role)) return null;
+  for (let node = e; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (node.hidden || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden') return null;
+  }
+  const rect = e.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return null;
+  const [nameSource, rawName] = attrName(e);
+  const description = idsText(e.getAttribute('aria-describedby'));
+  const placeholder = e.getAttribute('placeholder');
+  const editable = tag === 'textarea' || (tag === 'input' && !['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'hidden'].includes(inputType)) || e.isContentEditable === true;
+  const hints = {
+    placeholder: placeholder === null ? null : bounded(placeholder, 129),
+    input_type: inputType,
+    multiline: tag === 'textarea' || (e.isContentEditable === true && e.getAttribute('aria-multiline') === 'true') || (e.getAttribute('aria-multiline') === 'true'),
+    editable: editable ? true : (['input', 'textarea', 'select'].includes(tag) || e.isContentEditable === false ? false : null)
+  };
+  const href = tag === 'a' ? e.getAttribute('href') : null;
+  const form = e.form || (e.closest ? e.closest('form') : null);
+  const submitType = tag === 'button' ? String(e.type || 'submit').toLowerCase() : inputType;
+  const submitControl = form !== null && ((tag === 'button' && submitType === 'submit') || (tag === 'input' && ['submit', 'image'].includes(submitType)));
+  const formaction = submitControl ? e.getAttribute('formaction') : null;
+  const formmethod = submitControl ? e.getAttribute('formmethod') : null;
+  const action = {
+    href,
+    download: e.hasAttribute('download') ? e.getAttribute('download') : null,
+    target: e.getAttribute('target'),
+    form: form ? {
+      action: submitControl && formaction !== null && typeof e.formAction === 'string' ? e.formAction : form.action,
+      method: submitControl && formmethod !== null && typeof e.formMethod === 'string' ? String(e.formMethod).toLowerCase() : String(form.method || 'get').toLowerCase(),
+      formaction,
+      formmethod
+    } : null
+  };
+  return {
+    role, name: bounded(rawName, 257), name_source: nameSource,
+    description: description ? bounded(description, 257) : null,
+    context, hints, href, action,
+    enabled: !e.disabled && e.getAttribute('aria-disabled') !== 'true',
+    semantic: {role, name: bounded(rawName, 257), description: description ? bounded(description, 257) : null, context, hints, action: {...action, form: form ? {action: form.getAttribute('action'), method: (form.getAttribute('method') || 'get').toLowerCase()} : null}}
+  };
+}"""
+
+
 def parse_viewport(value: Any) -> dict[str, int] | None:
     if value is None or value == "系统默认":
         return None
@@ -189,6 +351,11 @@ class PageState:
         # interaction fixtures, but file operations fail closed without the
         # identity-bound handle.
         self.controls: dict[str, tuple[Any, ...]] = {}
+        # Metadata is kept beside the historical tuple shape so older fixture
+        # callers remain compatible while new targets retain their exact
+        # semantics and exposure state.
+        self.control_metadata: dict[str, dict[str, Any]] = {}
+        self.snapshot_batch: dict[str, Any] | None = None
         self.snapshot_serial = 0
         self.events: list[dict[str, Any]] = []
         self.request_chains: list[tuple[Any, tuple[str, ...]]] = []
@@ -277,17 +444,27 @@ class PageState:
         return None
 
     async def clear_controls(self) -> None:
-        for control in self.controls.values():
+        for ref, control in self.controls.items():
             handle = control[4] if len(control) > 4 else None
-            if handle is None:
-                continue
-            try:
-                dispose = getattr(handle, "dispose", None)
-                if callable(dispose):
-                    await dispose()
-            except Exception:
-                pass
+            metadata = self.control_metadata.get(ref, {})
+            form_handle = metadata.get("form_handle") if isinstance(metadata, dict) else None
+            if handle is not None:
+                try:
+                    dispose = getattr(handle, "dispose", None)
+                    if callable(dispose):
+                        await dispose()
+                except Exception:
+                    pass
+            if form_handle is not None and form_handle is not handle:
+                try:
+                    dispose = getattr(form_handle, "dispose", None)
+                    if callable(dispose):
+                        await dispose()
+                except Exception:
+                    pass
         self.controls.clear()
+        self.control_metadata.clear()
+        self.snapshot_batch = None
 
 
 _DEFAULT_ADAPTER: Any | None = None
@@ -619,7 +796,7 @@ class Driver:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "wrong_page", "page": await state.facts()}
         try:
             if action == "snapshot":
-                return {"status": "completed", "dispatch_state": "not_dispatched", "page": await state.facts(), "snapshot": await self.snapshot(state)}
+                return {"status": "completed", "dispatch_state": "not_dispatched", "page": await state.facts(), "snapshot": await self.snapshot(state, request)}
             if action == "click":
                 await (await self.locator(state, request)).click(timeout=int(request.get("timeout_ms", 5_000)))
             elif action == "input":
@@ -645,6 +822,10 @@ class Driver:
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
                 if wait_for == "enabled" and (not isinstance(request.get("target_ref"), str) or request["target_ref"] not in state.controls):
                     return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
+                if wait_for == "enabled":
+                    failure = await self.target_failure(state, request["target_ref"])
+                    if failure:
+                        return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": failure, "page": await state.facts()}
                 if not await self.wait_for_condition(state, request):
                     if self.close_requested.is_set():
                         return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "control_changed", "page": await state.facts()}
@@ -656,6 +837,10 @@ class Driver:
             else:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": "invalid_contract", "page": await state.facts()}
             return {"status": "completed", "dispatch_state": "dispatched", "page": await state.facts()}
+        except TargetFailure as error:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": error.failure_class, "page": await state.facts()}
+        except ObservationFailure as error:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "failure_class": error.failure_class, "page": await state.facts()}
         except TimeoutError:
             return {"status": "unknown_outcome", "dispatch_state": "dispatched", "failure_class": "timeout", "page": await state.facts()}
         except Exception as error:
@@ -689,6 +874,12 @@ class Driver:
             elif wait_for == "enabled":
                 remaining_ms = max(1, min(250, int(max(1, (deadline - time.monotonic()) * 1000))))
                 try:
+                    # Recheck the target's identity-bound semantics on every
+                    # poll. Enabled is intentionally excluded from that
+                    # fingerprint so a disabled control can become enabled.
+                    failure = await self.target_failure(state, request["target_ref"])
+                    if failure:
+                        raise TargetFailure(failure)
                     # Playwright 1.60 ElementHandle visibility methods have no
                     # timeout keyword. The surrounding bounded polling loop
                     # supplies the deadline without relying on a private API.
@@ -701,85 +892,565 @@ class Driver:
                 return False
             await state.page.wait_for_timeout(min(WAIT_POLL_MS, max(1, int(remaining * 1000))))
 
-    async def snapshot(self, state: PageState) -> dict[str, Any]:
-        selector = 'button,a,input,textarea,select,[role]'
+    async def _read_control(self, element: Any) -> dict[str, Any] | None:
+        try:
+            value = await element.evaluate(CONTROL_SEMANTICS_SCRIPT)
+        except Exception:
+            return None
+        if not isinstance(value, dict) or not isinstance(value.get("role"), str):
+            return None
+        return value
+
+    @staticmethod
+    async def _dispose_handle(handle: Any) -> None:
+        try:
+            dispose = getattr(handle, "dispose", None)
+            if callable(dispose):
+                await dispose()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _parse_aria_snapshot(snapshot: Any) -> tuple[str, str] | None:
+        if not isinstance(snapshot, str):
+            return None
+        first = next((line.strip() for line in snapshot.splitlines() if line.strip()), "")
+        match = ARIA_SNAPSHOT_ROOT.fullmatch(first)
+        if match is None:
+            return None
+        name = match.group(2)
+        if name is not None:
+            try:
+                name = json.loads(f'"{name}"')
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+        return match.group(1).lower(), name or ""
+
+    async def _locator_semantics(self, locator: Any, original: Any, failure_class: str) -> tuple[str, str] | None:
+        """Read public role/name only when the Locator still denotes original."""
+        try:
+            before = await locator.element_handle()
+        except Exception:
+            return None
+        if before is None:
+            return None
+        after = None
+        try:
+            if not await self._same_element(original, before):
+                raise ObservationFailure(failure_class)
+            snapshot = await locator.aria_snapshot()
+            after = await locator.element_handle()
+            if after is None or not await self._same_element(original, after):
+                raise ObservationFailure(failure_class)
+            parsed = self._parse_aria_snapshot(snapshot)
+            return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
+        finally:
+            if before is not original:
+                await self._dispose_handle(before)
+            if after is not None and after is not original and after is not before:
+                await self._dispose_handle(after)
+
+    async def _indexed_public_semantics(self, state: PageState, index: int, original: Any, failure_class: str) -> tuple[str, str] | None:
+        try:
+            return await self._locator_semantics(state.page.locator(OBSERVATION_SELECTOR).nth(index), original, failure_class)
+        except ObservationFailure:
+            raise
+        except Exception:
+            return None
+
+    async def _target_public_semantics(self, state: PageState, original: Any, role: str, name: str) -> tuple[str, str] | None:
+        try:
+            root = state.page.get_by_role(role, name=name, exact=True)
+            count = min(await root.count(), MAX_OBSERVATION_CONTROLS)
+            for index in range(count):
+                locator = root.nth(index)
+                candidate = await locator.element_handle()
+                if candidate is None:
+                    continue
+                try:
+                    if await self._same_element(original, candidate):
+                        return await self._locator_semantics(locator, original, "target_semantics_changed")
+                finally:
+                    if candidate is not original:
+                        await self._dispose_handle(candidate)
+        except ObservationFailure:
+            raise
+        except Exception:
+            return None
+        return None
+
+    def _normalized_control(self, item: dict[str, Any], page_url: str = "") -> dict[str, Any] | None:
+        role = str(item.get("role", "")).strip().lower()
+        if role not in OBSERVATION_ROLES:
+            return None
+        source = item.get("name_source") if isinstance(item.get("name_source"), str) else "none"
+        if source not in {"provider_accessibility", "html_label", "aria_labelledby", "aria_label", "content", "alt", "title", "none"}:
+            source = "none"
+        raw_name = item.get("name") if isinstance(item.get("name"), str) else ""
+        raw_description = item.get("description") if isinstance(item.get("description"), str) else ""
+        truncated_fields: list[str] = []
+        if len(raw_name) > 256:
+            truncated_fields.append("name")
+        if len(raw_description) > 256:
+            truncated_fields.append("description")
+        name = safe_text(raw_name, 256)
+        description = safe_text(raw_description, 256) if raw_description else None
+        context: list[dict[str, str]] = []
+        raw_context = item.get("context")
+        if isinstance(raw_context, list):
+            for index, entry in enumerate(raw_context[:2]):
+                if not isinstance(entry, dict) or not isinstance(entry.get("kind"), str) or not isinstance(entry.get("name"), str):
+                    continue
+                context_name = str(entry["name"])
+                if len(context_name) > 128:
+                    truncated_fields.append(f"context[{index}].name")
+                context.append({"kind": safe_text(entry["kind"], 32), "name": safe_text(context_name, 128)})
+        raw_hints = item.get("hints") if isinstance(item.get("hints"), dict) else {}
+        placeholder = raw_hints.get("placeholder")
+        if placeholder is not None and not isinstance(placeholder, str):
+            placeholder = None
+        if isinstance(placeholder, str) and len(placeholder) > 128:
+            truncated_fields.append("hints.placeholder")
+        hints = {
+            "placeholder": safe_text(placeholder, 128) if isinstance(placeholder, str) else None,
+            "input_type": raw_hints.get("input_type") if isinstance(raw_hints.get("input_type"), str) else None,
+            "multiline": raw_hints.get("multiline") if isinstance(raw_hints.get("multiline"), bool) else None,
+            "editable": raw_hints.get("editable") if isinstance(raw_hints.get("editable"), bool) else None,
+        }
+        href = item.get("href") if isinstance(item.get("href"), str) else None
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        raw_form = action.get("form") if isinstance(action.get("form"), dict) else None
+        private_action = {
+            "href": safe_url(urljoin(page_url, href)) if href and page_url else href,
+            "download": action.get("download") if isinstance(action.get("download"), str) else None,
+            "target": action.get("target") if isinstance(action.get("target"), str) else None,
+            "form": {
+                "action": raw_form.get("action") if isinstance(raw_form.get("action"), str) else None,
+                "method": str(raw_form.get("method", "get")).lower() if isinstance(raw_form.get("method"), str) else None,
+                "formaction": raw_form.get("formaction") if isinstance(raw_form.get("formaction"), str) else None,
+                "formmethod": str(raw_form.get("formmethod")).lower() if isinstance(raw_form.get("formmethod"), str) else None,
+            } if raw_form is not None else None,
+        }
+        action_fingerprint = private_fingerprint(private_action)
+        action_facts = {
+            "href": safe_url(urljoin(page_url, href)) if href and page_url else href,
+            "download": safe_text(action.get("download"), 256) if isinstance(action.get("download"), str) else None,
+            "target": safe_text(action.get("target"), 128) if isinstance(action.get("target"), str) else None,
+            "form": {
+                "action": safe_text(action.get("form", {}).get("action"), 512) if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("action"), str) else None,
+                "method": str(action.get("form", {}).get("method", "get")).lower() if isinstance(action.get("form"), dict) else None,
+                "formaction": safe_text(action.get("form", {}).get("formaction"), 512) if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("formaction"), str) else None,
+                "formmethod": str(action.get("form", {}).get("formmethod")).lower() if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("formmethod"), str) else None,
+            } if isinstance(action.get("form"), dict) else None,
+        }
+        enabled = item.get("enabled") is True
+        semantic = {
+            "role": role,
+            "name": name,
+            "name_source": source,
+            "description": description,
+            "context": context,
+            "hints": hints,
+            "action": action_facts,
+            "action_fingerprint": action_fingerprint,
+        }
+        return {
+            "role": role,
+            "name": name,
+            "name_source": source,
+            "description": description,
+            "context": context,
+            "hints": hints,
+            "href": href,
+            "action": action_facts,
+            "enabled": enabled,
+            "semantic": json.dumps(semantic, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            "action_fingerprint": action_fingerprint,
+            "truncated_fields": sorted(set(truncated_fields)),
+        }
+
+    async def _capture_candidate_records(self, state: PageState) -> tuple[list[dict[str, Any]], bool, bool, list[str]]:
+        selector = OBSERVATION_SELECTOR
+        start_generation = state.generation
+        start_url = safe_url(state.page.url)
         try:
             element_handles = await state.page.query_selector_all(selector)
-        except Exception:
-            element_handles = []
-        controls = []
-        state.snapshot_serial += 1
-        await state.clear_controls()
-        retained_indices: set[int] = set()
+        except Exception as error:
+            raise ObservationFailure("observation_changed") from error
+        records: list[dict[str, Any]] = []
+        reasons: list[str] = []
+        semantic_complete = True
+        metadata_bytes = 0
+        candidate_limit_hit = False
         for index, element in enumerate(element_handles):
-            if len(controls) >= 128:
-                break
-            try:
-                item = await element.evaluate("""e => {
-                  const rect = e.getBoundingClientRect(), style = getComputedStyle(e);
-                  if (!(rect.width > 0 && rect.height > 0) || style.display === 'none' || style.visibility === 'hidden') return null;
-                  let role = e.getAttribute('role');
-                  if (!role) {
-                    if (e.tagName === 'BUTTON' || (e.tagName === 'INPUT' && ['button','submit','reset'].includes(e.type))) role = 'button';
-                    else if (e.tagName === 'A' && e.hasAttribute('href')) role = 'link';
-                    else if (e.tagName === 'INPUT' && e.type === 'file') role = 'file';
-                    else if (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !['checkbox','radio','file','hidden','button','submit','reset'].includes(e.type))) role = 'textbox';
-                    else if (e.tagName === 'INPUT' && e.type === 'checkbox') role = 'checkbox';
-                    else if (e.tagName === 'INPUT' && e.type === 'radio') role = 'radio';
-                    else if (e.tagName === 'SELECT') role = 'combobox';
-                  }
-                  if (!role) return null;
-                  return { role, name: (e.getAttribute('aria-label') || e.innerText || e.value || '').trim().slice(0,256), href: e.tagName === 'A' ? e.getAttribute('href') : null, enabled: !e.disabled };
-                }""")
-            except Exception:
+            if index >= MAX_OBSERVATION_ELEMENTS:
+                reasons.append("scan_limit_reached")
+                await self._dispose_handle(element)
                 continue
-            if not isinstance(item, dict) or not isinstance(item.get("role"), str) or not isinstance(item.get("name"), str):
-                continue
-            ref = f"control:{state.generation}:{state.snapshot_serial}:{len(controls)}"
-            href = item.get("href") if isinstance(item.get("href"), str) else None
-            state.controls[ref] = (item["role"], item["name"], href, None, element)
-            retained_indices.add(index)
-            controls.append({"target_ref": ref, "role": safe_text(item["role"], 64), "name": safe_text(item["name"], 256), "enabled": item.get("enabled") is True})
-        for index, element in enumerate(element_handles):
-            if index in retained_indices:
+            if len(records) >= MAX_OBSERVATION_CONTROLS:
+                candidate_limit_hit = True
+                await self._dispose_handle(element)
                 continue
             try:
-                dispose = getattr(element, "dispose", None)
-                if callable(dispose):
-                    await dispose()
+                item = await self._read_control(element)
+                provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
             except Exception:
-                pass
-        try:
-            text = safe_text(await state.page.evaluate("() => (document.body?.innerText || '').slice(0,65536)"))
-        except Exception:
-            text = ""
-        return {"page_ref": state.ref, "observation_ref": f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}", "controls": controls, "text": text, "truncated": len(text) >= MAX_TEXT}
+                for record in records:
+                    await self._dispose_handle(record["handle"])
+                    if record.get("form_handle") is not None:
+                        await self._dispose_handle(record["form_handle"])
+                for remaining in element_handles[index:]:
+                    await self._dispose_handle(remaining)
+                raise
+            if item is None:
+                await self._dispose_handle(element)
+                continue
+            if provider is not None:
+                item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
+            normalized = self._normalized_control(item, start_url or "")
+            if normalized is None:
+                await self._dispose_handle(element)
+                continue
+            public = {
+                "role": safe_text(normalized["role"], 64),
+                "name": safe_text(normalized["name"], 256),
+                "name_source": normalized["name_source"],
+                "description": normalized["description"],
+                "context": normalized["context"],
+                "hints": normalized["hints"],
+                "enabled": normalized["enabled"],
+                "disambiguation": "ambiguous",
+                "truncated_fields": normalized["truncated_fields"],
+            }
+            encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+            if metadata_bytes + encoded_size > MAX_OBSERVATION_METADATA_BYTES:
+                reasons.append("metadata_truncated")
+                semantic_complete = False
+                await self._dispose_handle(element)
+                continue
+            metadata_bytes += encoded_size
+            form_handle = None
+            if isinstance(normalized.get("action"), dict) and normalized["action"].get("form") is not None:
+                try:
+                    form_handle = await element.evaluate_handle("e => e.form")
+                except Exception:
+                    semantic_complete = False
+                    if "semantic_unavailable" not in reasons:
+                        reasons.append("semantic_unavailable")
+            ref = f"control:{state.generation}:{state.snapshot_serial}:{len(records)}"
+            records.append({
+                "target_ref": ref,
+                "handle": element,
+                "public": public,
+                "semantic": normalized["semantic"],
+                "action": normalized["action"],
+                "action_fingerprint": normalized["action_fingerprint"],
+                "form_handle": form_handle,
+                "provider_accessibility": provider is not None,
+            })
+            if public["truncated_fields"]:
+                semantic_complete = False
+        if len(element_handles) > MAX_OBSERVATION_ELEMENTS and "scan_limit_reached" not in reasons:
+            reasons.append("scan_limit_reached")
+        if candidate_limit_hit and "capture_limit_reached" not in reasons:
+            reasons.append("capture_limit_reached")
+        if state.generation != start_generation or safe_url(state.page.url) != start_url:
+            for record in records:
+                await self._dispose_handle(record["handle"])
+                if record.get("form_handle") is not None:
+                    await self._dispose_handle(record["form_handle"])
+            raise ObservationFailure("observation_changed")
+        enumeration_complete = not any(reason in reasons for reason in ("scan_limit_reached", "capture_limit_reached", "metadata_truncated"))
+        return records, enumeration_complete, semantic_complete, sorted(set(reasons))
 
-    async def control_handle(self, state: PageState, target: str, role: str | None = None):
+    @staticmethod
+    def _disambiguate(records: list[dict[str, Any]], enumeration_complete: bool) -> None:
+        name_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for record in records:
+            public = record["public"]
+            name_groups.setdefault((public["role"], public["name"]), []).append(record)
+        for group in name_groups.values():
+            if not enumeration_complete:
+                for record in group:
+                    record["public"]["disambiguation"] = "ambiguous"
+                continue
+            variants: dict[str, int] = {}
+            for record in group:
+                public = record["public"]
+                variant = json.dumps({"description": public["description"], "context": public["context"], "hints": public["hints"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                variants[variant] = variants.get(variant, 0) + 1
+            for record in group:
+                public = record["public"]
+                variant = json.dumps({"description": public["description"], "context": public["context"], "hints": public["hints"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                if len(group) == 1:
+                    public["disambiguation"] = "unique"
+                elif variants.get(variant) == 1:
+                    public["disambiguation"] = "contextual"
+                else:
+                    public["disambiguation"] = "ambiguous"
+
+    @staticmethod
+    def _action_semantic(public: dict[str, Any], action: dict[str, Any], action_fingerprint: str | None = None) -> str:
+        hints = public["hints"]
+        identity = {
+            "role": public["role"],
+            "name": public["name"],
+            "editing": {"input_type": hints["input_type"], "multiline": hints["multiline"], "editable": hints["editable"]},
+            "action": action,
+            "action_fingerprint": action_fingerprint,
+        }
+        if public["disambiguation"] == "contextual":
+            identity["distinguishing"] = {"description": public["description"], "context": public["context"], "hints": hints}
+        return json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _cursor(self, state: PageState, batch: dict[str, Any], offset: int) -> str:
+        seed = f"{state.ref}:{batch['observation_ref']}:{offset}:{time.time_ns()}"
+        cursor = f"cursor:{hashlib.sha256(seed.encode()).hexdigest()[:40]}"
+        batch.setdefault("cursors", {})[cursor] = offset
+        return cursor
+
+    async def _verify_snapshot_batch(self, state: PageState, batch: dict[str, Any], failure_class: str = "observation_cursor_stale") -> None:
+        selector = OBSERVATION_SELECTOR
+        try:
+            handles = await state.page.query_selector_all(selector)
+        except Exception as error:
+            raise ObservationFailure(failure_class) from error
+        current: list[tuple[Any, dict[str, Any]]] = []
+        try:
+            for index, handle in enumerate(handles):
+                if index >= MAX_OBSERVATION_ELEMENTS:
+                    break
+                item = await self._read_control(handle)
+                provider = await self._indexed_public_semantics(state, index, handle, failure_class)
+                if provider is not None and item is not None:
+                    item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
+                normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
+                if normalized is not None:
+                    if len(current) < MAX_OBSERVATION_CONTROLS:
+                        current.append((handle, normalized))
+                    else:
+                        await self._dispose_handle(handle)
+            records = batch["records"]
+            if len(current) != len(records):
+                raise ObservationFailure(failure_class)
+            for (fresh, normalized), record in zip(current, records):
+                if (not await self._same_element(record["handle"], fresh) or
+                    normalized["semantic"] != record["semantic"] or
+                    normalized["enabled"] != record["public"]["enabled"]):
+                    raise ObservationFailure(failure_class)
+            if state.generation != batch["generation"] or safe_url(state.page.url) != batch["page_url"]:
+                raise ObservationFailure(failure_class)
+        finally:
+            old_handles = {id(record["handle"]) for record in batch["records"]}
+            for handle, _ in current:
+                if id(handle) not in old_handles:
+                    await self._dispose_handle(handle)
+            for handle in handles:
+                if all(handle is not current_handle for current_handle, _ in current) and id(handle) not in old_handles:
+                    await self._dispose_handle(handle)
+
+    @staticmethod
+    async def _same_element(first: Any, second: Any) -> bool:
+        if first is second:
+            return True
+        try:
+            return await first.evaluate("(e, other) => e === other", second) is True
+        except AssertionError:
+            return first is second
+        except Exception:
+            return False
+
+    async def _snapshot_result(self, state: PageState, batch: dict[str, Any], offset: int, limit: int, continuation: bool) -> dict[str, Any]:
+        records = batch["records"]
+        selected = records[offset:offset + limit]
+        text_state = "omitted_on_continuation" if continuation else batch["text_state"]
+        text = "" if continuation else batch["text"]
+        response: dict[str, Any] | None = None
+        while selected or offset == len(records):
+            controls = [{**record["public"], "target_ref": record["target_ref"]} for record in selected]
+            returned_count = len(controls)
+            returned_through = offset + returned_count
+            has_more = returned_through < len(records)
+            response = {
+                "schema_version": "harbor-observation-targets/v1",
+                "page_ref": state.ref,
+                "observation_ref": batch["observation_ref"],
+                "captured_at": batch["captured_at"],
+                "controls": controls,
+                "text": text,
+                "truncated": batch["truncated"],
+                "coverage": {
+                    "scope": "main_document_light_dom",
+                    "excluded": ["child_frames", "shadow_roots", "virtualized_not_in_dom"],
+                    "controls": {
+                        "enumeration_complete": batch["enumeration_complete"],
+                        "captured_count": len(records),
+                        "total": len(records) if batch["enumeration_complete"] else None,
+                        "returned_through": returned_through,
+                        "complete": batch["enumeration_complete"] and returned_through == len(records),
+                        "reason_codes": batch["reason_codes"],
+                    },
+                    "text": {"state": text_state, "returned_bytes": len(text.encode("utf-8"))},
+                    "semantics": {"complete": batch["semantic_complete"], "reason_codes": batch["semantic_reason_codes"]},
+                },
+                "continuation": {"offset": offset, "returned_count": returned_count, "has_more": has_more, "next_cursor": "cursor:" + "0" * 40 if has_more else None},
+            }
+            if len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= MAX_OBSERVATION_RESPONSE_BYTES:
+                break
+            selected.pop()
+        if response is None or not selected and offset < len(records):
+            raise ObservationFailure("observation_limit_exceeded")
+        if response["continuation"]["has_more"]:
+            response["continuation"]["next_cursor"] = self._cursor(state, batch, response["coverage"]["controls"]["returned_through"])
+        for record in selected:
+            state.control_metadata[record["target_ref"]]["exposed"] = True
+        return response
+
+    async def snapshot(self, state: PageState, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        cursor = request.get("cursor")
+        try:
+            limit = request.get("limit")
+            if limit is None:
+                limit = state.snapshot_batch.get("initial_limit", MAX_SNAPSHOT_LIMIT) if isinstance(state.snapshot_batch, dict) and cursor else MAX_SNAPSHOT_LIMIT
+            if type(limit) is not int or not 1 <= limit <= MAX_SNAPSHOT_LIMIT:
+                raise ObservationFailure("observation_limit_exceeded")
+        except ObservationFailure:
+            raise
+        if cursor is not None:
+            if not isinstance(cursor, str) or not REF.fullmatch(cursor):
+                raise ObservationFailure("observation_cursor_stale")
+            batch = state.snapshot_batch
+            if not isinstance(batch, dict) or request.get("observation_ref") != batch["observation_ref"]:
+                raise ObservationFailure("observation_cursor_stale")
+            offset = batch.get("cursors", {}).get(cursor)
+            if not isinstance(offset, int) or offset < 0 or offset >= len(batch["records"]):
+                raise ObservationFailure("observation_cursor_stale")
+            await self._verify_snapshot_batch(state, batch)
+            return await self._snapshot_result(state, batch, offset, limit, True)
+        if request.get("observation_ref") is not None:
+            raise ObservationFailure("observation_cursor_stale")
+        state.snapshot_serial += 1
+        records, enumeration_complete, semantic_complete, reasons = await self._capture_candidate_records(state)
+        observation_ref = f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}"
+        self._disambiguate(records, enumeration_complete)
+        text_raw: Any
+        text_unavailable = False
+        try:
+            text_raw = await state.page.evaluate("""() => { const text = document.body?.innerText || ''; return { text: text.slice(0, 65536), length: text.length }; }""")
+        except Exception:
+            text_raw = {"text": "", "length": 0}
+            text_unavailable = True
+        if isinstance(text_raw, dict):
+            raw_text = text_raw.get("text", "") if isinstance(text_raw.get("text"), str) else ""
+            text_length = int(text_raw.get("length", len(raw_text))) if isinstance(text_raw.get("length"), (int, float)) else len(raw_text)
+        else:
+            raw_text = text_raw if isinstance(text_raw, str) else ""
+            text_length = len(raw_text)
+        text, text_byte_truncated = safe_text_bytes(raw_text, MAX_TEXT)
+        text_truncated = not text_unavailable and (text_byte_truncated or text_length > len(raw_text))
+        if text_unavailable:
+            reasons = sorted(set([*reasons, "text_unavailable"]))
+        batch = {
+            "observation_ref": observation_ref,
+            "captured_at": now(),
+            "generation": state.generation,
+            "page_url": safe_url(state.page.url),
+            "records": records,
+            "enumeration_complete": enumeration_complete,
+            "semantic_complete": semantic_complete,
+            "semantic_reason_codes": [reason for reason in reasons if reason in {"semantic_unavailable", "metadata_truncated"}],
+            "reason_codes": reasons,
+            "text": text,
+            "text_state": "unavailable" if text_unavailable else "truncated" if text_truncated else "complete",
+            "truncated": text_truncated,
+            "initial_limit": limit,
+            "cursors": {},
+        }
+        try:
+            await self._verify_snapshot_batch(state, batch, "observation_changed")
+        except Exception:
+            for record in records:
+                await self._dispose_handle(record["handle"])
+                if record.get("form_handle") is not None:
+                    await self._dispose_handle(record["form_handle"])
+            raise
+        await state.clear_controls()
+        for record in records:
+            state.controls[record["target_ref"]] = (record["public"]["role"], record["public"]["name"], record["action"].get("href"), None, record["handle"])
+            state.control_metadata[record["target_ref"]] = {
+                "semantic": record["semantic"],
+                "action_semantic": self._action_semantic(record["public"], record["action"], record["action_fingerprint"]),
+                "action": record["action"],
+                "action_fingerprint": record["action_fingerprint"],
+                "form_handle": record.get("form_handle"),
+                "provider_accessibility": record.get("provider_accessibility") is True,
+                "disambiguation": record["public"]["disambiguation"],
+                "exposed": False,
+            }
+        state.snapshot_batch = batch
+        return await self._snapshot_result(state, batch, 0, limit, False)
+
+    async def target_failure(self, state: PageState, target: str, role: str | None = None) -> str | None:
         control = state.controls.get(target)
-        if control is None or len(control) < 5 or (role is not None and control[0] != role):
+        if control is None:
+            return "target_stale"
+        if role is not None and control[0] != role:
+            return "target_semantics_changed"
+        metadata = state.control_metadata.get(target)
+        if metadata is not None:
+            if metadata.get("exposed") is not True:
+                return "target_stale"
+            if metadata.get("disambiguation") == "ambiguous":
+                return "target_ambiguous"
+        if len(control) < 5 or control[4] is None:
             return None
         handle = control[4]
-        if handle is None:
-            return None
         try:
             if await handle.evaluate("e => Boolean(e.isConnected)") is not True:
-                return None
+                return "target_stale"
         except Exception:
+            return "target_stale"
+        if metadata is not None:
+            form_handle = metadata.get("form_handle")
+            if form_handle is not None:
+                try:
+                    if await handle.evaluate("(e, form) => e.form === form", form_handle) is not True:
+                        return "target_semantics_changed"
+                except Exception:
+                    return "target_semantics_changed"
+            current = await self._read_control(handle)
+            if metadata.get("provider_accessibility") is True:
+                provider = await self._target_public_semantics(state, handle, control[0], control[1])
+                if provider is None:
+                    return "target_semantics_changed"
+                if current is not None:
+                    current = {**current, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
+            normalized = self._normalized_control(current, safe_url(state.page.url) or "") if current is not None else None
+            if normalized is None:
+                return "target_semantics_changed"
+            current_public = {**normalized, "disambiguation": metadata.get("disambiguation")}
+            if self._action_semantic(current_public, normalized["action"], normalized["action_fingerprint"]) != metadata.get("action_semantic"):
+                return "target_semantics_changed"
+        return None
+
+    async def control_handle(self, state: PageState, target: str, role: str | None = None):
+        if await self.target_failure(state, target, role):
             return None
-        return handle
+        control = state.controls.get(target)
+        return control[4] if control is not None and len(control) >= 5 else None
 
     async def locator(self, state: PageState, request: dict[str, Any]):
         ref = request.get("target_ref")
         if not isinstance(ref, str) or ref not in state.controls:
-            raise ValueError("Target ref is not from the current Page observation.")
+            raise TargetFailure("target_stale")
         control = state.controls[ref]
         role, name = control[0], control[1]
+        failure = await self.target_failure(state, ref)
+        if failure:
+            raise TargetFailure(failure)
         if len(control) >= 5:
-            handle = await self.control_handle(state, ref)
-            if handle is None:
-                raise ValueError("Target element is no longer attached to the current Page.")
-            return handle
+            return control[4]
         return state.page.get_by_role(role, name=name, exact=True)
 
     async def observe(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -1219,7 +1890,10 @@ class Driver:
             source = request.get("source_path")
             if not isinstance(source, str) or not source or "\x00" in source:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_source_unavailable", "page": await state.facts()}
-            if target not in state.controls or state.controls[target][0] != "file" or await self.control_handle(state, target, "file") is None:
+            target_failure = await self.target_failure(state, target, "file")
+            if target_failure:
+                return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": target_failure, "page": await state.facts()}
+            if await self.control_handle(state, target, "file") is None:
                 return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "upload", "failure_class": "file_input_unavailable", "page": await state.facts()}
             try:
                 source_path = Path(source)
@@ -1248,6 +1922,9 @@ class Driver:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
         role, _name, *metadata = state.controls[target]
         observed_href = metadata[0] if metadata else None
+        target_failure = await self.target_failure(state, target, "link")
+        if target_failure:
+            return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": target_failure, "page": await state.facts()}
         if role != "link" or await self.control_handle(state, target, "link") is None:
             return {"status": "unavailable", "dispatch_state": "not_dispatched", "operation": "download", "failure_class": "download_target_unsupported", "page": await state.facts()}
         staging = request.get("staging_path")

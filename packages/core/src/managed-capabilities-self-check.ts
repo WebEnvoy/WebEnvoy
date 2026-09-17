@@ -78,6 +78,10 @@ assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
   "idempotency_key", "connection_id", "grant_id", "operation", "task_scope",
   "profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"
 ]);
+assert.deepEqual(managedCapabilityInputFields("instance.snapshot"), [
+  "idempotency_key", "connection_id", "grant_id", "operation", "task_scope",
+  "profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "cursor", "limit"
+]);
 assert.doesNotThrow(() => parseManagedBrowserRequest(observation));
 assert.throws(() => parseManagedBrowserRequest({ ...observation, runtime_session_ref: undefined }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...observation, origin: undefined }), /managed_browser_invalid_input/);
@@ -97,6 +101,41 @@ const download = {
 assert.doesNotThrow(() => parseManagedBrowserRequest(download));
 assert.throws(() => parseManagedBrowserRequest({ ...download, file_ref: "attachment:runtime/11111111-1111-4111-8111-111111111111" }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...download, task_scope: { ...download.task_scope, file_refs: ["attachment:runtime/11111111-1111-4111-8111-111111111111"] } }), /managed_browser_invalid_input/);
+
+const snapshot = parserFixture(managedCapabilityDefinition("instance.snapshot")!);
+assert.doesNotThrow(() => parseManagedBrowserRequest({ ...snapshot, limit: 128 }));
+assert.doesNotThrow(() => parseManagedBrowserRequest({ ...snapshot, limit: 1 }));
+assert.ok(managedCapabilityInputShapeIssues({ ...snapshot, limit: 129 }).invalid.some(issue => issue.field === "limit"));
+assert.throws(() => parseManagedBrowserRequest({ ...snapshot, limit: 129 }), /managed_browser_invalid_input/);
+assert.doesNotThrow(() => parseManagedBrowserRequest({ ...snapshot, cursor: "c".repeat(256) }));
+assert.ok(managedCapabilityInputShapeIssues({ ...snapshot, cursor: "c".repeat(257) }).invalid.some(issue => issue.field === "cursor"));
+assert.throws(() => parseManagedBrowserRequest({ ...snapshot, cursor: "c".repeat(257) }), /managed_browser_invalid_input/);
+const continuation = { ...snapshot, cursor: "cursor:fixture", observation_ref: fixtureObservation, page_id: fixturePage, page_ref: fixturePageRef, document_generation: 1 };
+assert.doesNotThrow(() => parseManagedBrowserRequest(continuation));
+for (const field of ["observation_ref", "page_id", "page_ref", "document_generation"] as const) {
+  const missing = { ...continuation };
+  delete missing[field];
+  assert.ok(managedCapabilityInputShapeIssues(missing).missing.includes(field), `snapshot continuation requires ${field}`);
+  assert.throws(() => parseManagedBrowserRequest(missing), /managed_browser_invalid_input/);
+}
+assert.ok(managedCapabilityInputShapeIssues({ ...snapshot, cursor: undefined, observation_ref: fixtureObservation }).invalid.some(issue => issue.field === "observation_ref"));
+assert.throws(() => parseManagedBrowserRequest({ ...snapshot, cursor: undefined, observation_ref: fixtureObservation }), /managed_browser_invalid_input/);
+const diagnostics = parserFixture(managedCapabilityDefinition("instance.diagnostics")!);
+assert.doesNotThrow(() => parseManagedBrowserRequest({ ...diagnostics, limit: 64 }));
+assert.doesNotThrow(() => parseManagedBrowserRequest({ ...diagnostics, cursor: "c".repeat(512) }));
+assert.ok(managedCapabilityInputShapeIssues({ ...diagnostics, limit: 65 }).invalid.some(issue => issue.field === "limit"));
+assert.throws(() => parseManagedBrowserRequest({ ...diagnostics, limit: 65 }), /managed_browser_invalid_input/);
+assert.ok(managedCapabilityInputShapeIssues({ ...observation, operation: "instance.observe", cursor: "cursor:fixture" }).invalid.some(issue => issue.field === "cursor"));
+assert.throws(() => parseManagedBrowserRequest({ ...observation, operation: "instance.observe", cursor: "cursor:fixture" }), /managed_browser_invalid_input/);
+const snapshotSchema = managedCapabilityExecutionInputSchema("instance.snapshot") as Record<string, any>;
+assert.equal(snapshotSchema.properties.limit.maximum, 128);
+assert.equal(snapshotSchema.properties.cursor.maxLength, 256);
+assert.ok(snapshotSchema.allOf.some((condition: any) => condition.if?.required?.includes("cursor") && condition.then.required.includes("observation_ref")));
+assert.ok(snapshotSchema.allOf.some((condition: any) => condition.if?.not?.required?.includes("cursor") && condition.then.not?.anyOf?.some((item: any) => item.required?.includes("observation_ref"))));
+const diagnosticsSchema = managedCapabilityExecutionInputSchema("instance.diagnostics") as Record<string, any>;
+assert.equal(diagnosticsSchema.properties.cursor.maxLength, 512);
+assert.equal(diagnosticsSchema.properties.limit.maximum, 64);
+assert.ok(diagnosticsSchema.allOf.some((condition: any) => condition.if?.required?.includes("limit") && condition.then.properties?.limit.maximum === 64));
 
 const fileRef = "attachment:runtime/11111111-1111-4111-8111-111111111111";
 const upload = { ...download, idempotency_key: "capability-upload-fixture", operation: "file.upload", file_ref: fileRef,

@@ -28,6 +28,7 @@ let sessionStopped = false;
 let dropResponse = false, omitProviderSelection = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false, crossOriginInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
+const forwardedInteractionInputs: Record<string, unknown>[] = [];
 const receipts = new Map<string, unknown>();
 let pageLists = 0, pageMutations = 0, dropPageResponse = false;
 const pageReceipts = new Map<string, Record<string, unknown>>();
@@ -215,8 +216,9 @@ const server = createServer((req, res) => { void (async () => {
     assert.equal(input.expected_origin, "http://127.0.0.1:18794");
     assert.ok(Array.isArray(input.authorized_origins));
     forwardedInteractionOrigins.push([...input.authorized_origins]);
+    forwardedInteractionInputs.push(input);
     const timedOut = waitConditionTimeout && input.action === "wait";
-    if (!refuseInteraction && !timedOut) interactions++;
+    if (!refuseInteraction && !timedOut && !(input.action === "snapshot" && input.cursor)) interactions++;
     value = timedOut
       ? { status: "unavailable", dispatch_state: "dispatched", failure_class: "wait_condition_timeout", operation_ref: input.operation_ref, runtime_session_ref: "session:one", page: { current_url: "http://127.0.0.1:18794/fixture", title: "Fixture", status: "ready" } }
       : { status: refuseInteraction ? "unavailable" : "completed", dispatch_state: refuseInteraction ? "not_dispatched" : "dispatched",
@@ -456,13 +458,20 @@ try {
   await accessStore.setProfilePolicy({ idempotency_key: "no-declaration", ...policy });
   const interactiveGrant = await accessStore.createGrant({ idempotency_key: "controlled-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: interactionOps, allowed_origins: [origin], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const interactive = { idempotency_key: "snapshot", connection_id: connection.connection_id, grant_id: interactiveGrant.grant_id,
-    operation: "instance.snapshot", profile_ref: "profile:1", origin, runtime_session_ref: "session:one", page_ref: "page:one", task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [origin] } };
+    operation: "instance.snapshot", profile_ref: "profile:1", origin, runtime_session_ref: "session:one", page_id: "page-id:one", page_ref: "page:one", document_generation: 1, limit: 128,
+    task_scope: { operations: interactionOps, profile_refs: ["profile:1"], origins: [origin] } };
   await assert.rejects(service.submit(credentialHash, interactive), /controlled_origin_required/);
   await assert.rejects(accessStore.setProfilePolicy({ idempotency_key: "invalid-declaration", ...policy, controlled_interaction_origins: ["http://127.0.0.1:18795"] }), /invalid_input/);
   await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration", ...policy, controlled_interaction_origins: [origin] });
   const snapshot = await service.submit(credentialHash, interactive);
   assert.equal(snapshot.status, "succeeded", JSON.stringify(snapshot));
-  const input = { ...interactive, idempotency_key: "input-one", operation: "instance.input", page_ref: "page:one", observation_ref: "observation:1", target_ref: "target:one", text: "ordinary test" };
+  const continuation = await service.submit(credentialHash, { ...interactive, idempotency_key: "snapshot-continuation", observation_ref: "observation:1", cursor: "cursor:next", limit: 32 });
+  assert.equal(continuation.status, "succeeded", JSON.stringify(continuation));
+  assert.deepEqual(Object.fromEntries(["page_id", "page_ref", "document_generation", "observation_ref", "cursor", "limit"].map(key => [key, forwardedInteractionInputs.at(-1)![key]])), {
+    page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:1", cursor: "cursor:next", limit: 32
+  }, "Core must forward the complete continuation binding instead of starting a new snapshot");
+  const { limit: _snapshotLimit, ...interactiveWithoutLimit } = interactive;
+  const input = { ...interactiveWithoutLimit, idempotency_key: "input-one", operation: "instance.input", page_ref: "page:one", observation_ref: "observation:1", target_ref: "target:one", text: "ordinary test" };
   const deniedPolicy = await service.submit(credentialHash, { ...input, idempotency_key: "prepare-not-allowed" });
   assert.equal(deniedPolicy.failure?.code, "managed_browser_policy_refused");
   assert.equal(deniedPolicy.dispatch_state, "not_dispatched");
@@ -597,7 +606,7 @@ try {
   dropInteractionResponse = false;
   assert.deepEqual(await service.submit(credentialHash, input), lost, "same key cannot replay input");
   waitConditionTimeout = true;
-  const timedOutWait = await service.submit(credentialHash, { ...interactive, idempotency_key: "wait-timeout", operation: "instance.wait",
+  const timedOutWait = await service.submit(credentialHash, { ...interactiveWithoutLimit, idempotency_key: "wait-timeout", operation: "instance.wait",
     page_ref: "page:one", observation_ref: "observation:1", wait_for: "text", text: "never", timeout_ms: 50 });
   waitConditionTimeout = false;
   assert.equal(timedOutWait.status, "failed", JSON.stringify(timedOutWait));
@@ -608,7 +617,7 @@ try {
 
   waitConditionTimeout = true;
   dropInteractionResponse = true;
-  const timedOutLost = await service.submit(credentialHash, { ...interactive, idempotency_key: "wait-timeout-lost", operation: "instance.wait",
+  const timedOutLost = await service.submit(credentialHash, { ...interactiveWithoutLimit, idempotency_key: "wait-timeout-lost", operation: "instance.wait",
     page_ref: "page:one", observation_ref: "observation:1", wait_for: "text", text: "never", timeout_ms: 50 });
   dropInteractionResponse = false;
   waitConditionTimeout = false;

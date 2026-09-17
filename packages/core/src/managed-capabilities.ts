@@ -99,8 +99,43 @@ function conditionMatches(value: JsonObject, condition: ManagedCapabilityConditi
   if (!condition.when || typeof condition.when !== "object") return true;
   const when = condition.when as JsonObject;
   const actual = value[String(when.field)];
+  if (Object.hasOwn(when, "present")) return when.present === true ? actual !== undefined : actual === undefined;
+  if (Object.hasOwn(when, "absent")) return when.absent === true ? actual === undefined : actual !== undefined;
   if (Object.hasOwn(when, "equals")) return actual === when.equals;
   return Array.isArray(when.in) && when.in.includes(actual);
+}
+
+function conditionIf(condition: ManagedCapabilityCondition): JsonObject | undefined {
+  if (condition.kind !== "conditional_fields" || !condition.when || typeof condition.when !== "object") return undefined;
+  const when = condition.when as JsonObject;
+  if (typeof when.field !== "string") return undefined;
+  if (Object.hasOwn(when, "present")) return when.present === true ? { required: [when.field] } : { not: { required: [when.field] } };
+  if (Object.hasOwn(when, "absent")) return when.absent === true ? { not: { required: [when.field] } } : { required: [when.field] };
+  if (Object.hasOwn(when, "equals")) return { properties: { [when.field]: { const: when.equals } }, required: [when.field] };
+  if (Array.isArray(when.in)) return { properties: { [when.field]: { enum: when.in } }, required: [when.field] };
+  return undefined;
+}
+
+function operationFieldSchema(definition: ManagedCapabilityDefinition | undefined, field: string): ManagedCapabilityField {
+  const base = document.fields[field];
+  if (!base) throw new Error(`unknown managed capability field: ${field}`);
+  const schema: ManagedCapabilityField = { ...base };
+  for (const condition of definition?.conditions ?? []) {
+    if (condition.kind === "conditional_fields" && condition.constraints?.[field]) Object.assign(schema, condition.constraints[field]);
+  }
+  return schema;
+}
+
+function conditionRequiredWhen(condition: ManagedCapabilityCondition): string {
+  const when = condition.when;
+  if (!when || typeof when !== "object") return String(when ?? "when applicable");
+  const field = String((when as JsonObject).field);
+  if ((when as JsonObject).present === true) return `when ${field} is provided`;
+  if ((when as JsonObject).absent === true) return `when ${field} is omitted`;
+  if (Object.hasOwn(when as JsonObject, "equals")) return `${field}=${String((when as JsonObject).equals)}`;
+  const values = (when as JsonObject).in;
+  if (Array.isArray(values)) return `${field} in ${values.join(",")}`;
+  return "when applicable";
 }
 
 function publicOrigin(value: string): boolean {
@@ -221,7 +256,7 @@ function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: bo
     }
   }
   for (const field of definition.allowed) {
-    if (value[field] !== undefined && !managedCapabilityFieldMatches(value[field], document.fields[field]!)) issues.invalid.push({ field, code: "invalid_value" });
+    if (value[field] !== undefined && !managedCapabilityFieldMatches(value[field], operationFieldSchema(definition, field))) issues.invalid.push({ field, code: "invalid_value" });
   }
   for (const field of definition.required) if (value[field] === undefined) {
     if (partial) issues.missing.push(field); else issues.invalid.push({ field, code: "missing_required" });
@@ -247,8 +282,8 @@ export function managedCapabilityExample(operation: string): JsonObject | null {
 
 export function managedCapabilityInputSchema(operation?: string): JsonObject {
   const fields = document.fields;
-  const properties: JsonObject = Object.fromEntries(Object.entries(fields).map(([key, schema]) => [key, { ...schema }]));
   const definition = managedCapabilityDefinition(operation);
+  const properties: JsonObject = Object.fromEntries(Object.entries(fields).map(([key]) => [key, { ...operationFieldSchema(definition, key) }]));
   const schema: JsonObject = {
     type: "object",
     properties,
@@ -258,6 +293,18 @@ export function managedCapabilityInputSchema(operation?: string): JsonObject {
     schema.required = definition.required;
     const forbidden = Object.keys(fields).filter(field => !definition.allowed.includes(field));
     if (forbidden.length > 0) schema.not = { anyOf: forbidden.map(field => ({ required: [field] })) };
+    const allOf: JsonObject[] = [];
+    for (const condition of definition.conditions ?? []) {
+      const ifSchema = conditionIf(condition);
+      if (!ifSchema) continue;
+      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...operationFieldSchema(definition, field), ...constraints }]));
+      allOf.push({ if: ifSchema, then: {
+        ...(condition.required?.length ? { required: condition.required } : {}),
+        ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
+        ...(Object.keys(constrainedProperties).length ? { properties: constrainedProperties } : {})
+      } });
+    }
+    if (allOf.length) schema.allOf = allOf;
     if (definition.conditions?.length) schema["x-webenvoy-conditions"] = structuredClone(definition.conditions);
   }
   return schema;
@@ -298,7 +345,7 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
     grant_id: { type: "string", description: "The one owner-issued Grant for this submitted operation." },
     operation: { type: "string", ...(definition ? { enum: [definition.id] } : { pattern: document.operation_pattern }), description: "One exposed operation name." },
     task_scope: taskScopeSchema(definition?.file_scope),
-    ...Object.fromEntries((definition ? definition.allowed : Object.keys(document.fields)).map(field => [field, { ...document.fields[field] }]))
+    ...Object.fromEntries((definition ? definition.allowed : Object.keys(document.fields)).map(field => [field, operationFieldSchema(definition, field)]))
   };
   const schema: JsonObject = {
     type: "object", properties, required: ["idempotency_key", "grant_id", "operation", "task_scope"], additionalProperties: false
@@ -316,8 +363,10 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && condition.when && typeof condition.when === "object" && typeof (condition.when as JsonObject).field === "string") {
       const when = condition.when as JsonObject;
-      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...document.fields[field], ...constraints }]));
-      allOf.push({ if: { properties: { [String(when.field)]: { const: when.equals } }, required: [String(when.field)] }, then: {
+      const ifSchema = conditionIf(condition);
+      if (!ifSchema) continue;
+      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...operationFieldSchema(definition, field), ...constraints }]));
+      allOf.push({ if: ifSchema, then: {
         ...(condition.required?.length ? { required: condition.required } : {}),
         ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
         ...(Object.keys(constrainedProperties).length ? { properties: constrainedProperties } : {})
@@ -348,9 +397,9 @@ export function managedCapabilityFieldGuidance(operation: unknown): ManagedCapab
     const selector = definition.conditions?.find(item => item.kind === "page_selector" && item.fields?.includes(field));
     guidance.push({
       path: `/${field}`,
-      required_when: definition.required.includes(field) ? "always" : condition ? `${String((condition.when as JsonObject | undefined)?.field)}=${String((condition.when as JsonObject | undefined)?.equals)}` : selector ? String(selector.when) : "optional",
-      source: field === "runtime_session_ref" ? "instance.start result.session.runtime_session_ref" : field === "page_ref" || field === "page_id" ? "the latest observation/page list" : field === "observation_ref" || field === "target_ref" ? "the latest instance.observe result" : field === "file_ref" ? "owner file import result" : "operation definition",
-      constraints: fieldConstraints(document.fields[field]!)
+      required_when: definition.required.includes(field) ? "always" : condition ? conditionRequiredWhen(condition) : selector ? String(selector.when) : "optional",
+      source: field === "runtime_session_ref" ? "instance.start result.session.runtime_session_ref" : field === "page_ref" || field === "page_id" ? "the latest observation/page list" : field === "observation_ref" || field === "target_ref" ? "the latest instance.snapshot result" : field === "cursor" ? definition.id === "instance.diagnostics" ? "the latest instance.diagnostics result" : "the latest instance.snapshot result" : field === "file_ref" ? "owner file import result" : "operation definition",
+      constraints: fieldConstraints(operationFieldSchema(definition, field))
     });
   }
   for (const condition of definition.conditions ?? []) {

@@ -33,6 +33,48 @@ function hasKnownCapabilityDescriptionStates(value) {
     capabilityDescriptionStates.availability.has(value.availability?.state) &&
     capabilityDescriptionStates.inputs.has(value.inputs?.state);
 }
+const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value).every(key => keys.includes(key)) && keys.every(key => Object.hasOwn(value, key));
+const nullable = (value, predicate) => value === null || predicate(value);
+function hasObservationTargetsShape(value) {
+  if (!exactKeys(value, ['schema_version', 'page_id', 'page_ref', 'document_generation', 'observation_ref', 'captured_at', 'controls', 'text', 'truncated', 'coverage', 'continuation']) ||
+    value.schema_version !== 'harbor-observation-targets/v1' || typeof value.page_id !== 'string' || typeof value.page_ref !== 'string' ||
+    !Number.isSafeInteger(value.document_generation) || value.document_generation < 1 || typeof value.observation_ref !== 'string' ||
+    typeof value.captured_at !== 'string' || !Number.isFinite(Date.parse(value.captured_at)) || !Array.isArray(value.controls) || value.controls.length > 128 ||
+    typeof value.text !== 'string' || Buffer.byteLength(value.text, 'utf8') > 65536 || typeof value.truncated !== 'boolean') return false;
+  const controlKeys = ['target_ref', 'role', 'name', 'enabled', 'name_source', 'description', 'context', 'hints', 'disambiguation', 'truncated_fields'];
+  if (value.controls.some(control => !exactKeys(control, controlKeys) || typeof control.target_ref !== 'string' || typeof control.role !== 'string' ||
+    typeof control.name !== 'string' || typeof control.enabled !== 'boolean' || !['provider_accessibility', 'html_label', 'aria_labelledby', 'aria_label', 'content', 'alt', 'title', 'none'].includes(control.name_source) ||
+    !nullable(control.description, item => typeof item === 'string') || !Array.isArray(control.context) || control.context.length > 2 || control.context.some(item =>
+      !exactKeys(item, ['kind', 'name']) || !['form', 'group', 'dialog', 'region', 'heading'].includes(item.kind) || typeof item.name !== 'string') ||
+    !Array.isArray(control.truncated_fields) || control.truncated_fields.some(item => typeof item !== 'string') ||
+    !exactKeys(control.hints, ['placeholder', 'input_type', 'multiline', 'editable']) ||
+    !nullable(control.hints.placeholder, item => typeof item === 'string') || !nullable(control.hints.input_type, item => typeof item === 'string') ||
+    !nullable(control.hints.multiline, item => typeof item === 'boolean') || !nullable(control.hints.editable, item => typeof item === 'boolean') ||
+    !['unique', 'contextual', 'ambiguous'].includes(control.disambiguation))) return false;
+  const coverage = value.coverage;
+  const continuation = value.continuation;
+  if (!exactKeys(coverage, ['scope', 'excluded', 'controls', 'text', 'semantics']) || coverage.scope !== 'main_document_light_dom' || !Array.isArray(coverage.excluded) ||
+    !exactKeys(coverage.controls, ['enumeration_complete', 'captured_count', 'total', 'returned_through', 'complete', 'reason_codes']) ||
+    !exactKeys(coverage.text, ['state', 'returned_bytes']) || !exactKeys(coverage.semantics, ['complete', 'reason_codes']) ||
+    !exactKeys(continuation, ['offset', 'returned_count', 'has_more', 'next_cursor'])) return false;
+  const controls = coverage.controls;
+  return typeof controls.enumeration_complete === 'boolean' && Number.isSafeInteger(controls.captured_count) && controls.captured_count >= 0 && controls.captured_count <= 2048 &&
+    (controls.total === null || Number.isSafeInteger(controls.total) && controls.total >= 0 && controls.total <= 2048) && Number.isSafeInteger(controls.returned_through) && controls.returned_through >= 0 && controls.returned_through <= controls.captured_count && typeof controls.complete === 'boolean' && Array.isArray(controls.reason_codes) &&
+    ['complete', 'truncated', 'omitted_on_continuation', 'unavailable'].includes(coverage.text.state) && Number.isSafeInteger(coverage.text.returned_bytes) &&
+    coverage.text.returned_bytes === Buffer.byteLength(value.text, 'utf8') && typeof coverage.semantics.complete === 'boolean' && Array.isArray(coverage.semantics.reason_codes) &&
+    Number.isSafeInteger(continuation.offset) && continuation.offset >= 0 && Number.isSafeInteger(continuation.returned_count) && continuation.returned_count >= 0 && continuation.returned_count === value.controls.length &&
+    continuation.offset + continuation.returned_count === controls.returned_through && typeof continuation.has_more === 'boolean' &&
+    continuation.has_more === (controls.returned_through < controls.captured_count) && (!continuation.has_more || continuation.returned_count > 0) &&
+    (continuation.has_more ? typeof continuation.next_cursor === 'string' && continuation.next_cursor.length > 0 && continuation.next_cursor.length <= 256 : continuation.next_cursor === null) &&
+    (continuation.offset === 0 || value.text === '' && coverage.text.state === 'omitted_on_continuation' && coverage.text.returned_bytes === 0) &&
+    controls.complete === (controls.enumeration_complete && controls.returned_through === controls.captured_count) &&
+    (controls.enumeration_complete ? controls.total === controls.captured_count : controls.total === null);
+}
+function checkedObservationResult(value) {
+  if (!value?.result?.snapshot || hasObservationTargetsShape(value.result.snapshot)) return value;
+  return { ok: false, ...(typeof value.run_id === 'string' ? { run_id: value.run_id } : {}), ...(typeof value.status === 'string' ? { status: value.status } : {}), error: { code: 'observation_format_unavailable' } };
+}
 const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
 const managedOperationIds = capabilityOperations.map(definition => definition.id);
 const managedOperationSet = new Set(managedOperationIds);
@@ -62,14 +104,23 @@ const managedOperationProperties = Object.fromEntries([
   ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])
 ]);
 const forbiddenFor = definition => Object.keys(capabilityDefinitions.fields).filter(field => !definition.allowed.includes(field));
+const conditionIf = condition => {
+  const when = condition.when;
+  if (!when || typeof when !== 'object' || typeof when.field !== 'string') return undefined;
+  if (Object.hasOwn(when, 'present')) return when.present === true ? { required: [when.field] } : { not: { required: [when.field] } };
+  if (Object.hasOwn(when, 'absent')) return when.absent === true ? { not: { required: [when.field] } } : { required: [when.field] };
+  if (Object.hasOwn(when, 'equals')) return { required: [when.field], properties: { [when.field]: { const: when.equals } } };
+  if (Array.isArray(when.in)) return { required: [when.field], properties: { [when.field]: { enum: when.in } } };
+  return undefined;
+};
 const conditionThen = definition => {
   const then = {
     required: [...definition.required],
     ...(forbiddenFor(definition).length ? { not: { anyOf: forbiddenFor(definition).map(field => ({ required: [field] })) } } : {})
   };
-  const conditional = (definition.conditions ?? []).filter(condition => condition.kind === 'conditional_fields' && condition.when?.field);
+  const conditional = (definition.conditions ?? []).filter(condition => condition.kind === 'conditional_fields' && conditionIf(condition));
   if (conditional.length) then.allOf = conditional.map(condition => ({
-    if: { required: [condition.when.field], properties: { [condition.when.field]: condition.when.equals !== undefined ? { const: condition.when.equals } : { enum: condition.when.in } } },
+    if: conditionIf(condition),
     then: {
       ...(condition.required?.length ? { required: condition.required } : {}),
       ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
@@ -204,7 +255,7 @@ async function call(name, args) {
     if (!/^managed-[a-f0-9]{64}$/.test(runId)) throw new Error('query_input_refused');
     const skillResult = await request(`/managed-skills/operations/${runId}`);
     if (skillResult?.error?.code !== 'managed_skill_operation_not_found') return skillResult;
-    return request(`/managed-browser/operations/${runId}`);
+    return checkedObservationResult(await request(`/managed-browser/operations/${runId}`));
   }
   if (name === 'webenvoy_operation') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
@@ -212,7 +263,7 @@ async function call(name, args) {
     const scope = args.task_scope;
     if (!managedFileOperationIds.includes(args.operation) && scope && typeof scope === 'object' && !Array.isArray(scope) && Object.hasOwn(scope, 'file_refs')) throw new Error('operation_input_refused');
     if (managedOriginOperationIds.includes(args.operation) && typeof args.origin !== 'string') throw new Error('operation_input_refused');
-    return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
+    return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }));
   }
   if (name === 'webenvoy_recovery') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };

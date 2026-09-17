@@ -1,0 +1,167 @@
+{
+  "schema_version": "webenvoy.observation-targets-540-evidence/v1",
+  "work_item": 540,
+  "recorded_at": "2026-09-17",
+  "status": "passed",
+  "scope": "Bounded main-document light-DOM observation continuation and target identity for the existing managed-browser operation path; no new tool, Grant dimension, Provider, browser patch, account workflow, release or deployment.",
+  "specification": {
+    "pull_request": 552,
+    "accepted_head": "08b18e683d4e5040485b5e7751b1681bb1df9675",
+    "accepted_tree": "6c2615f251395ce26a83bb5c5ba9b1c6a79dc772",
+    "merge_commit": "4d0fb2ea2d8fef4f8c020766afaa5c19eff634fa",
+    "independent_review": "APPROVE"
+  },
+  "implementation": {
+    "pull_request": 553,
+    "runtime_commit": "fa5171903966e849b1e80b2a523e6e2f5e296e4b",
+    "runtime_tree": "123fc939ac5ded87fe45c71e0073c5b0ee930c46",
+    "core_tree": "5b028e3697b76387327772865b86c919b3cb8a36",
+    "harbor_tree": "9c69cc4b47248eff05825df78ebf08ac355701ea",
+    "base_commit": "4d0fb2ea2d8fef4f8c020766afaa5c19eff634fa",
+    "static_definition": "packages/core/src/managed-capability-definitions.json",
+    "package_builds": 4,
+    "final_package_manifest_assets": 897,
+    "final_package_assets_digest": "aec7e8c876bcd53e6204c45d7775b3fb8c2819715a5bd36423c9d8fb494a4242",
+    "package_integrity": "verified",
+    "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package proved the initial live flow. The third package added first-batch consistency, incomplete enumeration and effective form semantics. The fourth and final package fixes the reviewed MCP limit projection and preserves private effective form-action identity; later repository changes are evidence-only."
+  },
+  "contracts": {
+    "request_schema": "packages/schemas/schemas/harbor-observation-targets-request.schema.json",
+    "response_schema": "packages/schemas/schemas/harbor-observation-targets.schema.json",
+    "positive_fixtures": [
+      "packages/schemas/fixtures/harbor-observation-targets-request.fixture.json",
+      "packages/schemas/fixtures/harbor-observation-targets-request-continuation.fixture.json",
+      "packages/schemas/fixtures/harbor-observation-targets.fixture.json"
+    ],
+    "negative_fixtures": [
+      "packages/schemas/invalid-fixtures/harbor-observation-targets-request.invalid.fixture.json",
+      "packages/schemas/invalid-fixtures/harbor-observation-targets.invalid.fixture.json"
+    ]
+  },
+  "g0": {
+    "baseline": "docs/verification/540/g0-baseline.md",
+    "enumeration": "The base path returned only 128 of 160 controls and had no continuation; the fixed shared-driver regression returns one frozen 128+32 batch with retained handles.",
+    "semantics": "Hand-written expectations cover label-for, wrapping labels, aria-labelledby, aria-label, descriptions, named groups, same-name buttons and observable textarea/select/contenteditable. A Camoufox public-Locator probe proved get_by_label/get_by_role and aria_snapshot names while element_handle equality tied every result back to the original retained object, without DOM-order alignment.",
+    "identity": "Replacement nodes, retained nodes with changed role/name/form or disambiguating description, unrelated clock changes and enabled waits are checked separately before Provider dispatch."
+  },
+  "acceptance": {
+    "O1": {
+      "status": "passed_deterministic_and_installed",
+      "evidence": "Shared-driver tests cover 160 controls as 128+32 with one observation and no duplicate target; text/control completeness combinations and empty results are separate. Both installed Providers repeated 128+32."
+    },
+    "O2": {
+      "status": "passed_deterministic_and_schema",
+      "evidence": "Tests and negative fixtures cover limit bounds, UTF-8/response bytes, scan/capture ceilings, repeated and invalid cursors, exact last-segment invariants and unknown totals without generating expected results from the production collector. The installed MCP schema accepted snapshot 128 and diagnostics 64 while rejecting snapshot 129, diagnostics 65 and observe with limit."
+    },
+    "O3": {
+      "status": "passed_deterministic",
+      "evidence": "Hand-written semantic fixtures and the public-Locator identity probe cover standard labels and ARIA precedence, prevent textbox values/password material from becoming names, preserve the original ElementHandle, and keep textarea/select observation distinct from newly supported actions."
+    },
+    "O4": {
+      "status": "passed_deterministic_installed_and_agent",
+      "evidence": "Cross-segment same-name controls are classified from the full batch; named groups and descriptions disambiguate, true ambiguity is local. Both Providers and the real Agent selected the invoice-module Save while leaving shipping untouched."
+    },
+    "O5": {
+      "status": "passed_deterministic_and_installed",
+      "evidence": "Node replacement returns target_stale; explicit semantic changes return target_semantics_changed; both are not_dispatched. Unrelated clock text does not invalidate the target. Installed clients rejected an old post-update observation, continued after a fresh snapshot, and both rejected an effective form action query change as target_semantics_changed/not_dispatched."
+    },
+    "O6": {
+      "status": "passed_deterministic",
+      "evidence": "New snapshot, navigation, control-generation change, reorder and semantic change reject old continuation without Provider dispatch; cursor replay is stable, continuation creates no observation, and front-segment targets remain available through continuation."
+    },
+    "O7": {
+      "status": "passed_deterministic_with_inherited_ui_path",
+      "evidence": "Managed-interaction handoff/Page regressions invalidate pre-handoff observations and continue on the bound original Page after a fresh observation without following OS focus. The unchanged owner/native handoff mechanism is inherited from the existing formal Provider evidence; no second live UI automation run is claimed."
+    },
+    "O8": {
+      "status": "passed_deterministic",
+      "evidence": "Snapshot continuation remains not_dispatched and does not acquire or renew input control; revocation blocks cached continuation. Existing dispatch/unknown and original-Run query tests remain active, and the live Agent queried rather than replayed its final click."
+    },
+    "O9": {
+      "status": "passed_deterministic_and_packaged",
+      "evidence": "The canonical operation definition feeds parser, MCP schema and describe; strict Harbor/Core/Plugin projection and positive/negative schemas reject mixed versions. Core, Harbor, Desktop and packaged checks passed on the runtime candidate lineage, including the #539 correction regression. The final installed tools/list schema was validated directly rather than inferred from source."
+    },
+    "O10": {
+      "status": "passed_installed_and_real_agent",
+      "evidence": "The fourth and final package completed long-form continuation, contextual Save, unrelated updates, stale-old-target and changed-form-action refusal, fresh continuation and original-Run query separately in Chrome and Camoufox. A real Codex task on that package independently found the late field, filled it, selected the invoice Save, refreshed, continued, queried the original click Run and stopped the Camoufox Instance."
+    }
+  },
+  "deterministic_regression": {
+    "core": "full build/self-check/test/typecheck/lint passed",
+    "harbor": "366 tests: 365 passed and one Windows-only ZIP test skipped; focused first-batch consistency, public semantic identity, incomplete enumeration and form-submitter regressions also passed",
+    "desktop": "15 passed; two official-upstream fixture checks skipped because those fixture directories were absent on the test host",
+    "schemas": "28 schemas, 50 positive fixtures and 12 negative fixture sets passed",
+    "python": "affected shared-driver source compiled and ran through the Harbor regressions",
+    "skips": "Skipped tests are recorded as skipped, not as successful execution."
+  },
+  "formal_installation": {
+    "candidate_commit": "fa5171903966e849b1e80b2a523e6e2f5e296e4b",
+    "candidate_tree": "123fc939ac5ded87fe45c71e0073c5b0ee930c46",
+    "live_evidence_sha256": "73fd4c9665defed685f32df35f925d22cb7288095631145c9754e1a127d57e5a",
+    "installed_schema_evidence_sha256": "93ce48dc429606d77c868ae218faf046547ff6f922806d09bbc23e16be8566d3",
+    "camoufox": {
+      "combination": "Camoufox 0.5.6 / browser 152.0.4-beta.30 / Playwright 1.60.0",
+      "long_form": "128+32, 160 unique targets in one observation",
+      "same_name_selection": "invoice context selected; shipping unchanged",
+      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued; form action query change refused target_semantics_changed/not_dispatched"
+    },
+    "chrome_official": {
+      "combination": "Chrome 153.0.8010.37 / Playwright 1.60.0",
+      "long_form": "128+32, 160 unique targets in one observation",
+      "same_name_selection": "invoice context selected; shipping unchanged",
+      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued; form action query change refused target_semantics_changed/not_dispatched",
+      "installation_note": "The earlier dedicated Chrome.app auto-updated to 153.0.8010.48. The owner binding was refreshed to a fresh copy of the already approved 153.0.8010.37 source with the pinned executable hash; an exact driver launch and the final installed client both passed. No browser or SDK upgrade was performed."
+    },
+    "cleanup": "Both installed-client sessions stopped; two Grants and the connection were revoked; both Profile policies were restored."
+  },
+  "real_agent": {
+    "status": "passed_after_one_retained_setup_failure",
+    "host": "Codex CLI 0.154.0-alpha.6.2",
+    "actual_model": "gpt-5.6-sol",
+    "actual_reasoning_effort": "low",
+    "successful_thread": "01a0ad7d-7974-7812-9784-e1450e58af24",
+    "successful_provider": "camoufox",
+    "successful_result_sha256": "d66ff89ebd45e124ee699ddef540fa8359fdb0f2eb37eab65f41e7061e22d200",
+    "result": "late field filled; invoice Save selected; local update followed by fresh snapshot; Continue clicked; original click Run succeeded/completed/dispatched; Instance stopped",
+    "retained_failure": "The first Chrome Agent task made one start request, received launch_failed, queried that failed Run and stopped without retrying or acting on the page. Readback later proved that its persisted binding still named 153.0.8010.37 while the old app path had auto-updated to 153.0.8010.48 and changed executable hash. The failure is retained; after an owner-scoped binding refresh to the original pinned source, the final installed Chrome client passed.",
+    "retained_failure_sha256": "c2fcacfccb8195db5ed00df4eb9c80d02874fd8a628ef6ea86190bebe6da5be9"
+  },
+  "review_configuration": {
+    "worker": {
+      "requested_model": "gpt-5.6-luna",
+      "requested_reasoning_effort": "max",
+      "sessions": ["/root/core_projection", "/root/harbor_fix", "/root/540_review_fixes", "/root/540_accessibility_probe", "/root/540_agent_failure"]
+    },
+    "independent_reviewer": {
+      "requested_model": "gpt-6-astra",
+      "requested_reasoning_effort": "low",
+      "session": "/root/correction_reviewer",
+      "spec_verdict": "APPROVE",
+      "implementation_verdict": "pending exact-head review"
+    },
+    "host_visibility": "The host accepted the requested spawn configuration. Hidden backend resolution is not visible and is not inferred."
+  },
+  "evidence_classification": {
+    "deterministic": "Executed locally on the runtime candidate lineage.",
+    "installed": "Executed through the fourth and final packaged application with both Providers; three retained harness failures on that package were test-fixture timing, target-segment and expected-code mistakes, not product failures, and each exact response was preserved.",
+    "real_agent": "Executed through the installed MCP by a separate Codex task; the successful task used Camoufox.",
+    "ui_automation": "Not rerun; only the unchanged owner/native handoff path is inherited from existing formal evidence.",
+    "independent_review": "The reviewer reruns selected deterministic checks and audits installed/Agent originals; no duplicate live run is implied."
+  },
+  "cleanup": {
+    "test_grants": "revoked",
+    "test_connections": "revoked",
+    "profile_policies": "restored",
+    "provider_sessions": "stopped",
+    "runtime_and_local_page_server": "stopped",
+    "retained": ["formal installation", "dedicated Profiles", "Run records and receipts", "redacted success and failure evidence"]
+  },
+  "excluded": [
+    "child frames and shadow roots",
+    "virtualized controls not present in the DOM",
+    "complex editors and new multiline/select actions",
+    "real accounts and third-party business workflows",
+    "new Provider, SDK, permission system or browser patch",
+    "release or deployment"
+  ]
+}
