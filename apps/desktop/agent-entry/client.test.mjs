@@ -7,6 +7,7 @@ import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:f
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
+import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
 import { localRequest } from './client.mjs';
 import { REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
@@ -87,6 +88,16 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(describe.inputSchema.properties.operation.enum, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.operation, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.connection_id, undefined);
+    const validateOperation = new Ajv2020({ allErrors: true, strict: false }).compile(operation.inputSchema);
+    const snapshotSchemaFixture = {
+      idempotency_key: 'schema-snapshot-limit', grant_id: 'grant:fixture', operation: 'instance.snapshot',
+      task_scope: { operations: ['instance.snapshot'], profile_refs: ['profile:fixture'], origins: ['https://example.com'] },
+      profile_ref: 'profile:fixture', origin: 'https://example.com', runtime_session_ref: 'session:fixture', limit: 128
+    };
+    assert.equal(validateOperation(snapshotSchemaFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 64 }), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-over-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 65 }), false);
+    assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-observe-limit', operation: 'instance.observe', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.observe'] }, limit: 1 }), false);
     const operationConditions = operation.inputSchema.allOf.filter(condition => condition.if?.properties?.operation?.const);
     for (const definition of definitions.operations.filter(item => item.exposure === 'exposed')) {
       const condition = operationConditions.find(item => item.if.properties.operation.const === definition.id);

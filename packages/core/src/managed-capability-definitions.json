@@ -14,7 +14,7 @@
     "page_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The document-bound Page reference from the current observation; required by file.upload/file.download." },
     "document_generation": { "type": "integer", "minimum": 1, "description": "The document generation matching page_ref; required by file.upload/file.download." },
     "cursor": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "A bounded continuation cursor; operation definitions describe whether it belongs to diagnostics or an instance.snapshot observation batch." },
-    "limit": { "type": "integer", "minimum": 1, "maximum": 64, "description": "A bounded result limit; operation definitions state the applicable per-operation bound." },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 128, "description": "A bounded result limit up to 128; operation definitions state the applicable per-operation bound, including diagnostics at 1–64." },
     "target_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The visible target reference from the same fresh observation; required by file.upload/file.download." },
     "file_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^attachment:runtime/[0-9a-f-]{36}$", "description": "Only for file.upload: the opaque owner-registered file reference; omit for file.download." },
     "text": { "type": "string", "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Text input for instance.input may be empty to clear a field; wait_for=text requires non-empty text." },

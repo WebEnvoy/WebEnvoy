@@ -186,6 +186,11 @@ def safe_text_bytes(value: Any, limit: int = MAX_TEXT) -> tuple[str, bool]:
     return encoded[:limit].decode("utf-8", "ignore"), True
 
 
+def private_fingerprint(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 # This is deliberately a small DOM projection, not an accessible-name engine.
 # It reads only the element being retained and its bounded label/description
 # references.  The original ElementHandle remains the action identity.
@@ -1014,6 +1019,19 @@ class Driver:
         }
         href = item.get("href") if isinstance(item.get("href"), str) else None
         action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        raw_form = action.get("form") if isinstance(action.get("form"), dict) else None
+        private_action = {
+            "href": safe_url(urljoin(page_url, href)) if href and page_url else href,
+            "download": action.get("download") if isinstance(action.get("download"), str) else None,
+            "target": action.get("target") if isinstance(action.get("target"), str) else None,
+            "form": {
+                "action": raw_form.get("action") if isinstance(raw_form.get("action"), str) else None,
+                "method": str(raw_form.get("method", "get")).lower() if isinstance(raw_form.get("method"), str) else None,
+                "formaction": raw_form.get("formaction") if isinstance(raw_form.get("formaction"), str) else None,
+                "formmethod": str(raw_form.get("formmethod")).lower() if isinstance(raw_form.get("formmethod"), str) else None,
+            } if raw_form is not None else None,
+        }
+        action_fingerprint = private_fingerprint(private_action)
         action_facts = {
             "href": safe_url(urljoin(page_url, href)) if href and page_url else href,
             "download": safe_text(action.get("download"), 256) if isinstance(action.get("download"), str) else None,
@@ -1034,6 +1052,7 @@ class Driver:
             "context": context,
             "hints": hints,
             "action": action_facts,
+            "action_fingerprint": action_fingerprint,
         }
         return {
             "role": role,
@@ -1046,6 +1065,7 @@ class Driver:
             "action": action_facts,
             "enabled": enabled,
             "semantic": json.dumps(semantic, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            "action_fingerprint": action_fingerprint,
             "truncated_fields": sorted(set(truncated_fields)),
         }
 
@@ -1124,6 +1144,7 @@ class Driver:
                 "public": public,
                 "semantic": normalized["semantic"],
                 "action": normalized["action"],
+                "action_fingerprint": normalized["action_fingerprint"],
                 "form_handle": form_handle,
                 "provider_accessibility": provider is not None,
             })
@@ -1169,13 +1190,14 @@ class Driver:
                     public["disambiguation"] = "ambiguous"
 
     @staticmethod
-    def _action_semantic(public: dict[str, Any], action: dict[str, Any]) -> str:
+    def _action_semantic(public: dict[str, Any], action: dict[str, Any], action_fingerprint: str | None = None) -> str:
         hints = public["hints"]
         identity = {
             "role": public["role"],
             "name": public["name"],
             "editing": {"input_type": hints["input_type"], "multiline": hints["multiline"], "editable": hints["editable"]},
             "action": action,
+            "action_fingerprint": action_fingerprint,
         }
         if public["disambiguation"] == "contextual":
             identity["distinguishing"] = {"description": public["description"], "context": public["context"], "hints": hints}
@@ -1358,8 +1380,9 @@ class Driver:
             state.controls[record["target_ref"]] = (record["public"]["role"], record["public"]["name"], record["action"].get("href"), None, record["handle"])
             state.control_metadata[record["target_ref"]] = {
                 "semantic": record["semantic"],
-                "action_semantic": self._action_semantic(record["public"], record["action"]),
+                "action_semantic": self._action_semantic(record["public"], record["action"], record["action_fingerprint"]),
                 "action": record["action"],
+                "action_fingerprint": record["action_fingerprint"],
                 "form_handle": record.get("form_handle"),
                 "provider_accessibility": record.get("provider_accessibility") is True,
                 "disambiguation": record["public"]["disambiguation"],
@@ -1407,7 +1430,7 @@ class Driver:
             if normalized is None:
                 return "target_semantics_changed"
             current_public = {**normalized, "disambiguation": metadata.get("disambiguation")}
-            if self._action_semantic(current_public, normalized["action"]) != metadata.get("action_semantic"):
+            if self._action_semantic(current_public, normalized["action"], normalized["action_fingerprint"]) != metadata.get("action_semantic"):
                 return "target_semantics_changed"
         return None
 

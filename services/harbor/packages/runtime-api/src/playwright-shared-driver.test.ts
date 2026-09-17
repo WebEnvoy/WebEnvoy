@@ -376,6 +376,19 @@ async def run():
     assert cursor_stale["dispatch_state"] == "not_dispatched", cursor_stale
     assert cursor_stale["failure_class"] == "observation_cursor_stale", cursor_stale
 
+    # A query-only effective form-action change must remain distinguishable in
+    # the private identity even though the stored action facts are redacted.
+    page.handles = PageImpl.make_handles()
+    query_first = page.handles[0]
+    query_first.form_action = "/compose?id=1"
+    query_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    query_first.form_action = "/compose?id=2"
+    query_action = await instance.interact(dict(common, action="click", observation_ref=query_batch["observation_ref"], target_ref=query_batch["controls"][0]["target_ref"]))
+    assert query_action["status"] == "unavailable", query_action
+    assert query_action["dispatch_state"] == "not_dispatched", query_action
+    assert query_action["failure_class"] == "target_semantics_changed", query_action
+    assert query_first.clicks == 0, query_first.clicks
+
     page.handles = PageImpl.make_handles()
     form_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     form_first = page.handles[0]
@@ -389,14 +402,24 @@ async def run():
     # Regression: changing a submitter's formaction/formmethod on the same
     # node invalidates the old target before any click is dispatched.
     page.handles = PageImpl.make_handles()
-    override_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     override_first = page.handles[0]
-    override_first.form_action_override = "/alternate-form"
-    override_first.form_method_override = "get"
+    override_first.form_action_override = "/alternate-form?id=1"
+    override_first.form_method_override = "post"
+    override_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    override_first.form_action_override = "/alternate-form?id=2"
     override_action = await instance.interact(dict(common, action="click", observation_ref=override_batch["observation_ref"], target_ref=override_batch["controls"][0]["target_ref"]))
     assert override_action["status"] == "unavailable", override_action
     assert override_action["dispatch_state"] == "not_dispatched", override_action
     assert override_action["failure_class"] == "target_semantics_changed", override_action
+    assert override_first.clicks == 0, override_first.clicks
+
+    # A method-only submitter override change is independently identity-bound.
+    override_first.form_action_override = "/alternate-form?id=1"
+    override_first.form_method_override = "get"
+    method_action = await instance.interact(dict(common, action="click", observation_ref=override_batch["observation_ref"], target_ref=override_batch["controls"][0]["target_ref"]))
+    assert method_action["status"] == "unavailable", method_action
+    assert method_action["dispatch_state"] == "not_dispatched", method_action
+    assert method_action["failure_class"] == "target_semantics_changed", method_action
     assert override_first.clicks == 0, override_first.clicks
 
     page.handles = PageImpl.make_handles()
