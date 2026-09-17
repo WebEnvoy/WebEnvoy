@@ -1,6 +1,6 @@
 # Form State and Target Actionability V1
 
-状态：Proposed（待规格 PR 接受）；版本：1.0。owner：Harbor（目标状态、引用与动作前检查）、共享 Provider execution（真实元素与状态采集）、Core（operation 定义、授权与结果）、Plugin（正式 projection）。归口：[Work Item #555](https://github.com/WebEnvoy/WebEnvoy/issues/555)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，消费 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)。
+状态：Accepted（实施规格已接受；功能实现与验收仍由 #555 另行交付）；版本：1.0。owner：Harbor（目标状态、引用与动作前检查）、共享 Provider execution（真实元素与状态采集）、Core（operation 定义、授权与结果）、Plugin（正式 projection）。归口：[Work Item #555](https://github.com/WebEnvoy/WebEnvoy/issues/555)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，消费 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)。
 
 依据：[Observation Completeness and Target Identity V1](observation-targets-v1.md)、[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md)、[Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md) 与 canonical v1.5。
 
@@ -208,12 +208,17 @@ Blocker 可以并存。`blockers=[]` 也不表示已授权、Provider 支持或�
 
 - `instance.input`：重新核对该 target 的 `value`、`readonly` 和 editable 事实。自 observation 后已改变且会造成覆盖旧现场时，未派发并返回 `target_state_changed`，要求 fresh snapshot。
 - `instance.click`：对 checkbox/radio/switch/option 以及带明确 expanded state 的 disclosure target，重新核对 checked/selected/expanded；如果状态已改变，未派发并返回 `target_state_changed`。普通按钮/链接不因无关字段值改变而失效。
-- `instance.press`：若 target 具有本规格可见的 value/checked/selected/expanded 状态，重新核对与该 key 可能相关的当前 target state；无法证明旧决定仍安全时返回 `target_state_changed`。没有这些状态的普通 target 继续沿 #540 的 identity/semantics 检查。
+- `instance.press`：按 key 固定比较与动作相关的 target state，而不是由实现者自行判断：
+  - editable textbox/searchbox/spinbutton/combobox/contenteditable 上的 `Backspace`、`Delete`、`Space`、`Enter`：核对 `value` 与 `readonly`；
+  - checkbox/radio/switch 上的 `Space`、`Enter`：核对 `checked`；
+  - select/option 上的 `ArrowDown`、`ArrowUp`、`Home`、`End`、`Space`、`Enter`：核对 `selected`；
+  - 带明确 expanded state 的 disclosure target 上的 `Space`、`Enter`：核对 `expanded`；
+  - `Tab`、`Escape`，以及没有上述相关状态的其他合法 key，只做 #540 的 target identity/semantics 与 Provider actionability 检查，不因为无关 state 变化拒绝。
 - enabled/visible/actionability 仍由现有 Provider SDK/共享执行路径在派发时复核；disabled→enabled 的有界 wait 继续可成立，不把 enabled 本身并入固定状态 fingerprint。
 
 不得因为另一个无关字段变化、正文时钟变化、广告刷新或页面其他目标状态改变，让当前 target 全局失效。
 
-### 6.3 新失败类
+### 6.3 新失败类与错误优先级
 
 新增：
 
@@ -221,6 +226,8 @@ Blocker 可以并存。`blockers=[]` 也不表示已授权、Provider 支持或�
 | --- | --- | --- |
 | `target_state_changed` | `not_dispatched` | 原 target 仍是同一可信对象，但与本次 operation 相关的当前状态已不同；重新 snapshot，让 Agent 基于新状态重新决定，不自动重放 |
 | `target_operation_not_applicable` | `not_dispatched` | 当前 operation 与 target 的公共适用条件不匹配；改用 snapshot 返回的候选 operation，或在缺能力时准确报告限制 |
+
+既有授权、Profile/Page 可见性、origin、document/control generation、ControlLease 与 `target_stale/target_semantics_changed/target_ambiguous` 的检查和失败优先级保持；调用方无权访问目标或目标本身已失效时，不得为了返回 actionability 错误而泄漏目标存在、状态或适用操作。只有在现有访问和新鲜度边界通过后，才使用 `target_operation_not_applicable`／`target_state_changed` 解释 target-local 拒绝。
 
 只有能在 Provider 派发前证明时才能返回以上错误。一旦已经调用可能产生网页效果，超时／断连／响应丢失仍必须保留真实 `dispatched/unknown_outcome`，不能倒写为未派发。
 
