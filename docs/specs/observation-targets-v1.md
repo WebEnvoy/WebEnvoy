@@ -94,7 +94,7 @@
 - `continuation.has_more` 恰好表示本批缓存还有未返回项；有则必须提供 next_cursor，无则 null。扫描预算导致还有未采集目标时，末段 has_more=false 但 complete=false，并说明原因，不能循环生成无进展 cursor。
 - `coverage.text.state=complete|truncated|omitted_on_continuation|unavailable`。首次返回正文前缀；续读不重复正文，text=""、state=omitted_on_continuation、returned_bytes=0。正文内容不续页，本批只续控件。
 - 旧 `truncated` **继续只表示该批首次正文是否因长度截断**，续读保持该值；新版消费者必须分别读取 coverage，不能以它判断控件是否完整。正文读取失败返回 unavailable，而非伪装为空正文成功。
-- `coverage.semantics.complete`：在已保留候选内，名称/角色/区分上下文均已可靠取得且必要区分信息未被裁剪；这是与控件枚举独立的维度。不完整不否定其他有效目标。
+- `coverage.semantics.complete`：在已保留候选内，名称/角色/description/hints/区分上下文均已可靠取得且必要区分信息未被裁剪；这是与控件枚举独立的维度。不完整不否定其他有效目标。
 
 固定资源预算：每页最多 128 控件；一次候选遍历最多 20,000 个主文档元素；每批最多 2,048 个候选记录/真实句柄且规范化元数据最多 2 MiB；首次正文最多 64 KiB UTF-8；单次完整公共响应最多 256 KiB UTF-8。limit 是数量上限，字节上限可使本段返回更少项，但必须至少推进一项或明确报 `observation_limit_exceeded`，不得静默丢项。截断按有效 Unicode 边界。160 个短标签样例必须正常得到 128+32，不能用预算提前结束。
 
@@ -110,7 +110,7 @@
 | `description` | 关联 aria-describedby 等公开描述，有值最多 256 字符，否则 null；不抓整段祖先正文。 |
 | `context` | 最多两项 `{kind,name}`，由外到内；kind为form/group/dialog/region/heading。来自实际所属的最近有名称 form、fieldset/legend、ARIA group/dialog/region，必要时补同一语义容器内关联的标题；每项 name最多128字符。不能借DOM序号/任意前一段文字捏造业务身份。 |
 | `hints` | `{placeholder,input_type,multiline,editable}`；字符串null或最多128字符，布尔事实未知用null。placeholder单独显示，不冒称 accessible name。 |
-| `disambiguation` | `unique/contextual/ambiguous`，按本批完整候选集的公开role/name/description/context/hints比较，不只比较当前128项；distinct target_ref或DOM序号本身不算语义区别。 |
+| `disambiguation` | `unique/contextual/ambiguous`，按本批完整候选集的公开role/name/description/context/hints比较，不只比较当前128项；只使用本次实际取得且未被截断或脱敏的字段作为区分依据，distinct target_ref或DOM序号本身不算语义区别。实现应为动作前复核保留本次实际用于区分该目标的字段集合。 |
 | `truncated_fields` | 本项被截断的字段路径数组；没有截断为[]。 |
 
 role最多64字符，name最多256字符；保留现有脱敏规则，不回显密码/隐藏值、完整输入value、文件路径、raw HTML、原始URL参数。既有可选value字段不作为name或身份指纹；本批不扩展表单值读取。敏感内容经脱敏后无法区分的目标必须如实 ambiguous，不能以私有原文可区分为由让Agent猜。
@@ -125,9 +125,9 @@ role最多64字符，name最多256字符；保留现有脱敏规则，不回显�
 
 ### 5.2 同名不是一律拒绝
 
-两个“保存”分别属于“收货地址”和“发票信息”时返回上下文，Agent可选择正确target。相同role/name/上下文的两个按钮，不能凭列表顺序猜第一个；返回 ambiguous，拒绝依赖这个歧义目标的 click/input/press/upload/download，沿第7节给出 `target_ambiguous`。其他可区分字段和页面仍可用，不建设“高风险动作”分类器。
+两个“保存”分别属于“收货地址”和“发票信息”时返回上下文，Agent可选择正确target。相同role/name/上下文的两个按钮，若仅由不同且可靠的 `description`（例如各自关联的 `aria-describedby`）或 `hints` 区分，应按该实际区分语义标记为 `contextual` 或 `unique`，让Agent选择正确target；若这些字段相同、缺失、被截断或脱敏后无法区分，则不能凭列表顺序猜第一个，返回 `ambiguous`，拒绝依赖这个歧义目标的 click/input/press/upload/download，沿第7节给出 `target_ambiguous`。其他可区分字段和页面仍可用，不建设“高风险动作”分类器。
 
-完整枚举未完成时，不能武断宣布某个同名目标全页唯一。已知不同上下文且可确认作用域内唯一的目标可以 contextual；无法证明该局部区别则 ambiguous。不是要求所有控件都读完才允许操作：批内完整枚举与向Agent分段发送是两件事。
+完整枚举未完成时，不能武断宣布某个同名目标全页唯一。已知不同上下文或其他可靠区分语义，且可确认作用域内唯一的目标可以 contextual；无法证明该局部区别则 ambiguous。不是要求所有控件都读完才允许操作：批内完整枚举与向Agent分段发送是两件事。
 
 ## 6. 批次与目标新鲜度
 
@@ -137,7 +137,7 @@ role最多64字符，name最多256字符；保留现有脱敏规则，不回显�
 
 首批元数据与候选集合必须经过一致性核对：采集起止时Page/document与候选对象及相关语义保持；不一致返回 `observation_changed`，不能将两个阶段凑成一批。预算以内可做一次固定采集和末次核对；不无限等待DOM稳定，不要求网络idle。
 
-续读返回冻结的描述，同时用有界只读核对确认候选对象集合/顺序、名称/角色/区分上下文及状态没有与该批相矛盾的变化。它可以访问浏览器，但不重新分配target、不刷新captured_at、不悄悄把新控件接到旧列表。发生相关变化、另一次新snapshot、Page导航、控制代次变化、Driver/Runtime重启、scope失配时返回 `observation_cursor_stale`，不返回半份新列表。
+续读返回冻结的描述，同时用有界只读核对确认候选对象集合/顺序、名称/角色/description/hints、区分上下文及状态没有与该批相矛盾的变化。它可以访问浏览器，但不重新分配target、不刷新captured_at、不悄悄把新控件接到旧列表。发生相关变化、另一次新snapshot、Page导航、控制代次变化、Driver/Runtime重启、scope失配时返回 `observation_cursor_stale`，不返回半份新列表。
 
 纯正文时钟/广告文案变化，未影响任何候选及其关联语义，不使控件续读失效；正文仍是captured_at的前缀。重排候选改变旧offset含义，续读必须失效。只改变另一个字段，会使未完成续读需要重新观察，但不得因此给所有已返回目标的动作加一个全页一致性检查。
 
@@ -149,11 +149,11 @@ role最多64字符，name最多256字符；保留现有脱敏规则，不回显�
 
 - 当前Page/document、holder、ControlLease代次和原observation有效，目标来自已经返回的那一段。
 - 原节点仍属于原document且仍是同一对象；不存在时不按同role/name/selector重新定位。
-- 目标role、input type、可编辑类型、可访问名称、用于区分的所属容器及其名字保持。
+- 目标role、input type、可编辑类型、可访问名称，以及本次实际用于区分该目标的 `description`、`hints`、所属容器及其名字保持；未用于区分的可选语义变化不单独使该目标失效。
 - 对链接保留并核对原href、target、download等动作相关事实；对提交控件保留所属form对象、有效action/method及控件override；这些私有比较值不公开返回。
 - 公开SDK的enabled/visible/editable/actionability检查继续在实际动作上执行。
 
-名称、role、form归属或动作目标改变但节点未替换，返回 `target_semantics_changed`；节点被新节点替换则 `target_stale`。不会因为对象仍isConnected就把它当原目标。比较当前受支持的显式语义，不宣称检测了所有JS事件处理器替换或业务后台变化。
+本次实际用于区分的名称、role、`description`、`hints`、form归属或动作目标改变但节点未替换，返回 `target_semantics_changed`；节点被新节点替换则 `target_stale`。不会因为对象仍isConnected就把它当原目标。比较当前受支持的显式语义，不宣称检测了所有JS事件处理器替换或业务后台变化。
 
 用户输入值、选择状态、光标、尺寸位置、无关正文不进入身份指纹；否则正常填写会无意义地反复失效。disabled→enabled由SDK与wait条件处理，不把“等待启用”变成不可完成；动作所需其他状态变化按现有精确拒绝处理。
 
@@ -193,8 +193,8 @@ Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`（snapshot/describe投影及
 先冻结最小合成页面和预期，再在当前两个官方Provider组合做G0：
 
 - G0-Enumeration：160个短标签控件、短正文，验证首段128/续段32的路径可实现，原版基线是否暴露了该缺口。
-- G0-Semantics：label for、包裹label、aria-labelledby、aria-label、两个“保存”及基础编辑宿主；公开语义结果必须对应同一真实对象，不能凭可访问树数组位置匹配Handle。
-- G0-Identity：替换原节点、原节点改名称/role/form、无关时钟变化；先证明完整现行链是否已拒绝，再只补缺口。
+- G0-Semantics：label for、包裹label、aria-labelledby、aria-label、两个同名同容器但仅由 aria-describedby 区分的“保存”及基础编辑宿主；公开语义结果必须对应同一真实对象，不能凭可访问树数组位置匹配Handle。
+- G0-Identity：替换原节点、原节点改名称/role/form、交换仅用于区分的 aria-describedby 描述、无关时钟变化；先证明完整现行链是否已拒绝，再只补缺口。
 
 不先写一个通用DOM框架再验证公开API。相同SDK和共享实现、两种Provider分别取证；来源、启动和环境不变。现有来源材料缺失可作为局部准备问题，不借本项升级浏览器、改变接入或恢复#530。
 
@@ -207,8 +207,8 @@ Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`（snapshot/describe投影及
 | O1 | 160短标签控件+短正文：128+32，同一observation，各target不重复/不遗漏；正文与控件完整性独立。长正文+少控件测试相反组合；空页不伪造控件。 |
 | O2 | limit1/128、response字节上限、扫描/捕获上限、重复cursor、末段、错误cursor；总数未知与枚举未完整不伪报完成；反例fixture不得全部从同一实现自动生成后只自证。 |
 | O3 | 标准label/ARIA来源正确，冲突标签优先序有独立预期；textbox value不冒充name，密码不泄漏；基础编辑宿主可被识别，但textarea/select读取不外推新增动作。 |
-| O4 | 不同group中的同名保存可选对；真正歧义只拒绝相应目标，其他字段可用；两按钮分跨首段/续段也不能错判唯一；截断/脱敏后歧义不隐藏。 |
-| O5 | 替换同名节点/原节点语义变化的旧target拒绝且网站计数不增；重新snapshot后可操作新目标。未改变目标的时钟/广告变化不阻塞动作。 |
+| O4 | 不同group中的同名保存可选对；同名同容器但仅由可靠 aria-describedby 区分时可选对；真正歧义只拒绝相应目标，其他字段可用；两按钮分跨首段/续段也不能错判唯一；截断/脱敏后歧义不隐藏。 |
+| O5 | 替换同名节点/原节点语义变化的旧target拒绝且网站计数不增；交换仅用于区分的 aria-describedby 描述后旧ref同样以 `not_dispatched` 拒绝且网站计数不增；重新snapshot后可操作新目标。未改变目标的时钟/广告变化不阻塞动作。 |
 | O6 | 新snapshot、导航、控制变化、候选重排/改名使旧续读失效；不混批。读完续段不使前段target失效；对前段target的合法一次动作仍可完成。 |
 | O7 | 原页A人工接管后查看/修改B，交还后旧ref拒绝，新snapshot仍可在A继续；不跟随OS焦点、不新增系统权限，P2不受影响。 |
 | O8 | snapshot/续读不输入、导航、抢焦点或续租；授权收窄/撤销后不能读缓存；超时与已派发unknown保留事实。丢一次写响应后只query原Run，网站计数不增加。 |
