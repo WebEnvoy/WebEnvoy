@@ -124,10 +124,16 @@ class Handle:
         self.index = index
         self.role = role
         self.name = name if name is not None else "Action " + str(index)
+        self.public_role = role
+        self.public_name = self.name
         self.name_source = name_source
         self.description = description
         self.form_token = object()
         self.form_action = "/compose"
+        self.form_action_override = None
+        self.form_method_override = None
+        self.context = [{"kind": "form", "name": "Composer"}]
+        self.placeholder = "Save value"
         self.connected = True
         self.clicks = 0
         self.fills = []
@@ -140,10 +146,10 @@ class Handle:
             "name_source": self.name_source,
             "description": self.description,
             "description_source": "aria-describedby" if self.description else None,
-            "context": [{"kind": "form", "name": "Composer"}],
-            "hints": {"placeholder": "Save value", "input_type": None, "multiline": False, "editable": False},
+            "context": self.context,
+            "hints": {"placeholder": self.placeholder, "input_type": None, "multiline": False, "editable": False},
             "href": None,
-            "action": {"href": None, "download": None, "target": None, "form": {"action": self.form_action, "method": "post"}},
+            "action": {"href": None, "download": None, "target": None, "form": {"action": self.form_action, "method": "post", "formaction": self.form_action_override, "formmethod": self.form_method_override}},
             "enabled": True,
             "dom_index": self.index,
             "truncated_fields": [],
@@ -169,6 +175,19 @@ class Body:
     def __init__(self, page): self.page = page
     async def inner_text(self, timeout=None): return self.page.text
 
+class ControlLocator:
+    def __init__(self, page, handles):
+        self.page = page
+        self.handles = handles
+    def nth(self, index):
+        return ControlLocator(self.page, self.handles[index:index + 1])
+    async def count(self): return len(self.handles)
+    async def element_handle(self):
+        return self.handles[0] if self.handles else None
+    async def aria_snapshot(self):
+        handle = await self.element_handle()
+        return None if handle is None else "- " + handle.public_role + " " + json.dumps(handle.public_name)
+
 class Mouse:
     def __init__(self): self.wheels = []
     async def wheel(self, x, y): self.wheels.append((x, y))
@@ -179,6 +198,8 @@ class PageImpl:
     def __init__(self):
         self.text = "short body"
         self.handles = self.make_handles()
+        self.mutate_after_text = False
+        self.locator_mismatch_index = None
         self.wait_ticks = 0
         self.mouse = Mouse()
     @staticmethod
@@ -202,17 +223,33 @@ class PageImpl:
         values[1] = Handle(1, name="Save", name_source="aria_labelledby", description="Same action")
         values[2] = Handle(2, name="Other", name_source="aria_label", description="Other action")
         return values
+    @staticmethod
+    def make_incomplete_handles():
+        first = Handle(0, name="Save")
+        first.context = []
+        first.placeholder = None
+        return [first] + [Handle(index, name="Action " + str(index)) for index in range(1, 2049)]
     def is_closed(self): return False
     async def title(self): return "Fixture"
     async def query_selector_all(self, selector): return list(self.handles)
     async def evaluate(self, expression):
-        if "document.body" in expression: return self.text
+        if "document.body" in expression:
+            text = self.text
+            if self.mutate_after_text:
+                self.mutate_after_text = False
+                self.handles[0].description = "Changed before publish"
+            return text
         raise AssertionError("unexpected page expression: " + expression)
     def locator(self, selector):
-        assert selector == "body"
-        return Body(self)
+        if selector == "body": return Body(self)
+        assert selector == module.OBSERVATION_SELECTOR
+        handles = list(self.handles)
+        if self.locator_mismatch_index is not None:
+            index = self.locator_mismatch_index
+            handles[index] = Handle(index, name=self.handles[index].name)
+        return ControlLocator(self, handles)
     def get_by_role(self, role, name, exact):
-        raise AssertionError("fallback role lookup must not replace the captured ElementHandle")
+        return ControlLocator(self, [handle for handle in self.handles if handle.public_role == role and handle.public_name == name])
     async def wait_for_timeout(self, milliseconds):
         self.wait_ticks += 1
         await asyncio.sleep(0)
@@ -227,15 +264,27 @@ async def run():
     instance.close_requested = asyncio.Event()
     common = {"provider_page_ref": "page:1", "page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
 
+    # Regression: a DOM semantic change after body text capture must reject
+    # the first batch and release every original ElementHandle.
+    original_capture_handles = list(page.handles)
+    page.mutate_after_text = True
+    try:
+        await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+        raise AssertionError("changed first snapshot was published")
+    except module.ObservationFailure as error:
+        assert error.failure_class == "observation_changed", error.failure_class
+    assert state.snapshot_batch is None
+    assert state.controls == {}
+    assert all(handle.disposals == 1 for handle in original_capture_handles), [handle.disposals for handle in original_capture_handles]
+
+    page.handles = PageImpl.make_handles()
     first = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     assert first["schema_version"] == "harbor-observation-targets/v1", first
     assert len(first["controls"]) == 128, len(first["controls"])
     assert first["coverage"]["controls"]["captured_count"] == 160, first
     assert first["coverage"]["controls"]["returned_through"] == 128, first
     assert first["continuation"]["has_more"] is True, first
-    assert first["controls"][0]["name_source"] == "html_label", first["controls"][0]
-    assert first["controls"][1]["name_source"] == "aria_labelledby", first["controls"][1]
-    assert first["controls"][2]["name_source"] == "aria_label", first["controls"][2]
+    assert all(control["name_source"] == "provider_accessibility" for control in first["controls"]), first["controls"][:3]
     assert first["controls"][0]["description"] == "Primary action", first["controls"][0]
     assert "value" not in first["controls"][0], first["controls"][0]
     assert first["controls"][0]["context"] == [{"kind": "form", "name": "Composer"}], first["controls"][0]
@@ -243,6 +292,8 @@ async def run():
 
     first_ref = first["controls"][0]["target_ref"]
     first_handle = page.handles[0]
+    assert state.control_metadata[first_ref]["action"]["form"]["action"] == "/compose", state.control_metadata[first_ref]
+    assert state.control_metadata[first_ref]["action"]["form"]["method"] == "post", state.control_metadata[first_ref]
     assert await instance.control_handle(state, first_ref) is first_handle
     assert await instance.locator(state, {"target_ref": first_ref, "observation_ref": first["observation_ref"], "document_generation": 1}) is first_handle
 
@@ -262,6 +313,41 @@ async def run():
     clicked = await instance.interact(dict(common, action="click", observation_ref=first["observation_ref"], target_ref=first_ref))
     assert clicked["status"] == "completed" and clicked["dispatch_state"] == "dispatched", clicked
     assert first_handle.clicks == 1, first_handle.clicks
+
+    # Public role/name wins over the fixed DOM supplement, but a Locator that
+    # denotes another node is rejected rather than aligned by array order.
+    page.handles = PageImpl.make_handles()
+    page.handles[0].public_name = "Public Save"
+    public_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    assert public_batch["controls"][0]["name"] == "Public Save", public_batch["controls"][0]
+    assert public_batch["controls"][0]["name_source"] == "provider_accessibility", public_batch["controls"][0]
+    public_ref = public_batch["controls"][0]["target_ref"]
+    page.handles[0].public_name = "Renamed Save"
+    public_changed = await instance.interact(dict(common, action="click", observation_ref=public_batch["observation_ref"], target_ref=public_ref))
+    assert public_changed["status"] == "unavailable", public_changed
+    assert public_changed["dispatch_state"] == "not_dispatched", public_changed
+    assert public_changed["failure_class"] == "target_semantics_changed", public_changed
+    page.handles = PageImpl.make_handles()
+    page.locator_mismatch_index = 0
+    try:
+        await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+        raise AssertionError("mismatched public Locator was adopted")
+    except module.ObservationFailure as error:
+        assert error.failure_class == "observation_changed", error.failure_class
+    page.locator_mismatch_index = None
+
+    # Regression: an incomplete enumeration cannot turn a singleton with
+    # false/general hints into a contextual target.
+    page.handles = PageImpl.make_incomplete_handles()
+    incomplete_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    assert incomplete_batch["coverage"]["controls"]["enumeration_complete"] is False, incomplete_batch["coverage"]["controls"]
+    incomplete_ref = incomplete_batch["controls"][0]["target_ref"]
+    assert incomplete_batch["controls"][0]["disambiguation"] == "ambiguous", incomplete_batch["controls"][0]
+    incomplete_action = await instance.interact(dict(common, action="click", observation_ref=incomplete_batch["observation_ref"], target_ref=incomplete_ref))
+    assert incomplete_action["status"] == "unavailable", incomplete_action
+    assert incomplete_action["dispatch_state"] == "not_dispatched", incomplete_action
+    assert incomplete_action["failure_class"] == "target_ambiguous", incomplete_action
+    assert page.handles[0].clicks == 0, page.handles[0].clicks
 
     page.handles = PageImpl.make_ambiguous_handles()
     ambiguous_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
@@ -299,6 +385,19 @@ async def run():
     assert form_action["dispatch_state"] == "not_dispatched", form_action
     assert form_action["failure_class"] == "target_semantics_changed", form_action
     assert form_first.clicks == 0, form_first.clicks
+
+    # Regression: changing a submitter's formaction/formmethod on the same
+    # node invalidates the old target before any click is dispatched.
+    page.handles = PageImpl.make_handles()
+    override_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
+    override_first = page.handles[0]
+    override_first.form_action_override = "/alternate-form"
+    override_first.form_method_override = "get"
+    override_action = await instance.interact(dict(common, action="click", observation_ref=override_batch["observation_ref"], target_ref=override_batch["controls"][0]["target_ref"]))
+    assert override_action["status"] == "unavailable", override_action
+    assert override_action["dispatch_state"] == "not_dispatched", override_action
+    assert override_action["failure_class"] == "target_semantics_changed", override_action
+    assert override_first.clicks == 0, override_first.clicks
 
     page.handles = PageImpl.make_handles()
     replacement_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})

@@ -53,6 +53,8 @@ OBSERVATION_ROLES = frozenset({
     "listbox", "option", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "slider",
     "spinbutton", "treeitem", "file"
 })
+OBSERVATION_SELECTOR = 'button,a[href],input,textarea,select,[role],[contenteditable="true"],[contenteditable=""]'
+ARIA_SNAPSHOT_ROOT = re.compile(r'^-\s+([A-Za-z][A-Za-z0-9_-]*)(?:\s+"((?:[^"\\]|\\.)*)")?(?::.*)?$')
 
 
 class ObservationFailure(Exception):
@@ -277,12 +279,19 @@ CONTROL_SEMANTICS_SCRIPT = r"""e => {
   };
   const href = tag === 'a' ? e.getAttribute('href') : null;
   const form = e.form || (e.closest ? e.closest('form') : null);
+  const submitType = tag === 'button' ? String(e.type || 'submit').toLowerCase() : inputType;
+  const submitControl = form !== null && ((tag === 'button' && submitType === 'submit') || (tag === 'input' && ['submit', 'image'].includes(submitType)));
+  const formaction = submitControl ? e.getAttribute('formaction') : null;
+  const formmethod = submitControl ? e.getAttribute('formmethod') : null;
   const action = {
     href,
     download: e.hasAttribute('download') ? e.getAttribute('download') : null,
     target: e.getAttribute('target'),
     form: form ? {
-      action: form.getAttribute('action'), method: (form.getAttribute('method') || 'get').toLowerCase()
+      action: submitControl && formaction !== null && typeof e.formAction === 'string' ? e.formAction : form.action,
+      method: submitControl && formmethod !== null && typeof e.formMethod === 'string' ? String(e.formMethod).toLowerCase() : String(form.method || 'get').toLowerCase(),
+      formaction,
+      formmethod
     } : null
   };
   return {
@@ -896,6 +905,75 @@ class Driver:
         except Exception:
             pass
 
+    @staticmethod
+    def _parse_aria_snapshot(snapshot: Any) -> tuple[str, str] | None:
+        if not isinstance(snapshot, str):
+            return None
+        first = next((line.strip() for line in snapshot.splitlines() if line.strip()), "")
+        match = ARIA_SNAPSHOT_ROOT.fullmatch(first)
+        if match is None:
+            return None
+        name = match.group(2)
+        if name is not None:
+            try:
+                name = json.loads(f'"{name}"')
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+        return match.group(1).lower(), name or ""
+
+    async def _locator_semantics(self, locator: Any, original: Any, failure_class: str) -> tuple[str, str] | None:
+        """Read public role/name only when the Locator still denotes original."""
+        try:
+            before = await locator.element_handle()
+        except Exception:
+            return None
+        if before is None:
+            return None
+        after = None
+        try:
+            if not await self._same_element(original, before):
+                raise ObservationFailure(failure_class)
+            snapshot = await locator.aria_snapshot()
+            after = await locator.element_handle()
+            if after is None or not await self._same_element(original, after):
+                raise ObservationFailure(failure_class)
+            parsed = self._parse_aria_snapshot(snapshot)
+            return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
+        finally:
+            if before is not original:
+                await self._dispose_handle(before)
+            if after is not None and after is not original and after is not before:
+                await self._dispose_handle(after)
+
+    async def _indexed_public_semantics(self, state: PageState, index: int, original: Any, failure_class: str) -> tuple[str, str] | None:
+        try:
+            return await self._locator_semantics(state.page.locator(OBSERVATION_SELECTOR).nth(index), original, failure_class)
+        except ObservationFailure:
+            raise
+        except Exception:
+            return None
+
+    async def _target_public_semantics(self, state: PageState, original: Any, role: str, name: str) -> tuple[str, str] | None:
+        try:
+            root = state.page.get_by_role(role, name=name, exact=True)
+            count = min(await root.count(), MAX_OBSERVATION_CONTROLS)
+            for index in range(count):
+                locator = root.nth(index)
+                candidate = await locator.element_handle()
+                if candidate is None:
+                    continue
+                try:
+                    if await self._same_element(original, candidate):
+                        return await self._locator_semantics(locator, original, "target_semantics_changed")
+                finally:
+                    if candidate is not original:
+                        await self._dispose_handle(candidate)
+        except ObservationFailure:
+            raise
+        except Exception:
+            return None
+        return None
+
     def _normalized_control(self, item: dict[str, Any], page_url: str = "") -> dict[str, Any] | None:
         role = str(item.get("role", "")).strip().lower()
         if role not in OBSERVATION_ROLES:
@@ -943,6 +1021,8 @@ class Driver:
             "form": {
                 "action": safe_text(action.get("form", {}).get("action"), 512) if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("action"), str) else None,
                 "method": str(action.get("form", {}).get("method", "get")).lower() if isinstance(action.get("form"), dict) else None,
+                "formaction": safe_text(action.get("form", {}).get("formaction"), 512) if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("formaction"), str) else None,
+                "formmethod": str(action.get("form", {}).get("formmethod")).lower() if isinstance(action.get("form"), dict) and isinstance(action.get("form", {}).get("formmethod"), str) else None,
             } if isinstance(action.get("form"), dict) else None,
         }
         enabled = item.get("enabled") is True
@@ -970,7 +1050,7 @@ class Driver:
         }
 
     async def _capture_candidate_records(self, state: PageState) -> tuple[list[dict[str, Any]], bool, bool, list[str]]:
-        selector = 'button,a[href],input,textarea,select,[role],[contenteditable="true"],[contenteditable=""]'
+        selector = OBSERVATION_SELECTOR
         start_generation = state.generation
         start_url = safe_url(state.page.url)
         try:
@@ -991,10 +1071,22 @@ class Driver:
                 candidate_limit_hit = True
                 await self._dispose_handle(element)
                 continue
-            item = await self._read_control(element)
+            try:
+                item = await self._read_control(element)
+                provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+            except Exception:
+                for record in records:
+                    await self._dispose_handle(record["handle"])
+                    if record.get("form_handle") is not None:
+                        await self._dispose_handle(record["form_handle"])
+                for remaining in element_handles[index:]:
+                    await self._dispose_handle(remaining)
+                raise
             if item is None:
                 await self._dispose_handle(element)
                 continue
+            if provider is not None:
+                item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
             normalized = self._normalized_control(item, start_url or "")
             if normalized is None:
                 await self._dispose_handle(element)
@@ -1033,6 +1125,7 @@ class Driver:
                 "semantic": normalized["semantic"],
                 "action": normalized["action"],
                 "form_handle": form_handle,
+                "provider_accessibility": provider is not None,
             })
             if public["truncated_fields"]:
                 semantic_complete = False
@@ -1056,6 +1149,10 @@ class Driver:
             public = record["public"]
             name_groups.setdefault((public["role"], public["name"]), []).append(record)
         for group in name_groups.values():
+            if not enumeration_complete:
+                for record in group:
+                    record["public"]["disambiguation"] = "ambiguous"
+                continue
             variants: dict[str, int] = {}
             for record in group:
                 public = record["public"]
@@ -1065,14 +1162,7 @@ class Driver:
                 public = record["public"]
                 variant = json.dumps({"description": public["description"], "context": public["context"], "hints": public["hints"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                 if len(group) == 1:
-                    if enumeration_complete:
-                        public["disambiguation"] = "unique"
-                    else:
-                        # An incomplete candidate set cannot prove a bare
-                        # singleton is unique. Keep it non-actionable unless
-                        # an actual contextual signal was captured.
-                        has_context = bool(public["description"] or public["context"] or any(value not in (None, "") for value in public["hints"].values()))
-                        public["disambiguation"] = "contextual" if has_context else "ambiguous"
+                    public["disambiguation"] = "unique"
                 elif variants.get(variant) == 1:
                     public["disambiguation"] = "contextual"
                 else:
@@ -1097,18 +1187,21 @@ class Driver:
         batch.setdefault("cursors", {})[cursor] = offset
         return cursor
 
-    async def _verify_snapshot_batch(self, state: PageState, batch: dict[str, Any]) -> None:
-        selector = 'button,a[href],input,textarea,select,[role],[contenteditable="true"],[contenteditable=""]'
+    async def _verify_snapshot_batch(self, state: PageState, batch: dict[str, Any], failure_class: str = "observation_cursor_stale") -> None:
+        selector = OBSERVATION_SELECTOR
         try:
             handles = await state.page.query_selector_all(selector)
         except Exception as error:
-            raise ObservationFailure("observation_cursor_stale") from error
+            raise ObservationFailure(failure_class) from error
         current: list[tuple[Any, dict[str, Any]]] = []
         try:
             for index, handle in enumerate(handles):
                 if index >= MAX_OBSERVATION_ELEMENTS:
                     break
                 item = await self._read_control(handle)
+                provider = await self._indexed_public_semantics(state, index, handle, failure_class)
+                if provider is not None and item is not None:
+                    item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
                 normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
                 if normalized is not None:
                     if len(current) < MAX_OBSERVATION_CONTROLS:
@@ -1117,14 +1210,14 @@ class Driver:
                         await self._dispose_handle(handle)
             records = batch["records"]
             if len(current) != len(records):
-                raise ObservationFailure("observation_cursor_stale")
+                raise ObservationFailure(failure_class)
             for (fresh, normalized), record in zip(current, records):
                 if (not await self._same_element(record["handle"], fresh) or
                     normalized["semantic"] != record["semantic"] or
                     normalized["enabled"] != record["public"]["enabled"]):
-                    raise ObservationFailure("observation_cursor_stale")
+                    raise ObservationFailure(failure_class)
             if state.generation != batch["generation"] or safe_url(state.page.url) != batch["page_url"]:
-                raise ObservationFailure("observation_cursor_stale")
+                raise ObservationFailure(failure_class)
         finally:
             old_handles = {id(record["handle"]) for record in batch["records"]}
             for handle, _ in current:
@@ -1252,6 +1345,14 @@ class Driver:
             "initial_limit": limit,
             "cursors": {},
         }
+        try:
+            await self._verify_snapshot_batch(state, batch, "observation_changed")
+        except Exception:
+            for record in records:
+                await self._dispose_handle(record["handle"])
+                if record.get("form_handle") is not None:
+                    await self._dispose_handle(record["form_handle"])
+            raise
         await state.clear_controls()
         for record in records:
             state.controls[record["target_ref"]] = (record["public"]["role"], record["public"]["name"], record["action"].get("href"), None, record["handle"])
@@ -1260,6 +1361,7 @@ class Driver:
                 "action_semantic": self._action_semantic(record["public"], record["action"]),
                 "action": record["action"],
                 "form_handle": record.get("form_handle"),
+                "provider_accessibility": record.get("provider_accessibility") is True,
                 "disambiguation": record["public"]["disambiguation"],
                 "exposed": False,
             }
@@ -1295,6 +1397,12 @@ class Driver:
                 except Exception:
                     return "target_semantics_changed"
             current = await self._read_control(handle)
+            if metadata.get("provider_accessibility") is True:
+                provider = await self._target_public_semantics(state, handle, control[0], control[1])
+                if provider is None:
+                    return "target_semantics_changed"
+                if current is not None:
+                    current = {**current, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
             normalized = self._normalized_control(current, safe_url(state.page.url) or "") if current is not None else None
             if normalized is None:
                 return "target_semantics_changed"
