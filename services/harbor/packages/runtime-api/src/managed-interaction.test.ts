@@ -3,7 +3,7 @@ import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { identityInput, isolateProfileStorage } from "./identity-environment-mutation-test-helpers.js";
 import { trustManagedInteractionOperation, type ManagedInteractionInput, type ManagedInteractionResult } from "./managed-interaction.js";
-import type { ManagedInteractionRequest } from "./managed-interaction-request.js";
+import { parseManagedInteractionRequest, type ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { RuntimeSessionStore } from "./runtime-session.js";
 import { startHarborRuntimeServer } from "./server.js";
 
@@ -75,6 +75,7 @@ test("Core snapshot page_ref is accepted and stale Page refs are refused before 
 
 test("fixture HTTP interaction rejects unprivileged callers and malformed scope/actions without dispatch; receipts require supervisor", async () => {
   const f = await setup();
+  assert.equal(parseManagedInteractionRequest(f.request("input", { page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:one", target_ref: "target:one", text: "ordinary" }))?.page_id, "page-id:one");
   const token = Buffer.alloc(32, 23).toString("base64url");
   const server = await startHarborRuntimeServer({ port: 0, runtime: f.runtime, manual_authentication_supervisor_token: token });
   const path = `${server.url}/runtime/sessions/${encodeURIComponent(f.a)}/interactions`;
