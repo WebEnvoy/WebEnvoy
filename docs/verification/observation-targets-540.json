@@ -13,16 +13,17 @@
   },
   "implementation": {
     "pull_request": 553,
-    "runtime_commit": "c4a1fff27a97a34d7513e5c3a9516c55cf5e3764",
-    "runtime_tree": "26dbf7c9c4b2014de528f21bb71f52a6d6d2d8d5",
-    "core_tree": "6539b03343ca07ba7057725c933a71b37e11a85d",
-    "harbor_tree": "4014ec85a6e86087b78545b66dc49e304cca501b",
+    "runtime_commit": "fa5171903966e849b1e80b2a523e6e2f5e296e4b",
+    "runtime_tree": "123fc939ac5ded87fe45c71e0073c5b0ee930c46",
+    "core_tree": "5b028e3697b76387327772865b86c919b3cb8a36",
+    "harbor_tree": "9c69cc4b47248eff05825df78ebf08ac355701ea",
     "base_commit": "4d0fb2ea2d8fef4f8c020766afaa5c19eff634fa",
     "static_definition": "packages/core/src/managed-capability-definitions.json",
-    "package_builds": 3,
-    "final_package_assets_digest": "92d80becd47bddf9e7d778bb9f080cafc7509cb3d15b3211d17690c445724e65",
+    "package_builds": 4,
+    "final_package_manifest_assets": 897,
+    "final_package_assets_digest": "aec7e8c876bcd53e6204c45d7775b3fb8c2819715a5bd36423c9d8fb494a4242",
     "package_integrity": "verified",
-    "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package proved the initial live flow. The third and final package adds the independent review fixes for first-batch consistency, incomplete enumeration and effective form semantics; later repository changes are evidence-only."
+    "candidate_note": "The first package was discarded after the installed client exposed a missing Core-to-Harbor page/document action binding. The second package proved the initial live flow. The third package added first-batch consistency, incomplete enumeration and effective form semantics. The fourth and final package fixes the reviewed MCP limit projection and preserves private effective form-action identity; later repository changes are evidence-only."
   },
   "contracts": {
     "request_schema": "packages/schemas/schemas/harbor-observation-targets-request.schema.json",
@@ -50,7 +51,7 @@
     },
     "O2": {
       "status": "passed_deterministic_and_schema",
-      "evidence": "Tests and negative fixtures cover limit bounds, UTF-8/response bytes, scan/capture ceilings, repeated and invalid cursors, exact last-segment invariants and unknown totals without generating expected results from the production collector."
+      "evidence": "Tests and negative fixtures cover limit bounds, UTF-8/response bytes, scan/capture ceilings, repeated and invalid cursors, exact last-segment invariants and unknown totals without generating expected results from the production collector. The installed MCP schema accepted snapshot 128 and diagnostics 64 while rejecting snapshot 129, diagnostics 65 and observe with limit."
     },
     "O3": {
       "status": "passed_deterministic",
@@ -62,7 +63,7 @@
     },
     "O5": {
       "status": "passed_deterministic_and_installed",
-      "evidence": "Node replacement returns target_stale; explicit semantic changes return target_semantics_changed; both are not_dispatched. Unrelated clock text does not invalidate the target. Installed clients rejected an old post-update observation and continued after a fresh snapshot."
+      "evidence": "Node replacement returns target_stale; explicit semantic changes return target_semantics_changed; both are not_dispatched. Unrelated clock text does not invalidate the target. Installed clients rejected an old post-update observation, continued after a fresh snapshot, and both rejected an effective form action query change as target_semantics_changed/not_dispatched."
     },
     "O6": {
       "status": "passed_deterministic",
@@ -78,11 +79,11 @@
     },
     "O9": {
       "status": "passed_deterministic_and_packaged",
-      "evidence": "The canonical operation definition feeds parser, MCP schema and describe; strict Harbor/Core/Plugin projection and positive/negative schemas reject mixed versions. Core, Harbor, Desktop and packaged checks passed on the runtime candidate lineage, including the #539 correction regression."
+      "evidence": "The canonical operation definition feeds parser, MCP schema and describe; strict Harbor/Core/Plugin projection and positive/negative schemas reject mixed versions. Core, Harbor, Desktop and packaged checks passed on the runtime candidate lineage, including the #539 correction regression. The final installed tools/list schema was validated directly rather than inferred from source."
     },
     "O10": {
       "status": "passed_installed_and_real_agent",
-      "evidence": "The third and final package completed long-form continuation, contextual Save, unrelated updates, stale-old-target refusal, fresh continuation and original-Run query separately in Chrome and Camoufox. A real Codex task independently found the late field, filled it, selected the invoice Save, refreshed, continued, queried the original click Run and stopped the Camoufox Instance."
+      "evidence": "The fourth and final package completed long-form continuation, contextual Save, unrelated updates, stale-old-target and changed-form-action refusal, fresh continuation and original-Run query separately in Chrome and Camoufox. A real Codex task on that package independently found the late field, filled it, selected the invoice Save, refreshed, continued, queried the original click Run and stopped the Camoufox Instance."
     }
   },
   "deterministic_regression": {
@@ -94,20 +95,21 @@
     "skips": "Skipped tests are recorded as skipped, not as successful execution."
   },
   "formal_installation": {
-    "candidate_commit": "c4a1fff27a97a34d7513e5c3a9516c55cf5e3764",
-    "candidate_tree": "26dbf7c9c4b2014de528f21bb71f52a6d6d2d8d5",
-    "live_evidence_sha256": "ac33d2fc11cabd4d2083bcd1be07fcd80c8d564caf42bb15171e40446c1213f6",
+    "candidate_commit": "fa5171903966e849b1e80b2a523e6e2f5e296e4b",
+    "candidate_tree": "123fc939ac5ded87fe45c71e0073c5b0ee930c46",
+    "live_evidence_sha256": "73fd4c9665defed685f32df35f925d22cb7288095631145c9754e1a127d57e5a",
+    "installed_schema_evidence_sha256": "93ce48dc429606d77c868ae218faf046547ff6f922806d09bbc23e16be8566d3",
     "camoufox": {
       "combination": "Camoufox 0.5.6 / browser 152.0.4-beta.30 / Playwright 1.60.0",
       "long_form": "128+32, 160 unique targets in one observation",
       "same_name_selection": "invoice context selected; shipping unchanged",
-      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued"
+      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued; form action query change refused target_semantics_changed/not_dispatched"
     },
     "chrome_official": {
       "combination": "Chrome 153.0.8010.37 / Playwright 1.60.0",
       "long_form": "128+32, 160 unique targets in one observation",
       "same_name_selection": "invoice context selected; shipping unchanged",
-      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued",
+      "local_update": "clock tolerated; stale observation refused not_dispatched; fresh snapshot continued; form action query change refused target_semantics_changed/not_dispatched",
       "installation_note": "The earlier dedicated Chrome.app auto-updated to 153.0.8010.48. The owner binding was refreshed to a fresh copy of the already approved 153.0.8010.37 source with the pinned executable hash; an exact driver launch and the final installed client both passed. No browser or SDK upgrade was performed."
     },
     "cleanup": "Both installed-client sessions stopped; two Grants and the connection were revoked; both Profile policies were restored."
@@ -117,9 +119,9 @@
     "host": "Codex CLI 0.154.0-alpha.6.2",
     "actual_model": "gpt-5.6-sol",
     "actual_reasoning_effort": "low",
-    "successful_thread": "01a0ad63-95d4-78a0-9a49-cd5b498ad85e",
+    "successful_thread": "01a0ad7d-7974-7812-9784-e1450e58af24",
     "successful_provider": "camoufox",
-    "successful_result_sha256": "d125935d3baba81feb8b2f542cb68450bff89cd1d96a5e91f85e6b28de6461e9",
+    "successful_result_sha256": "d66ff89ebd45e124ee699ddef540fa8359fdb0f2eb37eab65f41e7061e22d200",
     "result": "late field filled; invoice Save selected; local update followed by fresh snapshot; Continue clicked; original click Run succeeded/completed/dispatched; Instance stopped",
     "retained_failure": "The first Chrome Agent task made one start request, received launch_failed, queried that failed Run and stopped without retrying or acting on the page. Readback later proved that its persisted binding still named 153.0.8010.37 while the old app path had auto-updated to 153.0.8010.48 and changed executable hash. The failure is retained; after an owner-scoped binding refresh to the original pinned source, the final installed Chrome client passed.",
     "retained_failure_sha256": "c2fcacfccb8195db5ed00df4eb9c80d02874fd8a628ef6ea86190bebe6da5be9"
@@ -141,7 +143,7 @@
   },
   "evidence_classification": {
     "deterministic": "Executed locally on the runtime candidate lineage.",
-    "installed": "Executed through the third and final packaged application with both Providers.",
+    "installed": "Executed through the fourth and final packaged application with both Providers; three retained harness failures on that package were test-fixture timing, target-segment and expected-code mistakes, not product failures, and each exact response was preserved.",
     "real_agent": "Executed through the installed MCP by a separate Codex task; the successful task used Camoufox.",
     "ui_automation": "Not rerun; only the unchanged owner/native handoff path is inherited from existing formal evidence.",
     "independent_review": "The reviewer reruns selected deterministic checks and audits installed/Agent originals; no duplicate live run is implied."
