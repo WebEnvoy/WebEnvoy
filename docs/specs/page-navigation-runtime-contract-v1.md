@@ -97,6 +97,8 @@ Core 根据一个当前有效 Grant、目标 Profile 的 permission ceiling 和 
 
 Observation、interaction target、network event、console event 和 diagnostics cursor 必须绑定 `page_ref` 与 `document_generation`，并受当前 relation/control generation 保护。Page navigation、close、native handoff reobserve、driver loss、control generation change 或 Runtime restart 让旧绑定失效；返回 `stale_page`/`stale_document`/`cursor_stale`，不能重试去命中相似的 Page 或 selector。关系无法证明时优先返回 `page_relation_unavailable`，不得把关系错误降级成 `page_not_found` 后继续派发。
 
+关于 `instance.snapshot` 的完整性、续读和 target identity，以已接受的 [Observation Completeness and Target Identity V1](observation-targets-v1.md) 为优先补充；本文件其余 Page/navigation 与 stale-ref 语义保持。
+
 Diagnostics 为每个 Page 保留独立有界 ring，并受 Instance 总量上限约束：最多 64 个 Page 对象、每 Page 128 条事件、每 Instance 512 条事件、最多 256 个 pending request correlation。cursor 绑定 Instance、Page、document generation 和 ring position。读操作不改变 active Page。网络/console 记录过滤 query、fragment、credentials、headers、bodies、cookies、raw exception 和 Provider handles 后再进入 ring；超出上限返回 bounded unavailable/evicted facts，不静默扩大缓存。
 
 ## 5. Unavailable results and support

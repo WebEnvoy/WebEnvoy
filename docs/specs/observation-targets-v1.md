@@ -1,8 +1,8 @@
 # Observation Completeness and Target Identity V1
 
-状态：Proposed（实施规格已起草，待独立审查接受）；版本：1.0。owner：Harbor（观察批次、引用与控制）、共享 Provider execution（真实元素、语义采集与动作前检查）、Core（授权与结果）、Plugin（输入/输出投影）。归口：[Work Item #540](https://github.com/WebEnvoy/WebEnvoy/issues/540)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，消费 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)。
+状态：Accepted（实施规格已接受）；版本：1.0。owner：Harbor（观察批次、引用与控制）、共享 Provider execution（真实元素、语义采集与动作前检查）、Core（授权与结果）、Plugin（输入/输出投影）。归口：[Work Item #540](https://github.com/WebEnvoy/WebEnvoy/issues/540)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，消费 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)。
 
-依据：[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Plugin Exposure](plugin-runtime-exposure-v1.md)、[能力发现](capability-discovery-v1.md)、[Files](browser-files-v1.md)、[Grant](grant-wire-contract-v1.md)、[Runtime 能力](browser-runtime-capabilities-v1.md)、[共享执行设计](../architecture/provider-execution-reuse-v1.md)。本文件是 Page/Plugin 的专门补充，不建立第二套 Page/RefMap。接受后，本文件优先规定 `instance.snapshot` 的新增输入、snapshot 子对象完整性、target 语义与续读；其他 Page/navigation、授权、文件结果、Run 与控制生命周期不改。Proposed/文档合并不代表功能已交付。
+依据：[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Plugin Exposure](plugin-runtime-exposure-v1.md)、[能力发现](capability-discovery-v1.md)、[Files](browser-files-v1.md)、[Grant](grant-wire-contract-v1.md)、[Runtime 能力](browser-runtime-capabilities-v1.md)、[共享执行设计](../architecture/provider-execution-reuse-v1.md)。本文件是 Page/Plugin 的专门补充，不建立第二套 Page/RefMap。本文件优先规定 `instance.snapshot` 的新增输入、snapshot 子对象完整性、target 语义与续读；其他 Page/navigation、授权、文件结果、Run 与控制生命周期不改。文档接受不表示功能已实现。
 
 ## 1. 用户结果与基线
 
@@ -178,13 +178,13 @@ role最多64字符，name最多256字符；保留现有脱敏规则，不回显�
 
 ## 8. 公共投影、兼容与安装
 
-实现同步修改当前Core静态定义、parser、MCP schema及describe说明：只对snapshot增加cursor/limit/续读条件；observe只提供页面事实，不产生控件target；获取或恢复target应指向`instance.snapshot`。#539已有错误草稿纠正和next_steps不能回归。describe本身依然只读取管理事实，不执行新的snapshot/续读或验证DOM。
+实现PR应同步修改当前Core静态定义、parser、MCP schema及describe说明：只对snapshot增加cursor/limit/续读条件；observe只提供页面事实，不产生控件target；获取或恢复target应指向`instance.snapshot`。#539已有错误草稿纠正和next_steps不能回归。describe本身依然只读取管理事实，不执行新的snapshot/续读或验证DOM。
 
 公共snapshot新增上述schema标识；外层interaction/Page/Run协议保持原版本。旧请求不带cursor仍可做首段观察，旧`truncated`不改义；旧消费者忽略新增字段不意味着已具备本项完整性能力。新版Plugin必须验证新snapshot形状与coverage一致性，缺失时显示观察格式/能力未提供，不能默认complete=true。新cursor不得被旧Runtime忽略后偷偷变成新观察；旧入口应明确拒绝未知字段/版本。错误只影响相应操作，不堵住管理、查询或已支持的独立能力。
 
 Core/Harbor/共享Python的内部snapshot字段、cursor映射与严格reader在同一安装候选更新并由manifest核验；不得依赖未登记工作树文件或新TS+旧Python静默混装。新增schema和正反fixture在实现PR实际存在后再从本文件/索引链接，不在本docs PR虚构已存在的文件。
 
-本文件按文首声明形成Page/Plugin正式补充，索引须双向可发现。实现PR只在旧的snapshot参数列表、截断/目标说明处添加必要引用/修订，不复制整篇规格；旧#519/#541历史状态及未涉及的导航语义不重写。
+本文件按文首声明形成Page/Plugin正式补充，索引须双向可发现；Page/Plugin的短引用已在本PR加入，真实schema/fixture由实现PR补入，不在本docs PR虚构。实现PR只在旧的snapshot参数列表、截断/目标说明处添加必要引用/修订，不复制整篇规格；旧#519/#541历史状态及未涉及的导航语义不重写。
 
 Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`（snapshot/describe投影及版本）；Page/Observation合同由本文件冻结；`DO-GRANT-WIRE=not-triggered`（无新增授权维度）；Network/Console=not-triggered（不改payload/政策）；Provider-private-schema=not-triggered（无新增环境持久结构；内部消息与安装配对仍必须同步）；App IA=not-triggered（沿用最小owner入口）。
 
