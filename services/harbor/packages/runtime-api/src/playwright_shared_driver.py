@@ -1069,6 +1069,20 @@ class Driver:
             "truncated_fields": sorted(set(truncated_fields)),
         }
 
+    @staticmethod
+    def _public_control(normalized: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "role": safe_text(normalized["role"], 64),
+            "name": safe_text(normalized["name"], 256),
+            "name_source": normalized["name_source"],
+            "description": normalized["description"],
+            "context": normalized["context"],
+            "hints": normalized["hints"],
+            "enabled": normalized["enabled"],
+            "disambiguation": "ambiguous",
+            "truncated_fields": normalized["truncated_fields"],
+        }
+
     async def _capture_candidate_records(self, state: PageState) -> tuple[list[dict[str, Any]], bool, bool, list[str]]:
         selector = OBSERVATION_SELECTOR
         start_generation = state.generation
@@ -1111,17 +1125,7 @@ class Driver:
             if normalized is None:
                 await self._dispose_handle(element)
                 continue
-            public = {
-                "role": safe_text(normalized["role"], 64),
-                "name": safe_text(normalized["name"], 256),
-                "name_source": normalized["name_source"],
-                "description": normalized["description"],
-                "context": normalized["context"],
-                "hints": normalized["hints"],
-                "enabled": normalized["enabled"],
-                "disambiguation": "ambiguous",
-                "truncated_fields": normalized["truncated_fields"],
-            }
+            public = self._public_control(normalized)
             encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
             if metadata_bytes + encoded_size > MAX_OBSERVATION_METADATA_BYTES:
                 reasons.append("metadata_truncated")
@@ -1216,20 +1220,25 @@ class Driver:
         except Exception as error:
             raise ObservationFailure(failure_class) from error
         current: list[tuple[Any, dict[str, Any]]] = []
+        metadata_bytes = 0
         try:
             for index, handle in enumerate(handles):
                 if index >= MAX_OBSERVATION_ELEMENTS:
                     break
+                if len(current) >= MAX_OBSERVATION_CONTROLS:
+                    continue
                 item = await self._read_control(handle)
                 provider = await self._indexed_public_semantics(state, index, handle, failure_class)
                 if provider is not None and item is not None:
                     item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
                 normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
                 if normalized is not None:
-                    if len(current) < MAX_OBSERVATION_CONTROLS:
-                        current.append((handle, normalized))
-                    else:
-                        await self._dispose_handle(handle)
+                    public = self._public_control(normalized)
+                    encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                    if metadata_bytes + encoded_size > MAX_OBSERVATION_METADATA_BYTES:
+                        continue
+                    metadata_bytes += encoded_size
+                    current.append((handle, normalized))
             records = batch["records"]
             if len(current) != len(records):
                 raise ObservationFailure(failure_class)
