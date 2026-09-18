@@ -1,6 +1,6 @@
 # WebEnvoy 跨仓架构
 
-> 2026-09-14：产品方向和模块职责以 [canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。本文只维护现行模块间接口边界，不替代字段级 spec、Issue 状态或逐模块实现设计。
+> 2026-09-18：产品方向和模块职责以 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md) 在跨仓文档合并前为 Proposed，不改变现有 wire 或实现。本文只维护模块间接口边界。
 
 本文定义 `WebEnvoy/WebEnvoy` monorepo 中 Core、Desktop、Plugin／agent-entry、Harbor 与独立 `WebEnvoy/Lode` 的协作边界。
 
@@ -14,7 +14,7 @@ ADR 记录为什么选择某个方向；spec 定义能力、状态、JSON Schema
 
 ## 权威文档
 
-- 产品范围：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+- 产品范围：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 - 实施决策：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
 - Browser Runtime：[Runtime Capability Plane](runtime-capability-plane.md)
 - 能力语义：[Browser Runtime Capabilities V1](../specs/browser-runtime-capabilities-v1.md)
@@ -29,19 +29,20 @@ ADR 记录为什么选择某个方向；spec 定义能力、状态、JSON Schema
 |---|---|---|---|
 | `WebEnvoy/WebEnvoy` Core | 授权、任务和结果边界 | Principal、Connection、Grant、task scope、Task、Run、Result Envelope、ExternalOutcome、Lode pin、capability admission、failure attribution、公共 API | 浏览器 Profile data、Provider 私有连接、页面 handle、站点知识、Plugin 状态 |
 | `WebEnvoy/WebEnvoy` Harbor | Browser Runtime 与长期运行现场 | Profile、Environment、Provider facts、Instance、Page、ControlLease、Browser Runtime capability、Snapshot、Network／Console runtime facts、operation receipt、Evidence refs | Grant、站点业务成功、SKILL 内容、Core Run Record |
-| `WebEnvoy/WebEnvoy` Plugin／agent-entry | 第三方 Agent 宿主适配 | 安装入口、宿主连接、capability discovery、工具呈现、SKILL 分发、结果投影 | 第二套 Profile、Account、Grant、Run、恢复或浏览器状态真相 |
-| `WebEnvoy/Lode` | 站点能力资产与共享知识 | SKILL／Capability package、AccountSystem 模板、workflow、input/output/source schema、fixtures、post-check、asset registry | Runtime Session、真实账号现场、当前授权、Run Record、Plugin 会话 |
-| `WebEnvoy/WebEnvoy` Desktop／可信 owner 入口 | 人类控制面 | 用户意图、Principal／Grant 管理、敏感决定、待处理事项、同实例接管／交还和展示状态 | Core／Harbor 状态机、Lode 资产真相、Provider 私有控制 |
+| `WebEnvoy/WebEnvoy` CLI／API／Plugin／agent-entry | 上游与第三方 Agent 的正式入口 | 安装与连接、capability discovery、工具／命令投影、SKILL 分发、结果投影 | 第二套 Profile、Account、Grant、Run、恢复或浏览器状态真相 |
+| `WebEnvoy/Lode` | 可分发站点资产与共享知识 | SKILL package、AccountSystem 模板、references、受管脚本和验证材料、版本及来源 | Runtime Session、真实账号现场、当前授权、Run Record、所有用户私有运行资产 |
+| `WebEnvoy/WebEnvoy` 可信 owner 入口 | 人类控制面，可由 CLI、宿主或原浏览器承接 | 用户意图、Principal／Grant 管理、敏感决定、待处理事项、同实例接管／交还和展示状态 | Core／Harbor 状态机、Lode 资产真相、Provider 私有控制 |
+| `WebEnvoy/WebEnvoy` Desktop | 冻结的可选产品壳与历史设计参考 | 已交付代码和历史证据 | V1 必需入口、独占 owner 能力或新的默认实施承诺 |
 | Provider | 浏览器和原生环境 | 浏览器内核、设备环境能力、底层输入、私有协议 | WebEnvoy 授权、业务结果、站点流程 |
 
 ## 核心原则
 
-1. **正式入口统一。** Plugin、CLI、MCP、SDK 和 App 不绕过 Core／Harbor owner 进入独立执行链。
+1. **正式入口统一。** CLI、API、Plugin、MCP、SDK、可信用户入口和后续受管站点脚本不绕过 Core／Harbor owner 进入独立执行链。
 2. **Core 是授权、Run 和业务结果真相源。** accepted、running、succeeded、failed、unknown outcome、manual recovery 和 ExternalOutcome 由 Core 持久化。
 3. **Harbor 是 Runtime 现场真相源。** Profile、Environment、Provider、Instance、Page、ControlLease、Browser capability、operation receipt 和 runtime evidence 来自 Harbor。
 4. **Lode 是站点知识和资产真相源。** 网站流程、AccountSystem 模板、业务输入输出、post-check 和失效标记不写入 Harbor／Core。
-5. **Plugin 是第一完整 Agent 消费端，但保持薄层。** 它发现和呈现能力，不复制授权、状态或恢复。
-6. **Desktop／owner 入口是人类控制面。** 完整 App 产品化可后置，但必要授权、敏感决定和同实例接管不能缺失。
+5. **CLI、API 与 Plugin 是薄入口。** 它们发现、调用和呈现同一能力，不复制授权、状态或恢复。
+6. **可信 owner 入口是人类控制面。** App 专属产品化冻结；必要授权、监督、敏感决定、同实例接管／交还、撤权、停止和恢复不能缺失，也不能依赖 App。
 7. **能力存在、工具暴露、授权、当前可执行性分离。** 隐藏工具不等于拒绝权限，工具存在也不等于当前可执行。
 8. **Browser Runtime capability 与站点 capability 分离。** Browser Runtime 提供通用确定性操作；SKILL 选择和组合这些能力并解释业务结果。
 9. **公共 Runtime 不等同底层协议。** CDP、Playwright、Juggler 和 Provider 私有对象只留在 Driver 边界。

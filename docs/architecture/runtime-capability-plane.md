@@ -2,7 +2,7 @@
 
 > 状态：现行 V1 架构基线
 > 日期：2026-09-14
-> 决策依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)
+> 决策依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md) 的新基线在跨仓文档合并前为 Proposed，不改变现有 wire 或实现
 > 规范依据：[Browser Runtime 能力规格](../specs/browser-runtime-capabilities-v1.md)、[Profile 环境规格](../specs/profile-environment-v1.md)
 > 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 
@@ -16,8 +16,8 @@ WebEnvoy Runtime 必须同时满足：
 
 1. **能力类别完整**：现代网页任务所需的主要 browser capability 有统一归口。
 2. **Provider 无关**：公共语义不等同于 CDP、Playwright、Juggler 或站点脚本。
-3. **Plugin-first**：已安装 Plugin 是第一完整 Agent 消费入口。
-4. **同一真实现场**：Agent、用户和 App 使用同一个受管 Profile／Instance／Page。
+3. **共同正式入口**：CLI、API、已安装 Plugin 与后续受管站点脚本消费同一 owner facts，不建立旁路。
+4. **同一真实现场**：Agent 与可信用户入口使用同一个受管 Profile／Instance／Page。
 5. **能力与放权分离**：能力存在、工具展示、授权和当前可执行性分别判断。
 6. **结果可恢复**：有影响的动作保留 Run／operation／receipt，结果未知时不自动重放。
 7. **长期环境连续**：Provider 深层能力不能破坏 Profile 的设备环境、账号和存储连续性。
@@ -26,14 +26,13 @@ WebEnvoy Runtime 必须同时满足：
 ## 2. 总体分层
 
 ```text
-Third-party Agent Host
+CLI / API / Third-party Agent Host
         │
         ▼
-WebEnvoy Plugin / Host Adapter
-  - capability discovery
-  - filtered tool presentation
-  - SKILL delivery
-  - result projection
+WebEnvoy entry / Plugin / Host Adapter
+  - capability discovery and invocation
+  - filtered tool presentation where applicable
+  - SKILL delivery and result projection
         │
         ▼
 Core API / Authorization / Run Boundary
@@ -63,7 +62,8 @@ Original Browser Instance
 ```text
 Lode / SKILL
   ── declares required/recommended capabilities
-  ── provides site/account/business knowledge
+  ── provides site/account/business knowledge and managed script assets
+  ── invokes the same authorized capability path; owns no queue or runtime state
   ── never grants permission
 
 Trusted Owner Control Plane
@@ -136,9 +136,9 @@ implemented
 | Provider Driver | Provider 私有连接／handle、能力映射、底层操作和 Provider-specific 诊断 | Principal、Grant、业务结果、SKILL 语义 |
 | Harbor | Profile、Environment、Instance、Page、ControlLease、browser capability、运行观测、operation receipt、evidence ref | Agent 授权、站点业务成功、SKILL 内容 |
 | Core | Principal、Connection、Grant、任务范围、动作风险、Run、幂等、ExternalOutcome、查询和恢复决定 | Provider 私有 endpoint、Cookie／Profile 目录、站点 selector |
-| Plugin | 宿主适配、能力发现、工具呈现、SKILL 分发、正式调用和结果投影 | 第二套授权、Profile、账号、Run 或浏览器状态 |
-| Lode／SKILL | AccountSystem 模板、站点知识、capability requirement、工作流、结果判断和恢复指导 | Runtime 能力、当前权限、真实 Cookie／现场 |
-| App／Owner 入口 | 人类授权、敏感决定、待处理事项、同实例接管与交还 | Core／Harbor 状态机和重复事实存储 |
+| CLI／API／Plugin | 正式入口投影、宿主适配、能力发现、工具呈现、SKILL 分发、正式调用和结果投影 | 第二套授权、Profile、账号、Run 或浏览器状态 |
+| Lode／SKILL | AccountSystem 模板、站点知识、capability requirement、受管脚本资产、结果判断和恢复指导 | Runtime 能力、当前权限、独立执行服务／队列、真实 Cookie／现场 |
+| 可信 owner 入口 | 人类授权、敏感决定、待处理事项、同实例接管与交还；可由 CLI、宿主或原浏览器承接 | Core／Harbor 状态机和重复事实存储；不要求 App |
 
 ## 5. Capability catalog
 
@@ -159,7 +159,7 @@ Catalog 表达“能力可以怎样被实现”，不表达“当前 Agent 已�
 
 V1 的十二类最低结果与规范来源由 [Browser Runtime 能力规格第 4 节](../specs/browser-runtime-capabilities-v1.md#4-v1-十二类能力最低结果矩阵)统一索引；本架构不另建能力清单或完成台账。实现 Work Item 必须引用适用类别并保留成功、必要拒绝和恢复的证据边界。
 
-Plugin 使用 catalog 生成或选择工具集；SKILL 可以引用 capability identifier 和最低语义版本；Core 在正式执行时仍重新授权，Harbor 在派发前仍重新核对现场。
+CLI、API 与 Plugin 使用 catalog 生成或选择调用面；SKILL 可以引用 capability identifier 和最低语义版本。后续受管脚本仍经 Core 重新授权，Harbor 在派发前重新核对现场，不新增脚本专属服务、队列或状态机。
 
 ## 6. 正式执行路径
 
@@ -244,7 +244,7 @@ Agent operating Instance A
 
 交还后严格处于 `control_owner=none`、`ControlLease.owner=none`、`state=released` 且无 holder 的 Instance，仍可接受 Core 的新纯观察（包括 semantic snapshot、页面事实和公开 read），且不取得或续租输入租约。需要输入时，Core 必须先以新观察为依据取得租约；同一 Core holder 的非争用首次取得可沿用该新观察的当前代次，其他 holder 或期间发生控制变化则使观察失效。
 
-完整 App 后置不改变这条路径。可信 owner 入口可以是最小 App surface 或后续其他本地确认入口，但不得把 owner 凭据交给 Agent。
+App 专属产品化冻结不改变这条路径。可信 owner 入口可由 CLI、宿主或原浏览器承接，但不得把 owner 凭据交给 Agent。
 
 ## 8. Profile 环境与深层能力
 
@@ -258,7 +258,7 @@ Network interception、main-world evaluation、脚本注入、截图和输入策
 
 Profile 环境的 configured／effective／pending／observed／drift 语义由 [Profile 环境规格](../specs/profile-environment-v1.md) 定义。Runtime capability 不能静默更换 Provider、代理或设备环境以换取成功。
 
-## 9. Plugin-first 消费
+## 9. CLI、API 与 Plugin 共同消费
 
 首个支持宿主可以是当前 Codex，但接口必须保持 host-neutral：
 
@@ -266,12 +266,12 @@ Profile 环境的 configured／effective／pending／observed／drift 语义由 
 Host-neutral WebEnvoy API / capability catalog
                  ▲
                  │
-          Codex adapter first
+          CLI / host adapters
 ```
 
 不得把 Codex 的工具审批、配置格式、会话模型或提示词语义写入 Core／Harbor 公共合同。
 
-Plugin 完整消费检查点至少覆盖：
+正式入口的组合检查点至少覆盖：
 
 - 安装、连接和重连；
 - capability discovery；

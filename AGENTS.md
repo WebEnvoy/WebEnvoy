@@ -2,7 +2,14 @@
 
 本仓库是 `WebEnvoy/WebEnvoy` 产品 monorepo：`packages/*` 承载 Core，`apps/desktop` 承载 Desktop App，`services/harbor` 承载 Harbor Runtime；Lode 仍是独立资产仓。
 
-产品方向、V1 约束和决策状态以组织级 [canonical v1.5 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。
+产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释实现决策，不得另立产品方向。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的 v1.6 修订在组织 canonical PR 合并前待生效。
+
+## 浏览器基础设施与 App 冻结边界
+
+- WebEnvoy 是第三方 Agent／上游系统的浏览器基础设施；Core 是本 monorepo 内部模块。CLI、API、Plugin、受管站点脚本和可信用户入口必须复用同一 Profile、Grant、Instance、ControlLease、Run、结果与恢复事实。
+- Desktop App 专属工作台、布局与独立发行产品化冻结。现有代码、历史设计和证据保留；授权、监督、接管、交还、撤权、停止和恢复必须有不依赖 App 的正式路径。
+- 站点 SKILL 可以统一承载 references、scripts、assets、任务分流、输出验证和修复，但包安装、代码准入、运行授权、数据外发与业务结果分别判定。
+- 受管脚本、主动 Network 与受控视觉只在 S2/S4/S5 对应正式 Spec 接受后扩展；现行 selector、坐标、evaluate、Network body／mutation 和权限 wire 不因产品规划自动放宽。
 
 ## 可选模型辅助的执行边界
 
@@ -16,9 +23,9 @@
 - 用户或 Agent 的真实路径仍是交付单元；但已确认进入 V1 的基础 Runtime 能力类别必须先在 canonical／FR 中完整定义，不得因当前消费者暂未使用就从规划中省略。对象、Schema 和合同的具体实现仍只细化到当前与下一批真实交付需要的程度。
 - 先验证会推翻设计的页面或 Provider 假设。Provider 接入遵循 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate：先分类、后有界 spike、再决定是否采用。WebEnvoy 不实现、模拟或长期补偿 Provider 缺失的浏览器核心语义；Obscura 在当前愿景内不采用，历史见 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511)，不再验证、等待或跟踪版本。该产品方向以已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21) 为准。
 - 本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成其声明范围的供应方原版 Camoufox 任务页协作与私有补丁退役：只接受 owner 明确提供、重新核验 provenance 的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`，由公开 API Driver 消费完整 launch/context options 并精确复用。该路径仍按 `limited` 处理：popup 首请求若在派发前无法建立可信 Page 归属，必须在任何 `fetch`/`continue`/外部请求前以 `page_relation_unavailable` 局部拒绝，不猜测、不重放；普通任务页和同 Instance 观察/接管语义仍有效。#519 的完成只覆盖其实际声明范围；完整 Runtime、所有 popup／Files／Provider、#497／#474／#482 的其余结果仍由各自 FR／Work Item 和证据核验。旧 Camoufox 私有 launch binding、patched/native artifact 继续 `unsupported`／已退役，不启动、不 fallback；#499、#504、#510 的旧记录仅作历史/恢复校验事实。
-- Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；App 只组合 owner facts 并发送用户意图；Lode 拥有 SKILL、AccountSystem 模板和网站知识。
+- Core 拥有授权、Run、外部结果、幂等和恢复；Harbor 拥有 Profile、Provider、Instance、现场和 ControlLease；可信用户入口只组合 owner facts 并发送用户意图；Lode 拥有站点 SKILL、AccountSystem 模板、references、scripts、assets 和验证材料。
 - Browser Runtime capability 是否存在，与 Plugin 向 Agent 展示哪些工具以及当前 Grant 是否允许调用必须分离；Network、Console、文件、窗口、受控执行、画面等通用能力不得按站点特例散落到 Harbor／Core。
-- V1 实施优先采用 Plugin-first：一个已安装 Plugin 在真实第三方 Agent 中持续消费 Runtime、Profile、账号、环境、SKILL 和结果能力；完整 App 产品化后移，但必要 owner 授权、敏感决定、同实例接管与交还持续可用。
+- V1 实施采用 CLI／集成入口优先：CLI、API 和已安装 Plugin 消费同一 Runtime、Profile、账号、环境、SKILL 和结果能力；真实 Plugin 验收不能由 CLI 替代。Desktop App 专属产品化冻结，但必要 owner 授权、敏感决定、同实例接管、交还、撤权、停止与恢复持续可用。
 - 每条业务规则只有一个 owner。预检和正式执行复用同一判定，不在 App、站点代码或 Lode 复制授权白名单。
 - 防御作用域不大于风险作用域。身份、授权、控制权和重复写入必须保护；可选 evidence、viewer 或未安装网站 SKILL 不得全局阻断通用浏览器与环境管理。
 - unknown 写入禁止重放，但允许安全查询、对账、人工接管和停止后续执行。

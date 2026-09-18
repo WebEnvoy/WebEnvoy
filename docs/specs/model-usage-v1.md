@@ -1,8 +1,8 @@
 # Model Usage V1：模型使用与可选网页辅助
 
-状态：Proposed；版本：1.0；owner：Core（配置/用途/授权/调用协调/运行归因）、Harbor（浏览器现场/目标/控制/执行）、App（可信用户决定）、Plugin（正式宿主投影）。产品归口：[#558](https://github.com/WebEnvoy/WebEnvoy/issues/558)；首个条件验证：[#559](https://github.com/WebEnvoy/WebEnvoy/issues/559)。
+状态：Proposed；版本：1.0；owner：Core（配置/用途/授权/调用协调/运行归因）、Harbor（浏览器现场/目标/控制/执行）、可信 owner 入口（用户决定）、Plugin（正式宿主投影）。产品归口：[#558](https://github.com/WebEnvoy/WebEnvoy/issues/558)；首个条件验证：[#559](https://github.com/WebEnvoy/WebEnvoy/issues/559)。
 
-依据：[canonical](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md)、[Plugin Exposure](plugin-runtime-exposure-v1.md)、[Capability Discovery](capability-discovery-v1.md)、[Observation Targets](observation-targets-v1.md)、[Grant](grant-wire-contract-v1.md)、[Browser Runtime](browser-runtime-capabilities-v1.md)。正式接受须先完成 canonical 对应修订；文档接受不表示模型已支持或功能已交付。
+依据：[canonical](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md)、[Plugin Exposure](plugin-runtime-exposure-v1.md)、[Capability Discovery](capability-discovery-v1.md)、[Observation Targets](observation-targets-v1.md)、[Grant](grant-wire-contract-v1.md)、[Browser Runtime](browser-runtime-capabilities-v1.md)。正式接受须先完成 canonical 对应修订；文档接受不表示模型已支持或功能已交付。S0 的 App 冻结不改变本规格的可选、有界、非 V1 阻塞边界；配置与停止由可信 owner 入口承接，不要求 App。
 
 ## 1. 用户结果与范围
 

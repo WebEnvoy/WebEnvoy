@@ -3,7 +3,7 @@
 > 状态：V1 规范性语义规格
 > 版本：1.2（规范性语义与来源矩阵修订，不改变 wire 枚举）
 > 日期：2026-09-14
-> 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
+> 产品依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；Provider 职责修订以已合并的 [.github#21](https://github.com/WebEnvoy/.github/pull/21) 为准
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品完成归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 > 验收衔接：[已安装 Plugin／真实 Agent #474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[完整 V1 证据汇合 #482](https://github.com/WebEnvoy/WebEnvoy/issues/482)
@@ -11,6 +11,8 @@
 本文定义 WebEnvoy V1 Browser Runtime capability plane 的**规范性语义、能力类别、支持状态、权限层次、结果和验收规则**。
 
 本文不是最终 wire schema。具体 HTTP／MCP 字段、JSON Schema、生成类型和 Provider adapter 可以在实现中演进，但不得改变本文的语义和安全边界，除非通过新的 ADR／spec 修订。
+
+> **2026-09-18 S0 Proposed 边界**：[S2 #563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、[S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 与 [S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 分别规划受管站点脚本、主动 Network 与视觉交互的正式语义。规划不放开现有任意 evaluate、selector、坐标、响应正文或 request modification；只有对应 Spec 接受并由实施 Work Item 交付后，现有 wire 和支持事实才可改变。
 
 > **2026-09-14 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。#523／PR #524 的受管文件单文件 Plugin slice 有独立 `plugin_verified` 证据，但不把其他能力或完整 V1 扩写为 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 
