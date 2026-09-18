@@ -271,7 +271,7 @@ Host-neutral WebEnvoy API / capability catalog
 
 不得把 Codex 的工具审批、配置格式、会话模型或提示词语义写入 Core／Harbor 公共合同。
 
-正式入口的组合检查点至少覆盖：
+完整 installed Plugin 检查点按组织规范 §21.1.1 由真实第三方 Agent 通过实际安装后的 Plugin 独立证明，至少覆盖：
 
 - 安装、连接和重连；
 - capability discovery；
@@ -282,6 +282,8 @@ Host-neutral WebEnvoy API / capability catalog
 - 同实例人工接管；
 - query／unknown／recovery；
 - 更新或卸载后长期 Profile 不丢失。
+
+CLI 与 API 对同一能力和 owner facts 的新增验收应分别记录；它们不能与 Plugin 各完成一部分后拼接替代完整 installed Plugin 检查点，也不能标记 `plugin_verified`。
 
 ## 10. SKILL 消费
 
