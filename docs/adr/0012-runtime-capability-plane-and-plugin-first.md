@@ -6,6 +6,12 @@
 - 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 - 首批执行项：[Network／Console #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 
+## 2026-09-18 Proposed supersession
+
+[ADR 0014](0014-browser-infrastructure-and-app-freeze.md) 提议将本 ADR 第 5 节的“Plugin 是第一完整产品消费者”和第 6 节的“完整 App 产品化后移”替换为基础设施优先、CLI／API／Plugin／受管站点脚本共享同一 owner facts，以及 App 专属产品化冻结。该替代只有在 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的组织级 canonical 与三仓配套文档合并后生效。
+
+本 ADR 的 capability 分层、薄 Plugin、Provider qualification、授权、结果、同一原 Instance、接管／交还和 unknown 不重放继续有效。App 冻结不冻结授权、监督、接管、交还、撤权、停止或恢复；这些能力不得以 App 作为隐藏依赖。现有 wire、schema、fixture 和实现不会因本提议自动改变。
+
 ## 与可选模型辅助的关系（Proposed）
 
 [ADR 0013](0013-optional-model-assisted-browser-tasks.md) 为 [#558](https://github.com/WebEnvoy/WebEnvoy/issues/558) 提议可选模型辅助边界，正式接受以组织级 canonical 对应修订为前提。该方向不改变本 ADR 的 Browser Runtime、Plugin-first、Core 授权／结果与 Harbor 现场职责，也不新增 V1 必须完成项。

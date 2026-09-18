@@ -1,7 +1,7 @@
 # Desktop App 愿景
 
-Desktop App 是 WebEnvoy 的人类控制台。产品方向以 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。
+> 状态：App 专属产品化冻结；本文件是历史愿景参考，不是 V1 必需构成或实施承诺。当前提议见 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md)，跨仓文档合并前尚未生效。
 
-用户在 App 中管理 Agent 接入、账号体系、账号、Profile、Provider、SKILL 和 Instance，并查看 Activity、同一真实浏览器现场、必要确认、结果和人工接管入口。App 只组合 Core、Harbor 与 Lode 的 owner facts，不成为任务、运行现场、授权或资产的第二真相。
+历史方向是由 Desktop App 组合 Core、Harbor 与 Lode 的 owner facts。当前 V1 通过 CLI、API、Plugin、可信用户入口和原浏览器提供必要能力；App 不得成为授权、监督、接管、交还、撤权、停止或恢复的隐藏依赖。
 
-首批不建设完整 Agent 工作台、站点专属创作编辑器或多实例直播墙。Task Thread、固定布局与完整 Library 仍需真实用户路径验证，不是实现前置。
+完整 Agent 工作台、站点专属创作编辑器、多实例直播墙、Task Thread、固定布局与完整 Library 均冻结。只有新的明确产品决定才能重启，不因可信 CLI／宿主入口或现有组件维护自动解冻。

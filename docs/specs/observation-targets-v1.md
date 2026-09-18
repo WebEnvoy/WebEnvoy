@@ -4,6 +4,8 @@
 
 依据：[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Plugin Exposure](plugin-runtime-exposure-v1.md)、[能力发现](capability-discovery-v1.md)、[Files](browser-files-v1.md)、[Grant](grant-wire-contract-v1.md)、[Runtime 能力](browser-runtime-capabilities-v1.md)、[共享执行设计](../architecture/provider-execution-reuse-v1.md)。本文件是 Page/Plugin 的专门补充，不建立第二套 Page/RefMap。本文件优先规定 `instance.snapshot` 的新增输入、snapshot 子对象完整性、target 语义与续读；其他 Page/navigation、授权、文件结果、Run 与控制生命周期不改。文档接受不表示功能已实现。
 
+> **S5 Proposed 后续**：[视觉交互 Spec #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 将定义画面材料、坐标绑定、降级、外发和审计。它尚未接受；本合同当前不提供任意坐标、selector 或屏幕操作入口。
+
 ## 1. 用户结果与基线
 
 用户将较长表单交给 Agent：它能发现尚未返回的字段，区分不同模块中的同名按钮；局部更新或人工交还后重新看原页，不拿相似新按钮冒充原目标。输出不是无限 DOM，也不要求全页永远不变化。

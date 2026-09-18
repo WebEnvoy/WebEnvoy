@@ -4,7 +4,9 @@
 - 版本：1.3；日期：2026-09-15。
 - Owner：Harbor Runtime；产品归口：[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)。
 - 当前交付：[#528](https://github.com/WebEnvoy/WebEnvoy/issues/528)、[#541](https://github.com/WebEnvoy/WebEnvoy/issues/541)、[#544](https://github.com/WebEnvoy/WebEnvoy/issues/544)；关联 #471、#474、#477、#482。
-- 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
+- 产品依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
+
+> 2026-09-18 Proposed：S0 允许正式 Provider 在保持公共语义、Profile／Context／权限隔离和 owner facts 单一的前提下采用 Provider 特有优化。复用是降低维护成本的手段，不要求不同 Provider 内部实现完全相同；特有路径须提供语义、隐身质量和性能证据。该方向不预设直接 CDP 重写，也不改变本文件已记录的现行执行路径。
 - 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](runtime-capability-plane.md)。
 - 本文不宣称 Chrome 已通过资格门，不新增公共操作、权限或十二类能力要求；实现、当前支持和证据由 #528／#541／#497 记录。
 

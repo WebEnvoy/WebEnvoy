@@ -1,12 +1,12 @@
 # WebEnvoy
 
-`WebEnvoy/WebEnvoy` 是 WebEnvoy 模块化产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的 canonical 产品开发入口。产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。
+`WebEnvoy/WebEnvoy` 是 WebEnvoy 产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的 canonical 开发入口。WebEnvoy 面向第三方 Agent 和上游系统提供浏览器基础设施；产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的 v1.6 修订在组织 canonical PR 合并前待生效。
 
-Core 模块负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因；Desktop App 提供人类用户入口；Harbor 提供浏览器身份和运行现场；Lode 继续作为独立 MIT 能力资产仓维护站点知识、能力包和任务模板。
+Core 模块负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因；Harbor 提供浏览器身份和运行现场；Lode 继续作为独立 MIT 站点 SKILL 资产仓。CLI、API、Plugin、受管站点脚本和可信用户入口消费同一事实。Desktop App 专属工作台、布局与独立发行产品化冻结，现有代码和历史证据保留。
 
 旧的 `WebEnvoy/App` 与 `WebEnvoy/Harbor` 源仓仅保留历史、backlog 和 rollback 参考，不承载新的产品实现；是否 transfer、关闭或 archive 仍需单独的 owner 确认。
 
-WebEnvoy Core 让 Agent 的网页操作任务进入统一、可准入、可执行、可记录、可验证、可归因、可对账的核心任务路径。
+WebEnvoy 让 Agent 和上游系统的浏览器任务进入统一、可准入、可执行、可记录、可验证、可归因、可对账的路径，并保留无 App 的授权、监督、接管、交还、撤权、停止与恢复。
 
 ## WebEnvoy Core 解决什么问题
 
@@ -81,9 +81,10 @@ API Server 是本仓库的一等入口。SDK、CLI、MCP 和 WebEnvoy App 都应
 
 WebEnvoy Core 负责让 Agent 和上游系统调用网站能力，并把执行过程和结果组织清楚。
 
-- WebEnvoy App 负责统一人类用户入口，承载 Work、Library 和 Browser 三个产品域；
+- 可信用户入口负责授权、监督、接管、交还、撤权、停止和恢复，不限定为 Desktop App；
+- Desktop App 现有代码只作冻结的可选人类控制台与历史参考，不是 Runtime 或正式能力的前提；
 - Harbor 负责浏览器账号和运行现场：Profile、登录态、代理、指纹、浏览器会话、人工接管、运行证据，以及 provider、Profile、Runtime Session 的客观能力事实；
-- Lode 负责可复用的网站经验：站点知识、能力包、原子动作、任务封装、输出契约、模板、测试样例、版本和失效标记；
+- Lode 负责可复用的站点 SKILL：references、确定性 scripts、assets、任务声明、输出契约、验证材料、版本和失效标记；
 - WebEnvoy Core 负责把 Lode 中的能力拿来运行，按 Lode 输出契约校验和封装公共结果，并通过 Harbor 在真实浏览器环境中完成任务。
 
 ## 文档

@@ -25,6 +25,19 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Managed Browser Files V1](browser-files-v1.md) | [Work Item #523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，授权语义 [#544](https://github.com/WebEnvoy/WebEnvoy/issues/544) | 冻结 owner 文件材料、`file.upload`/`file.download` 的 Page/ControlLease/Grant 绑定、受限格式与配额、原子持久化、结果/对账、撤销/过期，以及 legacy/v2 下载归属边界。 |
 | [Grant Wire Contract V1 (v1.4)](grant-wire-contract-v1.md) | [Work Items #505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、[#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、[#544](https://github.com/WebEnvoy/WebEnvoy/issues/544)、[#547](https://github.com/WebEnvoy/WebEnvoy/issues/547) | 固定 recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle、digest CAS、可信 stopped、严格 reader 拒绝和历史兼容边界。 |
 
+## 已登记、尚未编写的规格
+
+| 代号 | 真实 Issue | 计划归口 |
+| --- | --- | --- |
+| S1 | [#562](https://github.com/WebEnvoy/WebEnvoy/issues/562) | CLI 与上游集成；实现前冻结必要 discovery、调用、安装与授权合同。 |
+| S2 | [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563) | 站点 SKILL 包与受管脚本执行；复用 Core／Harbor 授权、Run、结果和恢复。 |
+| S3 | [#564](https://github.com/WebEnvoy/WebEnvoy/issues/564) | 站点资产创作、转换、修复与验证；不建立第二套资产状态机。 |
+| S4 | [#565](https://github.com/WebEnvoy/WebEnvoy/issues/565) | 主动 Network 能力；扩展现有 Network 合同。 |
+| S5 | [#566](https://github.com/WebEnvoy/WebEnvoy/issues/566) | 视觉观察与交互；与 Page、Grant、控制和外发边界对齐。 |
+| S6 | [#567](https://github.com/WebEnvoy/WebEnvoy/issues/567) | 浏览器环境质量、隐身和性能；复用现有 Profile／Provider 事实。 |
+
+本批不创建上述空 spec、schema、fixture 或验证报告。Spec Issue 关闭只表示规范已接受，不表示对应功能、真实 Agent 路径或 V1 验收已经完成。
+
 ## 可选模型辅助的设计义务（Proposed）
 
 - #558/#559：方向与行为由 [ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md) 和 [Model Usage V1](model-usage-v1.md) 承接，正式接受须先完成 canonical 对应修订；不以文档接受、SDK 接口或模型目录可见冒充功能完成。
@@ -34,7 +47,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 ## 使用规则
 
-1. 先读取组织级 [canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
+1. 先读取组织级 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
 2. Spec 定义语义；Issue 定义当前交付切片；verification 只保存实际证据。
 3. 当前实现缺失不能反向缩小 spec；需要缩小 V1 范围时先更新产品决策。
 4. Provider 私有 API、站点 selector、临时测试字段和未经接受的草稿不能进入公共 spec。
@@ -54,7 +67,7 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 | `DO-NETWORK-CONTRACT` | 第一次形成稳定跨 Driver→Harbor→Core→Plugin 的 Network public payload，或新增 response body、intercept、modify 等公共能力 | 新建或更新 `docs/specs/network-runtime-contract-v1.md`，冻结 operation/event/result、生命周期、敏感字段过滤、权限、Page/Instance binding 和结束/丢失语义 |
 | `DO-CONSOLE-CONTRACT` | 第一次形成稳定跨层 console／page-error public payload，或扩展日志级别、source、exception 等公共结构 | 新建或更新 `docs/specs/console-runtime-contract-v1.md`，冻结公共错误结构、截断、脱敏、Page binding、生命周期和权限 |
 | `DO-PROVIDER-PRIVATE-SCHEMA` | WebEnvoy 开始持久化 Provider-specific environment bundle、fingerprint/seed config、provider config version 或启动回灌结构 | 建立 versioned Provider-private contract/schema，并说明 owner、迁移、兼容与回滚；若事实证明全部由 Provider/Profile 自持久化，则记录明确的 `not-triggered` 证据，不创建空 schema |
-| `DO-APP-IA` | 开始新增或重构完整资源工作台、全局导航、Library／Activity、多实例管理等正式产品 surface，而不只是既有最小 owner 授权／确认／接管入口 | 更新现有 App IA 权威文档或创建被明确指定的新 IA/architecture；不得由 UI 组件反向发明对象、状态或权限 |
+| `DO-APP-IA` | 有明确重启 App 产品化的决定，并开始新增或重构完整资源工作台、全局导航、Library／Activity、多实例管理等正式产品 surface | 更新现有 App IA 权威文档或创建被明确指定的新 IA/architecture；可信 CLI／宿主确认不是重启整个工作台，不得由 UI 组件反向发明对象、状态或权限 |
 
 ### 判定规则
 
