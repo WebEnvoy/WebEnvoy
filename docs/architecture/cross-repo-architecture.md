@@ -1,6 +1,6 @@
 # WebEnvoy 跨仓架构
 
-> 2026-09-18：产品方向和模块职责以 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md) 在跨仓文档合并前为 Proposed，不改变现有 wire 或实现。本文只维护模块间接口边界。
+> 2026-09-18：产品方向和模块职责以 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0011](../adr/0011-v1-managed-browser-and-skill-delivery.md) 与 [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已于 2026-09-18 合并并回读，[ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md) 已接受；该文档接受不自动改变现有 wire 或实现。本文只维护模块间接口边界。
 
 本文定义 `WebEnvoy/WebEnvoy` monorepo 中 Core、Desktop、Plugin／agent-entry、Harbor 与独立 `WebEnvoy/Lode` 的协作边界。
 
