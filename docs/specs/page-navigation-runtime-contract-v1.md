@@ -69,7 +69,7 @@ Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分�
 
 ## 2.2 Historical #510 native tab handoff and relation recovery
 
-以下 native swap、完整 relation 和安全暂停条款只保留 #510 的历史 Provider-private 设计与兼容阅读，不构成当前 Camoufox launch/support 承诺；当前任务页交还和可选焦点语义以上述 v1.5 章节为准。
+以下 native swap、完整 relation 和安全暂停条款只保留 #510 的历史 Provider-private 设计与兼容阅读，不构成当前 Camoufox launch/support 承诺；当前任务页交还和可选焦点语义以上述 v1.6 章节为准。
 
 #510 的 native tab handoff 是原生 tab/window location 的变化，不是新的 Page、document 或 navigation。只有在 Provider 给出一个较新的、完整且可双向验证的 relation，并证明仍是同一个客户端 Page、同一个稳定的 target 与同一个 `BrowsingContext` 时，Harbor 才能接受这次 handoff。此时：
 
