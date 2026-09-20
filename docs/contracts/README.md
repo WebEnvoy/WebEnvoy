@@ -10,7 +10,7 @@ Page/navigation、Network/Console 与已安装 SKILL 的正式 wire/投影合同
 
 | 合同 | 权威位置 | 接受范围 |
 | --- | --- | --- |
-| Runtime Capability Plane 决策 | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 能力类别完整、Provider 无关公共语义、能力存在／入口投影／授权／当前可执行性分离；S0 Proposed supersession 见 ADR 0014。 |
+| Runtime Capability Plane 决策 | [ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md) | 能力类别完整、Provider 无关公共语义、能力存在／入口投影／授权／当前可执行性分离；S0 已接受的局部 supersession 见 ADR 0014。 |
 | Runtime Capability Plane 架构 | [Runtime Capability Plane](../architecture/runtime-capability-plane.md) | Provider Driver、Harbor、Core、Plugin、SKILL 与 owner 入口的所有权、调用方向、执行和恢复路径。 |
 | Browser Runtime Capabilities V1 | [browser-runtime-capabilities-v1.md](../specs/browser-runtime-capabilities-v1.md) | V1 主要 browser capability 的规范性语义、支持状态、权限分级、数据边界、结果和完成条件；不冻结最终 wire 字段。 |
 | Profile Environment V1 | [profile-environment-v1.md](../specs/profile-environment-v1.md) | configured／effective／pending／observed／drift、Provider／设备／网络环境 owner、#519 官方固定 Camoufox 安装与完整 launch/context options replay、历史 continuity、变更和验证语义；installed/live evidence 仍以 Issue/verification 为准。 |
