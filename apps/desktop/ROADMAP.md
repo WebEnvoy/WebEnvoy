@@ -1,6 +1,6 @@
 # Desktop App 路线图投影
 
-> 状态：冻结的历史投影。App 不是 M21—M24 或 V1 的必需入口；当前提议见 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561)。
+> 状态：冻结的历史投影。App 不是 M21—M24 或 V1 的必需入口；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已于 2026-09-18 合并并回读，App 专属产品化冻结已生效。
 
 ## 冻结边界
 
