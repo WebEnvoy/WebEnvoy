@@ -1,6 +1,6 @@
 # Desktop App 执行指南
 
-本目录保存冻结的 App 代码和历史设计。先遵循仓库根 `AGENTS.md`、[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md)。ADR 0014 与 S0 跨仓文档合并前为 Proposed。
+本目录保存冻结的 App 代码和历史设计。先遵循仓库根 `AGENTS.md`、[canonical v1.6 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和已接受的 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md)。
 
 - App 专属产品化冻结；除安全修复、兼容维护、明确的去 App 隐藏依赖工作或新的重启决定外，不新增界面和产品流程。
 - 授权、监督、接管、交还、撤权、停止和恢复必须可由无 App 的可信入口完成；不得把普通 Agent 或 owner 能力做成 App-only。
