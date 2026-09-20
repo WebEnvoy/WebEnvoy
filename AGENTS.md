@@ -73,7 +73,7 @@ Parent 表达归属，不自动表示执行顺序；优先级表示投入顺序�
 
 ## 设计与实施
 
-Runtime、Profile、CLI／API／Plugin、站点执行、Network／视觉、App 或其他稳定产品接口的 Work Item，在进入实现时必须按 [Design Obligation Triggers](docs/specs/README.md#design-obligation-triggers) 判断适用项并记录 `triggered`、`conditional` 或有具体理由的 `not-triggered`。
+Runtime、Profile、CLI／API／Plugin、站点执行、Network／视觉、App 或其他稳定产品接口的 Work Item，在进入实现时必须按 [Design Obligation Gate](docs/specs/README.md#design-obligation-gate) 判断适用项并记录 `triggered`、`conditional` 或有具体理由的 `not-triggered`。
 
 一旦 trigger 成立，相应 Spec／Contract／Schema／Architecture artifact 是本 Work Item 的完成条件。它可以和实现同 PR，也可以先行；但稳定跨进程接口、Plugin tool projection、持久字段、enum、Grant 维度或 Provider-private versioned config 不能先成为正式消费者依赖或 durable write，再把合同留给未来。
 
