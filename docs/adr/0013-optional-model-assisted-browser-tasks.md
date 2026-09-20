@@ -2,7 +2,7 @@
 
 - 状态：Proposed；接受前须先合并组织级 canonical 的对应修订，并完成独立审查。
 - 日期：2026-09-17
-- 产品依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。S0 的基础设施定位与 App 冻结仍在提议中；本 ADR 不独立改变产品定位或 V1 完成门，也不要求 App 作为模型使用入口。
+- 产品依据：[canonical v1.6 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。S0 的基础设施定位与 App 冻结已于 2026-09-18 接受；本 ADR 仍按自身 Proposed 状态判断，不独立改变产品定位或 V1 完成门，也不要求 App 作为模型使用入口。
 - 产品归口：[#558 按需使用模型辅助网页任务，并保留原有操作方式](https://github.com/WebEnvoy/WebEnvoy/issues/558)；首个条件验证：[#559](https://github.com/WebEnvoy/WebEnvoy/issues/559)。
 - 行为规格：[Model Usage V1](../specs/model-usage-v1.md)；已有边界：[ADR 0012](0012-runtime-capability-plane-and-plugin-first.md)。
 
