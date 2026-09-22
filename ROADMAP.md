@@ -2,9 +2,9 @@
 
 组织级路线以 [WebEnvoy ROADMAP](https://github.com/WebEnvoy/.github/blob/main/ROADMAP.md) 和 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。本页只说明本仓如何服务当前与下一批，不维护 Issue 状态。
 
-## 当前批：S0 待接受
+## 当前基线：S0 已接受
 
-先审查 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的浏览器基础设施定位、App 冻结与 V1 范围修订。规范合并前，CLI、受管站点脚本、主动 Network 与受控视觉的新语义仍是规划目标，不表示当前接口已经支持。
+[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的浏览器基础设施定位、App 冻结与 V1 范围修订已于 2026-09-18 完成三仓文档合并和回读。CLI、受管站点脚本、主动 Network 与受控视觉仍须由 S1—S6 及对应实施证据分别交付；S0 接受不表示当前接口已经支持。
 
 - Provider 候选先通过 [ADR 0012](docs/adr/0012-runtime-capability-plane-and-plugin-first.md) 的 Qualification Gate；必须由 WebEnvoy 补浏览器核心语义时停止采用，不把候选缺口变成 Runtime 新职责。
 - Obscura 仅保留 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 的历史结论，当前愿景内不采用且不再验证；通用 Provider 选择与新建默认由 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 独立交付。

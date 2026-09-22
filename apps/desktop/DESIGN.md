@@ -1,6 +1,6 @@
 # DESIGN.md
 
-> 2026-09-18 Proposed freeze：App 专属产品化冻结；本文件以下内容只作历史设计参考，不是 V1 必需界面或默认实施承诺。冻结不取消无 App 的授权、监督、接管、交还、撤权、停止和恢复。只有新的明确产品决定和实际 Work Item 才能重启；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md) 在跨仓文档合并前尚未生效。
+> 2026-09-18 Accepted freeze：App 专属产品化冻结；本文件以下内容只作历史设计参考，不是 V1 必需界面或默认实施承诺。冻结不取消无 App 的授权、监督、接管、交还、撤权、停止和恢复。只有新的明确产品决定和实际 Work Item 才能重启；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已合并并回读，[ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md) 已接受。
 
 ## 1. 桌面设计主张
 
@@ -16,7 +16,7 @@
 > 已由 monorepo [ADR 0012](../../docs/adr/0012-runtime-capability-plane-and-plugin-first.md)
 > 的 Plugin-first 基线替代。V1 先通过已安装 Plugin 在真实第三方 Agent 中完整消费
 > Runtime 和 Agent 可委托管理能力；完整 App 产品化后移。此调整不取消 owner truth、
-> 必要授权与敏感决定、同一原 Instance 接管／交还；“App 的最终 V1 产品要求”由 2026-09-18 Proposed freeze 替代。
+> 必要授权与敏感决定、同一原 Instance 接管／交还；“App 的最终 V1 产品要求”由 2026-09-18 Accepted freeze 替代。
 
 WebEnvoy App 应像一个克制、紧凑、可信的人类网站工作台，而不是聊天应用或技术状态控制台。它同时承载 Work、Browser 和 Library；Browser 是账号身份、provider、浏览器环境和实例的操作台。
 

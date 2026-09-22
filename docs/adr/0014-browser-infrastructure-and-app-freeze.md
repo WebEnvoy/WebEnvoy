@@ -1,6 +1,6 @@
 # ADR 0014：浏览器基础设施定位、全能力可集成与 App 产品化冻结
 
-- 状态：Proposed；随 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的组织 canonical 修订及本仓 docs PR 接受后生效。
+- 状态：Accepted；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的组织 canonical、主仓与 Lode 基线已于 2026-09-18 合并并回读。
 - 日期：2026-09-18
 - 产品依据：[canonical v1 修订](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
 - 产品归口：[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561)

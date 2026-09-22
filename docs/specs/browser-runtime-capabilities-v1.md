@@ -12,7 +12,7 @@
 
 本文不是最终 wire schema。具体 HTTP／MCP 字段、JSON Schema、生成类型和 Provider adapter 可以在实现中演进，但不得改变本文的语义和安全边界，除非通过新的 ADR／spec 修订。
 
-> **2026-09-18 S0 Proposed 边界**：[S2 #563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、[S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 与 [S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 分别规划受管站点脚本、主动 Network 与视觉交互的正式语义。规划不放开现有任意 evaluate、selector、坐标、响应正文或 request modification；只有对应 Spec 接受并由实施 Work Item 交付后，现有 wire 和支持事实才可改变。
+> **2026-09-18 S0 Accepted 边界**：[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的基础设施定位与 App 冻结已接受；[S2 #563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、[S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 与 [S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 仍分别规划受管站点脚本、主动 Network 与视觉交互的正式语义。S0 接受不放开现有任意 evaluate、selector、坐标、响应正文或 request modification；只有对应 Spec 接受并由实施 Work Item 交付后，现有 wire 和支持事实才可改变。
 
 > **2026-09-14 当前 Provider 事实**：本轮 [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 的上游原版 Camoufox／Playwright 组合按第二类“可准确表达为 `limited` 的能力差异”接入：只接受 owner 核验的官方 `0.5.6`／`152.0.4-beta.30`／`1.60.0` 固定组合，并在 popup 首请求无法于派发前建立可信 Page 归属时局部拒绝，不猜测、不重放。#523／PR #524 的受管文件单文件 Plugin slice 有独立 `plugin_verified` 证据，但不把其他能力或完整 V1 扩写为 `plugin_verified`。旧 Camoufox 私有 launch binding、patched/native artifact 和对应 live 记录仍为 `unsupported`／已退役；保留的 Profile／binding／bundle 只按 recovery/安全校验规则处理，不恢复旧 launchability。本状态不改变下述公共 capability、wire 核心字段或 Plugin exposure 语义。
 

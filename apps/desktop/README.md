@@ -1,6 +1,6 @@
 # WebEnvoy App
 
-> 状态：App 专属产品化冻结。当前决定由 [S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md) 提议，须在跨仓文档合并后生效。冻结不删除现有代码，也不取消无 App 的授权、监督、接管、交还、撤权、停止和恢复能力。
+> 状态：App 专属产品化冻结。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已于 2026-09-18 合并并回读，[ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md) 已接受。冻结不删除现有代码，也不取消无 App 的授权、监督、接管、交还、撤权、停止和恢复能力。
 >
 > 下文保留为历史产品与设计参考，不是 V1 必需构成、默认实施顺序或新的交付承诺。除安全修复、兼容维护、去除 App 隐藏依赖或另有明确重启决定外，不从本文启动 App 功能开发。
 

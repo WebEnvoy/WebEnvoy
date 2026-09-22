@@ -1,6 +1,6 @@
 # WebEnvoy
 
-`WebEnvoy/WebEnvoy` 是 WebEnvoy 产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的 canonical 开发入口。WebEnvoy 面向第三方 Agent 和上游系统提供浏览器基础设施；产品方向、V1 约束和决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的 v1.6 修订在组织 canonical PR 合并前待生效。
+`WebEnvoy/WebEnvoy` 是 WebEnvoy 产品 monorepo，也是 Core、Desktop App 与 Harbor Runtime 的 canonical 开发入口。WebEnvoy 面向第三方 Agent 和上游系统提供浏览器基础设施；产品方向、V1 约束和决策状态以组织级 [canonical v1.6 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已于 2026-09-18 合并并回读；文档接受不表示对应能力已经实现。
 
 Core 模块负责 API Server、Core Runtime、任务执行契约、Run Record、结果归一和失败归因；Harbor 提供浏览器身份和运行现场；Lode 继续作为独立 MIT 站点 SKILL 资产仓。CLI、API、Plugin、受管站点脚本和可信用户入口消费同一事实。Desktop App 专属工作台、布局与独立发行产品化冻结，现有代码和历史证据保留。
 

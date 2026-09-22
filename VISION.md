@@ -1,6 +1,6 @@
 # WebEnvoy 产品 monorepo 愿景
 
-本仓库承载 WebEnvoy 的 Core、Desktop App 与 Harbor Runtime。WebEnvoy 是第三方 Agent 和上游系统的浏览器基础设施；完整产品定位、对象边界、V1 约束和五类决策状态以组织级 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。S0 修订在组织 canonical PR 合并前待生效。
+本仓库承载 WebEnvoy 的 Core、Desktop App 与 Harbor Runtime。WebEnvoy 是第三方 Agent 和上游系统的浏览器基础设施；完整产品定位、对象边界、V1 约束和五类决策状态以组织级 [canonical v1.6 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。S0 三仓基线已于 2026-09-18 合并并回读；新产品边界已生效，但不表示对应能力已经实现。
 
 - Core：统一授权、任务、Run、外部结果、幂等、失败和恢复。
 - Harbor：WebEnvoy 管理的 Profile、Provider、Environment、Instance、页面现场和 ControlLease。

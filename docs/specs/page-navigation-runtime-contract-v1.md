@@ -4,9 +4,9 @@
 
 > **2026-09-14 #519 受限路径**：Page/document/navigation 的公共语义、Page Registry、授权、receipt、失联安全暂停和 observation freshness 继续有效。当前仅允许 owner 核验的官方 Camoufox `0.5.6`／browser `152.0.4-beta.30`／Playwright `1.60.0` 组合接入公开 API Driver；其 popup 首请求若在派发前无法建立可信 Page 归属，必须在任何外部请求前局部返回 `page_relation_unavailable`，不以 URL/title/active/最近新页猜测，也不重放。后续 Page 事件只能记录真实 Page，不能倒推或续发原请求；普通任务页、同 Instance 观察与接管仍可按本合同继续。#523／PR #524 的文件 slice 另有安装/真实消费者证据；这不把本合同所有 Page/Runtime 能力标为 `live_verified`。#510 Camoufox native tab-handoff 及旧私有 launch binding 继续是 Retired 历史 Provider-private 设计，不是当前路线；不通过 fallback 或 replacement Page 恢复。
 
-## 当前 v1.5 任务页与焦点边界
+## 当前 v1.6 任务页与焦点边界
 
-当前任务页协作遵循 [canonical v1.5 产品架构](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#971-%E4%BB%BB%E5%8A%A1%E9%A1%B5%E4%B8%8E%E5%8E%9F%E7%94%9F%E7%84%A6%E7%82%B9%E5%90%88%E5%90%8C)。任务页 A 是用户或 Agent 本次工作的真实 Page 引用；Viewer 选中的帮助或其他页面 B 属于同一 Instance 的独立现场事实，不得把 B 冒充为 A。任何需要目标页的操作都必须绑定当前有效的 `page_id`/`page_ref` 与适用的 `document_generation`；原生 selected tab/window、OS 前台和 focus 只是可选 Provider 事实，不能反向决定任务目标。
+当前任务页协作遵循 [canonical v1.6 产品架构](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md#971-%E4%BB%BB%E5%8A%A1%E9%A1%B5%E4%B8%8E%E5%8E%9F%E7%94%9F%E7%84%A6%E7%82%B9%E5%90%88%E5%90%8C)；S0 接受不自动改变本合同既有 Page/document wire、版本或已取得证据。任务页 A 是用户或 Agent 本次工作的真实 Page 引用；Viewer 选中的帮助或其他页面 B 属于同一 Instance 的独立现场事实，不得把 B 冒充为 A。任何需要目标页的操作都必须绑定当前有效的 `page_id`/`page_ref` 与适用的 `document_generation`；原生 selected tab/window、OS 前台和 focus 只是可选 Provider 事实，不能反向决定任务目标。
 
 - 原生 tab/window selected、OS 前台和其他 focus 是可选观测。可信的 A 只要求供应方可验证的 Page 归属与新鲜度，不要求完整的全局窗口关系或 OS 前台证明；`page.list`、普通 read、snapshot 和 diagnostics 不得为了补齐可选焦点而激活、切页或抢前台。
 - 人类接管 A 后可以观看或操作 B；用户明确交还后，Agent 默认以交还前可信的 A 重新观察，不自动跟随 B，也不要求先证明 A 仍是原生选中标签。A 关闭、失联、替换或出现身份歧义时，只停止依赖 A 的动作，不能凭 URL、标题、内容或创建顺序认领另一页。
@@ -69,7 +69,7 @@ Registry 的 Page facts 是唯一公共事实源。Driver 只保存 Harbor 分�
 
 ## 2.2 Historical #510 native tab handoff and relation recovery
 
-以下 native swap、完整 relation 和安全暂停条款只保留 #510 的历史 Provider-private 设计与兼容阅读，不构成当前 Camoufox launch/support 承诺；当前任务页交还和可选焦点语义以上述 v1.5 章节为准。
+以下 native swap、完整 relation 和安全暂停条款只保留 #510 的历史 Provider-private 设计与兼容阅读，不构成当前 Camoufox launch/support 承诺；当前任务页交还和可选焦点语义以上述 v1.6 章节为准。
 
 #510 的 native tab handoff 是原生 tab/window location 的变化，不是新的 Page、document 或 navigation。只有在 Provider 给出一个较新的、完整且可双向验证的 relation，并证明仍是同一个客户端 Page、同一个稳定的 target 与同一个 `BrowsingContext` 时，Harbor 才能接受这次 handoff。此时：
 

@@ -1,6 +1,6 @@
 # Harbor Runtime 执行指南
 
-本目录是 monorepo 内的浏览器运行时。先遵循仓库根 `AGENTS.md` 和 [canonical v1.5 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
+本目录是 monorepo 内的浏览器运行时。先遵循仓库根 `AGENTS.md` 和 [canonical v1.6 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
 
 - Harbor 拥有 WebEnvoy 管理的 Profile、ProviderBinding、EnvironmentConfiguration、Instance、页面操作、Viewer、ControlLease 和运行观测；不拥有业务授权、Run 结果或网站知识。
 - [#519](https://github.com/WebEnvoy/WebEnvoy/issues/519)／[PR #522](https://github.com/WebEnvoy/WebEnvoy/pull/522) 已完成其声明范围的供应方原版任务页协作与私有补丁退役。固定组合仍只接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`，由公开 API Driver 复用完整 launch/context options；其 `limited` 边界是 popup 首请求无法在派发前建立可信 Page 归属时，Harbor 必须在 `fetch`/`continue`/外部请求前以 `page_relation_unavailable` 局部拒绝，不猜测或重放。#519 只覆盖其声明范围，完整 Runtime、所有 popup／Files／Provider 及 #497／#474／#482 余项仍分别验收。旧 Camoufox 私有 launch binding、patched/native artifact 继续 `unsupported`／已退役；Harbor 不启动、不 fallback，旧 #499/#504/#510 记录仅用于历史和 recovery 校验。

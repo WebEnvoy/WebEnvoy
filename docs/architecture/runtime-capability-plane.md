@@ -2,7 +2,7 @@
 
 > 状态：现行 V1 架构基线
 > 日期：2026-09-14
-> 决策依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)；[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 与 [ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md) 的新基线在跨仓文档合并前为 Proposed，不改变现有 wire 或实现
+> 决策依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、已接受的 [ADR 0014](../adr/0014-browser-infrastructure-and-app-freeze.md)；新基线不因文档接受自动改变现有 wire 或实现
 > 规范依据：[Browser Runtime 能力规格](../specs/browser-runtime-capabilities-v1.md)、[Profile 环境规格](../specs/profile-environment-v1.md)
 > 产品归口：[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)
 
