@@ -2,7 +2,7 @@
 
 本文件是 `WebEnvoy/WebEnvoy` 的仓库级执行基线。即使没有加载外部 Plugin、SKILL 或其他工作流，这些规则也必须成立。更具体的目录规则由更近的 `AGENTS.md` 补充；它们可以收紧局部做法，但不能扩大授权、改写产品方向或降低验收要求。
 
-产品方向与 V1 约束以组织级 [canonical v1.6 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释产品决定在本仓的架构后果，不另立产品方向。
+产品方向与 V1 约束以组织级 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 为准。仓内 ADR 解释产品决定在本仓的架构后果，不另立产品方向。
 
 ## 仓库地图
 
