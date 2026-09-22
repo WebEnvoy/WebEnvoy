@@ -45,8 +45,14 @@ const projectPage = value => value && typeof value === 'object' && !Array.isArra
 const projectLock = value => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(['owner', 'state', 'holder_ref', 'updated_at'].filter(key => key in value).map(key => [key, value[key]]))
   : undefined;
-function projectSessionFacts(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !Number.isSafeInteger(value.control_generation) || value.control_generation < 0) return undefined;
+function projectSessionFacts(value, { allowTerminalStop = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const hasControlGeneration = Number.isSafeInteger(value.control_generation) && value.control_generation >= 0;
+  const terminalStop = value.lifecycle_state === 'closed' && value.control_owner === 'none' &&
+    value.control_lock && typeof value.control_lock === 'object' && !Array.isArray(value.control_lock) &&
+    value.control_lock.owner === 'none' && value.control_lock.state === 'closed' && value.control_lock.holder_ref === null;
+  if (!hasControlGeneration && !(allowTerminalStop && terminalStop)) return undefined;
+  if (Object.hasOwn(value, 'control_generation') && !hasControlGeneration) return undefined;
   const result = Object.fromEntries(['schema_version', 'runtime_session_ref', 'identity_environment_ref', 'execution_identity_ref', 'profile_ref', 'provider_ref', 'provider_mode', 'lifecycle_state', 'created_at', 'last_seen_at', 'closed_at', 'availability', 'control_owner', 'control_generation'].filter(key => key in value).map(key => [key, value[key]]));
   if (value.availability && typeof value.availability === 'object' && !Array.isArray(value.availability)) result.availability = Object.fromEntries(['driver', 'cdp', 'viewer', 'snapshot', 'evidence'].filter(key => key in value.availability).map(key => [key, value.availability[key]]));
   if (value.current_page) result.current_page = projectPage(value.current_page);
@@ -63,6 +69,7 @@ function projectSessionFacts(value) {
 }
 function projectHarborResponse(req, value) {
   const pathname = new URL(req.url, 'http://owner.local').pathname;
+  const allowTerminalStop = req.method === 'POST' && /^\/runtime\/sessions\/[^/]+\/stop$/.test(pathname);
   if (pathname === '/runtime/sessions') {
     if (Array.isArray(value)) {
       const sessions = value.map(projectSessionFacts);
@@ -81,7 +88,7 @@ function projectHarborResponse(req, value) {
     return result;
   }
   if (value && typeof value === 'object' && typeof value.error === 'string') return { error: value.error };
-  return projectSessionFacts(value);
+  return projectSessionFacts(value, { allowTerminalStop });
 }
 const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
   (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
