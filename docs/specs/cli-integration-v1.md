@@ -65,13 +65,13 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 
 当前候选中的 apps/desktop/agent-entry/cli.mjs 已有以下 owner 入口：
 
-- setup、access list|register|grant|grant-v2|policy-v2|revoke|operation、files import|inspect|export|revoke|delete、recovery inspect|backup|plan|apply|status、start、diagnose、stop、uninstall 和 app。
-- setup 已分离 --data-dir 与 --host-dir，默认创建 data／host 目录为 0700，client 文件为 0600，输出 Agent credential fingerprint，写入安装配置、host MCP 配置、SKILL 和 installation receipt。
+- setup、access list|register|grant|grant-v2|policy-v2|revoke|operation、files import|inspect|export|revoke|delete、recovery inspect|backup|plan|apply|status、start、diagnose、stop、uninstall、instance 和 agent。
+- 正式 setup 以 owner 的 --data-dir 和可选 --agent-uid 记录安装身份、Agent endpoint 与 OS boundary，只输出不含 secret 的公开 bootstrap；独立 Agent UID 再以 agent setup 创建自己的 client 文件、host MCP 配置、SKILL 和 installation receipt。两阶段均保持 data／host 目录为 0700、client 文件为 0600；owner setup 不写 Agent host 文件。
 - owner 路径当前通过本地 Runtime service 使用 data-dir/owner.json 中的 owner bearer；Agent MCP 读取 host 中的 webenvoy-client.json，通过独立 client credential 进入 /agent-connections 和 managed operation 路径。当前 owner.json 的 0600 和同 UID 运行仍不足以形成真实边界，目标必须迁移到第 4.2 节 owner-private OS domain。
 - access grant、grant-v2、policy-v2 的输入文件有明确允许字段；files 与 recovery 已有 owner-only 路由；Agent 工具不能执行 owner grant、backup、plan、apply。
 - Core 的 managed-access receipt 以 `idempotency_key` 的 hash 和请求 hash 去重；当前 CLI 的 `access register` 会在省略 key 时随机生成 owner-local key，`recovery inspect` 也会在省略 key 时生成 owner-local key。owner files 的 `/owner/files/import` 可记录可选 `operation_ref`，但现有 `importFile` 只保存该关联值，不以它去重；`export`、`revoke` 和 `delete` 也没有 caller key。
 - Agent MCP 已有 webenvoy_status、webenvoy_skill、webenvoy_connect、webenvoy_describe、webenvoy_operation、webenvoy_query、webenvoy_recovery、webenvoy_skills，并将 browser operation 映射到 /managed-browser/operations。
-- 当前 hostConfig() 仍默认以 Electron process.execPath 加 ELECTRON_RUN_AS_NODE=1 启动 mcp.mjs；client.mjs 和 service.mjs 也以 Electron 运行时作为当前 fallback。当前 setup 输出的 next 仍要求“打开 App 并注册 fingerprint”。
+- 正式 hostConfig() 使用独立 Runtime launcher；Electron 与 ELECTRON_RUN_AS_NODE 只属于历史兼容材料。当前 setup 输出的 next 是 Agent UID setup 后由 owner CLI register／grant，不要求打开 App。
 - 当前 CLI 的未捕获异常主要由 Node 写入 stderr，尚未冻结稳定的参数错误、pending、unknown、权限拒绝和 Runtime 不可用退出码。
 
 这些事实只说明当前代码已有可复用的 seam。它们不证明本规范已经实现。
@@ -106,7 +106,7 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 | 材料 | 位置／传递 | 可见主体 | 用途 |
 | --- | --- | --- | --- |
 | installation manifest／asset digest | 安装 root | Runtime verifier、owner status | 验证 bundle，不作身份 |
-| webenvoy-client.json | host dir，0600 | Agent launcher／MCP／Agent CLI | 保存 client credential、data-dir opaque binding、agent endpoint 和安装时记录的 owner／Agent UID；不得含 owner service credential |
+| webenvoy-client.json | Agent-owned host dir，0600 | Agent launcher／MCP／Agent CLI | 保存 client credential、data-dir、Agent endpoint、owner_uid 和 agent_uid；不得含 owner service credential |
 | owner-private store／control socket | OS ACL 保护的 owner domain | owner control service 与被批准的人类 owner client | 保存并使用 owner service credential；不得让 Agent UID 访问 |
 | Principal／Grant | Core managed access store | Core、owner API、授权后的查询 | 真实主体、授权范围、有效期和撤销 |
 | installation receipt | host dir，0600 | installer／uninstall | 只记录受管文件；不授予权限 |
@@ -181,12 +181,15 @@ owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带�
 
 以下步骤是正式 no-App 路径的顺序合同：
 
-1. owner 从正式安装入口运行 webenvoy setup，指定独立、持久且不在 installation root 内的 --data-dir 和 --host-dir。
-2. setup 验证 bundle、Provider binding、安装目录、OS boundary 和已有 receipt；创建或复用 client credential；输出 fingerprint、安装文件和下一步命令。它不得要求打开 App。
-3. owner 从可信终端运行 webenvoy access register，使用 setup 输出的 fingerprint 为 Principal 注册，并提供调用方保存的 `--idempotency-key KEY`。注册是 owner action，不由 Agent 或 Plugin 触发；丢响应时按第 5.3.1 节用同一 key 查询或重试。
-4. owner 使用 webenvoy access grant 或明确带 --confirm 的 v2 命令授予最小 Profile／operation／Origin／File／Skill scope，并设置有效期。没有 Grant 时，Agent 应得到明确 denied。
-5. Agent 使用 host client 文件运行 webenvoy agent connect 或 Plugin webenvoy_connect。connect 只能发现已注册 Principal，不能 register、grant、revoke 或读取 owner secret。
-6. Agent 提交一个 operation；Core 创建或复用原 Run。用户对 Instance 的接管、交还、停止和撤权走 owner CLI，不经 Agent。
+1. owner 从正式安装入口运行 `webenvoy setup --data-dir OWNER_DIR --agent-uid AGENT_UID`。`--agent-uid` 是两阶段 Agent 安装的目标身份；若省略或 OS boundary 无法验证，setup 只能完成 owner maintenance，必须报告 `owner_agent_isolation_unavailable`，不得启用 Agent host config。
+2. setup 验证 bundle、Provider binding、安装目录、OS boundary 和已有 receipt；记录 owner／Agent UID、Agent endpoint 与 boundary 状态，并只输出不含 secret 的公开 bootstrap。owner setup 不创建 client credential、Agent host config、SKILL 或 Agent receipt，也不得要求打开 App。
+3. 独立 Agent UID 在自己拥有的目录运行 `webenvoy agent setup --host-dir AGENT_DIR --data-dir OWNER_DIR --owner-uid OWNER_UID [--agent-endpoint SOCKET]`。它只创建或复用 Agent 自己的 client credential、MCP 配置、SKILL 和 receipt，不读取 owner installation link、owner-private store、owner credential，也不连接 Runtime、Core 或授予权限；owner UID 与 Agent UID 相同必须拒绝。
+4. owner 从可信终端运行 webenvoy access register，使用 Agent setup 输出的 fingerprint 为 Principal 注册，并提供调用方保存的 `--idempotency-key KEY`。注册是 owner action，不由 Agent 或 Plugin 触发；丢响应时按第 5.3.1 节用同一 key 查询或重试。
+5. owner 使用 webenvoy access grant 或明确带 --confirm 的 v2 命令授予最小 Profile／operation／Origin／File／Skill scope，并设置有效期。没有 Grant 时，Agent 应得到明确 denied。
+6. Agent 使用自己的 host client 文件运行 webenvoy agent connect 或 Plugin webenvoy_connect。connect 只能发现已注册 Principal，不能 register、grant、revoke 或读取 owner secret。
+7. Agent 提交一个 operation；Core 创建或复用原 Run。用户对 Instance 的接管、交还、停止和撤权走 owner CLI，不经 Agent。
+
+Agent UID 可运行 `webenvoy agent uninstall --host-dir AGENT_DIR --data-dir OWNER_DIR`；该命令只按 Agent receipt 删除自己的 host MCP/SKILL 文件，保留 client credential、owner data、Principal／Grant、Run 和 recovery。owner `webenvoy uninstall` 只处理其调用方可验证且 receipt 列出的 owner-managed host 文件；它不得代替 Agent uninstall 读取或删除 Agent-owned host root。
 
 任何一步遇到缺少 OS 权限、UID／ACL boundary、Provider executable、source binding、端口、签名、Runtime 或 owner confirmation，都必须报告真实原因并返回非零退出码；不得通过打开 App、换 Provider、换 Profile、放宽 Grant 或静默 fallback 制造成功。
 
@@ -194,7 +197,7 @@ owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带�
 
 ### 5.1 通用语法
 
-正式 launcher 名称为 webenvoy。所有命令接受全局 --data-dir DIR，但 Agent 命令用 --client-file FILE 绑定 Agent 身份；两者不可以在同一命令中互相替代。
+正式 launcher 名称为 webenvoy。owner 命令使用 --data-dir DIR 绑定 owner 安装；两阶段 Agent setup 额外使用 --host-dir DIR、--owner-uid UID 和可选 --agent-endpoint SOCKET，其他 Agent 命令用 --client-file FILE 绑定 Agent 身份。owner data、Agent host 和 client file 参数不可以互相替代。
 
     webenvoy help [COMMAND] [--data-dir DIR]
     webenvoy --version
@@ -214,12 +217,14 @@ help 的根页面必须列出 setup、start、diagnose、stop、uninstall、acce
 
 | 命令 | 必填参数 | 可选参数与约束 | 结果 |
 | --- | --- | --- | --- |
-| webenvoy setup | --data-dir DIR、--host-dir DIR | Provider binding 只能使用已批准的官方 source／version／hash 参数；--codex-profile NAME 必须匹配 [a-z0-9-]{1,64}；--approve-tools 只写 host approval，不授予 Core 权限 | 写入或复用安装文件、client、receipt、host config，输出 fingerprint 和 manifest 摘要 |
+| webenvoy setup | --data-dir OWNER_DIR；两阶段 Agent 安装提供 --agent-uid UID | Provider binding 只能使用已批准的官方 source／version／hash 参数；--agent-uid 缺失或 OS boundary 未验证时只允许 owner maintenance，并输出 `owner_agent_isolation_unavailable`；旧 --host-dir 不能让 owner 代写 Agent host | 验证并写入 owner 安装事实、owner／Agent UID、Agent endpoint 和 boundary 状态；仅在 boundary 支持时输出不含 secret 的公开 bootstrap，不创建 Agent client／host 文件 |
+| webenvoy agent setup | --host-dir AGENT_DIR、--data-dir OWNER_DIR、--owner-uid UID | 只能由独立 Agent UID 运行；可提供 --agent-endpoint SOCKET；不得读取 owner installation link、owner-private store 或调用 Runtime/Core | 在 Agent-owned host root 创建或复用 client credential、MCP config、SKILL 和 receipt，输出 fingerprint；不注册 Principal、不授予 Grant |
+| webenvoy agent uninstall | --host-dir AGENT_DIR、--data-dir OWNER_DIR | 只能由 Agent UID 运行；严格按 Agent receipt 和用户修改保护处理 | 删除 receipt 列出的 Agent MCP/SKILL 文件，保留 client credential、owner data、Principal、Grant、Run 和 recovery |
 | webenvoy start | --data-dir DIR | 无 | 确保同一 Runtime service，输出 status |
 | webenvoy diagnose | --data-dir DIR | 无 | 只读输出 Runtime、bundle、Provider、endpoint、OS boundary 和安全 recovery guidance |
 | webenvoy stop | --data-dir DIR | 无 | owner-only 停止 Runtime service 及其 managed child；不是 Instance handoff 或业务 Run stop |
-| webenvoy uninstall | --data-dir DIR、--host-dir DIR | --codex-profile NAME 可指定受管 profile 文件 | Runtime 已停止时删除 receipt 列出的受管 host 文件，保留 data root、Principal、Grant、Run、Profile 和恢复资料 |
-| webenvoy app | --data-dir DIR | 仅兼容历史开发／桌面流程 | 非正式 V1 入口；不得成为 setup、owner control 或 Agent operation 的必要条件 |
+| webenvoy uninstall | --data-dir DIR、--host-dir OWNER_HOST_DIR | --codex-profile NAME 可指定受管 owner profile 文件；不能指向 Agent-owned host root | Runtime 已停止时只删除 owner 调用方可验证且 receipt 列出的受管 host 文件，保留 data root、Principal、Grant、Run、Profile 和恢复资料；Agent host 必须由 agent uninstall 处理 |
+| webenvoy app | --data-dir DIR | 历史开发／桌面材料不属于正式入口 | standalone 包明确拒绝；不得成为 setup、owner control 或 Agent operation 的必要条件 |
 
 setup 的 Provider 参数保持现有实现的命名和校验，不另建 Provider schema：
 
@@ -268,7 +273,7 @@ caller key 是调用方在提交前生成并保存的稳定 `idempotency_key`。
 | `files export` | `/owner/files/export` 当前没有 caller key；Harbor 以 owner 指定的 destination path 做 `O_EXCL` 写入，已有目标返回 `file_destination_exists`。这是目标路径的固有重复保护，不是新的 receipt。 | 响应丢失先检查同一 destination 的存在性并核对内容／摘要，再用 `files inspect --file-ref FILE_REF` 核对源记录。目标存在且内容／摘要匹配时按同一导出事实对账；存在但不匹配时保持冲突，不覆盖；目标不存在且源仍可用时只能重试同一 file_ref／destination，不能换目标路径掩盖 unknown。 |
 | `files revoke`、`files delete` | `/owner/files/revoke` 和 `/owner/files/delete` 当前没有 caller key；操作以准确 `file_ref` 为对象，revoke 对已 revoked 记录保持状态，delete 重复清理并保持 deleted 记录。 | 响应丢失先用 `files inspect --file-ref FILE_REF`；状态已是目标状态即完成，仍可用时可以重试同一 file_ref，不能伪造 key、换 ref 或把缺失的 ref 当作另一个文件。 |
 | `instance takeover`、`instance handback`、`lock`、`release` | 这些 owner ControlLease 写入不使用 caller key，必须带同一次 list／inspect 得到的 `expected_control`，由 Harbor 在单一现场原子比较 owner、lock、holder 和 generation；不是 CLI 先查再写。 | 丢响应后必须 fresh observe。目标状态已成立即完成；仍等于原 expected 状态时可重试同一请求；generation、holder 或任一 control 字段已变化则返回冲突并停止，不能用旧快照或新 key 重放。ABA 由 generation 区分。 |
-| `instance stop` | owner API 以准确 `runtime_session_ref` 调用 Harbor `/runtime/sessions/{ref}/stop`，没有 caller key，也不停止 Runtime service。Harbor 对已 closed 的同一 session 保持 terminal 事实；它不是 Run receipt。 | 丢响应后用 `instance inspect` fresh observe；已 closed 即完成，仍 active 时才可针对同一 ref 再请求，缺失／unavailable 保持未知并查询恢复，不能换 ref 或新 key。 |
+| `instance stop` | owner API 以准确 `runtime_session_ref` 调用 Harbor `/runtime/sessions/{ref}/stop`，没有 caller key，也不停止 Runtime service。Harbor 对已 closed 的同一 session 保持 terminal 事实；它不是 Run receipt。 | 丢响应后用 `instance inspect` fresh observe；已 closed 即完成，仍 active 时才可由 owner 决定是否针对同一 ref 再请求，缺失／unavailable 保持未知并查询恢复，不能盲目重试、换 ref 或新 key。 |
 | `setup`、`start`、`stop`、`uninstall` | 这些是安装／Runtime 生命周期或 receipt 清理操作，现有入口没有 Core owner receipt caller key；它们依赖安装 manifest、Runtime status、精确 data／host 路径和 installation receipt。 | 响应丢失先用 `diagnose`／`status` 和 receipt 读取当前事实，再按当前前置状态继续；不得把生命周期重试伪装成 Core idempotency receipt，也不得用新 key 掩盖未知状态。 |
 
 实现和帮助必须逐项遵守这张矩阵。除表中现有 receipt、operation selector、目标路径／file_ref 语义和 ControlLease CAS 外，不得新增幂等机制；无法查询或对账时必须保留 unknown／unavailable。
@@ -291,15 +296,15 @@ owner 必须能够在没有保存 Agent key 或 runtime_session_ref、且 Agent 
 
     webenvoy instance list --data-dir DIR [--profile-ref PROFILE]
     webenvoy instance inspect --data-dir DIR --runtime-session-ref REF
-    webenvoy instance takeover --data-dir DIR --runtime-session-ref REF
-    webenvoy instance handback --data-dir DIR --runtime-session-ref REF
+    webenvoy instance takeover --data-dir DIR --runtime-session-ref REF [--expected-control-file FILE]
+    webenvoy instance handback --data-dir DIR --runtime-session-ref REF [--expected-control-file FILE]
     webenvoy instance stop --data-dir DIR --runtime-session-ref REF
 
 - list 是 owner read，不启动 Runtime、Profile、Page 或 Provider，不获取 ControlLease。它映射到 owner-authenticated GET /runtime/sessions?profile_ref=PROFILE；省略 profile_ref 返回当前 RuntimeSessionStore 中尚未 closed 的全部 session facts。当前 Harbor 已有按 ref 读取 RuntimeSessionStore 的事实和 routes；list 是在 owner-authenticated Runtime seam 上增加的窄投影，不是第二个持久 registry。每项只返回最小身份和控制字段：runtime_session_ref、profile_ref、identity_environment_ref、provider_ref、lifecycle_state、created_at、last_seen_at、availability、control_owner、control_generation、control_lock（owner、state、holder_ref）、current_page 的安全 ref／generation／status 摘要、current_error.code。它不返回 Cookie、token、raw DOM、HAR、截图、任意本地路径或 Provider 私有材料。
-- inspect 是 owner read；读取 /runtime/sessions/{ref} 与 /runtime/sessions/{ref}/runtime-facts，不获取写 ControlLease，不启动、导航或刷新 Page。
+- inspect 是 owner read；读取一次 owner-authenticated `/runtime/sessions/{ref}` 的完整原子 session projection（含 control_generation、control_lock 和 viewer_entry），不拼接 `/runtime-facts` 的另一套事实，不获取写 ControlLease，不启动、导航或刷新 Page。
 - takeover 先读取该 session 的当前事实并按下列分支执行：若 control_owner=core_task 且 control_lock.owner=core_task、state=held，则 POST /runtime/sessions/{ref}/handoff；请求保留 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested 和可选 holder_ref 字段，并必须带第 5.5.1 节的 expected_control 前置状态；若 control_owner=user 且 control_lock.owner=user、state=held，则返回 already_user 的当前事实，不重复 handoff；若 control_owner=none 且 control_lock.owner=none、state=released，则 POST /runtime/sessions/{ref}/lock，请求带 control_owner=user、holder_ref=harbor_mediated_user 和同一 expected_control 前置状态；其他 owner、lock 或 lifecycle 组合返回 control_state_unavailable，不猜测或改写状态。handoff 需要 viewer 可用；成功后返回当前 control owner、control generation 和安全事实摘要，不创建替代 Profile、不重新打开 URL、不清除 Run。
 - handback 先读取当前事实：若 control_owner=user 且 user lock 为 held，则 POST /runtime/sessions/{ref}/release，请求带 control_owner=user、holder_ref=当前 user holder 和 expected_control 前置状态；成功结果必须是 control_owner=none、control_lock.owner=none、state=released；若 control_owner=none 且 control_lock.owner=none、state=released，则返回 already_released；若仍是 core_task/held、provider／system owner 或组合不一致，则返回 control_lock_conflict／control_state_unavailable，不替 user release。release 后 Agent 只能以 core_task 和自己的 holder_ref 重新 lock，并先 fresh observe。handback 不是 App 关闭、CLI 退出、socket 断线或浏览器窗口消失的别名。
-- stop 只停止指定 Instance／browser session；它不停止本地 Runtime service，不删除 Profile，不回放原 Run。停止后原 Run 和 outcome 仍可 query。
+- stop 只停止指定 Instance／browser session；它不停止本地 Runtime service，不删除 Profile，不回放原 Run。停止后原 Run 和 outcome 仍可 query。响应丢失或返回 unavailable 时先 fresh inspect；不得盲目重试、换 ref 或把缺失 session 当作已停止。
 
 ### 5.5.1 owner control 的 CAS 前置状态
 
@@ -316,9 +321,9 @@ owner 的 inspect／list 投影必须返回可用于一次写入比较的 `contr
       "control_generation": 12
     }
 
-owner CLI 从同一次 inspect／list 结果逐字段复制 expected_control。handoff 的请求字段因此是现有 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested、可选 holder_ref，加上 required expected_control；released→lock 是 control_owner=user、holder_ref=harbor_mediated_user，加上 required expected_control；user→release 是 control_owner=user、holder_ref=当前 user holder，加上 required expected_control。旧 handoff 的“body 只能是三个字段、可选 holder_ref”限制由这个带版本前置状态的 allowlist 替代；lock／release 也不得只传 owner 和 holder。
+owner CLI 从同一次 inspect／list 结果逐字段复制 expected_control。`--expected-control-file FILE` 是可选的严格校验输入；省略时 CLI 必须先取得同一次 fresh inspect，再用该 projection 作为 CAS 前置状态，不能要求调用方手工拼 JSON 才能完成常规接管。handoff 的请求字段因此是现有 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested、可选 holder_ref，加上 required expected_control；released→lock 是 control_owner=user、holder_ref=harbor_mediated_user，加上 required expected_control；user→release 是 control_owner=user、holder_ref=当前 user holder，加上 required expected_control。旧 handoff 的“body 只能是三个字段、可选 holder_ref”限制由这个带版本前置状态的 allowlist 替代；lock／release 也不得只传 owner 和 holder。
 
-Runtime service 只能把 owner request 和 expected_control 原样转发给 Harbor。Harbor 必须在单一 RuntimeSessionStore 现场内原子地比较 control_owner、control_lock.owner、control_lock.state、control_lock.holder_ref 和 control_generation，比较成功后执行一次 mutation 并递增代数；不能由 CLI 或 Runtime service 先 inspect、再独立调用旧写接口来假装 CAS。检查失败返回 409 control_state_changed（现场正在收敛时可返回 409 session_locked），不得修改现场；返回的安全当前控制摘要可供 owner 重新 inspect，但不得自动重试。user→released→新 user 即使 holder_ref 相同，也因 control_generation 改变而拒绝旧请求，消除 ABA。
+Runtime service 只能把 owner request 和 expected_control 原样转发给 Harbor。Harbor 必须在单一 RuntimeSessionStore 现场内原子地比较 control_owner、control_lock.owner、control_lock.state、control_lock.holder_ref 和 control_generation，比较成功后执行一次 mutation 并递增代数；不能由 CLI 或 Runtime service 先 inspect、再独立调用旧写接口来假装 CAS。检查失败返回 409 control_state_changed（现场正在收敛时可返回 409 session_locked），不得修改现场；返回的安全当前控制摘要可供 owner 重新 inspect，但不得自动重试。响应丢失时同样必须 fresh inspect 后再由 owner 决定是否以同一 ref 和新的 expected_control 重试，不能盲目重复原请求。user→released→新 user 即使 holder_ref 相同，也因 control_generation 改变而拒绝旧请求，消除 ABA。
 
 旧 Harbor handoff body 仍可供已认证的既有 Core supervisor 调用者在兼容期使用，但缺少 expected_control 的 legacy 请求不满足本 owner 合同，不能由 owner control socket 或 owner CLI 发出；owner proxy 不支持 v1 时返回 control_precondition_unsupported／unavailable，不降级为先读后写。实现若将该字段接入现有 Harbor route，必须保留现有 handoff 字段和 route，不新增通用锁服务；不声称当前 public Harbor route 已提供 generation CAS。
 
@@ -328,6 +333,8 @@ Runtime service 只能把 owner request 和 expected_control 原样转发给 Har
 
 Agent CLI 是 MCP projection 的一次性、非交互、薄适配。它读取 --client-file FILE，禁止读取 data-dir/owner-private store，禁止接受 owner service credential、supervisor token 或 --confirm owner flag。
 
+    webenvoy agent setup --host-dir AGENT_DIR --data-dir OWNER_DIR --owner-uid OWNER_UID [--agent-endpoint SOCKET]
+    webenvoy agent uninstall --host-dir AGENT_DIR --data-dir OWNER_DIR
     webenvoy agent status --client-file FILE
     webenvoy agent skill --client-file FILE
     webenvoy agent connect --client-file FILE
@@ -339,7 +346,8 @@ Agent CLI 是 MCP projection 的一次性、非交互、薄适配。它读取 --
 
 参数规则：
 
-- --client-file 必须是安装生成的 webenvoy-client.json 或等价的受管 Agent credential file；文件内只允许 `data_dir`、`credential`、`agent_endpoint`、`owner_uid`、`agent_uid` 五类字段，权限、OS UID／ACL、socket 本体和路径由安装 verifier 每次检查。安装 manifest 使用同名的顶层 `owner_uid`、`agent_uid`、`agent_endpoint` 字段；不接受 camelCase、`os_boundary` 或用户填入的 process／ACL 布尔值作为替代。`agent_endpoint` 不能指向 owner control socket；client file 不得包含 owner token、supervisor token、owner-private path 或可代理 owner route 的材料。
+- agent setup／uninstall 只能由独立 Agent UID 在自己的 host root 运行；setup 不连接 owner/Core，不注册 Principal，不授予 Grant；uninstall 只按 receipt 删除 Agent-owned MCP/SKILL 文件并保留 client credential 与 owner data。owner uninstall 不得代替它读取或删除该 host root。
+- --client-file 必须是 agent setup 生成的 webenvoy-client.json 或等价的受管 Agent credential file；文件内只允许 `data_dir`、`credential`、`agent_endpoint`、`owner_uid`、`agent_uid` 五类字段，权限、OS UID／ACL、socket 本体和路径由安装 verifier 检查。owner 安装记录 `installation.json` 使用同名的顶层 `owner_uid`、`agent_uid`、`agent_endpoint` 字段；不接受 camelCase、`os_boundary` 或用户填入的 process／ACL 布尔值作为替代。`data_dir` 只绑定 owner 提供的公开安装身份，不授予读取 owner root 的权限；`agent_endpoint` 不能指向 owner control socket，client file 不得包含 owner token、supervisor token 或可代理 owner route 的材料。
 - agent connect 只能调用 /agent-connections 注册现有 Principal；没有 owner register／grant 权限。
 - agent describe 的 request file 是现有 webenvoy_describe 的 JSON 参数：operation，可选 context（grant_id、profile_ref、task_scope），可选 arguments。它不得创建 Run、启动 Instance、打开 Page、获取 ControlLease 或授予权限。
 - agent operation 的 request file 与 webenvoy_operation 完全相同：必填 idempotency_key、grant_id、operation、task_scope；其余字段严格取自已安装 managed-capability-definitions.json 的该 operation allowed 集合。未知 operation、未知字段、将后续步骤混入当前 task_scope、缺少 operation-specific origin、错误 Page／file selector 或违反 file_refs 约束，在发送前拒绝。
@@ -400,7 +408,7 @@ account.bind 可以存在于 Core capability definition，但当前未暴露给 
 | files ... | 无 | owner /owner/files... | Core／Harbor owner file store |
 | recovery ... | 无 | owner /owner/recovery... | Core owner recovery service |
 | instance list | 无 | owner-authenticated GET /runtime/sessions?profile_ref=... | Harbor RuntimeSessionStore live facts |
-| instance inspect | 无 | owner-authenticated GET /runtime/sessions/{ref}、GET /runtime/sessions/{ref}/runtime-facts | Harbor session facts |
+| instance inspect | 无 | owner-authenticated GET /runtime/sessions/{ref} 的完整原子 session projection | Harbor session facts、control_generation 和 viewer_entry |
 | instance takeover | 无 | owner-authenticated POST /runtime/sessions/{ref}/handoff（core_task held）或 POST /runtime/sessions/{ref}/lock（released），均带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance handback | 无 | owner-authenticated POST /runtime/sessions/{ref}/release，带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance stop | 无 | owner-authenticated POST /runtime/sessions/{ref}/stop | Harbor exact Instance |
@@ -564,7 +572,7 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 - installation root：只读或受安装器管理，包含 bundle 和 manifest；
 - owner 安装者创建并持有 installation root、Runtime Node、CLI／service 代码和 manifest；Agent setup 只由 Agent UID 创建自己的 host root 资产，不能修改 bundle、fixed Node、CLI、service 或 manifest。实际安装若无法复核这些路径对 Agent UID 不可写，必须拒绝 Agent data plane；
 - data root：独立、持久、0700，保存 Runtime／Core 状态、Principal／Grant／Run 相关数据和 recovery；
-- host root：独立、持久、0700，保存 webenvoy-client.json、host config、SKILL 和 installation receipt；
+- host root：由独立 Agent UID 创建并持有、独立、持久、0700，保存 webenvoy-client.json、host config、SKILL 和 Agent installation receipt；owner setup 不代写该 root；
 - Agent IPC root／endpoint：独立于 owner data root 和 host root，由安装器预置并按 owner／Agent 角色配置；Agent endpoint 可由 owner service 创建但不允许复用 owner control socket，Agent 只能通过 client file 中的已验证引用连接；
 - owner-private store／control socket：只能由可信 owner UID 或强制验证的人类 control client 访问；Agent UID／脚本 UID 无权读写；
 - owner runtime record、client 文件、receipt 和受管 host config：按当前实现的 0600 约束原子写入；任何冲突的用户文件保护用户内容。
@@ -588,7 +596,7 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 - 在同一 data root 上升级或重装时，先显式停止旧 Runtime；验证新 bundle 后复用同一安装身份、Principal／Grant、Run、Profile、recovery 和有效 client credential。
 - 更新不得自动复活旧 Instance、复用过期 Page／target、改变 Grant scope 或把 unknown 写成 succeeded；Agent 必须重新 connect，操作必须重新 observe。
 - client credential rotation 是显式 owner action：注册新 fingerprint、迁移／替换 Grant、撤销旧 Principal／connection，并保留审计和 idempotency 事实；不能在 setup 重跑时静默换 credential。
-- uninstall 只删除当前 receipt 列出的受管 host 文件；data root、Run、Profile、Grant 和恢复资料默认保留，并输出 data_preserved。
+- Agent uninstall 只删除 Agent receipt 列出的受管 host 文件，保留 client credential；owner uninstall 只删除 owner 调用方可验证且 receipt 列出的 owner-managed host 文件。两者都保留 data root、Run、Profile、Grant 和恢复资料，并输出 data_preserved。
 - 旧 host 文件有用户修改或 receipt／identity 不匹配时停止并报告 conflict，不覆盖、不删除、不假装卸载完成。
 
 ## 11. 安全数据和错误边界
@@ -617,15 +625,17 @@ CLI、MCP、API、SKILL 和 Run public result 只返回实现后可验证的最�
 
 `grant.json` 必须包含本次调用方保存的 `idempotency_key`；grant-v2 和 policy-v2 文件同样必须包含 caller key。
 
-    webenvoy setup --data-dir /var/lib/webenvoy/data --host-dir /var/lib/webenvoy/host --codex-profile browser-agent
-    webenvoy access register --data-dir /var/lib/webenvoy/data --display-name browser-agent --credential-hash SETUP_OUTPUT_FINGERPRINT --idempotency-key principal-register-20260922-001
+    webenvoy setup --data-dir /var/lib/webenvoy/data --agent-uid AGENT_UID
+    # 以 AGENT_UID 运行：
+    webenvoy agent setup --host-dir /var/lib/webenvoy/agent-host --data-dir /var/lib/webenvoy/data --owner-uid OWNER_UID
+    webenvoy access register --data-dir /var/lib/webenvoy/data --display-name browser-agent --credential-hash AGENT_SETUP_FINGERPRINT --idempotency-key principal-register-20260922-001
     webenvoy access grant --data-dir /var/lib/webenvoy/data --grant-file grant.json
-    webenvoy agent connect --client-file /var/lib/webenvoy/host/webenvoy-client.json
-    webenvoy agent operation --client-file /var/lib/webenvoy/host/webenvoy-client.json --request-file start.json
+    webenvoy agent connect --client-file /var/lib/webenvoy/agent-host/webenvoy-client.json
+    webenvoy agent operation --client-file /var/lib/webenvoy/agent-host/webenvoy-client.json --request-file start.json
 
 start.json 返回 Core 的 admitted 或 running 后，CLI 退出而不保持交互。调用者将 stdout 中的 run_id 和原 key 交给另一台 API consumer、Plugin 或重新连接的 CLI：
 
-    webenvoy agent query --client-file /var/lib/webenvoy/host/webenvoy-client.json --idempotency-key task-20260922-001
+    webenvoy agent query --client-file /var/lib/webenvoy/agent-host/webenvoy-client.json --idempotency-key task-20260922-001
 
 三种入口应看到同一 managed-<sha256>、同一 status 和同一 result／failure；Plugin query 不能创建第二 Run。
 

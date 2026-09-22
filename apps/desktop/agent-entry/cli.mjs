@@ -203,7 +203,7 @@ function exitCodeFor(value) {
   const errorCode = value?.error?.code ?? value?.failure?.code;
   if (value?.dispatch_state === 'possibly_dispatched' || ['unknown_outcome', 'managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(status) || ['managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(errorCode)) return 6;
   if (['runtime_unavailable', 'runtime_unavailable_query_without_replay', 'discovery_not_available', 'bundle_unavailable'].includes(errorCode)) return 7;
-  if (status === 'unavailable' && ['control_state_changed', 'viewer_unavailable', 'control_state_unavailable'].includes(value?.failure_class ?? value?.error?.code)) return 5;
+  if (status === 'unavailable') return 5;
   if (['requires_user_action', 'manual_recovery_required', 'pending'].includes(status)) return 4;
   if (['failed', 'blocked', 'cancelled', 'expired'].includes(status)) return 5;
   if (value?.ok === false || value?.error) return 3;
@@ -475,7 +475,7 @@ if (command === 'setup') {
     const providedExpectedControl = expectedControlPath === undefined ? undefined : await readExpectedControl(expectedControlPath);
     await ensureOwnerRuntime(dataDir);
     const current = await readInstanceFacts(dataDir, ref);
-    if (current?.error) printResult(current);
+    if (current?.error || current?.ok === false || current?.status === 'unavailable') printResult(current);
     else {
       const projection = controlProjection(current);
       const expectedControl = providedExpectedControl ?? projection;
@@ -685,10 +685,8 @@ function argFrom(values, name) { const index = values.indexOf(name); return inde
 async function readInstanceFacts(dataDir, runtimeSessionRef) {
   const encoded = encodeURIComponent(runtimeSessionRef);
   const session = await ownerRequest(dataDir, `/runtime/sessions/${encoded}`);
-  if (session?.error) return session;
-  const runtimeFacts = await ownerRequest(dataDir, `/runtime/sessions/${encoded}/runtime-facts`);
-  if (runtimeFacts?.error) return runtimeFacts;
-  return { session, runtime_facts: runtimeFacts };
+  if (session?.error || session?.ok === false || session?.status === 'unavailable') return session;
+  return { session };
 }
 
 function controlProjection(value) {

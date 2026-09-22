@@ -82,7 +82,6 @@ test('owner list, diagnose and inspect use live reads without Runtime startup', 
     let payload = { ready: true, assets: { digest: 'fixture' }, pid: process.pid, services: [] };
     if (request.url === '/runtime/sessions') payload = { schema_version: 'harbor-runtime-session-list/v1', sessions: [] };
     if (request.url === '/runtime/sessions/demo') payload = { runtime_session_ref: 'demo', control_owner: 'none', control_generation: 0, control_lock: { owner: 'none', state: 'released', holder_ref: null } };
-    if (request.url === '/runtime/sessions/demo/runtime-facts') payload = { runtime_session_ref: 'demo', control_owner: 'none', control_generation: 0, control_lock: { owner: 'none', state: 'released', holder_ref: null } };
     response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(payload));
   });
   try {
@@ -94,11 +93,45 @@ test('owner list, diagnose and inspect use live reads without Runtime startup', 
     assert.equal(list.code, 0);
     assert.equal(diagnose.code, 0);
     assert.equal(inspect.code, 0);
-    assert.deepEqual(requests, ['/runtime/sessions', '/status', '/runtime/sessions/demo', '/runtime/sessions/demo/runtime-facts']);
+    assert.deepEqual(requests, ['/runtime/sessions', '/status', '/runtime/sessions/demo']);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('owner stop preserves unavailable session outcomes with a nonzero exit', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-owner-stop-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  let calls = 0;
+  const server = createServer((request, response) => {
+    calls += 1;
+    const failureClass = calls === 1 ? 'session_missing' : 'interaction_settling';
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ status: 'unavailable', failure_class: failureClass, runtime_session_ref: 'demo' }));
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const missing = await runCli(['instance', 'stop', '--data-dir', dir, '--runtime-session-ref', 'demo']);
+    const settling = await runCli(['instance', 'stop', '--data-dir', dir, '--runtime-session-ref', 'demo']);
+    assert.equal(missing.code, 5);
+    assert.equal(settling.code, 5);
+    assert.equal(JSON.parse(missing.stdout).failure_class, 'session_missing');
+    assert.equal(JSON.parse(settling.stdout).failure_class, 'interaction_settling');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('Agent help exposes operation submission and durable query commands', async () => {
+  const operation = await runCli(['help', 'agent', 'operation']);
+  const query = await runCli(['help', 'agent', 'query']);
+  assert.equal(operation.code, 0);
+  assert.match(operation.stdout, /webenvoy agent operation --client-file FILE --request-file FILE/);
+  assert.equal(query.code, 0);
+  assert.match(query.stdout, /webenvoy agent query --client-file FILE \(--run-id RUN_ID\|--idempotency-key KEY\)/);
 });
 
 test('formal CLI rejects the historical App entry', async () => {
