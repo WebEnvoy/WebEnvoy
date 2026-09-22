@@ -114,6 +114,13 @@ verification requirements、data-handling 限制和门状态（未评估的 Runt
 `runtime_unavailable`、`not_authorized` 报成 `executable_ready`。这些动态状态由
 `webenvoy_task` admission 投影的现有 Core `FailureRecord`/Run 事实返回。
 
+上述字段必须逐项来自 [Managed SKILL Library Lifecycle V1 的 #563 projection](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)：
+`required_capabilities` 是完整的 Lode `entrypoint.capability_refs` 解析集合，不能由单个
+`capability_ref` 缩减；`known_branches`、`verification` 和 `data_handling` 只在 Lode
+声明并通过静态校验后投影。`result.skill.skill_ref` 与摘要的稳定 `package_ref` 采用同一
+包身份，摘要的 `revision_ref` 才带 `@version#source-commit`；Plugin 不重新解释这些
+字段，也不增加 Runtime preflight。
+
 发现只读元数据，不启动 Runtime、不建立 Connection、不派发浏览器动作、不读取
 未授权正文或 live evidence。没有任务声明的包不能作为正式 task 出现在可执行列表。
 
@@ -148,9 +155,11 @@ source/revision 和包完整性校验的任务摘要；未授权或无效任务�
 5. `skill.disable` 阻止后续新的 task admission，但保留内容、选择、历史和旧 Run
    事实；它不撤销已产生的 ExternalOutcome，也不远程抹除 Agent 已读上下文。
 
-Lode package 的 `package_ref`/version/hash 是身份真相；Core 只保留 verified projection
-和历史引用。manifest、package digest 或 compatibility 不一致必须 fail closed，不能
-用 `latest`、当前工作树、另一个 package 或旧 script 代替。
+Lode package 的稳定 `package_ref` 与版本化 `revision_ref`/hash 是身份真相；Core 只保留
+verified projection 和历史引用。manifest、package digest 或 compatibility 不一致必须
+fail closed，不能用 `latest`、当前工作树、另一个 package 或旧 script 代替。对同一
+`package_ref` 的升级保持既有 `skill_ref` 不变，只重新选择获准的完整 `revision_ref`；
+不同 `package_ref` 不得借旧的 skill scope 伪装为同包升级。
 
 ### 4.3 普通 Agent 的 managed task projection
 
@@ -208,13 +217,13 @@ Core 仍按既有 Principal/Connection/Grant 关系记录和审计。
   "grant_id": "grant:example",
   "task_scope": {
     "operations": ["task.submit"],
-    "skill_refs": ["lode://site-skill/example/catalog@1.0.0"],
+    "skill_refs": ["lode://site-skill/example/catalog"],
     "source_refs": ["lode://site-skill/example/catalog@1.0.0#<source-commit>"],
     "profile_refs": ["profile:example"],
     "origins": ["https://example.com"]
   },
   "package": {
-    "package_ref": "lode://site-skill/example/catalog@1.0.0",
+    "package_ref": "lode://site-skill/example/catalog",
     "revision_ref": "lode://site-skill/example/catalog@1.0.0#<source-commit>",
     "package_digest": "sha256:<64-lowercase-hex>",
     "task_ref": "catalog-read"
@@ -249,8 +258,11 @@ Token、credential、Provider handle、owner 字段或 Agent 自带 allowlist。
 扩大网页范围。
 
 `package.package_ref`、完整 `revision_ref`、唯一 package-level `package_digest` 和
-`task_ref` 必须来自当前获准的 `skill.inspect` 摘要；digest 不是 Agent 自行计算或替换
-的第二身份。Core/Lode resolver 必须逐项核对该摘要与已安装、enabled、Lode manifest
+`task_ref` 必须来自当前获准的 `skill.inspect` 摘要；`package_ref` 必须等于摘要中
+`result.skill.skill_ref` 的稳定包身份，不能带 `@version`。`task_scope.skill_refs` 使用
+同一个稳定 `skill_ref`，而 `task_scope.source_refs` 必须覆盖本次选中的完整
+`revision_ref`/approved source；它们不是两个可由调用者自行拼接的包身份。digest 不是
+Agent 自行计算或替换的第二身份。Core/Lode resolver 必须逐项核对该摘要与已安装、enabled、Lode manifest
 完整性、source、task declaration、revision 和 `integrity.package_digest` 完全相等；
 任何不一致均在 dispatch 前拒绝。客户端不能把另一个 revision、latest、工作树路径或
 capability ref 冒充该 task。
@@ -311,7 +323,7 @@ file/Grant 合同传递不透明 ref；managed-task carrier 不新增 `file_refs
   "grant_id": "grant:example",
   "task_scope": {
     "operations": ["task.query"],
-    "skill_refs": ["lode://site-skill/example/catalog@1.0.0"],
+    "skill_refs": ["lode://site-skill/example/catalog"],
     "source_refs": ["lode://site-skill/example/catalog@1.0.0#<source-commit>"],
     "profile_refs": ["profile:example"],
     "origins": ["https://example.com"]
@@ -355,7 +367,7 @@ late result 沿既有 Core 事实保留，不能换 key 重放。
   "run": {
     "run_id": "run:core/example-001",
     "task_intent_ref": "intent:example-001",
-    "package_ref": "lode://site-skill/example/catalog@1.0.0",
+    "package_ref": "lode://site-skill/example/catalog",
     "status": "admitted",
     "dispatch_state": "not_dispatched"
   },

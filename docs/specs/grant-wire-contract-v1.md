@@ -109,7 +109,9 @@ Run 或第二材料注册表。没有输入的 task 仍可提交；需要现有 
 site-task 请求的 `task_scope` 是版本化 projection 的请求范围，恰好含
 `operations`、`skill_refs`、`source_refs`、`profile_refs`、`origins` 五组数组。它只能
 收窄本 Grant：`operations` 对应本次一个 `task.*` operation，
-`skill_refs/source_refs` 必须覆盖获准 package/revision，`profile_refs/origins` 必须覆盖
+`skill_refs` 必须包含与 Lode 稳定 `package_ref` 一一对应的既有 `skill_ref`（不带版本），
+`source_refs` 必须覆盖本次选中的完整 `revision_ref`/approved source；二者共同覆盖获准
+package/revision，`profile_refs/origins` 必须覆盖
 任务声明实际需要的浏览器范围（无浏览器输入时为空）。请求还必须通过任务声明的
 capability/action、
 Profile ceiling、ControlLease、Runtime 和现有 egress 检查。未知字段、未声明 carrier 的

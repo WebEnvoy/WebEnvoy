@@ -50,9 +50,13 @@
 既有输入和 `webenvoy.skill-operation-result.v1` 外壳；获准的 Lode revision 可在
 `result.skill.site_tasks` 附带 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)
 定义的 `webenvoy.site-task-summary/v1`；其中 package-level `package_digest` 是 Agent
-提交时唯一可用的 digest 来源。该投影按 `skill_scope`、source/revision、task
-scope 和包完整性过滤，不返回未授权 task 名称、脚本正文、路径、Grant、Profile、Page、
-OS identity 或 live evidence；`knowledge_only` 仍可 install/enable/read。
+提交时唯一可用的 digest 来源。`package_ref` 是不带版本的稳定包身份，并与
+`result.skill.skill_ref` 对应；`revision_ref` 才带版本和 source commit。task 摘要完整
+投影 Lode 声明的 `required_capabilities`、`known_branches`、`verification` 和
+`data_handling`，其中单个 `capability_ref` 只是兼容主摘要，不能代替 required set。
+该投影按 `skill_scope`、source/revision、task scope 和包完整性过滤，不返回未授权 task
+名称、脚本正文、路径、Grant、Profile、Page、OS identity 或 live evidence；
+`knowledge_only` 仍可 install/enable/read。
 
 普通 Agent 的执行、查询和停止只通过新的 `webenvoy_task` projection。它固定调用
 `POST /managed-tasks/operations`，请求版本为 `webenvoy.managed-task-operation/v1`，
