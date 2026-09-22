@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
-import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyAgentSocket, verifyLiveOsBoundary, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyLiveOsBoundary, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 import { projectHarborResponse } from './service-projection.mjs';
 
 const dataDir = process.argv[2];
@@ -163,11 +163,6 @@ async function closeAgentServer() {
   if (!agentServer?.listening) return;
   agentSocketOwned = false;
   await closeServer(agentServer);
-  try {
-    const ownerUid = state.boundary.identity?.owner_uid;
-    verifyAgentSocket(agentSocket, { ownerUid });
-    await unlink(agentSocket);
-  } catch {}
 }
 async function shutdown() {
   if (stopping) return;
