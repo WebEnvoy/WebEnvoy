@@ -8,6 +8,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 | 规格 | 归口 | 作用 |
 | --- | --- | --- |
+| [CLI and Upstream Integration V1](cli-integration-v1.md) | [S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)、[集成 FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 经独立审查并合入 main 后作为 Accepted 实施基线：无 App 首次信任、可信用户与 Agent 隔离、CLI/API/Plugin 映射、独立现场控制、跨入口结果及正式安装合同；不表示 W1/W2 已实现或验证。 |
 | [Model Usage V1](model-usage-v1.md) | [产品 FR #558](https://github.com/WebEnvoy/WebEnvoy/issues/558)、[条件验证 #559](https://github.com/WebEnvoy/WebEnvoy/issues/559) | Proposed：通用模型配置、用途、外发与费用、有界网页循环、DONE/BLOCKED、接管／交回和结果核验；非 V1 发布阻塞，不表示模型已支持。 |
 | [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 定义 V1 Browser Runtime capability 类别、支持／证据状态、权限、数据边界、恢复和完成条件。 |
 | [Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510) | 冻结同一 Instance 内多 Page、document generation、popup/opener、URL/origin authorization、redirect、bounded close tombstone、native tab handoff 的 Page/ref 连续性、旧观察失效、receipt 与关系异常安全暂停语义。 |
@@ -30,7 +31,6 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 | 代号 | 真实 Issue | 计划归口 |
 | --- | --- | --- |
-| S1 | [#562](https://github.com/WebEnvoy/WebEnvoy/issues/562) | CLI 与上游集成；实现前冻结必要 discovery、调用、安装与授权合同。 |
 | S2 | [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563) | 站点 SKILL 包与受管脚本执行；复用 Core／Harbor 授权、Run、结果和恢复。 |
 | S3 | [#564](https://github.com/WebEnvoy/WebEnvoy/issues/564) | 站点资产创作、转换、修复与验证；不建立第二套资产状态机。 |
 | S4 | [#565](https://github.com/WebEnvoy/WebEnvoy/issues/565) | 主动 Network 能力；扩展现有 Network 合同。 |
@@ -81,6 +81,7 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 
 ### 当前已知映射
 
+- #562：CLI、可信用户控制和跨入口语义由 [CLI and Upstream Integration V1](cli-integration-v1.md) 承接；Design Obligation 逐项判定见该规格第 13 节，功能和安装证据由 W1/W2 分别交付。
 - #498：`DO-NETWORK-CONTRACT = triggered`、`DO-CONSOLE-CONTRACT = triggered`；`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 在新增动态 exposure policy 或新 Grant wire dimension 时转为 `triggered`。
 - #499：`DO-PROVIDER-PRIVATE-SCHEMA = triggered`；固定版本 Camoufox 的 `launch_options()` 会生成必须由 WebEnvoy 重放的 fingerprint/config/seed 材料，正式私有合同见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。#499 的历史 bundle/验收本身不授予当前 launchability；该合同的当前上游 addendum 由 #519 重新承接。`DO-PLUGIN-EXPOSURE` 与 `DO-GRANT-WIRE` 复用既有 operation/Grant 结构，不新增持久维度。
 - #505：`DO-PLUGIN-EXPOSURE = triggered`，恢复 projection 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)；`DO-GRANT-WIRE = triggered`，恢复值与单计划确认见 [Grant Wire Contract V1](grant-wire-contract-v1.md)；`DO-PROVIDER-PRIVATE-SCHEMA = conditional`，仅当改变 Camoufox 私有 bundle/兼容规则时转为 triggered，恢复默认沿用 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md)。
