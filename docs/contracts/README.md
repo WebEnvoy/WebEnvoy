@@ -2,7 +2,7 @@
 
 本目录是稳定合同索引，不重写已接受 ADR 或规范性 spec 的正文，也不把 `docs/draft/` 中的候选字段升级成实现合同。
 
-[S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)、[S2 #563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、[S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 与 [S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 后续接受的 CLI、受管站点脚本、主动 Network 和视觉合同必须回到本索引。当前只有规划 Issue；本批不建立空 schema、假 fixture 或已实现接口。
+受管站点任务合同见 [Site SKILL Execution V1](../specs/site-skill-execution-v1.md)。[S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)、[S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 与 [S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566) 后续接受的 CLI、主动 Network 和视觉合同也必须回到本索引；不建立空 schema、假 fixture 或冒充已实现接口。
 
 ## V1 Browser Runtime 与 Profile 环境
 
@@ -21,8 +21,9 @@ Page/navigation、Network/Console 与已安装 SKILL 的正式 wire/投影合同
 | Installed Profile Recovery V1 | [installed-profile-recovery-v1.md](../specs/installed-profile-recovery-v1.md) | 已安装更新/重装、长期 Profile 接续、私有 backup/plan/apply、owner 确认、恢复边界和 fail-closed 验收；当前 upstream binding 可接续，历史 Camoufox binding/bundle 仍可校验和恢复但不恢复旧 launchability。 |
 | Provider Selection and Creation Default V1 | [provider-selection-v1.md](../specs/provider-selection-v1.md) | 项目推荐、用户新建默认、本次选择、Profile binding、Harbor preference/selection wire、Plugin/Grant、幂等与兼容边界。 |
 | Managed SKILL Library Lifecycle V1 | [skill-library-lifecycle-v1.md](../specs/skill-library-lifecycle-v1.md) | 可选固定来源 SKILL 的身份、受管 data-root 存储、八个 `webenvoy_skills` operation、内容/receipt、CAS、局部失败与重启持久性。 |
+| Site SKILL Execution V1 | [site-skill-execution-v1.md](../specs/site-skill-execution-v1.md)、[Plugin exposure](../specs/plugin-runtime-exposure-v1.md)、[SKILL 生命周期](../specs/skill-library-lifecycle-v1.md) | #563 固定包版本与任务的发现、执行准入、受限调用、输入输出、脚本边界及原 Run/query/no-replay；包 manifest 只在 Lode 维护，文档接受不证明执行器或站点可用。 |
 | Managed Browser Files V1 (v1.1) | [browser-files-v1.md](../specs/browser-files-v1.md) | #523 owner 文件材料、固定 `file.upload`/`file.download` projection、Grant/Page/ControlLease 绑定、配额与保留、原子下载归属、结果/unknown 对账及 legacy/v2 归属边界。 |
-| Grant Wire Contract V1 (v1.4) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle（`/agent-access/v2/grants`、`/agent-access/v2/profile-policies`）、digest CAS、可信 stopped、严格 reader、撤销/过期与 idempotency 语义。 |
+| Grant Wire Contract V1 (v1.5) | [grant-wire-contract-v1.md](../specs/grant-wire-contract-v1.md) | recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle（`/agent-access/v2/grants`、`/agent-access/v2/profile-policies`）、site-task operation 与请求范围、digest CAS、可信 stopped、严格 reader、撤销/过期与 idempotency 语义。 |
 | Capability Discovery V1 | [capability-discovery-v1.md](../specs/capability-discovery-v1.md), [`capability-description-request.schema.json`](../../packages/schemas/schemas/capability-description-request.schema.json), [`capability-description.schema.json`](../../packages/schemas/schemas/capability-description.schema.json), [`harbor-capability-description.schema.json`](../../packages/schemas/schemas/harbor-capability-description.schema.json), [request fixture](../../packages/schemas/fixtures/capability-description-request.fixture.json), [response fixture](../../packages/schemas/fixtures/capability-description.fixture.json), [Harbor fixture](../../packages/schemas/fixtures/harbor-capability-description.fixture.json), [request invalid fixtures](../../packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json), [response invalid fixtures](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json), [#539 evidence](../verification/capability-discovery-539.json) | `webenvoy_describe` 的静态/上下文五维结果、Core→Harbor 窄只读快照、正反 fixtures 与旧入口兼容边界。 |
 
 具体 HTTP、MCP、JSON Schema、生成类型、Provider adapter 和 migration 只有在真实实现 Work Item 需要时才建立。新增 wire contract 必须：

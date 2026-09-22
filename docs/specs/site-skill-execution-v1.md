@@ -1,15 +1,13 @@
 # Site SKILL Execution V1
 
-状态：规范候选（`#563`，待本分支评审与合入）；版本：v1；产品归口：`#563`（parent `#475`）；owner：Core（准入、授权、Run、结果与恢复）和 Harbor（受管执行现场、Page/target、ControlLease 及 OS 执行边界）。Plugin、CLI、API 只投影既有 Core operation。
+状态：经独立审查并合入 main 后成为 Accepted 实施基线，不表示执行器或真实站点已验收；版本：v1；产品归口：`#563`（parent `#475`）；owner：Core（准入、授权、Run、结果与恢复）、Harbor（受管浏览器现场、Page/target、ControlLease）及第 5 节定义的 Agent-side worker host。Plugin、CLI、API 共同投影 Core 语义。
 
-当前候选分支为
-[`codex/spec-563-skill`](https://github.com/WebEnvoy/WebEnvoy/tree/codex/spec-563-skill)。包定义在 Lode 候选分支
-[`codex/spec-563-package`](https://github.com/WebEnvoy/Lode/tree/codex/spec-563-package)
-的 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/codex/spec-563-package/docs/contracts/site-skill-package-v1.md)。两个链接均是 review candidate；在合入前不能引用为 `main` 已存在的合同。
+包定义由配套 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/eab62c98aab3f7cfb1968b1232f03192b520e9e7/docs/contracts/site-skill-package-v1.md)
+拥有；该链接固定合同内容，引用本身不表示包合同已经接受或进入 `main`。
 
 本文件定义一个已安装、已固定版本、已获运行授权的 site SKILL task 如何进入现有
 WebEnvoy Runtime 并得到结果。它不拥有 Lode 的包身份、version、source/hash、任务
-声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/codex/spec-563-package/docs/contracts/site-skill-package-v1.md)
+声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/eab62c98aab3f7cfb1968b1232f03192b520e9e7/docs/contracts/site-skill-package-v1.md)
 拥有。本文件建立在 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、
 [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、
 [Grant Wire Contract V1](grant-wire-contract-v1.md)、
@@ -560,20 +558,15 @@ Provider 或 App IA 的 owner。site-task managed operation、input carrier、sc
 broker 和 v1.5 Grant extension 已在本候选中显式触发并链接其 owner 合同；后续实现若
 要新增跨进程字段，仍须先更新对应 owner 合同，不能在实现 PR 中悄悄扩 wire。
 
-跨仓集成顺序为：
-
-1. 评审并接受 Lode `codex/spec-563-package` 的精确提交；
-2. 以该提交作为本分支 `codex/spec-563-skill` 的 package companion，完成 Core/Harbor
-   执行、S1 命令/信任、Plugin exposure 和 Design Obligation 对齐；
-3. 两个候选接受后，由集成 owner 更新 WebEnvoy/Lode 共享索引，并把本文件的候选链接
-   替换成合入后的稳定 `main` 链接；
-4. 实现 Work Item 再提供准确的 Lode manifest、code-admission 记录、OS worker 文件/
-   网络权限、Grant/Run schema、installed Agent 和 live site 证据。接受本规格不授予
-   安装、运行、外发、合并或发布授权。
+包合同可以先于本执行合同接受；正式消费者必须等待两份合同各自接受，并与
+[S1 命令及信任合同](https://github.com/WebEnvoy/WebEnvoy/blob/2a9646827c24cc514eb28be8d12f036c60d81004/docs/specs/cli-integration-v1.md)
+对齐。实现 Work Item 再提供准确的 Lode manifest、code-admission 记录、第 5 节的
+worker 实际权限及 owner 隔离、Grant/Run schema、installed Agent 和 live site 证据。
+接受本规格不授予安装、运行、外发、合并或发布授权。
 
 后续真实站点验收至少绑定同一候选 SHA、Lode package `revision_ref`/source commit/
 package digest、WebEnvoy/Harbor/Provider 版本、正式安装身份、Principal/Grant/Profile/
-Instance/Page、OS worker 的实际文件/网络拒绝与清理证据，并由真实第三方 Agent 经过
+Instance/Page、worker 的实际权限、owner 隔离与清理证据，并由真实第三方 Agent 经过
 Plugin 完成 install/enable、task discovery、正常执行、fresh target、分页完整性、
 post-check 和 query/reconcile。响应丢失的 write 必须证明原 Run/operation 对账而无重放；
 知识-only、未准入、local modified、不可用和 unknown 必须保留各自状态。fixture、mock、
