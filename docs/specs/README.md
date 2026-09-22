@@ -12,6 +12,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 定义 V1 Browser Runtime capability 类别、支持／证据状态、权限、数据边界、恢复和完成条件。 |
 | [Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510) | 冻结同一 Instance 内多 Page、document generation、popup/opener、URL/origin authorization、redirect、bounded close tombstone、native tab handoff 的 Page/ref 连续性、旧观察失效、receipt 与关系异常安全暂停语义。 |
 | [Profile Environment V1](profile-environment-v1.md) | [Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471) | 定义长期 Profile 环境的 configured／effective／pending／observed／drift、Provider owner、连续性和验证。 |
+| [Browser Environment Quality V1](browser-environment-quality-v1.md) | [规格 #567](https://github.com/WebEnvoy/WebEnvoy/issues/567)、[质量基线 #570](https://github.com/WebEnvoy/WebEnvoy/issues/570) | 合入后生效的固定组合质量标准、证据要求和回归计划，分别判断连续性、隔离、隐身、操作与性能；不表示实际质量验证完成。 |
 | [Provider Selection and Creation Default V1](provider-selection-v1.md) | [Work Item #516](https://github.com/WebEnvoy/WebEnvoy/issues/516) | 冻结项目推荐、用户新建默认、本次选择与 Profile binding 的分离，以及 Harbor 持久化、App/Plugin、Grant、幂等与兼容语义。 |
 | [Network Runtime Contract V1](network-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 bounded Network metadata、Page binding、cursor、脱敏和生命周期语义。 |
 | [Console Runtime Contract V1](console-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 console/page-error levels、文本截断脱敏、source location 和生命周期语义。 |
@@ -35,7 +36,6 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | S3 | [#564](https://github.com/WebEnvoy/WebEnvoy/issues/564) | 站点资产创作、转换、修复与验证；不建立第二套资产状态机。 |
 | S4 | [#565](https://github.com/WebEnvoy/WebEnvoy/issues/565) | 主动 Network 能力；扩展现有 Network 合同。 |
 | S5 | [#566](https://github.com/WebEnvoy/WebEnvoy/issues/566) | 视觉观察与交互；与 Page、Grant、控制和外发边界对齐。 |
-| S6 | [#567](https://github.com/WebEnvoy/WebEnvoy/issues/567) | 浏览器环境质量、隐身和性能；复用现有 Profile／Provider 事实。 |
 
 本批不创建上述空 spec、schema、fixture 或验证报告。Spec Issue 关闭只表示规范已接受，不表示对应功能、真实 Agent 路径或 V1 验收已经完成。
 
