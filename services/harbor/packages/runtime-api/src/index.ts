@@ -88,6 +88,8 @@ import {
 } from "./runtime-fixtures.js";
 import {
   HARBOR_RUNTIME_FACTS_SCHEMA,
+  HARBOR_RUNTIME_SESSION_LIST_SCHEMA,
+  HARBOR_CONTROL_PRECONDITION_SCHEMA,
   HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA,
   managedOperationAdapterAvailable,
   managedOperationOwner,
@@ -99,6 +101,11 @@ import {
   type OpenIdentityEnvironmentSessionInput,
   type RuntimeSessionControlInput,
   type RuntimeSessionFacts,
+  type RuntimeControlPrecondition,
+  type RuntimeControlSnapshot,
+  type RuntimeSessionOwnerList,
+  type RuntimeSessionOwnerProjection,
+  type RuntimeSessionOwnerSummary,
   type RuntimeSessionRecord,
   type RuntimeSessionUnavailable,
   type ValidationRuntimeFacts,
@@ -264,7 +271,12 @@ export { HARBOR_ALLOWLISTED_READ_OPERATION_SCHEMA, LODE_262_ALLOWLIST_PIN, LODE_
 /** @deprecated Compatibility schema; new consumers must use the owner-clean runtime-facts route. */
 export { HARBOR_SITE_RESOURCE_FACTS_SCHEMA } from "./site-runtime-facts.js";
 export { HARBOR_PREVIEW_EVIDENCE_STATUS_FIXTURE_SCHEMA, HARBOR_REDACTED_PREVIEW_EXPORT_FIXTURE_SCHEMA, HARBOR_WRITE_PRECHECK_FACTS_SCHEMA } from "./runtime-fixtures.js";
-export { HARBOR_RUNTIME_FACTS_SCHEMA, HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA } from "./runtime-session.js";
+export {
+  HARBOR_RUNTIME_FACTS_SCHEMA,
+  HARBOR_RUNTIME_SESSION_LIST_SCHEMA,
+  HARBOR_CONTROL_PRECONDITION_SCHEMA,
+  HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA
+} from "./runtime-session.js";
 export {
   HARBOR_BROWSER_FILE_RESULT_SCHEMA,
   HARBOR_MANAGED_FILE_STORE_SCHEMA,
@@ -474,6 +486,8 @@ export type {
   ProviderMode,
   RuntimeControlLockFacts,
   RuntimeControlLockState,
+  RuntimeControlPrecondition,
+  RuntimeControlSnapshot,
   RuntimeErrorCode,
   RuntimeErrorFact,
   RuntimeFact,
@@ -481,6 +495,9 @@ export type {
   RuntimePageStatus,
   RuntimeSessionControlInput,
   RuntimeSessionFacts,
+  RuntimeSessionOwnerList,
+  RuntimeSessionOwnerProjection,
+  RuntimeSessionOwnerSummary,
   RuntimeSessionUnavailable,
   RuntimeViewerEntry,
   ValidationRuntimeFacts
@@ -592,6 +609,17 @@ export class HarborRuntime {
 
   getSession(runtime_session_ref: string): RuntimeSessionFacts | null {
     return this.runtimeSessions.getSession(runtime_session_ref);
+  }
+
+  getOwnerSessionFacts(runtime_session_ref: string): RuntimeSessionOwnerProjection | null {
+    return this.runtimeSessions.getOwnerSessionFacts(runtime_session_ref);
+  }
+
+  listOwnerSessionFacts(profile_ref?: string): RuntimeSessionOwnerList {
+    return {
+      schema_version: HARBOR_RUNTIME_SESSION_LIST_SCHEMA,
+      sessions: this.runtimeSessions.listOwnerSessionFacts(profile_ref)
+    };
   }
 
   /**
@@ -1794,9 +1822,10 @@ export class HarborRuntime {
   }
 
   recordHandoff(runtime_session_ref: string, input: RecordHandoffInput): ViewerControlFacts | ViewerControlUnavailable {
-    const barrier = this.runtimeSessions.prepareHandoff(runtime_session_ref);
+    const barrier = this.runtimeSessions.prepareHandoff(runtime_session_ref, input.expected_control, input.holder_ref);
     if (barrier) return barrier;
-    const result = this.viewerControls.recordHandoff(runtime_session_ref, input);
+    const { expected_control: _expected_control, ...viewerInput } = input;
+    const result = this.viewerControls.recordHandoff(runtime_session_ref, viewerInput);
     if (!("status" in result)) {
       this.runtimeSessions.applyHandoff(runtime_session_ref, result.control);
     }
