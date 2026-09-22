@@ -48,6 +48,14 @@ const nodePath = join(outputRoot, "runtime/node");
 await mkdir(dirname(nodePath), { recursive: true, mode: 0o755 });
 await cp(nodeSource, nodePath, { dereference: true });
 await chmod(nodePath, 0o755);
+await cp(join(dirname(dirname(nodeSource)), "LICENSE"), join(outputRoot, "runtime/Node-LICENSE"));
+await mkdir(join(outputRoot, "licenses"), { mode: 0o755 });
+for (const [name, source] of [
+  ["WebEnvoy", join(appRoot, "../../LICENSE")],
+  ["Agent-entry", join(appRoot, "LICENSE")],
+  ["Harbor", join(appRoot, "../../services/harbor/LICENSE")],
+]) await cp(source, join(outputRoot, "licenses", `${name}.txt`));
+await writeFile(join(outputRoot, "SOURCE.txt"), `WebEnvoy source: https://github.com/WebEnvoy/WebEnvoy/tree/${runtimeState.workspace.commit}\nNode.js source and notices: https://github.com/nodejs/node/tree/v${nodeVersion}\nSee licenses/ and runtime/Node-LICENSE.\n`);
 const nodeHash = sha(await readFile(nodePath));
 if (nodeHash !== sha(await readFile(nodeSource))) throw new Error("standalone_node_copy_integrity_failed");
 

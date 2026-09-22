@@ -13,6 +13,8 @@ assert.equal(manifest.platform, "darwin");
 assert.equal(manifest.arch, "arm64");
 assert.equal(manifest.runtime?.executable, "runtime/node");
 assert.equal(manifest.runtime?.node_version, "24.14.0");
+assert.match(await readFile(join(packageRoot, "runtime/Node-LICENSE"), "utf8"), /Copyright Node.js contributors/);
+assert.match(await readFile(join(packageRoot, "SOURCE.txt"), "utf8"), new RegExp(manifest.workspace.commit));
 await access(join(packageRoot, "bin/webenvoy"), constants.X_OK);
 await access(join(packageRoot, "runtime/node"), constants.X_OK);
 for (const path of ["agent-entry/cli.mjs", "agent-entry/mcp.mjs", "agent-entry/service.mjs", "dist-electron/runtime/core/start-runtime.mjs", "dist-electron/runtime/harbor/start-runtime.mjs"]) {
