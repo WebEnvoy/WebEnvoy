@@ -184,6 +184,12 @@ Provider 操作在单一 owning event loop 上串行，输入队列有界；owne
 
 SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
 
+### #562 CLI 第二宿主补充
+
+S1 #562 将 CLI 定义为既有 Plugin exposure 规则的第二宿主，因此 `DO-PLUGIN-EXPOSURE=triggered`。`webenvoy agent status|skill|connect|describe|operation|query|recovery|skills` 只能投影本文件已冻结的固定 `webenvoy_*` 工具、operation envelope、Principal／Connection／Grant 检查、Core Run／receipt／query 和 unknown/no-replay 语义；CLI 帮助和 request-file 校验不得发明另一套 capability 定义。CLI 不增加 MCP tool、动态 tool filtering、Grant 维度、Provider fallback、owner route 或第二 Runtime／auth。
+
+`access`、`files`、`recovery` 和 `instance` owner 命令属于可信 owner control plane，不进入 Plugin。CLI 的 agent projection 与 Plugin 必须使用相同 operation、授权、Run、结果和恢复事实；差异只允许来自 transport 与 authentication binding。具体命令和退出合同见 [CLI Integration V1](cli-integration-v1.md)。后续改变 CLI／Plugin projection 时必须同时更新本补充和 CLI 规范，不在此处复制 operation 表。
+
 ### #519 Design Obligation disposition
 
 | Trigger | disposition | 依据 |
