@@ -3,7 +3,7 @@
 > 状态：V1 规范性语义规格
 > 版本：1.1
 > 日期：2026-09-14
-> 产品依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)
+> 产品依据：[canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；S0 接受不自动改变本规格既有环境语义、wire 或已取得证据
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品归口：[Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471)
 > 首批执行项：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)

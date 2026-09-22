@@ -4,7 +4,7 @@
 
 仓内文档不得另立产品方向；它们负责解释架构决策、模块关系、规范性语义、稳定合同和实际验证。
 
-Provider 资格、用户选择和职责边界的组织级修订已合并为 [.github#21](https://github.com/WebEnvoy/.github/pull/21)。本仓的 ADR／spec 修订以 canonical v1.5 为准，不复制另一份 canonical；该规范变化时必须先对账。
+Provider 资格、用户选择和职责边界的组织级修订已合并为 [.github#21](https://github.com/WebEnvoy/.github/pull/21)。本仓的 ADR／spec 修订以当前 canonical v1.6 为准，不复制另一份 canonical；该规范变化时必须先对账。
 
 V1 Browser Runtime 的十二类最低结果和来源索引见 [Browser Runtime 能力规格第 4 节](specs/browser-runtime-capabilities-v1.md#4-v1-十二类能力最低结果矩阵)；Issue／PR／verification 仍是当前交付状态和证据的唯一来源。
 

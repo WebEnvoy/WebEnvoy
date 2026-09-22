@@ -1,6 +1,6 @@
 # Console Runtime Contract V1
 
-状态：Accepted；版本：1.0；owner：Harbor / Provider Driver。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续由 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。依据：[canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
+状态：Accepted；版本：1.0；owner：Harbor / Provider Driver。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续由 [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) 承载。依据：[canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)（S0 接受不自动改变本合同既有 wire 或证据）、[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)。
 
 > **2026-09-14 Provider 事实**：本合同保持 Provider-neutral 的 Console/Page Error observation 语义；#519／PR #522 的官方固定 Camoufox 路径只按 `limited` 使用。Console/page-error 事件只有在 Driver 能把事件可靠关联到已登记 Page、当前 `page_ref` 和 `document_generation` 时才投影；popup 首请求关系未知时不创建或猜测 Page ref，迟到的 Page 事件也不回填早先未归属的事件。#523 文件 slice 的安装/真实消费者证据不扩写为完整 Console 验收；旧私有 launch binding、patched/native artifact 仅作历史/恢复事实。
 

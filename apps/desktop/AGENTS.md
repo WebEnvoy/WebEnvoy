@@ -1,9 +1,9 @@
 # Desktop App 执行指南
 
-本目录是 monorepo 内的人类控制台。先遵循仓库根 `AGENTS.md` 和 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)。
+本目录保存冻结的 App 代码和历史设计。先遵循仓库根 `AGENTS.md`、[canonical v1.6 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和已接受的 [ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md)。
 
-- App 管理 Agent 接入、AccountSystem、Account、Profile、Provider、SKILL、Instance、Activity、观看和人工接管；不拥有 Core、Harbor 或 Lode 的业务真相。
-- 首批界面围绕“正在运行／需要我处理／最近完成”、同一真实 Instance、必要确认和接管；不把 Task Thread、完整 Library、三栏布局或站点专属创作编辑器预设为实现前置。
+- App 专属产品化冻结；除安全修复、兼容维护、明确的去 App 隐藏依赖工作或新的重启决定外，不新增界面和产品流程。
+- 授权、监督、接管、交还、撤权、停止和恢复必须可由无 App 的可信入口完成；不得把普通 Agent 或 owner 能力做成 App-only。
 - `Activity` 优先投影已有 Run／receipt，不新建第二业务状态机。
 - 没有网站 SKILL 时仍允许授权范围内的通用浏览器；账号绑定清单不是网站访问白名单。
 - App 不复制授权、站点准入、结果判断或 Profile 数据；所有输入经 owner API，观看失败不等于任务失败。

@@ -1,8 +1,10 @@
 # WebEnvoy App
 
-> 当前产品定位和 V1 约束见 [canonical v1 规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；首批以 Activity、同实例现场、必要确认和人工接管为主。
+> 状态：App 专属产品化冻结。[S0 #561](https://github.com/WebEnvoy/WebEnvoy/issues/561) 的三仓基线已于 2026-09-18 合并并回读，[ADR 0014](../../docs/adr/0014-browser-infrastructure-and-app-freeze.md) 已接受。冻结不删除现有代码，也不取消无 App 的授权、监督、接管、交还、撤权、停止和恢复能力。
+>
+> 下文保留为历史产品与设计参考，不是 V1 必需构成、默认实施顺序或新的交付承诺。除安全修复、兼容维护、去除 App 隐藏依赖或另有明确重启决定外，不从本文启动 App 功能开发。
 
-WebEnvoy App 是 WebEnvoy 的统一人类用户入口。
+WebEnvoy App 曾被规划为统一人类用户入口；当前它是冻结的可选产品壳。
 
 它面向市场、运营、产品经理等非技术用户，承载确定性网页任务的自动执行入口、WebEnvoy 全局运行事实观测、站点技能管理、账号身份管理、浏览器执行现场和异常处理入口。
 
@@ -65,7 +67,7 @@ Browser 是 Harbor 账号身份和执行现场的人类工作台，也不因 Tas
 
 ## 与 WebEnvoy / Harbor / Lode 的关系
 
-- WebEnvoy App 负责统一人类用户入口和全局观测；
+- WebEnvoy App 在历史设计中负责统一人类用户入口和全局观测；
 - WebEnvoy Core 负责 API Server、Core Runtime、任务执行、结果归一和 Run Record；
 - Lode 负责网站经验、能力包、capability package metadata、模板、测试样例、版本和失效标记；workflow package 是后续扩展。
 - Harbor 负责账号身份、浏览器环境、Identity Runtime Session、Viewer、人工接管、provider 能力事实和运行证据。
@@ -79,9 +81,9 @@ WebEnvoy App
 
 App 不绕过 Core 写任务记录，不保存 Lode 能力资产真相，也不绕过 Harbor API 操作浏览器会话。
 
-## 第一阶段产品表面
+## 历史第一阶段产品表面
 
-第一阶段按 Desktop App first 设计。开发期可以用本地 Web UI 调试，但最终产品形态、信息架构、连接状态和交互优先级按 Desktop App 收敛。
+以下 Desktop App first 设计已经被基础设施优先和 App 冻结决定替代，不再约束 V1 产品形态、信息架构、连接状态或交互优先级。
 
 当前技术基线见 [ADR 0007](docs/adr/0007-desktop-app-technical-baseline.md)。当前桌面设计 checkpoint 见 [ADR 0008](docs/adr/0008-desktop-ui-design-checkpoint.md) 和 [DESIGN.md](DESIGN.md)。
 

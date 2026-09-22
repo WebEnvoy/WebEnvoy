@@ -4,8 +4,6 @@
 
 依据：[Observation Completeness and Target Identity V1](observation-targets-v1.md)、[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md)、[Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md) 与当前已接受的 canonical v1.6（已合并 [.github#27](https://github.com/WebEnvoy/.github/pull/27) 与 [#571](https://github.com/WebEnvoy/WebEnvoy/pull/571)）。
 
-本文件只表示规格接受；#555 的实现、schema/fixture、Chrome/Camoufox、正式 installed Plugin 与真实第三方 Agent 验收仍未完成。
-
 本文件是 Observation／Plugin 对 #555 的专门补充：在 #540 已有可信 target 上增加**目标当前状态**和**目标级动作适用性**，并冻结状态变化时的动作前检查。它不建立第二套 Page/RefMap、operation registry、权限系统或 Agent planner；未被本文件改变的 Observation、Plugin、Grant、Page、Run、ControlLease 和 unknown/no-replay 语义继续沿现有合同。
 
 ---

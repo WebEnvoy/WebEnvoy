@@ -8,6 +8,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 | 规格 | 归口 | 作用 |
 | --- | --- | --- |
+| [Model Usage V1](model-usage-v1.md) | [产品 FR #558](https://github.com/WebEnvoy/WebEnvoy/issues/558)、[条件验证 #559](https://github.com/WebEnvoy/WebEnvoy/issues/559) | Proposed：通用模型配置、用途、外发与费用、有界网页循环、DONE/BLOCKED、接管／交回和结果核验；非 V1 发布阻塞，不表示模型已支持。 |
 | [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 定义 V1 Browser Runtime capability 类别、支持／证据状态、权限、数据边界、恢复和完成条件。 |
 | [Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510) | 冻结同一 Instance 内多 Page、document generation、popup/opener、URL/origin authorization、redirect、bounded close tombstone、native tab handoff 的 Page/ref 连续性、旧观察失效、receipt 与关系异常安全暂停语义。 |
 | [Profile Environment V1](profile-environment-v1.md) | [Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471) | 定义长期 Profile 环境的 configured／effective／pending／observed／drift、Provider owner、连续性和验证。 |
@@ -16,7 +17,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Console Runtime Contract V1](console-runtime-contract-v1.md) | [Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498) | 冻结 console/page-error levels、文本截断脱敏、source location 和生命周期语义。 |
 | [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md) | [Work Items #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508) | 固定诊断与已安装 SKILL capability→MCP projection、版本、availability、授权与恢复语义。 |
 | [Observation Completeness and Target Identity V1](observation-targets-v1.md) | [Work Item #540](https://github.com/WebEnvoy/WebEnvoy/issues/540)、[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 已接受的 Page/Plugin 专门补充：snapshot 完整性、同批续读、标签/同名上下文、真实目标身份、局部失效、版本和 O1—O10 验收；不新增权限或浏览器后端。 |
-| [Form State and Target Actionability V1](form-state-actionability-v1.md) | [Work Item #555](https://github.com/WebEnvoy/WebEnvoy/issues/555)、[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 已接受的 Observation/Plugin 专门补充：在可信 target 上冻结普通表单当前状态、目标级既有动作适用性、状态新鲜度、准确未派发拒绝、兼容与 S1—S8 验收；不新增 planner、权限或浏览器能力。 |
+| [Form State and Target Actionability V1](form-state-actionability-v1.md) | [Work Item #555](https://github.com/WebEnvoy/WebEnvoy/issues/555)、[#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 已接受的 Observation/Plugin 专门补充：在可信 target 上冻结普通表单当前状态、目标级既有动作适用性、状态新鲜度、准确未派发拒绝、兼容与 S1—S9 验收；不新增 planner、权限或浏览器能力。 |
 | [Capability Discovery and Operation Guidance V1](capability-discovery-v1.md) | [Work Item #539](https://github.com/WebEnvoy/WebEnvoy/issues/539)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 已接受实施合同：单 operation 的静态规则与上下文说明、五维状态、只读无派发、单一参数定义、版本和验收；不表示已实现或新增执行权限。 |
 | [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md) | [Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)、[#519](https://github.com/WebEnvoy/WebEnvoy/issues/519) | 冻结 #519 官方固定来源、完整 `launch_options`/`context_options` exact replay、popup 受限边界和 #499 历史 continuity；不暴露私有材料，installed/live evidence 另行记录。 |
 | [Camoufox Native Provider Contract V1](camoufox-native-provider-contract-v1.md) | [Phase 1 native Camoufox validation #504](https://github.com/WebEnvoy/WebEnvoy/issues/504)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510)、[Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 历史 test-only Camoufox native snapshot、Playwright adapter、固定构件、Page relation、background create、safe-return close、reload 适配、v2 native tab-handoff/CSS variant 及兼容/回滚边界；2026-09-12 起不作为当前 launch/support 路线，现行退役事实见规格正文。 |
@@ -25,9 +26,29 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 | [Managed Browser Files V1](browser-files-v1.md) | [Work Item #523](https://github.com/WebEnvoy/WebEnvoy/issues/523)，授权语义 [#544](https://github.com/WebEnvoy/WebEnvoy/issues/544) | 冻结 owner 文件材料、`file.upload`/`file.download` 的 Page/ControlLease/Grant 绑定、受限格式与配额、原子持久化、结果/对账、撤销/过期，以及 legacy/v2 下载归属边界。 |
 | [Grant Wire Contract V1 (v1.4)](grant-wire-contract-v1.md) | [Work Items #505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、[#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、[#544](https://github.com/WebEnvoy/WebEnvoy/issues/544)、[#547](https://github.com/WebEnvoy/WebEnvoy/issues/547) | 固定 recovery、SKILL/file scope、Provider preference、`scope_semantics`、owner v2 Grant/policy lifecycle、digest CAS、可信 stopped、严格 reader 拒绝和历史兼容边界。 |
 
+## 已登记、尚未编写的规格
+
+| 代号 | 真实 Issue | 计划归口 |
+| --- | --- | --- |
+| S1 | [#562](https://github.com/WebEnvoy/WebEnvoy/issues/562) | CLI 与上游集成；实现前冻结必要 discovery、调用、安装与授权合同。 |
+| S2 | [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563) | 站点 SKILL 包与受管脚本执行；复用 Core／Harbor 授权、Run、结果和恢复。 |
+| S3 | [#564](https://github.com/WebEnvoy/WebEnvoy/issues/564) | 站点资产创作、转换、修复与验证；不建立第二套资产状态机。 |
+| S4 | [#565](https://github.com/WebEnvoy/WebEnvoy/issues/565) | 主动 Network 能力；扩展现有 Network 合同。 |
+| S5 | [#566](https://github.com/WebEnvoy/WebEnvoy/issues/566) | 视觉观察与交互；与 Page、Grant、控制和外发边界对齐。 |
+| S6 | [#567](https://github.com/WebEnvoy/WebEnvoy/issues/567) | 浏览器环境质量、隐身和性能；复用现有 Profile／Provider 事实。 |
+
+本批不创建上述空 spec、schema、fixture 或验证报告。Spec Issue 关闭只表示规范已接受，不表示对应功能、真实 Agent 路径或 V1 验收已经完成。
+
+## 可选模型辅助的设计义务（Proposed）
+
+- #558/#559：方向与行为由 [ADR 0013](../adr/0013-optional-model-assisted-browser-tasks.md) 和 [Model Usage V1](model-usage-v1.md) 承接，正式接受须先完成 canonical 对应修订；不以文档接受、SDK 接口或模型目录可见冒充功能完成。
+- 正式模型能力发现／任务委托／查询／退出投影形成时，`DO-PLUGIN-EXPOSURE = triggered`；新增可委托模型使用、数据外发或持久跨进程授权字段时，`DO-GRANT-WIRE = triggered`，不能继承 #555 的 `not-triggered`。
+- 完整模型设置、导航或活动工作台改变时，`DO-APP-IA = triggered`；无论是否触发完整 IA，最小 owner 配置、外发、费用和停止入口都必须定义并验收。Browser、Network、Console 和 Provider-private schema 未实际改变时不扩围，实际改变时重判。
+- 本轮仅建立语义和采用边界，不新增运行依赖、字段枚举、空 schema/fixture、持续监控或空验证报告；#555/#556/#557 独立推进，模型方向不增加当前 V1 发布阻塞。
+
 ## 使用规则
 
-1. 先读取组织级当前已接受 [canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)（已合并 [.github#27](https://github.com/WebEnvoy/.github/pull/27) 与 [#571](https://github.com/WebEnvoy/WebEnvoy/pull/571)）和适用 Accepted ADR。
+1. 先读取组织级 [canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
 2. Spec 定义语义；Issue 定义当前交付切片；verification 只保存实际证据。
 3. 当前实现缺失不能反向缩小 spec；需要缩小 V1 范围时先更新产品决策。
 4. Provider 私有 API、站点 selector、临时测试字段和未经接受的草稿不能进入公共 spec。
@@ -47,7 +68,7 @@ Work Item 进入实现前，作者必须逐项判断以下 trigger，并在 Issu
 | `DO-NETWORK-CONTRACT` | 第一次形成稳定跨 Driver→Harbor→Core→Plugin 的 Network public payload，或新增 response body、intercept、modify 等公共能力 | 新建或更新 `docs/specs/network-runtime-contract-v1.md`，冻结 operation/event/result、生命周期、敏感字段过滤、权限、Page/Instance binding 和结束/丢失语义 |
 | `DO-CONSOLE-CONTRACT` | 第一次形成稳定跨层 console／page-error public payload，或扩展日志级别、source、exception 等公共结构 | 新建或更新 `docs/specs/console-runtime-contract-v1.md`，冻结公共错误结构、截断、脱敏、Page binding、生命周期和权限 |
 | `DO-PROVIDER-PRIVATE-SCHEMA` | WebEnvoy 开始持久化 Provider-specific environment bundle、fingerprint/seed config、provider config version 或启动回灌结构 | 建立 versioned Provider-private contract/schema，并说明 owner、迁移、兼容与回滚；若事实证明全部由 Provider/Profile 自持久化，则记录明确的 `not-triggered` 证据，不创建空 schema |
-| `DO-APP-IA` | 开始新增或重构完整资源工作台、全局导航、Library／Activity、多实例管理等正式产品 surface，而不只是既有最小 owner 授权／确认／接管入口 | 更新现有 App IA 权威文档或创建被明确指定的新 IA/architecture；不得由 UI 组件反向发明对象、状态或权限 |
+| `DO-APP-IA` | 有明确重启 App 产品化的决定，并开始新增或重构完整资源工作台、全局导航、Library／Activity、多实例管理等正式产品 surface | 更新现有 App IA 权威文档或创建被明确指定的新 IA/architecture；可信 CLI／宿主确认不是重启整个工作台，不得由 UI 组件反向发明对象、状态或权限 |
 
 ### 判定规则
 
