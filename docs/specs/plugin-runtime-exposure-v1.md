@@ -40,7 +40,55 @@
 | Provider preference and create selection | `webenvoy_operation`：`provider.preference.read`、`provider.preference.set`、`provider.preference.clear`；动态模板的 `profile.create` 可带 `provider_id` | 每项需同名 `allowed_operations`；固定模板拒绝请求级 Provider；详见 [Provider Selection V1](provider-selection-v1.md)。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
+| 已安装 site SKILL 的任务元数据 | 既有 `webenvoy_skills`：`skill.inspect` 的可选 `result.skill.site_tasks` | 使用 `webenvoy.site-task-summary/v1`；只投影 Lode 声明且通过现有 `skill_scope`/task scope、来源和完整性过滤的摘要，不做 Runtime 预检或执行。 |
+| 已安装 site SKILL 的受管任务 | `webenvoy_task`：`task.submit`、`task.query`、`task.stop` | 使用 v1.5 `task.*` Grant、site-task 五组 task scope、Lode pinned inline input carrier 和 `webenvoy.managed-task-operation/v1`；内部复用 Core Task/Run/result/unknown，不走 owner `/tasks`/`/runs`。 |
 | 受管浏览器文件 | `webenvoy_operation`：`file.upload`、`file.download`；既有 `webenvoy_query` 查询原 Run/receipt | `file_scope`、task `file_refs`、Profile/Principal/Grant、Page/document、目标新鲜度和 ControlLease 的交集；owner `files import/inspect/export/revoke/delete` 只走受信入口。结果为 `webenvoy.browser-file-result/v1`，正文和路径不投影，详见 [Managed Browser Files V1](browser-files-v1.md)。 |
+
+### #563 site-task execution projection
+
+`webenvoy_skills.skill.inspect` 仍是 site SKILL task 的唯一 metadata entrypoint。它保持
+既有输入和 `webenvoy.skill-operation-result.v1` 外壳；获准的 Lode revision 可在
+`result.skill.site_tasks` 附带 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)
+定义的 `webenvoy.site-task-summary/v1`；其中 package-level `package_digest` 是 Agent
+提交时唯一可用的 digest 来源。`package_ref` 是不带版本的稳定包身份，并与
+`result.skill.skill_ref` 对应；`revision_ref` 才带版本和 source commit。task 摘要完整
+投影 Lode 声明的 script entrypoint identity/ABI（若有）、`required_capabilities`、
+`known_branches`、`verification` 和 `data_handling`，其中单个 `capability_ref` 只是兼容
+主摘要，不能代替 required set；合法 script-only task 的 required set 可为空，但不因此
+变成 `knowledge_only`，当前 TaskIntent 映射边界见 execution §4.1。
+该投影按 `skill_scope`、source/revision、task scope 和包完整性过滤，不返回未授权 task
+名称、脚本正文、路径、Grant、Profile、Page、OS identity 或 live evidence；
+`knowledge_only` 仍可 install/enable/read。
+
+普通 Agent 的执行、查询和停止只通过新的 `webenvoy_task` projection。它固定调用
+`POST /managed-tasks/operations`，请求版本为 `webenvoy.managed-task-operation/v1`，
+响应版本为 `webenvoy.managed-task-operation-result/v1`，operation 只有
+`task.submit`、`task.query`、`task.stop`。三者都携带一个 `grant_id` 和精确五组
+`task_scope={operations,skill_refs,source_refs,profile_refs,origins}`；MCP arguments 不
+包含 `connection_id`，Connector 在 HTTP JSON body 中注入必填的同名字段，直接 API
+消费者先 connect 再在相同字段提交连接 ID；Core 核对它属于 bearer
+Principal 且仍有效，不在多个活动 connection 中猜选。重连后新 connection 可按同一
+Principal 的当前有效 Grant/scope 查询原 Run。请求形状、package/revision/digest pin、
+Lode pinned inline JSON input carrier、过滤顺序和 broker 语义见 [Site SKILL Execution V1 §4.3](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)。
+
+Managed-access API 必须把该 path 纳入现有 Agent credential route，同时保留 owner
+`/tasks`/`/runs` bearer gate。它不能把 owner bearer 作为代理，不能调用 `webenvoy_query`
+替代 `task.query`，也不能从 `skill.inspect` 旁路 dispatch。Core 先核对 bearer-bound
+Principal、context-bound Connection、一个当前有效 Grant、v1.5 `task.*` operation、`skill_scope`、
+package lifecycle、Profile/ControlLease/Runtime，再内部生成同一
+`webenvoy.task-intent.v0` 并调用既有 Task/Run service。
+
+`task.submit` response 是 bounded Run projection；终态 `result` 使用既有
+`webenvoy.result-envelope.v0`，`failure` 使用既有 `FailureRecord`。`task.query` 只读原
+Run/receipt；`task.stop` 调用现有 cancellation/request-cancel service。响应丢失后，
+`task.query` 只读接受 `run_id` 或原 submit `original_idempotency_key` 二选一 selector，
+再按原 Run ref stop；不重发 submit。`dispatched`/`unknown_outcome` 不换 key 重放。稳定的
+route-level invalid/version/access/conflict code 沿执行合同与现有 managed-access
+mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。CLI 是 S1 command root
+下的 site-task 专门扩展，固定命令为
+`webenvoy agent task submit|query|stop --request-file <path> --client-file <path>`；
+它不修改既有 `webenvoy agent operation` 的 managed-browser envelope。S1 只拥有参数
+解析和 trust channel，不拥有 task 字段、授权或 Run 状态。
 
 ## 十二类基线与 Plugin checkpoint
 
@@ -182,7 +230,20 @@ Provider 操作在单一 owning event loop 上串行，输入队列有界；owne
 它是公共 lifecycle/结果边界，不增加 MCP operation、Grant 维度或 Provider 私有
 协议，也不把确定性 fake 证据扩写成 installed/live/plugin checkpoint。
 
-SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
+SKILL 资产管理 operation 不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider；site task 的脚本执行沿本文件 #563 managed-task projection 和 S1 Agent-side managed worker 合同，不从管理 operation 旁路。这里仍不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。
+
+### #563 Design Obligation addendum
+
+`DO-PLUGIN-EXPOSURE=triggered`：`webenvoy_task`、`POST /managed-tasks/operations`、
+`webenvoy.managed-task-operation/v1`、`webenvoy.managed-task-operation-result/v1`、
+submit/query/stop 的入口、版本、输入过滤、错误和兼容边界已在本文件与 Site SKILL
+Execution V1 冻结；结果仍归属 Core Task/Run/Result Envelope。
+
+`DO-GRANT-WIRE=triggered`：#563 新增的 `task.submit`、`task.query`、`task.stop` 只由
+[Grant Wire Contract V1](grant-wire-contract-v1.md#site-task-agent-projection-and-inline-input-contract-v15)
+拥有；inline input carrier 的 schema、大小和敏感边界由 Site SKILL Execution 与 Lode
+package 合同共同约束，不新增 Grant 输入字段。`webenvoy_task` 不复制 Grant、Profile
+policy、OS identity 或 broker authorization。
 
 ### #562 CLI 第二宿主补充
 

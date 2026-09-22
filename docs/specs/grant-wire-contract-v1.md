@@ -1,10 +1,10 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.4（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 与受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围和 managed-browser scope semantics 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.5（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523) 与站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics 和 site-task Agent projection 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -90,6 +90,41 @@ SKILL 请求的 `task_scope` 必须恰好包含 `operations`、`skill_refs`、`s
 
 来源 revision 的批准清单和不可变 commit/blob/SHA-256 身份由 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。Grant 不得携带本地路径、正文、Cookie、Token 或 Provider-private 数据；错误、list 和 inspect 也不得泄露这些内容。
 
+## Site task Agent projection and inline input contract V1.5
+
+站点 SKILL 的普通 Agent 执行面固定为 [Site SKILL Execution V1](site-skill-execution-v1.md)
+定义的 `webenvoy_task` projection。`allowed_operations` 新值为 `task.submit`、
+`task.query` 和 `task.stop`；旧 Grant 缺少这些值即没有对应 Agent 能力。它们不是 owner
+`/tasks`、`/runs` 的 bearer 代理，也不把 Plugin 的 `skill.inspect` 元数据读取变成执行
+许可。Core 仍只拥有一个 Principal、Connection、Grant、Run 和结果事实。
+
+Site task 的输入不是新的 Grant 维度。普通数量、筛选条件和分页参数可以随
+`webenvoy_task` 请求直接提交，但请求必须使用 Lode 声明的
+`webenvoy.managed-task-inline/v1` carrier、固定 `schema_ref` 和有界 JSON 值；Grant 只
+决定 `task.submit`/`task.query`/`task.stop` operation 以及已有 SKILL、Profile、origin
+等范围。inline 值只在受管 admission 到 worker 调用期间存在，不进入 Grant、Core durable
+Run 或第二材料注册表。没有输入的 task 仍可提交；需要现有 file/material ref 的能力继续
+沿其既有 Grant 合同消费，不能借 site task carrier 扩权。
+
+site-task 请求的 `task_scope` 是版本化 projection 的请求范围，恰好含
+`operations`、`skill_refs`、`source_refs`、`profile_refs`、`origins` 五组数组。它只能
+收窄本 Grant：`operations` 对应本次一个 `task.*` operation，
+`skill_refs` 必须包含与 Lode 稳定 `package_ref` 一一对应的既有 `skill_ref`（不带版本），
+`source_refs` 必须覆盖本次选中的完整 `revision_ref`/approved source；二者共同覆盖获准
+package/revision，`profile_refs/origins` 必须覆盖
+任务声明实际需要的浏览器范围（无浏览器输入时为空）。请求还必须通过任务声明的
+capability/action、
+Profile ceiling、ControlLease、Runtime 和现有 egress 检查。未知字段、未声明 carrier 的
+inline JSON、`file_refs`、路径、selector、Cookie、Token、credential、Provider handle 和
+Agent 自带 allowlist 拒绝。`task.query`/`task.stop` 必须由同一 Principal 的当前有效 connection
+和 Grant 重新授权；重连得到的新 connection 可以查询或停止，只要当前 Grant/task scope
+覆盖原 Run 的 package/revision 与目标范围。不能以新 key、另一个 Principal 或当前页面
+状态重放或改写原 Run。
+
+v1.5 reader 读取不含 `task.*` operation 的旧 Grant 时必须成功，但该 Grant 没有 site-task
+Agent 能力；旧严格 reader 遇到 `task.*` operation 必须明确拒绝，不能忽略后继续执行。
+该 extension 不改变既有 `skill_scope`、browser task scope 或 file scope 的旧语义。
+
 ## Owner 入口与历史
 
 Owner 固定使用本机受信的 `access register`、`access grant`、`access revoke`、`access list` 管理 Principal、Grant 及 `skill_scope`；owner credential 只在本机/owner API 内部读取，不进入 Agent MCP。Agent 不能写自己的 scope，网页操作 Grant 不能替代 owner 授权。
@@ -148,4 +183,4 @@ Core 持久化以下 v1 对象；字段未知、缺失、类型错误、额外�
 
 ## 非目标
 
-本合同不新增第二权限系统，不赋予 Agent owner backup/plan/apply，不把 SKILL scope 变成网页 origin 白名单，不修改 Network/Console/Provider-private schema，也不定义不存在的 fixture 或验收路径。Plugin 投影和八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)。
+本合同不新增第二权限系统，不赋予 Agent owner backup/plan/apply，不把 SKILL scope 变成网页 origin 白名单，不修改 Network/Console/Provider-private schema，也不定义不存在的 fixture 或验收路径。Plugin 的 SKILL 投影、`webenvoy_task` site-task projection 和八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)。

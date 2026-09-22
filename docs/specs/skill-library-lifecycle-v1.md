@@ -36,7 +36,7 @@
 | `webenvoy.skill-library.v1` root | `schema_version`、`assets`、`operations` | Core data-root 的唯一受管库状态。 |
 | `assets[]` / revision | `skill_ref`、`asset_name`、`source_repository`、`source_path`、`revisions[]`、`enabled`、`enabled_revision_ref`、`record_version`、`history[]`；revision 含 `revision_ref`、`source_ref`、`source_commit`、`source_blob`、`version`、`path`、`content_sha256`、`content_bytes`、`compatibility`、`installed_at` | `history` item 含 `event`、可选 revision/source/receipt ref、`at`、`run_id`；不保存正文。 |
 | `operations[]` | `run_id`、`principal_id`、`request_hash`、`operation`、`metadata`、`committed_at` | `metadata` 是非正文摘要；含 `content` 的持久记录拒绝。 |
-| `webenvoy.skill-operation-result.v1` | result `schema_version` 加统一 `{ok, run_id, status, result?, failure?}`；result 按 operation 使用 `skills`/`skill`、`revision`、`idempotent`，read 使用 `skill_ref`、`revision`、`receipt` | 即时 `skill.read` 响应可附真实 `content`；Run、operation metadata 和 query 不保存或返回正文。 |
+| `webenvoy.skill-operation-result.v1` | result `schema_version` 加统一 `{ok, run_id, status, result?, failure?}`；result 按 operation 使用 `skills`/`skill`、`revision`、`idempotent`、可选 `skill.site_tasks`（`webenvoy.site-task-summary/v1`），read 使用 `skill_ref`、`revision`、`receipt` | 即时 `skill.read` 响应可附真实 `content`；Run、operation metadata 和 query 不保存或返回正文。site task summary 只有获准的包元数据，不携带脚本正文或现场数据。 |
 | `webenvoy.skill-read-receipt.v1` | `receipt_ref`、`skill_ref`、`revision_ref`、`source_ref`、`content_sha256`、`content_bytes`、`record_version`、`read_at` | receipt 证明已校验的版本和字节摘要，不携带正文。 |
 
 库状态与 operation 摘要在受管锁内原子提交；提交后既有 Run 只是结果投影。若 Run 投影或响应丢失，恢复只从已提交的 operation metadata 补齐 Run/result envelope，不重新执行 install、enable、read、update、rollback 或 disable。
@@ -55,13 +55,141 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
 
 `skill.list`/`skill.inspect` 只返回当前范围内的批准元数据和本地状态，不返回未授权 revision、物化内容或本地路径。Owner 只通过现有受信入口的 `access register`、`access grant`、`access revoke`、`access list` 管理资产范围；凭据只在 owner/本机内部流转，不能放入 MCP。
 
+### #563 site task metadata projection
+
+`skill.inspect` 保持既有输入和 `webenvoy.skill-operation-result.v1` 外壳；当获准 revision
+是 Lode site SKILL 且 manifest/task declaration 通过完整性校验时，`result.skill` 可附
+一个 `site_tasks` 对象：
+
+对 Lode site package，本投影固定既有 `result.skill.skill_ref` 与
+`site_tasks.package_ref` 使用同一个稳定包身份；两者都不带版本后缀。`revision_ref`
+才绑定选中的 `version` 和不可变 source commit。现有
+`skill_ref=webenvoy-browser-reference` 仍是独立的历史资产，不与这个 Lode 包混同。
+因此 package 升级时 `skill_ref`/`package_ref` 保持不变，只替换完整的
+`revision_ref`、`version` 和 `package_digest`；改包名、站点或包边界才产生新的
+`package_ref`/`skill_ref`。
+
+```json
+{
+  "schema_version": "webenvoy.site-task-summary/v1",
+  "package_ref": "lode://site-skill/example/catalog",
+  "revision_ref": "lode://site-skill/example/catalog@1.0.0#<source-commit>",
+  "package_digest": "sha256:<64-lowercase-hex>",
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "task_ref": "catalog-read",
+      "entrypoint": {
+        "script_ref": "<script-ref>",
+        "script_version": "1.0.0",
+        "script_sha256": "sha256:<64-lowercase-hex>",
+        "runtime_kind": "webenvoy.site-skill-script-abi/v1",
+        "broker": "webenvoy.site-skill-broker/v1"
+      },
+      "capability_ref": "lode:capability/catalog-read",
+      "capability_version": "1.0.0",
+      "source_ref": "<approved-source-ref>",
+      "lock_ref": "lode://lock/site-skill/example/catalog@1.0.0",
+      "required_capabilities": [
+        {
+          "ref": "lode:capability/catalog-read",
+          "version": "1.0.0",
+          "source_ref": "<approved-source-ref>",
+          "lock_ref": "lode://lock/site-skill/example/catalog@1.0.0"
+        }
+      ],
+      "operation_id": "catalog_read",
+      "action": "read",
+      "input_schema_ref": "lode://schema/example/catalog-read-input@1.0.0",
+      "input_carrier": "webenvoy.managed-task-inline/v1",
+      "input_max_bytes": 65536,
+      "output_schema_ref": "lode://schema/example/catalog-read-output@1.0.0",
+      "post_check_ref": "lode://check/example/catalog-read@1.0.0",
+      "known_branches": ["catalog-page"],
+      "verification": {
+        "post_check_ref": "lode://check/example/catalog-read@1.0.0",
+        "required_evidence_refs": ["catalog-read-result"]
+      },
+      "data_handling": {
+        "input_sensitivity": "public",
+        "output_sensitivity": "public",
+        "external_egress": "none"
+      },
+      "task_support": "declared",
+      "runtime_state": "not_evaluated"
+    }
+  ]
+}
+```
+
+`site_tasks` 只投影 Lode 已声明的 package-level `package_ref`/`revision_ref`/`version`/
+`package_digest`、task `task_ref`、`entrypoint` 的有界 script 身份/ABI、完整的
+`required_capabilities`、operation/action、input schema/carrier/size、output schema、`known_branches`、verification requirements
+和 `data_handling`；不投影脚本源、输入正文、文件路径、Grant、Profile、Page、OS identity
+或 live evidence。`capability_ref`/`capability_version`/`source_ref`/`lock_ref` 是兼容的
+主能力摘要；有 Lode capability refs 时必须与 `required_capabilities` 中的一个条目相等，
+不能用单个 `capability_ref` 代替完整 required set；script-only task 没有这些摘要字段。
+`required_capabilities` 是必需数组，允许为空；非空时完整来源是 Lode task
+`entrypoint.capability_refs` 及每项已解析的 version/source/lock，空数组只有在 Lode
+`entrypoint.script_ref` 存在且未声明 capability refs 时合法，不能从 script 推导 capability。
+有 `script_ref` 时，`entrypoint` 的 `script_version`、`script_sha256`、`runtime_kind` 和
+`broker` 必须来自 Lode script declaration；不返回 script path 或源代码。若包没有声明
+`known_branches`，该字段可省略，不能由运行时猜测；`verification.post_check_ref` 和
+`required_evidence_refs` 来自同名 Lode 声明，`data_handling` 的敏感级别与外发值来自
+任务声明及 `inputs.sensitivity`，均为静态元数据。示例中的顶层 `post_check_ref` 是现有
+消费者的兼容别名，必须与 `verification.post_check_ref` 完全相等，不是第二个验证来源。
+`task_support` 只有 `declared` 和
+`knowledge_only`：没有完整 task declaration 的 package 返回空任务或
+`knowledge_only`，但完整的 capability-backed 或 script-only task 都保持 `declared`，不因
+缺少 capability refs 降为 `knowledge_only`；`runtime_state` 在这个
+不带 Profile/Harbor context 的管理 operation 中固定为 `not_evaluated`。
+
+字段的必需性、来源和过滤边界固定如下；这些字段由本 lifecycle projection 唯一拥有，
+Plugin 和 execution 只消费它们：
+
+| 字段 | 必需性 | 唯一来源与投影规则 | 过滤条件 |
+| --- | --- | --- | --- |
+| `package_ref`、`revision_ref`、`version`、`package_digest` | 必需 | Lode manifest；`package_ref` 必须是稳定身份，`revision_ref` 必须是该包的完整版本/source commit | manifest identity、revision、digest 不一致则拒绝 |
+| `tasks[].entrypoint` | 必需；script 字段条件出现 | Lode task/script declaration 的 `script_ref`、version/hash、`runtime_kind`、broker ABI；不投影 path | 至少存在 script ref 或 capability refs；script ref 无法解析、ABI/hash 不匹配则过滤 |
+| `tasks[].required_capabilities` | 必需，可为空 | Lode `entrypoint.capability_refs` 与每项的 version/source/lock 解析结果 | 非空时必须完整覆盖声明集合；缺项、重复项、无法解析或与主摘要不一致则过滤；空数组不得补 capability |
+| `tasks[].capability_ref` 等主摘要 | 有 capability refs 时必需；script-only 时省略 | `required_capabilities` 中被选作主显示项的同一条目 | 仅作显示/兼容字段，不能单独通过授权或执行过滤；不得从 script_ref 生成 |
+| `tasks[].known_branches` | 可选 | Lode task `known_branches` 的有界 opaque refs | 缺失时省略；不从 Page、Runtime 或模型输出补全 |
+| `tasks[].verification` | 必需 | Lode `verification.post_check_ref` 与 `required_evidence_refs` | 任一 ref 缺失、越界或未获准则过滤；不把 HTTP/exit code 当业务验证 |
+| `tasks[].data_handling` | 必需 | Lode `data_handling` 与 `inputs.sensitivity` 的固定枚举值 | 未声明、未知值或与包声明不一致则拒绝；该字段不能扩 Grant |
+
+过滤顺序固定为：先用现有 `skill_scope.skill_refs/source_refs` 与 task scope 确认
+asset、source 和 revision 可见，再校验包完整性和 task declaration，最后按上表完成
+字段映射并只返回通过校验的 task 摘要。entrypoint 既没有 script ref 也没有 capability
+refs 的声明不是完整 task；合法 script-only task 仍返回静态摘要和 `task_support=declared`。
+未授权 revision/task 不得以名称、路径、正文
+或错误细节泄露；source 缺失/损坏、local modified、not installed、disabled、incompatible
+和 access denied 沿本文件已有 `managed_skill_*` 错误返回，不建立 site-task 错误表。
+跨版本时，新的 revision 必须重新通过同一 manifest、entrypoint/script 完整性、required
+capability set（可为空）、source/lock、verification 和 data-handling 校验；在途 Run 继续
+使用原 revision 和 digest。
+
+`skill.inspect` 不做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task
+execution 只沿
+[#563 Site SKILL Execution V1](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)
+定义的 `webenvoy_task` / `POST /managed-tasks/operations` projection 提交、查询或
+停止。对 capability-backed task，该 projection 的 package-level `package_ref`/`revision_ref`/
+`package_digest` 与声明的 capability 映射为同一 `webenvoy.task-intent.v0`；对合法
+script-only task，projection 保留 package、revision、script ABI/hash、输入输出和验证
+静态事实，但不从 script 生成 `capability.ref`。当前 Task Intent v0 将 capability 作为
+必填字段，因此 `webenvoy_task.task.submit` 对 script-only 请求沿既有
+`request_invalid`/`capability_ref_required` 边界拒绝且不创建 Run；这不是 `knowledge_only`，
+也不新增 runner、registry、tool 或 runtime preflight。未来若要派发该类任务，必须先有
+兼容的版本化 Task Intent/managed-task 映射并复用本节的既有 script ABI/broker，不在此处
+猜测能力或扩展授权。submit 必须使用 `skill.inspect` 摘要中的同一 digest，Core 再与已安装 manifest 重验；动态结果沿既有 Run/Result
+Envelope 返回，不把 owner `/tasks` 或 `/runs` 暴露给普通 Agent。
+
 ## 生命周期与不变量
 
 | operation | 必需行为 |
 | --- | --- |
-| `skill.list` / `skill.inspect` | 查询获准资产、来源和选择摘要；只记录本次 Run/receipt，不改变资产选择、启用值或物化正文，不读出正文。 |
+| `skill.list` / `skill.inspect` | 查询获准资产、来源、选择摘要和可选 `site_tasks` 元数据投影；只记录本次 Run/receipt，不改变资产选择、启用值或物化正文，不读出正文或 Runtime 事实。 |
 | `skill.install` | 只安装清单中的明确 revision；首次保持 disabled，不自动选择、启用或安装 latest；同一有效请求幂等返回相同摘要。 |
-| `skill.enable` | 只选择已安装、兼容且完整校验的 revision；显式启用。 |
+| `skill.enable` | 只选择已安装、兼容且完整校验的 revision；显式启用。知识-only revision 也可启用，code admission 只在 task dispatch 门检查。 |
 | `skill.read` | 只读取当前 enabled revision；先用同一物化 Buffer 校验 bytes/hash，再返回真实 UTF-8 content 与 receipt。disabled、缺失、修改、损坏、不兼容或越权均拒绝。 |
 | `skill.update` | 只将选择切换到调用者明确指定、已安装且完整校验的目标 revision；不隐式 install/merge/latest，并保持原 `enabled` 值。 |
 | `skill.rollback` | 只切回先前已安装且仍完整可用的历史 revision；不隐式 install/merge/latest，并保持原 `enabled` 值。 |
