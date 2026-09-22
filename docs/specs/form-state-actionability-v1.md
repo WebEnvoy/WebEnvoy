@@ -2,7 +2,9 @@
 
 状态：Accepted（实施规格已接受；功能实现与验收仍由 #555 另行交付）；版本：1.0。owner：Harbor（目标状态、引用与动作前检查）、共享 Provider execution（真实元素与状态采集）、Core（operation 定义、授权与结果）、Plugin（正式 projection）。归口：[Work Item #555](https://github.com/WebEnvoy/WebEnvoy/issues/555)，parent [#497](https://github.com/WebEnvoy/WebEnvoy/issues/497)，消费 [#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)。
 
-依据：[Observation Completeness and Target Identity V1](observation-targets-v1.md)、[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md)、[Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md) 与 canonical v1.5。
+依据：[Observation Completeness and Target Identity V1](observation-targets-v1.md)、[Capability Discovery and Operation Guidance V1](capability-discovery-v1.md)、[Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Page/Document 合同](page-navigation-runtime-contract-v1.md)、[Grant Wire Contract V1](grant-wire-contract-v1.md) 与当前已接受的 canonical v1.6（已合并 [.github#27](https://github.com/WebEnvoy/.github/pull/27) 与 [#571](https://github.com/WebEnvoy/WebEnvoy/pull/571)）。
+
+本文件只表示规格接受；#555 的实现、schema/fixture、Chrome/Camoufox、正式 installed Plugin 与真实第三方 Agent 验收仍未完成。
 
 本文件是 Observation／Plugin 对 #555 的专门补充：在 #540 已有可信 target 上增加**目标当前状态**和**目标级动作适用性**，并冻结状态变化时的动作前检查。它不建立第二套 Page/RefMap、operation registry、权限系统或 Agent planner；未被本文件改变的 Observation、Plugin、Grant、Page、Run、ControlLease 和 unknown/no-replay 语义继续沿现有合同。
 
@@ -61,7 +63,7 @@
 }
 ```
 
-旧消费者可以忽略新增字段；需要 #555 能力的消费者必须检查该 revision，缺失时不得假定状态或动作列表存在。Capability discovery 应把缺失／版本不匹配准确表达为当前 observation enhancement 未提供，而不是把基础 `instance.snapshot` 误报为整体 unsupported。
+`harbor-observation-targets/v1` 仍是外层 schema 标识，但本项新增的 top-level、control 和 `coverage` 字段属于配对的 projection contract，不能按 JSON additive 字段约定交给严格旧 reader。旧 Plugin/reader 若仍按现有 schema（包括 `additionalProperties:false`）解析新 projection，必须在读取／解析边界沿用既有 `observation_format_unavailable` 组件版本错误语义，并提示升级配对的 Plugin/Runtime；不能继续把该 snapshot 当旧格式执行。需要 #555 能力的消费者必须检查该 revision，缺失或版本不匹配时不得假定状态或动作列表存在。Capability discovery 应把缺失／版本不匹配准确表达为当前 observation enhancement 未提供，而不是把基础 `instance.snapshot` 误报为整体 unsupported；版本不匹配不回填默认、不自动 downgrade/replay，也不建立新的协商或旧格式兼容层。
 
 ### 3.2 每个 control 的新增结构
 
@@ -245,8 +247,9 @@ Blocker 可以并存。`blockers=[]` 也不表示已授权、Provider 支持或�
 
 - `harbor-observation-targets/v1` 保持；#555 通过 `target_semantics_revision` 声明增强语义。
 - 实现 PR 必须同步更新当前 Harbor/Core/Plugin response schema、positive/negative fixtures、TypeScript/Python reader 与 packaged schema；spec PR 不虚构尚不存在的新 fixture 路径或验收证据。
-- 旧 Runtime 缺少 revision 时，新 Plugin/consumer 必须准确显示 enhancement 未提供，不把缺失 `state` 当空状态，也不把缺失 `target_actions` 当“没有可执行操作”。
-- 新 Runtime 面对不理解新增字段的旧消费者仍可按原 #540 语义工作；旧消费者忽略新增字段不表示它已具备 #555 用户结果。
+- 旧 Runtime 缺少 revision 时，支持兼容读取的新版 Plugin/consumer 仍可读取 #540 基础 snapshot，但必须准确显示 #555 enhancement 未提供，不把缺失 `state` 当空状态，也不把缺失 `target_actions` 当“没有可执行操作”。
+- 新 Runtime/Harbor 返回含新增字段的 projection 对仍按旧 `harbor-observation-targets/v1` 结构严格解析的旧 Plugin/consumer 不是无条件兼容：top-level、control 或 `coverage` 的严格 `additionalProperties:false` reader 必须沿用 `observation_format_unavailable` 读取错误并提示配对升级。不得静默忽略、回填默认、降级到旧格式或重放原 operation。
+- 读取／解析失败与浏览器 operation 的 dispatch state 分开：`observation_format_unavailable` 不新增 failure_class，也不把底层已派发的 operation 改写为 `not_dispatched`；已派发／`unknown_outcome` 仍按原 Run 查询与 no-replay 合同处理。
 
 ### 8.2 数据与权限
 
@@ -290,6 +293,10 @@ Chrome、Camoufox 分别验证声明范围；共享实现不等于自动继承�
 ### S8 — 对比指标
 
 同一固定任务记录增强前后的无效 operation 调用、不必要重复填写/点击、工具调用数、observation 输出体积、任务耗时与 fresh snapshot 次数。指标用于判断用户收益，不设未经证据支持的 SLA，也不能以减少必要观察／权限检查制造好看数据。
+
+### S9 — 版本配对与读取边界
+
+固定旧 `harbor-observation-targets/v1` 严格 reader 消费含新增 top-level、control、`coverage` 字段的新 projection：在读取／解析边界返回既有 `observation_format_unavailable` 并提示升级配对的 Plugin/Runtime，不回填默认、不自动 downgrade/replay；该读取错误不新增 failure_class，也不改变底层 operation 的 dispatch state。固定新版 Plugin/consumer 消费缺少 `target_semantics_revision` 的旧 Runtime 基础 snapshot：基础 #540 snapshot 仍可用，但 #555 enhancement 必须标记为未提供，不臆造 `state` 或 `target_actions`，并可继续查询原 Run。
 
 ## 10. Design Obligations
 

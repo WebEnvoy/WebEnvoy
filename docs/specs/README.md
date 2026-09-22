@@ -27,7 +27,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 ## 使用规则
 
-1. 先读取组织级 [canonical v1.5](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md) 和适用 Accepted ADR。
+1. 先读取组织级当前已接受 [canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)（已合并 [.github#27](https://github.com/WebEnvoy/.github/pull/27) 与 [#571](https://github.com/WebEnvoy/WebEnvoy/pull/571)）和适用 Accepted ADR。
 2. Spec 定义语义；Issue 定义当前交付切片；verification 只保存实际证据。
 3. 当前实现缺失不能反向缩小 spec；需要缩小 V1 范围时先更新产品决策。
 4. Provider 私有 API、站点 selector、临时测试字段和未经接受的草稿不能进入公共 spec。
