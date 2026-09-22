@@ -297,7 +297,7 @@ function macAclBatchVerifier(paths) {
   for (let offset = 0; offset < values.length; offset += batchSize) {
     const batch = values.slice(offset, offset + batchSize);
     try {
-      const listing = execFileSync('/bin/ls', ['-lde', ...batch], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] });
+      const listing = execFileSync('/bin/ls', ['-ldef', ...batch], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] });
       const lines = listing.split('\n').filter(Boolean);
       if (lines.length !== batch.length) throw new Error('acl_listing_shape_invalid');
       lines.forEach((line, index) => verified.set(batch[index], !line.includes('+')));
