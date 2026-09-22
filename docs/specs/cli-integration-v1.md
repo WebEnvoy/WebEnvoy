@@ -69,6 +69,7 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 - setup 已分离 --data-dir 与 --host-dir，默认创建 data／host 目录为 0700，client 文件为 0600，输出 Agent credential fingerprint，写入安装配置、host MCP 配置、SKILL 和 installation receipt。
 - owner 路径当前通过本地 Runtime service 使用 data-dir/owner.json 中的 owner bearer；Agent MCP 读取 host 中的 webenvoy-client.json，通过独立 client credential 进入 /agent-connections 和 managed operation 路径。当前 owner.json 的 0600 和同 UID 运行仍不足以形成真实边界，目标必须迁移到第 4.2 节 owner-private OS domain。
 - access grant、grant-v2、policy-v2 的输入文件有明确允许字段；files 与 recovery 已有 owner-only 路由；Agent 工具不能执行 owner grant、backup、plan、apply。
+- Core 的 managed-access receipt 以 `idempotency_key` 的 hash 和请求 hash 去重；当前 CLI 的 `access register` 会在省略 key 时随机生成 owner-local key，`recovery inspect` 也会在省略 key 时生成 owner-local key。owner files 的 `/owner/files/import` 可记录可选 `operation_ref`，但现有 `importFile` 只保存该关联值，不以它去重；`export`、`revoke` 和 `delete` 也没有 caller key。
 - Agent MCP 已有 webenvoy_status、webenvoy_skill、webenvoy_connect、webenvoy_describe、webenvoy_operation、webenvoy_query、webenvoy_recovery、webenvoy_skills，并将 browser operation 映射到 /managed-browser/operations。
 - 当前 hostConfig() 仍默认以 Electron process.execPath 加 ELECTRON_RUN_AS_NODE=1 启动 mcp.mjs；client.mjs 和 service.mjs 也以 Electron 运行时作为当前 fallback。当前 setup 输出的 next 仍要求“打开 App 并注册 fingerprint”。
 - 当前 CLI 的未捕获异常主要由 Node 写入 stderr，尚未冻结稳定的参数错误、pending、unknown、权限拒绝和 Runtime 不可用退出码。
@@ -82,6 +83,7 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 | setup 的下一步提示打开 App、在 App 注册 fingerprint | setup 完成安装后只提示 owner 使用本地 access register、access grant，不得要求 App | 更新安装输出和专属安装／入口说明；不得把 App 作为隐藏 fallback |
 | hostConfig 和 Runtime service 依赖 Electron 可执行文件 | 正式安装提供独立 WebEnvoy Runtime launcher；Agent／owner CLI、service、MCP 均可由该 launcher 启动 | 保留现有协议与服务边界，替换正式包的进程／构建依赖；Electron 兼容路径不构成 V1 验收 |
 | 文件模式、同一 UID、不同命令或不同路径 | owner service credential、client credential、OS boundary、服务端 route／Principal 检查和进程环境清除共同形成边界 | 不得用 0600、UID 或命令分组单独声称 owner／Agent 隔离 |
+| access register 的 key 可省略；files 路由没有 caller key | 由 Core receipt 覆盖的 mutation 必须使用调用方提供的 key；files 按第 5.3.1 节的现有 operation ref、目标路径排他、file_ref 状态或 CAS 语义处理，不虚构第二套 receipt | 同步命令语法、帮助、示例和丢响应对账行为；省略 key 的兼容 fallback 不能成为目标合同 |
 | CLI 成功只输出 JSON，失败没有稳定 envelope／exit map | 见第 7 节：结构化结果、stderr、稳定退出码 | 适配层统一处理本地错误与 Core Run 结果；不得泄露 stack trace 或敏感路径 |
 | Agent 只通过 MCP 进入 capability | CLI Agent 投影与 Plugin、API 使用同一请求 envelope、同一 Run、同一 query | CLI 适配层不得创建第二结果或重试机制 |
 | 当前验证文档包含 App 参与步骤 | 验证文档中的旧步骤只能代表历史候选事实，不能覆盖本规范目标 | W1 实现并重新验证 no-App 路径；本轮不篡改历史 verification 证据 |
@@ -167,7 +169,7 @@ owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带�
 4. owner service credential 和 supervisor token 不进入 Agent 进程的 argv、环境、stdin、stdout、MCP payload、SKILL 或客户端可读文件。
 5. 启动 Agent／MCP／脚本时，服务端清除 WEBENVOY_、HARBOR_、CAMOUFOX_ 等私有环境继承，只注入经过安装验证且该角色需要的公开运行绑定。
 6. Core 再次按 Principal、Grant、Profile／operation／Origin／File／Skill scope、有效期、撤销和当前 Runtime safety 检查；本地 socket 可达不等于授权。
-7. owner 控制请求携带清晰的幂等 key 和角色审计信息；Agent 不能通过改写 connection_id、principal_id、run_id 或请求文件冒充 owner。
+7. 需要 Core receipt 的 owner 写请求携带调用方提供的幂等 key；Harbor ControlLease 写请求携带第 5.5.1 节的 CAS 前置状态；角色审计信息始终由 owner route 保留。Agent 不能通过改写 connection_id、principal_id、run_id 或请求文件冒充 owner。
 
 第 5 点的环境清除是纵深措施，不得替代第 1 至 6 点。#568 受管脚本必须复用 Agent data plane；脚本不得调用 owner／supervisor endpoint 或读取 owner-private store。
 
@@ -177,7 +179,7 @@ owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带�
 
 1. owner 从正式安装入口运行 webenvoy setup，指定独立、持久且不在 installation root 内的 --data-dir 和 --host-dir。
 2. setup 验证 bundle、Provider binding、安装目录、OS boundary 和已有 receipt；创建或复用 client credential；输出 fingerprint、安装文件和下一步命令。它不得要求打开 App。
-3. owner 从可信终端运行 webenvoy access register，使用 setup 输出的 fingerprint 为 Principal 注册。注册是 owner action，不由 Agent 或 Plugin 触发。
+3. owner 从可信终端运行 webenvoy access register，使用 setup 输出的 fingerprint 为 Principal 注册，并提供调用方保存的 `--idempotency-key KEY`。注册是 owner action，不由 Agent 或 Plugin 触发；丢响应时按第 5.3.1 节用同一 key 查询或重试。
 4. owner 使用 webenvoy access grant 或明确带 --confirm 的 v2 命令授予最小 Profile／operation／Origin／File／Skill scope，并设置有效期。没有 Grant 时，Agent 应得到明确 denied。
 5. Agent 使用 host client 文件运行 webenvoy agent connect 或 Plugin webenvoy_connect。connect 只能发现已注册 Principal，不能 register、grant、revoke 或读取 owner secret。
 6. Agent 提交一个 operation；Core 创建或复用原 Run。用户对 Instance 的接管、交还、停止和撤权走 owner CLI，不经 Agent。
@@ -202,7 +204,7 @@ owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带�
 - stdout 只承载第 7 节定义的数据；stderr 只承载诊断。不得把进度、颜色、stack trace、owner token、client secret、Cookie、raw DOM 或本机私密路径写入 stdout。
 - owner CLI 和 Agent CLI 不是两个 Runtime；它们只是同一安装 Runtime 的两个认证投影。
 
-help 的根页面必须列出 setup、start、diagnose、stop、uninstall、access、files、recovery、instance 和 agent，并明确标注 owner-only、Agent-only 或两者均可。help access、help instance 和 help recovery 必须列出必填参数、confirm／idempotency 约束和 owner OS identity／control socket 要求；help agent operation 必须说明 request-file 使用已安装 capability definition，help agent query 必须说明只能 query 原 run_id／idempotency key。帮助输出不得显示 secret、owner-private path、Provider executable path 或可复制的 bearer。
+help 的根页面必须列出 setup、start、diagnose、stop、uninstall、access、files、recovery、instance 和 agent，并明确标注 owner-only、Agent-only 或两者均可。help access、help instance、help files 和 help recovery 必须逐项列出第 5.3.1 节的 caller key、operation selector、CAS 或固有幂等例外，以及 owner OS identity／control socket 要求；help agent operation 必须说明 request-file 使用已安装 capability definition，help agent query 必须说明只能 query 原 run_id／idempotency key。帮助输出不得显示 secret、owner-private path、Provider executable path 或可复制的 bearer。
 
 ### 5.2 owner 安装与 Runtime 管理
 
@@ -227,14 +229,14 @@ setup 的 Provider 参数保持现有实现的命名和校验，不另建 Provid
 以下命令只能由经过 OS identity／control socket 认证的 owner CLI 调用。目标实现中 CLI 不读取明文 owner service bearer；若 Runtime service 内部需要 bearer 或 supervisor token，只能由受保护的 service process 使用。Agent credential 调用这些路径必须返回 owner-only denied：
 
     webenvoy access list --data-dir DIR
-    webenvoy access register --data-dir DIR --display-name NAME --credential-hash SHA256 [--idempotency-key KEY]
+    webenvoy access register --data-dir DIR --display-name NAME --credential-hash SHA256 --idempotency-key KEY
     webenvoy access grant --data-dir DIR --grant-file FILE
     webenvoy access grant-v2 --data-dir DIR --grant-file FILE --confirm
     webenvoy access policy-v2 --data-dir DIR --policy-file FILE --confirm
     webenvoy access revoke --data-dir DIR --kind principals|connections|grants --id ID --idempotency-key KEY
     webenvoy access operation --data-dir DIR --operation-ref REF
 
-grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins。额外字段必须在发送前拒绝。
+grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope；其中 `idempotency_key` 是必填的 caller key。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段，`idempotency_key` 同样必填。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins，`idempotency_key` 必填。缺 key 或空 key 是本地 usage error；额外字段必须在发送前拒绝。
 
 以下恢复命令沿用现有 [installed profile recovery](installed-profile-recovery-v1.md) owner 合同：
 
@@ -244,7 +246,28 @@ grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs
     webenvoy recovery apply --data-dir DIR --plan-file FILE --idempotency-key KEY (--confirm|--confirmation-file FILE)
     webenvoy recovery status --data-dir DIR (--operation-ref REF|--idempotency-key KEY) [--kind inspect|backup|plan|apply]
 
-access grant-v2、access policy-v2、recovery apply 缺 --confirm 或 confirmation file 时是本地 usage error，不得等待 stdin。每个 owner 写操作必须用显式幂等 key；缺少 key 的只读 inspect 可以生成 owner-local key，但必须把最终 operation ref 返回给 owner。
+access grant-v2、access policy-v2、recovery apply 缺 --confirm 或 confirmation file 时是本地 usage error，不得等待 stdin。owner 写入不统一强加同一种 key：需要 Core receipt 的动作按第 5.3.1 节要求 caller key，已有 operation ref、Harbor 固有幂等或 ControlLease CAS 的动作按各自既有事实对账；缺少 key 的只读 recovery inspect 可以生成 owner-local key，但必须把最终 operation ref 返回给 owner。
+
+#### 5.3.1 owner 写入的幂等适用矩阵
+
+caller key 是调用方在提交前生成并保存的稳定 `idempotency_key`。它只复用 Core／Recovery 已有 receipt，不增加 CLI 私有 receipt、注册表或重试服务。当前 `/agent-access/operations/{REF}` 路由的 `REF` 在 Core 中按原始 caller key 查找 receipt；CLI 保留 `--operation-ref` 参数名以兼容现有入口，不能把它误解为另一套 operation store。
+
+这张表按当前 `packages/core/src/managed-access.ts`、`packages/api-server/src/managed-access-api.ts`、`services/harbor/packages/runtime-api/src/managed-files.ts` 和 [installed profile recovery](installed-profile-recovery-v1.md) 的 owner API／旧合同收准；这些实现路径是核对依据，不是新增公共状态 owner。
+
+| owner action | 适用的现有事实和请求形式 | 重复请求、丢响应或断线后的处理 |
+| --- | --- | --- |
+| `access register`、`access grant`、`access grant-v2`、`access policy-v2`、`access revoke` | Core `managed-access` 的 receipt 以 caller key 和完整请求 hash 去重。register／revoke 使用 `--idempotency-key KEY`；grant、grant-v2、policy-v2 在各自 JSON 文件中使用必填 `idempotency_key`。 | 保存原 key 和原请求；用同一 key、同一请求安全取得原结果，key 相同而请求不同必须得到 `managed_access_idempotency_conflict`，不得执行第二次。响应丢失时可运行 `access operation --operation-ref KEY` 查询已有 receipt；查询不到时仍只能以原 key 重试，不能换新 key。 |
+| `recovery backup`、`recovery plan`、`recovery apply` | 复用 [installed profile recovery](installed-profile-recovery-v1.md) 的必填 caller key；Core 由 `kind:key` 派生既有 `operation_ref`。`apply` 另需 `--confirm` 或 confirmation file。 | 保存原 key、kind 和返回的 operation ref。响应丢失时用 `recovery status --operation-ref REF`，或用原 key 与对应 `--kind` 查询；同 key、同请求返回历史结果，改请求返回 `idempotency_conflict`，`unknown_outcome` 只能查询／对账，禁止换 key 重放。 |
+| `recovery inspect` | 这是只读检查，但现有 Recovery Core 仍为它创建 Run。显式 `--idempotency-key KEY` 时按上一行的 receipt／operation-ref 规则；省略时沿用 CLI 生成的 owner-local key 例外。 | 显式 key 的响应丢失按原 key 查询。省略 key 且响应丢失时，原随机 key 对调用方不可恢复；可以重新执行一次新的只读 inspect，但必须把它标为新的 operation，不能声称取得原 receipt 或把它当作写入重试。 |
+| `access list`、`access operation`、`recovery status`、`files inspect` | 只读查询，不生成新的写 receipt。`access operation` 使用原 access caller key 作为现有 API 的 selector；`recovery status` 使用 operation ref 或 `idempotency_key`／kind 派生 ref；files inspect 使用 file ref 或 owner file catalog。 | 丢响应只重复同一个查询；不生成新的 key，不把查询结果当作提交成功。Runtime／Harbor 不可用时保持 unavailable，并在恢复后查询。 |
+| `files import` | `/owner/files/import` 当前没有 caller key。可选 `--operation-ref REF` 只写入 managed-file record 作为关联字段，当前 Harbor `importFile` 不用它去重，也不把 owner import 写入 file operation receipt。 | 响应丢失保持 outcome unknown；先用 `files inspect`（必要时按返回目录中的 operation_ref、profile、名称、大小和摘要核对）与 owner 本地源文件事实对账，不能仅凭 REF 假定已完成，也不能盲目重新导入。没有唯一可核对记录时由 owner 决定后续动作；换一个 REF 不能绕过 unknown。 |
+| `files export` | `/owner/files/export` 当前没有 caller key；Harbor 以 owner 指定的 destination path 做 `O_EXCL` 写入，已有目标返回 `file_destination_exists`。这是目标路径的固有重复保护，不是新的 receipt。 | 响应丢失先检查同一 destination 的存在性并核对内容／摘要，再用 `files inspect --file-ref FILE_REF` 核对源记录。目标存在且内容／摘要匹配时按同一导出事实对账；存在但不匹配时保持冲突，不覆盖；目标不存在且源仍可用时只能重试同一 file_ref／destination，不能换目标路径掩盖 unknown。 |
+| `files revoke`、`files delete` | `/owner/files/revoke` 和 `/owner/files/delete` 当前没有 caller key；操作以准确 `file_ref` 为对象，revoke 对已 revoked 记录保持状态，delete 重复清理并保持 deleted 记录。 | 响应丢失先用 `files inspect --file-ref FILE_REF`；状态已是目标状态即完成，仍可用时可以重试同一 file_ref，不能伪造 key、换 ref 或把缺失的 ref 当作另一个文件。 |
+| `instance takeover`、`instance handback`、`lock`、`release` | 这些 owner ControlLease 写入不使用 caller key，必须带同一次 list／inspect 得到的 `expected_control`，由 Harbor 在单一现场原子比较 owner、lock、holder 和 generation；不是 CLI 先查再写。 | 丢响应后必须 fresh observe。目标状态已成立即完成；仍等于原 expected 状态时可重试同一请求；generation、holder 或任一 control 字段已变化则返回冲突并停止，不能用旧快照或新 key 重放。ABA 由 generation 区分。 |
+| `instance stop` | owner API 以准确 `runtime_session_ref` 调用 Harbor `/runtime/sessions/{ref}/stop`，没有 caller key，也不停止 Runtime service。Harbor 对已 closed 的同一 session 保持 terminal 事实；它不是 Run receipt。 | 丢响应后用 `instance inspect` fresh observe；已 closed 即完成，仍 active 时才可针对同一 ref 再请求，缺失／unavailable 保持未知并查询恢复，不能换 ref 或新 key。 |
+| `setup`、`start`、`stop`、`uninstall` | 这些是安装／Runtime 生命周期或 receipt 清理操作，现有入口没有 Core owner receipt caller key；它们依赖安装 manifest、Runtime status、精确 data／host 路径和 installation receipt。 | 响应丢失先用 `diagnose`／`status` 和 receipt 读取当前事实，再按当前前置状态继续；不得把生命周期重试伪装成 Core idempotency receipt，也不得用新 key 掩盖未知状态。 |
+
+实现和帮助必须逐项遵守这张矩阵。除表中现有 receipt、operation selector、目标路径／file_ref 语义和 ControlLease CAS 外，不得新增幂等机制；无法查询或对账时必须保留 unknown／unavailable。
 
 ### 5.4 owner 文件管理
 
@@ -255,6 +278,8 @@ access grant-v2、access policy-v2、recovery apply 缺 --confirm 或 confirmati
     webenvoy files delete --data-dir DIR --file-ref FILE_REF
 
 本地 owner path 只用于 owner files route。Agent request 只能携带不透明 file_ref 和当前 operation 需要的 task_scope.file_refs；owner source／destination path、Cookie、文件内容和本地目录不得进入 Agent request、Grant、Plugin 或 Run public result。
+
+上述四个写入命令保持现有 Harbor owner API 的字段，不添加 `--idempotency-key`：import 的 `--operation-ref` 是可选关联字段，不是去重凭据；export 的 destination path 排他写入、revoke/delete 的准确 file_ref 状态转换分别是第 5.3.1 节的固有保护。帮助必须把这些例外和 response-loss 对账步骤写出来，不能用“所有 owner 写操作都必须带 key”覆盖它们。
 
 ### 5.5 owner Instance 控制
 
@@ -341,7 +366,7 @@ agent operation、已安装 Plugin webenvoy_operation 和直接 API consumer 使
       "url": "https://example.test/start"
     }
 
-上例只展示 instance.start 的字段。真实 required／allowed／conditional fields 以安装 bundle 的 managed-capability-definitions.json 为准；CLI、MCP 和 API 不得各自维护一份副本。所有会改变外部状态的操作必须由调用者提供全新 idempotency key；重用同 key 但 request hash 不同必须返回 managed_browser_idempotency_conflict，不得执行第二次。
+上例只展示 instance.start 的字段。真实 required／allowed／conditional fields 以安装 bundle 的 managed-capability-definitions.json 为准；CLI、MCP 和 API 不得各自维护一份副本。所有 Agent managed operation（包括会改变外部状态的 operation）必须由调用者提供全新 idempotency key；重用同 key 但 request hash 不同必须返回 managed_browser_idempotency_conflict，不得执行第二次。owner action 的例外只按第 5.3.1 节处理。
 
 现有 exposed browser operation 名称为：
 
@@ -584,8 +609,10 @@ CLI、MCP、API、SKILL 和 Run public result 只返回实现后可验证的最�
 
 下面是 shell 形态示例；真实 Provider 参数按第 5.2 节和安装候选补齐。
 
+`grant.json` 必须包含本次调用方保存的 `idempotency_key`；grant-v2 和 policy-v2 文件同样必须包含 caller key。
+
     webenvoy setup --data-dir /var/lib/webenvoy/data --host-dir /var/lib/webenvoy/host --codex-profile browser-agent
-    webenvoy access register --data-dir /var/lib/webenvoy/data --display-name browser-agent --credential-hash SETUP_OUTPUT_FINGERPRINT
+    webenvoy access register --data-dir /var/lib/webenvoy/data --display-name browser-agent --credential-hash SETUP_OUTPUT_FINGERPRINT --idempotency-key principal-register-20260922-001
     webenvoy access grant --data-dir /var/lib/webenvoy/data --grant-file grant.json
     webenvoy agent connect --client-file /var/lib/webenvoy/host/webenvoy-client.json
     webenvoy agent operation --client-file /var/lib/webenvoy/host/webenvoy-client.json --request-file start.json
@@ -656,8 +683,8 @@ S1 文档验收必须能由实现者直接转换为检查：
 
 1. clean machine／clean data root 在没有 App 进程时完成 setup、register、grant、connect 和一次最小 read／start operation。
 2. owner service credential、client credential、OS UID／ACL、同 UID fallback、环境继承、owner route 和 Agent route 的正反例均可验证；Agent 不能 register／grant／revoke／files owner／recovery apply／Instance supervisor。
-3. CLI 的帮助、未知参数、未知字段、stdout／stderr、退出码和非交互 pending 有确定性测试；缺 Grant／未注册 Principal 的 pre-createRun denied 必须没有 run_id 并退出 3，真实 owner decision 的持久 Run 才能退出 4。
-4. CLI 提交后退出；Plugin、API、重连 CLI 能 query 同一个原 Run；response loss、Provider unknown、Core／Harbor disconnect 都证明 no-replay。
+3. CLI 的帮助、未知参数、未知字段、stdout／stderr、退出码和非交互 pending 有确定性测试；缺 Grant／未注册 Principal 的 pre-createRun denied 必须没有 run_id 并退出 3，真实 owner decision 的持久 Run 才能退出 4；帮助和语法检查逐项验证第 5.3.1 节的 required caller key 与文件／CAS 例外。
+4. Core access receipt 的同 key／同请求 replay、同 key／异请求 conflict、access operation selector、Recovery 按 kind 派生 operation-ref、files import 的 correlation-only 行为、export 的 destination conflict、revoke/delete 的 file_ref 固有幂等和 ControlLease 的 expected_control 原子冲突都必须有最小可复核检查；response loss 只能按矩阵查询／对账，不能用新 key 重放。
 5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect、检查后变化以及相同 holder_ref 的 user→released→新 user ABA 均有受控验证；exact Instance stop 仍按准确 ref 验证。
 6. 重装／更新复用 data root、Grant、Run、Profile、recovery 和明确的 credential identity；卸载保留 data 并只清理 receipt 管理的文件。
 7. 验证记录准确的提交、平台、Runtime／Provider 版本、安装身份、bundle digest、owner／Agent OS identity、测试 surface 和候选边界；fixture／mock 不得冒充真实安装或真实 Provider。
