@@ -199,9 +199,9 @@ async function call(name, args) {
   const request = (path, body) => agentRequest(client, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
   if (name === 'webenvoy_describe') {
     validateDescribeRequest(args, capabilityDefinitions);
-    await ensureAgentRuntime(client);
-    if (!connection) return { ok: false, error: { code: 'connect_first' } };
     try {
+      await ensureAgentRuntime(client);
+      if (!connection) return { ok: false, error: { code: 'connect_first' } };
       const result = await request('/managed-browser/capabilities/describe', { ...args, connection_id: connection.connection_id });
       if (result?.error?.code === 'runtime_unavailable_query_without_replay') return { ok: false, error: { code: 'runtime_unavailable' } };
       if (result?.error?.code === 'managed_access_route_not_found' || result?.error?.code === 'not_found') return { ok: false, error: { code: 'discovery_not_available' } };
@@ -209,7 +209,8 @@ async function call(name, args) {
       if (result?.schema_version !== 'webenvoy.capability-description/v1' || result?.definition_revision !== installedDefinitionRevision || !hasKnownCapabilityDescriptionStates(result)) return { ok: false, error: { code: 'discovery_version_mismatch' } };
       return result;
     } catch (error) {
-      if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET'].includes(error?.code)) return { ok: false, error: { code: 'runtime_unavailable' } };
+      const message = typeof error?.message === 'string' ? error.message : '';
+      if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'runtime_unavailable'].includes(error?.code) || message === 'runtime_unavailable' || message.startsWith('runtime_unavailable:')) return { ok: false, error: { code: 'runtime_unavailable' } };
       throw error;
     }
   }
