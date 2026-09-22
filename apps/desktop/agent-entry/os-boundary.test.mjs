@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, requiresControlPrecondition, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, probeUnixSocket, requiresControlPrecondition, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 
 test('owner and Agent endpoints use separate trust domains', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-boundary-'));
@@ -72,17 +74,46 @@ test('Agent endpoint verification rejects files and symlinks', async () => {
   }
 });
 
+test('runtime socket preparation keeps live sockets and removes only proven stale sockets', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'webenvoy-boundary-probe-'));
+  const livePath = join(directory, 'live.sock');
+  const stalePath = join(directory, 'stale.sock');
+  try {
+    const liveServer = createServer();
+    await new Promise((resolve, reject) => { liveServer.once('error', reject); liveServer.listen(livePath, resolve); });
+    assert.deepEqual(await probeUnixSocket(livePath), { state: 'live' });
+    await assert.rejects(prepareRuntimeSocket(livePath), /runtime_endpoint_occupied/);
+    await new Promise(resolve => liveServer.close(resolve));
+    assert.deepEqual(await probeUnixSocket(livePath), { state: 'missing' });
+    const staleServer = spawn(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => process.stdout.write('ready\\n'))", stalePath], { stdio: ['ignore', 'pipe', 'ignore'] });
+    await once(staleServer.stdout, 'data');
+    staleServer.kill('SIGKILL');
+    await once(staleServer, 'exit');
+    assert.deepEqual(await probeUnixSocket(stalePath), { state: 'stale' });
+    assert.deepEqual(await prepareRuntimeSocket(stalePath), { state: 'removed' });
+    assert.deepEqual(await probeUnixSocket(stalePath), { state: 'missing' });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('owner Harbor route allowlist distinguishes reads and control writes', () => {
   const route = (method, url) => ({ method, url });
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions')), true);
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions?profile_ref=profile%3Aone')), true);
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions?other=1')), false);
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions/session:one')), true);
+  assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions/session%3Aone')), true);
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions/session:one/runtime-facts')), true);
   for (const action of ['handoff', 'lock', 'release', 'stop']) {
     assert.equal(isOwnerHarborRoute(route('POST', `/runtime/sessions/session:one/${action}`)), true);
   }
   assert.equal(isOwnerHarborRoute(route('GET', '/runtime/sessions/session:one/handoff')), false);
   assert.equal(requiresControlPrecondition(route('POST', '/runtime/sessions/session:one/handoff')), true);
+  assert.equal(requiresControlPrecondition(route('POST', '/runtime/sessions/session%3Aone/handoff')), true);
   assert.equal(requiresControlPrecondition(route('POST', '/runtime/sessions/session:one/stop')), false);
+  assert.equal(isOwnerHarborRoute(route('GET', 'http://attacker.invalid/runtime/sessions')), false);
+  assert.equal(isOwnerHarborRoute(route('GET', '//attacker.invalid/runtime/sessions')), false);
+  assert.equal(isOwnerHarborRoute(route('GET', '/\\attacker.invalid/runtime/sessions')), false);
+  assert.equal(requiresControlPrecondition(route('POST', 'http://attacker.invalid/runtime/sessions/session:one/lock')), false);
 });

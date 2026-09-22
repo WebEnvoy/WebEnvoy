@@ -128,7 +128,8 @@ export async function readClient(path) {
     !hasEndpoint || !hasOwnerUid || !hasAgentUid) {
     throw new Error('client_configuration_invalid');
   }
-  const endpoint = agentDataSocket(value);
+  let endpoint;
+  try { endpoint = agentDataSocket(value); } catch { throw new Error('client_configuration_invalid'); }
   const client = { ...value, data_dir: resolve(value.data_dir), agent_endpoint: endpoint };
   if (endpoint === ownerControlSocket(client.data_dir)) throw new Error('client_configuration_invalid');
   return client;

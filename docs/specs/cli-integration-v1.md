@@ -562,6 +562,7 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 至少保持以下目录关系：
 
 - installation root：只读或受安装器管理，包含 bundle 和 manifest；
+- owner 安装者创建并持有 installation root、Runtime Node、CLI／service 代码和 manifest；Agent setup 只由 Agent UID 创建自己的 host root 资产，不能修改 bundle、fixed Node、CLI、service 或 manifest。实际安装若无法复核这些路径对 Agent UID 不可写，必须拒绝 Agent data plane；
 - data root：独立、持久、0700，保存 Runtime／Core 状态、Principal／Grant／Run 相关数据和 recovery；
 - host root：独立、持久、0700，保存 webenvoy-client.json、host config、SKILL 和 installation receipt；
 - Agent IPC root／endpoint：独立于 owner data root 和 host root，由安装器预置并按 owner／Agent 角色配置；Agent endpoint 可由 owner service 创建但不允许复用 owner control socket，Agent 只能通过 client file 中的已验证引用连接；

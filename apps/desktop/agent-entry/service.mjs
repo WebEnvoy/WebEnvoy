@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
-import { chmod, lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
-import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, requiresControlPrecondition, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error('data_directory_required');
@@ -22,21 +22,14 @@ const boundary = verifyOsBoundary({
   ownerSocketPath: socket
 });
 
-async function prepareSocket(path, { ownerUid = process.getuid?.() } = {}) {
-  const info = await lstat(path).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
-  if (!info) return;
-  if (info.isSymbolicLink() || !info.isSocket() || info.uid !== ownerUid) throw new Error('runtime_endpoint_occupied');
-  await unlink(path);
-}
-
 // A live or unrecognized socket is never removed or adopted.
 try {
   const pid = Number(await readFile(join(dataDir, 'runtime.pid'), 'utf8'));
   if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('runtime_pid_invalid');
   try { process.kill(pid, 0); process.exit(0); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-  await prepareSocket(socket);
-  if (boundary.state === 'supported') await prepareSocket(agentSocket);
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
+await prepareRuntimeSocket(socket);
+if (boundary.state === 'supported') await prepareRuntimeSocket(agentSocket);
 
 let state = { ready: false, runtime_id: randomUUID(), pid: process.pid, boundary };
 let supervisor, ownerToken;
@@ -152,7 +145,11 @@ async function handle(role, req, res) {
       upstreamBase = state.harborEndpoint;
       upstreamAuthorization = `Bearer ${harborToken}`;
     }
-    const upstream = await fetch(new URL(req.url, upstreamBase), {
+    const harborPath = harborRoute ? (() => {
+      const parsed = new URL(req.url, 'http://owner.local');
+      return `${parsed.pathname}${parsed.search}`;
+    })() : req.url;
+    const upstream = await fetch(new URL(harborPath, upstreamBase), {
       method: req.method,
       headers: { authorization: upstreamAuthorization, 'content-type': 'application/json' },
       ...(['POST', 'PUT'].includes(req.method) ? { body } : {}),

@@ -56,3 +56,20 @@ test('new client files cannot point Agent transport at the owner socket', async 
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('new client files keep the Agent endpoint outside owner-private data', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-client-boundary-'));
+  const clientPath = join(dataDir, 'webenvoy-client.json');
+  try {
+    await writeFile(clientPath, JSON.stringify({
+      data_dir: dataDir,
+      credential: 'c'.repeat(32),
+      agent_endpoint: join(dataDir, 'agent.sock'),
+      owner_uid: process.getuid?.() + 1,
+      agent_uid: process.getuid?.()
+    }), { mode: 0o600 });
+    await assert.rejects(() => readClient(clientPath), /client_configuration_invalid/);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
