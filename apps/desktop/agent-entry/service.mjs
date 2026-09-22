@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
-import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { projectHarborResponse } from './service-projection.mjs';
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error('data_directory_required');
@@ -19,7 +20,8 @@ if (agentSocket === socket) throw new Error('runtime_endpoints_not_separate');
 const boundary = verifyOsBoundary({
   ownerUid: config.owner_uid,
   agentUid: config.agent_uid,
-  ownerSocketPath: socket
+  ownerSocketPath: socket,
+  installRoot: root
 });
 
 // A live or unrecognized socket is never removed or adopted.
@@ -36,60 +38,6 @@ let supervisor, ownerToken;
 let ownerServer, agentServer;
 let agentSocketOwned = false;
 const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
-const projectRuntimeError = value => value && typeof value === 'object' && !Array.isArray(value)
-  ? Object.fromEntries(['code', 'retryable'].filter(key => key in value).map(key => [key, value[key]]))
-  : undefined;
-const projectPage = value => value && typeof value === 'object' && !Array.isArray(value)
-  ? Object.fromEntries(['requested_url', 'current_url', 'title', 'status', 'error_reason', 'observed_at', 'page_id', 'page_ref', 'document_generation', 'origin', 'active', 'opener_page_id'].filter(key => key in value).map(key => [key, key === 'error_reason' ? projectRuntimeError(value[key]) : value[key]]))
-  : undefined;
-const projectLock = value => value && typeof value === 'object' && !Array.isArray(value)
-  ? Object.fromEntries(['owner', 'state', 'holder_ref', 'updated_at'].filter(key => key in value).map(key => [key, value[key]]))
-  : undefined;
-function projectSessionFacts(value, { allowTerminalStop = false } = {}) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const hasControlGeneration = Number.isSafeInteger(value.control_generation) && value.control_generation >= 0;
-  const terminalStop = value.lifecycle_state === 'closed' && value.control_owner === 'none' &&
-    value.control_lock && typeof value.control_lock === 'object' && !Array.isArray(value.control_lock) &&
-    value.control_lock.owner === 'none' && value.control_lock.state === 'closed' && value.control_lock.holder_ref === null;
-  if (!hasControlGeneration && !(allowTerminalStop && terminalStop)) return undefined;
-  if (Object.hasOwn(value, 'control_generation') && !hasControlGeneration) return undefined;
-  const result = Object.fromEntries(['schema_version', 'runtime_session_ref', 'identity_environment_ref', 'execution_identity_ref', 'profile_ref', 'provider_ref', 'provider_mode', 'lifecycle_state', 'created_at', 'last_seen_at', 'closed_at', 'availability', 'control_owner', 'control_generation'].filter(key => key in value).map(key => [key, value[key]]));
-  if (value.availability && typeof value.availability === 'object' && !Array.isArray(value.availability)) result.availability = Object.fromEntries(['driver', 'cdp', 'viewer', 'snapshot', 'evidence'].filter(key => key in value.availability).map(key => [key, value.availability[key]]));
-  if (value.current_page) result.current_page = projectPage(value.current_page);
-  if (value.control_lock) result.control_lock = projectLock(value.control_lock);
-  if (value.current_error) result.current_error = projectRuntimeError(value.current_error);
-  if (value.viewer_entry && typeof value.viewer_entry === 'object' && !Array.isArray(value.viewer_entry)) {
-    result.viewer_entry = Object.fromEntries(['availability', 'access_mode', 'transport', 'input_capabilities', 'unavailable_reason'].filter(key => key in value.viewer_entry).map(key => [key, value.viewer_entry[key]]));
-  }
-  for (const key of ['lock_owner', 'lock_state', 'holder_ref']) if (key in value) result[key] = value[key];
-  if (value.control_precondition && typeof value.control_precondition === 'object' && !Array.isArray(value.control_precondition)) {
-    result.control_precondition = Object.fromEntries(['schema_version', 'control_owner', 'lock_owner', 'lock_state', 'holder_ref', 'control_generation'].filter(key => key in value.control_precondition).map(key => [key, value.control_precondition[key]]));
-  }
-  return result;
-}
-function projectHarborResponse(req, value) {
-  const pathname = new URL(req.url, 'http://owner.local').pathname;
-  const allowTerminalStop = req.method === 'POST' && /^\/runtime\/sessions\/[^/]+\/stop$/.test(pathname);
-  if (pathname === '/runtime/sessions') {
-    if (Array.isArray(value)) {
-      const sessions = value.map(projectSessionFacts);
-      return sessions.every(Boolean) ? sessions : undefined;
-    }
-    if (value && typeof value === 'object' && Array.isArray(value.sessions)) {
-      const sessions = value.sessions.map(projectSessionFacts);
-      if (!sessions.every(Boolean)) return undefined;
-      return { ...('schema_version' in value ? { schema_version: value.schema_version } : {}), ...('status' in value ? { status: value.status } : {}), sessions };
-    }
-    return value && typeof value === 'object' && typeof value.error === 'string' ? { error: value.error } : undefined;
-  }
-  if (value && typeof value === 'object' && value.status === 'unavailable') {
-    const result = Object.fromEntries(['status', 'failure_class', 'message', 'retryable'].filter(key => key in value).map(key => [key, value[key]]));
-    if (value.current_error) result.current_error = projectRuntimeError(value.current_error);
-    return result;
-  }
-  if (value && typeof value === 'object' && typeof value.error === 'string') return { error: value.error };
-  return projectSessionFacts(value, { allowTerminalStop });
-}
 const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
   (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
   (req.method === 'GET' && (req.url === '/owner/files' || req.url.startsWith('/owner/files?'))) ||
@@ -109,6 +57,20 @@ function statusFor(role) {
 async function handle(role, req, res) {
   let requestBody = '';
   try {
+    const identity = state.boundary.identity;
+    let liveBoundary = verifyOsBoundary({ ownerUid: identity.owner_uid, agentUid: identity.agent_uid, ownerSocketPath: socket, installRoot: root });
+    if (liveBoundary.state === 'supported' && role === 'agent') {
+      try { verifyAgentSocket(agentSocket, { ownerUid: identity.owner_uid }); }
+      catch { liveBoundary = { ...liveBoundary, state: 'disabled', code: 'owner_agent_isolation_unavailable', reason_codes: [...liveBoundary.reason_codes, 'agent_socket_unavailable'] }; }
+    }
+    state = { ...state, boundary: liveBoundary };
+    if (role === 'agent' && liveBoundary.state !== 'supported') {
+      if (agentServer?.listening) {
+        agentSocketOwned = false;
+        void closeServer(agentServer).then(() => unlink(agentSocket).catch(() => {})).catch(() => {});
+      }
+      return send(res, 503, { ok: false, error: { code: 'owner_agent_isolation_unavailable', reason_codes: liveBoundary.reason_codes } });
+    }
     if (state.ready && (!supervisor.getCoreRuntimeSupervisorToken(state.coreEndpoint) || !supervisor.getHarborRuntimeSupervisorToken(state.harborEndpoint))) state = { ...state, ready: false, error: 'runtime_child_exited' };
     if (req.url === '/status' && req.method === 'GET') return send(res, 200, statusFor(role));
     if (role === 'owner' && req.url === '/stop' && req.method === 'POST') {
@@ -187,7 +149,7 @@ async function handle(role, req, res) {
 ownerServer = createServer((req, res) => handle('owner', req, res));
 ownerServer.on('error', () => { supervisor?.stop(); process.exit(1); });
 await new Promise((resolveListen, reject) => { ownerServer.once('error', reject); ownerServer.listen(socket, () => chmod(socket, 0o600).then(resolveListen, reject)); });
-const liveBoundary = verifyOsBoundary({ ownerUid: boundary.identity.owner_uid, agentUid: boundary.identity.agent_uid, ownerSocketPath: socket });
+const liveBoundary = verifyOsBoundary({ ownerUid: boundary.identity.owner_uid, agentUid: boundary.identity.agent_uid, ownerSocketPath: socket, installRoot: root });
 state = { ...state, boundary: liveBoundary };
 if (liveBoundary.state === 'supported') {
   agentServer = createServer((req, res) => handle('agent', req, res));

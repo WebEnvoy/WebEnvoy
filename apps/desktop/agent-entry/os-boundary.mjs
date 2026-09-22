@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { lstat, unlink } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createConnection } from 'node:net';
 
 export const OWNER_CONTROL_SOCKET_NAME = 'owner-control.sock';
@@ -151,11 +151,149 @@ function userFacts(uid) {
     const name = execFileSync('/usr/bin/id', ['-nu', String(uid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     if (!name || /[^A-Za-z0-9_.-]/.test(name)) return { state: 'invalid' };
     const admin = classifyAdminMembership(execFileSync('/usr/bin/dsmemberutil', ['checkmembership', '-U', name, '-G', 'admin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+    const groups = execFileSync('/usr/bin/id', ['-G', name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\s+/).filter(Boolean).map(Number);
+    if (!groups.length || groups.some(group => !Number.isSafeInteger(group) || group < 0)) return { state: 'invalid' };
     const sudo = spawnSync('/usr/bin/sudo', ['-n', '-l', '-U', name], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'] });
-    return { state: 'verified', name, admin, sudo_access: classifySudoPolicy({ name, status: sudo.status, stdout: sudo.stdout, stderr: sudo.stderr }) };
+    return { state: 'verified', name, admin, groups, sudo_access: classifySudoPolicy({ name, status: sudo.status, stdout: sudo.stdout, stderr: sudo.stderr }) };
   } catch {
     return { state: 'unavailable' };
   }
+}
+
+const FIXED_AGENT_ASSET_PATHS = [
+  'agent-manifest.json',
+  'agent-entry/cli.mjs',
+  'agent-entry/client.mjs',
+  'agent-entry/service.mjs',
+  'bin/webenvoy',
+  'runtime/node'
+];
+
+// The Agent data plane is disabled unless the owner-held installation and all
+// manifest assets are provably immutable to the Agent UID. This supplements
+// bundle hash verification: hashes detect content drift, while these checks
+// prevent the Agent from causing that drift through a writable path.
+export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = {}) {
+  const failures = [];
+  if (typeof installRoot !== 'string' || !isAbsolute(installRoot) || installRoot.includes('\0')) return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: ['agent_bundle_root_missing'], checked_paths: 0 };
+  if (!Number.isSafeInteger(ownerUid) || ownerUid < 1 || !Number.isSafeInteger(agentUid) || agentUid < 1 || ownerUid === agentUid) return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: ['agent_bundle_identity_unavailable'], checked_paths: 0 };
+  const root = resolve(installRoot);
+  let rootInfo;
+  try { rootInfo = lstatSync(root); } catch { return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: ['agent_bundle_root_missing'], checked_paths: 0 }; }
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) failures.push('agent_bundle_root_invalid');
+  if (rootInfo.uid !== ownerUid) failures.push('agent_bundle_owner_mismatch');
+  if (!macAclVerified(root, ['-lde'])) failures.push('agent_bundle_root_acl_unverified');
+
+  const account = userFacts(agentUid);
+  if (account.state !== 'verified' || !Array.isArray(account.groups)) {
+    failures.push('agent_bundle_identity_unverified');
+    return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: [...new Set(failures)], checked_paths: 0 };
+  }
+  const groups = new Set(account.groups);
+  if (rootInfo.isDirectory() && agentCanWrite(rootInfo, agentUid, groups)) failures.push('agent_bundle_root_writable');
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(root, 'agent-manifest.json'), 'utf8'));
+  } catch {
+    failures.push('agent_bundle_manifest_unavailable');
+    return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: [...new Set(failures)], checked_paths: 0 };
+  }
+  const names = new Set(FIXED_AGENT_ASSET_PATHS);
+  for (const section of ['files', 'optional_files']) {
+    const entries = manifest?.[section];
+    if (entries !== undefined && (!entries || typeof entries !== 'object' || Array.isArray(entries))) failures.push('agent_bundle_manifest_invalid');
+    if (entries && typeof entries === 'object' && !Array.isArray(entries)) for (const name of Object.keys(entries)) names.add(name);
+  }
+  const assetPaths = [];
+  for (const name of names) {
+    if (typeof name !== 'string' || !name || name.includes('\0') || isAbsolute(name)) {
+      failures.push('agent_bundle_asset_path_invalid');
+      continue;
+    }
+    const assetPath = resolve(root, name);
+    const assetRelative = relative(root, assetPath);
+    if (!assetRelative || assetRelative === '..' || assetRelative.startsWith(`..${sep}`) || isAbsolute(assetRelative)) {
+      failures.push('agent_bundle_asset_path_invalid');
+      continue;
+    }
+    assetPaths.push(assetPath);
+    try {
+      const info = lstatSync(assetPath);
+      if (info.isSymbolicLink() || !info.isFile()) failures.push('agent_bundle_asset_invalid');
+      else {
+        if (agentCanWrite(info, agentUid, groups)) failures.push('agent_bundle_asset_writable');
+        if (!macAclVerified(assetPath, ['-le'])) failures.push('agent_bundle_asset_acl_unverified');
+      }
+      checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures);
+    } catch {
+      failures.push('agent_bundle_asset_missing');
+    }
+  }
+  try {
+    const realRoot = realpathSync(root);
+    checkParentReplacementChain(realRoot, agentUid, groups, failures);
+  } catch {
+    failures.push('agent_bundle_parent_unavailable');
+  }
+  return {
+    state: failures.length ? 'disabled' : 'supported',
+    code: failures.length ? 'agent_bundle_boundary_unavailable' : 'ok',
+    reason_codes: [...new Set(failures)],
+    checked_paths: assetPaths.length
+  };
+}
+
+function checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures) {
+  let child = assetPath;
+  let current = dirname(assetPath);
+  while (current === root || current.startsWith(`${root}${sep}`)) {
+    try {
+      const info = lstatSync(current);
+      if (!info.isDirectory() || info.isSymbolicLink()) {
+        failures.push('agent_bundle_asset_parent_invalid');
+        return;
+      }
+      if (!macAclVerified(current, ['-lde'])) failures.push('agent_bundle_asset_parent_acl_unverified');
+      const childInfo = lstatSync(child);
+      const permission = agentPermissions(info, agentUid, groups);
+      if (permission.write && permission.execute && (!((info.mode & 0o1000) !== 0) || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_asset_parent_replaceable');
+    } catch {
+      failures.push('agent_bundle_parent_unavailable');
+      return;
+    }
+    if (current === root) break;
+    child = current;
+    current = dirname(current);
+  }
+}
+
+function checkParentReplacementChain(root, agentUid, groups, failures) {
+  let child = root;
+  let current = dirname(root);
+  while (true) {
+    const info = lstatSync(current);
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      failures.push('agent_bundle_parent_invalid');
+      return;
+    }
+    if (!macAclVerified(current, ['-lde'])) failures.push('agent_bundle_parent_acl_unverified');
+    const childInfo = lstatSync(child);
+    const permission = agentPermissions(info, agentUid, groups);
+    if (permission.write && permission.execute && (!((info.mode & 0o1000) !== 0) || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_parent_replaceable');
+    if (current === '/') break;
+    child = current;
+    current = dirname(current);
+  }
+}
+
+function agentCanWrite(info, agentUid, groups) {
+  return agentPermissions(info, agentUid, groups).write;
+}
+
+function agentPermissions(info, agentUid, groups) {
+  const mode = info.mode & 0o777;
+  const bits = info.uid === agentUid ? (mode >> 6) & 7 : groups.has(info.gid) ? (mode >> 3) & 7 : mode & 7;
+  return { write: (bits & 2) !== 0, execute: (bits & 1) !== 0 };
 }
 
 function ownerSocketAcl(path, ownerUid) {
@@ -180,8 +318,9 @@ function macAclVerified(path, args) {
   }
 }
 
-export function verifyOsBoundary({ ownerUid = process.getuid?.(), agentUid, ownerSocketPath } = {}) {
+export function verifyOsBoundary({ ownerUid = process.getuid?.(), agentUid, ownerSocketPath, installRoot } = {}) {
   const identity = { ...discoverOsIdentity({ ownerUid, agentUid }), socket_acl: ownerSocketAcl(ownerSocketPath, ownerUid) };
+  const assetBoundary = verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid });
   const failures = [];
   if (identity.platform !== 'darwin' || identity.arch !== 'arm64') failures.push('platform_unsupported');
   if (!Number.isSafeInteger(identity.owner_uid) || identity.owner_uid < 1) failures.push('owner_uid_invalid');
@@ -194,11 +333,13 @@ export function verifyOsBoundary({ ownerUid = process.getuid?.(), agentUid, owne
   if (identity.agent_account.sudo_access !== 'denied') failures.push('agent_sudo_policy_unverified');
   if (!['verified', 'expected'].includes(identity.socket_acl)) failures.push('owner_socket_acl_unavailable');
   if (!['denied', 'enforced', 'verified', 'distinct_non_admin_uid'].includes(identity.process_inspection)) failures.push('agent_process_inspection_policy_unavailable');
+  if (assetBoundary.state !== 'supported') failures.push(...assetBoundary.reason_codes);
   return {
     state: failures.length ? 'disabled' : 'supported',
     code: failures.length ? 'owner_agent_isolation_unavailable' : 'ok',
     reason_codes: failures,
-    identity
+    identity,
+    asset_boundary: assetBoundary
   };
 }
 

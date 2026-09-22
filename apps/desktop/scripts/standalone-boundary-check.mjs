@@ -108,6 +108,8 @@ try {
   const queriedBeforeStop = runAsAgent(cli, ['agent', 'query', '--client-file', clientFile, '--idempotency-key', 'standalone-ci-profile-list']);
   const queryBeforeStop = lastJson(queriedBeforeStop.stdout, 'agent_query_before_stop');
   assert.equal(findString(queryBeforeStop, ['run_id']), findString(operationResult, ['run_id']), 'query must address the original Run');
+  const mcpQuery = runAgentMcpQuery(clientFile, 'standalone-ci-profile-list');
+  assert.equal(findString(mcpQuery, ['run_id']), findString(operationResult, ['run_id']), 'MCP query must address the original Run without replay');
   await assertAgentOwnerRouteDenied(clientFile);
 
   const ownerSessions = run(cli, ['instance', 'list', '--data-dir', ownerData]);
@@ -155,6 +157,31 @@ function run(command, args) {
 
 function runAsAgent(command, args) {
   return run('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', command, ...args]);
+}
+
+// This is a fixed-package MCP stdio client check, not a real third-party Agent
+// or plugin_verified claim. It exercises the second public query entry point.
+function runAgentMcpQuery(clientPath, idempotencyKey) {
+  const messages = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'standalone-boundary-check', version: '1' } } },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'webenvoy_connect', arguments: {} } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'webenvoy_query', arguments: { idempotency_key: idempotencyKey } } }
+  ].map(message => JSON.stringify(message)).join('\n') + '\n';
+  const result = spawnSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', fixedNode, join(packageRoot, 'agent-entry/mcp.mjs'), clientPath], {
+    cwd: packageRoot,
+    input: messages,
+    encoding: 'utf8',
+    timeout: 120_000,
+    env: { ...process.env, LC_ALL: 'C' }
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 || result.signal) throw new Error(`mcp_query_failed: status=${result.status ?? 'null'} signal=${result.signal ?? 'none'} stderr=${result.stderr || ''}`);
+  const response = String(result.stdout).trim().split('\n').map(line => JSON.parse(line)).find(message => message.id === 3);
+  if (!response) throw new Error('mcp_query_response_missing');
+  if (response.error || response.result?.isError) throw new Error(`mcp_query_refused:${JSON.stringify(response)}`);
+  const text = response.result?.content?.find(item => item?.type === 'text')?.text;
+  if (typeof text !== 'string') throw new Error('mcp_query_result_missing');
+  return JSON.parse(text);
 }
 
 async function mkdtempAsAgent(prefix) {
