@@ -52,7 +52,19 @@ test("owner session discovery and control CAS keep stale and ABA writes side-eff
     });
     assert.equal(row.current_page.status, "ready");
 
-    const inspect = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, { headers: authHeaders }));
+    const legacyInspectResponse = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`);
+    assert.equal(legacyInspectResponse.status, 200);
+    const legacyInspect = await json(legacyInspectResponse);
+    assert.equal("control_generation" in legacyInspect, false);
+
+    const wrongBearerInspect = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, {
+      headers: { authorization: "Bearer invalid-supervisor-token" }
+    });
+    assert.equal(wrongBearerInspect.status, 403);
+
+    const inspectResponse = await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, { headers: authHeaders });
+    assert.equal(inspectResponse.status, 200);
+    const inspect = await json(inspectResponse);
     assert.equal(inspect.control_generation, 0);
     assert.equal(inspect.runtime_session_ref, session.runtime_session_ref);
 
@@ -102,7 +114,7 @@ test("owner session discovery and control CAS keep stale and ABA writes side-eff
     assert.equal(staleRelease.response.status, 409);
     assert.equal(staleRelease.body.failure_class, "control_state_changed");
     assert.equal(staleRelease.body.current_control.control_generation, 1);
-    const unchangedAfterStale = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`));
+    const unchangedAfterStale = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, { headers: authHeaders }));
     assert.equal(unchangedAfterStale.control_owner, "user");
     assert.equal(unchangedAfterStale.control_generation, 1);
 
@@ -160,7 +172,7 @@ test("owner session discovery and control CAS keep stale and ABA writes side-eff
     assert.equal(aba.response.status, 409);
     assert.equal(aba.body.failure_class, "control_state_changed");
     assert.equal(aba.body.current_control.control_generation, 4);
-    const unchangedAfterAba = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`));
+    const unchangedAfterAba = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, { headers: authHeaders }));
     assert.equal(unchangedAfterAba.control_owner, "none");
     assert.equal(unchangedAfterAba.control_lock.holder_ref, null);
     assert.equal(unchangedAfterAba.control_lock.conflict_error, null);
@@ -200,7 +212,7 @@ test("owner takeover from a released session requires a viewer", async () => {
     });
     assert.equal(takeover.response.status, 409);
     assert.equal(takeover.body.failure_class, "viewer_unavailable");
-    const inspect = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`));
+    const inspect = await json(await fetch(`${running.url}/runtime/sessions/${session.runtime_session_ref}`, { headers: authHeaders }));
     assert.equal(inspect.control_owner, "none");
     assert.equal(inspect.control_generation, 1);
   } finally {

@@ -579,7 +579,11 @@ async function routeSession(
     return;
   }
   if (!action && method === "GET") {
-    const session = runtime.getOwnerSessionFacts(runtimeSessionRef);
+    const ownerProjection = request.headers.authorization !== undefined;
+    if (ownerProjection && !authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const session = ownerProjection
+      ? runtime.getOwnerSessionFacts(runtimeSessionRef)
+      : runtime.getSession(runtimeSessionRef);
     const unavailable = sessionReadUnavailable(runtimeSessionRef, session?.current_error);
     writeJson(response, unavailable ? 404 : 200, unavailable ?? session);
     return;
