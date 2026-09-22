@@ -8,6 +8,7 @@ on:
       - "apps/desktop/package.json"
       - "apps/desktop/scripts/build-standalone.mjs"
       - "apps/desktop/scripts/check-standalone-package.mjs"
+      - "apps/desktop/scripts/standalone-boundary-check.mjs"
       - "apps/desktop/scripts/package-standalone.mjs"
       - "apps/desktop/scripts/package-runtime-assets.mjs"
       - "apps/desktop/scripts/package-lode-assets.mjs"
@@ -35,7 +36,7 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      PACKAGE_ROOT: /tmp/webenvoy-standalone-macos-arm64
+      PACKAGE_ROOT: /tmp/webenvoy-standalone-ci/webenvoy-standalone-macos-arm64
       LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
     steps:
       - name: Check out exact candidate source
@@ -120,6 +121,9 @@ jobs:
           if (manifest.platform !== "darwin" || manifest.arch !== "arm64" || manifest.runtime?.node_version !== "24.14.0") throw new Error("standalone platform/runtime identity mismatch");
           console.log(JSON.stringify({ commit: manifest.workspace.commit, node: manifest.runtime.node_version, node_sha256: manifest.runtime.executable_sha256 }));
           NODE
+
+      - name: Verify isolated owner and Agent Runtime path
+        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
 
       - name: Record artifact digest
         id: metadata
