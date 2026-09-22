@@ -171,30 +171,34 @@ POST /managed-tasks/operations
 CLI 是 S1 既有 `webenvoy agent` command root 下的 site-task 专门扩展，固定为：
 
 ~~~text
-webenvoy agent task submit --request-file <path> --client <client-ref>
-webenvoy agent task query  --request-file <path> --client <client-ref>
-webenvoy agent task stop   --request-file <path> --client <client-ref>
+webenvoy agent task submit --request-file <path> --client-file <path>
+webenvoy agent task query  --request-file <path> --client-file <path>
+webenvoy agent task stop   --request-file <path> --client-file <path>
 ~~~
 
-`--request-file` 携带对应 managed-task body，`--client` 只选择 S1 已定义的 trust
-channel；两者都不能改变 Grant、task scope 或 Core task 语义。该扩展不修改既有
+`--request-file` 携带对应 managed-task 参数，`--client-file` 复用 S1 已定义的 client
+credential 文件及连接规则；两者都不能改变 Grant、task scope 或 Core task 语义。该扩展不修改既有
 `webenvoy agent operation` 的 managed-browser envelope。S1 只拥有 CLI 参数解析和
 trust channel，不能改写下面的 Core task 语义。
 
-MCP tool arguments 不包含 `connection_id`；Connector 从当前 `webenvoy_connect` context
-注入一个 out-of-band `connection_id`。HTTP managed route 也必须使用已建立 context
-注入的同一绑定，再把它交给 Core；请求 body 不能写入或覆盖该字段。Core 从 bearer
+MCP tool arguments 与 CLI request-file 不接受 `connection_id`；Connector 从当前
+`webenvoy_connect` context 取得连接，在发送到 `POST /managed-tasks/operations` 的
+HTTP JSON body 中加入必填的字符串字段 `connection_id`。直接 API 消费者先用当前
+Agent credential 调用既有 `POST /agent-connections`，再在每次 HTTP JSON body 的同一
+字段提交返回的 connection ID；不引入额外 header 或隐式元数据。Core 从 bearer
 credential 识别 Principal，核对所带 connection 是否属于该 Principal、仍有效且未撤销，
 再取与其匹配的单一 Grant；缺失或无法确定 connection 时返回既有 connection error，不能
 在多个活动 connection 中猜选。`connection_id` 是本次认证上下文，不是后续 query/stop
 的永久 owner key；重连后由同一 Principal 的新有效 connection 重新通过当前 Grant/scope
 检查即可。调用者不能选择 owner credential，也不能把 `/tasks` 或 `/runs` 作为 fallback。
-该 context binding 是 `webenvoy.managed-task-operation/v1` 的受管请求元数据，不投影到
-普通 Agent body 或结果；Core 仍按既有 Principal/Connection/Grant 关系记录和审计。
+以下三个 operation 的 JSON 示例均为 MCP/CLI 参数；对应 HTTP body 的完整 allowlist
+就是各自参数字段加必填 `connection_id`。Connector 必须拒绝工具参数/request-file 中
+试图注入该字段的请求；Core 独立校验 HTTP 字段，不因其来自 Connector 而信任。
+Core 仍按既有 Principal/Connection/Grant 关系记录和审计。
 
 #### submit 请求
 
-`task.submit` 的 body 只允许下列字段：
+`task.submit` 的 MCP/CLI 参数只允许下列字段；HTTP body 另须携带上述 `connection_id`：
 
 ~~~json
 {

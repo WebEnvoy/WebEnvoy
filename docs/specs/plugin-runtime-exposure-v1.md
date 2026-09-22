@@ -59,7 +59,8 @@ OS identity 或 live evidence；`knowledge_only` 仍可 install/enable/read。
 响应版本为 `webenvoy.managed-task-operation-result/v1`，operation 只有
 `task.submit`、`task.query`、`task.stop`。三者都携带一个 `grant_id` 和精确五组
 `task_scope={operations,skill_refs,source_refs,profile_refs,origins}`；MCP arguments 不
-包含 `connection_id`，Connector/HTTP context 注入一个绑定，Core 核对它属于 bearer
+包含 `connection_id`，Connector 在 HTTP JSON body 中注入必填的同名字段，直接 API
+消费者先 connect 再在相同字段提交连接 ID；Core 核对它属于 bearer
 Principal 且仍有效，不在多个活动 connection 中猜选。重连后新 connection 可按同一
 Principal 的当前有效 Grant/scope 查询原 Run。请求形状、package/revision/digest pin、
 Lode pinned inline JSON input carrier、过滤顺序和 broker 语义见 [Site SKILL Execution V1 §4.3](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)。
@@ -79,7 +80,7 @@ Run/receipt；`task.stop` 调用现有 cancellation/request-cancel service。响
 route-level invalid/version/access/conflict code 沿执行合同与现有 managed-access
 mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。CLI 是 S1 command root
 下的 site-task 专门扩展，固定命令为
-`webenvoy agent task submit|query|stop --request-file <path> --client <client-ref>`；
+`webenvoy agent task submit|query|stop --request-file <path> --client-file <path>`；
 它不修改既有 `webenvoy agent operation` 的 managed-browser envelope。S1 只拥有参数
 解析和 trust channel，不拥有 task 字段、授权或 Run 状态。
 
