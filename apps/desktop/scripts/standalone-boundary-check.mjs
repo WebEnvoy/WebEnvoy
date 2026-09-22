@@ -63,7 +63,7 @@ try {
   assert.equal(ownerStatus.boundary?.state, 'supported', `OS boundary must be supported: ${JSON.stringify(ownerStatus.boundary)}`);
   await assertAgentCannotModifyBundle();
 
-  agentHost = await mkdtempAsAgent(join(tmpdir(), `webenvoy-agent-host-${process.pid}-`));
+  agentHost = await mkdtempAsAgent(join('/tmp', `webenvoy-agent-host-${process.pid}-`));
   runAsAgent(cli, ['agent', 'setup', '--host-dir', agentHost, '--data-dir', ownerData, '--owner-uid', String(ownerUid), '--agent-endpoint', agentEndpoint]);
   clientFile = join(agentHost, 'webenvoy-client.json');
   const agentMeta = JSON.parse(runAsAgent(fixedNode, ['--input-type=module', '-e', agentMetadataScript, clientFile]).stdout);
@@ -206,7 +206,7 @@ async function expectDenied(path, message) {
   const script = `import { access } from 'node:fs/promises'; try { await access(process.argv[1]); process.exit(0); } catch { process.exit(7); }`;
   const result = spawnSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', fixedNode, '--input-type=module', '-e', script, path], { cwd: packageRoot, encoding: 'utf8', timeout: 30_000, env: { ...process.env, LC_ALL: 'C' } });
   if (result.error) throw result.error;
-  if (result.status === 0) throw new Error(message);
+  if (result.status !== 7 || result.signal) throw new Error(`${message}: expected nobody access denial (exit 7), got status=${result.status ?? 'null'} signal=${result.signal ?? 'none'}`);
 }
 
 async function expectOwnerWriteDenied(path, message) {
