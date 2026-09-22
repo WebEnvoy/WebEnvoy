@@ -66,6 +66,7 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
   "schema_version": "webenvoy.site-task-summary/v1",
   "package_ref": "lode://site-skill/example/catalog@1.0.0",
   "revision_ref": "lode://site-skill/example/catalog@1.0.0#<source-commit>",
+  "package_digest": "sha256:<64-lowercase-hex>",
   "version": "1.0.0",
   "tasks": [
     {
@@ -88,8 +89,9 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
 }
 ```
 
-`site_tasks` 只投影 Lode 已声明的 `task_ref`、`capability_ref`、version/source/lock、
-operation、input schema/carrier/size、output schema 和 verification refs；不投影脚本源、输入正文、文件路径、Grant、
+`site_tasks` 只投影 Lode 已声明的 package-level `package_ref`/`revision_ref`/`package_digest`、
+task `task_ref`、`capability_ref`、version/source/lock、operation、input schema/carrier/size、
+output schema 和 verification refs；不投影脚本源、输入正文、文件路径、Grant、
 Profile、Page、OS identity 或 live evidence。`task_support` 只有 `declared` 和
 `knowledge_only`：没有完整 task declaration 的 package 返回空任务或
 `knowledge_only`，但仍可按本生命周期 install、enable、read；`runtime_state` 在这个
@@ -103,8 +105,9 @@ asset、source 和 revision 可见，再校验包完整性和 task declaration�
 做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task execution 只沿
 [#563 Site SKILL Execution V1](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)
 定义的 `webenvoy_task` / `POST /managed-tasks/operations` projection 提交、查询或
-停止。该 projection 的 `package_ref`/`revision_ref`/digest 与 `capability.ref` 仍由
-Lode task declaration 解析为同一 `webenvoy.task-intent.v0`；动态结果沿既有 Run/Result
+停止。该 projection 的 package-level `package_ref`/`revision_ref`/`package_digest` 与
+`capability.ref` 仍由 Lode task declaration 解析为同一 `webenvoy.task-intent.v0`；
+submit 必须使用 `skill.inspect` 摘要中的同一 digest，Core 再与已安装 manifest 重验；动态结果沿既有 Run/Result
 Envelope 返回，不把 owner `/tasks` 或 `/runs` 暴露给普通 Agent。
 
 ## 生命周期与不变量

@@ -106,7 +106,8 @@ service，不把 owner `/tasks` 路由暴露给普通 Agent。
 
 ### 4.1 发现
 
-任务发现必须显示 Lode 的 `package_ref`、固定 `revision_ref`、`version`、
+任务发现必须显示 Lode 的 `package_ref`、固定 `revision_ref`、唯一 package-level
+`package_digest`、`version`、
 `task_ref`、action、required capabilities、input schema/carrier/size、output schema、known branches、
 verification requirements、data-handling 限制和门状态（未评估的 Runtime 门必须标为
 `not_evaluated`）。它必须区分
@@ -169,8 +170,18 @@ POST /managed-tasks/operations
 这个 POST action envelope，避免把 Grant 或 task scope 放进 URL、隐式 header 或 owner
 代理。实现必须把该 path 纳入现有 Agent credential route，并保留现有
 `/tasks`、`/runs` 的 owner gate；未知 method、path、schema version 或字段明确拒绝。
-最小 CLI 投影沿 S1 已有 CLI/client command root 命名为 `task submit`、`task query`、
-`task stop`；S1 只拥有 CLI 参数解析和 trust channel，不能改写下面的 Core task 语义。
+CLI 是 S1 既有 `webenvoy agent` command root 下的 site-task 专门扩展，固定为：
+
+~~~text
+webenvoy agent task submit --request-file <path> --client <client-ref>
+webenvoy agent task query  --request-file <path> --client <client-ref>
+webenvoy agent task stop   --request-file <path> --client <client-ref>
+~~~
+
+`--request-file` 携带对应 managed-task body，`--client` 只选择 S1 已定义的 trust
+channel；两者都不能改变 Grant、task scope 或 Core task 语义。该扩展不修改既有
+`webenvoy agent operation` 的 managed-browser envelope。S1 只拥有 CLI 参数解析和
+trust channel，不能改写下面的 Core task 语义。
 
 MCP tool arguments 不包含 `connection_id`；Connector 从当前 `webenvoy_connect` context
 注入一个 out-of-band `connection_id`。HTTP managed route 也必须使用已建立 context
@@ -235,10 +246,12 @@ Token、credential、Provider handle、owner 字段或 Agent 自带 allowlist。
 没有浏览器目标的 task 必须提交空的 `profile_refs`/`origins`，而不是借 task scope
 扩大网页范围。
 
-`package.package_ref`、完整 `revision_ref`、package digest 和 `task_ref` 必须来自
-当前获准的 `skill.inspect` 摘要。Core/Lode resolver 逐项核对已安装、enabled、完整性、
-source、task declaration、revision 和 package digest；任何不一致均在 dispatch 前
-拒绝。客户端不能把另一个 revision、latest、工作树路径或 capability ref 冒充该 task。
+`package.package_ref`、完整 `revision_ref`、唯一 package-level `package_digest` 和
+`task_ref` 必须来自当前获准的 `skill.inspect` 摘要；digest 不是 Agent 自行计算或替换
+的第二身份。Core/Lode resolver 必须逐项核对该摘要与已安装、enabled、Lode manifest
+完整性、source、task declaration、revision 和 `integrity.package_digest` 完全相等；
+任何不一致均在 dispatch 前拒绝。客户端不能把另一个 revision、latest、工作树路径或
+capability ref 冒充该 task。
 `target_ref` 必须是当前 Harbor/Core 已登记的不透明 target ref；不能以网页 URL、selector
 或最后一次页面状态替代。`intent.summary` 是最多 256 个 UTF-8 字符的非敏感摘要；
 `intent.policy` 只接受现有 Task Intent 的公开 risk、execution_intent 和 timeout 字段。
@@ -301,18 +314,29 @@ file/Grant 合同传递不透明 ref；managed-task carrier 不新增 `file_refs
     "profile_refs": ["profile:example"],
     "origins": ["https://example.com"]
   },
-  "run_id": "run:core/example-001"
+  "selector": {
+    "original_idempotency_key": "agent-task-001"
+  }
 }
 ~~~
 
-`task.stop` 使用相同字段，把 operation 改为 `task.stop`，并额外要求一个新的、
-仅用于停止请求本身的 `idempotency_key`。两者的 `task_scope` 除当前 operation 名外
-必须使用当前请求的 scope 覆盖原 submit 的 package/revision、目标范围和 Principal；Core
-从原 Run 的 pinned package/revision/target facts 检查覆盖关系，query/stop 不要求客户端
-重复提交 digest 或 target。
+`task.query` 的 `selector` 必须恰好二选一：`{"run_id":"<opaque-run-ref>"}` 或
+`{"original_idempotency_key":"<the-submit-key>"}`，不能同时出现、缺失或携带其它
+字段。`run_id` 是 submit response 或先前 query 返回的原 Run ref；
+`original_idempotency_key` 只能是原 `task.submit` 使用过的 key，不是一次新的 submit，
+也不能触发 task 创建、重派发或新的 Run。Core 按当前 bearer Principal、context-bound
+connection、当前有效 Grant 和 `task_scope` 查询该 selector 绑定的原 operation；当前
+scope 必须覆盖原 submit 的 package/revision、目标范围和 Principal。Core 从原 Run 的
+pinned package/revision/target facts 检查覆盖关系，query 不要求客户端重复提交 digest
+或 target。重连后的新 connection 仍可通过同一 Principal/scope 检查。
+
+若 submit response 丢失，调用者必须先用原 `original_idempotency_key` 做只读 query，取得
+Core 已生成的 `run_id`/receipt，再以该 `run_id` 发 `task.stop`；不能重发 submit 代替
+query。`task.stop` 使用相同字段，把 operation 改为 `task.stop`，只接受已经取得的
+`run_id`，并额外要求一个新的、仅用于停止请求本身的 `idempotency_key`。
 Core 仍重新检查当前 Grant 是否含 `task.query`/`task.stop`。重连后的新 connection
-可以通过该检查，不要求等于原 submit connection。`run_id` 只是不透明的原 Run ref；
-跨 Principal、scope 不足或不存在的 ref 统一返回不可枚举的
+可以通过该检查，不要求等于原 submit connection。跨 Principal、scope 不足、未知
+`run_id` 或未知/不属于当前 Principal 的原始 key 统一返回不可枚举的
 `managed_task_operation_unavailable`。`task.query` 只读原 Run/result/receipt，`task.stop`
 调用现有 cancellation/request-cancel service，只停止后续步骤，不回滚外部效果，不生成
 第二 Run。响应丢失后必须 query 原 operation；`unknown_outcome`、`dispatched` 和
@@ -348,7 +372,7 @@ late result 沿既有 Core 事实保留，不能换 key 重放。
 不创建另一种 site-task 状态。未派发失败保留 `dispatch_state: "not_dispatched"`；
 已派发但结果无法证明仍是原 Run 的 `dispatched`/`unknown_outcome`。
 
-访问和输入错误固定如下：schema/version/未知字段或 carrier 形状为 HTTP 400
+访问和输入错误固定如下：schema/version/未知字段、carrier 或 selector 形状为 HTTP 400
 `managed_task_invalid_input`/`managed_task_version_unsupported`；credential 或
 Connection 沿现有 `managed_access_authentication_required`、
 `managed_access_connection_unavailable`；Grant、scope、Principal、package/carrier 或

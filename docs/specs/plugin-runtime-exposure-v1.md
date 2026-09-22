@@ -49,7 +49,8 @@
 `webenvoy_skills.skill.inspect` 仍是 site SKILL task 的唯一 metadata entrypoint。它保持
 既有输入和 `webenvoy.skill-operation-result.v1` 外壳；获准的 Lode revision 可在
 `result.skill.site_tasks` 附带 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)
-定义的 `webenvoy.site-task-summary/v1`。该投影按 `skill_scope`、source/revision、task
+定义的 `webenvoy.site-task-summary/v1`；其中 package-level `package_digest` 是 Agent
+提交时唯一可用的 digest 来源。该投影按 `skill_scope`、source/revision、task
 scope 和包完整性过滤，不返回未授权 task 名称、脚本正文、路径、Grant、Profile、Page、
 OS identity 或 live evidence；`knowledge_only` 仍可 install/enable/read。
 
@@ -72,12 +73,15 @@ package lifecycle、Profile/ControlLease/Runtime，再内部生成同一
 
 `task.submit` response 是 bounded Run projection；终态 `result` 使用既有
 `webenvoy.result-envelope.v0`，`failure` 使用既有 `FailureRecord`。`task.query` 只读原
-Run/receipt；`task.stop` 调用现有 cancellation/request-cancel service。响应丢失后只用
-原 operation/idempotency 查询，`dispatched`/`unknown_outcome` 不换 key 重放。稳定的
+Run/receipt；`task.stop` 调用现有 cancellation/request-cancel service。响应丢失后，
+`task.query` 只读接受 `run_id` 或原 submit `original_idempotency_key` 二选一 selector，
+再按原 Run ref stop；不重发 submit。`dispatched`/`unknown_outcome` 不换 key 重放。稳定的
 route-level invalid/version/access/conflict code 沿执行合同与现有 managed-access
-mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。最小 CLI 名称为 S1
-command root 下的 `task submit`、`task query`、`task stop`，S1 只拥有参数解析和
-trust channel，不拥有 task 字段、授权或 Run 状态。
+mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。CLI 是 S1 command root
+下的 site-task 专门扩展，固定命令为
+`webenvoy agent task submit|query|stop --request-file <path> --client <client-ref>`；
+它不修改既有 `webenvoy agent operation` 的 managed-browser envelope。S1 只拥有参数
+解析和 trust channel，不拥有 task 字段、授权或 Run 状态。
 
 ## 十二类基线与 Plugin checkpoint
 
