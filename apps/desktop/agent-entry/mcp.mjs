@@ -77,7 +77,6 @@ function checkedObservationResult(value) {
 }
 const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
 const managedOperationIds = capabilityOperations.map(definition => definition.id);
-const managedOperationSet = new Set(managedOperationIds);
 const managedFileOperationIds = capabilityOperations.filter(definition => definition.file_scope).map(definition => definition.id);
 const managedOriginOperationIds = capabilityOperations.filter(definition => definition.required.includes('origin')).map(definition => definition.id);
 const managedOperationDescription = `Submit one authorized operation using the static WebEnvoy input definition. ${capabilityOperations.map(definition => `${definition.id}: ${definition.summary}`).join(' ')} task_scope describes this submitted operation only; submit later workflow steps separately. File upload/download accepts only opaque owner references and a fresh Page target; file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation. Operation-specific origin inputs are significant: ${managedOriginOperationIds.join(', ')} require the exact authorized origin as a top-level origin field; task_scope.origins cannot replace it. Preference, Profile, Page, environment and browser actions never retry; query the original Run when an outcome is unknown. This tool executes only the submitted operation; it does not describe later workflow steps.`;
@@ -196,6 +195,39 @@ const tools = [
 const operationTool = tools.find(tool => tool.name === 'webenvoy_operation');
 const describeOperationPattern = new RegExp(capabilityDefinitions.operation_pattern);
 const describeArgumentFields = new Set(Object.keys(capabilityDefinitions.fields).filter(name => name !== 'profile_ref'));
+function rejectUnless(value, predicate, code) { if (!predicate(value)) throw new Error(code); return value; }
+function onlyKeys(value, keys) { return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key)); }
+function validateTaskScope(scope, fileScope, code) {
+  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : [])];
+  rejectUnless(scope, value => exactKeys(value, keys) && ['operations', 'profile_refs', 'origins'].every(key => Array.isArray(value[key]) && value[key].every(item => typeof item === 'string')), code);
+  if (fileScope === 'upload') rejectUnless(scope.file_refs, value => Array.isArray(value) && value.length === 1 && /^attachment:runtime\/[0-9a-f-]{36}$/.test(value[0]), code);
+  if (fileScope === 'download') rejectUnless(scope.file_refs, value => Array.isArray(value) && value.length === 0, code);
+  return scope;
+}
+function validateOperationInput(args) {
+  const code = 'operation_input_refused';
+  rejectUnless(args, value => value && typeof value === 'object' && !Array.isArray(value), code);
+  const definition = capabilityOperations.find(item => item.id === args.operation);
+  if (!definition || typeof args.idempotency_key !== 'string' || !args.idempotency_key.length || args.idempotency_key.length > 512 || typeof args.grant_id !== 'string' || !args.grant_id.length) throw new Error(code);
+  if (Object.keys(args).some(key => !(key in operationTool.inputSchema.properties))) throw new Error(code);
+  validateTaskScope(args.task_scope, definition.file_scope, code);
+  if (!args.task_scope.operations.includes(definition.id) || definition.required.some(key => !Object.hasOwn(args, key))) throw new Error(code);
+  if (Object.keys(args).some(key => capabilityDefinitions.fields[key] && !definition.allowed.includes(key))) throw new Error(code);
+  if (definition.conditions?.some(condition => condition.kind === 'page_selector' && condition.when === 'always' && !condition.required_any.some(key => Object.hasOwn(args, key)))) throw new Error(code);
+  if (definition.conditions?.some(condition => condition.kind === 'file_scope' && condition.equals === 'file_ref' && args.task_scope.file_refs?.[0] !== args.file_ref)) throw new Error(code);
+  return args;
+}
+function validateRecoveryInput(args) {
+  const code = 'recovery_input_refused';
+  if (!onlyKeys(args, ['idempotency_key', 'grant_id', 'operation', 'task_scope', 'profile_ref', 'backup_ref', 'operation_ref']) || !['recovery.inspect', 'recovery.request', 'recovery.status'].includes(args.operation) || ['idempotency_key', 'grant_id', 'profile_ref'].some(key => typeof args[key] !== 'string' || !args[key].length) || !exactKeys(args.task_scope, ['operations', 'profile_refs', 'origins']) || ['operations', 'profile_refs', 'origins'].some(key => !Array.isArray(args.task_scope[key]) || args.task_scope[key].some(item => typeof item !== 'string'))) throw new Error(code);
+  return args;
+}
+function validateSkillsInput(args) {
+  const code = 'skill_input_refused';
+  const operations = ['skill.list', 'skill.inspect', 'skill.install', 'skill.enable', 'skill.read', 'skill.update', 'skill.rollback', 'skill.disable'];
+  if (!onlyKeys(args, ['idempotency_key', 'grant_id', 'operation', 'task_scope', 'skill_ref', 'source_ref', 'revision_ref', 'target_revision_ref', 'expected_revision_ref', 'expected_current_revision_ref', 'expected_record_version']) || !operations.includes(args.operation) || ['idempotency_key', 'grant_id'].some(key => typeof args[key] !== 'string' || !args[key].length) || !exactKeys(args.task_scope, ['operations', 'skill_refs', 'source_refs']) || ['operations', 'skill_refs', 'source_refs'].some(key => !Array.isArray(args.task_scope[key]) || args.task_scope[key].some(item => typeof item !== 'string'))) throw new Error(code);
+  return args;
+}
 function validateDescribeInput(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.operation !== 'string' || !describeOperationPattern.test(args.operation)) throw new Error('describe_input_refused');
   if (Object.keys(args).some(key => !['operation', 'context', 'arguments'].includes(key))) throw new Error('describe_input_refused');
@@ -259,21 +291,17 @@ async function call(name, args) {
   }
   if (name === 'webenvoy_operation') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    if (!managedOperationSet.has(args.operation) || Object.keys(args).some(k => !(k in operationTool.inputSchema.properties))) throw new Error('operation_input_refused');
-    const scope = args.task_scope;
-    if (!managedFileOperationIds.includes(args.operation) && scope && typeof scope === 'object' && !Array.isArray(scope) && Object.hasOwn(scope, 'file_refs')) throw new Error('operation_input_refused');
-    if (managedOriginOperationIds.includes(args.operation) && typeof args.origin !== 'string') throw new Error('operation_input_refused');
+    validateOperationInput(args);
     return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }));
   }
   if (name === 'webenvoy_recovery') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    if (!['recovery.inspect','recovery.request','recovery.status'].includes(args.operation)) throw new Error('recovery_input_refused');
+    validateRecoveryInput(args);
     return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
   }
   if (name === 'webenvoy_skills') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    const schema = tools.find(tool => tool.name === 'webenvoy_skills').inputSchema;
-    if (!schema.properties.operation.enum.includes(args.operation) || Object.keys(args).some(k => !(k in schema.properties))) throw new Error('skill_input_refused');
+    validateSkillsInput(args);
     return request('/managed-skills/operations', { ...args, connection_id: connection.connection_id });
   }
   throw new Error('tool_not_found');
