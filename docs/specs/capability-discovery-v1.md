@@ -23,7 +23,7 @@ Agent 在已安装 Plugin 内问“这个操作在这个环境能否使用、缺
 
 其中绑定既有 Profile 的操作提供第 4 节的上下文评估。`profile.create`、不指定 Profile 的 `profile.list` 和 `provider.preference.*` 本批提供完整静态调用规则；不增加创建/全局偏好动态预检。给这些操作提供 Profile 上下文返回 `discovery_context_not_supported`，不得谎称原操作不可用。
 
-`account.bind` 是已有公共定义但未暴露给本批 Plugin 的明确样本：返回 `definition.state=defined`、`invocation.exposure=not_exposed`，不提供内部调用地址或替代入口。本批不增加该能力。其他未知 operation 返回 `definition.state=unknown`，不把猜测名称当作未来支持承诺。`webenvoy_recovery`、`webenvoy_skills` 与 owner 管理操作不扩入本批 `webenvoy_describe` 覆盖；其原工具和合同保持可用，返回范围说明而非假报这些工具不存在。#563 的 site task 元数据由既有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 投影承载，执行沿 Core `POST /tasks` 的 `webenvoy.task-intent.v0`；本帮助工具不扩展这两条合同，也不为 site task 发明 discovery token。
+`account.bind` 是已有公共定义但未暴露给本批 Plugin 的明确样本：返回 `definition.state=defined`、`invocation.exposure=not_exposed`，不提供内部调用地址或替代入口。本批不增加该能力。其他未知 operation 返回 `definition.state=unknown`，不把猜测名称当作未来支持承诺。`webenvoy_recovery`、`webenvoy_skills` 与 owner 管理操作不扩入本批 `webenvoy_describe` 覆盖；其原工具和合同保持可用，返回范围说明而非假报这些工具不存在。#563 的 site task 元数据由既有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 投影承载，执行由独立的 `webenvoy_task` managed projection 承载；本帮助工具不扩展 task submit/query/stop 合同，也不为 site task 发明 discovery token。
 
 不做 #540 的观察续读/名称识别，不新增页面内容、截图、网络正文、执行能力、Provider 资格、Grant 维度或完整 App UI；不修复或调查另案 stop/restart 失败。不要求先完成所有 V1 能力才能交付本工具。
 

@@ -77,6 +77,8 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
       "operation_id": "catalog_read",
       "action": "read",
       "input_schema_ref": "lode://schema/example/catalog-read-input@1.0.0",
+      "input_carrier": "webenvoy.managed-task-inline/v1",
+      "input_max_bytes": 65536,
       "output_schema_ref": "lode://schema/example/catalog-read-output@1.0.0",
       "post_check_ref": "lode://check/example/catalog-read@1.0.0",
       "task_support": "declared",
@@ -87,7 +89,7 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
 ```
 
 `site_tasks` 只投影 Lode 已声明的 `task_ref`、`capability_ref`、version/source/lock、
-operation、schema 和 verification refs；不投影脚本源、输入正文、文件路径、Grant、
+operation、input schema/carrier/size、output schema 和 verification refs；不投影脚本源、输入正文、文件路径、Grant、
 Profile、Page、OS identity 或 live evidence。`task_support` 只有 `declared` 和
 `knowledge_only`：没有完整 task declaration 的 package 返回空任务或
 `knowledge_only`，但仍可按本生命周期 install、enable、read；`runtime_state` 在这个
@@ -98,9 +100,12 @@ asset、source 和 revision 可见，再校验包完整性和 task declaration�
 校验的 task 摘要。未授权 revision/task 不得以名称、路径、正文或错误细节泄露；source
 缺失/损坏、local modified、not installed、disabled、incompatible 和 access denied
 沿本文件已有 `managed_skill_*` 错误返回，不建立 site-task 错误表。`skill.inspect` 不
-做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task execution 使用
-现有 Core `POST /tasks` 和 `webenvoy.task-intent.v0`，其 `capability.ref` 解析回
-`task_ref`，动态结果沿现有 Run/Result Envelope 返回。
+做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task execution 只沿
+[#563 Site SKILL Execution V1](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)
+定义的 `webenvoy_task` / `POST /managed-tasks/operations` projection 提交、查询或
+停止。该 projection 的 `package_ref`/`revision_ref`/digest 与 `capability.ref` 仍由
+Lode task declaration 解析为同一 `webenvoy.task-intent.v0`；动态结果沿既有 Run/Result
+Envelope 返回，不把 owner `/tasks` 或 `/runs` 暴露给普通 Agent。
 
 ## 生命周期与不变量
 
