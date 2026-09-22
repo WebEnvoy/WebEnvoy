@@ -2,7 +2,7 @@
 
 `@webenvoy/app` 提供独立的 macOS arm64 候选打包路径。它使用构建机当前的 Node 24 可执行文件作为固定 Runtime，输出目录内包含 `runtime/node`、`bin/webenvoy`、Agent 入口、Core/Harbor 构建产物和 `agent-manifest.json`；锁定的 Lode 资产存在时一并带入，缺失时按可选资产记录为 unavailable；包内不包含 Electron `.app` 或 Electron 可执行文件。
 
-在 macOS arm64、Node `24.x` 的干净 checkout 中运行：
+在 macOS arm64、Node `24.14.0`、pnpm `10.30.3` 的干净 checkout 中运行：
 
 ```sh
 pnpm --filter @webenvoy/app package:standalone /tmp/webenvoy-standalone-macos-arm64

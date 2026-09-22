@@ -119,7 +119,7 @@ console.log(JSON.stringify({
   archive: archivePath,
   archive_sha256: archiveHash,
   manifest: join(outputRoot, "agent-manifest.json"),
-  manifest_sha256: sha(JSON.stringify(manifest)),
+  manifest_sha256: sha(await readFile(join(outputRoot, "agent-manifest.json"))),
   platform: process.platform,
   arch: process.arch,
   node_version: nodeVersion,
