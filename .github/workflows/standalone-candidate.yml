@@ -90,13 +90,13 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check CLI and IPC contracts
-        run: pnpm --filter @webenvoy/app test
-
       - name: Build standalone candidate
         env:
           WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
         run: pnpm --filter @webenvoy/app package:standalone "$PACKAGE_ROOT"
+
+      - name: Check CLI and IPC contracts
+        run: pnpm --filter @webenvoy/app test
 
       - name: Verify standalone package and no-App boundary
         shell: bash
