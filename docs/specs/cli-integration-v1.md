@@ -266,12 +266,34 @@ owner 必须能够在没有保存 Agent key 或 runtime_session_ref、且 Agent 
     webenvoy instance handback --data-dir DIR --runtime-session-ref REF
     webenvoy instance stop --data-dir DIR --runtime-session-ref REF
 
-- list 是 owner read，不启动 Runtime、Profile、Page 或 Provider，不获取 ControlLease。它映射到 owner-authenticated GET /runtime/sessions?profile_ref=PROFILE；省略 profile_ref 返回当前 RuntimeSessionStore 中尚未 closed 的全部 session facts。当前 Harbor 已有按 ref 读取 RuntimeSessionStore 的事实和 routes；list 是在 owner-authenticated Runtime seam 上增加的窄投影，不是第二个持久 registry。每项只返回最小身份和控制字段：runtime_session_ref、profile_ref、identity_environment_ref、provider_ref、lifecycle_state、created_at、last_seen_at、availability、control_owner、control_lock（owner、state、holder_ref）、current_page 的安全 ref／generation／status 摘要、current_error.code。它不返回 Cookie、token、raw DOM、HAR、截图、任意本地路径或 Provider 私有材料。
+- list 是 owner read，不启动 Runtime、Profile、Page 或 Provider，不获取 ControlLease。它映射到 owner-authenticated GET /runtime/sessions?profile_ref=PROFILE；省略 profile_ref 返回当前 RuntimeSessionStore 中尚未 closed 的全部 session facts。当前 Harbor 已有按 ref 读取 RuntimeSessionStore 的事实和 routes；list 是在 owner-authenticated Runtime seam 上增加的窄投影，不是第二个持久 registry。每项只返回最小身份和控制字段：runtime_session_ref、profile_ref、identity_environment_ref、provider_ref、lifecycle_state、created_at、last_seen_at、availability、control_owner、control_generation、control_lock（owner、state、holder_ref）、current_page 的安全 ref／generation／status 摘要、current_error.code。它不返回 Cookie、token、raw DOM、HAR、截图、任意本地路径或 Provider 私有材料。
 - inspect 是 owner read；读取 /runtime/sessions/{ref} 与 /runtime/sessions/{ref}/runtime-facts，不获取写 ControlLease，不启动、导航或刷新 Page。
-- takeover 先读取该 session 的当前事实并按下列分支执行：若 control_owner=core_task 且 control_lock.owner=core_task、state=held，则 POST /runtime/sessions/{ref}/handoff，body 只能是 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested，可带 holder_ref 且必须等于当前 core holder；若 control_owner=user 且 control_lock.owner=user、state=held，则返回 already_user 的当前事实，不重复 handoff；若 control_owner=none 且 control_lock.owner=none、state=released，则 POST /runtime/sessions/{ref}/lock，body 为 control_owner=user、holder_ref=harbor_mediated_user；其他 owner、lock 或 lifecycle 组合返回 control_state_unavailable，不猜测或改写状态。handoff 需要 viewer 可用；成功后返回当前 control owner、control generation 和安全事实摘要，不创建替代 Profile、不重新打开 URL、不清除 Run。
-- handback 先读取当前事实：若 control_owner=user 且 user lock 为 held，则 POST /runtime/sessions/{ref}/release，body 为 control_owner=user、holder_ref=当前 user holder；成功结果必须是 control_owner=none、control_lock.owner=none、state=released；若 control_owner=none 且 control_lock.owner=none、state=released，则返回 already_released；若仍是 core_task/held、provider／system owner 或组合不一致，则返回 control_lock_conflict／control_state_unavailable，不替 user release。release 后 Agent 只能以 core_task 和自己的 holder_ref 重新 lock，并先 fresh observe。handback 不是 App 关闭、CLI 退出、socket 断线或浏览器窗口消失的别名。
+- takeover 先读取该 session 的当前事实并按下列分支执行：若 control_owner=core_task 且 control_lock.owner=core_task、state=held，则 POST /runtime/sessions/{ref}/handoff；请求保留 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested 和可选 holder_ref 字段，并必须带第 5.5.1 节的 expected_control 前置状态；若 control_owner=user 且 control_lock.owner=user、state=held，则返回 already_user 的当前事实，不重复 handoff；若 control_owner=none 且 control_lock.owner=none、state=released，则 POST /runtime/sessions/{ref}/lock，请求带 control_owner=user、holder_ref=harbor_mediated_user 和同一 expected_control 前置状态；其他 owner、lock 或 lifecycle 组合返回 control_state_unavailable，不猜测或改写状态。handoff 需要 viewer 可用；成功后返回当前 control owner、control generation 和安全事实摘要，不创建替代 Profile、不重新打开 URL、不清除 Run。
+- handback 先读取当前事实：若 control_owner=user 且 user lock 为 held，则 POST /runtime/sessions/{ref}/release，请求带 control_owner=user、holder_ref=当前 user holder 和 expected_control 前置状态；成功结果必须是 control_owner=none、control_lock.owner=none、state=released；若 control_owner=none 且 control_lock.owner=none、state=released，则返回 already_released；若仍是 core_task/held、provider／system owner 或组合不一致，则返回 control_lock_conflict／control_state_unavailable，不替 user release。release 后 Agent 只能以 core_task 和自己的 holder_ref 重新 lock，并先 fresh observe。handback 不是 App 关闭、CLI 退出、socket 断线或浏览器窗口消失的别名。
 - stop 只停止指定 Instance／browser session；它不停止本地 Runtime service，不删除 Profile，不回放原 Run。停止后原 Run 和 outcome 仍可 query。
-- 每个 takeover、handback、lock、release 请求都在发送前保存 inspect 的 owner、lock state、holder_ref、control generation；服务端若事实在检查与写入之间改变，必须返回 409 session_locked／control_state_changed，不得覆盖新 owner。没有 viewer 不得假装 takeover 成功；主机断线不得自动 handback。
+
+### 5.5.1 owner control 的 CAS 前置状态
+
+owner 的 inspect／list 投影必须返回可用于一次写入比较的 `control_generation`。它来自 Harbor 当前 RuntimeSessionRecord 已有的单现场控制代数；当前公共 RuntimeSessionFacts 尚未暴露该内部字段，目标 owner projection 必须以 owner-only 字段返回它，不能用时间戳、holder_ref 相等或客户端自增值替代。代数从 0 开始，并在同一现场每次成功 handoff、lock 或 release 后单调递增；它不建立第二个持久锁或状态机。
+
+所有 owner 的 takeover、handback、lock、release 请求都必须携带以下 request-only `expected_control` 对象；它不是 Run、Grant 或 Harbor durable record：
+
+    {
+      "schema_version": "harbor-control-precondition/v1",
+      "control_owner": "core_task|user|none",
+      "lock_owner": "core_task|user|none",
+      "lock_state": "held|released|closed",
+      "holder_ref": "opaque-ref|null",
+      "control_generation": 12
+    }
+
+owner CLI 从同一次 inspect／list 结果逐字段复制 expected_control。handoff 的请求字段因此是现有 control_owner=user、expected_control_owner=core_task、handoff_reason=user_requested、可选 holder_ref，加上 required expected_control；released→lock 是 control_owner=user、holder_ref=harbor_mediated_user，加上 required expected_control；user→release 是 control_owner=user、holder_ref=当前 user holder，加上 required expected_control。旧 handoff 的“body 只能是三个字段、可选 holder_ref”限制由这个带版本前置状态的 allowlist 替代；lock／release 也不得只传 owner 和 holder。
+
+Runtime service 只能把 owner request 和 expected_control 原样转发给 Harbor。Harbor 必须在单一 RuntimeSessionStore 现场内原子地比较 control_owner、control_lock.owner、control_lock.state、control_lock.holder_ref 和 control_generation，比较成功后执行一次 mutation 并递增代数；不能由 CLI 或 Runtime service 先 inspect、再独立调用旧写接口来假装 CAS。检查失败返回 409 control_state_changed（现场正在收敛时可返回 409 session_locked），不得修改现场；返回的安全当前控制摘要可供 owner 重新 inspect，但不得自动重试。user→released→新 user 即使 holder_ref 相同，也因 control_generation 改变而拒绝旧请求，消除 ABA。
+
+旧 Harbor handoff body 仍可供已认证的既有 Core supervisor 调用者在兼容期使用，但缺少 expected_control 的 legacy 请求不满足本 owner 合同，不能由 owner control socket 或 owner CLI 发出；owner proxy 不支持 v1 时返回 control_precondition_unsupported／unavailable，不降级为先读后写。实现若将该字段接入现有 Harbor route，必须保留现有 handoff 字段和 route，不新增通用锁服务；不声称当前 public Harbor route 已提供 generation CAS。
+
+没有 viewer 不得假装 takeover 成功；主机断线不得自动 handback。
 
 ### 5.6 Agent／程序 CLI
 
@@ -350,11 +372,13 @@ account.bind 可以存在于 Core capability definition，但当前未暴露给 
 | recovery ... | 无 | owner /owner/recovery... | Core owner recovery service |
 | instance list | 无 | owner-authenticated GET /runtime/sessions?profile_ref=... | Harbor RuntimeSessionStore live facts |
 | instance inspect | 无 | owner-authenticated GET /runtime/sessions/{ref}、GET /runtime/sessions/{ref}/runtime-facts | Harbor session facts |
-| instance takeover | 无 | owner-authenticated POST /runtime/sessions/{ref}/handoff（core_task held）或 POST /runtime/sessions/{ref}/lock（released） | Harbor ControlLease |
-| instance handback | 无 | owner-authenticated POST /runtime/sessions/{ref}/release | Harbor ControlLease |
+| instance takeover | 无 | owner-authenticated POST /runtime/sessions/{ref}/handoff（core_task held）或 POST /runtime/sessions/{ref}/lock（released），均带 harbor-control-precondition/v1 | Harbor ControlLease |
+| instance handback | 无 | owner-authenticated POST /runtime/sessions/{ref}/release，带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance stop | 无 | owner-authenticated POST /runtime/sessions/{ref}/stop | Harbor exact Instance |
 
 owner session routes must be reachable only through a trusted owner control plane. If the current local service does not yet proxy these Harbor supervisor routes, implementation must add the narrow owner-authenticated forwarding seam; it must not expose them through Agent MCP or create a second direct Harbor client in CLI.
+
+所有 takeover、handback、lock、release 写请求复用第 5.5.1 节的 expected_control CAS 前置状态。CLI 的 inspect 结果、Runtime service 的转发和 Harbor 的单现场原子比较是同一个请求链；任何只在 CLI 端保存 generation、再调用没有 expected_control 的旧 route 的实现都不满足本规范。
 
 ### 6.3 API 与 Plugin 的一致性
 
@@ -476,10 +500,10 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 以 A 为 runtime_session_ref=A、B 为另一个 session 为例：
 
 1. Agent 以 core_task lease 对 A 执行 operation。
-2. owner 运行 webenvoy instance takeover --runtime-session-ref A。Harbor 验证 A 当前 lease、viewer／现场和 expected owner；成功后 A 的 control_owner=user。
+2. owner 从同一次 inspect 结果携带 A 的 owner、lock、holder 和 control_generation，运行 webenvoy instance takeover --runtime-session-ref A。Harbor 在单一现场原子比较 expected_control、当前 lease、viewer／现场；成功后 A 的 control_owner=user。检查后若发生 user→released→新 user 的 ABA 或其他变化，返回 409，不能覆盖新 owner。
 3. 在 A 由用户接管期间，任何 Agent click、input、press、scroll、navigate、page mutation 或 file operation 都返回 control_lock_conflict 或等价 denied；它不能通过新连接绕过 A 的 owner。
 4. B 的 lease、Grant 和 operation 不因 A takeover 改变；B 仍可执行其被授权的操作。
-5. 用户运行 webenvoy instance handback --runtime-session-ref A，明确释放 user lease。它不表示已有 Page 仍新鲜。
+5. 用户从当前 inspect 结果携带新的 expected_control 运行 webenvoy instance handback --runtime-session-ref A，明确释放 user lease；generation 不匹配时保持原控制事实并返回 409。它不表示已有 Page 仍新鲜。
 6. Agent 对 A 重新提交 instance.observe 或按 operation 要求获取 fresh observation；旧 Page／target／document generation 不得继续用于输入。
 
 ### 9.2 断线和 viewer 缺失
@@ -634,7 +658,7 @@ S1 文档验收必须能由实现者直接转换为检查：
 2. owner service credential、client credential、OS UID／ACL、同 UID fallback、环境继承、owner route 和 Agent route 的正反例均可验证；Agent 不能 register／grant／revoke／files owner／recovery apply／Instance supervisor。
 3. CLI 的帮助、未知参数、未知字段、stdout／stderr、退出码和非交互 pending 有确定性测试；缺 Grant／未注册 Principal 的 pre-createRun denied 必须没有 run_id 并退出 3，真实 owner decision 的持久 Run 才能退出 4。
 4. CLI 提交后退出；Plugin、API、重连 CLI 能 query 同一个原 Run；response loss、Provider unknown、Core／Harbor disconnect 都证明 no-replay。
-5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect 和 exact Instance stop 有受控验证。
+5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect、检查后变化以及相同 holder_ref 的 user→released→新 user ABA 均有受控验证；exact Instance stop 仍按准确 ref 验证。
 6. 重装／更新复用 data root、Grant、Run、Profile、recovery 和明确的 credential identity；卸载保留 data 并只清理 receipt 管理的文件。
 7. 验证记录准确的提交、平台、Runtime／Provider 版本、安装身份、bundle digest、owner／Agent OS identity、测试 surface 和候选边界；fixture／mock 不得冒充真实安装或真实 Provider。
 
