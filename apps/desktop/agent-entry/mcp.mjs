@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { root, sha, verifyBundle } from './bundle.mjs';
-import { ensureRuntime, localRequest, readClient } from './client.mjs';
+import { agentRequest, ensureAgentRuntime, readClient } from './client.mjs';
+import { validateDescribeRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
 const client = await readClient(process.argv[2]);
 let connection;
 async function readCapabilityDefinitions() {
@@ -192,64 +193,13 @@ const tools = [
   { name: 'webenvoy_recovery', description: 'Inspect or request owner-managed recovery for a granted Profile, or query an existing recovery operation. This tool cannot backup, confirm, or apply a recovery.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['recovery.inspect','recovery.request','recovery.status'] }, task_scope: { type: 'object' }, profile_ref: { type: 'string' }, backup_ref: { type: 'string' }, operation_ref: { type: 'string' } }, required: ['idempotency_key','grant_id','operation','task_scope','profile_ref'], additionalProperties: false } },
   { name: 'webenvoy_skills', description: 'List, inspect, install, enable, read, update, rollback, or disable an explicitly authorized fixed SKILL revision. Reads return the verified content once; query returns only the durable receipt and summary.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['skill.list','skill.inspect','skill.install','skill.enable','skill.read','skill.update','skill.rollback','skill.disable'] }, task_scope: { type: 'object', properties: { operations: { type: 'array', items: { type: 'string' } }, skill_refs: { type: 'array', items: { type: 'string' } }, source_refs: { type: 'array', items: { type: 'string' } } }, required: ['operations','skill_refs','source_refs'], additionalProperties: false }, skill_ref: { type: 'string' }, source_ref: { type: 'string' }, revision_ref: { type: 'string' }, target_revision_ref: { type: 'string' }, expected_revision_ref: { type: ['string','null'] }, expected_current_revision_ref: { type: ['string','null'] }, expected_record_version: { type: 'integer', minimum: 0 } }, required: ['idempotency_key','grant_id','operation','task_scope'], additionalProperties: false } },
 ];
-const operationTool = tools.find(tool => tool.name === 'webenvoy_operation');
-const describeOperationPattern = new RegExp(capabilityDefinitions.operation_pattern);
-const describeArgumentFields = new Set(Object.keys(capabilityDefinitions.fields).filter(name => name !== 'profile_ref'));
-function rejectUnless(value, predicate, code) { if (!predicate(value)) throw new Error(code); return value; }
-function onlyKeys(value, keys) { return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key)); }
-function validateTaskScope(scope, fileScope, code) {
-  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : [])];
-  rejectUnless(scope, value => exactKeys(value, keys) && ['operations', 'profile_refs', 'origins'].every(key => Array.isArray(value[key]) && value[key].every(item => typeof item === 'string')), code);
-  if (fileScope === 'upload') rejectUnless(scope.file_refs, value => Array.isArray(value) && value.length === 1 && /^attachment:runtime\/[0-9a-f-]{36}$/.test(value[0]), code);
-  if (fileScope === 'download') rejectUnless(scope.file_refs, value => Array.isArray(value) && value.length === 0, code);
-  return scope;
-}
-function validateOperationInput(args) {
-  const code = 'operation_input_refused';
-  rejectUnless(args, value => value && typeof value === 'object' && !Array.isArray(value), code);
-  const definition = capabilityOperations.find(item => item.id === args.operation);
-  if (!definition || typeof args.idempotency_key !== 'string' || !args.idempotency_key.length || args.idempotency_key.length > 512 || typeof args.grant_id !== 'string' || !args.grant_id.length) throw new Error(code);
-  if (Object.keys(args).some(key => !(key in operationTool.inputSchema.properties))) throw new Error(code);
-  validateTaskScope(args.task_scope, definition.file_scope, code);
-  if (!args.task_scope.operations.includes(definition.id) || definition.required.some(key => !Object.hasOwn(args, key))) throw new Error(code);
-  if (Object.keys(args).some(key => capabilityDefinitions.fields[key] && !definition.allowed.includes(key))) throw new Error(code);
-  if (definition.conditions?.some(condition => condition.kind === 'page_selector' && condition.when === 'always' && !condition.required_any.some(key => Object.hasOwn(args, key)))) throw new Error(code);
-  if (definition.conditions?.some(condition => condition.kind === 'file_scope' && condition.equals === 'file_ref' && args.task_scope.file_refs?.[0] !== args.file_ref)) throw new Error(code);
-  return args;
-}
-function validateRecoveryInput(args) {
-  const code = 'recovery_input_refused';
-  if (!onlyKeys(args, ['idempotency_key', 'grant_id', 'operation', 'task_scope', 'profile_ref', 'backup_ref', 'operation_ref']) || !['recovery.inspect', 'recovery.request', 'recovery.status'].includes(args.operation) || ['idempotency_key', 'grant_id', 'profile_ref'].some(key => typeof args[key] !== 'string' || !args[key].length) || !exactKeys(args.task_scope, ['operations', 'profile_refs', 'origins']) || ['operations', 'profile_refs', 'origins'].some(key => !Array.isArray(args.task_scope[key]) || args.task_scope[key].some(item => typeof item !== 'string'))) throw new Error(code);
-  return args;
-}
-function validateSkillsInput(args) {
-  const code = 'skill_input_refused';
-  const operations = ['skill.list', 'skill.inspect', 'skill.install', 'skill.enable', 'skill.read', 'skill.update', 'skill.rollback', 'skill.disable'];
-  if (!onlyKeys(args, ['idempotency_key', 'grant_id', 'operation', 'task_scope', 'skill_ref', 'source_ref', 'revision_ref', 'target_revision_ref', 'expected_revision_ref', 'expected_current_revision_ref', 'expected_record_version']) || !operations.includes(args.operation) || ['idempotency_key', 'grant_id'].some(key => typeof args[key] !== 'string' || !args[key].length) || !exactKeys(args.task_scope, ['operations', 'skill_refs', 'source_refs']) || ['operations', 'skill_refs', 'source_refs'].some(key => !Array.isArray(args.task_scope[key]) || args.task_scope[key].some(item => typeof item !== 'string'))) throw new Error(code);
-  return args;
-}
-function validateDescribeInput(args) {
-  if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.operation !== 'string' || !describeOperationPattern.test(args.operation)) throw new Error('describe_input_refused');
-  if (Object.keys(args).some(key => !['operation', 'context', 'arguments'].includes(key))) throw new Error('describe_input_refused');
-  if (args.context !== undefined) {
-    const context = args.context;
-    if (!context || typeof context !== 'object' || Array.isArray(context) || Object.keys(context).some(key => !['grant_id', 'profile_ref', 'task_scope'].includes(key)) ||
-      typeof context.grant_id !== 'string' || typeof context.profile_ref !== 'string' || !context.task_scope || typeof context.task_scope !== 'object' || Array.isArray(context.task_scope)) throw new Error('describe_input_refused');
-    const scope = context.task_scope;
-    const scopeKeys = ['operations', 'profile_refs', 'origins', ...(managedFileOperationIds.includes(args.operation) ? ['file_refs'] : [])];
-    if (Object.keys(scope).some(key => !scopeKeys.includes(key)) || !Array.isArray(scope.operations) || !Array.isArray(scope.profile_refs) || !Array.isArray(scope.origins)) throw new Error('describe_input_refused');
-  }
-  if (args.arguments !== undefined) {
-    const draft = args.arguments;
-    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some(key => !describeArgumentFields.has(key))) throw new Error('describe_input_refused');
-  }
-}
 async function call(name, args) {
   await verifyBundle();
   if (name === 'webenvoy_skill') return { skill: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8') };
-  const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  const request = (path, body) => agentRequest(client, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
   if (name === 'webenvoy_describe') {
-    validateDescribeInput(args);
+    validateDescribeRequest(args, capabilityDefinitions);
+    await ensureAgentRuntime(client);
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
     try {
       const result = await request('/managed-browser/capabilities/describe', { ...args, connection_id: connection.connection_id });
@@ -263,7 +213,12 @@ async function call(name, args) {
       throw error;
     }
   }
-  const status = await ensureRuntime(client.data_dir);
+  if (name === 'webenvoy_operation') validateOperationRequest(args, capabilityDefinitions);
+  if (name === 'webenvoy_recovery') validateRecoveryRequest(args);
+  if (name === 'webenvoy_skills') validateSkillsRequest(args);
+  if (name === 'webenvoy_query') validateQueryInput(args);
+  if (['webenvoy_operation', 'webenvoy_recovery', 'webenvoy_skills'].includes(name) && !connection) return { ok: false, error: { code: 'connect_first' } };
+  const status = await ensureAgentRuntime(client);
   if (name === 'webenvoy_status') {
     const publicStatus = { ...status };
     delete publicStatus.camoufoxArtifact;
@@ -291,20 +246,31 @@ async function call(name, args) {
   }
   if (name === 'webenvoy_operation') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    validateOperationInput(args);
-    return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }));
+    try { return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id })); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   if (name === 'webenvoy_recovery') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    validateRecoveryInput(args);
-    return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
+    try { return await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   if (name === 'webenvoy_skills') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    validateSkillsInput(args);
-    return request('/managed-skills/operations', { ...args, connection_id: connection.connection_id });
+    try { return await request('/managed-skills/operations', { ...args, connection_id: connection.connection_id }); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   throw new Error('tool_not_found');
+}
+function isDispatchedResponseLoss(error) {
+  return ['runtime_response_aborted', 'runtime_response_invalid', 'runtime_timeout', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(error?.code ?? error?.message?.split(':', 1)[0]);
+}
+function unknownAgentOutcome(idempotencyKey) {
+  return { ok: false, status: 'unknown_outcome', dispatch_state: 'dispatched', idempotency_key: idempotencyKey, failure: { code: 'managed_browser_outcome_unknown' }, reconciliation: null };
+}
+function validateQueryInput(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !['run_id', 'idempotency_key'].includes(key)) || args.run_id !== undefined && args.idempotency_key !== undefined || args.run_id === undefined && args.idempotency_key === undefined) throw new Error('query_input_refused');
+  if (args.run_id !== undefined && (typeof args.run_id !== 'string' || !/^managed-[a-f0-9]{64}$/.test(args.run_id))) throw new Error('query_input_refused');
+  if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== 'string' || !args.idempotency_key.length || args.idempotency_key.length > 512)) throw new Error('query_input_refused');
 }
 async function handle(message) {
   const { id, method, params } = message;

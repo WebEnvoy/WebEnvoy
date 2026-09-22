@@ -10,6 +10,16 @@ WebEnvoy App 曾被规划为统一人类用户入口；当前它是冻结的可�
 
 WebEnvoy App 不是 Core Runtime，不是 Harbor Runtime，也不是 Lode 资产仓库。自动任务执行通过 WebEnvoy API Server 和 Core Runtime；站点技能和 capability package metadata 来自 Lode，workflow package 是后续扩展；账号身份、浏览器环境和执行现场通过 Harbor Runtime API。
 
+## 正式无 App 入口
+
+正式 Runtime 由独立 `webenvoy` launcher 提供，owner 与 Agent 使用分离的本机身份和 socket。首次安装分两步完成：可信 owner 运行 `webenvoy setup --data-dir OWNER_DATA --agent-uid AGENT_UID`，确认输出的 boundary/bootstrap 事实；独立 Agent UID 在自己拥有的目录运行 `webenvoy agent setup --host-dir AGENT_HOST --data-dir OWNER_DATA --owner-uid OWNER_UID`。Agent setup 只创建 Agent client credential、MCP 配置、SKILL 和 receipt，不连接 owner/Core，也不授予权限。owner 随后使用输出的 fingerprint 运行 `access register`，再用 `access grant` 配置最小权限。
+
+没有可验证的独立 UID／OS boundary 时，owner setup 仍可完成 bundle 和数据目录维护，但必须报告 `owner_agent_isolation_unavailable`，不写 Agent host config，也不把同 UID 文件模式当作隔离。Agent 命令不会静默启动 Runtime；owner 先用 `webenvoy start`，之后 Agent 才能 status/connect/operation。`instance list|inspect|takeover|handback|stop` 由 owner CLI 直接使用 live Harbor facts 和 `expected_control` CAS，流程不需要 Desktop App。
+
+Agent 更新或移除自己的 host 资产时运行 `webenvoy agent setup` 或 `webenvoy agent uninstall --host-dir AGENT_HOST --data-dir OWNER_DATA`。后者只按 Agent receipt 删除 MCP/SKILL 文件，保留 `webenvoy-client.json`、owner data、Grant、Run 和 recovery；owner data 不由 Agent 清理。
+
+旧 Electron installed-runtime connector、App settings 注册路径和历史 `check-installed-agent` 证据属于兼容／历史材料，不是正式无 App 安装候选的验收依据；正式包不依赖 App、checkout、Electron 或 `ELECTRON_RUN_AS_NODE`，`webenvoy app` 在正式入口明确拒绝。
+
 ## 产品定位
 
 WebEnvoy App 是产品外壳，不是执行真相源，也不是能力资产真相源。
