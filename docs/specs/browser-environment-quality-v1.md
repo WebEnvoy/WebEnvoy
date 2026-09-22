@@ -96,6 +96,8 @@ runtime_build_or_commit
 
 下表是 W3 可以核对的现有候选，不是本规格新增的支持承诺。完整来源 hash、私有 bundle 形状和当前安装证据仍由既有规格和 verification 事实拥有。
 
+[#567](https://github.com/WebEnvoy/WebEnvoy/issues/567) 的固定选择 2 保留一条历史选型理由：负责人当时优先隐身与开源/分发条件，所以先把 Camoufox 作为工程验证对象。该理由只解释历史选择，不是当前质量证据，不等于 Camoufox 已满足本规格，也不意味着当前没有 Chromium 候选；官方 Chrome 仍按自己的来源、版本、平台、配置、执行方式和质量证据独立判断。
+
 | 组合 | 现有固定事实 | 既有 Qualification／能力范围 | W3 质量基线初始状态 |
 | --- | --- | --- | --- |
 | Camoufox upstream | `webenvoy.camoufox-upstream/v1`；Camoufox Python `0.5.6`；browser `152.0.4-beta.30`；Playwright `1.60.0`；`properties.json` 与来源由 owner 重新核对 | 当前上游原版路径按 `limited` 使用；完整 `launch_options`／`context_options` exact replay、缺 bundle fail-closed、popup 关系未知时局部拒绝，见 [Camoufox Environment Continuity V1](camoufox-environment-continuity-v1.md) | `not_evaluated`；必须绑定实际平台／架构和当前安装证据，不从历史 #499 或静态材料外推 |
@@ -219,6 +221,7 @@ attempts:
   wait/output/model/resource facts when available
 decision:
   dimension-level adopted | restricted | continue_investigation | not_adopted
+  optional combination-level decision (for example `combination_adopted`), kept separate from dimension results
   supported scope
   limits and unverified fields
   evidence refs
@@ -258,38 +261,36 @@ W3 对每个获准的 exact combination 单独建立一行矩阵，并按实际�
 
 下列是文档级决策标签，不是公共 wire enum。结论必须按 exact combination 和质量维度记录。
 
-### 7.1 `adopted`（采用）
+### 7.1 `adopted`（按维度采用）
 
-仅在以下事实均具备时使用：
+`adopted` 是一个质量维度的结论，不是整个组合的默认总标签。只检查该维度适用的证据条件；其他维度仍为 `unknown`、`not_evaluated` 或未采用时，不得错误阻塞已经满足条件的维度。每个维度至少满足：
 
-- Provider Qualification Gate 已通过，来源、版本、平台和执行方式可核对；
-- 环境连续性和隔离有实际 Provider evidence；
-- 声明的操作路径有成功、必要拒绝、恢复和 unknown/no-replay 证据；
-- 自动化暴露／隐身结论有固定范围和非营销证据；
-- 性能和资源事实已按同任务记录，未知项明确列出；
-- 没有未处理的关键身份、授权、控制、数据或结果未知；
-- 范围、限制、实际消费者和证据 refs 已写入执行记录。
+- **长期环境与连续性**：来源、版本、平台和执行方式可核对，并有该 Profile 的实际环境回读以及重启或安全配置变化证据；
+- **隔离**：至少两个专用无账号 Profile／Instance 的实际 Provider 证据证明存储、Context、控制、材料和结果引用不交叉；
+- **自动化暴露与隐身质量**：固定 Provider、环境和执行路径下有适用的 `live_verified`、真人、真实站点或同等直接证据；供应方声明和静态检查不能单独采用；
+- **操作语义与恢复**：声明的操作路径有成功、必要拒绝、恢复以及 `unknown`／no-replay 处理证据；
+- **性能与资源**：同一任务和组合有逐次耗时、输出以及可取得的模型、人工和资源事实；未知指标明确列出，不能以小样本冒称 SLA。
 
-`adopted` 只覆盖记录的 Provider／版本／平台／配置／执行方式和任务范围，不表示全部站点、全部平台或不可检测。
+每个维度仍必须写出精确组合、适用范围、限制、未验证字段和 evidence refs。一个维度达到条件时，只把该维度写为 `adopted`，其他维度保持自身结论。若需要对整个组合给出总的采用结论，必须另标为 `combination_adopted`：只有所有适用维度均达到各自条件、无关键未处理的身份／授权／控制／数据／结果未知，且范围、限制、实际消费者和证据 refs 齐全时才可使用。`combination_adopted` 与单维度 `adopted` 是不同结论；本文不以总标签替代维度判定。
 
-### 7.2 `restricted`（受限采用）
+### 7.2 `restricted`（按维度受限采用）
 
-当组合能够在有界场景提供用户结果，但某个平台、版本、能力、维度或证据范围有限时使用。记录必须包含：
+当该维度能够在有界场景提供用户结果，但某个平台、版本、能力或证据范围有限时使用。记录必须包含：
 
 - 允许的精确范围；
 - 明确的 `limited`／`unknown` 字段；
 - 触发局部拒绝、人工处理或继续调查的条件；
 - 不会静默 fallback、换环境或扩大授权的边界。
 
-受限采用不等于其他 Provider 或相同 Provider 的其他版本通过。
+受限采用只说明当前维度的有界结果，不等于其他维度、其他 Provider 或相同 Provider 的其他版本通过。
 
 ### 7.3 `continue_investigation`（继续调查）
 
-证据缺失、冲突、样本不足、挑战无法归因或关键字段未回读时，保持未决，不提前采用，也不改称 `unsupported`。后续只有在获得新授权、来源、现场或可判别证据后才重新评估。
+该维度的证据缺失、冲突、样本不足、挑战无法归因或关键字段未回读时，保持未决，不提前采用，也不改称 `unsupported`。后续只有在获得新授权、来源、现场或可判别证据后才重新评估。
 
 ### 7.4 `not_adopted`（不采用）
 
-出现以下任一情况时不采用受影响组合：
+出现以下任一情况时不采用受影响维度或其声明范围：
 
 - Qualification Gate 发现缺少必须的浏览器核心语义，需 WebEnvoy 模拟、补丁或长期补偿；
 - 不能保持 Profile／身份／控制／结果隔离；
@@ -298,7 +299,7 @@ W3 对每个获准的 exact combination 单独建立一行矩阵，并按实际�
 - 回归导致关键用户结果失败，且没有有界的人工处理或恢复；
 - 路线依赖 Obscura、旧 patched/native artifact、自动随机身份或静默 fallback。
 
-不采用只影响该组合和声明范围；不得借此全局删除不依赖它的通用能力，也不得自动切换另一个 Provider 制造成功。
+不采用只影响受影响维度和声明范围；不得借此全局删除不依赖它的通用能力，也不得自动切换另一个 Provider 制造成功。
 
 ## 8. 升级与回归触发
 
