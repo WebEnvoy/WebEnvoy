@@ -479,10 +479,15 @@ export function verifyLiveOsBoundary({ dataDir, ownerUid = process.getuid?.(), a
   const addFailure = reason => reasonCodes.push(reason);
   try { verifyOwnerDataDirectory(dataDir, { ownerUid }); }
   catch (error) { ownerTransport = false; addFailure(error.message === 'owner_data_dir_acl_unverified' ? error.message : 'owner_data_dir_invalid'); }
-  try { verifyOwnerSocket(ownerSocketPath, { ownerUid }); }
+  try {
+    if (verifyOwnerSocket(ownerSocketPath, { ownerUid }).state !== 'verified') throw new Error('owner_socket_acl_unavailable');
+  }
   catch { ownerTransport = false; addFailure('owner_socket_acl_unavailable'); }
   if (requireAgentSocket) {
-    try { verifyAgentSocket(agentSocketPath, { ownerUid }); agentTransport = true; }
+    try {
+      if (verifyAgentSocket(agentSocketPath, { ownerUid }).state !== 'verified') throw new Error('agent_socket_unavailable');
+      agentTransport = true;
+    }
     catch { addFailure('agent_socket_unavailable'); }
   }
   const uniqueReasons = [...new Set(reasonCodes)];

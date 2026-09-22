@@ -115,6 +115,15 @@ test('bundle boundary disables writable assets and parents while allowing missin
     assert.equal(invalidDataDir.owner_transport, false);
     assert.ok(invalidDataDir.reason_codes.includes('owner_data_dir_invalid'));
     await chmod(dataDir, 0o700);
+    await new Promise(resolve => agentServer.close(resolve));
+    agentServer = undefined;
+    const missingAgent = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
+    assert.equal(missingAgent.state, 'disabled', JSON.stringify(missingAgent));
+    assert.equal(missingAgent.agent_transport, false);
+    assert.ok(missingAgent.reason_codes.includes('agent_socket_unavailable'));
+    agentServer = createServer();
+    await new Promise((resolve, reject) => { agentServer.once('error', reject); agentServer.listen(agentSocket, resolve); });
+    await chmod(agentSocket, 0o666);
     assert.equal(verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true }).state, 'supported');
   } finally {
     if (ownerServer) await new Promise(resolve => ownerServer.close(resolve));
