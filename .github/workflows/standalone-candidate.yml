@@ -111,9 +111,17 @@ jobs:
             echo "standalone package contains an Electron artifact" >&2
             exit 1
           fi
-          if rg -n "from ['\"]electron|require\(['\"]electron" "$PACKAGE_ROOT/dist-electron" "$PACKAGE_ROOT/bin"; then
+          set +e
+          grep -RInE "from ['\"]electron|require\\(['\"]electron" "$PACKAGE_ROOT/dist-electron" "$PACKAGE_ROOT/bin"
+          scan_status=$?
+          set -e
+          if [ "$scan_status" -eq 0 ]; then
             echo "standalone runtime helper imports Electron" >&2
             exit 1
+          fi
+          if [ "$scan_status" -ne 1 ]; then
+            echo "standalone Electron import scan failed (grep exit $scan_status)" >&2
+            exit "$scan_status"
           fi
           node --input-type=module <<'NODE'
           import { readFile } from "node:fs/promises";
