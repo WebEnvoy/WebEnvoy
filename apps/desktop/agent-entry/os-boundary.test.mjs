@@ -6,7 +6,7 @@ import { createServer } from 'node:net';
 import { chmod, mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, probeUnixSocket, requiresControlPrecondition, verifyAgentBundleBoundary, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, probeUnixSocket, requiresControlPrecondition, verifyAgentBundleBoundary, verifyAgentSocket, verifyLiveOsBoundary, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 
 test('owner and Agent endpoints use separate trust domains', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-boundary-'));
@@ -61,6 +61,9 @@ test('bundle boundary disables writable assets and parents while allowing missin
   const root = await mkdtemp(join(tmpdir(), 'webenvoy-bundle-boundary-'));
   const assets = ['agent-manifest.json', 'agent-entry/cli.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'bin/webenvoy', 'runtime/node'];
   const optional = 'agent-entry/skill-assets/optional.txt';
+  let ownerServer;
+  let agentServer;
+  let dataDir;
   try {
     const directories = new Set([...assets.map(path => dirname(join(root, path))), dirname(join(root, optional))]);
     await Promise.all([...directories].map(path => mkdir(path, { recursive: true, mode: 0o755 })));
@@ -85,7 +88,38 @@ test('bundle boundary disables writable assets and parents while allowing missin
     assert.equal(missingOptional.state, 'supported', JSON.stringify(missingOptional));
     await writeFile(join(root, optional), 'optional', { mode: 0o644 });
     assert.equal(verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid }).state, 'supported');
+
+    dataDir = await mkdtemp('/tmp/wb-live-owner-');
+    const ownerSocket = join(dataDir, 'owner-control.sock');
+    const agentSocket = join(dataDir, 'agent-data.sock');
+    await mkdir(dataDir, { recursive: true, mode: 0o700 });
+    await chmod(dataDir, 0o700);
+    ownerServer = createServer();
+    await new Promise((resolve, reject) => { ownerServer.once('error', reject); ownerServer.listen(ownerSocket, resolve); });
+    await chmod(ownerSocket, 0o600);
+    agentServer = createServer();
+    await new Promise((resolve, reject) => { agentServer.once('error', reject); agentServer.listen(agentSocket, resolve); });
+    await chmod(agentSocket, 0o666);
+    const live = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
+    assert.equal(live.state, 'supported', JSON.stringify(live));
+    assert.equal(live.owner_transport, true);
+    await chmod(ownerSocket, 0o666);
+    const invalidSocket = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
+    assert.equal(invalidSocket.state, 'disabled', JSON.stringify(invalidSocket));
+    assert.equal(invalidSocket.owner_transport, false);
+    assert.ok(invalidSocket.reason_codes.includes('owner_socket_acl_unavailable'));
+    await chmod(ownerSocket, 0o600);
+    await chmod(dataDir, 0o755);
+    const invalidDataDir = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
+    assert.equal(invalidDataDir.state, 'disabled', JSON.stringify(invalidDataDir));
+    assert.equal(invalidDataDir.owner_transport, false);
+    assert.ok(invalidDataDir.reason_codes.includes('owner_data_dir_invalid'));
+    await chmod(dataDir, 0o700);
+    assert.equal(verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true }).state, 'supported');
   } finally {
+    if (ownerServer) await new Promise(resolve => ownerServer.close(resolve));
+    if (agentServer) await new Promise(resolve => agentServer.close(resolve));
+    if (dataDir) await rm(dataDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });

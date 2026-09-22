@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
-import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyAgentSocket, verifyLiveOsBoundary, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 import { projectHarborResponse } from './service-projection.mjs';
 
 const dataDir = process.argv[2];
@@ -58,19 +58,14 @@ async function handle(role, req, res) {
   let requestBody = '';
   try {
     const identity = state.boundary.identity;
-    let liveBoundary = state.boundary;
-    if (role === 'agent' && liveBoundary.state === 'supported') {
-      try { verifyAgentSocket(agentSocket, { ownerUid: identity.owner_uid }); }
-      catch { liveBoundary = { ...liveBoundary, state: 'disabled', code: 'owner_agent_isolation_unavailable', reason_codes: [...liveBoundary.reason_codes, 'agent_socket_unavailable'] }; }
-    }
+    const liveBoundary = verifyLiveOsBoundary({ dataDir, ownerUid: identity.owner_uid, agentUid: identity.agent_uid, ownerSocketPath: socket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     state = { ...state, boundary: liveBoundary };
     if (role === 'agent' && liveBoundary.state !== 'supported') {
-      if (agentServer?.listening) {
-        agentSocketOwned = false;
-        void closeServer(agentServer).then(() => unlink(agentSocket).catch(() => {})).catch(() => {});
-      }
+      void closeAgentServer();
       return send(res, 503, { ok: false, error: { code: 'owner_agent_isolation_unavailable', reason_codes: liveBoundary.reason_codes } });
     }
+    if (liveBoundary.state !== 'supported') void closeAgentServer();
+    if (role === 'owner' && !liveBoundary.owner_transport && !(req.method === 'GET' && req.url === '/status')) return send(res, 503, { ok: false, error: { code: 'owner_agent_isolation_unavailable', reason_codes: liveBoundary.reason_codes } });
     if (state.ready && (!supervisor.getCoreRuntimeSupervisorToken(state.coreEndpoint) || !supervisor.getHarborRuntimeSupervisorToken(state.harborEndpoint))) state = { ...state, ready: false, error: 'runtime_child_exited' };
     if (req.url === '/status' && req.method === 'GET') return send(res, 200, statusFor(role));
     if (role === 'owner' && req.url === '/stop' && req.method === 'POST') {
@@ -163,6 +158,16 @@ let stopping = false;
 async function closeServer(server) {
   if (!server?.listening) return;
   await new Promise(resolveClose => server.close(resolveClose));
+}
+async function closeAgentServer() {
+  if (!agentServer?.listening) return;
+  agentSocketOwned = false;
+  await closeServer(agentServer);
+  try {
+    const ownerUid = state.boundary.identity?.owner_uid;
+    verifyAgentSocket(agentSocket, { ownerUid });
+    await unlink(agentSocket);
+  } catch {}
 }
 async function shutdown() {
   if (stopping) return;

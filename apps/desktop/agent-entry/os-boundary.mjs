@@ -468,6 +468,34 @@ export function verifyOsBoundary({ ownerUid = process.getuid?.(), agentUid, owne
   };
 }
 
+// Recheck the mutable transport boundary before serving a status, connection,
+// or data-plane request. Bundle facts are intentionally re-read here; this is
+// a live gate, not a cached startup grant.
+export function verifyLiveOsBoundary({ dataDir, ownerUid = process.getuid?.(), agentUid, ownerSocketPath, agentSocketPath, installRoot, requireAgentSocket = false } = {}) {
+  const boundary = verifyOsBoundary({ ownerUid, agentUid, ownerSocketPath, installRoot });
+  const reasonCodes = [...boundary.reason_codes];
+  let ownerTransport = true;
+  let agentTransport = !requireAgentSocket;
+  const addFailure = reason => reasonCodes.push(reason);
+  try { verifyOwnerDataDirectory(dataDir, { ownerUid }); }
+  catch (error) { ownerTransport = false; addFailure(error.message === 'owner_data_dir_acl_unverified' ? error.message : 'owner_data_dir_invalid'); }
+  try { verifyOwnerSocket(ownerSocketPath, { ownerUid }); }
+  catch { ownerTransport = false; addFailure('owner_socket_acl_unavailable'); }
+  if (requireAgentSocket) {
+    try { verifyAgentSocket(agentSocketPath, { ownerUid }); agentTransport = true; }
+    catch { addFailure('agent_socket_unavailable'); }
+  }
+  const uniqueReasons = [...new Set(reasonCodes)];
+  return {
+    ...boundary,
+    state: uniqueReasons.length ? 'disabled' : 'supported',
+    code: uniqueReasons.length ? 'owner_agent_isolation_unavailable' : 'ok',
+    reason_codes: uniqueReasons,
+    owner_transport: ownerTransport,
+    agent_transport: agentTransport
+  };
+}
+
 export function assertOsBoundary(options) {
   const result = verifyOsBoundary(options);
   if (result.state !== 'supported') {

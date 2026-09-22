@@ -24,7 +24,7 @@ const { defaultAgentDataSocket, verifyAgentBundleBoundary, verifyOsBoundary } = 
 const sameUidBoundary = verifyOsBoundary({ ownerUid, agentUid: ownerUid });
 assert.equal(sameUidBoundary.state, 'disabled', 'same UID must never enable Agent data plane');
 assert.ok(sameUidBoundary.reason_codes.includes('owner_agent_uid_not_separated'), 'same UID rejection must be explicit');
-const root = await mkdtemp(join(tmpdir(), 'webenvoy-boundary-ci-'));
+const root = await mkdtemp('/tmp/wb-ci-');
 const ownerData = join(root, 'owner-data');
 const ownerSocket = join(ownerData, 'owner-control.sock');
 const linkedInstallationPath = join(packageRoot, '..', 'webenvoy-installation.json');
