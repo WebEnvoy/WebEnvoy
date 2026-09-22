@@ -40,6 +40,7 @@ async function stopChild(child) {
 function firstJsonMessage(child, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let stderr = '';
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
@@ -47,17 +48,20 @@ function firstJsonMessage(child, timeoutMs = 5000) {
       child.removeListener('error', onError);
       child.removeListener('exit', onExit);
       child.stdout.removeListener('data', onData);
+      child.stderr?.removeListener('data', onStderr);
       if (error) reject(error);
       else resolve(value);
     };
     const onError = error => finish(error);
-    const onExit = (code, signal) => finish(new Error(`child_exited_before_response:${code ?? signal ?? 'unknown'}`));
+    const onExit = (code, signal) => finish(new Error(`child_exited_before_response:${code ?? signal ?? 'unknown'}${stderr ? `:${stderr.trim()}` : ''}`));
+    const onStderr = chunk => { stderr += chunk.toString('utf8'); };
     const onData = chunk => {
       try { finish(undefined, JSON.parse(chunk.toString('utf8'))); } catch (error) { finish(error); }
     };
     const timer = setTimeout(() => finish(new Error('child_response_timeout')), timeoutMs);
     child.once('error', onError);
     child.once('exit', onExit);
+    child.stderr?.on('data', onStderr);
     child.stdout.once('data', onData);
   });
 }
@@ -98,7 +102,9 @@ const MOCK_CLIENT_MODULE = [
   "    req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));",
   "  });",
   "}",
-  "export async function ensureRuntime(target) { return localRequest(target, '/status'); }"
+  "export function agentRequest(target, path, options = {}) { return localRequest(target, path, options); }",
+  "export async function ensureAgentRuntime(target) { return localRequest(target, '/status'); }",
+  "export const ensureRuntime = ensureAgentRuntime;"
 ].join('\n');
 async function installMockClient(bundleRoot) {
   await writeFile(join(bundleRoot, 'agent-entry/client.mjs'), MOCK_CLIENT_MODULE);
@@ -132,7 +138,7 @@ test('MCP guidance exposes instance.start origin admission', async () => {
   let child;
   try {
     await writeFixtureClient(clientPath, dataDir, join(tmpdir(), `webenvoy-agent-fixture-${process.pid}-${Date.now()}.sock`));
-    child = spawn(process.execPath, [join(root, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    child = spawn(process.execPath, [join(root, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const responsePromise = firstJsonMessage(child);
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) + '\n');
     const response = await responsePromise;
@@ -236,7 +242,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
   const socketPath = join(dataDir, 'runtime.sock');
   const clientPath = join(dataDir, 'client.json');
   const files = [
-    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
@@ -267,7 +273,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 ${path === '/managed-browser/capabilities/describe' ? '404 Not Found' : '200 OK'}\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
     }));
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
-    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
     const call = async (id, name, args = {}) => {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
@@ -277,12 +283,12 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
     assert.equal((await call(1, 'webenvoy_connect')).ok, true);
     const oldRuntime = await call(2, 'webenvoy_describe', { operation: 'instance.snapshot' });
     assert.equal(oldRuntime.error.code, 'discovery_not_available');
-    assert.deepEqual(requests, ['/status', '/agent-connections', '/managed-browser/capabilities/describe']);
+    assert.deepEqual(requests, ['/status', '/agent-connections', '/status', '/managed-browser/capabilities/describe']);
     await new Promise(resolve => server.close(resolve));
     server = undefined;
     const stoppedRuntime = await call(3, 'webenvoy_describe', { operation: 'instance.snapshot' });
     assert.equal(stoppedRuntime.error.code, 'runtime_unavailable');
-    assert.deepEqual(requests, ['/status', '/agent-connections', '/managed-browser/capabilities/describe'], 'describe must not call status or a fallback route');
+    assert.deepEqual(requests, ['/status', '/agent-connections', '/status', '/managed-browser/capabilities/describe'], 'describe must not start Runtime or use a fallback route');
     await assert.rejects(lstat(socketPath), error => error?.code === 'ENOENT');
   } finally {
     await stopChild(child);
@@ -297,7 +303,7 @@ test('MCP validates capability description states and forwards correction guidan
   const socketPath = join(dataDir, 'runtime.sock');
   const clientPath = join(dataDir, 'client.json');
   const files = [
-    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
@@ -365,7 +371,7 @@ test('MCP validates capability description states and forwards correction guidan
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
     }));
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
-    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
     const call = async (id, name, args = {}) => {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
@@ -414,6 +420,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     'agent-entry/client.mjs',
     'agent-entry/service.mjs',
     'agent-entry/bundle.mjs',
+    'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs',

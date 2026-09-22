@@ -58,8 +58,8 @@ async function handle(role, req, res) {
   let requestBody = '';
   try {
     const identity = state.boundary.identity;
-    let liveBoundary = verifyOsBoundary({ ownerUid: identity.owner_uid, agentUid: identity.agent_uid, ownerSocketPath: socket, installRoot: root });
-    if (liveBoundary.state === 'supported' && role === 'agent') {
+    let liveBoundary = state.boundary;
+    if (role === 'agent' && liveBoundary.state === 'supported') {
       try { verifyAgentSocket(agentSocket, { ownerUid: identity.owner_uid }); }
       catch { liveBoundary = { ...liveBoundary, state: 'disabled', code: 'owner_agent_isolation_unavailable', reason_codes: [...liveBoundary.reason_codes, 'agent_socket_unavailable'] }; }
     }

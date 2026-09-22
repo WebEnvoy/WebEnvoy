@@ -20,7 +20,7 @@ if (!Number.isSafeInteger(agentUid) || agentUid < 1 || agentUid === ownerUid) th
 const switchedUid = Number(execFileSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', '/usr/bin/id', '-u'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim());
 if (switchedUid !== agentUid) throw new Error('agent_uid_switch_unavailable');
 
-const { defaultAgentDataSocket, verifyOsBoundary } = await import(pathToFileURL(join(packageRoot, 'agent-entry', 'os-boundary.mjs')).href);
+const { defaultAgentDataSocket, verifyAgentBundleBoundary, verifyOsBoundary } = await import(pathToFileURL(join(packageRoot, 'agent-entry', 'os-boundary.mjs')).href);
 const sameUidBoundary = verifyOsBoundary({ ownerUid, agentUid: ownerUid });
 assert.equal(sameUidBoundary.state, 'disabled', 'same UID must never enable Agent data plane');
 assert.ok(sameUidBoundary.reason_codes.includes('owner_agent_uid_not_separated'), 'same UID rejection must be explicit');
@@ -62,6 +62,7 @@ try {
   assert.equal(ownerStatus.ready, true, 'owner Runtime must become ready');
   assert.equal(ownerStatus.boundary?.state, 'supported', `OS boundary must be supported: ${JSON.stringify(ownerStatus.boundary)}`);
   await assertAgentCannotModifyBundle();
+  await assertBundleMutationBoundary();
 
   agentHost = await mkdtempAsAgent(join('/tmp', `webenvoy-agent-host-${process.pid}-`));
   runAsAgent(cli, ['agent', 'setup', '--host-dir', agentHost, '--data-dir', ownerData, '--owner-uid', String(ownerUid), '--agent-endpoint', agentEndpoint]);
@@ -247,6 +248,49 @@ async function assertAgentCannotModifyBundle() {
     packageRoot, join(packageRoot, 'bin'), join(packageRoot, 'agent-entry'), join(packageRoot, 'runtime'),
     cli, join(packageRoot, 'agent-entry', 'service.mjs'), join(packageRoot, 'agent-manifest.json'), fixedNode]);
   if (result.stdout.trim()) throw new Error(`agent_bundle_write_access:${result.stdout}`);
+}
+
+async function assertBundleMutationBoundary() {
+  const asset = join(packageRoot, 'agent-entry', 'service.mjs');
+  const parent = join(packageRoot, 'agent-entry');
+  const assetInfo = await lstat(asset);
+  const parentInfo = await lstat(parent);
+  const baseline = verifyAgentBundleBoundary({ installRoot: packageRoot, ownerUid, agentUid });
+  assert.equal(baseline.state, 'supported', `baseline bundle boundary must be supported: ${JSON.stringify(baseline)}`);
+  try {
+    await chmod(asset, (assetInfo.mode & 0o7777) | 0o002);
+    const writableAsset = verifyAgentBundleBoundary({ installRoot: packageRoot, ownerUid, agentUid });
+    assert.equal(writableAsset.state, 'disabled', 'Agent-writable bundle asset must disable the data plane');
+    assert.ok(writableAsset.reason_codes.includes('agent_bundle_asset_writable'), `missing writable asset reason: ${JSON.stringify(writableAsset)}`);
+    await chmod(asset, assetInfo.mode & 0o7777);
+    await chmod(parent, (parentInfo.mode & 0o7777) | 0o003);
+    const writableParent = verifyAgentBundleBoundary({ installRoot: packageRoot, ownerUid, agentUid });
+    assert.equal(writableParent.state, 'disabled', 'Agent-replaceable bundle parent must disable the data plane');
+    assert.ok(writableParent.reason_codes.includes('agent_bundle_asset_parent_replaceable'), `missing replaceable parent reason: ${JSON.stringify(writableParent)}`);
+    await chmod(parent, parentInfo.mode & 0o7777);
+    const restored = verifyAgentBundleBoundary({ installRoot: packageRoot, ownerUid, agentUid });
+    assert.equal(restored.state, 'supported', `restored bundle boundary must be supported: ${JSON.stringify(restored)}`);
+  } finally {
+    await chmod(asset, assetInfo.mode & 0o7777).catch(() => {});
+    await chmod(parent, parentInfo.mode & 0o7777).catch(() => {});
+  }
+  const manifest = JSON.parse(await readFile(join(packageRoot, 'agent-manifest.json'), 'utf8'));
+  for (const name of Object.keys(manifest.optional_files ?? {})) {
+    const optional = join(packageRoot, name);
+    let optionalInfo;
+    try { optionalInfo = await lstat(optional); } catch { continue; }
+    if (!optionalInfo.isFile()) continue;
+    const contents = await readFile(optional);
+    await unlink(optional);
+    try {
+      const missingOptional = verifyAgentBundleBoundary({ installRoot: packageRoot, ownerUid, agentUid });
+      assert.equal(missingOptional.state, 'supported', `missing optional asset must remain a local unavailable state: ${JSON.stringify(missingOptional)}`);
+    } finally {
+      await writeFile(optional, contents, { mode: optionalInfo.mode & 0o7777 });
+      await chmod(optional, optionalInfo.mode & 0o7777);
+    }
+    break;
+  }
 }
 
 async function assertAgentOwnerRouteDenied(path) {

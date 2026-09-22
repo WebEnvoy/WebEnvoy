@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, probeUnixSocket, requiresControlPrecondition, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { agentDataSocket, classifyAdminMembership, classifySudoPolicy, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, probeUnixSocket, requiresControlPrecondition, verifyAgentBundleBoundary, verifyAgentSocket, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
 
 test('owner and Agent endpoints use separate trust domains', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-boundary-'));
@@ -51,6 +51,42 @@ test('owner data directory is an actual owner-only directory', async () => {
     assert.throws(() => verifyOwnerDataDirectory(dataDir), /owner_data_dir_invalid/);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('bundle boundary disables writable assets and parents while allowing missing optional assets', { skip: process.platform !== 'darwin' || process.arch !== 'arm64' }, async () => {
+  const ownerUid = process.getuid?.();
+  const agentUid = Number(execFileSync('/usr/bin/id', ['-u', 'nobody'], { encoding: 'utf8' }).trim());
+  if (!Number.isSafeInteger(ownerUid) || ownerUid < 1 || !Number.isSafeInteger(agentUid) || agentUid < 1 || ownerUid === agentUid) return;
+  const root = await mkdtemp(join(tmpdir(), 'webenvoy-bundle-boundary-'));
+  const assets = ['agent-manifest.json', 'agent-entry/cli.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'bin/webenvoy', 'runtime/node'];
+  const optional = 'agent-entry/skill-assets/optional.txt';
+  try {
+    const directories = new Set([...assets.map(path => dirname(join(root, path))), dirname(join(root, optional))]);
+    await Promise.all([...directories].map(path => mkdir(path, { recursive: true, mode: 0o755 })));
+    for (const path of assets) await writeFile(join(root, path), path === 'agent-manifest.json' ? JSON.stringify({ files: Object.fromEntries(assets.map(name => [name, 'a'.repeat(64)])), optional_files: { [optional]: 'b'.repeat(64) } }) : 'fixture', { mode: path === 'runtime/node' || path === 'bin/webenvoy' ? 0o755 : 0o644 });
+    await writeFile(join(root, optional), 'optional', { mode: 0o644 });
+    const supported = verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid });
+    assert.equal(supported.state, 'supported', JSON.stringify(supported));
+    const asset = join(root, 'agent-entry/service.mjs');
+    await chmod(asset, 0o666);
+    const writableAsset = verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid });
+    assert.equal(writableAsset.state, 'disabled');
+    assert.ok(writableAsset.reason_codes.includes('agent_bundle_asset_writable'));
+    await chmod(asset, 0o644);
+    const parent = join(root, 'agent-entry');
+    await chmod(parent, 0o777);
+    const writableParent = verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid });
+    assert.equal(writableParent.state, 'disabled');
+    assert.ok(writableParent.reason_codes.includes('agent_bundle_asset_parent_replaceable'));
+    await chmod(parent, 0o755);
+    await unlink(join(root, optional));
+    const missingOptional = verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid });
+    assert.equal(missingOptional.state, 'supported', JSON.stringify(missingOptional));
+    await writeFile(join(root, optional), 'optional', { mode: 0o644 });
+    assert.equal(verifyAgentBundleBoundary({ installRoot: root, ownerUid, agentUid }).state, 'supported');
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

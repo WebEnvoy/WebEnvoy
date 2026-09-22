@@ -182,7 +182,6 @@ export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = 
   try { rootInfo = lstatSync(root); } catch { return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: ['agent_bundle_root_missing'], checked_paths: 0 }; }
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) failures.push('agent_bundle_root_invalid');
   if (rootInfo.uid !== ownerUid) failures.push('agent_bundle_owner_mismatch');
-  if (!macAclVerified(root, ['-lde'])) failures.push('agent_bundle_root_acl_unverified');
 
   const account = userFacts(agentUid);
   if (account.state !== 'verified' || !Array.isArray(account.groups)) {
@@ -190,7 +189,6 @@ export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = 
     return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: [...new Set(failures)], checked_paths: 0 };
   }
   const groups = new Set(account.groups);
-  if (rootInfo.isDirectory() && agentCanWrite(rootInfo, agentUid, groups)) failures.push('agent_bundle_root_writable');
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(join(root, 'agent-manifest.json'), 'utf8'));
@@ -198,15 +196,17 @@ export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = 
     failures.push('agent_bundle_manifest_unavailable');
     return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: [...new Set(failures)], checked_paths: 0 };
   }
-  const names = new Set(FIXED_AGENT_ASSET_PATHS);
-  for (const section of ['files', 'optional_files']) {
+  const requiredNames = new Set(FIXED_AGENT_ASSET_PATHS);
+  const optionalNames = new Set();
+  for (const [section, names] of [['files', requiredNames], ['optional_files', optionalNames]]) {
     const entries = manifest?.[section];
     if (entries !== undefined && (!entries || typeof entries !== 'object' || Array.isArray(entries))) failures.push('agent_bundle_manifest_invalid');
     if (entries && typeof entries === 'object' && !Array.isArray(entries)) for (const name of Object.keys(entries)) names.add(name);
   }
-  const assetPaths = [];
-  for (const name of names) {
-    if (typeof name !== 'string' || !name || name.includes('\0') || isAbsolute(name)) {
+  const requiredPaths = [];
+  const optionalPaths = [];
+  for (const [names, output] of [[requiredNames, requiredPaths], [optionalNames, optionalPaths]]) for (const name of names) {
+    if (typeof name !== 'string' || !name || name.includes('\0') || name.includes('\n') || name.includes('\r') || isAbsolute(name)) {
       failures.push('agent_bundle_asset_path_invalid');
       continue;
     }
@@ -216,24 +216,70 @@ export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = 
       failures.push('agent_bundle_asset_path_invalid');
       continue;
     }
-    assetPaths.push(assetPath);
+    output.push(assetPath);
+  }
+  const assetPaths = [...requiredPaths];
+  const presentOptionalPaths = [];
+  const missingOptionalParents = new Set();
+  for (const assetPath of optionalPaths) {
+    try {
+      const info = lstatSync(assetPath);
+      if (info.isSymbolicLink() || !info.isFile()) failures.push('agent_bundle_optional_asset_invalid');
+      else presentOptionalPaths.push(assetPath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') failures.push('agent_bundle_optional_asset_unavailable');
+      else {
+        try {
+          const parent = findExistingAssetParent(assetPath, root);
+          missingOptionalParents.add(parent);
+        } catch {
+          failures.push('agent_bundle_parent_unavailable');
+        }
+      }
+    }
+  }
+  assetPaths.push(...presentOptionalPaths);
+
+  let realRoot;
+  try { realRoot = realpathSync(root); } catch { failures.push('agent_bundle_parent_unavailable'); }
+  const aclPaths = new Set([root]);
+  for (const assetPath of assetPaths) {
+    for (let current = assetPath; current === root || current.startsWith(`${root}${sep}`); current = dirname(current)) aclPaths.add(current);
+  }
+  for (const parent of missingOptionalParents) {
+    for (let current = parent; current === root || current.startsWith(`${root}${sep}`); current = dirname(current)) aclPaths.add(current);
+  }
+  for (let current = dirname(root); ; current = dirname(current)) {
+    aclPaths.add(current);
+    if (current === '/') break;
+  }
+  if (realRoot) for (let current = realRoot; ; current = dirname(current)) {
+    aclPaths.add(current);
+    if (current === '/') break;
+  }
+  const aclVerified = macAclBatchVerifier(aclPaths);
+  if (!aclVerified(root)) failures.push('agent_bundle_root_acl_unverified');
+  if (rootInfo.isDirectory() && agentCanWrite(rootInfo, agentUid, groups)) failures.push('agent_bundle_root_writable');
+
+  for (const assetPath of assetPaths) {
     try {
       const info = lstatSync(assetPath);
       if (info.isSymbolicLink() || !info.isFile()) failures.push('agent_bundle_asset_invalid');
       else {
         if (agentCanWrite(info, agentUid, groups)) failures.push('agent_bundle_asset_writable');
-        if (!macAclVerified(assetPath, ['-le'])) failures.push('agent_bundle_asset_acl_unverified');
+        if (!aclVerified(assetPath)) failures.push('agent_bundle_asset_acl_unverified');
       }
-      checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures);
+      checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures, aclVerified);
     } catch {
       failures.push('agent_bundle_asset_missing');
     }
   }
-  try {
-    const realRoot = realpathSync(root);
-    checkParentReplacementChain(realRoot, agentUid, groups, failures);
-  } catch {
-    failures.push('agent_bundle_parent_unavailable');
+  for (const parent of missingOptionalParents) checkMissingAssetParentReplacementChain(parent, root, agentUid, groups, failures, aclVerified);
+  try { checkLexicalParentReplacementChain(root, agentUid, groups, failures, aclVerified); }
+  catch { failures.push('agent_bundle_parent_unavailable'); }
+  if (realRoot) {
+    try { checkParentReplacementChain(realRoot, agentUid, groups, failures, aclVerified); }
+    catch { failures.push('agent_bundle_parent_unavailable'); }
   }
   return {
     state: failures.length ? 'disabled' : 'supported',
@@ -243,7 +289,26 @@ export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = 
   };
 }
 
-function checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures) {
+function macAclBatchVerifier(paths) {
+  const values = [...paths];
+  const verified = new Map(values.map(path => [path, process.platform !== 'darwin']));
+  if (process.platform !== 'darwin') return path => verified.get(path) === true;
+  const batchSize = 128;
+  for (let offset = 0; offset < values.length; offset += batchSize) {
+    const batch = values.slice(offset, offset + batchSize);
+    try {
+      const listing = execFileSync('/bin/ls', ['-lde', ...batch], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] });
+      const lines = listing.split('\n').filter(Boolean);
+      if (lines.length !== batch.length) throw new Error('acl_listing_shape_invalid');
+      lines.forEach((line, index) => verified.set(batch[index], !line.includes('+')));
+    } catch {
+      for (const path of batch) verified.set(path, false);
+    }
+  }
+  return path => verified.get(path) === true;
+}
+
+function checkAssetParentReplacementChain(assetPath, root, agentUid, groups, failures, aclVerified) {
   let child = assetPath;
   let current = dirname(assetPath);
   while (current === root || current.startsWith(`${root}${sep}`)) {
@@ -253,7 +318,7 @@ function checkAssetParentReplacementChain(assetPath, root, agentUid, groups, fai
         failures.push('agent_bundle_asset_parent_invalid');
         return;
       }
-      if (!macAclVerified(current, ['-lde'])) failures.push('agent_bundle_asset_parent_acl_unverified');
+      if (!aclVerified(current)) failures.push('agent_bundle_asset_parent_acl_unverified');
       const childInfo = lstatSync(child);
       const permission = agentPermissions(info, agentUid, groups);
       if (permission.write && permission.execute && (!((info.mode & 0o1000) !== 0) || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_asset_parent_replaceable');
@@ -267,7 +332,46 @@ function checkAssetParentReplacementChain(assetPath, root, agentUid, groups, fai
   }
 }
 
-function checkParentReplacementChain(root, agentUid, groups, failures) {
+function findExistingAssetParent(assetPath, root) {
+  let current = dirname(assetPath);
+  while (current !== root && current.startsWith(`${root}${sep}`)) {
+    try { lstatSync(current); return current; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; current = dirname(current); }
+  }
+  lstatSync(root);
+  return root;
+}
+
+function checkMissingAssetParentReplacementChain(parent, root, agentUid, groups, failures, aclVerified) {
+  let child = undefined;
+  let current = parent;
+  while (current === root || current.startsWith(`${root}${sep}`)) {
+    try {
+      const info = lstatSync(current);
+      if (!info.isDirectory() || info.isSymbolicLink()) {
+        failures.push('agent_bundle_asset_parent_invalid');
+        return;
+      }
+      if (!aclVerified(current)) failures.push('agent_bundle_asset_parent_acl_unverified');
+      let childInfo;
+      if (child) {
+        try { childInfo = lstatSync(child); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      const permission = agentPermissions(info, agentUid, groups);
+      const sticky = (info.mode & 0o1000) !== 0;
+      if (permission.write && permission.execute && (!sticky || !childInfo || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_asset_parent_replaceable');
+    } catch {
+      failures.push('agent_bundle_parent_unavailable');
+      return;
+    }
+    if (current === root) break;
+    child = current;
+    current = dirname(current);
+  }
+}
+
+function checkParentReplacementChain(root, agentUid, groups, failures, aclVerified) {
   let child = root;
   let current = dirname(root);
   while (true) {
@@ -276,10 +380,31 @@ function checkParentReplacementChain(root, agentUid, groups, failures) {
       failures.push('agent_bundle_parent_invalid');
       return;
     }
-    if (!macAclVerified(current, ['-lde'])) failures.push('agent_bundle_parent_acl_unverified');
+    if (!aclVerified(current)) failures.push('agent_bundle_parent_acl_unverified');
     const childInfo = lstatSync(child);
     const permission = agentPermissions(info, agentUid, groups);
     if (permission.write && permission.execute && (!((info.mode & 0o1000) !== 0) || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_parent_replaceable');
+    if (current === '/') break;
+    child = current;
+    current = dirname(current);
+  }
+}
+
+function checkLexicalParentReplacementChain(root, agentUid, groups, failures, aclVerified) {
+  let child = root;
+  let current = dirname(root);
+  while (true) {
+    const info = lstatSync(current);
+    if (!info.isDirectory() && !info.isSymbolicLink()) {
+      failures.push('agent_bundle_parent_invalid');
+      return;
+    }
+    if (!aclVerified(current)) failures.push('agent_bundle_parent_acl_unverified');
+    if (info.isDirectory()) {
+      const childInfo = lstatSync(child);
+      const permission = agentPermissions(info, agentUid, groups);
+      if (permission.write && permission.execute && (!((info.mode & 0o1000) !== 0) || info.uid === agentUid || childInfo.uid === agentUid)) failures.push('agent_bundle_parent_replaceable');
+    }
     if (current === '/') break;
     child = current;
     current = dirname(current);
