@@ -106,12 +106,14 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 | 材料 | 位置／传递 | 可见主体 | 用途 |
 | --- | --- | --- | --- |
 | installation manifest／asset digest | 安装 root | Runtime verifier、owner status | 验证 bundle，不作身份 |
-| webenvoy-client.json | host dir，0600 | Agent launcher／MCP／Agent CLI | 保存 client credential 和 data-dir；不得含 owner service credential |
+| webenvoy-client.json | host dir，0600 | Agent launcher／MCP／Agent CLI | 保存 client credential、data-dir opaque binding、agent endpoint 和安装时记录的 owner／Agent UID；不得含 owner service credential |
 | owner-private store／control socket | OS ACL 保护的 owner domain | owner control service 与被批准的人类 owner client | 保存并使用 owner service credential；不得让 Agent UID 访问 |
 | Principal／Grant | Core managed access store | Core、owner API、授权后的查询 | 真实主体、授权范围、有效期和撤销 |
 | installation receipt | host dir，0600 | installer／uninstall | 只记录受管文件；不授予权限 |
 
 client credential 以安装时生成的随机 secret 形式保存；owner 注册只提交其 SHA-256 fingerprint／hash。owner CLI 不得把明文 client credential 或 owner service credential 写入 stdout、日志、Grant 或 API；Agent 不得把 owner service credential 的 hash 当成自己的认证凭据。
+
+Agent endpoint 是独立于 owner data root 的绝对 Unix socket 路径，client file 只保存连接引用，不保存 owner socket 或 service bearer。`owner_uid`、`agent_uid` 和 endpoint 只描述安装身份与传输边界，不授予 Core 权限；Runtime 每次启动／连接都重新核对当前 owner socket 的 UID／ACL、Agent socket 的本体／类型／owner 和当前 Agent UID，不能把 client file 中的身份字段当作已验证授权。
 
 ### 4.2 真实本机边界和支持矩阵
 
@@ -137,6 +139,8 @@ client credential 以安装时生成的随机 secret 形式保存；owner 注册
 | 原浏览器 GUI／WindowServer／viewer | 人类 owner 会话可启动、查看和接管 | 无 GUI／viewer 权限；只能得到受管事实 | 可绕过 OS，超出本规范威胁模型 |
 
 owner CLI、owner launcher 和 control client 不得是 setuid／setgid 或带有可被 Agent UID 调用的提权 helper；Agent UID 不得拥有 sudo／administrator 能力。只有可信 owner UID 的普通进程身份或平台声明的强制签名身份可以连接 owner control socket。
+
+在 macOS arm64 首版，Runtime verifier 只接受可复核的 OS 事实：当前 owner UID、Agent UID 对应的真实账户、Agent 不是 root／admin、`sudo -n -l -U <agent>` 明确返回无授权（退出 1 但输出为密码需要、配置／LDAP／插件错误时仍是 unknown）、owner data root 本体是当前 owner UID 持有的非 symlink 目录且 mode 为 0700、owner control socket 本体由 owner UID 持有且 ACL／mode 为 owner-only，以及 Agent endpoint 本体是预期 socket 而非 symlink／普通文件。已有路径不满足目录／ACL 条件时 verifier 拒绝并保持原状，不替其他 UID chmod。Node 没有跨平台 peer-UID／`task_for_pid` 原生 API；verifier 不把 JSON 中的 `processInspectionDenied`、`socketAcl` 或类似布尔值当作证据，而是依据真实账户、sudo policy 和 socket 检查推导 `distinct_non_admin_uid`。macOS `ptrace(2)` 的 same-real-UID／root 限制只是一项平台依据，不覆盖 `task_for_pid` 或 sudo policy；任一检查无法复核时，setup／diagnose 必须保持 `owner_agent_isolation_unavailable` 并禁用 Agent data plane。
 
 使用现有 OS sandbox／签名进程身份也可以满足同一要求，但必须能证明 Agent 进程不能读取 owner-private store、调用 owner CLI 获取 token、伪造可信 owner client 或从 owner service 环境取得 secret。没有独立 UID、OS ACL、强制 sandbox 或等价的不可伪造进程身份时：
 
@@ -335,7 +339,7 @@ Agent CLI 是 MCP projection 的一次性、非交互、薄适配。它读取 --
 
 参数规则：
 
-- --client-file 必须是安装生成的 webenvoy-client.json 或等价的受管 Agent credential file；文件内只允许 data-dir 和 client credential，权限、OS UID／ACL 和路径由安装 verifier 检查。
+- --client-file 必须是安装生成的 webenvoy-client.json 或等价的受管 Agent credential file；文件内只允许 `data_dir`、`credential`、`agent_endpoint`、`owner_uid`、`agent_uid` 五类字段，权限、OS UID／ACL、socket 本体和路径由安装 verifier 每次检查。安装 manifest 使用同名的顶层 `owner_uid`、`agent_uid`、`agent_endpoint` 字段；不接受 camelCase、`os_boundary` 或用户填入的 process／ACL 布尔值作为替代。`agent_endpoint` 不能指向 owner control socket；client file 不得包含 owner token、supervisor token、owner-private path 或可代理 owner route 的材料。
 - agent connect 只能调用 /agent-connections 注册现有 Principal；没有 owner register／grant 权限。
 - agent describe 的 request file 是现有 webenvoy_describe 的 JSON 参数：operation，可选 context（grant_id、profile_ref、task_scope），可选 arguments。它不得创建 Run、启动 Instance、打开 Page、获取 ControlLease 或授予权限。
 - agent operation 的 request file 与 webenvoy_operation 完全相同：必填 idempotency_key、grant_id、operation、task_scope；其余字段严格取自已安装 managed-capability-definitions.json 的该 operation allowed 集合。未知 operation、未知字段、将后续步骤混入当前 task_scope、缺少 operation-specific origin、错误 Page／file selector 或违反 file_refs 约束，在发送前拒绝。
@@ -545,7 +549,7 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 正式 Agent installation bundle 至少包含：
 
 - 独立可执行的 webenvoy launcher 和可验证 Runtime；
-- agent-entry/cli.mjs、mcp.mjs、client.mjs、service.mjs、bundle.mjs、installation.mjs 及其依赖；
+- agent-entry/cli.mjs、mcp.mjs、client.mjs、service.mjs、os-boundary.mjs、bundle.mjs、installation.mjs 及其依赖；
 - 与当前 bundle digest 匹配的 managed-capability-definitions.json 和版本化 WebEnvoy SKILL；
 - Core／Harbor Runtime 构建产物、已 Qualification 的 Provider driver/binding 和 manifest；
 - installation receipt 所需的签名／digest／版本资料；
@@ -560,6 +564,7 @@ Agent 如要停止自己创建或被授权的 Instance，必须用一个新的 i
 - installation root：只读或受安装器管理，包含 bundle 和 manifest；
 - data root：独立、持久、0700，保存 Runtime／Core 状态、Principal／Grant／Run 相关数据和 recovery；
 - host root：独立、持久、0700，保存 webenvoy-client.json、host config、SKILL 和 installation receipt；
+- Agent IPC root／endpoint：独立于 owner data root 和 host root，由安装器预置并按 owner／Agent 角色配置；Agent endpoint 可由 owner service 创建但不允许复用 owner control socket，Agent 只能通过 client file 中的已验证引用连接；
 - owner-private store／control socket：只能由可信 owner UID 或强制验证的人类 control client 访问；Agent UID／脚本 UID 无权读写；
 - owner runtime record、client 文件、receipt 和受管 host config：按当前实现的 0600 约束原子写入；任何冲突的用户文件保护用户内容。
 
