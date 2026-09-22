@@ -40,7 +40,35 @@
 | Provider preference and create selection | `webenvoy_operation`：`provider.preference.read`、`provider.preference.set`、`provider.preference.clear`；动态模板的 `profile.create` 可带 `provider_id` | 每项需同名 `allowed_operations`；固定模板拒绝请求级 Provider；详见 [Provider Selection V1](provider-selection-v1.md)。 |
 | Installed Profile recovery diagnosis/request/status | `webenvoy_recovery`：`recovery.inspect`、`recovery.request`、`recovery.status` | 明确授予的同名 operation；Agent 不能 backup/plan/apply，详见 [Grant Wire Contract V1](grant-wire-contract-v1.md)。 |
 | 已安装、固定来源的可选 SKILL | `webenvoy_skills`：`skill.list`、`skill.inspect`、`skill.install`、`skill.enable`、`skill.read`、`skill.update`、`skill.rollback`、`skill.disable` | `skill_scope` 与同名 `allowed_operations` 交集；正文与 receipt 由 [SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md) 维护。 |
+| 已安装 site SKILL 的任务元数据 | 既有 `webenvoy_skills`：`skill.inspect` 的可选 `result.skill.site_tasks` | 使用 `webenvoy.site-task-summary/v1`；只投影 Lode 声明且通过现有 `skill_scope`/task scope、来源和完整性过滤的摘要，不做 Runtime 预检或执行。 |
 | 受管浏览器文件 | `webenvoy_operation`：`file.upload`、`file.download`；既有 `webenvoy_query` 查询原 Run/receipt | `file_scope`、task `file_refs`、Profile/Principal/Grant、Page/document、目标新鲜度和 ControlLease 的交集；owner `files import/inspect/export/revoke/delete` 只走受信入口。结果为 `webenvoy.browser-file-result/v1`，正文和路径不投影，详见 [Managed Browser Files V1](browser-files-v1.md)。 |
+
+### #563 task projection and common submission path
+
+`webenvoy_skills.skill.inspect` 是 site SKILL task 的唯一 Plugin metadata entrypoint。
+它保持既有输入（`idempotency_key`、`grant_id`、`operation`、`task_scope`、`skill_ref`、
+`connection_id`）和 `webenvoy.skill-operation-result.v1` 外壳；获准的 Lode revision 可
+在 `result.skill.site_tasks` 附带 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)
+定义的 `webenvoy.site-task-summary/v1`。该投影只按现有 `skill_scope.skill_refs`、
+`skill_scope.source_refs`、request `task_scope`、批准来源/修订和完整性校验过滤；不返回
+未授权 task 名称、脚本正文、路径、Grant、Profile、Page、OS identity 或 live evidence。
+无有效任务声明时返回空 `tasks`/`knowledge_only`，不阻止资产 install、enable、read。
+
+`skill.inspect` 不读取 Runtime/Harbor 动态事实，不启动浏览器、不获取 ControlLease、不
+创建 task Run；site task 的动态授权和执行唯一使用现有 Core `POST /tasks`。请求 body 的
+固定最小形状为现有 `run_id`、`package_ref` 和严格的
+`webenvoy.task-intent.v0` `task_intent`，可选 `public_query`/`harbor` 仅沿当前 API
+字段；`task_intent.capability.ref/version/source_ref/lock_ref` 由 Lode task declaration
+解析，客户端不能添加 `task_ref`、`revision_ref`、`skill_ref` 或脚本字段。Core response
+是 HTTP 202 的 `{ok, task_intent, run, evidence_refs, runtime_binding_refs}`，终态沿
+既有 `webenvoy.result-envelope.v0`；Run 以 `task_intent_ref`、capability refs、
+`package_ref`、admission/runtime/evidence refs 归属，不另建 Plugin task state。
+
+这条路径的错误仍是 Core 既有 `FailureRecord` 和 `taskSubmissionFailureStatusCode`：
+请求结构/未知字段为 400，package/capability contract 为 422，资源/Harbor admission
+为 503，重复 run 或 action-risk 冲突为 409；已派发但无法证明的结果保留原 Run 的
+`unknown_outcome`。这些错误不被包装为新的 site-task error namespace。S1 只负责把
+现有语义投影到 CLI/client 和信任边界，不拥有 task 的运行字段或结果状态。
 
 ## 十二类基线与 Plugin checkpoint
 
@@ -182,7 +210,7 @@ Provider 操作在单一 owning event loop 上串行，输入队列有界；owne
 它是公共 lifecycle/结果边界，不增加 MCP operation、Grant 维度或 Provider 私有
 协议，也不把确定性 fake 证据扩写成 installed/live/plugin checkpoint。
 
-SKILL 资产管理不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider，不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；SKILL Grant 维度使 `DO-GRANT-WIRE=triggered`，其余 Network、Console、Provider-private schema、完整 App IA 本轮不触发。
+SKILL 资产管理 operation 不启动浏览器、不申请 ControlLease、不登录网站、不执行 SKILL 附带脚本、不改变 Profile/Account/Provider；site task 的脚本执行另沿 #563 的 Core `POST /tasks` 和 S1 Agent-side managed worker 合同，不从管理 operation 旁路。这里仍不实现动态 tool routing、Marketplace、任意脚本或 Network body/interception/modification。新增 capability→tool projection 使本 Work Item 的 `DO-PLUGIN-EXPOSURE=triggered`；现有 SKILL Grant 维度保持其已接受的 `DO-GRANT-WIRE=triggered`，#563 task dispatch 不新增 Grant 字段/operation。
 
 ### #519 Design Obligation disposition
 

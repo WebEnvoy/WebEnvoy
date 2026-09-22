@@ -57,27 +57,45 @@ CAS、版本选择、receipt、失败隔离、query/no-replay 仍完整有效。
 `webenvoy-browser-reference` 只是一项 WebEnvoy 管理/浏览器参考资产，不能冒充
 Lode site SKILL 或 live 任务证据。
 
-## 3. 六个门与执行状态
+## 3. 执行前准入门、执行后结果门与状态
 
-一个 task 只有在以下六个门按顺序满足时才可进入 Runtime：
+只有前五个 **执行前准入门** 都通过，Core 才能把 task 从 admission 推进到 Runtime
+派发；第六个 **Business gate** 发生在派发之后，不能反过来成为执行前提。这样既保留
+业务成功的独立判定，也允许知识包按 #508 完成资产生命周期操作。
 
-1. **Package gate**：Lode manifest、`package_ref`、`revision_ref`、文件 digest、
-   compatibility、task、schema、pre/post-check 和 repair refs 完整且相互一致；
-   knowledge-only 包在此门结束。
-2. **Code gate**：指定 script source/version/hash 已通过 WebEnvoy 的受管可信代码准入。
-   准入记录绑定包 revision 和 script digest；没有准入时只能读资产，不能 dispatch。
+### 3.1 执行前准入门
+
+1. **Package gate**：Lode manifest、`package_ref`、`revision_ref`、package digest、
+   compatibility、task、schema、pre/post-check 和 repair refs 完整且相互一致。没有
+   task declaration 的完整包在此返回 `knowledge_only`；该状态阻止 task dispatch，
+   不阻止获准的 install、enable 或 read。
+2. **Code gate**：指定 script source/version/hash 已通过 WebEnvoy 的受管可信代码准入，
+   且准入记录绑定同一 package revision 和 script digest。没有准入时只能管理或读取
+   资产，不能进入 script dispatch。
 3. **Lifecycle gate**：Core 按 #508 对完整 revision 执行显式 install/enable/read，
-   保持 disabled-by-default、CAS、来源和摘要校验。安装不运行 script，不自动登录、
-   启动浏览器或取得 ControlLease。
+   保持 disabled-by-default、CAS、来源和摘要校验。`enable` 只表示资产可被读取和
+   选择，不等于 code admission；安装和启用不运行 script、不自动登录、启动浏览器或
+   取得 ControlLease。
 4. **Runtime gate**：Core 计算 `Profile ceiling ∩ Principal Grant ∩ task scope ∩
    declared capabilities ∩ current Runtime safety`，Harbor 证明 Instance/Page/
    document/ControlLease/identity/target 当前可用。Lode 的 action、origin、账号或
    target 声明只是上界和匹配条件，不是授权。
 5. **Egress gate**：脚本输入、页面材料、normalized output、evidence 和模型/网络/
    文件 receiver 分别经过既有敏感性、Grant、origin、Network、file 或 Model Usage
-   合同。默认不把页面或脚本输出送往外部 receiver。
-6. **Business gate**：任务的 post-check 证明目标和输出完整；Runtime `completed`、
-   HTTP 2xx、DOM 文本、schema 通过或 process exit code 不能替代业务验证。
+   合同。默认不把页面或脚本输出送往外部 receiver；未声明或未获准的范围在派发前
+   局部阻断。
+
+知识-only 包可通过第 1、3 门进入 `skill.enable`/`skill.read` 的资产路径；它不会
+通过第 2、4、5 门，也不会出现在可执行 task admission 中。`skill.inspect` 的静态
+任务摘要将运行时授权标为 `not_evaluated`；真正的 Runtime/Grant/Harbor 判断只在
+下面固定的 `/tasks` admission 中发生。
+
+### 3.2 执行后结果门
+
+6. **Business gate**：Core 已记录 Run 并派发 Runtime 后，Lode post-check 对当前
+   target、normalized output 和 required evidence 验证目标和输出完整，再将结果映射到
+   既有 Result Envelope。Runtime `completed`、HTTP 2xx、DOM 文本、schema 通过或
+   process exit code 不能替代业务验证；失败、partial 或 unknown 必须保留各自结果。
 
 这些门的结果投影到既有 operation/Run/failure/ExternalOutcome。不要建立一个与
 `ConnectionState`、`InstanceState`、`ControlState`、`RunState` 或 `ExternalOutcome`
@@ -89,18 +107,28 @@ Lode site SKILL 或 live 任务证据。
 
 任务发现必须显示 Lode 的 `package_ref`、固定 `revision_ref`、`version`、
 `task_ref`、action、required capabilities、input/output schema、known branches、
-verification requirements、data-handling 限制和当前可执行门状态。它必须区分
-`knowledge_only`、`package_invalid`、`code_not_admitted`、`not_installed`、
-`disabled`、`runtime_unavailable`、`not_authorized` 和 `executable_ready`。
+verification requirements、data-handling 限制和门状态（未评估的 Runtime 门必须标为
+`not_evaluated`）。它必须区分
+`knowledge_only` 与已声明 task；管理投影不能把未在该上下文评估的
+`package_invalid`、`code_not_admitted`、`not_installed`、`disabled`、
+`runtime_unavailable`、`not_authorized` 报成 `executable_ready`。这些动态状态由现有
+Core `/tasks` admission 的 `FailureRecord`/Run 事实返回。
 
 发现只读元数据，不启动 Runtime、不建立 Connection、不派发浏览器动作、不读取
 未授权正文或 live evidence。没有任务声明的包不能作为正式 task 出现在可执行列表。
 
-这会形成一个新的、受授权上下文过滤的 site-task/capability projection，因此
-`DO-PLUGIN-EXPOSURE` 已触发。实现必须把它作为现有 `webenvoy_describe`/capability
-catalog 或 `webenvoy_operation` 的受限扩展来落地；本合同不新增 `site_skill_run`、
-第二 MCP tool、第二 registry 或动态 Provider endpoint。S1 的命令/信任合同拥有
-最终公开字段和兼容规则；在该合同接受前，实现不能自行发明另一套 CLI/MCP 命令。
+这会形成一个新的、受授权上下文过滤的 site-task metadata projection，因此
+`DO-PLUGIN-EXPOSURE` 已触发。正式入口已经固定为现有
+`webenvoy_skills` 的 `skill.inspect` operation；其 `result.skill.site_tasks` 可选字段
+使用 `webenvoy.site-task-summary/v1`，不增加新的 MCP tool、输入字段、registry 或
+Provider endpoint。`skill.inspect` 只返回通过现有 `skill_scope`、task scope、批准
+source/revision 和包完整性校验的任务摘要；未授权或无效任务被过滤或沿既有
+`managed_*`/source-corrupt 错误返回，不披露名称、路径、正文或摘要。
+
+这个摘要只报告包/生命周期事实，运行时授权状态为 `not_evaluated`；它不冒充 task
+执行许可，也不由 `webenvoy_describe` 扩展。任务提交固定沿现有 Core `POST /tasks`
+和 `webenvoy.task-intent.v0`，其请求、Run 归属、错误和 Result Envelope 见 §4.3。
+S1 只拥有 CLI/client 投影和信任，不改变这里的 task 语义或字段。
 
 ### 4.2 现有 managed lifecycle
 
@@ -108,8 +136,9 @@ catalog 或 `webenvoy_operation` 的受限扩展来落地；本合同不新增 `
 
 1. Core 只接受批准 source manifest 中的完整 `revision_ref`，校验 Lode package digest
    和文件摘要，并按 #508 `skill.install` 安装；第一次保持 disabled。
-2. Owner/受信管理入口显式 `skill.enable` 选定已安装、兼容、完整且 code-admitted 的
-   revision。Agent 不能用网页 Grant、task scope 或文本内容把未准入 revision 变成可执行。
+2. Owner/受信管理入口显式 `skill.enable` 选定已安装、兼容且完整校验的 revision。
+   `skill.enable` 不要求 code admission；Agent 不能用网页 Grant、task scope 或文本
+   内容把未准入 revision 变成可执行。
 3. `skill.read` 只读取当前 enabled revision，返回既有 receipt；不会将正文写入 Run、
    operation metadata 或持久历史。任务执行只消费已校验的 package bytes/hash。
 4. `skill.update`/`skill.rollback` 只接受明确已安装目标和 CAS。新 Run 可以选择新
@@ -122,99 +151,155 @@ Lode package 的 `package_ref`/version/hash 是身份真相；Core 只保留 ver
 和历史引用。manifest、package digest 或 compatibility 不一致必须 fail closed，不能
 用 `latest`、当前工作树、另一个 package 或旧 script 代替。
 
-### 4.3 逻辑调用语义（不是新增 wire）
+### 4.3 现有 Core Task Intent 调用语义（不是新增 wire）
 
-任务运行必须沿 S1 确认的现有 operation envelope，使用一个当前有效的 Principal/
-Connection/Grant、原有 `idempotency_key`、`grant_id`、`task_scope`、`profile_ref`、
-必要的 `runtime_session_ref`/`page_ref` 和 Core Run。下列是跨仓必须满足的逻辑元组，
-不是本文件单独新增的 CLI、MCP 工具或 JSON wire：
+任务提交的唯一语义入口是现有 Core `POST /tasks`。API、CLI、MCP、SDK 和 App 的
+投影都必须生成同一个 `webenvoy.task-intent.v0`；S1 只负责 CLI/client 投影和信任，
+不定义另一套 site-task 命令。`webenvoy_operation` 继续承载浏览器能力，
+`webenvoy_skills` 继续承载资产管理，二者都不是 task dispatch 的第二入口。
 
-```yaml
-site_task_request:
-  operation: <Lode task.operation_id, already exposed by WebEnvoy>
-  skill_ref: <managed lifecycle projection>
-  package_ref: <Lode package identity>
-  revision_ref: <revision resolved and pinned by Core>
-  task_ref: <Lode task identity>
-  idempotency_key: <existing Core operation key>
-  grant_id: <existing Core Grant>
-  task_scope: <existing browser/skill scope; further narrows authority>
-  profile_ref: <existing selected Profile>
-  page_binding: <current Harbor Page/document/observation binding when required>
-  inputs: <Lode input schema validated value>
+请求 body 使用现有字段 `run_id`、`package_ref`、`task_intent`，以及需要时现有的
+`harbor`（只允许当前 Core API 已接受的公开字段；`public_query` 仅用于已有任务）：
+
+```json
+{
+  "run_id": "run_example_001",
+  "package_ref": "lode://site-skill/example/catalog@1.0.0",
+  "task_intent": {
+    "schema_version": "webenvoy.task-intent.v0",
+    "intent_id": "intent_example_001",
+    "entrypoint": "mcp",
+    "user_intent": {"summary": "读取当前目录摘要"},
+    "capability": {
+      "ref": "lode:capability/catalog-read",
+      "version": "1.0.0",
+      "source_ref": "lode://site-skill/example/catalog@1.0.0",
+      "lock_ref": "lode://lock/site-skill/example/catalog@1.0.0"
+    },
+    "input": {"summary": "当前目录", "refs": []},
+    "scope": {"target_type": "catalog_page", "target_ref": "https://example.com/catalog"},
+    "policy": {"risk": "read", "execution_intent": "read", "timeout_ms": 30000},
+    "resource_requirement_refs": ["lode://resource/example/catalog-read@1.0.0"],
+    "evidence_policy_ref": "lode://evidence-policy/example/catalog-read@1.0.0"
+  },
+  "harbor": {
+    "identity_environment_ref": "identity-env:example",
+    "url": "https://example.com/catalog"
+  }
+}
 ```
 
-调用方不能自行提交未安装 revision、任意 package path、Provider handle、selector、
-Cookie、Token、raw CDP/Juggler text、任意文件路径或未声明 input。Core 必须从受管
-选择解析 `revision_ref` 并把它固定到 Run；调用方提供的期望值只用于冲突检查，不是
-绕过 install/enable/admission 的选择器。
+Lode 的 `task_ref` 不成为 Task Intent 顶层字段：Lode package manifest 将它解析到
+`capability.ref`、version、source 和 lock；`package_ref` 选择包版本，Lode resolver
+在 Core admission 前固定唯一 `revision_ref` 和 package digest。Core 不新增
+`revision_ref`、`task_ref`、`skill_ref`、`profile_ref`、`page_binding` 或任意脚本字段。
+现有 Run 以 `task_intent_ref`、`capability_ref`/version/source/lock、`package_ref`、
+scope、admission、runtime binding、result/evidence refs 归属；Lode revision/digest
+由 resolver 的 package contract 作为同一 pin 的验证材料，不另建 Run 或 registry。
 
-最小结果继续使用既有 `{ok, run_id, status, result?, failure?}` envelope。下例只是
-说明必须可追溯的结果内容，不是第二个 result schema：
+Core 先按已有 Task Intent 严格拒绝未知字段和私有输入，再校验 Lode package contract、
+现有 Principal/Grant/task scope、Profile/Runtime/Harbor 条件；调用方不能提交未安装
+revision、任意 package path、Provider handle、selector、Cookie、Token、raw CDP/Juggler
+text、任意文件路径或未声明 input。请求已被接受时，现有 `/tasks` 提交响应为 HTTP 202，
+body 直接投影现有 Run（下列省略 Run 的其他既有字段）：
 
-```yaml
-site_task_result_projection:
-  ok: true
-  run_id: <existing Core Run>
-  status: completed
-  result:
-    package_ref: <Lode package>
-    revision_ref: <pinned revision>
-    task_ref: <Lode task>
-    data: <Lode normalized output>
-    completeness: complete # complete | partial | empty | unknown
-    verification: verified # verified | incomplete | failed | unknown
-    evidence_refs: [<opaque Core/Harbor refs>]
-  failure: null
+```json
+{
+  "ok": true,
+  "task_intent": {"schema_version": "webenvoy.task-intent.v0", "intent_id": "intent_example_001"},
+  "run": {
+    "run_id": "run_example_001",
+    "task_intent_ref": "intent_example_001",
+    "capability_ref": "lode:capability/catalog-read",
+    "capability_version": "1.0.0",
+    "capability_source_ref": "lode://site-skill/example/catalog@1.0.0",
+    "capability_lock_ref": "lode://lock/site-skill/example/catalog@1.0.0",
+    "package_ref": "lode://site-skill/example/catalog@1.0.0",
+    "status": "admitted"
+  },
+  "evidence_refs": [],
+  "runtime_binding_refs": []
+}
 ```
 
-Core/Harbor 的 operation status、`dispatch_state`、`ExternalOutcome`、failure code 和
-unknown 仍按既有合同返回。`completeness`/`verification` 是 Lode 结果的投影，不能
-覆盖 `unknown_outcome`；具体公共字段必须在 S1/Plugin exposure 的实现合同中注册，
-否则只保留既有 envelope 和 Run metadata。
+`run.status` 是现有 Run 状态，提交返回时可按执行进度为 `admitted`、`running` 或
+已有终态；它不是 site-task 状态。提交失败仍使用现有 `FailureRecord`：结构错误为
+HTTP 400（例如 `task_intent_required`、`schema_version_unsupported`、未知字段或
+`package_ref_required`），`capability_contract` 为 HTTP 422（例如
+`package_contract_required`、`package_ref_mismatch`、`capability_ref_mismatch`、
+`capability_version_incompatible`、`package_lock_mismatch`），资源/现场 admission
+为 HTTP 503，`run_id_already_exists` 或 action-risk 冲突为 HTTP 409。具体 code 继续
+由 Core 的既有 failure mapping 负责；本规范不建立 site 专属错误表。已派发但结果
+无法证明时，原 Run/query 使用现有 `unknown_outcome`，不得换 key 重放。
+
+终态查询或结果投影使用现有 `webenvoy.result-envelope.v0`，而不是第二个 site result
+schema：
+
+```json
+{
+  "schema_version": "webenvoy.result-envelope.v0",
+  "run_record_ref": "run_example_001",
+  "ok": true,
+  "outcome": "success",
+  "terminal": true,
+  "capability_ref": "lode:capability/catalog-read",
+  "capability_version": "1.0.0",
+  "package_ref": "lode://site-skill/example/catalog@1.0.0",
+  "result_ref": "result:example-001",
+  "result_kind": "catalog-read",
+  "output_schema_id": "lode://schema/example/catalog-read-output@1.0.0",
+  "data": {"items": []},
+  "evidence_refs": ["evidence:example-001"],
+  "post_check": {
+    "schema_version": "webenvoy.post-check-result.v0",
+    "status": "passed",
+    "summary": "The package post-check passed.",
+    "consumer_boundary": "Core stores only the bounded post-check and opaque evidence refs."
+  }
+}
+```
+
+Lode 的 `completeness`、normalization 和 verification 只能作为 `data`/`post_check` 的
+既有受约束内容，不能覆盖 Core 的 `outcome`、`unknown_outcome`、`dispatch_state` 或
+ExternalOutcome。业务 gate 只在这一步之后成立；Core/Harbor 的 Run、query、reconcile
+和 recovery 继续拥有停止与 unknown 语义。
 
 ## 5. 受管执行位置与 OS 权限
 
 Lode `scripts/` 中的第三方或站点代码不得被 import、eval 或直接执行在 Core/Harbor
-进程内。WebEnvoy 只能把它交给 S1/Harbor 批准的受限 Agent-side OS 进程或等价 worker；
-`managed_runtime_worker` 是这里的逻辑执行位置，不是本文件新建的 runner，要求如下：
+进程内。本 v1 选定的执行位置是 **S1 批准的 Agent-side managed worker 进程**；它是
+受管 trusted-code host，不是本文件新建的 runner，也不是面向任意不可信代码的通用
+sandbox。S1/Harbor 负责宿主的真实边界，S2 只规定包如何使用它：
 
-- **进程边界**：script 在独立于 Core/Harbor 的受限 Agent-side OS 进程或既有等价
-  worker 中运行。S1/Harbor 拥有 OS identity、owner/control socket 和 role matrix；
-  S2 不新增每个 Agent 的授权系统、第二身份系统或自己的路径隔离规则。
-- **文件权限**：包被只读挂载或等价地以不可写已校验 bytes 提供；工作目录是 task
-  范围的临时目录。允许读取包内声明文件、当前输入和由 Core/Harbor 发放的不透明
-  material ref；允许写入只有正式的临时 material/evidence/result sink。经代码准入的
-  script 只有 S1/Harbor worker 已明确允许的本机文件范围和正式 file/material capability，
-  不能自行增加路径；OS 权限必须拒绝任意绝对路径、`..`、Lode checkout、Profile/data
-  root、用户 HOME、credential store 和未声明文件。
-- **网络权限**：未声明的 raw socket、任意 DNS 和任意出站连接默认拒绝；经代码准入的
-  script 如需本机网络，只能使用 S1/Harbor worker 已明确允许的范围和已接受的 Network
-  capability/Harbor broker。目的 origin、请求类型、数据敏感等级和 Grant 仍由既有合同
-  检查。S4 未接受前不能读取或修改 response/request body，也不能把脚本网络权限当作
-  账户或网页权限。
-- **身份与凭据**：S1/Harbor worker OS identity 只用于进程级最小权限，不代表用户授权。
-  Core 在调用边界继续核对 Principal/Grant/Connection；Cookie、Token、local/session
-  storage、Profile path、browser credential store 不能以参数、环境变量或挂载进入
-  script。
+- **进程和身份**：worker 独立于 Core/Harbor 进程运行，使用 S1 分配的 Agent OS
+  identity；owner control socket 由 owner identity 持有并以宿主 ACL 排除 Agent
+  identity。S1/Harbor 还拥有 worker 的监督、停止、清理和 role matrix。S2 不新增第二
+  Agent/owner 身份、bearer 隔离或路径约定。
+- **代码准入不等于 OS 权限**：WebEnvoy 的 trusted-code admission 只绑定允许加载的
+  `package_ref`、`revision_ref`、`script_ref` 和 source digest；准入后代码仍只能使用
+  worker identity 已有的宿主权限，SKILL 声明、Grant 或 API credential 都不能扩大它。
+- **文件**：包以只读已校验 bytes 提供，临时工作目录归 Agent identity 且按 task 管理。
+  worker 可访问的本机文件仅是 S1/Harbor role matrix 已允许的包 root、声明的
+  material/file capability 及 result/evidence sink；owner/Profile/credential 数据根和
+  其他未声明路径由宿主 ACL 拒绝。S2 不声称一个不存在的“任意文件全拒绝”沙箱。
+- **网络**：worker 的直接网络权限由 S1/Harbor role matrix 实际决定；没有获准 Network
+  capability 时不得联网，有获准范围时只能使用该范围或 Harbor broker。超出 task
+  declaration、Grant、origin 和 task scope 的 DNS/socket/出站由宿主拒绝；S2 不新增
+  Network body/interception/modification 合同，也不把网络权限当作账户或网页权限。
 - **输入/输出**：script 只收到版本化、哈希绑定的 code reference、有界 input、当前
-  observation/target 的不透明 ref、timeout/cancel 和允许的 capability refs；输出只
-  能是有界 schema 数据或既有 evidence/result ref。禁止动态下载、安装依赖、fork
-  未声明进程、隐藏 side effect、任意 shell、任意 JavaScript/eval、CDP/Juggler 或
-  Provider-private endpoint。
-
-OS 进程、只读包、临时目录和默认网络拒绝是执行合同的安全前提；HTTP/MCP `grant_id`
-或“API 已授权”本身不是 sandbox 证据。实现必须在实现 Work Item 的 candidate 和
-verification 中记录实际平台技术、worker identity、文件挂载/拒绝、网络 allow/deny
-和清理事实。本文件不把上述要求实现成 Lode runner、hosted registry 或第二 sandbox
-产品。
+  observation/target 的不透明 ref、timeout/cancel 和允许的 capability refs；输出只能
+  是有界 schema 数据或既有 evidence/result ref。禁止动态下载、安装依赖、fork 未声明
+  进程、隐藏 side effect、任意 shell、任意 JavaScript/eval、CDP/Juggler 或
+  Provider-private endpoint。Cookie、Token、local/session storage、Profile path、
+  browser credential store、用户 HOME 不能以参数、环境变量或隐式挂载进入 script。
 
 同一 OS 用户下的不同 bearer、路由、环境变量或约定路径不构成 Agent/owner 隔离；若
 worker 能读取 owner-controlled 文件或 owner control socket，即使 API Grant 有效也必须
-拒绝 script。独立 service UID 本身也不足以证明隔离。S1/实现候选必须先证明宿主实际
-强制了进程、socket、文件和网络边界；缺少该证据时只能提供包读取或 `knowledge_only`，
-不得报告 code-admitted 或 executable-ready。这里的 OS 边界是受限执行前提，不是面向
-任意不可信代码的通用 sandbox。
+拒绝 script。独立 service UID 本身也不足以证明隔离。S1/实现候选必须证明 Agent identity、
+owner socket ACL、包/临时目录访问和实际网络 role matrix；缺少这些宿主强制事实时只能
+提供包读取或 `knowledge_only`，不得报告 code-admitted 或 executable-ready。实现验证必须
+记录上述真实 OS 技术、worker identity、挂载/ACL、网络 allow/deny 和清理事实；HTTP/MCP
+`grant_id` 或“API 已授权”本身不是 OS 权限证据。
 
 ## 6. Script 与 Runtime capability
 
@@ -301,7 +386,7 @@ output schema 通过都只是 Runtime 或数据层事实。
 
 | Obligation | 本候选判断 | 依据和实施前门槛 |
 | --- | --- | --- |
-| `DO-PLUGIN-EXPOSURE` | `triggered` | 安装 task 的动态发现、按当前 Grant/SKILL/host 过滤和 task→existing-operation projection 是新 Agent-facing capability；本文件给 specialist 语义，实施前必须同步 Plugin Runtime Exposure/Capability Discovery 的真实入口、版本、错误、安装和兼容。 |
+| `DO-PLUGIN-EXPOSURE` | `triggered` | 入口已固定为现有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 元数据投影；投影按现有 `skill_scope`、task scope、批准 source/revision 和完整性过滤。执行入口已固定为 Core `POST /tasks` 的 `webenvoy.task-intent.v0`，错误沿既有 `FailureRecord`/HTTP mapping，结果归属现有 Run 与 `webenvoy.result-envelope.v0`；本文件、Plugin Runtime Exposure 与 Lifecycle 的窄增量必须保持这组字段一致。 |
 | `DO-GRANT-WIRE` | `not-triggered` | 运行复用现有 `skill_scope`（管理）与 browser `allowed_operations`、Profile/origin/task scope、ControlLease 和既有 action/identity policy；本候选不新增 site-task、script 或 egress 持久 Grant 字段。若实现引入专属字段、外发 receiver grant 或新的确认 wire，必须先改为 `triggered` 并更新 Grant 合同。 |
 | `DO-NETWORK-CONTRACT` | `conditional` | v1 默认拒绝 script raw network，不新增公共 request/response payload；使用主动 Network、body、interception 或 modification 前必须由 S4 提供并接受 Network Runtime 合同。 |
 | `DO-CONSOLE-CONTRACT` | `not-triggered` | script 不新增 console/page-error public payload；只消费既有有界诊断或 failure。 |

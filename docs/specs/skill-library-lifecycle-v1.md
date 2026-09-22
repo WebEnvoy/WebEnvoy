@@ -36,7 +36,7 @@
 | `webenvoy.skill-library.v1` root | `schema_version`、`assets`、`operations` | Core data-root 的唯一受管库状态。 |
 | `assets[]` / revision | `skill_ref`、`asset_name`、`source_repository`、`source_path`、`revisions[]`、`enabled`、`enabled_revision_ref`、`record_version`、`history[]`；revision 含 `revision_ref`、`source_ref`、`source_commit`、`source_blob`、`version`、`path`、`content_sha256`、`content_bytes`、`compatibility`、`installed_at` | `history` item 含 `event`、可选 revision/source/receipt ref、`at`、`run_id`；不保存正文。 |
 | `operations[]` | `run_id`、`principal_id`、`request_hash`、`operation`、`metadata`、`committed_at` | `metadata` 是非正文摘要；含 `content` 的持久记录拒绝。 |
-| `webenvoy.skill-operation-result.v1` | result `schema_version` 加统一 `{ok, run_id, status, result?, failure?}`；result 按 operation 使用 `skills`/`skill`、`revision`、`idempotent`，read 使用 `skill_ref`、`revision`、`receipt` | 即时 `skill.read` 响应可附真实 `content`；Run、operation metadata 和 query 不保存或返回正文。 |
+| `webenvoy.skill-operation-result.v1` | result `schema_version` 加统一 `{ok, run_id, status, result?, failure?}`；result 按 operation 使用 `skills`/`skill`、`revision`、`idempotent`、可选 `skill.site_tasks`（`webenvoy.site-task-summary/v1`），read 使用 `skill_ref`、`revision`、`receipt` | 即时 `skill.read` 响应可附真实 `content`；Run、operation metadata 和 query 不保存或返回正文。site task summary 只有获准的包元数据，不携带脚本正文或现场数据。 |
 | `webenvoy.skill-read-receipt.v1` | `receipt_ref`、`skill_ref`、`revision_ref`、`source_ref`、`content_sha256`、`content_bytes`、`record_version`、`read_at` | receipt 证明已校验的版本和字节摘要，不携带正文。 |
 
 库状态与 operation 摘要在受管锁内原子提交；提交后既有 Run 只是结果投影。若 Run 投影或响应丢失，恢复只从已提交的 operation metadata 补齐 Run/result envelope，不重新执行 install、enable、read、update、rollback 或 disable。
@@ -55,13 +55,60 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
 
 `skill.list`/`skill.inspect` 只返回当前范围内的批准元数据和本地状态，不返回未授权 revision、物化内容或本地路径。Owner 只通过现有受信入口的 `access register`、`access grant`、`access revoke`、`access list` 管理资产范围；凭据只在 owner/本机内部流转，不能放入 MCP。
 
+### #563 site task metadata projection
+
+`skill.inspect` 保持既有输入和 `webenvoy.skill-operation-result.v1` 外壳；当获准 revision
+是 Lode site SKILL 且 manifest/task declaration 通过完整性校验时，`result.skill` 可附
+一个 `site_tasks` 对象：
+
+```json
+{
+  "schema_version": "webenvoy.site-task-summary/v1",
+  "package_ref": "lode://site-skill/example/catalog@1.0.0",
+  "revision_ref": "lode://site-skill/example/catalog@1.0.0#<source-commit>",
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "task_ref": "catalog-read",
+      "capability_ref": "lode:capability/catalog-read",
+      "capability_version": "1.0.0",
+      "source_ref": "lode://site-skill/example/catalog@1.0.0",
+      "lock_ref": "lode://lock/site-skill/example/catalog@1.0.0",
+      "operation_id": "catalog_read",
+      "action": "read",
+      "input_schema_ref": "lode://schema/example/catalog-read-input@1.0.0",
+      "output_schema_ref": "lode://schema/example/catalog-read-output@1.0.0",
+      "post_check_ref": "lode://check/example/catalog-read@1.0.0",
+      "task_support": "declared",
+      "runtime_state": "not_evaluated"
+    }
+  ]
+}
+```
+
+`site_tasks` 只投影 Lode 已声明的 `task_ref`、`capability_ref`、version/source/lock、
+operation、schema 和 verification refs；不投影脚本源、输入正文、文件路径、Grant、
+Profile、Page、OS identity 或 live evidence。`task_support` 只有 `declared` 和
+`knowledge_only`：没有完整 task declaration 的 package 返回空任务或
+`knowledge_only`，但仍可按本生命周期 install、enable、read；`runtime_state` 在这个
+不带 Profile/Harbor context 的管理 operation 中固定为 `not_evaluated`。
+
+过滤顺序固定为：先用现有 `skill_scope.skill_refs/source_refs` 与 task scope 确认
+asset、source 和 revision 可见，再校验包完整性和 task declaration，最后只返回通过
+校验的 task 摘要。未授权 revision/task 不得以名称、路径、正文或错误细节泄露；source
+缺失/损坏、local modified、not installed、disabled、incompatible 和 access denied
+沿本文件已有 `managed_skill_*` 错误返回，不建立 site-task 错误表。`skill.inspect` 不
+做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task execution 使用
+现有 Core `POST /tasks` 和 `webenvoy.task-intent.v0`，其 `capability.ref` 解析回
+`task_ref`，动态结果沿现有 Run/Result Envelope 返回。
+
 ## 生命周期与不变量
 
 | operation | 必需行为 |
 | --- | --- |
-| `skill.list` / `skill.inspect` | 查询获准资产、来源和选择摘要；只记录本次 Run/receipt，不改变资产选择、启用值或物化正文，不读出正文。 |
+| `skill.list` / `skill.inspect` | 查询获准资产、来源、选择摘要和可选 `site_tasks` 元数据投影；只记录本次 Run/receipt，不改变资产选择、启用值或物化正文，不读出正文或 Runtime 事实。 |
 | `skill.install` | 只安装清单中的明确 revision；首次保持 disabled，不自动选择、启用或安装 latest；同一有效请求幂等返回相同摘要。 |
-| `skill.enable` | 只选择已安装、兼容且完整校验的 revision；显式启用。 |
+| `skill.enable` | 只选择已安装、兼容且完整校验的 revision；显式启用。知识-only revision 也可启用，code admission 只在 task dispatch 门检查。 |
 | `skill.read` | 只读取当前 enabled revision；先用同一物化 Buffer 校验 bytes/hash，再返回真实 UTF-8 content 与 receipt。disabled、缺失、修改、损坏、不兼容或越权均拒绝。 |
 | `skill.update` | 只将选择切换到调用者明确指定、已安装且完整校验的目标 revision；不隐式 install/merge/latest，并保持原 `enabled` 值。 |
 | `skill.rollback` | 只切回先前已安装且仍完整可用的历史 revision；不隐式 install/merge/latest，并保持原 `enabled` 值。 |
