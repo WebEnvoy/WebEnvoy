@@ -2,12 +2,12 @@
 
 状态：经独立审查并合入 main 后成为 Accepted 实施基线，不表示执行器或真实站点已验收；版本：v1；产品归口：`#563`（parent `#475`）；owner：Core（准入、授权、Run、结果与恢复）、Harbor（受管浏览器现场、Page/target、ControlLease）及第 5 节定义的 Agent-side worker host。Plugin、CLI、API 共同投影 Core 语义。
 
-包定义由配套 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/a2ebd0c6b923727c29d16a01a19219d95f9375b3/docs/contracts/site-skill-package-v1.md)
+包定义由配套 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/024891654dff700bab4b31c82bc54148bf4d6b00/docs/contracts/site-skill-package-v1.md)
 拥有；该链接固定合同内容，引用本身不表示包合同已经接受或进入 `main`。
 
 本文件定义一个已安装、已固定版本、已获运行授权的 site SKILL task 如何进入现有
 WebEnvoy Runtime 并得到结果。它不拥有 Lode 的包身份、version、source/hash、任务
-声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/a2ebd0c6b923727c29d16a01a19219d95f9375b3/docs/contracts/site-skill-package-v1.md)
+声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/024891654dff700bab4b31c82bc54148bf4d6b00/docs/contracts/site-skill-package-v1.md)
 拥有。本文件建立在 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、
 [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、
 [Grant Wire Contract V1](grant-wire-contract-v1.md)、
@@ -590,7 +590,7 @@ broker 和 v1.5 Grant extension 已在本候选中显式触发并链接其 owner
 要新增跨进程字段，仍须先更新对应 owner 合同，不能在实现 PR 中悄悄扩 wire。
 
 包合同可以先于本执行合同接受；正式消费者必须等待两份合同各自接受，并与
-[S1 命令及信任合同](https://github.com/WebEnvoy/WebEnvoy/blob/2a9646827c24cc514eb28be8d12f036c60d81004/docs/specs/cli-integration-v1.md)
+[S1 命令及信任合同](https://github.com/WebEnvoy/WebEnvoy/blob/4fd5ca525eecd3fa124bae31ceb4943d28c6a1ec/docs/specs/cli-integration-v1.md)
 对齐。实现 Work Item 再提供准确的 Lode manifest、code-admission 记录、第 5 节的
 worker 实际权限及 owner 隔离、Grant/Run schema、installed Agent 和 live site 证据。
 接受本规格不授予安装、运行、外发、合并或发布授权。
