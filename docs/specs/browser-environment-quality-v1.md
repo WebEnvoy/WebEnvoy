@@ -1,6 +1,6 @@
 # Browser Environment Quality V1
 
-> 状态：Proposed（正式规格，待独立审查合并）
+> 状态：待合并生效；本规格 PR 经独立审查并合入 `main` 后成为 Accepted 实施基线，不表示 W3 质量验证完成
 > 版本：1.0
 > 日期：2026-09-22
 > 产品依据：[canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)、[#567](https://github.com/WebEnvoy/WebEnvoy/issues/567)
