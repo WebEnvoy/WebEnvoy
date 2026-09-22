@@ -106,7 +106,8 @@ service，不把 owner `/tasks` 路由暴露给普通 Agent。
 
 任务发现必须显示 Lode 的 `package_ref`、固定 `revision_ref`、唯一 package-level
 `package_digest`、`version`、
-`task_ref`、action、required capabilities、input schema/carrier/size、output schema、known branches、
+`task_ref`、entrypoint 的 script identity/ABI（若有）、required capabilities、input
+schema/carrier/size、output schema、known branches、
 verification requirements、data-handling 限制和门状态（未评估的 Runtime 门必须标为
 `not_evaluated`）。它必须区分
 `knowledge_only` 与已声明 task；管理投影不能把未在该上下文评估的
@@ -115,11 +116,20 @@ verification requirements、data-handling 限制和门状态（未评估的 Runt
 `webenvoy_task` admission 投影的现有 Core `FailureRecord`/Run 事实返回。
 
 上述字段必须逐项来自 [Managed SKILL Library Lifecycle V1 的 #563 projection](skill-library-lifecycle-v1.md#563-site-task-metadata-projection)：
-`required_capabilities` 是完整的 Lode `entrypoint.capability_refs` 解析集合，不能由单个
-`capability_ref` 缩减；`known_branches`、`verification` 和 `data_handling` 只在 Lode
-声明并通过静态校验后投影。`result.skill.skill_ref` 与摘要的稳定 `package_ref` 采用同一
+`required_capabilities` 是完整的 Lode `entrypoint.capability_refs` 解析集合，也可以在
+script-only task 中为空；不能由单个 `capability_ref` 缩减，也不能从 `script_ref` 猜出
+能力。script-backed task 同时投影 `script_ref`、source/version/hash、固定 ABI/broker；
+`known_branches`、`verification` 和 `data_handling` 只在 Lode 声明并通过静态校验后投影。
+`result.skill.skill_ref` 与摘要的稳定 `package_ref` 采用同一
 包身份，摘要的 `revision_ref` 才带 `@version#source-commit`；Plugin 不重新解释这些
 字段，也不增加 Runtime preflight。
+
+合法 script-only task 仍是 `task_support=declared` 的可发现任务，不降级为
+`knowledge_only`。但当前既有 `webenvoy.task-intent.v0` 要求 `capability.ref`/version，
+`webenvoy_task.task.submit` 没有 script-only 的正式 Task Intent 映射；它沿既有
+`request_invalid`/`capability_ref_required` 边界在创建 Run 前拒绝。它不从 script 生成
+能力、不声称可执行，也不新增 runner、registry、tool 或 Runtime preflight；§5 的受管
+script ABI/broker 只作为未来兼容映射必须复用的有界执行宿主。
 
 发现只读元数据，不启动 Runtime、不建立 Connection、不派发浏览器动作、不读取
 未授权正文或 live evidence。没有任务声明的包不能作为正式 task 出现在可执行列表。
@@ -275,8 +285,12 @@ Core 在 managed projection 内部生成唯一 `run_id`/`intent_id`，并将请�
 
 - `entrypoint` 记录实际 projection（`mcp` 或 `cli`），`user_intent.summary` 来自
   `intent.summary`；
-- `capability.ref/version/source_ref/lock_ref`、resource refs 和 evidence policy
-  来自 pinned Lode task declaration，不由 Agent 任意补充；
+- capability-backed task 的 `capability.ref/version/source_ref/lock_ref`、resource refs
+  和 evidence policy 来自 pinned Lode task declaration，不由 Agent 任意补充；完整
+  `required_capabilities` 仍由同一 declaration 在 admission 中校验；
+- script-only task 不生成伪造的 `capability.ref`。由于既有 Task Intent v0 的 capability
+  字段必填，当前 managed projection 在映射前沿 `capability_ref_required` request-invalid
+  返回，不创建 Run；其 `script_ref`/ABI/hash 只保留在 inspect 的静态摘要；
 - `scope` 来自 `target`，`policy` 来自已校验的 `intent.policy`；
 - `input.summary` 固定为不含正文的受管摘要，`input.refs` 只保留能力本身已有且经
   既有合同校验的 file/material refs；managed-task inline value 不进入 v0 envelope，
@@ -542,6 +556,7 @@ output schema 通过都只是 Runtime 或数据层事实。
 | 触发场景 | 固定行为 |
 | --- | --- |
 | 只导入知识 | 返回或记录 `knowledge_only`；可以读取获准 references，但没有正式 task entrypoint，不能 dispatch。 |
+| 合法 script-only task | `skill.inspect` 返回 `task_support=declared` 及 script identity/ABI/hash 等静态事实；当前 `webenvoy_task` 因 Task Intent v0 缺少 capability 映射沿 `capability_ref_required` request-invalid 拒绝，不创建 Run，也不改称 `knowledge_only`。 |
 | 页面节点被替换 | 旧 target ref 失效；fresh observe 取得新 ref 后才可继续。旧 ref 不得静默重绑。 |
 | 写入 response 丢失 | 原 Run 保持 `dispatched`/`unknown_outcome`；只 query/reconcile 原 operation，不创建新 script/version/key。 |
 | 包在任务中更新 | admission 时固定旧 revision；更新只影响未来 Run。local modified 不被覆盖。 |

@@ -52,8 +52,10 @@
 定义的 `webenvoy.site-task-summary/v1`；其中 package-level `package_digest` 是 Agent
 提交时唯一可用的 digest 来源。`package_ref` 是不带版本的稳定包身份，并与
 `result.skill.skill_ref` 对应；`revision_ref` 才带版本和 source commit。task 摘要完整
-投影 Lode 声明的 `required_capabilities`、`known_branches`、`verification` 和
-`data_handling`，其中单个 `capability_ref` 只是兼容主摘要，不能代替 required set。
+投影 Lode 声明的 script entrypoint identity/ABI（若有）、`required_capabilities`、
+`known_branches`、`verification` 和 `data_handling`，其中单个 `capability_ref` 只是兼容
+主摘要，不能代替 required set；合法 script-only task 的 required set 可为空，但不因此
+变成 `knowledge_only`，当前 TaskIntent 映射边界见 execution §4.1。
 该投影按 `skill_scope`、source/revision、task scope 和包完整性过滤，不返回未授权 task
 名称、脚本正文、路径、Grant、Profile、Page、OS identity 或 live evidence；
 `knowledge_only` 仍可 install/enable/read。

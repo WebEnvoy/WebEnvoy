@@ -79,6 +79,13 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
   "tasks": [
     {
       "task_ref": "catalog-read",
+      "entrypoint": {
+        "script_ref": "<script-ref>",
+        "script_version": "1.0.0",
+        "script_sha256": "sha256:<64-lowercase-hex>",
+        "runtime_kind": "webenvoy.site-skill-script-abi/v1",
+        "broker": "webenvoy.site-skill-broker/v1"
+      },
       "capability_ref": "lode:capability/catalog-read",
       "capability_version": "1.0.0",
       "source_ref": "<approved-source-ref>",
@@ -116,20 +123,25 @@ Grant 通过窄 `skill_scope={skill_refs,source_refs}` 授权；`allowed_operati
 ```
 
 `site_tasks` 只投影 Lode 已声明的 package-level `package_ref`/`revision_ref`/`version`/
-`package_digest`、task `task_ref`、完整的 `required_capabilities`、operation/action、
-input schema/carrier/size、output schema、`known_branches`、verification requirements
+`package_digest`、task `task_ref`、`entrypoint` 的有界 script 身份/ABI、完整的
+`required_capabilities`、operation/action、input schema/carrier/size、output schema、`known_branches`、verification requirements
 和 `data_handling`；不投影脚本源、输入正文、文件路径、Grant、Profile、Page、OS identity
 或 live evidence。`capability_ref`/`capability_version`/`source_ref`/`lock_ref` 是兼容的
-主能力摘要，必须与 `required_capabilities` 中的一个条目相等，不能用单个
-`capability_ref` 代替完整 required set。`required_capabilities` 是必需的非空数组，来源
-是 Lode task `entrypoint.capability_refs` 及每项已解析的 version/source/lock；若包没有声明
+主能力摘要；有 Lode capability refs 时必须与 `required_capabilities` 中的一个条目相等，
+不能用单个 `capability_ref` 代替完整 required set；script-only task 没有这些摘要字段。
+`required_capabilities` 是必需数组，允许为空；非空时完整来源是 Lode task
+`entrypoint.capability_refs` 及每项已解析的 version/source/lock，空数组只有在 Lode
+`entrypoint.script_ref` 存在且未声明 capability refs 时合法，不能从 script 推导 capability。
+有 `script_ref` 时，`entrypoint` 的 `script_version`、`script_sha256`、`runtime_kind` 和
+`broker` 必须来自 Lode script declaration；不返回 script path 或源代码。若包没有声明
 `known_branches`，该字段可省略，不能由运行时猜测；`verification.post_check_ref` 和
 `required_evidence_refs` 来自同名 Lode 声明，`data_handling` 的敏感级别与外发值来自
 任务声明及 `inputs.sensitivity`，均为静态元数据。示例中的顶层 `post_check_ref` 是现有
 消费者的兼容别名，必须与 `verification.post_check_ref` 完全相等，不是第二个验证来源。
 `task_support` 只有 `declared` 和
 `knowledge_only`：没有完整 task declaration 的 package 返回空任务或
-`knowledge_only`，但仍可按本生命周期 install、enable、read；`runtime_state` 在这个
+`knowledge_only`，但完整的 capability-backed 或 script-only task 都保持 `declared`，不因
+缺少 capability refs 降为 `knowledge_only`；`runtime_state` 在这个
 不带 Profile/Harbor context 的管理 operation 中固定为 `not_evaluated`。
 
 字段的必需性、来源和过滤边界固定如下；这些字段由本 lifecycle projection 唯一拥有，
@@ -138,27 +150,37 @@ Plugin 和 execution 只消费它们：
 | 字段 | 必需性 | 唯一来源与投影规则 | 过滤条件 |
 | --- | --- | --- | --- |
 | `package_ref`、`revision_ref`、`version`、`package_digest` | 必需 | Lode manifest；`package_ref` 必须是稳定身份，`revision_ref` 必须是该包的完整版本/source commit | manifest identity、revision、digest 不一致则拒绝 |
-| `tasks[].required_capabilities` | 必需，非空 | Lode `entrypoint.capability_refs` 与每项的 version/source/lock 解析结果 | 必须完整覆盖声明集合；缺项、重复项、无法解析或与主摘要不一致则过滤该 task |
-| `tasks[].capability_ref` 等主摘要 | 必需 | `required_capabilities` 中被选作主显示项的同一条目 | 仅作显示/兼容字段，不能单独通过授权或执行过滤 |
+| `tasks[].entrypoint` | 必需；script 字段条件出现 | Lode task/script declaration 的 `script_ref`、version/hash、`runtime_kind`、broker ABI；不投影 path | 至少存在 script ref 或 capability refs；script ref 无法解析、ABI/hash 不匹配则过滤 |
+| `tasks[].required_capabilities` | 必需，可为空 | Lode `entrypoint.capability_refs` 与每项的 version/source/lock 解析结果 | 非空时必须完整覆盖声明集合；缺项、重复项、无法解析或与主摘要不一致则过滤；空数组不得补 capability |
+| `tasks[].capability_ref` 等主摘要 | 有 capability refs 时必需；script-only 时省略 | `required_capabilities` 中被选作主显示项的同一条目 | 仅作显示/兼容字段，不能单独通过授权或执行过滤；不得从 script_ref 生成 |
 | `tasks[].known_branches` | 可选 | Lode task `known_branches` 的有界 opaque refs | 缺失时省略；不从 Page、Runtime 或模型输出补全 |
 | `tasks[].verification` | 必需 | Lode `verification.post_check_ref` 与 `required_evidence_refs` | 任一 ref 缺失、越界或未获准则过滤；不把 HTTP/exit code 当业务验证 |
 | `tasks[].data_handling` | 必需 | Lode `data_handling` 与 `inputs.sensitivity` 的固定枚举值 | 未声明、未知值或与包声明不一致则拒绝；该字段不能扩 Grant |
 
 过滤顺序固定为：先用现有 `skill_scope.skill_refs/source_refs` 与 task scope 确认
 asset、source 和 revision 可见，再校验包完整性和 task declaration，最后按上表完成
-字段映射并只返回通过校验的 task 摘要。未授权 revision/task 不得以名称、路径、正文
+字段映射并只返回通过校验的 task 摘要。entrypoint 既没有 script ref 也没有 capability
+refs 的声明不是完整 task；合法 script-only task 仍返回静态摘要和 `task_support=declared`。
+未授权 revision/task 不得以名称、路径、正文
 或错误细节泄露；source 缺失/损坏、local modified、not installed、disabled、incompatible
 和 access denied 沿本文件已有 `managed_skill_*` 错误返回，不建立 site-task 错误表。
-跨版本时，新的 revision 必须重新通过同一 manifest、完整 required capability set、
-source/lock、verification 和 data-handling 校验；在途 Run 继续使用原 revision 和 digest。
+跨版本时，新的 revision 必须重新通过同一 manifest、entrypoint/script 完整性、required
+capability set（可为空）、source/lock、verification 和 data-handling 校验；在途 Run 继续
+使用原 revision 和 digest。
 
 `skill.inspect` 不做 Runtime/Grant/Harbor 动态预检，不启动浏览器或生成 task Run；task
 execution 只沿
 [#563 Site SKILL Execution V1](site-skill-execution-v1.md#43-普通-agent-的-managed-task-projection)
 定义的 `webenvoy_task` / `POST /managed-tasks/operations` projection 提交、查询或
-停止。该 projection 的 package-level `package_ref`/`revision_ref`/`package_digest` 与
-`capability.ref` 仍由 Lode task declaration 解析为同一 `webenvoy.task-intent.v0`；
-submit 必须使用 `skill.inspect` 摘要中的同一 digest，Core 再与已安装 manifest 重验；动态结果沿既有 Run/Result
+停止。对 capability-backed task，该 projection 的 package-level `package_ref`/`revision_ref`/
+`package_digest` 与声明的 capability 映射为同一 `webenvoy.task-intent.v0`；对合法
+script-only task，projection 保留 package、revision、script ABI/hash、输入输出和验证
+静态事实，但不从 script 生成 `capability.ref`。当前 Task Intent v0 将 capability 作为
+必填字段，因此 `webenvoy_task.task.submit` 对 script-only 请求沿既有
+`request_invalid`/`capability_ref_required` 边界拒绝且不创建 Run；这不是 `knowledge_only`，
+也不新增 runner、registry、tool 或 runtime preflight。未来若要派发该类任务，必须先有
+兼容的版本化 Task Intent/managed-task 映射并复用本节的既有 script ABI/broker，不在此处
+猜测能力或扩展授权。submit 必须使用 `skill.inspect` 摘要中的同一 digest，Core 再与已安装 manifest 重验；动态结果沿既有 Run/Result
 Envelope 返回，不把 owner `/tasks` 或 `/runs` 暴露给普通 Agent。
 
 ## 生命周期与不变量
