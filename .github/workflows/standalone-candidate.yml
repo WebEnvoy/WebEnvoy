@@ -1,0 +1,142 @@
+name: Standalone Runtime candidate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/standalone-candidate.yml"
+      - "apps/desktop/agent-entry/**"
+      - "apps/desktop/package.json"
+      - "apps/desktop/scripts/build-standalone.mjs"
+      - "apps/desktop/scripts/check-standalone-package.mjs"
+      - "apps/desktop/scripts/package-standalone.mjs"
+      - "apps/desktop/scripts/package-runtime-assets.mjs"
+      - "apps/desktop/scripts/package-lode-assets.mjs"
+      - "apps/desktop/scripts/runtime-source-lock.json"
+      - "apps/desktop/src/electron/runtimeSupervisor.ts"
+      - "apps/desktop/src/electron/lodeAsset*.ts"
+      - "apps/desktop/tsconfig.standalone.json"
+      - "packages/**"
+      - "services/harbor/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24.14.0"
+  PNPM_VERSION: "10.30.3"
+
+jobs:
+  package:
+    name: macOS arm64 standalone candidate
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PACKAGE_ROOT: /tmp/webenvoy-standalone-macos-arm64
+      LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable pinned pnpm and verify host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+          corepack enable
+          corepack prepare "pnpm@${PNPM_VERSION}" --activate
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(pnpm --version)" = "${PNPM_VERSION}"
+
+      - name: Resolve locked Lode source
+        id: lode
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode.commit)')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out locked Lode source
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: ${{ steps.lode.outputs.ref }}
+          path: .runtime-sources/lode
+          persist-credentials: false
+
+      - name: Verify exact source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C "$LODE_ROOT" rev-parse HEAD)" = "${{ steps.lode.outputs.ref }}"
+          test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude).runtime-sources' ':(exclude).runtime-sources/**')"
+          test -z "$(git -C "$LODE_ROOT" status --porcelain)"
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build standalone candidate
+        env:
+          WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
+        run: pnpm --filter @webenvoy/app package:standalone "$PACKAGE_ROOT"
+
+      - name: Verify standalone package and no-App boundary
+        shell: bash
+        env:
+          WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
+        run: |
+          set -euo pipefail
+          pnpm --filter @webenvoy/app check:standalone "$PACKAGE_ROOT"
+          test -x "$PACKAGE_ROOT/bin/webenvoy"
+          test -x "$PACKAGE_ROOT/runtime/node"
+          if find "$PACKAGE_ROOT" \( -name Electron -o -name '*.app' \) -print -quit | grep -q .; then
+            echo "standalone package contains an Electron artifact" >&2
+            exit 1
+          fi
+          if rg -n "from ['\"]electron|require\(['\"]electron" "$PACKAGE_ROOT/dist-electron" "$PACKAGE_ROOT/bin"; then
+            echo "standalone runtime helper imports Electron" >&2
+            exit 1
+          fi
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const packageRoot = process.env.PACKAGE_ROOT;
+          const manifest = JSON.parse(await readFile(`${packageRoot}/agent-manifest.json`, "utf8"));
+          if (manifest.schema !== "webenvoy-installed-standalone/v1" || manifest.package_kind !== "standalone-runtime") throw new Error("standalone manifest kind mismatch");
+          if (manifest.workspace?.commit !== process.env.SOURCE_SHA) throw new Error(`candidate commit mismatch: ${manifest.workspace?.commit}`);
+          if (manifest.platform !== "darwin" || manifest.arch !== "arm64" || manifest.runtime?.node_version !== "24.14.0") throw new Error("standalone platform/runtime identity mismatch");
+          console.log(JSON.stringify({ commit: manifest.workspace.commit, node: manifest.runtime.node_version, node_sha256: manifest.runtime.executable_sha256 }));
+          NODE
+
+      - name: Record artifact digest
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$(shasum -a 256 "$PACKAGE_ROOT/agent-manifest.json" | awk '{print $1}')"
+          echo "manifest_sha256=$digest" >> "$GITHUB_OUTPUT"
+          test "$(awk '{print $1}' "$PACKAGE_ROOT.tar.gz.sha256")" = "$(shasum -a 256 "$PACKAGE_ROOT.tar.gz" | awk '{print $1}')"
+
+      - name: Upload reviewable standalone candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: webenvoy-standalone-${{ env.SOURCE_SHA }}-macos-arm64-${{ steps.metadata.outputs.manifest_sha256 }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ env.PACKAGE_ROOT }}.tar.gz
+            ${{ env.PACKAGE_ROOT }}.tar.gz.sha256
+            ${{ env.PACKAGE_ROOT }}/agent-manifest.json

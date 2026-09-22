@@ -20,6 +20,8 @@
     "smoke:packaged:readonly": "pnpm run build && node scripts/smoke-packaged-readonly.mjs",
     "start": "electron dist-electron/main.js",
     "package:agent": "pnpm build && node scripts/package-agent.mjs",
+    "package:standalone": "node scripts/build-standalone.mjs && node scripts/package-standalone.mjs",
+    "check:standalone": "node scripts/check-standalone-package.mjs",
     "check:installed-agent": "node scripts/check-installed-agent.mjs"
   },
   "dependencies": {

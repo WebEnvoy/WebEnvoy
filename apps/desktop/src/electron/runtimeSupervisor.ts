@@ -339,6 +339,7 @@ export function runtimeSupervisorChildEnvironment(
   parentEnvironment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const {
+    ELECTRON_RUN_AS_NODE: _ignoredElectronRunAsNode,
     WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredCoreSupervisorToken,
     HARBOR_RUNTIME_SUPERVISOR_TOKEN: _ignoredRuntimeSupervisorToken,
     HARBOR_MANUAL_AUTH_SUPERVISOR_TOKEN: _ignoredManualAuthSupervisorToken,
@@ -347,6 +348,7 @@ export function runtimeSupervisorChildEnvironment(
     ...parentEnv
   } = parentEnvironment;
   const {
+    ELECTRON_RUN_AS_NODE: _ignoredServiceElectronRunAsNode,
     WEBENVOY_CORE_SUPERVISOR_TOKEN: _ignoredServiceCoreSupervisorToken,
     HARBOR_MEDIA_REF_RESOLVER_URL: mediaResolverUrl,
     HARBOR_MEDIA_REF_RESOLVER_TOKEN: mediaResolverToken,
@@ -354,7 +356,7 @@ export function runtimeSupervisorChildEnvironment(
   } = extraEnv;
   return {
     ...parentEnv,
-    ...(launchSource === "packaged-path" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    ...(launchSource === "packaged-path" && process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     ...serviceEnv,
     ...(supervisorToken ? { HARBOR_RUNTIME_SUPERVISOR_TOKEN: supervisorToken } : {}),
     ...(id === "core" && supervisorToken ? { WEBENVOY_CORE_SUPERVISOR_TOKEN: supervisorToken } : {}),
