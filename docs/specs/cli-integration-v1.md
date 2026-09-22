@@ -684,7 +684,7 @@ S1 文档验收必须能由实现者直接转换为检查：
 1. clean machine／clean data root 在没有 App 进程时完成 setup、register、grant、connect 和一次最小 read／start operation。
 2. owner service credential、client credential、OS UID／ACL、同 UID fallback、环境继承、owner route 和 Agent route 的正反例均可验证；Agent 不能 register／grant／revoke／files owner／recovery apply／Instance supervisor。
 3. CLI 的帮助、未知参数、未知字段、stdout／stderr、退出码和非交互 pending 有确定性测试；缺 Grant／未注册 Principal 的 pre-createRun denied 必须没有 run_id 并退出 3，真实 owner decision 的持久 Run 才能退出 4；帮助和语法检查逐项验证第 5.3.1 节的 required caller key 与文件／CAS 例外。
-4. Core access receipt 的同 key／同请求 replay、同 key／异请求 conflict、access operation selector、Recovery 按 kind 派生 operation-ref、files import 的 correlation-only 行为、export 的 destination conflict、revoke/delete 的 file_ref 固有幂等和 ControlLease 的 expected_control 原子冲突都必须有最小可复核检查；response loss 只能按矩阵查询／对账，不能用新 key 重放。
+4. Core access receipt 的同 key／同请求 replay、同 key／异请求 conflict、access operation selector、Recovery 按 kind 派生 operation-ref、files import 的 correlation-only 行为、export 的 destination conflict、revoke/delete 的 file_ref 固有幂等和 ControlLease 的 expected_control 原子冲突都必须有最小可复核检查；CLI 提交后退出，Plugin、API、重连 CLI 能 query 同一个原 Run；response loss、Provider unknown、Core／Harbor disconnect 都必须证明 no-replay，response loss 只能按矩阵查询／对账，不能用新 key 重放。
 5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect、检查后变化以及相同 holder_ref 的 user→released→新 user ABA 均有受控验证；exact Instance stop 仍按准确 ref 验证。
 6. 重装／更新复用 data root、Grant、Run、Profile、recovery 和明确的 credential identity；卸载保留 data 并只清理 receipt 管理的文件。
 7. 验证记录准确的提交、平台、Runtime／Provider 版本、安装身份、bundle digest、owner／Agent OS identity、测试 surface 和候选边界；fixture／mock 不得冒充真实安装或真实 Provider。
