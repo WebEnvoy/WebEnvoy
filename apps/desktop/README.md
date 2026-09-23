@@ -12,9 +12,9 @@ WebEnvoy App 不是 Core Runtime，不是 Harbor Runtime，也不是 Lode 资产
 
 ## 正式无 App 入口
 
-正式 Runtime 由独立 `webenvoy` launcher 提供，owner 与 Agent 使用分离的本机身份和 socket。首次安装分两步完成：可信 owner 运行 `webenvoy setup --data-dir OWNER_DATA --agent-uid AGENT_UID`，确认输出的 boundary/bootstrap 事实；独立 Agent UID 在自己拥有的目录运行 `webenvoy agent setup --host-dir AGENT_HOST --data-dir OWNER_DATA --owner-uid OWNER_UID`。Agent setup 只创建 Agent client credential、MCP 配置、SKILL 和 receipt，不连接 owner/Core，也不授予权限。owner 随后使用输出的 fingerprint 运行 `access register`，再用 `access grant` 配置最小权限。
+正式 Runtime 由独立 `webenvoy` launcher 提供，owner 与 Agent 使用分离的服务端角色、credential 和 socket。首次安装分两步完成：可信 owner 运行 `webenvoy setup --data-dir OWNER_DATA`，确认输出的 boundary/bootstrap 事实；可信本地 Agent 宿主在自己的目录运行 `webenvoy agent setup --host-dir AGENT_HOST --data-dir OWNER_DATA --owner-uid OWNER_UID`。Agent setup 只创建 Agent client credential、MCP 配置、SKILL 和 receipt，不连接 owner/Core，也不授予权限。owner 随后使用输出的 fingerprint 运行 `access register`，再用 `access grant` 配置最小权限。需要更强宿主隔离时，可由 owner setup 显式指定独立 `--agent-uid AGENT_UID`，再由该 UID 运行 Agent setup。
 
-没有可验证的独立 UID／OS boundary 时，owner setup 仍可完成 bundle 和数据目录维护，但必须报告 `owner_agent_isolation_unavailable`，不写 Agent host config，也不把同 UID 文件模式当作隔离。Agent 命令不会静默启动 Runtime；owner 先用 `webenvoy start`，之后 Agent 才能 status/connect/operation。`instance list|inspect|takeover|handback|stop` 由 owner CLI 直接使用 live Harbor facts 和 `expected_control` CAS，流程不需要 Desktop App。
+同 UID 普通本地模式报告 `trusted_local`，允许 Agent data plane，但不声称对拥有用户等价任意本机代码执行权限的宿主提供 OS 隔离；WebEnvoy 仍按 Agent credential、Grant 和服务端角色限制正式接口。显式选择独立 UID 时，只有 OS 边界与传输验证通过才报告 `distinct_uid_hardened` 并启用该绑定；失败时报告 `distinct_uid_unverified`，不静默降级。Agent 命令不会静默启动 Runtime；owner 先用 `webenvoy start`，之后 Agent 才能 status/connect/operation。`instance list|inspect|takeover|handback|stop` 由 owner CLI 直接使用 live Harbor facts 和 `expected_control` CAS，流程不需要 Desktop App。
 
 Agent 更新或移除自己的 host 资产时运行 `webenvoy agent setup` 或 `webenvoy agent uninstall --host-dir AGENT_HOST --data-dir OWNER_DATA`。后者只按 Agent receipt 删除 MCP/SKILL 文件，保留 `webenvoy-client.json`、owner data、Grant、Run 和 recovery；owner data 不由 Agent 清理。
 
