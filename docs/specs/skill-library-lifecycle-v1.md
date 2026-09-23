@@ -205,4 +205,74 @@ Envelope 返回，不把 owner `/tasks` 或 `/runs` 暴露给普通 Agent。
 
 实现必须稳定区分并准确拒绝：`managed_skill_source_missing`、`managed_skill_source_corrupt`、`managed_skill_local_modified`、`managed_skill_missing`、`managed_skill_incompatible`、`managed_skill_conflict`、`managed_skill_revision_unavailable`、`managed_skill_disabled`、`managed_skill_not_installed`、`managed_access_denied` 与 idempotency conflict。源清单/源字节损坏使用 `managed_skill_source_corrupt`；物化文件缺失使用 `managed_skill_missing`，存在但类型、字节数或摘要不匹配使用 `managed_skill_local_modified`。`read`、`update`、`rollback` 遇到这些状态时必须拒绝并保持选择不变。失败消息不得泄露未授权来源、正文或本地路径；安装、更新、回退失败不能覆盖用户原件或切换选择。
 
-本轮不实现 overlay 编辑、草稿修复/合并、SKILL 脚本执行、浏览器启动、输入租约、网站登录、Profile/Account/Provider 变更、Marketplace、队列或第二权限系统。Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`、`DO-GRANT-WIRE=triggered`；Network、Console、Provider-private schema、完整 App IA 为 `not-triggered`，因为本轮不改变这些边界。
+#508 的历史实现切片不包含 overlay 编辑、草稿修复/合并、SKILL 脚本执行、浏览器启动、输入租约、网站登录、Profile/Account/Provider 变更、Marketplace、队列或第二权限系统。其 Design Obligations：`DO-PLUGIN-EXPOSURE=triggered`、`DO-GRANT-WIRE=triggered`；Network、Console、Provider-private schema、完整 App IA 为 `not-triggered`。后续执行合同见 [S2](site-skill-execution-v1.md)，最低导入与修复链由下节补充；这不改写 #508 已交付的范围或证据。
+
+## S3 外部导入、草稿与本地覆盖
+
+本节经独立审查并合入 main 后成为 #564 的 Accepted 行为基线；不表示导入入口、overlay
+消费或执行器已经实现。Lode 的[站点创作／导入指南](https://github.com/WebEnvoy/Lode/blob/f1a8cc3d4ad1757af2c5aac0960b8e15ce106bc5/docs/contracts/site-asset-authoring-import-v1.md)拥有探索、OpenCLI 分类、作者材料和
+验证方法；[S2 包合同及 S3 补充](https://github.com/WebEnvoy/Lode/blob/f1a8cc3d4ad1757af2c5aac0960b8e15ce106bc5/docs/contracts/site-skill-package-v1.md)
+仍唯一拥有 manifest、package/revision/source/hash、依赖和任务声明。本节只规定这些
+材料如何衔接 Core 的来源准入、安装和选择，不增加 manifest、registry、CLI 或持久状态机。
+
+### 从不可信材料到明确选择
+
+1. **预览与检查**：用户知识、标准 SKILL、第三方包和 OpenCLI 源码先作为不可信材料。
+   只读查看文件清单、来源 commit/版本、许可、依赖、脚本/安装钩子、所需能力和差异；
+   不执行安装脚本、不解析为指令、不访问目标网站。缺许可或来源不可固定时记录缺口，
+   不宣称可再分发或可准入。私有材料可以留在用户本地或私有仓库，无公共上传前提。
+2. **导入与草稿**：在用户选定的创作位置保留源副本及修改说明，和 Core 已安装物化内容
+   分开。Agent 可在获准的本地创作范围创建草稿，但不能因此写受管 data root、批准来源、
+   更改 Grant 或选择版本。草稿不是 `skill.install` 输入；旧八个 operation 的 URL/路径
+   拒绝规则继续有效。包外作者材料不是第二份 Runtime 安装事实。
+3. **固定候选**：按 S2 生成一个完整包 revision 与 digest，固定 AccountSystem 等依赖，
+   以包内 references 保存上游来源、许可、base revision 和相对该 base 的修改说明，
+   这些文件纳入同一完整性清单。转换或离线检查通过只成为 source/code admission 的
+   材料；不能自动进入批准来源清单或获得脚本准入。
+4. **来源准入与安装**：可信 owner 检查精确候选、许可、差异、依赖和验证范围，沿 Core
+   唯一受管来源准入过程登记明确 source/revision；普通 Agent 不能自行准入。S3 不新增
+   source registration wire；实现新入口前须在本合同及适用 Grant/Plugin/CLI 合同中冻结
+   wire、兼容和必要检查，不能把任意路径塞进现有 `skill.install`。获准后复用现有
+   install，首次 disabled；可读知识与可执行代码仍分开准入。
+5. **显式选择**：候选测试结果与其 revision/digest 绑定。可信 owner 管理来源和启用决定；
+   已明确获委托的 Agent 只在同一 `skill_scope`/task scope 下操作。使用现有 enable、
+   update 或 rollback 的精确目标和 CAS；更新保持原 enabled 值，被禁用包须单独 enable。
+   测试需要执行候选时，也须先显式选择并经过 S2 执行门，不能用“试跑”旁路未启用包。
+   测试通过不自动把试验候选切到其他用户/任务的选择。
+
+### 覆盖、更新与回退
+
+本地 overlay 是同一 S2 包规则下的完整、固定派生 revision，不在每次执行时将浮动
+补丁叠到公共包上。同包维护可保留稳定 `package_ref`；改变包边界则按 S2 使用新身份，
+不得借原 skill scope 获权。派生来源必须指向包含修改后的不可变原始来源 commit，
+不能沿用未修改公共包的 commit/hash；上游 base 与差异留在包内来源说明中。私有本地
+Git 来源足以固定身份，无需上传公共仓或新建 fork 平台。
+
+Core 的正式消费者必须读取显式选中的已安装派生 revision，并让 receipt/Run 指向实际
+消费的完整 pin，不能展示 overlay 已选择却读取公共原包。公共更新只提供新候选，不能
+覆盖草稿、用户 AccountSystem 本地定义或已选择 overlay；检查差异时必须同时保留原
+base、本地修改和新上游版本。冲突留给用户选择保留、人工修订或另存，不自动合并。
+在途 Run 保持原 pin；历史 receipt 不被新版本重写。
+
+直接改动受管物化文件仍是 `managed_skill_local_modified`，read/update/rollback
+继续拒绝并保留原件。应将改动另存为创作草稿、固定新 revision、重新验证与来源准入；
+不能把被篡改文件直接改称 overlay。原选择无法完整校验时先按既有恢复边界处理，不能
+为启用新候选而放宽 CAS/完整性门。回退只选已安装、仍可用且获准的明确历史 revision，
+不撤销外部效果或恢复被撤销权限；任何失败保持此前选择和用户材料。
+
+### 诊断与修复的运行边界
+
+诊断先区分来源/依赖问题、未授权或登录/连接/ControlLease 现场问题、限流/挑战、合法
+空结果和有证据的接口漂移。只对确认受影响的任务与 revision 创建修复草稿；局部失败
+不把整个站点、可选包或通用 Runtime 判失效。修复任务在开始时固定尝试次数、时间、
+可改文件/任务、允许验证层次和停止条件；超预算、需要扩权/外发、身份不明或无信息
+增益时停止，保留原因与草稿，不自动启用修订。
+
+已派发且 unknown 的写入只查询/对账原 Run/operation 或停止后续执行；诊断、trace、
+测试、换版本、换 key、Network/UI 切换都不能重放原写入。可以离线检查修复草稿，但
+修复通过不把原 unknown 改成成功。真实验证沿 [S2 执行与结果合同](site-skill-execution-v1.md)，
+命令只引用 [S1](cli-integration-v1.md)，不另造导入/修复命令或自动自愈平台。
+
+本节只替代把最低导入/overlay/草稿修复整体排除出 V1 的解释；#508 的来源准入、
+disabled-by-default、CAS、local-modified、receipt/query/no-replay 继续有效。最低链由
+#475 承接；复杂 fork、冲突合并和公共贡献仍归 #479，不因 S3 规格接受而交付。
