@@ -7,6 +7,7 @@ import {
   getRunResult,
   getRunSessionRefs,
   getRunSummary,
+  getOwnerSessionRuns,
   continueXhsMediaActionTask,
   preflightXhsMediaActionConfirmation,
   isExactWritePrecheckRun,
@@ -83,6 +84,18 @@ function invalidRunId(): FailureRecord {
     code: "run_id_invalid",
     phase: "query",
     recovery_hint: "fix_input"
+  };
+}
+
+function ownerSessionRunsUnavailable(): JsonBody {
+  return {
+    ok: false,
+    error: {
+      category: "persistence_observability",
+      code: "owner_session_runs_unavailable",
+      phase: "query",
+      recovery_hint: "contact_operator"
+    }
   };
 }
 
@@ -254,6 +267,30 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const path = requestUrl.pathname;
   if (!authorizeCoreRequest(request, response, path, options)) return;
   if (await handleManagedAccessApi(request, response, path, options)) return;
+  const ownerSessionRunsMatch = /^\/owner\/runtime-sessions\/([^/]+)\/runs$/.exec(path);
+  if (ownerSessionRunsMatch && request.method === "GET") {
+    let runtimeSessionRef: string;
+    try {
+      runtimeSessionRef = decodeURIComponent(ownerSessionRunsMatch[1]!);
+    } catch {
+      sendJson(response, 400, { ok: false, error: { category: "request_invalid", code: "runtime_session_ref_invalid", phase: "query", recovery_hint: "fix_input" } });
+      return;
+    }
+    if (!runtimeSessionRef || runtimeSessionRef.length > 256 || /[\u0000-\u001f\u007f]/.test(runtimeSessionRef)) {
+      sendJson(response, 400, { ok: false, error: { category: "request_invalid", code: "runtime_session_ref_invalid", phase: "query", recovery_hint: "fix_input" } });
+      return;
+    }
+    if (!options.runRecordStore) {
+      sendJson(response, 503, ownerSessionRunsUnavailable());
+      return;
+    }
+    try {
+      sendJson(response, 200, await getOwnerSessionRuns(options.runRecordStore, runtimeSessionRef));
+    } catch {
+      sendJson(response, 503, ownerSessionRunsUnavailable());
+    }
+    return;
+  }
   const runMatch = /^\/runs\/([^/]+)$/.exec(path);
   const runResultMatch = /^\/runs\/([^/]+)\/result$/.exec(path);
   const runEvidenceRefsMatch = /^\/runs\/([^/]+)\/evidence-refs$/.exec(path);

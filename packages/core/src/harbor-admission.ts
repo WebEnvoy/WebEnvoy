@@ -367,7 +367,7 @@ function runtimeExpiredCode(lifecycleState: string): string {
   return "runtime_session_unavailable";
 }
 
-function sessionUse(owner: string): RuntimeSessionUse {
+export function runtimeSessionUseForControlOwner(owner: string): RuntimeSessionUse {
   if (owner === "user") return "manual_browsing";
   if (owner === "agent") return "agent_direct_browsing";
   if (owner === "core_task") return "core_task_run";
@@ -578,7 +578,7 @@ function validateRuntimeFacts(
     provider_mode: providerMode,
     lifecycle_state: lifecycleState,
     control_owner: controlOwner,
-    session_use: sessionUse(controlOwner),
+    session_use: runtimeSessionUseForControlOwner(controlOwner),
     core_task_run: true,
     consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
   };

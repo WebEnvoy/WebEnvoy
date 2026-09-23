@@ -7,6 +7,7 @@ import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { matchHarborBusinessOperationOwner } from "./execution-policy-owner-proof.js";
+import { runtimeSessionUseForControlOwner, type RuntimeSessionBindingFacts } from "./harbor-admission.js";
 import { normalizeExecutionPolicyMutation } from "./execution-policy-config.js";
 import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
@@ -339,6 +340,37 @@ function publicSession(value: unknown): ObjectValue {
   const session = object(value);
   return Object.fromEntries(["runtime_session_ref", "profile_ref", "identity_environment_ref", "provider_id", "lifecycle_state", "control_owner", "control_lock", "current_page", "current_error", "availability"].filter(key => session[key] !== undefined).map(key => [key, session[key]]));
 }
+function managedRuntimeSessionBinding(session: ObjectValue, identityEnvironmentRef: string, profileRef: string): {
+  binding: RuntimeSessionBindingFacts;
+  refs: string[];
+} {
+  const fields = ["runtime_session_ref", "identity_environment_ref", "execution_identity_ref", "profile_ref", "provider_ref", "provider_mode", "lifecycle_state", "control_owner"] as const;
+  const facts = Object.fromEntries(fields.map(field => [field, session[field]])) as Record<(typeof fields)[number], unknown>;
+  if (fields.some(field => typeof facts[field] !== "string" || !facts[field]) ||
+      facts.identity_environment_ref !== identityEnvironmentRef || facts.profile_ref !== profileRef ||
+      !["core_task", "user", "agent", "none"].includes(String(facts.control_owner))) {
+    return fail("managed_browser_runtime_invalid");
+  }
+  const binding: RuntimeSessionBindingFacts = {
+    schema_version: "webenvoy.runtime-session-binding.v0",
+    identity_environment_ref: facts.identity_environment_ref as string,
+    execution_identity_ref: facts.execution_identity_ref as string,
+    runtime_session_ref: facts.runtime_session_ref as string,
+    profile_ref: facts.profile_ref as string,
+    provider_ref: facts.provider_ref as string,
+    provider_mode: facts.provider_mode as string,
+    lifecycle_state: facts.lifecycle_state as string,
+    control_owner: facts.control_owner as string,
+    session_use: runtimeSessionUseForControlOwner(facts.control_owner as string),
+    core_task_run: true,
+    consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence."
+  };
+  return {
+    binding,
+    refs: [...new Set([binding.runtime_session_ref, binding.profile_ref, binding.provider_ref,
+      binding.identity_environment_ref, binding.execution_identity_ref])]
+  };
+}
 function response(run: RunRecord) {
   return { ok: run.status === "succeeded", run_id: run.run_id, status: run.status,
     ...(run.public_result_summary?.result === undefined ? {} : { result: run.public_result_summary.result }),
@@ -456,7 +488,8 @@ export function createManagedBrowserService(options: {
     const profile = profiles.find(profile => profile.profile_ref === input.profile_ref);
     if (!profile) return fail("managed_browser_profile_not_found");
     if (input.operation === "profile.read") return { profile };
-    const identity = encodeURIComponent(text(profile.identity_environment_ref));
+    const identityEnvironmentRef = text(profile.identity_environment_ref);
+    const identity = encodeURIComponent(identityEnvironmentRef);
     if (isEnvironment(input.operation)) await check();
     if (input.operation === "environment.read") return await harbor(`/runtime/identity-environments/${identity}/environment`);
     if (input.operation === "environment.update") return await harbor(`/runtime/identity-environments/${identity}/environment`, {
@@ -473,6 +506,8 @@ export function createManagedBrowserService(options: {
     }
     if (!session || session.profile_ref !== input.profile_ref) return fail("managed_browser_session_missing");
     if (input.runtime_session_ref !== undefined && session.runtime_session_ref !== input.runtime_session_ref) return fail("managed_browser_session_mismatch");
+    const runtimeBinding = managedRuntimeSessionBinding(session, identityEnvironmentRef, text(input.profile_ref));
+    await store.bindManagedBrowserRuntimeSession(runId, runtimeBinding.binding, runtimeBinding.refs);
     let leaseSession: ObjectValue = session;
     const ref = encodeURIComponent(text(leaseSession.runtime_session_ref));
     const acquireControlLease = async () => {

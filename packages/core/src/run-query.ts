@@ -16,6 +16,27 @@ import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
 export const runQuerySchemaVersion = "webenvoy.run-query.v0";
 export const approvalCancellationQuerySchemaVersion = "webenvoy.approval-cancellation-query.v0";
 export const sessionRefsQuerySchemaVersion = "webenvoy.session-refs-query.v0";
+export const ownerSessionRunsSchemaVersion = "webenvoy.owner-session-runs/v1";
+
+const ownerSessionRunStatuses = new Set<RunRecordStatus>([
+  "pending", "admitted", "running", "requires_user_action", "manual_recovery_required", "unknown_outcome"
+]);
+const safeOwnerIdentifier = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
+
+export type OwnerSessionRunSummary = {
+  run_id: string;
+  status: Extract<RunRecordStatus, "pending" | "admitted" | "running" | "requires_user_action" | "manual_recovery_required" | "unknown_outcome">;
+  updated_at: string;
+  operation?: string;
+  failure_code?: string;
+};
+
+export type OwnerSessionRunsEnvelope = {
+  schema_version: typeof ownerSessionRunsSchemaVersion;
+  runtime_session_ref: string;
+  status: "available";
+  runs: OwnerSessionRunSummary[];
+};
 
 export type RunTimeline = {
   created_at: string;
@@ -140,6 +161,31 @@ export type ApprovalCancellationQuery = {
   }[];
   consumer_boundary: string;
 };
+
+/** Read only the active Core Run facts bound to one exact Harbor Runtime Session. */
+export async function getOwnerSessionRuns(store: FileRunRecordStore, runtimeSessionRef: string): Promise<OwnerSessionRunsEnvelope> {
+  const records = await store.listRunRecords({ strict: true });
+  const runs = records
+    .filter(record => record.admission.runtime_session_binding?.runtime_session_ref === runtimeSessionRef && ownerSessionRunStatuses.has(record.status))
+    .map(record => {
+      const operation = record.public_result_summary?.operation;
+      const failureCode = record.failure?.code;
+      return {
+        run_id: record.run_id,
+        status: record.status as OwnerSessionRunSummary["status"],
+        updated_at: record.updated_at,
+        ...(typeof operation === "string" && safeOwnerIdentifier.test(operation) ? { operation } : {}),
+        ...(typeof failureCode === "string" && safeOwnerIdentifier.test(failureCode) ? { failure_code: failureCode } : {})
+      };
+    })
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at) || left.run_id.localeCompare(right.run_id));
+  return {
+    schema_version: ownerSessionRunsSchemaVersion,
+    runtime_session_ref: runtimeSessionRef,
+    status: "available",
+    runs
+  };
+}
 
 function queryFailure(code: string, category: FailureRecord["category"], recoveryHint: string): FailureRecord {
   return {

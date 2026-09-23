@@ -9,6 +9,7 @@ import { agentRequest, ensureAgentRuntime, ensureOwnerRuntime, ownerRequest, rea
 import { agentDataSocket, verifyOsBoundary } from './os-boundary.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
+import { projectSessionSupervision } from './service-projection.mjs';
 import { CAMOUFOX_UPSTREAM_PINS, CHROME_OFFICIAL_INSTALL_SCHEMA, CHROME_OFFICIAL_PINS, classifyCamoufoxBinding, classifyChromeOfficialBinding, resolveCamoufoxSetupBinding, resolveChromeOfficialSetupBinding } from './provider-artifact.mjs';
 import { validateDescribeRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
 const [command, ...args] = process.argv.slice(2);
@@ -474,15 +475,20 @@ if (command === 'setup') {
   const requestOwner = (path, body) => body === undefined ? ownerRequest(dataDir, path) : ownerWriteRequest(dataDir, path, body);
   if (action === 'list') {
     const profileRef = arg('--profile-ref');
-    printResult(await requestOwner(profileRef === undefined ? '/runtime/sessions' : `/runtime/sessions?profile_ref=${encodeURIComponent(profileRef)}`));
+    const listed = await requestOwner(profileRef === undefined ? '/runtime/sessions' : `/runtime/sessions?profile_ref=${encodeURIComponent(profileRef)}`);
+    if (Array.isArray(listed)) printResult(await Promise.all(listed.map(session => addInstanceSupervision(dataDir, session))));
+    else if (listed && typeof listed === 'object' && Array.isArray(listed.sessions)) {
+      printResult({ ...listed, sessions: await Promise.all(listed.sessions.map(session => addInstanceSupervision(dataDir, session))) });
+    } else printResult(listed);
   } else if (action === 'inspect') {
     const ref = required('--runtime-session-ref');
-    printResult(await readInstanceFacts(dataDir, ref));
+    const inspected = await readInstanceFacts(dataDir, ref);
+    printResult(await addInstanceSupervisionToInspection(dataDir, inspected));
   } else if (action === 'takeover' || action === 'handback') {
     const ref = required('--runtime-session-ref');
     const expectedControlPath = arg('--expected-control-file');
     const providedExpectedControl = expectedControlPath === undefined ? undefined : await readExpectedControl(expectedControlPath);
-    await ensureOwnerRuntime(dataDir);
+    await ensureOwnerRuntime(dataDir, { requireHarbor: true });
     const current = await readInstanceFacts(dataDir, ref);
     if (current?.error || current?.ok === false || current?.status === 'unavailable') printResult(current);
     else {
@@ -696,6 +702,26 @@ async function readInstanceFacts(dataDir, runtimeSessionRef) {
   const session = await ownerRequest(dataDir, `/runtime/sessions/${encoded}`);
   if (session?.error || session?.ok === false || session?.status === 'unavailable') return session;
   return { session };
+}
+
+async function addInstanceSupervision(dataDir, session) {
+  if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
+  let supervision;
+  if (typeof session.runtime_session_ref !== 'string') supervision = projectSessionSupervision(undefined, undefined);
+  else {
+    try {
+      const result = await ownerRequest(dataDir, `/owner/runtime-sessions/${encodeURIComponent(session.runtime_session_ref)}/runs`);
+      supervision = projectSessionSupervision(session.runtime_session_ref, result);
+    } catch {
+      supervision = { status: 'unavailable', error: { code: 'owner_session_runs_unavailable' } };
+    }
+  }
+  return { ...session, supervision };
+}
+
+async function addInstanceSupervisionToInspection(dataDir, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !value.session || typeof value.session !== 'object') return value;
+  return { ...value, session: await addInstanceSupervision(dataDir, value.session) };
 }
 
 function controlProjection(value) {

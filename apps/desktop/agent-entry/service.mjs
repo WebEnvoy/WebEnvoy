@@ -37,9 +37,11 @@ let state = { ready: false, runtime_id: randomUUID(), pid: process.pid, boundary
 let supervisor, ownerToken;
 let ownerServer, agentServer;
 let agentSocketOwned = false;
+let stopping = false;
 const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
   (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
+  (req.method === 'GET' && /^\/owner\/runtime-sessions\/[^/?]+\/runs$/.test(req.url)) ||
   (req.method === 'GET' && (req.url === '/owner/files' || req.url.startsWith('/owner/files?'))) ||
   (req.method === 'POST' && ['/owner/files/import', '/owner/files/export', '/owner/files/revoke', '/owner/files/delete'].includes(req.url)) ||
   (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
@@ -48,8 +50,12 @@ const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect
   isOwnerHarborRoute(req);
 const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
   (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
+function harborControlReady() {
+  return !stopping && Boolean(state.services?.some(service => service.id === 'harbor') &&
+    supervisor?.getHarborRuntimeSupervisorToken(state.harborEndpoint));
+}
 function statusFor(role) {
-  if (role === 'owner') return state;
+  if (role === 'owner') return { ...state, harbor_ready: harborControlReady() };
   const { coreEndpoint: _core, harborEndpoint: _harbor, owner_control_socket: _ownerSocket, agent_data_socket: _agentSocket, ...publicState } = state;
   return publicState;
 }
@@ -73,7 +79,8 @@ async function handle(role, req, res) {
       send(res, 200, { stopped: true });
       return shutdown();
     }
-    if (!state.ready) return send(res, 503, { ok: false, error: { code: state.error ?? (role === 'agent' ? 'owner_agent_isolation_unavailable' : 'runtime_starting') } });
+    const harborRoute = role === 'owner' && isOwnerHarborRoute(req);
+    if (!state.ready && !(harborRoute && harborControlReady())) return send(res, 503, { ok: false, error: { code: state.error ?? (role === 'agent' ? 'owner_agent_isolation_unavailable' : 'runtime_starting') } });
     const allowed = role === 'owner' ? ownerRoutes(req) : agentRoutes(req);
     if (!allowed) return send(res, 403, { ok: false, error: { code: role === 'owner' ? 'owner_route_denied' : 'agent_route_denied' } });
     const authorizationHeaders = req.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === 'authorization');
@@ -93,7 +100,6 @@ async function handle(role, req, res) {
     }
     const body = Buffer.concat(chunks).toString('utf8');
     requestBody = body;
-    const harborRoute = role === 'owner' && isOwnerHarborRoute(req);
     let upstreamBase = state.coreEndpoint;
     let upstreamAuthorization = role === 'owner' ? `Bearer ${ownerToken}` : req.headers.authorization;
     if (harborRoute) {
@@ -154,7 +160,6 @@ if (liveBoundary.state === 'supported') {
   });
 }
 await writeFile(join(dataDir, 'runtime.pid'), String(process.pid), { mode: 0o600 });
-let stopping = false;
 async function closeServer(server) {
   if (!server?.listening) return;
   await new Promise(resolveClose => server.close(resolveClose));
@@ -210,7 +215,11 @@ try {
     if (stopping) return;
     // Do not let a replacement server inherit our discovery record after a child exits.
     for (const service of state.services) {
-      try { process.kill(service.pid, 0); } catch { state = { ...state, ready: false, error: 'runtime_child_exited: explicitly stop and restart' }; supervisor.stop(); }
+      try { process.kill(service.pid, 0); } catch {
+        state = { ...state, ready: false, error: 'runtime_child_exited: explicitly stop and restart' };
+        // Core loss must leave the original Harbor available for owner control.
+        if (service.id === 'harbor') supervisor.stop();
+      }
     }
   }, 1000).unref();
 } catch (error) {

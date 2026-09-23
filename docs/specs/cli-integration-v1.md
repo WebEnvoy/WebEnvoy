@@ -317,6 +317,26 @@ Runtime service 只能把 owner request 和 expected_control 原样转发给 Har
 
 没有 viewer 不得假装 takeover 成功；主机断线不得自动 handback。
 
+### 5.5.2 owner 双实例监督与 Run 归属
+
+`instance list` 的每个 session 与 `instance inspect` 的 `session` 继续使用 Harbor 原子现场投影；附加 `supervision` 只读呈现 Core 已持久化、仍需关注的关联 Run。Harbor 的 Profile、Page、ControlLease、`last_seen_at` 与 Core Run 的 status、`updated_at` 分开表达，不能把两个时刻的读取称为跨进程原子快照，不能以历史 Run 的状态覆盖当前现场。
+
+Core owner-only `GET /owner/runtime-sessions/{runtime_session_ref}/runs` 按准确原 Session 读取已有 Run store，不启动浏览器、不抢锁、不重放、不执行结果对账或改写 Run。Agent credential 与 Agent transport 均不得调用此 owner 路由；宿主断线或没有保存 Agent key 时，owner 仍可从 live list 发现 ref 后读取。
+
+成功的 Core wire 为 `{schema_version:"webenvoy.owner-session-runs/v1", runtime_session_ref, status:"available", runs:[{run_id,status,updated_at,operation?,failure_code?}]}`；`run_id` 使用既有 Run ID（`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`），`updated_at` 使用 UTC 毫秒 ISO 时间；`operation` 和 `failure_code` 只允许 `^[A-Za-z][A-Za-z0-9._:-]{0,127}$` 安全标识码。`runs` 仅含下列六类仍需关注的原 Run 状态，保持原状态和更新时间；succeeded／failed／blocked／cancelled／expired 不列入待处理清单，历史结果仍从原 Run 查询入口读取。Core 无法完整读取时返回 HTTP 503 和结构化安全错误，不返回部分成功列表。
+
+CLI 保持 list 的 session 数组和 inspect 的 `{session}` 外层形状，在各 session 上附加 `{supervision:{status:"available",runs:[...]}}`；不转写 Harbor 字段。Core 请求失败或 schema／Session ref／摘要字段不符合上述合同，则附加 `{supervision:{status:"unavailable",error:{code}}}`，不附 `runs`。新消费者遇到未带 `supervision` 的旧版本必须按未知处理，不能当作空列表。该新增字段不改变 CAS 输入或现有控制命令。
+
+owner `/status` 的 `harbor_ready` 只表示当前 service 仍持有原 Harbor 子进程的有效 supervisor token；整体 `ready` 仍要求 Core 与 Harbor 均可用，Agent status 不暴露 `harbor_ready`。Core 子进程退出不得连带停止仍存活的 Harbor；owner 的 Harbor 查询与 takeover／handback／stop 可继续经过原 owner transport、route allowlist、token 和 CAS 检查，Core 依赖的请求与 Agent 入口保持 unavailable。该局部可用性不得信任同端口 replacement server，也不能自动恢复 Core、重放 Run 或将 unknown 改为成功。
+
+- 只采用 Core 已记录的可信 Runtime Session 绑定；不得按 Profile、URL、标题、最后观看页、任意嵌套结果字段或尚未核验的请求 ref 认领。受管操作必须在 Harbor 确认 Profile／Session 一致后复用既有绑定字段记录归属；没有可信绑定的历史 Run 不回填到当前实例。
+- 返回的 Run 摘要限于原 `run_id`、原 status、原更新时间及可选的安全 operation／failure code，不含请求正文、输入文本、网页结果正文、凭据、原始 DOM、截图或 Provider 私有配置。
+- 待处理事项由 Core 原状态表达：pending／admitted／running、requires_user_action／manual_recovery_required 与 unknown_outcome 分别保留等待／执行、需要人处理和结果未知的含义。unknown 不等于可重试；已完成或失败的历史 Run 也不得伪装成当前待办。
+- 只有完整读取对应 Run 事实成功时，空列表才表示未找到关联事项。Core 不可用、记录无法读取或投影无法验证时，`supervision` 明确为 unavailable，不能返回空清单冒充“无需处理”；仍保留已经取得的 Harbor 现场事实，且不阻止独立 takeover／handback／stop。
+- owner 识别目标使用 Profile／identity refs 与 inspect 中实际可知的原 Page ref、URL／title、状态和各自观察时间；未知身份或页面关系保持未知，不根据画面推断账号。CLI 退出不停止实例；用户关闭原窗口、画面失联也不构成交还。
+
+两实例检查必须分别证明 A 的控制代数与旧 observation／target 失效、B 的原 Session／Page 和正常工作持续。交还后由 Agent 重新观察原任务页再按正常授权取得控制，不能沿用旧截图／目标，也不能跟随用户最后观看的帮助页。前台、遮挡与非前台的焦点、输入落点、系统鼠标和剪贴板影响按实际证据记录；Page 对象级成功不代表原生键盘／坐标输入或零干扰已验证。
+
 ### 5.6 Agent／程序 CLI
 
 Agent CLI 是 MCP projection 的一次性、非交互、薄适配。它读取 --client-file FILE，禁止读取 data-dir/owner-private store，禁止接受 owner service credential、supervisor token 或 --confirm owner flag。
@@ -395,8 +415,8 @@ account.bind 可以存在于 Core capability definition，但当前未暴露给 
 | access list\|register\|grant\|grant-v2\|policy-v2\|revoke\|operation | 无 | owner local /agent-access... | Core owner managed access |
 | files ... | 无 | owner /owner/files... | Core／Harbor owner file store |
 | recovery ... | 无 | owner /owner/recovery... | Core owner recovery service |
-| instance list | 无 | owner-authenticated GET /runtime/sessions?profile_ref=... | Harbor RuntimeSessionStore live facts |
-| instance inspect | 无 | owner-authenticated GET /runtime/sessions/{ref} 的完整原子 session projection | Harbor session facts、control_generation 和 viewer_entry |
+| instance list | 无 | owner-authenticated GET /runtime/sessions?profile_ref=...，逐实例读取 /owner/runtime-sessions/{ref}/runs | Harbor live facts 与 Core 只读 Run supervision 分开返回 |
+| instance inspect | 无 | owner-authenticated GET /runtime/sessions/{ref}，再读取 /owner/runtime-sessions/{ref}/runs | Harbor 原子 session facts、control_generation、viewer_entry；Core supervision 为独立读取 |
 | instance takeover | 无 | owner-authenticated POST /runtime/sessions/{ref}/handoff（core_task held）或 POST /runtime/sessions/{ref}/lock（released），均带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance handback | 无 | owner-authenticated POST /runtime/sessions/{ref}/release，带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance stop | 无 | owner-authenticated POST /runtime/sessions/{ref}/stop | Harbor exact Instance |
@@ -650,7 +670,7 @@ CLI 退出 6。调用者重新 connect 后只运行 agent query --run-id managed
 
 ### 12.4 正例：宿主断线后的 owner discovery
 
-Agent host 断线且 owner 没有保存 Agent key 或 runtime_session_ref 时，owner 先运行 `webenvoy instance list --data-dir DIR`，从 Harbor 当前 live facts 选择准确的 runtime_session_ref，再运行 `instance inspect` 和 `instance takeover`。list 只读 RuntimeSessionStore；Runtime／Harbor 不可用时返回 unavailable，不能从旧 Run、客户端缓存或猜测的 ref 继续控制。
+Agent host 断线且 owner 没有保存 Agent key 或 runtime_session_ref 时，owner 先运行 `webenvoy instance list --data-dir DIR`，从 Harbor 当前 live facts 选择准确的 runtime_session_ref，再运行 `instance inspect` 和 `instance takeover`。list 的现场部分只读 RuntimeSessionStore，并按第 5.5.2 节附加 Core Run supervision；Runtime／Harbor 不可用时返回 unavailable，不能从旧 Run、客户端缓存或猜测的 ref 继续控制。Core supervision 不可用时保留现场部分，独立控制不依赖它。
 
 ### 12.5 正例：A/B handoff
 
@@ -688,7 +708,7 @@ S1 文档验收必须能由实现者直接转换为检查：
 2. owner／Agent credential、同 UID trusted-local 路径、环境继承、owner route 和 Agent route 的正反例均可验证；Agent 不能 register／grant／revoke／files owner／recovery apply／Instance supervisor。若候选宣称可选 UID／ACL／sandbox 加固，另以真实 OS 事实验证并检查 diagnose；不能用 fixture 布尔值代替。
 3. CLI 的帮助、未知参数、未知字段、stdout／stderr、退出码和非交互 pending 有确定性测试；缺 Grant／未注册 Principal 的 pre-createRun denied 必须没有 run_id 并退出 3，真实 owner decision 的持久 Run 才能退出 4；帮助和语法检查逐项验证第 5.3.1 节的 required caller key 与文件／CAS 例外。
 4. Core access receipt 的同 key／同请求 replay、同 key／异请求 conflict、access operation selector、Recovery 按 kind 派生 operation-ref、files import 的 correlation-only 行为、export 的 destination conflict、revoke/delete 的 file_ref 固有幂等和 ControlLease 的 expected_control 原子冲突都必须有最小可复核检查；CLI 提交后退出，Plugin、API、重连 CLI 能 query 同一个原 Run；response loss、Provider unknown、Core／Harbor disconnect 都必须证明 no-replay，response loss 只能按矩阵查询／对账，不能用新 key 重放。
-5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect、检查后变化以及相同 holder_ref 的 user→released→新 user ABA 均有受控验证；exact Instance stop 仍按准确 ref 验证。
+5. A takeover、B unaffected、handback fresh observe、viewer unavailable、host disconnect、检查后变化以及相同 holder_ref 的 user→released→新 user ABA 均有受控验证；exact Instance stop 仍按准确 ref 验证。 owner supervision 另覆盖 A/B 可信绑定、六种待处理状态、终态历史排除、未核验 ref 拒绝归属、损坏记录／Core 不可用，以及不可用时仍能独立控制。
 6. 重装／更新复用 data root、Grant、Run、Profile、recovery 和明确的 credential identity；卸载保留 data 并只清理 receipt 管理的文件。
 7. 验证记录准确的提交、平台、Runtime／Provider 版本、安装身份、bundle digest、本机可信用户与 Agent Principal、测试 surface 和候选边界；若适用，记录已实际核验的可选 OS 加固。fixture／mock 不得冒充真实安装或真实 Provider。
 
