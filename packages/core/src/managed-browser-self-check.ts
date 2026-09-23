@@ -371,7 +371,9 @@ try {
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
   const publicGrant = await accessStore.createGrant({ idempotency_key: "public-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: browserOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
-  managedSession = { runtime_session_ref: "session:one", profile_ref: "profile:1", control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
+  managedSession = { runtime_session_ref: "session:one", identity_environment_ref: "identity:1", execution_identity_ref: "identity:1:execution",
+    profile_ref: "profile:1", provider_ref: "harbor:provider/camoufox", provider_mode: "local_dedicated_profile", lifecycle_state: "active",
+    control_owner: "core_task", control_lock: { state: "held", holder_ref: principal.principal_id }, current_page: { current_url: "https://example.com/" } };
   const diagnosticsOps = ["instance.diagnostics"];
   await accessStore.setProfilePolicy({ idempotency_key: "diagnostics-policy", profile_ref: "profile:1", allowed_operations: [...diagnosticsOps, ...browserOps], allowed_origins: ["https://example.com"] });
   const diagnosticsGrant = await accessStore.createGrant({ idempotency_key: "diagnostics-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: diagnosticsOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
@@ -380,6 +382,9 @@ try {
   const diagnosticResult = await service.submit(credentialHash, { idempotency_key: "diagnostics-one", connection_id: connection.connection_id, grant_id: diagnosticsGrant.grant_id, operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", task_scope: { operations: diagnosticsOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } });
   assert.equal(diagnosticResult.status, "succeeded", JSON.stringify(diagnosticResult));
   assert.equal((diagnosticResult.result as { network: { status: number }[] }).network[0]?.status, 503);
+  const diagnosticBinding = (await runRecordStore.getRunRecord(diagnosticResult.run_id))?.admission.runtime_session_binding;
+  assert.equal(diagnosticBinding?.control_owner, "user");
+  assert.equal(diagnosticBinding?.session_use, "manual_browsing", "binding retains the Harbor owner rather than claiming Core holds the lease");
   assert.equal(diagnostics, 1);
   assert.equal(lockAttempts, 0, "diagnostics must not acquire ControlLease");
   const diagnosticRequest = { idempotency_key: "diagnostics-page", connection_id: connection.connection_id, grant_id: diagnosticsGrant.grant_id, operation: "instance.diagnostics", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one", page_ref: "page:one", cursor: "cursor:1", limit: 1, task_scope: { operations: diagnosticsOps, profile_refs: ["profile:1"], origins: ["https://example.com"] } };
@@ -431,9 +436,14 @@ try {
   await assert.rejects(service.submit(credentialHash, { ...navigation, runtime_session_ref: undefined }), /invalid_input/);
   const stale = await service.submit(credentialHash, { ...navigation, idempotency_key: "old-session", runtime_session_ref: "session:old" });
   assert.equal(stale.failure?.code, "managed_browser_session_mismatch");
+  const managedRunId = (key: string) => `managed-${createHash("sha256").update(`${principal.principal_id}:${key}`).digest("hex")}`;
+  assert.equal((await runRecordStore.getRunRecord(managedRunId("old-session")))?.admission.runtime_session_binding, undefined,
+    "an unverified request session ref must not create a durable session binding");
   assert.equal(navigations, 0);
   const navigated = await service.submit(credentialHash, navigation);
   assert.equal(navigated.status, "succeeded", JSON.stringify(navigated));
+  assert.equal((await runRecordStore.getRunRecord(navigated.run_id))?.admission.runtime_session_binding?.runtime_session_ref, "session:one",
+    "managed operations persist only the exact Harbor-confirmed session");
   assert.equal(navigations, 1);
   assert.equal(observations, 1, "fresh observation precedes navigation after reconnect or handback");
   assert.deepEqual(await service.query(credentialHash, navigated.run_id), navigated);

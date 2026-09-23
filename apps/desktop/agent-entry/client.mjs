@@ -62,14 +62,14 @@ export function ownerRequest(dataDir, path, options = {}) {
   return requestSocket(socketPath, path, options);
 }
 
-export async function ensureOwnerRuntime(dataDir) {
+export async function ensureOwnerRuntime(dataDir, { requireHarbor = false } = {}) {
   const assets = await verifyBundle();
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   verifyOwnerDataDirectory(dataDir);
   try {
     const status = await ownerRequest(dataDir, '/status');
     if (status.assets?.digest !== assets.digest) throw new Error('runtime_version_mismatch: stop the old Runtime explicitly before using this installation');
-    if (!status.ready) throw new Error(status.error ?? 'runtime_starting');
+    if (!status.ready && !(requireHarbor && status.harbor_ready === true)) throw new Error(status.error ?? 'runtime_starting');
     return status;
   } catch (error) {
     if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error;

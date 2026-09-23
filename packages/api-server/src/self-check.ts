@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { assertManagedAccessApi } from "./managed-access-api-self-check.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, identityCompatibilityPreviewRequestSchemaVersion, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type HarborIdentityFactsReader, type HarborRuntimeClient, type LodePackageResolver, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
+import { completeRunWithFailure, completeRunWithResult, createFileRunRecordStore, identityCompatibilityPreviewRequestSchemaVersion, taskTurnInputConsumerBoundary, taskTurnInputSchemaVersion, type HarborIdentityFactsReader, type HarborRuntimeClient, type LodePackageResolver, type RunRecordStatus, type TaskTurnInputPolicyResolver } from "@webenvoy/core-runtime";
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 import { apiServerHost } from "./index.js";
 import { createApiServer } from "./server.js";
@@ -15,6 +15,13 @@ import { assertAuthorizationDecisionApi } from "./authorization-decision-api-sel
 
 async function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
+  return { status: response.status, body: await response.json() };
+}
+
+async function getJsonWithAuthorization(port: number, path: string, token?: string): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers: token === undefined ? {} : { authorization: `Bearer ${token}` }
+  });
   return { status: response.status, body: await response.json() };
 }
 
@@ -37,6 +44,93 @@ async function requestBody(port: number, path: string, method: string, body?: st
 function asRecord(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value));
   return value as Record<string, unknown>;
+}
+
+function sessionBinding(runtimeSessionRef: string, profileRef: string) {
+  return {
+    schema_version: "webenvoy.runtime-session-binding.v0" as const,
+    identity_environment_ref: `identity:${profileRef}`,
+    execution_identity_ref: `identity:${profileRef}:execution`,
+    runtime_session_ref: runtimeSessionRef,
+    profile_ref: profileRef,
+    provider_ref: "harbor:provider/camoufox",
+    provider_mode: "local_dedicated_profile",
+    lifecycle_state: "active",
+    control_owner: "core_task",
+    session_use: "core_task_run" as const,
+    core_task_run: true as const,
+    consumer_boundary: "Core stores Harbor public refs and status facts only; no credentials, cookies, tokens, profile storage, raw browser endpoints, or raw evidence." as const
+  };
+}
+
+async function seedOwnerSessionRun(store: ReturnType<typeof createFileRunRecordStore>, runId: string, status: RunRecordStatus, runtimeSessionRef: string, profileRef: string, operation = "instance.observe") {
+  const initialStatus = ["pending", "admitted", "requires_user_action"].includes(status) ? status as "pending" | "admitted" | "requires_user_action" : "admitted";
+  await store.createRunRecord({
+    run_id: runId,
+    status: initialStatus,
+    task_intent_ref: `intent:${runId}`,
+    capability_ref: "harbor:managed-browser",
+    admission: { decision: "accepted", action_risk: "read", runtime_session_binding: sessionBinding(runtimeSessionRef, profileRef) },
+    public_result_summary: { operation, runtime_session_ref: runtimeSessionRef }
+  });
+  if (status !== initialStatus) {
+    await store.updateRunRecord(runId, { status: "running" });
+    if (status !== "running") await store.updateRunRecord(runId, { status });
+  }
+}
+
+async function assertOwnerSessionRunsApi(store: ReturnType<typeof createFileRunRecordStore>, directory: string): Promise<void> {
+  const ownerToken = "owner-supervisor-token-12345678901234567890";
+  const agentToken = "a".repeat(32);
+  const server = createApiServer({ runRecordStore: store, supervisorToken: ownerToken });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert(address && typeof address === "object");
+  try {
+    const path = "/owner/runtime-sessions/session%3AA/runs";
+    assert.equal((await getJsonWithAuthorization(address.port, path)).status, 401, "session Run projection is owner-only");
+    assert.equal((await getJsonWithAuthorization(address.port, path, agentToken)).status, 401, "Agent credentials cannot use the owner projection");
+    const a = await getJsonWithAuthorization(address.port, path, ownerToken);
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    const envelope = asRecord(a.body);
+    assert.deepEqual(Object.keys(envelope).sort(), ["runs", "runtime_session_ref", "schema_version", "status"]);
+    assert.equal(envelope.schema_version, "webenvoy.owner-session-runs/v1");
+    assert.equal(envelope.runtime_session_ref, "session:A");
+    assert.equal(envelope.status, "available");
+    const aRuns = envelope.runs as Record<string, unknown>[];
+    assert.deepEqual(aRuns.map(run => run.status).sort(), ["admitted", "manual_recovery_required", "pending", "requires_user_action", "running", "unknown_outcome"]);
+    assert.equal(aRuns.some(run => run.run_id === "owner_A_unbound_request_ref" || run.run_id === "owner_A_terminal_history"), false,
+      "request summary refs and terminal history cannot claim the current session");
+    assert.equal(aRuns.find(run => run.status === "unknown_outcome")?.failure_code, "managed_browser_outcome_unknown");
+    assert.deepEqual(aRuns.map(run => Object.keys(run).sort()).every(keys =>
+      keys.every(key => ["failure_code", "operation", "run_id", "status", "updated_at"].includes(key))), true);
+
+    const b = await getJsonWithAuthorization(address.port, "/owner/runtime-sessions/session%3AB/runs", ownerToken);
+    assert.equal(b.status, 200);
+    const bRuns = asRecord(b.body).runs as Record<string, unknown>[];
+    assert.deepEqual(bRuns.map(run => run.run_id), ["owner_B_running"], "session A records do not leak into B");
+  } finally {
+    if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+
+  const brokenDirectory = await mkdtemp(join(directory, "broken-session-runs-"));
+  const brokenStore = createFileRunRecordStore({ directory: brokenDirectory });
+  await seedOwnerSessionRun(brokenStore, "owner_partial_running", "running", "session:A", "profile:A");
+  await writeFile(join(brokenDirectory, "zz_corrupt.json"), "{\n", "utf8");
+  const brokenServer = createApiServer({ runRecordStore: brokenStore, supervisorToken: ownerToken });
+  await new Promise<void>((resolve) => brokenServer.listen(0, "127.0.0.1", resolve));
+  const brokenAddress = brokenServer.address();
+  assert(brokenAddress && typeof brokenAddress === "object");
+  try {
+    const failed = await getJsonWithAuthorization(brokenAddress.port, "/owner/runtime-sessions/session%3AA/runs", ownerToken);
+    assert.equal(failed.status, 503);
+    assert.equal(asRecord(asRecord(failed.body).error).code, "owner_session_runs_unavailable");
+    assert.equal(Object.hasOwn(asRecord(failed.body), "runs"), false, "incomplete Core reads never masquerade as a partial list");
+    assert.deepEqual((await brokenStore.listRunRecords()).map(run => run.run_id), ["owner_partial_running"],
+      "strict supervision reads do not change legacy best-effort list behavior");
+  } finally {
+    if (brokenServer.listening) await new Promise<void>((resolve, reject) => brokenServer.close(error => error ? reject(error) : resolve()));
+  }
 }
 let tick = 0;
 
@@ -228,6 +322,25 @@ async function main(): Promise<void> {
     retention_state: "redacted"
   });
 
+  const ownerSessionStatuses = ["pending", "admitted", "running", "requires_user_action", "manual_recovery_required", "unknown_outcome"] as const;
+  for (const status of ownerSessionStatuses) {
+    await seedOwnerSessionRun(store, `owner_A_${status}`, status, "session:A", "profile:A");
+  }
+  await store.updateRunRecord("owner_A_unknown_outcome", {
+    failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+  });
+  await seedOwnerSessionRun(store, "owner_B_running", "running", "session:B", "profile:B", "instance.click");
+  await store.createRunRecord({
+    run_id: "owner_A_unbound_request_ref",
+    status: "admitted",
+    task_intent_ref: "intent:owner_A_unbound_request_ref",
+    capability_ref: "harbor:managed-browser",
+    admission: { decision: "accepted", action_risk: "read" },
+    public_result_summary: { operation: "instance.observe", runtime_session_ref: "session:A" }
+  });
+  await store.updateRunRecord("owner_A_unbound_request_ref", { status: "running" });
+  await seedOwnerSessionRun(store, "owner_A_terminal_history", "succeeded", "session:A", "profile:A");
+
   const server = createApiServer({ runRecordStore: store, taskThreadStore, lodePackageResolver: threadLodeResolver, harborIdentityFactsReader, harborRuntimeClient });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
@@ -236,6 +349,7 @@ async function main(): Promise<void> {
   const port = address.port;
 
   try {
+    await assertOwnerSessionRunsApi(store, directory);
     assert.deepEqual(await getJson(port, "/health"), {
       status: 200,
       body: {

@@ -29,7 +29,7 @@ import {
   tryAcquireFileOwnership,
   withFileOwnershipLock
 } from "./file-ownership.js";
-import type { RuntimeSessionBindingFacts } from "./harbor-admission.js";
+import { runtimeSessionUseForControlOwner, type RuntimeSessionBindingFacts } from "./harbor-admission.js";
 import { readTrustedExecutionPolicyEvaluation } from "./execution-policy.js";
 import { requireRunId } from "./run-id.js";
 
@@ -300,13 +300,15 @@ export type FileRunRecordStore = {
   updateRunRecord(runId: string, patch: RunRecordPatch): Promise<RunRecord>;
   /** Narrow atomic transition that binds a Core-owned Harbor session before write-precheck dispatch. */
   bindCoreTaskRuntimeSession(runId: string, binding: RuntimeSessionBindingFacts, runtimeBindingRefs: readonly string[]): Promise<RunRecord>;
+  /** Bind a managed-browser Run to the exact Harbor session already verified by its identity-specific lookup. */
+  bindManagedBrowserRuntimeSession(runId: string, binding: RuntimeSessionBindingFacts, runtimeBindingRefs: readonly string[]): Promise<RunRecord>;
   /** Narrow continuation seam for the policy-owned requires_user_action state. */
   continueRequiresUserActionRun(runId: string, patch?: RunRecordPatch): Promise<RunRecord>;
   /** Narrow denial seam for the policy-owned requires_user_action state. */
   denyRequiresUserActionRun(runId: string, failure: FailureRecord, patch?: RunRecordPatch): Promise<RunRecord>;
   /** Narrow cancellation seam for the policy-owned requires_user_action state. */
   cancelRequiresUserActionRun(runId: string, failure?: FailureRecord, patch?: RunRecordPatch): Promise<RunRecord>;
-  listRunRecords(): Promise<RunRecord[]>;
+  listRunRecords(options?: { strict?: boolean }): Promise<RunRecord[]>;
 };
 
 type AuthorizationDecisionRefTransaction = (
@@ -1014,6 +1016,43 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
       });
     },
 
+    async bindManagedBrowserRuntimeSession(runId, binding, runtimeBindingRefs) {
+      return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
+        const record = await getRunRecord(runId);
+        if (!record) throw new Error("run record not found");
+        if (record.capability_ref !== "harbor:managed-browser" || record.status !== "running") {
+          throw new Error("run_managed_browser_runtime_binding_unavailable");
+        }
+        if (binding.core_task_run !== true || !["core_task", "user", "agent", "none"].includes(binding.control_owner) ||
+          binding.session_use !== runtimeSessionUseForControlOwner(binding.control_owner)) {
+          throw new Error("run_managed_browser_runtime_binding_invalid");
+        }
+        if (record.admission.runtime_session_binding !== undefined) {
+          throw new Error("run_runtime_binding_already_bound");
+        }
+        const requiredRefs = [binding.runtime_session_ref, binding.profile_ref, binding.provider_ref,
+          binding.identity_environment_ref, binding.execution_identity_ref];
+        if (requiredRefs.some(ref => !runtimeBindingRefs.includes(ref))) {
+          throw new Error("run_runtime_binding_refs_mismatch");
+        }
+        const admissionRefs = [...new Set([...(record.admission.runtime_binding_refs ?? []), ...runtimeBindingRefs])];
+        const topLevelRefs = [...new Set([...(record.runtime_binding_refs ?? []), ...runtimeBindingRefs])];
+        const next: RunRecord = {
+          ...record,
+          updated_at: clock().toISOString(),
+          admission: {
+            ...record.admission,
+            runtime_binding_refs: admissionRefs,
+            runtime_session_binding: binding
+          },
+          runtime_binding_refs: topLevelRefs
+        };
+        assertRunRecord(next);
+        await writeRecord(directory, next);
+        return next;
+      });
+    },
+
     async continueRequiresUserActionRun(runId, patch = {}) {
       return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
         const record = await getRunRecord(runId);
@@ -1113,9 +1152,20 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
       });
     },
 
-    async listRunRecords() {
-      await mkdir(directory, { recursive: true });
-      const files = (await readdir(directory)).filter((entry) => entry.endsWith(".json")).sort();
+    async listRunRecords(options = {}) {
+      let entries: string[];
+      if (options.strict) {
+        try {
+          entries = await readdir(directory);
+        } catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
+          throw error;
+        }
+      } else {
+        await mkdir(directory, { recursive: true });
+        entries = await readdir(directory);
+      }
+      const files = entries.filter((entry) => entry.endsWith(".json")).sort();
       const records: RunRecord[] = [];
       for (const file of files) {
         const runId = basename(file, ".json");
@@ -1123,8 +1173,10 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
         try {
           record = await getRunRecord(runId);
         } catch {
+          if (options.strict) throw new Error("run_record_read_failed");
           continue;
         }
+        if (options.strict && (!record || record.run_id !== runId)) throw new Error("run_record_read_failed");
         if (record) {
           records.push(record);
         }

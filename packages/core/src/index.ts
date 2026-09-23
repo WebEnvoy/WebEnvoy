@@ -109,6 +109,8 @@ export {
   type RealSiteWritePreviewResult
 } from "./real-site-write-preview.js";
 export {
+  ownerSessionRunsSchemaVersion,
+  getOwnerSessionRuns,
   approvalCancellationQuerySchemaVersion,
   getApprovalCancellationSummary,
   getRunSummary,
@@ -116,6 +118,8 @@ export {
   projectRunSummary,
   runQuerySchemaVersion,
   sessionRefsQuerySchemaVersion,
+  type OwnerSessionRunSummary,
+  type OwnerSessionRunsEnvelope,
   type ApprovalCancellationQuery,
   type RunAdmissionSummary,
   type RunCapabilitySummary,

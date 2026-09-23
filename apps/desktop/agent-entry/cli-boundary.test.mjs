@@ -87,8 +87,9 @@ test('owner list, diagnose and inspect use live reads without Runtime startup', 
   const server = createServer((request, response) => {
     requests.push(request.url);
     let payload = { ready: true, assets: { digest: 'fixture' }, pid: process.pid, services: [] };
-    if (request.url === '/runtime/sessions') payload = { schema_version: 'harbor-runtime-session-list/v1', sessions: [] };
+    if (request.url === '/runtime/sessions') payload = { schema_version: 'harbor-runtime-session-list/v1', sessions: [{ runtime_session_ref: 'demo', profile_ref: 'profile:demo', control_owner: 'none', control_generation: 0, control_lock: { owner: 'none', state: 'released', holder_ref: null } }] };
     if (request.url === '/runtime/sessions/demo') payload = { runtime_session_ref: 'demo', control_owner: 'none', control_generation: 0, control_lock: { owner: 'none', state: 'released', holder_ref: null } };
+    if (request.url === '/owner/runtime-sessions/demo/runs') payload = { schema_version: 'webenvoy.owner-session-runs/v1', runtime_session_ref: 'demo', status: 'available', runs: [] };
     response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(payload));
   });
   try {
@@ -100,7 +101,9 @@ test('owner list, diagnose and inspect use live reads without Runtime startup', 
     assert.equal(list.code, 0);
     assert.equal(diagnose.code, 0);
     assert.equal(inspect.code, 0);
-    assert.deepEqual(requests, ['/runtime/sessions', '/status', '/runtime/sessions/demo']);
+    assert.deepEqual(requests, ['/runtime/sessions', '/owner/runtime-sessions/demo/runs', '/status', '/runtime/sessions/demo', '/owner/runtime-sessions/demo/runs']);
+    assert.deepEqual(JSON.parse(list.stdout).sessions[0].supervision, { status: 'available', runs: [] });
+    assert.deepEqual(JSON.parse(inspect.stdout).session.supervision, { status: 'available', runs: [] });
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(dir, { recursive: true, force: true });

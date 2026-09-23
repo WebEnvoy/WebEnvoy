@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectHarborResponse } from './service-projection.mjs';
+import { projectHarborResponse, projectSessionSupervision } from './service-projection.mjs';
 
 const terminalFacts = () => ({
   schema_version: 'harbor-runtime-facts/v1',
@@ -37,4 +37,37 @@ test('inspect and non-terminal stop still require control generation', () => {
 test('invalid generation is never hidden by terminal stop compatibility', () => {
   const value = { ...terminalFacts(), control_generation: 'old-format' };
   assert.equal(projectHarborResponse({ method: 'POST', url: '/runtime/sessions/session:one/stop' }, value), undefined);
+});
+
+test('owner session supervision accepts only the exact safe Core projection', () => {
+  const updatedAt = '2026-09-22T00:00:00.000Z';
+  const envelope = {
+    schema_version: 'webenvoy.owner-session-runs/v1',
+    runtime_session_ref: 'session:A',
+    status: 'available',
+    runs: [{ run_id: 'managed-abc123', status: 'unknown_outcome', updated_at: updatedAt, operation: 'instance.click', failure_code: 'managed_browser_outcome_unknown' }]
+  };
+  assert.deepEqual(projectSessionSupervision('session:A', envelope), {
+    status: 'available',
+    runs: envelope.runs
+  });
+  assert.deepEqual(projectSessionSupervision('session:B', envelope), {
+    status: 'unavailable', error: { code: 'owner_session_runs_invalid' }
+  });
+  assert.deepEqual(projectSessionSupervision('session:A', undefined), {
+    status: 'unavailable', error: { code: 'owner_session_runs_invalid' }
+  });
+});
+
+test('owner session supervision rejects terminal states and unsafe summary fields without echoing them', () => {
+  const base = { schema_version: 'webenvoy.owner-session-runs/v1', runtime_session_ref: 'session:A', status: 'available', runs: [] };
+  assert.deepEqual(projectSessionSupervision('session:A', { ...base, runs: [{ run_id: 'run-one', status: 'succeeded', updated_at: '2026-09-22T00:00:00.000Z' }] }), {
+    status: 'unavailable', error: { code: 'owner_session_runs_invalid' }
+  });
+  assert.deepEqual(projectSessionSupervision('session:A', { ...base, unexpected: '/private/path' }), {
+    status: 'unavailable', error: { code: 'owner_session_runs_invalid' }
+  });
+  assert.deepEqual(projectSessionSupervision('session:A', { ok: false, error: { code: 'owner_session_runs_unavailable', path: '/private/path' } }), {
+    status: 'unavailable', error: { code: 'owner_session_runs_unavailable' }
+  });
 });

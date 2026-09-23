@@ -10,6 +10,50 @@ const projectLock = value => value && typeof value === 'object' && !Array.isArra
   ? Object.fromEntries(['owner', 'state', 'holder_ref', 'updated_at'].filter(key => key in value).map(key => [key, value[key]]))
   : undefined;
 
+const ownerSessionRunStatuses = new Set(['pending', 'admitted', 'running', 'requires_user_action', 'manual_recovery_required', 'unknown_outcome']);
+const safeIdentifier = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
+const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const exactKeys = (value, required, optional = []) => {
+  const keys = Object.keys(value);
+  return required.every(key => Object.hasOwn(value, key)) && keys.every(key => required.includes(key) || optional.includes(key));
+};
+
+export function projectSessionSupervision(runtimeSessionRef, value) {
+  const unavailable = code => ({ status: 'unavailable', error: { code } });
+  const isSafeRef = typeof runtimeSessionRef === 'string' && runtimeSessionRef.length > 0 && runtimeSessionRef.length <= 256 && !/[\u0000-\u001f\u007f]/.test(runtimeSessionRef);
+  if (!isSafeRef) return unavailable('owner_session_runs_invalid');
+  if (value?.ok === false && value.error && typeof value.error === 'object' && !Array.isArray(value.error)) {
+    return unavailable(typeof value.error.code === 'string' && safeIdentifier.test(value.error.code)
+      ? value.error.code : 'owner_session_runs_unavailable');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      !exactKeys(value, ['schema_version', 'runtime_session_ref', 'status', 'runs']) ||
+      value.schema_version !== 'webenvoy.owner-session-runs/v1' || value.runtime_session_ref !== runtimeSessionRef ||
+      value.status !== 'available' || !Array.isArray(value.runs)) return unavailable('owner_session_runs_invalid');
+  const runs = [];
+  const seen = new Set();
+  for (const run of value.runs) {
+    if (!run || typeof run !== 'object' || Array.isArray(run) ||
+        !exactKeys(run, ['run_id', 'status', 'updated_at'], ['operation', 'failure_code']) ||
+        typeof run.run_id !== 'string' || !safeRunId.test(run.run_id) || seen.has(run.run_id) ||
+        !ownerSessionRunStatuses.has(run.status) || typeof run.updated_at !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(run.updated_at) || !Number.isFinite(Date.parse(run.updated_at)) ||
+        (Object.hasOwn(run, 'operation') && (typeof run.operation !== 'string' || !safeIdentifier.test(run.operation))) ||
+        (Object.hasOwn(run, 'failure_code') && (typeof run.failure_code !== 'string' || !safeIdentifier.test(run.failure_code)))) {
+      return unavailable('owner_session_runs_invalid');
+    }
+    seen.add(run.run_id);
+    runs.push({
+      run_id: run.run_id,
+      status: run.status,
+      updated_at: run.updated_at,
+      ...(Object.hasOwn(run, 'operation') ? { operation: run.operation } : {}),
+      ...(Object.hasOwn(run, 'failure_code') ? { failure_code: run.failure_code } : {})
+    });
+  }
+  return { status: 'available', runs };
+}
+
 export function projectSessionFacts(value, { allowTerminalStop = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const hasControlGeneration = Number.isSafeInteger(value.control_generation) && value.control_generation >= 0;
