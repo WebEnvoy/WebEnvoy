@@ -132,7 +132,8 @@ export function classifyAdminMembership(output = '') {
 }
 
 export function discoverOsIdentity({ ownerUid = process.getuid?.(), agentUid } = {}) {
-  const account = Number.isSafeInteger(agentUid) && agentUid > 0 ? userFacts(agentUid) : { state: 'missing' };
+  const sameUid = Number.isSafeInteger(ownerUid) && Number.isSafeInteger(agentUid) && ownerUid === agentUid;
+  const account = sameUid ? { state: 'trusted_owner_user' } : Number.isSafeInteger(agentUid) && agentUid > 0 ? userFacts(agentUid) : { state: 'missing' };
   return {
     platform: process.platform,
     arch: process.arch,
@@ -140,9 +141,9 @@ export function discoverOsIdentity({ ownerUid = process.getuid?.(), agentUid } =
     agent_uid: Number.isSafeInteger(agentUid) ? agentUid : null,
     owner_is_root: ownerUid === 0,
     agent_is_root: agentUid === 0,
-    same_uid: Number.isSafeInteger(ownerUid) && Number.isSafeInteger(agentUid) && ownerUid === agentUid,
+    same_uid: sameUid,
     agent_account: account,
-    process_inspection: account.state === 'verified' && account.admin === false && account.sudo_access === 'denied' ? 'distinct_non_admin_uid' : 'unverified'
+    process_inspection: sameUid ? 'trusted_same_uid' : account.state === 'verified' && account.admin === false && account.sudo_access === 'denied' ? 'distinct_non_admin_uid' : 'unverified'
   };
 }
 
@@ -169,10 +170,10 @@ const FIXED_AGENT_ASSET_PATHS = [
   'runtime/node'
 ];
 
-// The Agent data plane is disabled unless the owner-held installation and all
-// manifest assets are provably immutable to the Agent UID. This supplements
-// bundle hash verification: hashes detect content drift, while these checks
-// prevent the Agent from causing that drift through a writable path.
+// In distinct-UID hardened mode, the Agent data plane is disabled unless the
+// owner-held installation and all manifest assets are provably immutable to
+// the Agent UID. This supplements bundle hashes, which detect content drift,
+// by preventing the distinct Agent UID from causing it through writable paths.
 export function verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid } = {}) {
   const failures = [];
   if (typeof installRoot !== 'string' || !isAbsolute(installRoot) || installRoot.includes('\0')) return { state: 'disabled', code: 'agent_bundle_boundary_unavailable', reason_codes: ['agent_bundle_root_missing'], checked_paths: 0 };
@@ -445,23 +446,30 @@ function macAclVerified(path, args) {
 
 export function verifyOsBoundary({ ownerUid = process.getuid?.(), agentUid, ownerSocketPath, installRoot } = {}) {
   const identity = { ...discoverOsIdentity({ ownerUid, agentUid }), socket_acl: ownerSocketAcl(ownerSocketPath, ownerUid) };
-  const assetBoundary = verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid });
+  const requestedMode = identity.same_uid ? 'trusted_local' : agentUid === undefined || agentUid === null ? 'unconfigured' : 'distinct_uid_hardened';
+  const assetBoundary = requestedMode === 'trusted_local'
+    ? { state: 'trusted_user_domain', code: 'same_uid_trusted_user_domain', reason_codes: [], checked_paths: 0 }
+    : verifyAgentBundleBoundary({ installRoot, ownerUid, agentUid });
   const failures = [];
   if (identity.platform !== 'darwin' || identity.arch !== 'arm64') failures.push('platform_unsupported');
   if (!Number.isSafeInteger(identity.owner_uid) || identity.owner_uid < 1) failures.push('owner_uid_invalid');
   if (!Number.isSafeInteger(identity.agent_uid) || identity.agent_uid < 1) failures.push('agent_uid_missing');
   if (identity.owner_is_root || identity.agent_is_root) failures.push('privileged_uid_unsupported');
-  if (identity.same_uid) failures.push('owner_agent_uid_not_separated');
-  if (identity.agent_account.state !== 'verified') failures.push('agent_uid_unverified');
-  if (identity.agent_account.admin === true || identity.agent_account.sudo_access === 'allowed') failures.push('agent_uid_privileged');
-  if (identity.agent_account.admin !== false) failures.push('agent_admin_policy_unverified');
-  if (identity.agent_account.sudo_access !== 'denied') failures.push('agent_sudo_policy_unverified');
+  if (requestedMode !== 'trusted_local') {
+    if (identity.agent_account.state !== 'verified') failures.push('agent_uid_unverified');
+    if (identity.agent_account.admin === true || identity.agent_account.sudo_access === 'allowed') failures.push('agent_uid_privileged');
+    if (identity.agent_account.admin !== false) failures.push('agent_admin_policy_unverified');
+    if (identity.agent_account.sudo_access !== 'denied') failures.push('agent_sudo_policy_unverified');
+  }
   if (!['verified', 'expected'].includes(identity.socket_acl)) failures.push('owner_socket_acl_unavailable');
-  if (!['denied', 'enforced', 'verified', 'distinct_non_admin_uid'].includes(identity.process_inspection)) failures.push('agent_process_inspection_policy_unavailable');
-  if (assetBoundary.state !== 'supported') failures.push(...assetBoundary.reason_codes);
+  if (requestedMode !== 'trusted_local' && !['denied', 'enforced', 'verified', 'distinct_non_admin_uid'].includes(identity.process_inspection)) failures.push('agent_process_inspection_policy_unavailable');
+  if (requestedMode !== 'trusted_local' && assetBoundary.state !== 'supported') failures.push(...assetBoundary.reason_codes);
+  const mode = requestedMode === 'distinct_uid_hardened' && failures.length ? 'distinct_uid_unverified' : requestedMode;
+  const code = failures.length ? 'owner_agent_isolation_unavailable' : mode === 'trusted_local' ? 'trusted_local_user_domain' : 'ok';
   return {
+    mode,
     state: failures.length ? 'disabled' : 'supported',
-    code: failures.length ? 'owner_agent_isolation_unavailable' : 'ok',
+    code,
     reason_codes: failures,
     identity,
     asset_boundary: assetBoundary
@@ -491,10 +499,12 @@ export function verifyLiveOsBoundary({ dataDir, ownerUid = process.getuid?.(), a
     catch { addFailure('agent_socket_unavailable'); }
   }
   const uniqueReasons = [...new Set(reasonCodes)];
+  const mode = boundary.mode === 'distinct_uid_hardened' && uniqueReasons.length ? 'distinct_uid_unverified' : boundary.mode;
   return {
     ...boundary,
+    mode,
     state: uniqueReasons.length ? 'disabled' : 'supported',
-    code: uniqueReasons.length ? 'owner_agent_isolation_unavailable' : 'ok',
+    code: uniqueReasons.length ? 'owner_agent_isolation_unavailable' : mode === 'trusted_local' ? 'trusted_local_user_domain' : 'ok',
     reason_codes: uniqueReasons,
     owner_transport: ownerTransport,
     agent_transport: agentTransport

@@ -26,6 +26,8 @@ Agent 在自己的普通非管理员 UID 下创建 host 资产，使用 owner �
 
 入口按自身目录解析固定 Node，不读取 PATH，也不需要 checkout、`node_modules`、Electron 或 Desktop App。owner data、Agent host 与包目录必须分离；同 UID 或无法核实隔离时不得启用 Agent data plane。完整命令合同见 [S1](../specs/cli-integration-v1.md)。
 
+历史验证注记（2026-09-23）：上述同 UID 禁用门槛记录的是 [#576 候选](https://github.com/WebEnvoy/WebEnvoy/issues/576) 当时的检查要求，保留其原命令和候选证据语义。它已由本日修订的 [S1 合同](../specs/cli-integration-v1.md) 对 V1 trusted-local 模式取代：同 UID 主机可在可信本地用户域假设下启用 Agent plane，但 Agent 请求仍须遵守 Grant、角色、ControlLease 和数据边界。
+
 `Standalone Runtime candidate` workflow 从准确候选 SHA 和锁定 Lode 构建，上传带 source SHA／manifest SHA 的归档及 SHA-256 文件；候选 artifact 的保留期为 7 天。workflow 中的双 UID 检查使用 CI 已有 nobody 账户，覆盖有限 `profile.list`、原 Run 查询、重启和文件权限边界；它不执行浏览器任务，也不代表真实第三方 Agent 消费。实际结果以对应 SHA 的 Actions run 为准。
 
 候选保持 `release: false`；可获取的 CI artifact 不表示 GitHub Release、签名、真实 Provider、真实账号或第三方 Agent 验收已经完成。

@@ -8,7 +8,7 @@ Spec 不维护当前交付状态，不替代 canonical 产品范围，也不直�
 
 | 规格 | 归口 | 作用 |
 | --- | --- | --- |
-| [CLI and Upstream Integration V1](cli-integration-v1.md) | [S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)、[集成 FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 经独立审查并合入 main 后作为 Accepted 实施基线：无 App 首次信任、可信用户与 Agent 隔离、CLI/API/Plugin 映射、独立现场控制、跨入口结果及正式安装合同；不表示 W1/W2 已实现或验证。 |
+| [CLI and Upstream Integration V1](cli-integration-v1.md) | [S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)、[集成 FR #474](https://github.com/WebEnvoy/WebEnvoy/issues/474) | 经独立审查并合入 main 后作为 Accepted 实施基线：无 App 首次信任、可信本地用户域与 Agent plane 的角色／Grant／控制边界、CLI/API/Plugin 映射、独立现场控制、跨入口结果及正式安装合同；不声称同 UID OS 进程隔离，也不表示 W1/W2 已实现或验证。 |
 | [Model Usage V1](model-usage-v1.md) | [产品 FR #558](https://github.com/WebEnvoy/WebEnvoy/issues/558)、[条件验证 #559](https://github.com/WebEnvoy/WebEnvoy/issues/559) | Proposed：通用模型配置、用途、外发与费用、有界网页循环、DONE/BLOCKED、接管／交回和结果核验；非 V1 发布阻塞，不表示模型已支持。 |
 | [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497) | 定义 V1 Browser Runtime capability 类别、支持／证据状态、权限、数据边界、恢复和完成条件。 |
 | [Page, Document and Navigation Runtime Contract V1](page-navigation-runtime-contract-v1.md) | [Runtime FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、[Native tab handoff #510](https://github.com/WebEnvoy/WebEnvoy/issues/510) | 冻结同一 Instance 内多 Page、document generation、popup/opener、URL/origin authorization、redirect、bounded close tombstone、native tab handoff 的 Page/ref 连续性、旧观察失效、receipt 与关系异常安全暂停语义。 |

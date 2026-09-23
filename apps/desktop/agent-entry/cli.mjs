@@ -42,10 +42,12 @@ idempotency key: register/revoke take --idempotency-key; grant, grant-v2 and
   setup: `Usage: webenvoy setup --data-dir OWNER_DIR [--agent-uid UID]
 
 Owner setup verifies the standalone bundle and writes owner installation facts.
-With a separately verified Agent UID it prints public bootstrap facts; without
-that boundary it reports owner_agent_isolation_unavailable and writes no Agent
-host configuration. --host-dir remains a legacy-compatible ignored option;
-the Agent UID creates its own host assets with agent setup.`,
+Without an existing Agent UID binding, omitting --agent-uid defaults to the
+owner UID and selects trusted local mode; same-UID processes are not
+OS-isolated from each other. A separate verified non-admin UID selects the
+hardened OS boundary. Both modes use the Agent route, credential, and Core
+Grant checks. --host-dir remains a legacy-compatible ignored option; the Agent
+creates its own host assets with agent setup.`,
   files: `Usage: webenvoy files <import|inspect|export|revoke|delete> --data-dir DIR
 
 Owner control identity is required. File import accepts an optional correlation
@@ -68,7 +70,8 @@ pass a strictly validated file to bind an earlier snapshot. stop targets the exa
 write response requires fresh inspect and never a new key.`,
   agent: `Usage: webenvoy agent <setup|uninstall|status|skill|connect|describe|operation|query|recovery|skills> [role-specific options]
 
-Agent setup is separate: run as the independent Agent UID with
+Agent setup is separate: run as the configured Agent identity (the owner UID
+for trusted local mode, or the independent Agent UID for hardened mode) with
 webenvoy agent setup --host-dir DIR --data-dir OWNER_DIR --owner-uid UID
 [--agent-endpoint SOCKET]. It only creates the Agent-owned client file and
 host assets; it never calls owner/Core or grants access. Other Agent commands
@@ -80,10 +83,12 @@ replays an operation. Agent commands are non-interactive and cannot confirm
 owner actions.`,
   'agent setup': `Usage: webenvoy agent setup --host-dir DIR --data-dir OWNER_DIR --owner-uid UID [--agent-endpoint SOCKET]
 
-Run this command as the independent Agent UID. It creates or reuses only the
-Agent-owned client credential, MCP host configuration, SKILL and receipt. The
-owner must first run setup --agent-uid UID and then register the printed
-fingerprint; setup never contacts Runtime, Core, or the owner control socket.`,
+Run this command as the configured Agent identity. It creates or reuses only
+the Agent-owned client credential, MCP host configuration, SKILL and receipt.
+The owner must first run setup (optionally binding --agent-uid UID) and then
+register the printed fingerprint; setup never contacts Runtime, Core, or the
+owner control socket.
+Same-UID mode trusts the local user domain and provides no OS isolation.`,
   'agent uninstall': `Usage: webenvoy agent uninstall --host-dir DIR --data-dir OWNER_DIR
 
 Run as the Agent UID. This removes only receipt-managed MCP/SKILL host files and
@@ -300,10 +305,10 @@ if (command === 'setup') {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const ownerUid = process.getuid?.();
   const configuredAgentUid = arg('--agent-uid') === undefined
-    ? existingInstallation?.agent_uid
+    ? existingInstallation?.agent_uid ?? ownerUid
     : parseUid(arg('--agent-uid'), 'agent_uid_invalid');
   if (arg('--agent-uid') !== undefined && existingInstallation?.agent_uid !== undefined && existingInstallation.agent_uid !== configuredAgentUid) throw new Error('agent_uid_binding_mismatch');
-  if (configuredAgentUid !== undefined && (!Number.isSafeInteger(ownerUid) || ownerUid < 1 || ownerUid === configuredAgentUid || configuredAgentUid < 1)) throw new Error('agent_uid_invalid');
+  if (configuredAgentUid !== undefined && (!Number.isSafeInteger(ownerUid) || ownerUid < 1 || configuredAgentUid < 1)) throw new Error('agent_uid_invalid');
   const endpoint = configuredAgentUid === undefined ? undefined : agentDataSocket({ data_dir: dataDir });
   const boundary = configuredAgentUid === undefined
     ? { state: 'disabled', code: 'owner_agent_isolation_unavailable', reason_codes: ['agent_uid_missing'] }
@@ -322,7 +327,7 @@ if (command === 'setup') {
   } else if (chrome) {
     installation = { ...installation, chromeOfficial: chrome };
   }
-  if (endpoint) installation = { ...installation, owner_uid: ownerUid, agent_uid: configuredAgentUid, agent_endpoint: endpoint, os_boundary: { state: boundary.state, code: boundary.code, reason_codes: boundary.reason_codes } };
+  if (endpoint) installation = { ...installation, owner_uid: ownerUid, agent_uid: configuredAgentUid, agent_endpoint: endpoint, os_boundary: { state: boundary.state, mode: boundary.mode, code: boundary.code, reason_codes: boundary.reason_codes } };
   else if (installation.os_boundary || installation.agent_uid || installation.agent_endpoint) {
     const { owner_uid: ignoredOwnerUid, agent_uid: ignoredAgentUid, agent_endpoint: ignoredEndpoint, os_boundary: ignoredBoundary, ...withoutBoundary } = installation;
     installation = withoutBoundary;
@@ -335,11 +340,11 @@ if (command === 'setup') {
     installed: true,
     camoufox_launch: classifyCamoufoxBinding(installation),
     chrome_launch: classifyChromeOfficialBinding(installation),
-    boundary: endpoint ? { state: boundary.state, code: boundary.code, reason_codes: boundary.reason_codes } : { state: 'disabled', code: 'owner_agent_isolation_unavailable', reason_codes: ['agent_uid_missing'] },
+    boundary: endpoint ? { state: boundary.state, mode: boundary.mode, code: boundary.code, reason_codes: boundary.reason_codes } : { state: 'disabled', mode: 'unconfigured', code: 'owner_agent_isolation_unavailable', reason_codes: ['agent_uid_missing'] },
     ...(agentEnabled ? { bootstrap: { data_dir: dataDir, agent_endpoint: endpoint, owner_uid: ownerUid, agent_uid: configuredAgentUid } } : {}),
     next: agentEnabled
-      ? `As Agent UID ${configuredAgentUid}, run webenvoy agent setup --host-dir DIR --data-dir ${dataDir} --owner-uid ${ownerUid}; then owner registers that fingerprint with access register.`
-      : 'owner_agent_isolation_unavailable: owner maintenance is installed; configure a separately owned Agent UID before enabling Agent data plane.'
+      ? `As ${boundary.mode === 'trusted_local' ? 'the owner user' : `Agent UID ${configuredAgentUid}`}, run webenvoy agent setup --host-dir DIR --data-dir ${dataDir} --owner-uid ${ownerUid}; then owner registers that fingerprint with access register.`
+      : 'owner_agent_isolation_unavailable: owner maintenance is installed; configure a trusted local or separately verified Agent UID before enabling Agent data plane.'
   });
 } else if (command === 'agent' && args[0] === 'setup') {
   printResult(await runAgentSetup(args));
@@ -558,7 +563,7 @@ async function runAgentSetup(values) {
   const ownerDataDir = resolve(argFrom(values, '--data-dir'));
   const ownerUid = parseUid(argFrom(values, '--owner-uid'), 'owner_uid_invalid');
   const agentUid = process.getuid?.();
-  if (!Number.isSafeInteger(agentUid) || agentUid < 1 || ownerUid < 1 || ownerUid === agentUid) throw new Error('owner_agent_isolation_unavailable');
+  if (!Number.isSafeInteger(agentUid) || agentUid < 1 || ownerUid < 1) throw new Error('owner_agent_isolation_unavailable');
   const endpoint = agentDataSocket({ data_dir: ownerDataDir, agent_endpoint: argFrom(values, '--agent-endpoint') });
   if (endpoint === join(ownerDataDir, 'owner-control.sock')) throw new Error('agent_endpoint_invalid');
   await mkdir(hostDir, { recursive: true, mode: 0o700 });
@@ -589,7 +594,7 @@ async function runAgentSetup(values) {
       { path: skillPath, content: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md')) }
     ]
   });
-  return { installed: true, credential_fingerprint: sha(client.credential), boundary: { state: 'pending_owner_registration', owner_uid: ownerUid, agent_uid: agentUid, agent_endpoint: endpoint }, next: 'Owner registers this fingerprint with access register and grants the minimum scope.' };
+  return { installed: true, credential_fingerprint: sha(client.credential), boundary: { state: 'pending_owner_registration', ...(ownerUid === agentUid ? { mode: 'trusted_local' } : {}), owner_uid: ownerUid, agent_uid: agentUid, agent_endpoint: endpoint }, next: 'Owner registers this fingerprint with access register and grants the minimum scope.' };
 }
 
 async function runAgentUninstall(values) {

@@ -5,28 +5,34 @@ import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
-// This check is intentionally CI-only. It uses an existing nobody account and
-// sudo's non-interactive account switch; it never creates users or changes
-// ACLs, sudo policy, signatures, providers, browsers, or external accounts.
+// This check is intentionally CI-only. Default mode uses the existing nobody
+// account and sudo; --same-uid checks the trusted owner-user path. Neither mode
+// creates users or changes ACLs, sudo policy, signatures, providers, browsers,
+// or external accounts.
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('standalone_boundary_requires_macos_arm64');
 
 const packageRoot = resolve(process.argv[2] ?? process.env.PACKAGE_ROOT ?? '.');
 const cli = join(packageRoot, 'bin', 'webenvoy');
 const fixedNode = join(packageRoot, 'runtime', 'node');
+const sameUidMode = process.argv.includes('--same-uid');
 const ownerUid = process.getuid?.();
 if (!Number.isSafeInteger(ownerUid) || ownerUid < 1) throw new Error('owner_uid_unavailable');
-const agentUid = Number(execFileSync('/usr/bin/id', ['-u', 'nobody'], { encoding: 'utf8' }).trim());
-if (!Number.isSafeInteger(agentUid) || agentUid < 1 || agentUid === ownerUid) throw new Error('agent_uid_unavailable');
-const switchedUid = Number(execFileSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', '/usr/bin/id', '-u'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim());
-if (switchedUid !== agentUid) throw new Error('agent_uid_switch_unavailable');
+const agentUid = sameUidMode ? ownerUid : Number(execFileSync('/usr/bin/id', ['-u', 'nobody'], { encoding: 'utf8' }).trim());
+if (!Number.isSafeInteger(agentUid) || agentUid < 1 || !sameUidMode && agentUid === ownerUid) throw new Error('agent_uid_unavailable');
+if (!sameUidMode) {
+  const switchedUid = Number(execFileSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', '/usr/bin/id', '-u'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim());
+  if (switchedUid !== agentUid) throw new Error('agent_uid_switch_unavailable');
+}
 
 const { defaultAgentDataSocket, verifyAgentBundleBoundary, verifyOsBoundary } = await import(pathToFileURL(join(packageRoot, 'agent-entry', 'os-boundary.mjs')).href);
-const sameUidBoundary = verifyOsBoundary({ ownerUid, agentUid: ownerUid });
-assert.equal(sameUidBoundary.state, 'disabled', 'same UID must never enable Agent data plane');
-assert.ok(sameUidBoundary.reason_codes.includes('owner_agent_uid_not_separated'), 'same UID rejection must be explicit');
 const root = await mkdtemp('/tmp/wb-ci-');
 const ownerData = join(root, 'owner-data');
 const ownerSocket = join(ownerData, 'owner-control.sock');
+const sameUidBoundary = verifyOsBoundary({ ownerUid, agentUid: ownerUid, ownerSocketPath: join(root, 'same-uid-probe.sock') });
+assert.equal(sameUidBoundary.mode, 'trusted_local', 'same UID must report its trusted local mode');
+assert.equal(sameUidBoundary.state, 'supported', `same-UID owner path must be usable: ${JSON.stringify(sameUidBoundary)}`);
+assert.equal(sameUidBoundary.asset_boundary.state, 'trusted_user_domain', 'same UID must not claim bundle isolation');
+assert.ok(!sameUidBoundary.reason_codes.includes('owner_agent_uid_not_separated'), 'same UID is an explicit supported trust mode');
 const linkedInstallationPath = join(packageRoot, '..', 'webenvoy-installation.json');
 let linkedInstallationExisted = false;
 try {
@@ -44,12 +50,15 @@ const agentMetadataScript = `import { createHash } from 'node:crypto'; import { 
 try {
   await mkdir(ownerData, { mode: 0o700 });
   await chmod(ownerData, 0o700);
-  const ownerSetup = run(cli, ['setup', '--data-dir', ownerData, '--agent-uid', String(agentUid)]);
+  const ownerSetup = run(cli, ['setup', '--data-dir', ownerData, ...(sameUidMode ? [] : ['--agent-uid', String(agentUid)])]);
   const bootstrap = lastJson(ownerSetup.stdout, 'owner_setup');
   const installation = JSON.parse(await readFile(join(ownerData, 'installation.json'), 'utf8'));
   await expectMissing(join(ownerData, 'owner.json'), 'owner setup must not persist an owner bearer file');
   assert.equal(installation.owner_uid, ownerUid, 'owner setup must persist the actual owner UID');
   assert.equal(installation.agent_uid, agentUid, 'owner setup must persist the actual Agent UID');
+  const expectedMode = sameUidMode ? 'trusted_local' : 'distinct_uid_hardened';
+  assert.equal(bootstrap.boundary?.mode, expectedMode, 'owner setup must report the configured trust mode');
+  assert.equal(installation.os_boundary?.mode, expectedMode, 'owner setup must persist the configured trust mode');
   agentEndpoint = bootstrap.agent_endpoint ?? installation.agent_endpoint ?? defaultAgentDataSocket(ownerData);
   assert.ok(typeof agentEndpoint === 'string' && agentEndpoint.startsWith('/'), 'owner setup must publish an absolute Agent endpoint');
   assert.ok(agentEndpoint !== ownerSocket && !agentEndpoint.startsWith(`${resolve(ownerData)}${sep}`), 'Agent endpoint must be outside owner-private data');
@@ -61,20 +70,27 @@ try {
   const ownerStatus = lastJson(run(cli, ['diagnose', '--data-dir', ownerData]).stdout, 'owner_diagnose');
   assert.equal(ownerStatus.ready, true, 'owner Runtime must become ready');
   assert.equal(ownerStatus.boundary?.state, 'supported', `OS boundary must be supported: ${JSON.stringify(ownerStatus.boundary)}`);
-  await assertAgentCannotModifyBundle();
-  await assertBundleMutationBoundary();
+  assert.equal(ownerStatus.boundary?.mode, expectedMode, 'Runtime must report the configured trust mode');
+  if (!sameUidMode) {
+    await assertAgentCannotModifyBundle();
+    await assertBundleMutationBoundary();
+  }
 
   agentHost = await mkdtempAsAgent(join('/tmp', `webenvoy-agent-host-${process.pid}-`));
-  runAsAgent(cli, ['agent', 'setup', '--host-dir', agentHost, '--data-dir', ownerData, '--owner-uid', String(ownerUid), '--agent-endpoint', agentEndpoint]);
+  const agentSetup = lastJson(runAsAgent(cli, ['agent', 'setup', '--host-dir', agentHost, '--data-dir', ownerData, '--owner-uid', String(ownerUid), '--agent-endpoint', agentEndpoint]).stdout, 'agent_setup');
+  if (sameUidMode) assert.equal(agentSetup.boundary?.mode, expectedMode, 'Agent setup must report trusted local mode');
+  else assert.equal(agentSetup.boundary?.mode, undefined, 'Agent setup must not claim the distinct-UID hardening was verified');
   clientFile = join(agentHost, 'webenvoy-client.json');
   const agentMeta = JSON.parse(runAsAgent(fixedNode, ['--input-type=module', '-e', agentMetadataScript, clientFile]).stdout);
   assert.equal(agentMeta.owner_uid, ownerUid);
   assert.equal(agentMeta.agent_uid, agentUid);
   assert.equal(agentMeta.agent_endpoint, agentEndpoint);
   assert.match(agentMeta.credential_fingerprint, /^[a-f0-9]{64}$/);
-  await expectDenied(ownerData, 'Agent must not traverse owner data');
-  await expectDenied(ownerSocket, 'Agent must not read owner control socket');
-  await expectOwnerWriteDenied(agentHost, 'Owner must not write Agent host assets');
+  if (!sameUidMode) {
+    await expectDenied(ownerData, 'Agent must not traverse owner data');
+    await expectDenied(ownerSocket, 'Agent must not read owner control socket');
+    await expectOwnerWriteDenied(agentHost, 'Owner must not write Agent host assets');
+  }
 
   const registered = lastJson(run(cli, ['access', 'register', '--data-dir', ownerData, '--display-name', 'standalone-ci-agent', '--credential-hash', agentMeta.credential_fingerprint, '--idempotency-key', 'standalone-ci-register']).stdout, 'owner_register');
   const principalId = findString(registered, ['principal_id']);
@@ -106,6 +122,18 @@ try {
   const operation = runAsAgent(cli, ['agent', 'operation', '--client-file', clientFile, '--request-file', operationFile]);
   const operationResult = lastJson(operation.stdout, 'agent_operation');
   assert.ok(findString(operationResult, ['run_id']), 'Agent operation must return a durable Run reference');
+  const deniedOperationFile = join(agentHost, 'profile-read-denied.json');
+  await writeAsAgent(deniedOperationFile, JSON.stringify({
+    idempotency_key: 'standalone-ci-profile-read-denied',
+    grant_id: grantId,
+    operation: 'profile.read',
+    profile_ref: 'profile:outside-live-grant',
+    task_scope: { operations: ['profile.read'], profile_refs: ['profile:outside-live-grant'], origins: [] }
+  }));
+  const deniedOperation = runAsAgentResult(cli, ['agent', 'operation', '--client-file', clientFile, '--request-file', deniedOperationFile]);
+  assert.equal(deniedOperation.status, 3, `out-of-scope operation must be denied: ${deniedOperation.stderr || deniedOperation.stdout}`);
+  const deniedOperationBody = lastJson(deniedOperation.stdout, 'agent_out_of_scope_operation');
+  assert.equal(deniedOperationBody.error?.code ?? deniedOperationBody.failure?.code, 'managed_access_denied', JSON.stringify(deniedOperationBody));
   const queriedBeforeStop = runAsAgent(cli, ['agent', 'query', '--client-file', clientFile, '--idempotency-key', 'standalone-ci-profile-list']);
   const queryBeforeStop = lastJson(queriedBeforeStop.stdout, 'agent_query_before_stop');
   assert.equal(findString(queryBeforeStop, ['run_id']), findString(operationResult, ['run_id']), 'query must address the original Run');
@@ -130,6 +158,7 @@ try {
     state: 'passed',
     owner_uid: ownerUid,
     agent_uid: agentUid,
+    mode: expectedMode,
     owner_data_mode: '0700',
     agent_endpoint: agentEndpoint,
     operation: 'profile.list',
@@ -150,14 +179,25 @@ try {
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { cwd: packageRoot, encoding: 'utf8', timeout: 120_000, env: { ...process.env, LC_ALL: 'C' } });
-  if (result.error) throw result.error;
+  const result = runResult(command, args);
   if (result.status !== 0) throw new Error(`boundary_command_failed:${command}:${args.join(' ')}:${result.stderr || result.stdout}`);
   return result;
 }
 
+function runResult(command, args) {
+  const result = spawnSync(command, args, { cwd: packageRoot, encoding: 'utf8', timeout: 120_000, env: { ...process.env, LC_ALL: 'C' } });
+  if (result.error) throw result.error;
+  return result;
+}
+
 function runAsAgent(command, args) {
-  return run('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', command, ...args]);
+  const result = runAsAgentResult(command, args);
+  if (result.status !== 0) throw new Error(`agent_command_failed:${command}:${args.join(' ')}:${result.stderr || result.stdout}`);
+  return result;
+}
+
+function runAsAgentResult(command, args) {
+  return sameUidMode ? runResult(command, args) : runResult('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', command, ...args]);
 }
 
 // This is a fixed-package MCP stdio client check, not a real third-party Agent
@@ -168,7 +208,8 @@ function runAgentMcpQuery(clientPath, idempotencyKey) {
     { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'webenvoy_connect', arguments: {} } },
     { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'webenvoy_query', arguments: { idempotency_key: idempotencyKey } } }
   ].map(message => JSON.stringify(message)).join('\n') + '\n';
-  const result = spawnSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', fixedNode, join(packageRoot, 'agent-entry/mcp.mjs'), clientPath], {
+  const mcpArgs = [join(packageRoot, 'agent-entry/mcp.mjs'), clientPath];
+  const result = spawnSync(sameUidMode ? fixedNode : '/usr/bin/sudo', sameUidMode ? mcpArgs : ['-n', '-u', 'nobody', '--', fixedNode, ...mcpArgs], {
     cwd: packageRoot,
     input: messages,
     encoding: 'utf8',
