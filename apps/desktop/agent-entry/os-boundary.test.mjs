@@ -23,11 +23,30 @@ test('owner and Agent endpoints use separate trust domains', async () => {
   }
 });
 
-test('same UID and unverified identity fail closed', () => {
+test('same UID uses the trusted local domain without claiming OS isolation', () => {
   const result = verifyOsBoundary({ ownerUid: process.getuid?.(), agentUid: process.getuid?.() });
+  assert.equal(result.mode, 'trusted_local');
+  assert.equal(result.identity.process_inspection, 'trusted_same_uid');
+  assert.equal(result.asset_boundary.state, 'trusted_user_domain');
+  assert.ok(!result.reason_codes.includes('owner_agent_uid_not_separated'));
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    assert.equal(result.state, 'disabled');
+    assert.ok(result.reason_codes.includes('owner_socket_acl_unavailable'));
+  } else {
+    assert.equal(result.state, 'disabled');
+    assert.ok(result.reason_codes.includes('platform_unsupported'));
+  }
+});
+
+test('distinct UID reports unverified and fails closed when hardening checks fail', () => {
+  const ownerUid = process.getuid?.();
+  const agentUid = ownerUid + 1_000_000;
+  const result = verifyOsBoundary({ ownerUid, agentUid, ownerSocketPath: '/missing/webenvoy-owner.sock', installRoot: '/missing/webenvoy-agent-bundle' });
+  assert.equal(result.mode, 'distinct_uid_unverified');
   assert.equal(result.state, 'disabled');
-  assert.equal(result.code, 'owner_agent_isolation_unavailable');
-  assert.ok(result.reason_codes.includes('owner_agent_uid_not_separated'));
+  assert.ok(!result.reason_codes.includes('owner_agent_uid_not_separated'));
+  assert.ok(result.reason_codes.includes('agent_uid_unverified'));
+  assert.ok(result.reason_codes.includes('agent_process_inspection_policy_unavailable'));
 });
 
 test('sudo policy classification uses the target user text, not only exit status', () => {
@@ -102,16 +121,19 @@ test('bundle boundary disables writable assets and parents while allowing missin
     await chmod(agentSocket, 0o666);
     const live = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     assert.equal(live.state, 'supported', JSON.stringify(live));
+    assert.equal(live.mode, 'distinct_uid_hardened');
     assert.equal(live.owner_transport, true);
     await chmod(ownerSocket, 0o666);
     const invalidSocket = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     assert.equal(invalidSocket.state, 'disabled', JSON.stringify(invalidSocket));
+    assert.equal(invalidSocket.mode, 'distinct_uid_unverified');
     assert.equal(invalidSocket.owner_transport, false);
     assert.ok(invalidSocket.reason_codes.includes('owner_socket_acl_unavailable'));
     await chmod(ownerSocket, 0o600);
     await chmod(dataDir, 0o755);
     const invalidDataDir = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     assert.equal(invalidDataDir.state, 'disabled', JSON.stringify(invalidDataDir));
+    assert.equal(invalidDataDir.mode, 'distinct_uid_unverified');
     assert.equal(invalidDataDir.owner_transport, false);
     assert.ok(invalidDataDir.reason_codes.includes('owner_data_dir_invalid'));
     await chmod(dataDir, 0o700);
@@ -119,6 +141,7 @@ test('bundle boundary disables writable assets and parents while allowing missin
     agentServer = undefined;
     const missingAgent = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     assert.equal(missingAgent.state, 'disabled', JSON.stringify(missingAgent));
+    assert.equal(missingAgent.mode, 'distinct_uid_unverified');
     assert.equal(missingAgent.agent_transport, false);
     assert.ok(missingAgent.reason_codes.includes('agent_socket_unavailable'));
     agentServer = createServer();

@@ -30,7 +30,7 @@ test('owner transport never forwards a bearer and Agent transport does', async (
     assert.deepEqual(await ownerRequest(dataDir, '/status'), { role: 'owner' });
     assert.throws(() => ownerRequest(dataDir, '/status', { credential: 'owner-secret' }), /owner_credential_forbidden/);
     agentServer = await socketServer(agentSocket, request => { requests.push(['agent', request]); return { role: 'agent' }; });
-    assert.deepEqual(await agentRequest(agentSocket, '/status', { owner_uid: process.getuid?.(), credential: 'c'.repeat(32) }), { role: 'agent' });
+    assert.deepEqual(await agentRequest({ agent_endpoint: agentSocket, owner_uid: process.getuid?.(), agent_uid: process.getuid?.() }, '/status', { credential: 'c'.repeat(32) }), { role: 'agent' });
     assert.match(requests.find(([role]) => role === 'owner')[1], /^GET \/status HTTP\/1\.1[\s\S]*\r\n\r\n$/);
     assert.doesNotMatch(requests.find(([role]) => role === 'owner')[1], /authorization:/i);
     assert.match(requests.find(([role]) => role === 'agent')[1], /authorization: Bearer c{32}/i);

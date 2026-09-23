@@ -136,6 +136,9 @@ jobs:
       - name: Verify isolated owner and Agent Runtime path
         run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
 
+      - name: Verify trusted local owner and Agent Runtime path
+        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT" --same-uid
+
       - name: Record artifact digest
         id: metadata
         shell: bash

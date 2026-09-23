@@ -45,7 +45,6 @@ export function agentRequest(endpointOrDataDir, path, options = {}) {
   const resolvedOwnerUid = ownerUid ?? endpointOrDataDir?.owner_uid;
   const resolvedAgentUid = agentUid ?? endpointOrDataDir?.agent_uid;
   if (resolvedAgentUid !== undefined) {
-    if (resolvedOwnerUid === resolvedAgentUid) throw new Error('owner_agent_isolation_unavailable');
     verifyAgentIdentity(resolvedAgentUid);
   }
   verifyAgentSocket(socketPath, { ownerUid: resolvedOwnerUid });
@@ -96,7 +95,6 @@ export async function ensureAgentRuntime(clientOrDataDir) {
   const client = typeof clientOrDataDir === 'object' && clientOrDataDir !== null ? clientOrDataDir : undefined;
   if (!client?.agent_endpoint) throw new Error('client_configuration_invalid');
   if (client.agent_uid !== undefined) {
-    if (client.owner_uid === client.agent_uid) throw new Error('owner_agent_isolation_unavailable');
     verifyAgentIdentity(client.agent_uid);
   }
   const assets = await verifyBundle();

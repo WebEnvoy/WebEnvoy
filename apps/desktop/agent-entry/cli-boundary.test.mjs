@@ -61,16 +61,16 @@ test('Agent CLI does not read owner installation link before validating request'
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('Agent setup rejects same UID without touching owner or host paths', async () => {
-  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-agent-setup-'));
-  const hostDir = join(dir, 'agent-host');
-  try {
-    const uid = process.getuid?.();
-    const result = await withInvalidOwnerLink(() => runCli(['agent', 'setup', '--host-dir', hostDir, '--data-dir', join(dir, 'owner-data'), '--owner-uid', String(uid)]));
-    assert.equal(result.code, 3);
-    assert.equal(JSON.parse(result.stderr).error.code, 'owner_agent_isolation_unavailable');
-    await assert.rejects(lstat(hostDir), error => error.code === 'ENOENT');
-  } finally { await rm(dir, { recursive: true, force: true }); }
+test('CLI describes trusted local mode without claiming OS isolation', async () => {
+  const setup = await runCli(['help', 'setup']);
+  const agentSetup = await runCli(['help', 'agent', 'setup']);
+  assert.equal(setup.code, 0);
+  assert.match(setup.stdout, /setup --data-dir OWNER_DIR \[--agent-uid UID\]/);
+  assert.match(setup.stdout, /omitting --agent-uid defaults to the\s+owner UID/);
+  assert.match(setup.stdout, /trusted local mode/);
+  assert.match(setup.stdout, /same-UID processes are not\s+OS-isolated/);
+  assert.equal(agentSetup.code, 0);
+  assert.match(agentSetup.stdout, /provides no OS isolation/);
 });
 
 test('owner list, diagnose and inspect use live reads without Runtime startup', async () => {
