@@ -10,14 +10,14 @@
 - Obscura 仅保留 [#511](https://github.com/WebEnvoy/WebEnvoy/issues/511) 的历史结论，当前愿景内不采用且不再验证；通用 Provider 选择与新建默认由 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516) 独立交付。
 - 此边界对齐已合并的 [canonical 修订 .github#21](https://github.com/WebEnvoy/.github/pull/21)；不在本仓复制第二份 canonical。
 
-## 后续已登记 Backlog
+## 后续已登记事项
 
 - [S1 #562](https://github.com/WebEnvoy/WebEnvoy/issues/562)：无 App 的 CLI、上游集成与可信用户控制。
 - [S2 #563](https://github.com/WebEnvoy/WebEnvoy/issues/563)／[S3 #564](https://github.com/WebEnvoy/WebEnvoy/issues/564)：统一站点 SKILL、确定性执行、导入、OpenCLI 转化与修复。
 - [S4 #565](https://github.com/WebEnvoy/WebEnvoy/issues/565)／[S5 #566](https://github.com/WebEnvoy/WebEnvoy/issues/566)：主动 Network 与受控视觉合同。
 - [S6 #567](https://github.com/WebEnvoy/WebEnvoy/issues/567)：长期环境与隐身质量标准。
 
-这些 Issue 的建立不授权功能开发，也不改变现有 wire。W1—W3 保持 Backlog并只依赖其直接 Spec。
+这些 Issue 的建立不授权功能开发，也不改变现有 wire。W1—W3 的实时状态以对应 GitHub Issue／Project 原生字段为准，并只依赖其直接 Spec。
 
 ## 后续
 
