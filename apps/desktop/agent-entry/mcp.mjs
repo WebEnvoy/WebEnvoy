@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { root, sha, verifyBundle } from './bundle.mjs';
-import { ensureRuntime, localRequest, readClient } from './client.mjs';
+import { agentRequest, ensureAgentRuntime, readClient } from './client.mjs';
+import { validateDescribeRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
 const client = await readClient(process.argv[2]);
 let connection;
 async function readCapabilityDefinitions() {
@@ -77,7 +78,6 @@ function checkedObservationResult(value) {
 }
 const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
 const managedOperationIds = capabilityOperations.map(definition => definition.id);
-const managedOperationSet = new Set(managedOperationIds);
 const managedFileOperationIds = capabilityOperations.filter(definition => definition.file_scope).map(definition => definition.id);
 const managedOriginOperationIds = capabilityOperations.filter(definition => definition.required.includes('origin')).map(definition => definition.id);
 const managedOperationDescription = `Submit one authorized operation using the static WebEnvoy input definition. ${capabilityOperations.map(definition => `${definition.id}: ${definition.summary}`).join(' ')} task_scope describes this submitted operation only; submit later workflow steps separately. File upload/download accepts only opaque owner references and a fresh Page target; file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation. Operation-specific origin inputs are significant: ${managedOriginOperationIds.join(', ')} require the exact authorized origin as a top-level origin field; task_scope.origins cannot replace it. Preference, Profile, Page, environment and browser actions never retry; query the original Run when an outcome is unknown. This tool executes only the submitted operation; it does not describe later workflow steps.`;
@@ -193,33 +193,15 @@ const tools = [
   { name: 'webenvoy_recovery', description: 'Inspect or request owner-managed recovery for a granted Profile, or query an existing recovery operation. This tool cannot backup, confirm, or apply a recovery.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['recovery.inspect','recovery.request','recovery.status'] }, task_scope: { type: 'object' }, profile_ref: { type: 'string' }, backup_ref: { type: 'string' }, operation_ref: { type: 'string' } }, required: ['idempotency_key','grant_id','operation','task_scope','profile_ref'], additionalProperties: false } },
   { name: 'webenvoy_skills', description: 'List, inspect, install, enable, read, update, rollback, or disable an explicitly authorized fixed SKILL revision. Reads return the verified content once; query returns only the durable receipt and summary.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['skill.list','skill.inspect','skill.install','skill.enable','skill.read','skill.update','skill.rollback','skill.disable'] }, task_scope: { type: 'object', properties: { operations: { type: 'array', items: { type: 'string' } }, skill_refs: { type: 'array', items: { type: 'string' } }, source_refs: { type: 'array', items: { type: 'string' } } }, required: ['operations','skill_refs','source_refs'], additionalProperties: false }, skill_ref: { type: 'string' }, source_ref: { type: 'string' }, revision_ref: { type: 'string' }, target_revision_ref: { type: 'string' }, expected_revision_ref: { type: ['string','null'] }, expected_current_revision_ref: { type: ['string','null'] }, expected_record_version: { type: 'integer', minimum: 0 } }, required: ['idempotency_key','grant_id','operation','task_scope'], additionalProperties: false } },
 ];
-const operationTool = tools.find(tool => tool.name === 'webenvoy_operation');
-const describeOperationPattern = new RegExp(capabilityDefinitions.operation_pattern);
-const describeArgumentFields = new Set(Object.keys(capabilityDefinitions.fields).filter(name => name !== 'profile_ref'));
-function validateDescribeInput(args) {
-  if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.operation !== 'string' || !describeOperationPattern.test(args.operation)) throw new Error('describe_input_refused');
-  if (Object.keys(args).some(key => !['operation', 'context', 'arguments'].includes(key))) throw new Error('describe_input_refused');
-  if (args.context !== undefined) {
-    const context = args.context;
-    if (!context || typeof context !== 'object' || Array.isArray(context) || Object.keys(context).some(key => !['grant_id', 'profile_ref', 'task_scope'].includes(key)) ||
-      typeof context.grant_id !== 'string' || typeof context.profile_ref !== 'string' || !context.task_scope || typeof context.task_scope !== 'object' || Array.isArray(context.task_scope)) throw new Error('describe_input_refused');
-    const scope = context.task_scope;
-    const scopeKeys = ['operations', 'profile_refs', 'origins', ...(managedFileOperationIds.includes(args.operation) ? ['file_refs'] : [])];
-    if (Object.keys(scope).some(key => !scopeKeys.includes(key)) || !Array.isArray(scope.operations) || !Array.isArray(scope.profile_refs) || !Array.isArray(scope.origins)) throw new Error('describe_input_refused');
-  }
-  if (args.arguments !== undefined) {
-    const draft = args.arguments;
-    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some(key => !describeArgumentFields.has(key))) throw new Error('describe_input_refused');
-  }
-}
 async function call(name, args) {
   await verifyBundle();
   if (name === 'webenvoy_skill') return { skill: await readFile(join(root, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8') };
-  const request = (path, body) => localRequest(client.data_dir, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
+  const request = (path, body) => agentRequest(client, path, { credential: client.credential, ...(body === undefined ? {} : { method: 'POST', body }) });
   if (name === 'webenvoy_describe') {
-    validateDescribeInput(args);
-    if (!connection) return { ok: false, error: { code: 'connect_first' } };
+    validateDescribeRequest(args, capabilityDefinitions);
     try {
+      await ensureAgentRuntime(client);
+      if (!connection) return { ok: false, error: { code: 'connect_first' } };
       const result = await request('/managed-browser/capabilities/describe', { ...args, connection_id: connection.connection_id });
       if (result?.error?.code === 'runtime_unavailable_query_without_replay') return { ok: false, error: { code: 'runtime_unavailable' } };
       if (result?.error?.code === 'managed_access_route_not_found' || result?.error?.code === 'not_found') return { ok: false, error: { code: 'discovery_not_available' } };
@@ -227,11 +209,17 @@ async function call(name, args) {
       if (result?.schema_version !== 'webenvoy.capability-description/v1' || result?.definition_revision !== installedDefinitionRevision || !hasKnownCapabilityDescriptionStates(result)) return { ok: false, error: { code: 'discovery_version_mismatch' } };
       return result;
     } catch (error) {
-      if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET'].includes(error?.code)) return { ok: false, error: { code: 'runtime_unavailable' } };
+      const message = typeof error?.message === 'string' ? error.message : '';
+      if (['ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'runtime_unavailable'].includes(error?.code) || message === 'runtime_unavailable' || message.startsWith('runtime_unavailable:')) return { ok: false, error: { code: 'runtime_unavailable' } };
       throw error;
     }
   }
-  const status = await ensureRuntime(client.data_dir);
+  if (name === 'webenvoy_operation') validateOperationRequest(args, capabilityDefinitions);
+  if (name === 'webenvoy_recovery') validateRecoveryRequest(args);
+  if (name === 'webenvoy_skills') validateSkillsRequest(args);
+  if (name === 'webenvoy_query') validateQueryInput(args);
+  if (['webenvoy_operation', 'webenvoy_recovery', 'webenvoy_skills'].includes(name) && !connection) return { ok: false, error: { code: 'connect_first' } };
+  const status = await ensureAgentRuntime(client);
   if (name === 'webenvoy_status') {
     const publicStatus = { ...status };
     delete publicStatus.camoufoxArtifact;
@@ -259,24 +247,31 @@ async function call(name, args) {
   }
   if (name === 'webenvoy_operation') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    if (!managedOperationSet.has(args.operation) || Object.keys(args).some(k => !(k in operationTool.inputSchema.properties))) throw new Error('operation_input_refused');
-    const scope = args.task_scope;
-    if (!managedFileOperationIds.includes(args.operation) && scope && typeof scope === 'object' && !Array.isArray(scope) && Object.hasOwn(scope, 'file_refs')) throw new Error('operation_input_refused');
-    if (managedOriginOperationIds.includes(args.operation) && typeof args.origin !== 'string') throw new Error('operation_input_refused');
-    return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }));
+    try { return checkedObservationResult(await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id })); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   if (name === 'webenvoy_recovery') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    if (!['recovery.inspect','recovery.request','recovery.status'].includes(args.operation)) throw new Error('recovery_input_refused');
-    return request('/managed-browser/operations', { ...args, connection_id: connection.connection_id });
+    try { return await request('/managed-browser/operations', { ...args, connection_id: connection.connection_id }); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   if (name === 'webenvoy_skills') {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
-    const schema = tools.find(tool => tool.name === 'webenvoy_skills').inputSchema;
-    if (!schema.properties.operation.enum.includes(args.operation) || Object.keys(args).some(k => !(k in schema.properties))) throw new Error('skill_input_refused');
-    return request('/managed-skills/operations', { ...args, connection_id: connection.connection_id });
+    try { return await request('/managed-skills/operations', { ...args, connection_id: connection.connection_id }); }
+    catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
   }
   throw new Error('tool_not_found');
+}
+function isDispatchedResponseLoss(error) {
+  return ['runtime_response_aborted', 'runtime_response_invalid', 'runtime_timeout', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(error?.code ?? error?.message?.split(':', 1)[0]);
+}
+function unknownAgentOutcome(idempotencyKey) {
+  return { ok: false, status: 'unknown_outcome', dispatch_state: 'dispatched', idempotency_key: idempotencyKey, failure: { code: 'managed_browser_outcome_unknown' }, reconciliation: null };
+}
+function validateQueryInput(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !['run_id', 'idempotency_key'].includes(key)) || args.run_id !== undefined && args.idempotency_key !== undefined || args.run_id === undefined && args.idempotency_key === undefined) throw new Error('query_input_refused');
+  if (args.run_id !== undefined && (typeof args.run_id !== 'string' || !/^managed-[a-f0-9]{64}$/.test(args.run_id))) throw new Error('query_input_refused');
+  if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== 'string' || !args.idempotency_key.length || args.idempotency_key.length > 512)) throw new Error('query_input_refused');
 }
 async function handle(message) {
   const { id, method, params } = message;

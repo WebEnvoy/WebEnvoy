@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "outDir": "dist-electron",
+    "rootDir": "src/electron"
+  },
+  "include": [
+    "src/electron/runtimeSupervisor.ts",
+    "src/electron/lodeAssetBundle.ts",
+    "src/electron/lodeAssetAccess.ts"
+  ]
+}

@@ -19,6 +19,8 @@ import {
 } from "./profile-storage.js";
 import {
   HARBOR_RUNTIME_FACTS_SCHEMA,
+  HARBOR_RUNTIME_SESSION_LIST_SCHEMA,
+  HARBOR_CONTROL_PRECONDITION_SCHEMA,
   HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA,
   isRuntimeSessionReadable,
   type CreateRuntimeSessionInput,
@@ -44,6 +46,11 @@ import {
   type RuntimePageFacts,
   type RuntimeSessionControlInput,
   type RuntimeSessionFacts,
+  type RuntimeControlPrecondition,
+  type RuntimeControlSnapshot,
+  type RuntimeSessionOwnerList,
+  type RuntimeSessionOwnerProjection,
+  type RuntimeSessionOwnerSummary,
   type RuntimeSessionUnavailable,
   type RuntimeViewerEntry,
   type ValidationRuntimeFacts
@@ -75,6 +82,8 @@ import type {
 
 export {
   HARBOR_RUNTIME_FACTS_SCHEMA,
+  HARBOR_RUNTIME_SESSION_LIST_SCHEMA,
+  HARBOR_CONTROL_PRECONDITION_SCHEMA,
   HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA
 } from "./runtime-session-types.js";
 export type {
@@ -123,6 +132,8 @@ export type {
   ProviderMode,
   RuntimeControlLockFacts,
   RuntimeControlLockState,
+  RuntimeControlPrecondition,
+  RuntimeControlSnapshot,
   RuntimeErrorCode,
   RuntimeErrorFact,
   RuntimeFact,
@@ -130,6 +141,9 @@ export type {
   RuntimePageStatus,
   RuntimeSessionControlInput,
   RuntimeSessionFacts,
+  RuntimeSessionOwnerList,
+  RuntimeSessionOwnerProjection,
+  RuntimeSessionOwnerSummary,
   RuntimeSessionUnavailable,
   RuntimeViewerEntry,
   ValidationRuntimeFacts
@@ -508,6 +522,17 @@ export class RuntimeSessionStore {
     return facts ? snapshot(facts) : null;
   }
 
+  getOwnerSessionFacts(runtime_session_ref: string): RuntimeSessionOwnerProjection | null {
+    const record = this.records.get(runtime_session_ref);
+    return record ? { ...snapshot(record.facts), control_generation: record.control_generation } : null;
+  }
+
+  listOwnerSessionFacts(profile_ref?: string): RuntimeSessionOwnerSummary[] {
+    return [...this.records.values()]
+      .filter(record => record.facts.lifecycle_state !== "closed" && (profile_ref === undefined || record.facts.profile_ref === profile_ref))
+      .map(record => ownerSessionSummary(record));
+  }
+
   getActiveIdentityEnvironmentSession(identity_environment_ref: string): RuntimeSessionFacts | null {
     for (const record of this.records.values()) {
       if (record.facts.identity_environment_ref === identity_environment_ref &&
@@ -554,6 +579,15 @@ export class RuntimeSessionStore {
 
   getRecord(runtime_session_ref: string): RuntimeSessionRecord | undefined {
     return this.records.get(runtime_session_ref);
+  }
+
+  checkControlPrecondition(
+    runtime_session_ref: string,
+    expected_control: RuntimeControlPrecondition | undefined
+  ): RuntimeSessionUnavailable | null {
+    const record = this.records.get(runtime_session_ref);
+    if (!record || !expected_control || controlMatches(record, expected_control)) return null;
+    return controlStateChanged(record);
   }
 
   async listManagedPages(runtime_session_ref: string, authorized_origins: readonly string[] = [], holder_ref?: string, scope_semantics?: ManagedScopeSemantics): Promise<ManagedPageList | ManagedPageUnavailable> {
@@ -722,9 +756,13 @@ export class RuntimeSessionStore {
   lockSession(runtime_session_ref: string, input: RuntimeSessionControlInput = {}): RuntimeSessionFacts | RuntimeSessionUnavailable {
     const record = this.records.get(runtime_session_ref);
     if (!record) return unavailableSession("session_missing", error("session_lost", "Runtime Session is missing.", true));
+    const precondition = this.checkControlPrecondition(runtime_session_ref, input.expected_control);
+    if (precondition) return precondition;
     const owner = input.control_owner ?? "user";
     const holder_ref = input.holder_ref ?? owner;
-    const preserveReleasedSnapshotGeneration = canPreserveReleasedSnapshotGeneration(record, owner, holder_ref);
+    if (input.expected_control && owner === "user" && isReleasedControl(record) && record.facts.availability.viewer !== "available") {
+      return unavailableSession("viewer_unavailable", error("viewer_unavailable", "Runtime Session has no interactive local viewer.", false));
+    }
     const conflict = this.acquireControl(record, owner, holder_ref);
     if (conflict) return conflict;
     const now = new Date().toISOString();
@@ -732,14 +770,15 @@ export class RuntimeSessionStore {
     record.facts.last_seen_at = now;
     record.facts.control_lock.state = "held";
     record.facts.control_lock.updated_at = now;
-    if (!preserveReleasedSnapshotGeneration) bumpControlGeneration(record);
     record.facts.facts.push({ key: "session.lock", source: "observed", value: record.facts.control_owner });
-    return snapshot(record.facts);
+    return input.expected_control ? this.getOwnerSessionFacts(runtime_session_ref)! : snapshot(record.facts);
   }
 
   releaseSession(runtime_session_ref: string, input: RuntimeSessionControlInput = {}): RuntimeSessionFacts | RuntimeSessionUnavailable {
     const record = this.records.get(runtime_session_ref);
     if (!record) return unavailableSession("session_missing", error("session_lost", "Runtime Session is missing.", true));
+    const precondition = this.checkControlPrecondition(runtime_session_ref, input.expected_control);
+    if (precondition) return precondition;
     if (record.facts.lifecycle_state !== "active" && record.facts.lifecycle_state !== "locked") {
       return unavailableSession("session_cleanup_failed", error("session_cleanup_failed", "Runtime Session is not releasable.", true));
     }
@@ -769,7 +808,7 @@ export class RuntimeSessionStore {
     record.read_operation_user_handoff = false;
     this.viewerControls.recordHandoff(runtime_session_ref, { control_owner: "none" });
     record.facts.facts.push({ key: "session.release", source: "observed", value: owner ?? "unscoped" });
-    return snapshot(record.facts);
+    return input.expected_control ? this.getOwnerSessionFacts(runtime_session_ref)! : snapshot(record.facts);
   }
 
   async stopSession(runtime_session_ref: string, input: RuntimeSessionControlInput = {}): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
@@ -885,8 +924,18 @@ export class RuntimeSessionStore {
    * Agent input cannot enter; the owner retries the same handoff after the
    * admitted operation reaches its existing receipt boundary.
    */
-  prepareHandoff(runtime_session_ref: string): ViewerControlUnavailable | null {
+  prepareHandoff(runtime_session_ref: string, expected_control?: RuntimeControlPrecondition, holder_ref?: string): ViewerControlUnavailable | null {
     const record = this.records.get(runtime_session_ref);
+    const precondition = this.checkControlPrecondition(runtime_session_ref, expected_control);
+    if (precondition) return precondition as unknown as ViewerControlUnavailable;
+    if (record && expected_control && (record.facts.control_owner !== "core_task" ||
+      record.facts.control_lock.owner !== "core_task" || record.facts.control_lock.state !== "held" ||
+      (holder_ref !== undefined && record.facts.control_lock.holder_ref !== holder_ref))) {
+      return controlStateChanged(record) as unknown as ViewerControlUnavailable;
+    }
+    if (record && expected_control && record.facts.availability.viewer !== "available") {
+      return { status: "unavailable", failure_class: "viewer_unavailable", message: "Runtime Session has no interactive local viewer.", retryable: false };
+    }
     if (!record || record.active_provider_interactions === 0 || record.active_provider_interaction_kind === "passive_wait") return null;
     // A handoff is only a Core->user transition. A caller cannot create a
     // dangling intent while a lease-free/user-controlled Page is merely
@@ -1747,6 +1796,66 @@ function lockConflict(record: RuntimeSessionRecord, requestedOwner: ControlOwner
   // A rejected control request is not a driver or page health failure.
   record.facts.control_lock.conflict_error = current_error;
   return unavailableSession("session_locked", current_error);
+}
+
+function controlStateChanged(record: RuntimeSessionRecord): RuntimeSessionUnavailable {
+  const current_error = error("control_state_changed", "Runtime Session control state changed.", true);
+  return {
+    status: "unavailable",
+    failure_class: "control_state_changed",
+    message: current_error.message,
+    retryable: current_error.retryable,
+    current_error,
+    current_control: controlSnapshot(record)
+  };
+}
+
+function controlSnapshot(record: RuntimeSessionRecord): RuntimeControlSnapshot {
+  return {
+    control_owner: record.facts.control_owner,
+    lock_owner: record.facts.control_lock.owner,
+    lock_state: record.facts.control_lock.state,
+    holder_ref: record.facts.control_lock.holder_ref,
+    control_generation: record.control_generation
+  };
+}
+
+function controlMatches(record: RuntimeSessionRecord, expected: RuntimeControlPrecondition): boolean {
+  const lock = record.facts.control_lock;
+  return expected.schema_version === HARBOR_CONTROL_PRECONDITION_SCHEMA &&
+    expected.control_owner === record.facts.control_owner &&
+    expected.lock_owner === lock.owner &&
+    expected.lock_state === lock.state &&
+    expected.holder_ref === lock.holder_ref &&
+    expected.control_generation === record.control_generation;
+}
+
+function ownerSessionSummary(record: RuntimeSessionRecord): RuntimeSessionOwnerSummary {
+  const { facts } = record;
+  return {
+    schema_version: HARBOR_RUNTIME_FACTS_SCHEMA,
+    runtime_session_ref: facts.runtime_session_ref,
+    ...(facts.identity_environment_ref === undefined ? {} : { identity_environment_ref: facts.identity_environment_ref }),
+    profile_ref: facts.profile_ref,
+    provider_ref: facts.provider_ref,
+    lifecycle_state: facts.lifecycle_state,
+    created_at: facts.created_at,
+    last_seen_at: facts.last_seen_at,
+    availability: snapshot(facts.availability),
+    control_owner: facts.control_owner,
+    control_generation: record.control_generation,
+    control_lock: {
+      owner: facts.control_lock.owner,
+      state: facts.control_lock.state,
+      holder_ref: facts.control_lock.holder_ref
+    },
+    current_page: {
+      ...(facts.current_page.page_ref === undefined ? {} : { page_ref: facts.current_page.page_ref }),
+      ...(facts.current_page.document_generation === undefined ? {} : { document_generation: facts.current_page.document_generation }),
+      status: facts.current_page.status
+    },
+    current_error: facts.current_error ? { code: facts.current_error.code } : null
+  };
 }
 
 function hasControlConflict(record: RuntimeSessionRecord, owner: ControlOwner, holder_ref: string): boolean {

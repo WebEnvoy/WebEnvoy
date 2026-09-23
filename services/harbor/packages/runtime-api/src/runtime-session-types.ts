@@ -6,6 +6,8 @@ import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const HARBOR_RUNTIME_FACTS_SCHEMA = "harbor-runtime-facts/v0";
 export const HARBOR_VALIDATION_RUNTIME_FACTS_SCHEMA = "harbor-validation-runtime-facts/v0";
+export const HARBOR_RUNTIME_SESSION_LIST_SCHEMA = "harbor-runtime-session-list/v1";
+export const HARBOR_CONTROL_PRECONDITION_SCHEMA = "harbor-control-precondition/v1";
 
 export type AvailabilityState = "available" | "unavailable" | "policy_denied" | "unsupported";
 export type FactSource = "configured" | "observed" | "provider_claim" | "validation_evidence";
@@ -19,6 +21,7 @@ export type RuntimeErrorCode =
   | "launch_failed"
   | "url_unreachable"
   | "session_locked"
+  | "viewer_unavailable"
   | "session_cleanup_failed"
   | "cdp_unavailable"
   | "driver_unavailable"
@@ -26,6 +29,7 @@ export type RuntimeErrorCode =
   | "recovery_operation_unfinished"
   | "session_lost"
   | "capture_denied"
+  | "control_state_changed"
   | "unsupported";
 
 export interface RuntimeFact {
@@ -43,6 +47,25 @@ export interface RuntimeErrorFact {
 
 export type RuntimePageStatus = "loading" | "ready" | "failed" | "closed" | "unavailable" | "unknown";
 export type RuntimeControlLockState = "held" | "released" | "closed";
+
+export type RuntimeControlPreconditionOwner = Extract<ControlOwner, "core_task" | "user" | "none">;
+
+export interface RuntimeControlSnapshot {
+  control_owner: ControlOwner;
+  lock_owner: ControlOwner;
+  lock_state: RuntimeControlLockState;
+  holder_ref: string | null;
+  control_generation: number;
+}
+
+export interface RuntimeControlPrecondition {
+  schema_version: typeof HARBOR_CONTROL_PRECONDITION_SCHEMA;
+  control_owner: RuntimeControlPreconditionOwner;
+  lock_owner: RuntimeControlPreconditionOwner;
+  lock_state: RuntimeControlLockState;
+  holder_ref: string | null;
+  control_generation: number;
+}
 
 export interface LocalProviderScreenshotFacts {
   screenshot_ref: string;
@@ -87,10 +110,11 @@ export interface RuntimeControlLockFacts {
 
 export interface RuntimeSessionUnavailable {
   status: "unavailable";
-  failure_class: "identity_environment_unavailable" | "session_locked" | "session_cleanup_failed" | "session_missing" | "url_unreachable";
+  failure_class: "identity_environment_unavailable" | "session_locked" | "viewer_unavailable" | "session_cleanup_failed" | "session_missing" | "url_unreachable" | "control_state_changed";
   message: string;
   retryable: boolean;
   current_error: RuntimeErrorFact;
+  current_control?: RuntimeControlSnapshot;
 }
 
 export interface RuntimeSessionFacts {
@@ -185,6 +209,33 @@ export interface OpenIdentityEnvironmentSessionInput extends CreateRuntimeSessio
 export interface RuntimeSessionControlInput {
   control_owner?: ControlOwner;
   holder_ref?: string;
+  expected_control?: RuntimeControlPrecondition;
+}
+
+export interface RuntimeSessionOwnerProjection extends RuntimeSessionFacts {
+  control_generation: number;
+}
+
+export interface RuntimeSessionOwnerSummary {
+  schema_version: typeof HARBOR_RUNTIME_FACTS_SCHEMA;
+  runtime_session_ref: string;
+  identity_environment_ref?: string;
+  profile_ref: string;
+  provider_ref: string;
+  lifecycle_state: LifecycleState;
+  created_at: string;
+  last_seen_at: string;
+  availability: RuntimeSessionFacts["availability"];
+  control_owner: ControlOwner;
+  control_generation: number;
+  control_lock: Pick<RuntimeControlLockFacts, "owner" | "state" | "holder_ref">;
+  current_page: Pick<RuntimePageFacts, "page_ref" | "document_generation" | "status">;
+  current_error: Pick<RuntimeErrorFact, "code"> | null;
+}
+
+export interface RuntimeSessionOwnerList {
+  schema_version: typeof HARBOR_RUNTIME_SESSION_LIST_SCHEMA;
+  sessions: RuntimeSessionOwnerSummary[];
 }
 
 export interface LocalProviderLaunchInput {

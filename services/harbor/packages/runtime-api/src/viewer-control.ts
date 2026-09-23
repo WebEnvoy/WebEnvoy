@@ -1,5 +1,5 @@
 import { opaqueRef } from "./refs.js";
-import type { RuntimeErrorFact } from "./runtime-session-types.js";
+import type { RuntimeControlPrecondition, RuntimeControlSnapshot, RuntimeErrorFact } from "./runtime-session-types.js";
 
 export const HARBOR_VIEWER_CONTROL_FACTS_SCHEMA = "harbor-viewer-control-facts/v0";
 export const HARBOR_CORE_RUNTIME_FACTS_SCHEMA = "harbor-core-runtime-facts/v0";
@@ -27,7 +27,7 @@ export type TakeoverUnavailableReason =
   | "unsupported";
 export type ViewerAccessMode = "none" | "read_only" | "interactive" | "input_disabled";
 export type ViewerAvailability = "available" | "unavailable" | "permission_denied" | "expired" | "unsupported";
-export type ViewerControlFailureClass = "session_locked" | "session_missing" | "viewer_unavailable" | "control_owner_unknown";
+export type ViewerControlFailureClass = "session_locked" | "session_missing" | "viewer_unavailable" | "control_owner_unknown" | "control_state_changed";
 export type ViewerTransport = "not_applicable" | "local_window" | "remote_vnc" | "remote_browser_viewer";
 
 export interface ViewerControlSessionFacts {
@@ -102,9 +102,11 @@ export interface ViewerControlFacts {
 
 export interface RecordHandoffInput {
   control_owner: ControlOwner;
+  holder_ref?: string;
   handoff_reason?: HandoffReason;
   takeover_available?: boolean;
   takeover_unavailable_reason?: TakeoverUnavailableReason;
+  expected_control?: RuntimeControlPrecondition;
 }
 
 export interface ViewerControlUnavailable {
@@ -112,6 +114,7 @@ export interface ViewerControlUnavailable {
   failure_class: ViewerControlFailureClass;
   message: string;
   retryable: boolean;
+  current_control?: RuntimeControlSnapshot;
 }
 
 export interface CoreRuntimeFacts {

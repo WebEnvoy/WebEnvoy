@@ -2,11 +2,15 @@ import { boundedManagedRef, managedOperationCatalog } from "./managed-observatio
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   HarborRuntime,
+  HARBOR_CONTROL_PRECONDITION_SCHEMA,
   HARBOR_RUNTIME_FACTS_SCHEMA,
   ManagedFileError,
   type OpenIdentityEnvironmentSessionInput,
+  type RuntimeControlPrecondition,
   type RuntimeErrorFact,
   type RuntimeSessionControlInput,
+  type RuntimeSessionFacts,
+  type RuntimeSessionUnavailable,
   type SiteResourceFactsInput,
   type WritePrecheckInput
 } from "./index.js";
@@ -172,6 +176,14 @@ async function route(
   }
   if (method === "GET" && url.pathname === "/runtime/managed-operation-catalog") {
     writeJson(response, 200, managedOperationCatalog); return;
+  }
+
+  if (method === "GET" && url.pathname === "/runtime/sessions") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const profile_ref = url.searchParams.get("profile_ref");
+    if (profile_ref !== null && !boundedManagedRef(profile_ref)) throw new BadRequest("Invalid profile reference.");
+    writeJson(response, 200, runtime.listOwnerSessionFacts(profile_ref ?? undefined));
+    return;
   }
   if (method === "POST" && url.pathname === "/runtime/capabilities/describe") {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
@@ -389,6 +401,7 @@ function readinessBody(): object {
       "/runtime/profile-recovery/operations/{operation_ref}",
       "/runtime/identity-environments/{identity_environment_ref}",
       "/runtime/identity-environment-sessions",
+      "/runtime/sessions",
       "/runtime/sessions/{runtime_session_ref}",
       "/runtime/sessions/{runtime_session_ref}/runtime-facts",
       "/runtime/sessions/{runtime_session_ref}/diagnostics",
@@ -566,7 +579,11 @@ async function routeSession(
     return;
   }
   if (!action && method === "GET") {
-    const session = runtime.getSession(runtimeSessionRef);
+    const ownerProjection = request.headers.authorization !== undefined;
+    if (ownerProjection && !authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const session = ownerProjection
+      ? runtime.getOwnerSessionFacts(runtimeSessionRef)
+      : runtime.getSession(runtimeSessionRef);
     const unavailable = sessionReadUnavailable(runtimeSessionRef, session?.current_error);
     writeJson(response, unavailable ? 404 : 200, unavailable ?? session);
     return;
@@ -636,38 +653,77 @@ async function routeSession(
   if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
   const body = await readJson<RuntimeSessionControlInput & Record<string, unknown>>(request, {});
   if (action === "handoff") {
-    if (!["control_owner,expected_control_owner,handoff_reason", "control_owner,expected_control_owner,handoff_reason,holder_ref"].includes(Object.keys(body).sort().join(",")) ||
+    const expected_control = parseControlPrecondition(body.expected_control);
+    const allowedKeys = expected_control
+      ? ["control_owner,expected_control,expected_control_owner,handoff_reason", "control_owner,expected_control,expected_control_owner,handoff_reason,holder_ref"]
+      : ["control_owner,expected_control_owner,handoff_reason", "control_owner,expected_control_owner,handoff_reason,holder_ref"];
+    if (!allowedKeys.includes(Object.keys(body).sort().join(",")) ||
       (body.holder_ref !== undefined && !boundedManagedRef(body.holder_ref)) ||
       body.control_owner !== "user" || body.expected_control_owner !== "core_task" || body.handoff_reason !== "user_requested") {
       throw new BadRequest("Invalid Runtime Session handoff request.");
     }
-    const current = runtime.getSession(runtimeSessionRef);
+    const current = runtime.getOwnerSessionFacts(runtimeSessionRef);
     if (!current) {
       writeJson(response, 404, sessionReadUnavailable(runtimeSessionRef, undefined));
       return;
     }
-    if (current.control_owner !== body.expected_control_owner || current.control_lock.state !== "held" ||
-      (body.holder_ref !== undefined && current.control_lock.holder_ref !== body.holder_ref)) {
+    if (!expected_control && (current.control_owner !== body.expected_control_owner || current.control_lock.state !== "held" ||
+      (body.holder_ref !== undefined && current.control_lock.holder_ref !== body.holder_ref))) {
       writeJson(response, 409, { status: "unavailable", failure_class: "session_locked", message: "Runtime Session control owner changed before handoff.", retryable: true });
       return;
     }
-    if (current.availability.viewer !== "available") {
+    if (!expected_control && current.availability.viewer !== "available") {
       writeJson(response, 409, { status: "unavailable", failure_class: "viewer_unavailable", message: "Runtime Session has no interactive local viewer.", retryable: false });
       return;
     }
-    const handoff = runtime.recordHandoff(runtimeSessionRef, { control_owner: "user", handoff_reason: "user_requested" });
+    const handoff = runtime.recordHandoff(runtimeSessionRef, {
+      control_owner: "user",
+      holder_ref: typeof body.holder_ref === "string" ? body.holder_ref : undefined,
+      handoff_reason: "user_requested",
+      expected_control
+    });
     if (!("status" in handoff)) {
       const cleared = await runtime.clearManagedPublicPageGuard(runtimeSessionRef);
       if (cleared.status !== "completed") { writeJson(response, 409, cleared); return; }
     }
-    const transferred = runtime.getSession(runtimeSessionRef);
+    const transferred = runtime.getOwnerSessionFacts(runtimeSessionRef);
     writeJson(response, "status" in handoff || !transferred ? 409 : 200, "status" in handoff ? handoff : transferred);
   }
-  else if (action === "lock") writeJson(response, 200, runtime.lockSession(runtimeSessionRef, body));
-  else if (action === "release") writeJson(response, 200, runtime.releaseSession(runtimeSessionRef, body));
+  else if (action === "lock") {
+    parseControlPrecondition(body.expected_control);
+    const result = runtime.lockSession(runtimeSessionRef, body);
+    writeJson(response, controlMutationStatusCode(result), result);
+  }
+  else if (action === "release") {
+    parseControlPrecondition(body.expected_control);
+    const result = runtime.releaseSession(runtimeSessionRef, body);
+    writeJson(response, controlMutationStatusCode(result), result);
+  }
   else if (action === "stop") writeJson(response, 200, await runtime.stopSession(runtimeSessionRef, body));
   else if (action === "snapshot") writeJson(response, 201, await runtime.captureLiveSnapshot(runtimeSessionRef));
   else writeJson(response, 404, { error: "not_found", path: `/runtime/sessions/${runtimeSessionRef}/${action}` });
+}
+
+function parseControlPrecondition(value: unknown): RuntimeControlPrecondition | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequest("Invalid Runtime Session control precondition.");
+  const body = value as Record<string, unknown>;
+  const allowed = ["control_owner", "control_generation", "holder_ref", "lock_owner", "lock_state", "schema_version"];
+  if (Object.keys(body).some(key => !allowed.includes(key)) ||
+    body.schema_version !== HARBOR_CONTROL_PRECONDITION_SCHEMA ||
+    !["core_task", "user", "none"].includes(String(body.control_owner)) ||
+    !["core_task", "user", "none"].includes(String(body.lock_owner)) ||
+    !["held", "released", "closed"].includes(String(body.lock_state)) ||
+    (body.holder_ref !== null && !boundedManagedRef(body.holder_ref)) ||
+    !Number.isSafeInteger(body.control_generation) || Number(body.control_generation) < 0) {
+    throw new BadRequest("Invalid Runtime Session control precondition.");
+  }
+  return body as unknown as RuntimeControlPrecondition;
+}
+
+function controlMutationStatusCode(result: RuntimeSessionFacts | RuntimeSessionUnavailable): number {
+  return typeof result === "object" && result !== null && "failure_class" in result &&
+    (result.failure_class === "control_state_changed" || result.failure_class === "viewer_unavailable") ? 409 : 200;
 }
 
 function authorizeCoreControl(

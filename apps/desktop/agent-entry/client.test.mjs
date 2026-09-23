@@ -37,10 +37,77 @@ async function stopChild(child) {
   }
 }
 
+function firstJsonMessage(child, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stderr = '';
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('error', onError);
+      child.removeListener('exit', onExit);
+      child.stdout.removeListener('data', onData);
+      child.stderr?.removeListener('data', onStderr);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const onError = error => finish(error);
+    const onExit = (code, signal) => finish(new Error(`child_exited_before_response:${code ?? signal ?? 'unknown'}${stderr ? `:${stderr.trim()}` : ''}`));
+    const onStderr = chunk => { stderr += chunk.toString('utf8'); };
+    const onData = chunk => {
+      try { finish(undefined, JSON.parse(chunk.toString('utf8'))); } catch (error) { finish(error); }
+    };
+    const timer = setTimeout(() => finish(new Error('child_response_timeout')), timeoutMs);
+    child.once('error', onError);
+    child.once('exit', onExit);
+    child.stderr?.on('data', onStderr);
+    child.stdout.once('data', onData);
+  });
+}
+
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (!value || typeof value !== 'object') return JSON.stringify(value);
   return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+}
+
+const fixtureOwnerUid = () => (process.getuid?.() ?? 1) === 1 ? 2 : 1;
+function fixtureClient(dataDir, agentEndpoint) {
+  return {
+    data_dir: dataDir,
+    credential: 'c'.repeat(32),
+    agent_endpoint: agentEndpoint,
+    owner_uid: fixtureOwnerUid(),
+    agent_uid: process.getuid?.() ?? 1
+  };
+}
+async function writeFixtureClient(path, dataDir, agentEndpoint) {
+  await writeFile(path, JSON.stringify(fixtureClient(dataDir, agentEndpoint)), { mode: 0o600 });
+}
+
+// These MCP projection fixtures intentionally mock only the client transport.
+// They exercise MCP shape and no-fallback behavior; cross-UID IPC is covered by
+// the macOS standalone lane and must not be inferred from this same-UID fixture.
+const MOCK_CLIENT_MODULE = [
+  "import { request } from 'node:http';",
+  "import { readFile } from 'node:fs/promises';",
+  "function endpoint(target) { return typeof target === 'string' ? target + '/runtime.sock' : target.agent_endpoint; }",
+  "export async function readClient(path) { return JSON.parse(await readFile(path, 'utf8')); }",
+  "export function localRequest(target, path, { method = 'GET', body, credential } = {}) {",
+  "  return new Promise((resolve, reject) => {",
+  "    const req = request({ socketPath: endpoint(target), path, method, headers: { 'content-type': 'application/json', ...(credential ? { authorization: `Bearer ${credential}` } : {}) } }, response => {",
+  "      const chunks = []; response.on('data', chunk => chunks.push(chunk)); response.on('error', reject); response.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (error) { reject(error); } });",
+  "    });",
+  "    req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));",
+  "  });",
+  "}",
+  "export function agentRequest(target, path, options = {}) { return localRequest(target, path, options); }",
+  "export async function ensureAgentRuntime(target) { return localRequest(target, '/status'); }",
+  "export const ensureRuntime = ensureAgentRuntime;"
+].join('\n');
+async function installMockClient(bundleRoot) {
+  await writeFile(join(bundleRoot, 'agent-entry/client.mjs'), MOCK_CLIENT_MODULE);
 }
 
 test('localRequest preserves UTF-8 when a socket response splits a code point', async () => {
@@ -58,7 +125,7 @@ test('localRequest preserves UTF-8 when a socket response splits a code point', 
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   try {
-    assert.deepEqual(await localRequest(dataDir, '/status'), { ok: true, text: '时间和范围' });
+    assert.deepEqual(await localRequest(socketPath, '/status'), { ok: true, text: '时间和范围' });
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(dataDir, { recursive: true, force: true });
@@ -70,12 +137,9 @@ test('MCP guidance exposes instance.start origin admission', async () => {
   const clientPath = join(dataDir, 'client.json');
   let child;
   try {
-    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
-    child = spawn(process.execPath, [join(root, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
-    const responsePromise = new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.stdout.once('data', chunk => { try { resolve(JSON.parse(chunk.toString('utf8'))); } catch (error) { reject(error); } });
-    });
+    await writeFixtureClient(clientPath, dataDir, join(tmpdir(), `webenvoy-agent-fixture-${process.pid}-${Date.now()}.sock`));
+    child = spawn(process.execPath, [join(root, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const responsePromise = firstJsonMessage(child);
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) + '\n');
     const response = await responsePromise;
     const operation = response.result.tools.find(tool => tool.name === 'webenvoy_operation');
@@ -178,7 +242,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
   const socketPath = join(dataDir, 'runtime.sock');
   const clientPath = join(dataDir, 'client.json');
   const files = [
-    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
@@ -192,9 +256,10 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(root, name), target);
     }
+    await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
-    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
+    await writeFixtureClient(clientPath, dataDir, socketPath);
     const requests = [];
     server = createServer(socket => socket.once('data', chunk => {
       const path = chunk.toString('utf8').split('\r\n', 1)[0].split(' ')[1];
@@ -208,7 +273,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 ${path === '/managed-browser/capabilities/describe' ? '404 Not Found' : '200 OK'}\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
     }));
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
-    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
     const call = async (id, name, args = {}) => {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
@@ -218,12 +283,12 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
     assert.equal((await call(1, 'webenvoy_connect')).ok, true);
     const oldRuntime = await call(2, 'webenvoy_describe', { operation: 'instance.snapshot' });
     assert.equal(oldRuntime.error.code, 'discovery_not_available');
-    assert.deepEqual(requests, ['/status', '/agent-connections', '/managed-browser/capabilities/describe']);
+    assert.deepEqual(requests, ['/status', '/agent-connections', '/status', '/managed-browser/capabilities/describe']);
     await new Promise(resolve => server.close(resolve));
     server = undefined;
     const stoppedRuntime = await call(3, 'webenvoy_describe', { operation: 'instance.snapshot' });
     assert.equal(stoppedRuntime.error.code, 'runtime_unavailable');
-    assert.deepEqual(requests, ['/status', '/agent-connections', '/managed-browser/capabilities/describe'], 'describe must not call status or a fallback route');
+    assert.deepEqual(requests, ['/status', '/agent-connections', '/status', '/managed-browser/capabilities/describe'], 'describe must not start Runtime or use a fallback route');
     await assert.rejects(lstat(socketPath), error => error?.code === 'ENOENT');
   } finally {
     await stopChild(child);
@@ -238,7 +303,7 @@ test('MCP validates capability description states and forwards correction guidan
   const socketPath = join(dataDir, 'runtime.sock');
   const clientPath = join(dataDir, 'client.json');
   const files = [
-    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
@@ -252,11 +317,12 @@ test('MCP validates capability description states and forwards correction guidan
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(root, name), target);
     }
+    await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0',
       host: { electron_version: process.versions.electron ?? null, executable_sha256: sha(await readFile(process.execPath)) },
       files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
-    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
+    await writeFixtureClient(clientPath, dataDir, socketPath);
     const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
     const revision = `sha256:${createHash('sha256').update(canonical(definitions)).digest('hex')}`;
     const base = {
@@ -305,7 +371,7 @@ test('MCP validates capability description states and forwards correction guidan
       socket.end(Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`), body]));
     }));
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
-    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+    child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
     const call = async (id, name, args = {}) => {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
@@ -354,6 +420,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     'agent-entry/client.mjs',
     'agent-entry/service.mjs',
     'agent-entry/bundle.mjs',
+    'agent-entry/request-validation.mjs',
     ...REQUIRED_AGENT_ASSETS,
     'agent-entry/skills/webenvoy-browser/SKILL.md',
     'dist-electron/runtime/core/start-runtime.mjs',
@@ -368,6 +435,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(root, name), target);
     }
+    await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
     const status = {
@@ -381,7 +449,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
       camoufox_launch: { state: 'retired', reason: 'retired_binding' },
       camoufoxArtifact: { app: '/private/Camoufox Native Test.app', executable: '/private/Camoufox Native Test.app/Contents/MacOS/camoufox', manifest: '/private/Camoufox Native Test.app/Contents/Resources/webenvoy-native-manifest.json', manifest_sha256: 'a'.repeat(64) }
     };
-    await writeFile(clientPath, JSON.stringify({ data_dir: dataDir, credential: 'c'.repeat(32) }));
+    await writeFixtureClient(clientPath, dataDir, socketPath);
     server = createServer(socket => {
       socket.once('data', () => {
         const payload = Buffer.from(JSON.stringify(status));
@@ -390,10 +458,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     });
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
     child = spawn(process.execPath, [join(bundleRoot, 'agent-entry/mcp.mjs'), clientPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
-    const responsePromise = new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.stdout.once('data', chunk => { try { resolve(JSON.parse(chunk.toString('utf8'))); } catch (error) { reject(error); } });
-    });
+    const responsePromise = firstJsonMessage(child);
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'webenvoy_status', arguments: {} } }) + '\n');
     const response = await responsePromise;
     assert.equal(response.result.isError, undefined, response.result.content?.[0]?.text);
