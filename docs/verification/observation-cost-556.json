@@ -1,0 +1,4794 @@
+{
+  "schema": "webenvoy.observation-cost-556-evidence/v1",
+  "candidate": "5bfb19347ea1dd4079d4d9524686deedc5f2d872",
+  "decision": "B",
+  "preflight": {
+    "timestamp": "2026-09-23T16:40:23.838Z",
+    "candidate": "5bfb19347ea1dd4079d4d9524686deedc5f2d872",
+    "provider": {
+      "id": "webenvoy.camoufox-upstream/v1",
+      "status": "source_verified",
+      "browser_version": "152.0.4-beta.30",
+      "camoufox_version": "0.5.6",
+      "playwright_version": "1.60.0",
+      "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+      "source_sha256": {
+        "browser": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+        "camoufox": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+        "playwright": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+      }
+    },
+    "chrome": {
+      "status": "not_evaluated",
+      "required_browser": "153.0.8010.37",
+      "observed_browser": "153.0.8010.53",
+      "reason": "fixed .37 materials not retained; .53 not adopted, no launch"
+    },
+    "python": "Python 3.12.13"
+  },
+  "cli_startup_control": [
+    {
+      "label": "version-0",
+      "wall_ms": 460.807208,
+      "exit_code": 0,
+      "bytes": 67,
+      "result": {
+        "version": "0.2.0",
+        "skill_version": "0.2.0",
+        "integrity": "verified"
+      }
+    },
+    {
+      "label": "version-1",
+      "wall_ms": 284.96425,
+      "exit_code": 0,
+      "bytes": 67,
+      "result": {
+        "version": "0.2.0",
+        "skill_version": "0.2.0",
+        "integrity": "verified"
+      }
+    },
+    {
+      "label": "version-2",
+      "wall_ms": 278.5764170000001,
+      "exit_code": 0,
+      "bytes": 67,
+      "result": {
+        "version": "0.2.0",
+        "skill_version": "0.2.0",
+        "integrity": "verified"
+      }
+    }
+  ],
+  "setup_attempt_before_browser": {
+    "schema": "webenvoy.observation-cost-556-cli/v1",
+    "state": "failed",
+    "candidate": "5bfb19347ea1dd4079d4d9524686deedc5f2d872",
+    "standalone_integrity": "verified",
+    "package_manifest_sha256": "08efc54ebab512940c990151d93e03f73375a9312465de7c56fc3c7b8fbf6911",
+    "platform": "darwin-arm64",
+    "provider": {
+      "provider_id": "webenvoy.camoufox-upstream/v1",
+      "source": "owner_verified_upstream",
+      "camoufox_version": "0.5.6",
+      "browser_version": "152.0.4-beta.30",
+      "playwright_version": "1.60.0",
+      "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+      "source_sha256": {
+        "browser": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+        "camoufox": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+        "playwright": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+      }
+    },
+    "scope": "dedicated no-account profile; static 127.0.0.1 fixture; no external resources or site skill",
+    "measurement": "CLI command wall includes CLI start/local handling/output; caller JSON parse and request write are measured separately, not IPC or provider-only time",
+    "limits": {
+      "max_profiles": 1,
+      "simultaneous_instances": 1,
+      "per_operation_timeout_ms": 120000,
+      "provider_operation_timeout_ms": 60000,
+      "live_budget_ms": 900000,
+      "ordinary_repeats_per_count": 3,
+      "counts": [
+        32,
+        128,
+        160
+      ],
+      "pressure_count": 800,
+      "max_pressure_segments": 16
+    },
+    "fixtures": [
+      {
+        "path": "/controls/32",
+        "controls": 32,
+        "html_bytes": 3120,
+        "sha256": "d45fd54b257d22193d286af27dd6b161c75bde582e5704e83f542de849d7cf96"
+      },
+      {
+        "path": "/controls/128",
+        "controls": 128,
+        "html_bytes": 12164,
+        "sha256": "7bff234f255444a12ac49c2af90b369c12f419394dc1a365b67eb6c948674ce6"
+      },
+      {
+        "path": "/controls/160",
+        "controls": 160,
+        "html_bytes": 15268,
+        "sha256": "0ac4fd34bd190af84157878b5de809da0d9bb62e447665b276581a220c26e8af"
+      },
+      {
+        "path": "/stress",
+        "controls": 800,
+        "html_bytes": 1607377,
+        "sha256": "dda831b780e7ec5f2cd2d099dc42b0b793de009dd1cf24e342c6323ac473476a"
+      }
+    ],
+    "cli_calls": [
+      {
+        "label": "owner-setup",
+        "command": "setup --data-dir",
+        "wall_ms": 539.286,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 0,
+        "stderr_bytes": 212,
+        "output_parse_ms": 0.071,
+        "exit_code": 8,
+        "signal": null,
+        "failure_code": "This_installation_already_belongs_to_another_data_directory",
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "failed"
+      }
+    ],
+    "samples": [],
+    "chrome": {
+      "status": "not_evaluated",
+      "reason": "fixed Chrome 153.0.8010.37 materials unavailable; .53 not adopted"
+    },
+    "failure_code": "This_installation_already_belongs_to_another_data_directory",
+    "failed_at": "2026-09-23T17:01:36.903Z",
+    "cleanup": {
+      "instance": "not_active",
+      "grants": "not_created",
+      "runtime": "not_started",
+      "fixture": "not_started"
+    },
+    "completed_at": "2026-09-23T17:01:36.904Z"
+  },
+  "installed_cli": {
+    "schema": "webenvoy.observation-cost-556-cli/v1",
+    "state": "stopped",
+    "candidate": "5bfb19347ea1dd4079d4d9524686deedc5f2d872",
+    "standalone_integrity": "verified",
+    "package_manifest_sha256": "08efc54ebab512940c990151d93e03f73375a9312465de7c56fc3c7b8fbf6911",
+    "platform": "darwin-arm64",
+    "provider": {
+      "provider_id": "webenvoy.camoufox-upstream/v1",
+      "source": "owner_verified_upstream",
+      "camoufox_version": "0.5.6",
+      "browser_version": "152.0.4-beta.30",
+      "playwright_version": "1.60.0",
+      "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+      "source_sha256": {
+        "browser": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+        "camoufox": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+        "playwright": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+      }
+    },
+    "scope": "dedicated no-account profile; static 127.0.0.1 fixture; no external resources or site skill",
+    "measurement": "CLI command wall includes CLI start/local handling/output; caller JSON parse and request write are measured separately, not IPC or provider-only time",
+    "limits": {
+      "max_profiles": 1,
+      "simultaneous_instances": 1,
+      "per_operation_timeout_ms": 120000,
+      "provider_operation_timeout_ms": 60000,
+      "live_budget_ms": 900000,
+      "ordinary_repeats_per_count": 3,
+      "counts": [
+        32,
+        128,
+        160
+      ],
+      "pressure_count": 800,
+      "max_pressure_segments": 16
+    },
+    "fixtures": [
+      {
+        "path": "/controls/32",
+        "controls": 32,
+        "html_bytes": 3120,
+        "sha256": "d45fd54b257d22193d286af27dd6b161c75bde582e5704e83f542de849d7cf96"
+      },
+      {
+        "path": "/controls/128",
+        "controls": 128,
+        "html_bytes": 12164,
+        "sha256": "7bff234f255444a12ac49c2af90b369c12f419394dc1a365b67eb6c948674ce6"
+      },
+      {
+        "path": "/controls/160",
+        "controls": 160,
+        "html_bytes": 15268,
+        "sha256": "0ac4fd34bd190af84157878b5de809da0d9bb62e447665b276581a220c26e8af"
+      },
+      {
+        "path": "/stress",
+        "controls": 800,
+        "html_bytes": 1607377,
+        "sha256": "dda831b780e7ec5f2cd2d099dc42b0b793de009dd1cf24e342c6323ac473476a"
+      }
+    ],
+    "cli_calls": [
+      {
+        "label": "owner-setup",
+        "command": "setup --data-dir",
+        "wall_ms": 574.914,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 662,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.362,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "runtime-start",
+        "command": "start --data-dir",
+        "wall_ms": 951.412,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 2214,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.144,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "runtime-diagnose",
+        "command": "diagnose --data-dir",
+        "wall_ms": 55.108,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 2214,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.032,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "agent-host-setup",
+        "command": "agent setup",
+        "wall_ms": 251.377,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 394,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.019,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "agent-register",
+        "command": "access register",
+        "wall_ms": 310.528,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 185,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.019,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "agent-connect",
+        "command": "agent connect",
+        "wall_ms": 362.379,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 229,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.093,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "creation-grant",
+        "command": "access grant",
+        "wall_ms": 283.975,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 945,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.053,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "profile-create",
+        "operation": "profile.create",
+        "command": "agent operation",
+        "wall_ms": 341.163,
+        "request_bytes": 329,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 1370,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.063,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.195,
+        "key_fingerprint": "1ca1c647c2addec4"
+      },
+      {
+        "label": "creation-grant-revoke",
+        "command": "access revoke",
+        "wall_ms": 283.81,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 1035,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.031,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "profile-grant",
+        "command": "access grant",
+        "wall_ms": 282.316,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 500,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.022,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "instance-start-32",
+        "operation": "instance.start",
+        "command": "agent operation",
+        "wall_ms": 3188.425,
+        "request_bytes": 423,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1761,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.061,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.105,
+        "key_fingerprint": "730651605e59b2be"
+      },
+      {
+        "label": "observe-32-1",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 330.858,
+        "request_bytes": 448,
+        "request_serialize_ms": 0.007,
+        "stdout_bytes": 1877,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.041,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.155,
+        "key_fingerprint": "c86169729a860d2b"
+      },
+      {
+        "label": "snapshot-32-1",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 1223.681,
+        "request_bytes": 591,
+        "request_serialize_ms": 0.007,
+        "stdout_bytes": 12217,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.113,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.143,
+        "key_fingerprint": "f140681e7d3c8f46"
+      },
+      {
+        "label": "input-32-1",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 345.39,
+        "request_bytes": 676,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 830,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.026,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.185,
+        "key_fingerprint": "6b1ec0b116aedab8"
+      },
+      {
+        "label": "observe-32-2",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 296.244,
+        "request_bytes": 448,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1877,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.026,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.116,
+        "key_fingerprint": "caa43e32cb680c98"
+      },
+      {
+        "label": "snapshot-32-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 1128.008,
+        "request_bytes": 591,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 12217,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.049,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.16,
+        "key_fingerprint": "b42b3d1772c30829"
+      },
+      {
+        "label": "input-32-2",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 325.266,
+        "request_bytes": 676,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 830,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.017,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.183,
+        "key_fingerprint": "acc81846a118e97d"
+      },
+      {
+        "label": "observe-32-3",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 299.921,
+        "request_bytes": 448,
+        "request_serialize_ms": 0.002,
+        "stdout_bytes": 1877,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.026,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.112,
+        "key_fingerprint": "55cf111f94f53a4a"
+      },
+      {
+        "label": "snapshot-32-3",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 1151.623,
+        "request_bytes": 591,
+        "request_serialize_ms": 0.007,
+        "stdout_bytes": 12217,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.05,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.137,
+        "key_fingerprint": "2a3b6460a86c7b78"
+      },
+      {
+        "label": "input-32-3",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 315.604,
+        "request_bytes": 676,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 830,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.016,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.156,
+        "key_fingerprint": "29cbd96193599202"
+      },
+      {
+        "label": "instance-stop-32",
+        "command": "instance stop",
+        "wall_ms": 284.384,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 1359,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.055,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "instance-start-128",
+        "operation": "instance.start",
+        "command": "agent operation",
+        "wall_ms": 2121.032,
+        "request_bytes": 425,
+        "request_serialize_ms": 0.007,
+        "stdout_bytes": 1764,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.026,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.295,
+        "key_fingerprint": "af3d984c328220c2"
+      },
+      {
+        "label": "observe-128-1",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 325.227,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.024,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.103,
+        "key_fingerprint": "b0cb2cdef295b89d"
+      },
+      {
+        "label": "snapshot-128-1",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 4248.51,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 44278,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.134,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.141,
+        "key_fingerprint": "5385e3dccadea6fb"
+      },
+      {
+        "label": "input-128-1",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 373.634,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.017,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.157,
+        "key_fingerprint": "b1bf84cce8917873"
+      },
+      {
+        "label": "observe-128-2",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 311.038,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.002,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.031,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.12,
+        "key_fingerprint": "fd96eefa83ac878e"
+      },
+      {
+        "label": "snapshot-128-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 4515.728,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 44278,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.148,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.177,
+        "key_fingerprint": "d3a863d1494f3030"
+      },
+      {
+        "label": "input-128-2",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 367.983,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.021,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.187,
+        "key_fingerprint": "a97402a037095e4d"
+      },
+      {
+        "label": "observe-128-3",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 296.262,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.026,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.128,
+        "key_fingerprint": "c575be09083f294c"
+      },
+      {
+        "label": "snapshot-128-3",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 4332.361,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 44278,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.114,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.152,
+        "key_fingerprint": "3982e0acbe0b33a4"
+      },
+      {
+        "label": "input-128-3",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 348.868,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.038,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.154,
+        "key_fingerprint": "c109ab3a631ed28d"
+      },
+      {
+        "label": "instance-stop-128",
+        "command": "instance stop",
+        "wall_ms": 227.277,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 1361,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.037,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "instance-start-160",
+        "operation": "instance.start",
+        "command": "agent operation",
+        "wall_ms": 2187.175,
+        "request_bytes": 425,
+        "request_serialize_ms": 0.022,
+        "stdout_bytes": 1764,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.025,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.198,
+        "key_fingerprint": "7b470d5705e22013"
+      },
+      {
+        "label": "observe-160-1",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 359.657,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.022,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.109,
+        "key_fingerprint": "e4c7f827a59d8b79"
+      },
+      {
+        "label": "snapshot-160-1",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 5723.511,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 44611,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.146,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.162,
+        "key_fingerprint": "54b37037baaea995"
+      },
+      {
+        "label": "continuation-160-1-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 2993.316,
+        "request_bytes": 712,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 12073,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.059,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.181,
+        "key_fingerprint": "891482f74d56f994"
+      },
+      {
+        "label": "input-160-1",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 359.755,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.016,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.176,
+        "key_fingerprint": "ec1d6f79d615bdc7"
+      },
+      {
+        "label": "observe-160-2",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 297.58,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.002,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.024,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.113,
+        "key_fingerprint": "f61567b1ea5b2d85"
+      },
+      {
+        "label": "snapshot-160-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 5545.837,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 44611,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.141,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.145,
+        "key_fingerprint": "f76c241f6dbba41a"
+      },
+      {
+        "label": "continuation-160-2-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 2852.493,
+        "request_bytes": 712,
+        "request_serialize_ms": 0.009,
+        "stdout_bytes": 12073,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.065,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.153,
+        "key_fingerprint": "7988780c07e07abd"
+      },
+      {
+        "label": "input-160-2",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 337.494,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.023,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.155,
+        "key_fingerprint": "e2c356bef10d0409"
+      },
+      {
+        "label": "observe-160-3",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 302.396,
+        "request_bytes": 449,
+        "request_serialize_ms": 0.002,
+        "stdout_bytes": 1880,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.028,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.121,
+        "key_fingerprint": "6e807e68f6f624f8"
+      },
+      {
+        "label": "snapshot-160-3",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 5728.252,
+        "request_bytes": 592,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 44611,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.138,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.126,
+        "key_fingerprint": "df76416b5107eb17"
+      },
+      {
+        "label": "continuation-160-3-2",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 2814.194,
+        "request_bytes": 712,
+        "request_serialize_ms": 0.006,
+        "stdout_bytes": 12073,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.052,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "not_dispatched",
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.194,
+        "key_fingerprint": "56ec7c8b032da358"
+      },
+      {
+        "label": "input-160-3",
+        "operation": "instance.input",
+        "command": "agent operation",
+        "wall_ms": 349.639,
+        "request_bytes": 679,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 832,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.016,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": "dispatched",
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.163,
+        "key_fingerprint": "f8b948341d90ccb5"
+      },
+      {
+        "label": "instance-stop-160",
+        "command": "instance stop",
+        "wall_ms": 167.468,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 1361,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.031,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "instance-start-stress-800",
+        "operation": "instance.start",
+        "command": "agent operation",
+        "wall_ms": 2463.429,
+        "request_bytes": 426,
+        "request_serialize_ms": 0.009,
+        "stdout_bytes": 1746,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.051,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": true,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.384,
+        "key_fingerprint": "1ef4e9536c4b9d10"
+      },
+      {
+        "label": "observe-stress-800",
+        "operation": "instance.observe",
+        "command": "agent operation",
+        "wall_ms": 344.507,
+        "request_bytes": 454,
+        "request_serialize_ms": 0.003,
+        "stdout_bytes": 1862,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.023,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": "succeeded",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed",
+        "request_file_write_ms": 0.117,
+        "key_fingerprint": "79053b3bcd33604d"
+      },
+      {
+        "label": "snapshot-stress-800",
+        "operation": "instance.snapshot",
+        "command": "agent operation",
+        "wall_ms": 39308.919,
+        "request_bytes": 597,
+        "request_serialize_ms": 0.005,
+        "stdout_bytes": 207,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.12,
+        "exit_code": 6,
+        "signal": null,
+        "failure_code": "managed_browser_outcome_unknown",
+        "dispatch_state": "dispatched",
+        "result_status": "unknown_outcome",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "unknown",
+        "request_file_write_ms": 0.14,
+        "key_fingerprint": "8769ec9d1d21d8c4"
+      },
+      {
+        "label": "snapshot-stress-800-original-run-query",
+        "command": "agent query",
+        "wall_ms": 86.721,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 207,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.041,
+        "exit_code": 6,
+        "signal": null,
+        "failure_code": "managed_browser_outcome_unknown",
+        "dispatch_state": "dispatched",
+        "result_status": "unknown_outcome",
+        "mutation": false,
+        "timeout": false,
+        "outcome": "failed",
+        "key_fingerprint": "8769ec9d1d21d8c4"
+      },
+      {
+        "label": "instance-stop-stress-800",
+        "command": "instance stop",
+        "wall_ms": 239.572,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 1349,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.123,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "cleanup-grant-c3a983174f24509e",
+        "command": "access revoke",
+        "wall_ms": 385.298,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 522,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.023,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      },
+      {
+        "label": "cleanup-runtime-stop",
+        "command": "stop --data-dir",
+        "wall_ms": 5669.537,
+        "request_bytes": null,
+        "request_serialize_ms": null,
+        "stdout_bytes": 17,
+        "stderr_bytes": 0,
+        "output_parse_ms": 0.024,
+        "exit_code": 0,
+        "signal": null,
+        "failure_code": null,
+        "dispatch_state": null,
+        "result_status": null,
+        "mutation": false,
+        "timeout": false,
+        "outcome": "completed"
+      }
+    ],
+    "samples": [
+      {
+        "controls": 32,
+        "repeat": 1,
+        "startup_position": "first_observation_after_instance_start",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 32,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:33.537Z",
+        "page_ref_fingerprint": "d6347c7bc3eecec8",
+        "page_id_fingerprint": "ae483586ccbe8668",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "bff294b4565b74eb",
+        "initial": {
+          "controls": 32,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 32,
+          "has_more": false,
+          "text_bytes": 247,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 32,
+          "target_ref_fingerprint": "15d8298c4499484e"
+        },
+        "completed_at": "2026-09-23T17:02:35.439Z"
+      },
+      {
+        "controls": 32,
+        "repeat": 2,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 32,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:35.439Z",
+        "page_ref_fingerprint": "d6347c7bc3eecec8",
+        "page_id_fingerprint": "ae483586ccbe8668",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "15a8fe8a117ef4dc",
+        "initial": {
+          "controls": 32,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 32,
+          "has_more": false,
+          "text_bytes": 247,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 32,
+          "target_ref_fingerprint": "2a5c74e12479f945"
+        },
+        "completed_at": "2026-09-23T17:02:37.190Z"
+      },
+      {
+        "controls": 32,
+        "repeat": 3,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 32,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:37.190Z",
+        "page_ref_fingerprint": "d6347c7bc3eecec8",
+        "page_id_fingerprint": "ae483586ccbe8668",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "5c87b2dadaf7e1f0",
+        "initial": {
+          "controls": 32,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 32,
+          "has_more": false,
+          "text_bytes": 247,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 32,
+          "target_ref_fingerprint": "e97ae08d22e84e3e"
+        },
+        "completed_at": "2026-09-23T17:02:38.958Z"
+      },
+      {
+        "controls": 128,
+        "repeat": 1,
+        "startup_position": "first_observation_after_instance_start",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:41.364Z",
+        "page_ref_fingerprint": "5f0181c43699c1e8",
+        "page_id_fingerprint": "7f1753a1a114c256",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "bff294b4565b74eb",
+        "initial": {
+          "controls": 128,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 128,
+          "has_more": false,
+          "text_bytes": 1044,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 128,
+          "target_ref_fingerprint": "9b2d31a20058f2fe"
+        },
+        "completed_at": "2026-09-23T17:02:46.312Z"
+      },
+      {
+        "controls": 128,
+        "repeat": 2,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:46.312Z",
+        "page_ref_fingerprint": "5f0181c43699c1e8",
+        "page_id_fingerprint": "7f1753a1a114c256",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "15a8fe8a117ef4dc",
+        "initial": {
+          "controls": 128,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 128,
+          "has_more": false,
+          "text_bytes": 1044,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 128,
+          "target_ref_fingerprint": "75b21b3586af0237"
+        },
+        "completed_at": "2026-09-23T17:02:51.508Z"
+      },
+      {
+        "controls": 128,
+        "repeat": 3,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          }
+        ],
+        "started_at": "2026-09-23T17:02:51.508Z",
+        "page_ref_fingerprint": "5f0181c43699c1e8",
+        "page_id_fingerprint": "7f1753a1a114c256",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "5c87b2dadaf7e1f0",
+        "initial": {
+          "controls": 128,
+          "complete": true,
+          "enumeration_complete": true,
+          "total": 128,
+          "has_more": false,
+          "text_bytes": 1044,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 128,
+          "target_ref_fingerprint": "84572096d2213f2d"
+        },
+        "completed_at": "2026-09-23T17:02:56.487Z"
+      },
+      {
+        "controls": 160,
+        "repeat": 1,
+        "startup_position": "first_observation_after_instance_start",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          },
+          {
+            "controls": 32,
+            "continuation": true
+          }
+        ],
+        "started_at": "2026-09-23T17:02:58.902Z",
+        "page_ref_fingerprint": "f81af8f4c8e3253b",
+        "page_id_fingerprint": "7f4956044061ef27",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "bff294b4565b74eb",
+        "initial": {
+          "controls": 128,
+          "complete": false,
+          "enumeration_complete": true,
+          "total": 160,
+          "has_more": true,
+          "text_bytes": 1332,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 160,
+          "target_ref_fingerprint": "4bd67d756e63fee1"
+        },
+        "completed_at": "2026-09-23T17:03:08.341Z"
+      },
+      {
+        "controls": 160,
+        "repeat": 2,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          },
+          {
+            "controls": 32,
+            "continuation": true
+          }
+        ],
+        "started_at": "2026-09-23T17:03:08.341Z",
+        "page_ref_fingerprint": "f81af8f4c8e3253b",
+        "page_id_fingerprint": "7f4956044061ef27",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "15a8fe8a117ef4dc",
+        "initial": {
+          "controls": 128,
+          "complete": false,
+          "enumeration_complete": true,
+          "total": 160,
+          "has_more": true,
+          "text_bytes": 1332,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 160,
+          "target_ref_fingerprint": "72585c45f10a19cb"
+        },
+        "completed_at": "2026-09-23T17:03:17.376Z"
+      },
+      {
+        "controls": 160,
+        "repeat": 3,
+        "startup_position": "warm_same_instance",
+        "outcome": "completed",
+        "segments": [
+          {
+            "controls": 128,
+            "continuation": false
+          },
+          {
+            "controls": 32,
+            "continuation": true
+          }
+        ],
+        "started_at": "2026-09-23T17:03:17.376Z",
+        "page_ref_fingerprint": "f81af8f4c8e3253b",
+        "page_id_fingerprint": "7f4956044061ef27",
+        "document_generation": 2,
+        "observation_ref_fingerprint": "5c87b2dadaf7e1f0",
+        "initial": {
+          "controls": 128,
+          "complete": false,
+          "enumeration_complete": true,
+          "total": 160,
+          "has_more": true,
+          "text_bytes": 1332,
+          "text_state": "complete"
+        },
+        "normal_target_action": {
+          "status": "succeeded",
+          "outcome": "completed",
+          "dispatch_state": "dispatched",
+          "failure_code": null,
+          "target_ordinal": 160,
+          "target_ref_fingerprint": "46cf35f59cd53db6"
+        },
+        "completed_at": "2026-09-23T17:03:26.572Z"
+      },
+      {
+        "controls": 800,
+        "repeat": 1,
+        "startup_position": "first_observation_after_instance_start",
+        "outcome": "unknown",
+        "segments": [],
+        "started_at": "2026-09-23T17:03:29.204Z",
+        "failure_code": "managed_browser_outcome_unknown"
+      }
+    ],
+    "chrome": {
+      "status": "not_evaluated",
+      "reason": "fixed Chrome 153.0.8010.37 materials unavailable; .53 not adopted"
+    },
+    "status": "running",
+    "profile": "dedicated_no_account_profile",
+    "requested_authorization": {
+      "operations": [
+        "profile.read",
+        "instance.start",
+        "instance.observe",
+        "instance.snapshot",
+        "instance.input",
+        "instance.stop",
+        "profile.create"
+      ],
+      "origins": "loopback fixture origin only"
+    },
+    "completed_at": "2026-09-23T17:04:09.185Z",
+    "cleanup": {
+      "instance": "not_active",
+      "grants": "revoked",
+      "runtime": "stopped",
+      "fixture": "stopped"
+    }
+  },
+  "instrumented_shared_driver": {
+    "candidate": "5bfb19347ea1dd4079d4d9524686deedc5f2d872",
+    "kind": "instrumented_direct_production_methods",
+    "manifest_sha256": "08efc54ebab512940c990151d93e03f73375a9312465de7c56fc3c7b8fbf6911",
+    "fixtures": {
+      "/controls/32": {
+        "sha256": "d45fd54b257d22193d286af27dd6b161c75bde582e5704e83f542de849d7cf96",
+        "bytes": 3120
+      },
+      "/controls/128": {
+        "sha256": "7bff234f255444a12ac49c2af90b369c12f419394dc1a365b67eb6c948674ce6",
+        "bytes": 12164
+      },
+      "/controls/160": {
+        "sha256": "0ac4fd34bd190af84157878b5de809da0d9bb62e447665b276581a220c26e8af",
+        "bytes": 15268
+      },
+      "/stress": {
+        "sha256": "dda831b780e7ec5f2cd2d099dc42b0b793de009dd1cf24e342c6323ac473476a",
+        "bytes": 1607377
+      }
+    },
+    "started_at": 1790182564.045599,
+    "samples": [
+      {
+        "label": "32-r0-snapshot",
+        "wall_ms": 991.4415,
+        "python_cpu_ms": 457.764,
+        "json_encode_ms": 0.042958,
+        "response_bytes": 11534,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 500863750,
+            "exclusive_ns": 61772206
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 160,
+            "inclusive_ns": 121736547,
+            "exclusive_ns": 121736547
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 64,
+            "inclusive_ns": 743971877,
+            "exclusive_ns": 510841373
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 64,
+            "inclusive_ns": 124023874,
+            "exclusive_ns": 124023874
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 160,
+            "inclusive_ns": 159374084,
+            "exclusive_ns": 159374084
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 71166,
+            "exclusive_ns": 71166
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 487376959,
+            "exclusive_ns": 10492625
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 991400458,
+            "exclusive_ns": 1619249
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 989781209,
+            "exclusive_ns": 1469334
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 225,
+          "waitForSelector": 128,
+          "ariaSnapshot": 64,
+          "dispose": 160,
+          "evaluateExpressionHandle": 32
+        },
+        "protocol_send_count": 612,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 32,
+              "total": 32,
+              "returned_through": 32,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 247
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "32-r0-input",
+        "wall_ms": 30.961209,
+        "python_cpu_ms": 11.278,
+        "json_encode_ms": 0.00875,
+        "response_bytes": 271,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2070875,
+            "exclusive_ns": 2070875
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1625750,
+            "exclusive_ns": 1625750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 2567125,
+            "exclusive_ns": 2567125
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 20277750,
+            "exclusive_ns": 15639750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 30938792,
+            "exclusive_ns": 6994709
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 23944083,
+            "exclusive_ns": 2040583
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "32-r1-snapshot",
+        "wall_ms": 992.85925,
+        "python_cpu_ms": 483.561,
+        "json_encode_ms": 0.044541,
+        "response_bytes": 11534,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 467371667,
+            "exclusive_ns": 38000130
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 160,
+            "inclusive_ns": 121706832,
+            "exclusive_ns": 121706832
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 64,
+            "inclusive_ns": 701031208,
+            "exclusive_ns": 483182875
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 64,
+            "inclusive_ns": 131209371,
+            "exclusive_ns": 131209371
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 160,
+            "inclusive_ns": 162477505,
+            "exclusive_ns": 162477505
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 82084,
+            "exclusive_ns": 82084
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 480460208,
+            "exclusive_ns": 11255162
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 992838333,
+            "exclusive_ns": 760417
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 992077916,
+            "exclusive_ns": 44163957
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 225,
+          "waitForSelector": 128,
+          "ariaSnapshot": 64,
+          "dispose": 224,
+          "evaluateExpressionHandle": 32
+        },
+        "protocol_send_count": 676,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 32,
+              "total": 32,
+              "returned_through": 32,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 247
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "32-r1-input",
+        "wall_ms": 27.679125,
+        "python_cpu_ms": 11.168,
+        "json_encode_ms": 0.009208,
+        "response_bytes": 271,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2255292,
+            "exclusive_ns": 2255292
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1779500,
+            "exclusive_ns": 1779500
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 2940167,
+            "exclusive_ns": 2940167
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 20538750,
+            "exclusive_ns": 15343291
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 27652584,
+            "exclusive_ns": 3468500
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 24184084,
+            "exclusive_ns": 1865834
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "32-r2-snapshot",
+        "wall_ms": 952.787333,
+        "python_cpu_ms": 468.875,
+        "json_encode_ms": 0.044292,
+        "response_bytes": 11534,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 448302833,
+            "exclusive_ns": 39201957
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 160,
+            "inclusive_ns": 117246743,
+            "exclusive_ns": 117246743
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 64,
+            "inclusive_ns": 704689963,
+            "exclusive_ns": 495489962
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 64,
+            "inclusive_ns": 107326625,
+            "exclusive_ns": 107326625
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 160,
+            "inclusive_ns": 141083838,
+            "exclusive_ns": 141083838
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 64625,
+            "exclusive_ns": 64625
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 462193084,
+            "exclusive_ns": 10146792
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 952766208,
+            "exclusive_ns": 868666
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 951897542,
+            "exclusive_ns": 41337000
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 225,
+          "waitForSelector": 128,
+          "ariaSnapshot": 64,
+          "dispose": 224,
+          "evaluateExpressionHandle": 32
+        },
+        "protocol_send_count": 676,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 32,
+              "total": 32,
+              "returned_through": 32,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 247
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "32-r2-input",
+        "wall_ms": 23.913167,
+        "python_cpu_ms": 10.2,
+        "json_encode_ms": 0.007834,
+        "response_bytes": 271,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2104041,
+            "exclusive_ns": 2104041
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1687292,
+            "exclusive_ns": 1687292
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 2462501,
+            "exclusive_ns": 2462501
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 17526709,
+            "exclusive_ns": 12960167
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 23891834,
+            "exclusive_ns": 2957251
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 20934583,
+            "exclusive_ns": 1720582
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "128-r0-snapshot",
+        "wall_ms": 4850.626083,
+        "python_cpu_ms": 1885.858,
+        "json_encode_ms": 0.160958,
+        "response_bytes": 43594,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 2498351792,
+            "exclusive_ns": 193048746
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 640,
+            "inclusive_ns": 506919200,
+            "exclusive_ns": 506919200
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 256,
+            "inclusive_ns": 3910165960,
+            "exclusive_ns": 2942139795
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 256,
+            "inclusive_ns": 489535544,
+            "exclusive_ns": 489535544
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 640,
+            "inclusive_ns": 677357879,
+            "exclusive_ns": 677357879
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 285333,
+            "exclusive_ns": 285333
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 2348009208,
+            "exclusive_ns": 37359836
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 4850593708,
+            "exclusive_ns": 1326499
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 4849267209,
+            "exclusive_ns": 2620876
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 897,
+          "waitForSelector": 512,
+          "ariaSnapshot": 256,
+          "dispose": 640,
+          "evaluateExpressionHandle": 128
+        },
+        "protocol_send_count": 2436,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 128,
+              "total": 128,
+              "returned_through": 128,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1044
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "128-r0-input",
+        "wall_ms": 53.223875,
+        "python_cpu_ms": 12.274,
+        "json_encode_ms": 0.009458,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2196708,
+            "exclusive_ns": 2196708
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 2022625,
+            "exclusive_ns": 2022625
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 4089251,
+            "exclusive_ns": 4089251
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 39638709,
+            "exclusive_ns": 33352750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 53195916,
+            "exclusive_ns": 6963083
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 46232833,
+            "exclusive_ns": 4571499
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "128-r1-snapshot",
+        "wall_ms": 4690.849041,
+        "python_cpu_ms": 1989.825,
+        "json_encode_ms": 0.159208,
+        "response_bytes": 43594,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 2143684459,
+            "exclusive_ns": 184448205
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 640,
+            "inclusive_ns": 499937711,
+            "exclusive_ns": 499937711
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 256,
+            "inclusive_ns": 3617736713,
+            "exclusive_ns": 2700523081
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 256,
+            "inclusive_ns": 468108349,
+            "exclusive_ns": 468108349
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 640,
+            "inclusive_ns": 624813243,
+            "exclusive_ns": 624813243
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 238459,
+            "exclusive_ns": 238459
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 2372164250,
+            "exclusive_ns": 38018120
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 4690820417,
+            "exclusive_ns": 1041208
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 4689779209,
+            "exclusive_ns": 173692041
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 897,
+          "waitForSelector": 512,
+          "ariaSnapshot": 256,
+          "dispose": 896,
+          "evaluateExpressionHandle": 128
+        },
+        "protocol_send_count": 2692,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 128,
+              "total": 128,
+              "returned_through": 128,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1044
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "128-r1-input",
+        "wall_ms": 63.723833,
+        "python_cpu_ms": 29.368,
+        "json_encode_ms": 0.008958,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 19753625,
+            "exclusive_ns": 19753625
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1959042,
+            "exclusive_ns": 1959042
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 3725750,
+            "exclusive_ns": 3725750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 52523834,
+            "exclusive_ns": 29044459
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 63699000,
+            "exclusive_ns": 4079541
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 59619459,
+            "exclusive_ns": 5136583
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "128-r2-snapshot",
+        "wall_ms": 4561.059,
+        "python_cpu_ms": 1959.845,
+        "json_encode_ms": 0.148459,
+        "response_bytes": 43594,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 2136471125,
+            "exclusive_ns": 157111547
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 640,
+            "inclusive_ns": 491144129,
+            "exclusive_ns": 491144129
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 256,
+            "inclusive_ns": 3531898666,
+            "exclusive_ns": 2639787483
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 256,
+            "inclusive_ns": 471957962,
+            "exclusive_ns": 471957962
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 640,
+            "inclusive_ns": 598063549,
+            "exclusive_ns": 598063549
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 210500,
+            "exclusive_ns": 210500
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 2258595667,
+            "exclusive_ns": 37002122
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 4561036959,
+            "exclusive_ns": 780500
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 4560256459,
+            "exclusive_ns": 164979167
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 897,
+          "waitForSelector": 512,
+          "ariaSnapshot": 256,
+          "dispose": 896,
+          "evaluateExpressionHandle": 128
+        },
+        "protocol_send_count": 2692,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 128,
+              "total": 128,
+              "returned_through": 128,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1044
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "128-r2-input",
+        "wall_ms": 41.369584,
+        "python_cpu_ms": 11.949,
+        "json_encode_ms": 0.008416,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2158417,
+            "exclusive_ns": 2158417
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1828000,
+            "exclusive_ns": 1828000
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 3427875,
+            "exclusive_ns": 3427875
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 33670334,
+            "exclusive_ns": 28084042
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 41344167,
+            "exclusive_ns": 3840001
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 37504166,
+            "exclusive_ns": 2005832
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "160-r0-snapshot",
+        "wall_ms": 5992.721333,
+        "python_cpu_ms": 2328.851,
+        "json_encode_ms": 0.150875,
+        "response_bytes": 43927,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 2935524666,
+            "exclusive_ns": 221414211
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 800,
+            "inclusive_ns": 618747701,
+            "exclusive_ns": 618747701
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 320,
+            "inclusive_ns": 4817035331,
+            "exclusive_ns": 3672535421
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 320,
+            "inclusive_ns": 645019250,
+            "exclusive_ns": 645019250
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 800,
+            "inclusive_ns": 781065643,
+            "exclusive_ns": 781065643
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 271208,
+            "exclusive_ns": 271208
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 3050865667,
+            "exclusive_ns": 47608107
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 5992690375,
+            "exclusive_ns": 2868875
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 5989821500,
+            "exclusive_ns": 3159959
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 1121,
+          "waitForSelector": 640,
+          "ariaSnapshot": 320,
+          "dispose": 800,
+          "evaluateExpressionHandle": 160
+        },
+        "protocol_send_count": 3044,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 128,
+              "complete": false,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1332
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "160-r0-continuation-1",
+        "wall_ms": 3203.115083,
+        "python_cpu_ms": 1247.974,
+        "json_encode_ms": 0.053542,
+        "response_bytes": 11389,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 480,
+            "inclusive_ns": 377863283,
+            "exclusive_ns": 377863283
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 160,
+            "inclusive_ns": 2565376335,
+            "exclusive_ns": 1969142431
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 160,
+            "inclusive_ns": 299701878,
+            "exclusive_ns": 299701878
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 480,
+            "inclusive_ns": 504131286,
+            "exclusive_ns": 504131286
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 179792,
+            "exclusive_ns": 179792
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 3201498417,
+            "exclusive_ns": 50659539
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 3203081417,
+            "exclusive_ns": 1380834
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 3201700583,
+            "exclusive_ns": 22374
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 640,
+          "waitForSelector": 320,
+          "ariaSnapshot": 160,
+          "dispose": 480
+        },
+        "protocol_send_count": 1602,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 160,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 128,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "160-r0-input",
+        "wall_ms": 69.767292,
+        "python_cpu_ms": 14.694,
+        "json_encode_ms": 0.014042,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2414249,
+            "exclusive_ns": 2414249
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 3536375,
+            "exclusive_ns": 3536375
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 4174583,
+            "exclusive_ns": 4174583
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 48279625,
+            "exclusive_ns": 41690793
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 69728792,
+            "exclusive_ns": 8768792
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 60960000,
+            "exclusive_ns": 9144000
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "160-r1-snapshot",
+        "wall_ms": 6303.214333,
+        "python_cpu_ms": 2566.211,
+        "json_encode_ms": 0.146083,
+        "response_bytes": 43927,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 3024573708,
+            "exclusive_ns": 215828379
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 800,
+            "inclusive_ns": 626336170,
+            "exclusive_ns": 626336170
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 320,
+            "inclusive_ns": 4947008577,
+            "exclusive_ns": 3768248053
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 320,
+            "inclusive_ns": 607235081,
+            "exclusive_ns": 607235081
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 800,
+            "inclusive_ns": 806521844,
+            "exclusive_ns": 806521844
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 230667,
+            "exclusive_ns": 230667
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 3046763708,
+            "exclusive_ns": 47167889
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 6303163792,
+            "exclusive_ns": 22396000
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 6280767792,
+            "exclusive_ns": 209199709
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 1121,
+          "waitForSelector": 640,
+          "ariaSnapshot": 320,
+          "dispose": 1120,
+          "evaluateExpressionHandle": 160
+        },
+        "protocol_send_count": 3364,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 128,
+              "complete": false,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1332
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "160-r1-continuation-1",
+        "wall_ms": 2949.183542,
+        "python_cpu_ms": 1192.928,
+        "json_encode_ms": 0.051125,
+        "response_bytes": 11389,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 480,
+            "inclusive_ns": 361205412,
+            "exclusive_ns": 361205412
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 160,
+            "inclusive_ns": 2350423380,
+            "exclusive_ns": 1794997914
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 160,
+            "inclusive_ns": 293372290,
+            "exclusive_ns": 293372290
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 480,
+            "inclusive_ns": 453935970,
+            "exclusive_ns": 453935970
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 94042,
+            "exclusive_ns": 94042
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 2948028667,
+            "exclusive_ns": 44517081
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 2949161625,
+            "exclusive_ns": 1024792
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 2948136833,
+            "exclusive_ns": 14124
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 640,
+          "waitForSelector": 320,
+          "ariaSnapshot": 160,
+          "dispose": 480
+        },
+        "protocol_send_count": 1602,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 160,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 128,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "160-r1-input",
+        "wall_ms": 44.071167,
+        "python_cpu_ms": 11.636,
+        "json_encode_ms": 0.009375,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2473541,
+            "exclusive_ns": 2473541
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1755250,
+            "exclusive_ns": 1755250
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 2656584,
+            "exclusive_ns": 2656584
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 35858458,
+            "exclusive_ns": 30728333
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 44046209,
+            "exclusive_ns": 4624834
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 39421375,
+            "exclusive_ns": 1807667
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "160-r2-snapshot",
+        "wall_ms": 6287.65,
+        "python_cpu_ms": 2583.967,
+        "json_encode_ms": 0.204416,
+        "response_bytes": 43927,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 2831702584,
+            "exclusive_ns": 197505215
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 800,
+            "inclusive_ns": 627974889,
+            "exclusive_ns": 627974889
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 320,
+            "inclusive_ns": 4955750659,
+            "exclusive_ns": 3808846687
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 320,
+            "inclusive_ns": 617868904,
+            "exclusive_ns": 617868904
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 800,
+            "inclusive_ns": 768513158,
+            "exclusive_ns": 768513158
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 328959,
+            "exclusive_ns": 328959
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 3243058292,
+            "exclusive_ns": 54052023
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 6287623833,
+            "exclusive_ns": 861583
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 6286762250,
+            "exclusive_ns": 211672415
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 1121,
+          "waitForSelector": 640,
+          "ariaSnapshot": 320,
+          "dispose": 1120,
+          "evaluateExpressionHandle": 160
+        },
+        "protocol_send_count": 3364,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 128,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 128,
+              "complete": false,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 1332
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 128,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "160-r2-continuation-1",
+        "wall_ms": 2893.102709,
+        "python_cpu_ms": 1185.885,
+        "json_encode_ms": 0.050084,
+        "response_bytes": 11389,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 480,
+            "inclusive_ns": 367771575,
+            "exclusive_ns": 367771575
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 160,
+            "inclusive_ns": 2312089214,
+            "exclusive_ns": 1755752304
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 160,
+            "inclusive_ns": 282268824,
+            "exclusive_ns": 282268824
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 480,
+            "inclusive_ns": 438983242,
+            "exclusive_ns": 438983242
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 89334,
+            "exclusive_ns": 89334
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 2891635500,
+            "exclusive_ns": 46859555
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 2893077084,
+            "exclusive_ns": 1338543
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 2891738541,
+            "exclusive_ns": 13707
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 640,
+          "waitForSelector": 320,
+          "ariaSnapshot": 160,
+          "dispose": 480
+        },
+        "protocol_send_count": 1602,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 32,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": true,
+              "captured_count": 160,
+              "total": 160,
+              "returned_through": 160,
+              "complete": true,
+              "reason_codes": []
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": true,
+              "reason_codes": []
+            }
+          },
+          "continuation": {
+            "offset": 128,
+            "returned_count": 32,
+            "has_more": false
+          }
+        }
+      },
+      {
+        "label": "160-r2-input",
+        "wall_ms": 44.314667,
+        "python_cpu_ms": 11.544,
+        "json_encode_ms": 0.00775,
+        "response_bytes": 272,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 3,
+            "inclusive_ns": 2296666,
+            "exclusive_ns": 2296666
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1,
+            "inclusive_ns": 1969333,
+            "exclusive_ns": 1969333
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3,
+            "inclusive_ns": 2932499,
+            "exclusive_ns": 2932499
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_target_public_semantics",
+            "count": 1,
+            "inclusive_ns": 36865958,
+            "exclusive_ns": 31636793
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 44292208,
+            "exclusive_ns": 3246750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "target_failure",
+            "count": 1,
+            "inclusive_ns": 41045458,
+            "exclusive_ns": 2210167
+          }
+        ],
+        "protocol_sends": {
+          "evaluateExpression": 6,
+          "queryCount": 1,
+          "waitForSelector": 3,
+          "ariaSnapshot": 1,
+          "dispose": 3,
+          "fill": 1,
+          "title": 1
+        },
+        "protocol_send_count": 16,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": null
+      },
+      {
+        "label": "800-r0-snapshot",
+        "wall_ms": 43107.36125,
+        "python_cpu_ms": 12344.949,
+        "json_encode_ms": 0.354333,
+        "response_bytes": 261125,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_capture_candidate_records",
+            "count": 1,
+            "inclusive_ns": 21459028208,
+            "exclusive_ns": 1114704253
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 4104,
+            "inclusive_ns": 3253057139,
+            "exclusive_ns": 3253057139
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 1602,
+            "inclusive_ns": 37177554818,
+            "exclusive_ns": 31125363415
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 1602,
+            "inclusive_ns": 3227176579,
+            "exclusive_ns": 3227176579
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 3906,
+            "inclusive_ns": 4016458398,
+            "exclusive_ns": 4016458398
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 17794209,
+            "exclusive_ns": 17794209
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21622937292,
+            "exclusive_ns": 345205716
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 43107317250,
+            "exclusive_ns": 1459666
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 43105857584,
+            "exclusive_ns": 6097875
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 2,
+          "evaluateExpression": 5509,
+          "waitForSelector": 3204,
+          "ariaSnapshot": 1602,
+          "dispose": 4104,
+          "evaluateExpressionHandle": 702
+        },
+        "protocol_send_count": 15124,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 86,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "complete",
+              "returned_bytes": 768
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 0,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-1",
+        "wall_ms": 21287.942583,
+        "python_cpu_ms": 6203.033,
+        "json_encode_ms": 0.363667,
+        "response_bytes": 260454,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1896859406,
+            "exclusive_ns": 1896859406
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18221872135,
+            "exclusive_ns": 15296189138
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1596450306,
+            "exclusive_ns": 1596450306
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2165826218,
+            "exclusive_ns": 2165826218
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 17757084,
+            "exclusive_ns": 17757084
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21268873958,
+            "exclusive_ns": 313548890
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21287909375,
+            "exclusive_ns": 1259333
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21286650042,
+            "exclusive_ns": 19000
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 172,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 86,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-2",
+        "wall_ms": 21031.354458,
+        "python_cpu_ms": 6185.009,
+        "json_encode_ms": 0.331791,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1832988139,
+            "exclusive_ns": 1832988139
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18044468907,
+            "exclusive_ns": 15188640375
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1518910046,
+            "exclusive_ns": 1518910046
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2168441729,
+            "exclusive_ns": 2168441729
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 17622208,
+            "exclusive_ns": 17622208
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21012418750,
+            "exclusive_ns": 303438461
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21031324417,
+            "exclusive_ns": 1262958
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21030061459,
+            "exclusive_ns": 20501
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 258,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 172,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-3",
+        "wall_ms": 21210.381291,
+        "python_cpu_ms": 6202.031,
+        "json_encode_ms": 0.34025,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1844475885,
+            "exclusive_ns": 1844475885
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18196296372,
+            "exclusive_ns": 15272659418
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1547596333,
+            "exclusive_ns": 1547596333
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2204787707,
+            "exclusive_ns": 2204787707
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 18696750,
+            "exclusive_ns": 18696750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21190288209,
+            "exclusive_ns": 320768866
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21210338708,
+            "exclusive_ns": 1334500
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21209004208,
+            "exclusive_ns": 19249
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 344,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 258,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-4",
+        "wall_ms": 21188.005083,
+        "python_cpu_ms": 6232.119,
+        "json_encode_ms": 0.316084,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1879173724,
+            "exclusive_ns": 1879173724
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18196816474,
+            "exclusive_ns": 15286602515
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1528426158,
+            "exclusive_ns": 1528426158
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2163311169,
+            "exclusive_ns": 2163311169
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 17327000,
+            "exclusive_ns": 17327000
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21169491208,
+            "exclusive_ns": 311977642
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21187975292,
+            "exclusive_ns": 1142083
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21186833209,
+            "exclusive_ns": 15001
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 430,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 344,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-5",
+        "wall_ms": 21075.953125,
+        "python_cpu_ms": 6213.038,
+        "json_encode_ms": 0.319333,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1913182740,
+            "exclusive_ns": 1913182740
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 17971123651,
+            "exclusive_ns": 15099700290
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1506911698,
+            "exclusive_ns": 1506911698
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2192061027,
+            "exclusive_ns": 2192061027
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 17513667,
+            "exclusive_ns": 17513667
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21057230875,
+            "exclusive_ns": 345375120
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21075922208,
+            "exclusive_ns": 1159583
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21074762625,
+            "exclusive_ns": 18083
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 516,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 430,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-6",
+        "wall_ms": 21013.026916,
+        "python_cpu_ms": 6175.988,
+        "json_encode_ms": 0.368583,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1836296488,
+            "exclusive_ns": 1836296488
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18020877830,
+            "exclusive_ns": 15183730468
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1524443653,
+            "exclusive_ns": 1524443653
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2139692866,
+            "exclusive_ns": 2139692866
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 19274709,
+            "exclusive_ns": 19274709
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 20992146542,
+            "exclusive_ns": 307983067
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21012988250,
+            "exclusive_ns": 1540291
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21011447959,
+            "exclusive_ns": 26708
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 602,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 516,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-7",
+        "wall_ms": 21753.075167,
+        "python_cpu_ms": 6412.801,
+        "json_encode_ms": 0.334417,
+        "response_bytes": 260469,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1890662201,
+            "exclusive_ns": 1890662201
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 18608130106,
+            "exclusive_ns": 15622211279
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1634323786,
+            "exclusive_ns": 1634323786
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2283053960,
+            "exclusive_ns": 2283053960
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 5733750,
+            "exclusive_ns": 5733750
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 21745613542,
+            "exclusive_ns": 315362316
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 21753039541,
+            "exclusive_ns": 1673791
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 21751365750,
+            "exclusive_ns": 18458
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 86,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 688,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 602,
+            "returned_count": 86,
+            "has_more": true
+          }
+        }
+      },
+      {
+        "label": "800-r0-continuation-8",
+        "wall_ms": 22999.298125,
+        "python_cpu_ms": 6588.761,
+        "json_encode_ms": 0.075125,
+        "response_bytes": 43201,
+        "methods": [
+          {
+            "kind": "shared_driver_method",
+            "name": "_dispose_handle",
+            "count": 2403,
+            "inclusive_ns": 1943919040,
+            "exclusive_ns": 1943919040
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_indexed_public_semantics",
+            "count": 801,
+            "inclusive_ns": 19798628370,
+            "exclusive_ns": 16560091359
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_read_control",
+            "count": 801,
+            "inclusive_ns": 1697291047,
+            "exclusive_ns": 1697291047
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_same_element",
+            "count": 2304,
+            "inclusive_ns": 2434917717,
+            "exclusive_ns": 2434917717
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_snapshot_result",
+            "count": 1,
+            "inclusive_ns": 151083,
+            "exclusive_ns": 151083
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "_verify_snapshot_batch",
+            "count": 1,
+            "inclusive_ns": 22997833375,
+            "exclusive_ns": 361614212
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "interact",
+            "count": 1,
+            "inclusive_ns": 22999270333,
+            "exclusive_ns": 1267124
+          },
+          {
+            "kind": "shared_driver_method",
+            "name": "snapshot",
+            "count": 1,
+            "inclusive_ns": 22998003209,
+            "exclusive_ns": 18751
+          }
+        ],
+        "protocol_sends": {
+          "title": 1,
+          "querySelectorAll": 1,
+          "evaluateExpression": 3105,
+          "waitForSelector": 1602,
+          "ariaSnapshot": 801,
+          "dispose": 2403
+        },
+        "protocol_send_count": 7913,
+        "status": "completed",
+        "failure_class": null,
+        "dispatch_state": "not_dispatched",
+        "exception": null,
+        "timeout": false,
+        "snapshot": {
+          "controls": 14,
+          "coverage": {
+            "scope": "main_document_light_dom",
+            "excluded": [
+              "child_frames",
+              "shadow_roots",
+              "virtualized_not_in_dom"
+            ],
+            "controls": {
+              "enumeration_complete": false,
+              "captured_count": 702,
+              "total": null,
+              "returned_through": 702,
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            },
+            "text": {
+              "state": "omitted_on_continuation",
+              "returned_bytes": 0
+            },
+            "semantics": {
+              "complete": false,
+              "reason_codes": [
+                "metadata_truncated"
+              ]
+            }
+          },
+          "continuation": {
+            "offset": 688,
+            "returned_count": 14,
+            "has_more": false
+          }
+        }
+      }
+    ],
+    "starts": [
+      {
+        "controls": 32,
+        "wall_ms": 3036.129791
+      },
+      {
+        "controls": 128,
+        "wall_ms": 1543.099292
+      },
+      {
+        "controls": 160,
+        "wall_ms": 1638.242333
+      },
+      {
+        "controls": 800,
+        "wall_ms": 2012.477209
+      }
+    ],
+    "protocol_count_scope": "Python to Playwright driver sends, NOT browser wire round-trips",
+    "cpu_scope": "Python process only, NOT browser/Node/OS CPU",
+    "timing_scope": "inclusive nested method times; exclusive subtracts measured children; sums of inclusive are invalid",
+    "authentication": "direct diagnostic; no Core/Grant/Plugin verification claim",
+    "cleanup": "driver_closed",
+    "state": "completed",
+    "ended_at": 1790182832.598917
+  },
+  "offline_storage_check": {
+    "kind": "offline_Core_summary_boundary_only_not_browser_replay",
+    "results": [
+      {
+        "synthetic_text_bytes": 32000,
+        "summary_bytes": 32035,
+        "error": null
+      },
+      {
+        "synthetic_text_bytes": 260000,
+        "summary_bytes": 260035,
+        "error": "public_result_summary exceeds 64 KiB"
+      }
+    ]
+  },
+  "measurement_notes": [
+    "Diagnostic ran before the formal CLI layer. Each size first sample follows Instance start; none claims cold OS/disk cache. Distinct dedicated profiles, same fixed fixture hashes.",
+    "CLI pressure response unknown at 39308.919ms, not a 60s timeout; query same original key also unknown, no continuation/input/replay after this result.",
+    "Raw CLI original-run-query outcome was incorrectly classified failed by the measurement admin-call branch. Its preserved result_status=unknown_outcome, exit_code=6, failure_code and dispatch_state unambiguously show unknown; final script corrects query classification. Raw record is retained unchanged.",
+    "Diagnostic reports Python-to-Playwright driver sends only, not browser wire roundtrips. Python CPU includes profiling overhead; browser CPU is not measured. No subtraction of independent CLI/direct samples is reported as IPC.",
+    "Diagnostic pressure path completed with 702 retained controls, 9 segments, metadata_truncated, total=null. Direct-method success is not formal CLI success.",
+    "Core 64KiB summary rejection is independently reproduced with synthetic data. Source trace makes it a strong explanation for formal pressure unknown; the failed live exception was not captured, so its exact originating exception remains unconfirmed.",
+    "Post-live measurement-tool changes: query classification corrected, state metadata corrected, offline storage selfcheck added, unused JS aggregation removed and Python selfcheck strengthened. No fixture, product code, or live sampling path rerun or optimized.",
+    "One offline storage-check setup error (missing required synthetic admission field) was corrected before the successful offline probe; no browser or existing Run was involved."
+  ],
+  "cleanup": {
+    "diagnostic": "Driver.close returned; subsequent process scan found no Camoufox",
+    "cli": "all dedicated Instances stopped, active Grant revoked, dedicated Runtime and loopback fixture stopped; subsequent process scan found no Camoufox",
+    "private_materials": "retained privately outside repository; no Profile/raw result/private credential artifacts committed"
+  },
+  "verification": {
+    "production_contract_tests": "19/19 (playwright-shared-driver + managed-interaction)",
+    "helper_self_checks": "passed",
+    "generated_python_compile": "passed"
+  },
+  "instrumentation_python_sha256": "db5891beb812e4b62c1e891a224d8daf9b846d7d03d0d3e6e8d9a1a8827617a2"
+}
