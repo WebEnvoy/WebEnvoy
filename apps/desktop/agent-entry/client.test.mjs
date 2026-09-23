@@ -144,14 +144,37 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     const response = await responsePromise;
     const operation = response.result.tools.find(tool => tool.name === 'webenvoy_operation');
     const describe = response.result.tools.find(tool => tool.name === 'webenvoy_describe');
+    const task = response.result.tools.find(tool => tool.name === 'webenvoy_task');
     const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
     assert.ok(operation);
     assert.ok(describe);
+    assert.ok(task);
     assert.deepEqual(operation.inputSchema.properties.operation.enum, definitions.operations.filter(item => item.exposure === 'exposed').map(item => item.id));
     assert.equal(operation.inputSchema.properties.connection_id, undefined);
     assert.equal(describe.inputSchema.properties.operation.enum, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.operation, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.connection_id, undefined);
+    assert.equal(task.inputSchema.properties.connection_id, undefined);
+    assert.deepEqual(Object.keys(task.inputSchema.properties.task_scope.properties).sort(), ['operations', 'origins', 'profile_refs', 'skill_refs', 'source_refs']);
+    const validateTask = new Ajv2020({ allErrors: true, strict: false }).compile(task.inputSchema);
+    const taskSubmitFixture = {
+      schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.submit', idempotency_key: 'catalog-read-001', grant_id: 'grant:fixture',
+      task_scope: { operations: ['task.submit'], skill_refs: ['lode://site-skill/example/catalog'], source_refs: ['lode://site-skill/example/catalog@1.0.0#commit'], profile_refs: [], origins: [] },
+      package: { package_ref: 'lode://site-skill/example/catalog', revision_ref: 'lode://site-skill/example/catalog@1.0.0#commit', package_digest: `sha256:${'a'.repeat(64)}`, task_ref: 'catalog-read' },
+      target: { target_type: 'web_page', target_ref: 'target:catalog' },
+      input: { schema_ref: 'lode://schema/example/catalog-read-input@1.0.0', carrier: 'none' },
+      intent: { summary: 'Read the catalog.', policy: { risk: 'read', execution_intent: 'read' } }
+    };
+    assert.equal(validateTask(taskSubmitFixture), true, JSON.stringify(validateTask.errors));
+    assert.equal(validateTask({ ...taskSubmitFixture, task_scope: { ...taskSubmitFixture.task_scope, operations: ['task.query'] } }), false);
+    assert.equal(validateTask({ ...taskSubmitFixture, connection_id: 'connection:caller' }), false);
+    assert.equal(validateTask({ ...taskSubmitFixture, target: { ...taskSubmitFixture.target, target_ref: 'https://example.test/catalog' } }), false);
+    const taskQueryFixture = { schema_version: taskSubmitFixture.schema_version, operation: 'task.query', grant_id: taskSubmitFixture.grant_id,
+      task_scope: { ...taskSubmitFixture.task_scope, operations: ['task.query'] }, selector: { original_idempotency_key: taskSubmitFixture.idempotency_key } };
+    const taskStopFixture = { ...taskQueryFixture, operation: 'task.stop', idempotency_key: 'stop-001', task_scope: { ...taskQueryFixture.task_scope, operations: ['task.stop'] }, selector: { run_id: 'run:core/catalog-001' } };
+    assert.equal(validateTask(taskQueryFixture), true, JSON.stringify(validateTask.errors));
+    assert.equal(validateTask(taskStopFixture), true, JSON.stringify(validateTask.errors));
+    assert.equal(validateTask({ ...taskQueryFixture, selector: { run_id: 'run:a', original_idempotency_key: 'key:a' } }), false);
     const validateOperation = new Ajv2020({ allErrors: true, strict: false }).compile(operation.inputSchema);
     const snapshotSchemaFixture = {
       idempotency_key: 'schema-snapshot-limit', grant_id: 'grant:fixture', operation: 'instance.snapshot',

@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError, managedSkillOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
 import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
+import { approvedManagedSiteTaskPackage, resolveApprovedSiteTaskPackage, type VerifiedSiteTask } from "./site-skill-package.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -26,6 +27,8 @@ export type SkillRevision = {
   content_sha256: string;
   content_bytes: number;
   compatibility: Compatibility;
+  package_digest?: string;
+  package_type?: "site-skill";
 };
 type ManifestRevision = SkillRevision;
 type SkillSourceManifest = {
@@ -86,6 +89,7 @@ export type SkillScopeRequest = {
   expected_record_version?: number;
   idempotency_key: string;
 };
+export type ManagedSiteTaskPackageRequest = { package_ref: string; revision_ref: string; package_digest: string; task_ref: string };
 
 export class ManagedSkillError extends ManagedAccessError {
   constructor(code: string) { super(code); }
@@ -95,6 +99,21 @@ const fail = (code: string): never => { throw new ManagedSkillError(code); };
 const digest = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
 const gitBlobDigest = (value: Uint8Array) => createHash("sha1").update(`blob ${value.byteLength}\0`).update(value).digest("hex");
 const nowIso = (clock?: () => Date) => (clock?.() ?? new Date()).toISOString();
+function siteSkillRevision(sitePackage: VerifiedSiteTask): SkillRevision {
+  return {
+    revision_ref: sitePackage.revision_ref,
+    source_ref: sitePackage.source_ref,
+    source_commit: sitePackage.source_commit,
+    source_blob: gitBlobDigest(sitePackage.skill_text),
+    version: sitePackage.version,
+    path: "SKILL.md",
+    content_sha256: digest(sitePackage.skill_text),
+    content_bytes: sitePackage.skill_text.byteLength,
+    compatibility: { host: "codex", plugin_version: "0.2.0" },
+    package_type: "site-skill",
+    package_digest: sitePackage.package_digest
+  };
+}
 
 function object(value: unknown, required: string[] = [], optional: string[] = []): JsonObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_skill_invalid_input");
@@ -121,12 +140,14 @@ function sha256(value: unknown): string {
 }
 function revisionRef(value: unknown): string {
   const result = text(value);
-  if (!/^git:[A-Za-z0-9._/-]+@[a-f0-9]{40}:[A-Za-z0-9._/-]+#[a-f0-9]{40}$/.test(result)) return fail("managed_skill_invalid_input");
+  if (!/^git:[A-Za-z0-9._/-]+@[a-f0-9]{40}:[A-Za-z0-9._/-]+#[a-f0-9]{40}$/.test(result) &&
+      !/^lode:\/\/site-skill\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+#[a-f0-9]{40}$/.test(result)) return fail("managed_skill_invalid_input");
   return result;
 }
 function sourceRef(value: unknown): string {
   const result = text(value);
-  if (!/^github:[A-Za-z0-9._/-]+:[A-Za-z0-9._/-]+@[a-f0-9]{40}$/.test(result)) return fail("managed_skill_invalid_input");
+  if (!/^github:[A-Za-z0-9._/-]+:[A-Za-z0-9._/-]+@[a-f0-9]{40}$/.test(result) &&
+      !/^lode:\/\/source\/site-skill\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+#[a-f0-9]{40}$/.test(result)) return fail("managed_skill_invalid_input");
   return result;
 }
 function safeRelative(value: unknown): string {
@@ -139,13 +160,18 @@ function compatibility(value: unknown): Compatibility {
   return { host: text(item.host), plugin_version: text(item.plugin_version) };
 }
 function manifestRevision(value: unknown): ManifestRevision {
-  const item = object(value, ["revision_ref", "source_ref", "source_commit", "source_blob", "version", "path", "content_sha256", "content_bytes", "compatibility"]);
+  const item = object(value, ["revision_ref", "source_ref", "source_commit", "source_blob", "version", "path", "content_sha256", "content_bytes", "compatibility"], ["package_digest", "package_type"]);
   const commit = text(item.source_commit), blob = text(item.source_blob);
   if (!/^[a-f0-9]{40}$/.test(commit) || !/^[a-f0-9]{40}$/.test(blob)) return fail("managed_skill_source_corrupt");
   if (!Number.isSafeInteger(item.content_bytes) || Number(item.content_bytes) < 1 || Number(item.content_bytes) > maxSkillContentBytes) return fail("managed_skill_source_corrupt");
+  const packageDigest = item.package_digest;
+  if (packageDigest !== undefined && (typeof packageDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(packageDigest))) return fail("managed_skill_source_corrupt");
+  if (item.package_type === "site-skill" && packageDigest === undefined || item.package_type !== undefined && item.package_type !== "site-skill") return fail("managed_skill_source_corrupt");
   return {
     revision_ref: revisionRef(item.revision_ref), source_ref: sourceRef(item.source_ref), source_commit: commit, source_blob: blob,
-    version: text(item.version), path: safeRelative(item.path), content_sha256: sha256(item.content_sha256), content_bytes: Number(item.content_bytes), compatibility: compatibility(item.compatibility)
+    version: text(item.version), path: safeRelative(item.path), content_sha256: sha256(item.content_sha256), content_bytes: Number(item.content_bytes), compatibility: compatibility(item.compatibility),
+    ...(packageDigest === undefined ? {} : { package_digest: packageDigest }),
+    ...(item.package_type === undefined ? {} : item.package_type === "site-skill" ? { package_type: "site-skill" as const } : fail("managed_skill_source_corrupt"))
   };
 }
 function parseManifest(value: unknown): SkillSourceManifest {
@@ -172,8 +198,9 @@ function recordVersion(value: unknown): number {
   return Number(value);
 }
 function parseStoredRevision(value: unknown): InstalledRevision {
-  const item = object(value, ["revision_ref", "source_ref", "source_commit", "source_blob", "version", "path", "content_sha256", "content_bytes", "compatibility", "installed_at"]);
-  const revision = manifestRevision({ revision_ref: item.revision_ref, source_ref: item.source_ref, source_commit: item.source_commit, source_blob: item.source_blob, version: item.version, path: item.path, content_sha256: item.content_sha256, content_bytes: item.content_bytes, compatibility: item.compatibility });
+  const item = object(value, ["revision_ref", "source_ref", "source_commit", "source_blob", "version", "path", "content_sha256", "content_bytes", "compatibility", "installed_at"], ["package_digest", "package_type"]);
+  const revision = manifestRevision({ revision_ref: item.revision_ref, source_ref: item.source_ref, source_commit: item.source_commit, source_blob: item.source_blob, version: item.version, path: item.path, content_sha256: item.content_sha256, content_bytes: item.content_bytes, compatibility: item.compatibility,
+    ...(item.package_digest === undefined ? {} : { package_digest: item.package_digest }), ...(item.package_type === undefined ? {} : { package_type: item.package_type }) });
   return { ...revision, installed_at: text(item.installed_at) };
 }
 function parseHistory(value: unknown): SkillHistoryEntry[] {
@@ -207,7 +234,8 @@ function parseState(value: unknown): SkillLibraryState {
   return { schema_version: skillLibrarySchemaVersion, assets, operations };
 }
 function publicRevision(revision: SkillRevision): JsonObject {
-  return { revision_ref: revision.revision_ref, source_ref: revision.source_ref, source_commit: revision.source_commit, source_blob: revision.source_blob, version: revision.version, content_sha256: revision.content_sha256, content_bytes: revision.content_bytes, compatibility: revision.compatibility };
+  return { revision_ref: revision.revision_ref, source_ref: revision.source_ref, source_commit: revision.source_commit, source_blob: revision.source_blob, version: revision.version, content_sha256: revision.content_sha256, content_bytes: revision.content_bytes, compatibility: revision.compatibility,
+    ...(revision.package_type === undefined ? {} : { package_type: revision.package_type }), ...(revision.package_digest === undefined ? {} : { package_digest: revision.package_digest }) };
 }
 function assertCompatible(revision: SkillRevision): void {
   if (revision.compatibility.host !== "codex" || revision.compatibility.plugin_version !== "0.2.0") return fail("managed_skill_incompatible");
@@ -227,10 +255,50 @@ function stateSummary(record: SkillRecord | undefined, manifest: SkillSourceMani
   };
 }
 
+function siteTaskSummary(sitePackage: VerifiedSiteTask): JsonObject {
+  const task = sitePackage.task;
+  const inputs = task.inputs as JsonObject;
+  const outputs = task.outputs as JsonObject;
+  const verification = task.verification as JsonObject;
+  const declaredCapabilityRefs = objectOrEmpty(task.entrypoint).capability_refs as string[];
+  return {
+    schema_version: "webenvoy.site-task-summary/v1",
+    package_ref: sitePackage.package_ref,
+    revision_ref: sitePackage.revision_ref,
+    package_digest: sitePackage.package_digest,
+    version: sitePackage.version,
+    tasks: [{
+      task_ref: sitePackage.task_ref,
+      title: task.title,
+      intent: task.intent,
+      ...(Array.isArray(task.known_branches) ? { known_branches: task.known_branches } : {}),
+      entrypoint: { kind: "capability_refs", capability_refs: declaredCapabilityRefs },
+      capability_ref: sitePackage.capability.capability_ref,
+      capability_version: sitePackage.capability.version,
+      source_ref: sitePackage.source_ref,
+      lock_ref: sitePackage.lock_ref,
+      required_capabilities: declaredCapabilityRefs.map(ref => ({ ref, version: sitePackage.capability.version, source_ref: sitePackage.source_ref, lock_ref: sitePackage.lock_ref })),
+      operation_id: sitePackage.capability.operation_id,
+      action: sitePackage.capability.action,
+      input_schema_ref: inputs.schema_ref,
+      input_carrier: inputs.carrier,
+      input_max_bytes: inputs.max_bytes,
+      output_schema_ref: outputs.schema_ref,
+      post_check_ref: verification.post_check_ref,
+      verification: { post_check_ref: verification.post_check_ref, required_evidence_refs: verification.required_evidence_refs },
+      data_handling: { input_sensitivity: inputs.sensitivity, output_sensitivity: objectOrEmpty(task.data_handling).output_sensitivity, external_egress: objectOrEmpty(task.data_handling).external_egress },
+      task_support: "declared",
+      runtime_state: "not_evaluated"
+    }]
+  };
+}
+function objectOrEmpty(value: unknown): JsonObject { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {}; }
+
 export function createFileSkillLibraryService(options: {
   directory: string;
   sourceManifestPath?: string;
   trustedManifestSha256?: string;
+  lodeAssetsPath?: string;
   runRecordStore: FileRunRecordStore;
   accessStore: FileManagedAccessStore;
   clock?: () => Date;
@@ -292,7 +360,23 @@ export function createFileSkillLibraryService(options: {
     await mkdir(options.directory, { recursive: true, mode: 0o700 });
     return withFileOwnershipLock(lockPath, lockTimeoutMs, async () => { const state = await readState(); const result = await action(state); await writeState(state); return result; });
   }
-  async function sourceManifest(): Promise<{ manifest: SkillSourceManifest; sourceRoot: string }> {
+  async function sourceManifest(skillRef?: string): Promise<{ manifest: SkillSourceManifest; sourceRoot: string; sitePackage?: VerifiedSiteTask }> {
+    if (skillRef === approvedManagedSiteTaskPackage.package_ref) {
+      const sitePackage = await resolveApprovedSiteTaskPackage(options.lodeAssetsPath);
+      const revision = siteSkillRevision(sitePackage);
+      return {
+        manifest: {
+          schema_version: skillSourceManifestSchemaVersion,
+          asset_ref: sitePackage.package_ref,
+          asset_name: String(sitePackage.task.title ?? "Site skill"),
+          source_repository: "WebEnvoy/Lode",
+          source_path: approvedManagedSiteTaskPackage.package_path,
+          revisions: [revision]
+        },
+        sourceRoot: options.lodeAssetsPath ?? process.env.WEBENVOY_LODE_ASSETS_PATH ?? "",
+        sitePackage
+      };
+    }
     try {
       const info = await lstat(sourceManifestPath);
       if (!info.isFile() || info.isSymbolicLink() || info.size > maxSkillManifestBytes) return fail("managed_skill_source_corrupt");
@@ -306,7 +390,8 @@ export function createFileSkillLibraryService(options: {
       return fail("managed_skill_source_corrupt");
     }
   }
-  async function sourceBytes(manifest: SkillSourceManifest, sourceRoot: string, revision: SkillRevision): Promise<Buffer> {
+  async function sourceBytes(manifest: SkillSourceManifest, sourceRoot: string, revision: SkillRevision, sitePackage?: VerifiedSiteTask): Promise<Buffer> {
+    if (sitePackage && revision.package_type === "site-skill") return Buffer.from(sitePackage.skill_text);
     const filePath = resolve(sourceRoot, revision.path);
     const rel = relative(sourceRoot, filePath);
     if (!rel || rel.startsWith(".." + "/") || rel === "..") return fail("managed_skill_source_corrupt");
@@ -327,15 +412,59 @@ export function createFileSkillLibraryService(options: {
     return manifest.revisions.find(revision => revision.revision_ref === ref || revision.source_ref === ref) ?? fail("managed_skill_revision_unavailable");
   }
   function findRecord(state: SkillLibraryState, skillRef: string): SkillRecord | undefined { return state.assets.find(item => item.skill_ref === skillRef); }
-  function targetPath(skillRef: string, revisionRef: string): string {
-    const skill = encodeURIComponent(skillRef), revision = encodeURIComponent(digest(revisionRef));
-    return join(assetRoot, skill, "revisions", `${revision}.md`);
+  function targetPath(skillRef: string, revision: SkillRevision): string {
+    const skill = encodeURIComponent(skillRef), revisionDigest = encodeURIComponent(digest(revision.revision_ref));
+    return revision.package_type === "site-skill"
+      ? join(assetRoot, skill, "revisions", revisionDigest, "SKILL.md")
+      : join(assetRoot, skill, "revisions", `${revisionDigest}.md`);
   }
-  async function installedBytes(record: SkillRecord, revision: SkillRevision): Promise<{ bytes: Buffer; state: "available" | "missing" | "local_modified" }> {
-    const path = targetPath(record.skill_ref, revision.revision_ref);
-    const directoryState = await checkManagedDirectory(join(assetRoot, encodeURIComponent(record.skill_ref), "revisions"));
+  function targetPackageDirectory(skillRef: string, revision: SkillRevision): string {
+    return join(assetRoot, encodeURIComponent(skillRef), "revisions", encodeURIComponent(digest(revision.revision_ref)));
+  }
+  async function installedSitePackageState(skillRef: string, revision: SkillRevision, sitePackage: VerifiedSiteTask): Promise<"available" | "missing" | "local_modified"> {
+    const root = targetPackageDirectory(skillRef, revision);
+    const directoryState = await checkManagedDirectory(root);
+    if (directoryState !== "available") return directoryState;
+    const expected = new Map([
+      ["manifest.json", { path: "manifest.json", bytes: sitePackage.manifest_bytes, sha256: `sha256:${digest(sitePackage.manifest_bytes)}` }],
+      ...sitePackage.files.map(item => [item.path, item] as const)
+    ]);
+    const actual: string[] = [];
+    async function visit(directory: string): Promise<boolean> {
+      let entries;
+      try { entries = await readdir(directory, { withFileTypes: true }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        const info = await lstat(path);
+        if (info.isSymbolicLink()) return false;
+        if (info.isDirectory()) { if (!await visit(path)) return false; }
+        else if (info.isFile()) actual.push(relative(root, path).split("\\").join("/"));
+        else return false;
+      }
+      return true;
+    }
+    if (!await visit(root)) return "local_modified";
+    actual.sort();
+    if (actual.some(path => !expected.has(path))) return "local_modified";
+    if (actual.length < expected.size) return "missing";
+    for (const path of actual) {
+      const item = expected.get(path)!;
+      const bytes = await readFile(join(root, path));
+      if (bytes.byteLength !== item.bytes.byteLength || digest(bytes) !== item.sha256.slice("sha256:".length)) return "local_modified";
+    }
+    return "available";
+  }
+  async function installedBytes(record: SkillRecord, revision: SkillRevision, sitePackage?: VerifiedSiteTask): Promise<{ bytes: Buffer; state: "available" | "missing" | "local_modified" }> {
+    const path = targetPath(record.skill_ref, revision);
+    const directoryState = revision.package_type === "site-skill" ? await checkManagedDirectory(targetPackageDirectory(record.skill_ref, revision)) : await checkManagedDirectory(join(assetRoot, encodeURIComponent(record.skill_ref), "revisions"));
     if (directoryState === "missing") return { bytes: Buffer.alloc(0), state: "missing" };
     if (directoryState === "local_modified") return { bytes: Buffer.alloc(0), state: "local_modified" };
+    if (revision.package_type === "site-skill") {
+      if (!sitePackage) return { bytes: Buffer.alloc(0), state: "missing" };
+      const packageState = await installedSitePackageState(record.skill_ref, revision, sitePackage);
+      if (packageState !== "available") return { bytes: Buffer.alloc(0), state: packageState };
+    }
     try {
       const info = await lstat(path);
       if (!info.isFile() || info.isSymbolicLink() || info.size !== revision.content_bytes || info.size > maxSkillContentBytes) return { bytes: Buffer.alloc(0), state: "local_modified" };
@@ -343,16 +472,18 @@ export function createFileSkillLibraryService(options: {
       return bytes.byteLength === revision.content_bytes && digest(bytes) === revision.content_sha256 ? { bytes, state: "available" } : { bytes, state: "local_modified" };
     } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { bytes: Buffer.alloc(0), state: "missing" }; throw error; }
   }
-  async function verifiedStateSummary(record: SkillRecord | undefined, manifest: SkillSourceManifest, allowedSources?: readonly string[]): Promise<JsonObject> {
+  async function verifiedStateSummary(record: SkillRecord | undefined, manifest: SkillSourceManifest, allowedSources?: readonly string[], sitePackage?: VerifiedSiteTask): Promise<JsonObject> {
     const allowed = allowedSources === undefined ? undefined : new Set(allowedSources);
     const localStates = new Map<string, "available" | "missing" | "local_modified">();
     if (record) {
       for (const revision of manifest.revisions) {
         if (allowed !== undefined && !allowed.has(revision.source_ref) && !allowed.has(revision.revision_ref)) continue;
-        if (record.revisions.some(installed => installed.revision_ref === revision.revision_ref)) localStates.set(revision.revision_ref, (await installedBytes(record, revision)).state);
+        if (record.revisions.some(installed => installed.revision_ref === revision.revision_ref)) localStates.set(revision.revision_ref, (await installedBytes(record, revision, sitePackage)).state);
       }
     }
-    return stateSummary(record, manifest, allowedSources, localStates);
+    const summary = stateSummary(record, manifest, allowedSources, localStates);
+    if (sitePackage && (allowedSources === undefined || allowedSources.includes(sitePackage.source_ref) || allowedSources.includes(sitePackage.revision_ref))) summary.site_tasks = siteTaskSummary(sitePackage);
+    return summary;
   }
   function assertScopeRef(input: SkillScopeRequest, skillRef: string, revision?: SkillRevision): void {
     if (!input.task_scope.operations.includes(input.operation) || !input.task_scope.skill_refs.includes(skillRef)) return fail("managed_access_denied");
@@ -420,7 +551,31 @@ export function createFileSkillLibraryService(options: {
   }
 
   async function execute(input: SkillScopeRequest, runId: string, principalId: string, requestHash: string): Promise<{ metadata: JsonObject; content?: string }> {
-    const { manifest, sourceRoot } = await sourceManifest();
+    if (input.operation === "skill.list" && input.skill_ref === undefined) {
+      const state = await readState();
+      const visible: JsonObject[] = [];
+      const refs = input.task_scope.skill_refs;
+      if (refs.includes(approvedManagedSiteTaskPackage.package_ref)) {
+        try {
+          const { manifest, sitePackage } = await sourceManifest(approvedManagedSiteTaskPackage.package_ref);
+          visible.push(await verifiedStateSummary(findRecord(state, manifest.asset_ref), manifest, input.task_scope.source_refs, sitePackage));
+        } catch (error) {
+          if (!(error instanceof ManagedAccessError) || error.code !== "managed_skill_source_missing") throw error;
+        }
+      }
+      if (refs.some(ref => ref !== approvedManagedSiteTaskPackage.package_ref)) {
+        try {
+          const { manifest, sitePackage } = await sourceManifest();
+          if (refs.includes(manifest.asset_ref)) visible.push(await verifiedStateSummary(findRecord(state, manifest.asset_ref), manifest, input.task_scope.source_refs, sitePackage));
+        } catch (error) {
+          if (!(error instanceof ManagedAccessError) || error.code !== "managed_skill_source_missing") throw error;
+        }
+      }
+      const metadata = { schema_version: skillResultSchemaVersion, skills: visible };
+      await transaction(current => { rememberOperation(current, input, runId, principalId, requestHash, metadata); });
+      return { metadata };
+    }
+    const { manifest, sourceRoot, sitePackage } = await sourceManifest(input.skill_ref);
     const state = await readState();
     let record = findRecord(state, manifest.asset_ref);
     const skillRef = input.skill_ref ?? manifest.asset_ref;
@@ -430,49 +585,74 @@ export function createFileSkillLibraryService(options: {
     if (input.source_ref !== undefined && requested && requested.source_ref !== input.source_ref) return fail("managed_skill_source_mismatch");
     assertScopeRef(input, skillRef, requested);
     if (input.operation === "skill.list") {
-      const visible = input.task_scope.skill_refs.includes(manifest.asset_ref) ? [await verifiedStateSummary(record, manifest, input.task_scope.source_refs)] : [];
+      const visible = input.task_scope.skill_refs.includes(manifest.asset_ref) ? [await verifiedStateSummary(record, manifest, input.task_scope.source_refs, sitePackage)] : [];
       const metadata = { schema_version: skillResultSchemaVersion, skills: visible };
       await transaction(current => { rememberOperation(current, input, runId, principalId, requestHash, metadata); });
       return { metadata };
     }
     if (input.operation === "skill.inspect") {
-      const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(record, manifest, input.task_scope.source_refs) };
+      const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(record, manifest, input.task_scope.source_refs, sitePackage) };
       await transaction(current => { rememberOperation(current, input, runId, principalId, requestHash, metadata); });
       return { metadata };
     }
     if (input.operation === "skill.install") {
       const revision = requested!;
       assertCompatible(revision);
-      const bytes = await sourceBytes(manifest, sourceRoot, revision);
+      const bytes = await sourceBytes(manifest, sourceRoot, revision, sitePackage);
       return { metadata: await transaction(async current => {
         let asset = findRecord(current, skillRef);
         if (!asset) { asset = { skill_ref: skillRef, asset_name: manifest.asset_name, source_repository: manifest.source_repository, source_path: manifest.source_path, revisions: [], enabled: false, enabled_revision_ref: null, record_version: 0, history: [] }; current.assets.push(asset); }
         const existing = asset.revisions.find(item => item.revision_ref === revision.revision_ref);
         if (existing) {
-          const installed = await installedBytes(asset!, revision);
+          const installed = await installedBytes(asset!, revision, sitePackage);
           if (installed.state === "local_modified") return fail("managed_skill_local_modified");
           if (installed.state === "missing") return fail("managed_skill_missing");
-          const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs), revision: publicRevision(revision), idempotent: true };
+          const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs, sitePackage), revision: publicRevision(revision), idempotent: true };
           rememberOperation(current, input, runId, principalId, requestHash, metadata);
           return metadata;
         }
-        const destination = targetPath(skillRef, revision.revision_ref);
-        await ensureManagedDirectory(join(assetRoot, encodeURIComponent(skillRef), "revisions"));
-        try { const info = await lstat(destination); if (info.isSymbolicLink() || !info.isFile() || info.size !== revision.content_bytes || info.size > maxSkillContentBytes) return fail("managed_skill_local_modified"); const existingBytes = await readFile(destination); if (digest(existingBytes) !== revision.content_sha256) return fail("managed_skill_local_modified"); }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          const temporary = `${destination}.${randomUUID()}.tmp`;
-          try {
-            await writeFile(temporary, bytes, { mode: 0o600, flag: "wx" });
-            try { await link(temporary, destination); }
-            catch (linkError) {
-              if ((linkError as NodeJS.ErrnoException).code !== "EEXIST") throw linkError;
-              return fail("managed_skill_local_modified");
+        if (sitePackage && revision.package_type === "site-skill") {
+          const revisionRoot = targetPackageDirectory(skillRef, revision);
+          await ensureManagedDirectory(revisionRoot);
+          const packageFiles = [
+            { path: "manifest.json", bytes: sitePackage.manifest_bytes },
+            ...sitePackage.files.map(({ path, bytes }) => ({ path, bytes }))
+          ];
+          for (const file of packageFiles) {
+            const destination = join(revisionRoot, file.path);
+            await ensureManagedDirectory(join(revisionRoot, ...file.path.split("/").slice(0, -1)));
+            try {
+              const info = await lstat(destination);
+              if (info.isSymbolicLink() || !info.isFile() || info.size !== file.bytes.byteLength || digest(await readFile(destination)) !== digest(file.bytes)) return fail("managed_skill_local_modified");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+              const temporary = `${destination}.${randomUUID()}.tmp`;
+              try {
+                await writeFile(temporary, file.bytes, { mode: 0o600, flag: "wx" });
+                try { await link(temporary, destination); }
+                catch (linkError) { if ((linkError as NodeJS.ErrnoException).code !== "EEXIST") throw linkError; return fail("managed_skill_local_modified"); }
+              } finally { await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; }); }
             }
-          } finally { await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; }); }
+          }
+        } else {
+          const destination = targetPath(skillRef, revision);
+          await ensureManagedDirectory(join(assetRoot, encodeURIComponent(skillRef), "revisions"));
+          try { const info = await lstat(destination); if (info.isSymbolicLink() || !info.isFile() || info.size !== revision.content_bytes || info.size > maxSkillContentBytes) return fail("managed_skill_local_modified"); const existingBytes = await readFile(destination); if (digest(existingBytes) !== revision.content_sha256) return fail("managed_skill_local_modified"); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            const temporary = `${destination}.${randomUUID()}.tmp`;
+            try {
+              await writeFile(temporary, bytes, { mode: 0o600, flag: "wx" });
+              try { await link(temporary, destination); }
+              catch (linkError) {
+                if ((linkError as NodeJS.ErrnoException).code !== "EEXIST") throw linkError;
+                return fail("managed_skill_local_modified");
+              }
+            } finally { await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; }); }
+          }
         }
         asset.revisions.push({ ...revision, installed_at: nowIso(options.clock) }); asset.record_version += 1; asset.history.push({ event: "install", revision_ref: revision.revision_ref, source_ref: revision.source_ref, at: nowIso(options.clock), run_id: runId });
-        const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs), revision: publicRevision(revision), idempotent: false };
+        const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs, sitePackage), revision: publicRevision(revision), idempotent: false };
         rememberOperation(current, input, runId, principalId, requestHash, metadata);
         return metadata;
       }) };
@@ -485,7 +665,7 @@ export function createFileSkillLibraryService(options: {
       assertCompatible(selected);
       if (!input.task_scope.source_refs.includes(selected.source_ref) && !input.task_scope.source_refs.includes(selected.revision_ref)) return fail("managed_access_denied");
       if (input.source_ref !== undefined && input.source_ref !== selected.source_ref) return fail("managed_skill_source_mismatch");
-      const installed = await installedBytes(record, selected);
+      const installed = await installedBytes(record, selected, sitePackage);
       if (installed.state !== "available") return fail(`managed_skill_${installed.state}`);
       const readReceipt = receipt(selected, skillRef, record.record_version, options.clock);
       const metadata = { schema_version: skillResultSchemaVersion, skill_ref: skillRef, revision: publicRevision(selected), receipt: readReceipt };
@@ -501,11 +681,11 @@ export function createFileSkillLibraryService(options: {
     if (input.expected_current_revision_ref !== undefined && input.expected_current_revision_ref !== record.enabled_revision_ref) return fail("managed_skill_conflict");
     if (input.expected_record_version !== undefined && input.expected_record_version !== record.record_version) return fail("managed_skill_conflict");
     if (input.operation === "skill.update" || input.operation === "skill.rollback") {
-      if (currentSelected) { assertCompatible(currentSelected); const currentBytes = await installedBytes(record, currentSelected); if (currentBytes.state !== "available") return fail(`managed_skill_${currentBytes.state}`); }
+      if (currentSelected) { assertCompatible(currentSelected); const currentBytes = await installedBytes(record, currentSelected, sitePackage); if (currentBytes.state !== "available") return fail(`managed_skill_${currentBytes.state}`); }
       assertCompatible(target!);
-      const targetBytes = await installedBytes(record, target!); if (targetBytes.state !== "available") return fail(`managed_skill_${targetBytes.state}`);
+      const targetBytes = await installedBytes(record, target!, sitePackage); if (targetBytes.state !== "available") return fail(`managed_skill_${targetBytes.state}`);
     }
-    if (input.operation === "skill.enable") { assertCompatible(target!); const targetBytes = await installedBytes(record, target!); if (targetBytes.state !== "available") return fail(`managed_skill_${targetBytes.state}`); }
+    if (input.operation === "skill.enable") { assertCompatible(target!); const targetBytes = await installedBytes(record, target!, sitePackage); if (targetBytes.state !== "available") return fail(`managed_skill_${targetBytes.state}`); }
     const event = input.operation === "skill.enable" ? "enable" : input.operation === "skill.update" ? "update" : input.operation === "skill.rollback" ? "rollback" : "disable";
     const metadata = await transaction(async current => {
       const asset = findRecord(current, skillRef); if (!asset) return fail("managed_skill_not_installed");
@@ -519,7 +699,7 @@ export function createFileSkillLibraryService(options: {
       if (selected && event !== "disable") assertCompatible(selected);
       asset.history.push({ event, ...(asset.enabled_revision_ref === null ? {} : { revision_ref: asset.enabled_revision_ref }), ...(selected === undefined ? {} : { source_ref: selected.source_ref }), at: nowIso(options.clock), run_id: runId });
       const visibleSelected = asset.enabled_revision_ref ? manifest.revisions.find(item => item.revision_ref === asset.enabled_revision_ref) : undefined;
-      const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs), revision: visibleSelected && (input.task_scope.source_refs.includes(visibleSelected.source_ref) || input.task_scope.source_refs.includes(visibleSelected.revision_ref)) ? publicRevision(visibleSelected) : null };
+      const metadata = { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary(asset, manifest, input.task_scope.source_refs, sitePackage), revision: visibleSelected && (input.task_scope.source_refs.includes(visibleSelected.source_ref) || input.task_scope.source_refs.includes(visibleSelected.revision_ref)) ? publicRevision(visibleSelected) : null };
       rememberOperation(current, input, runId, principalId, requestHash, metadata);
       return metadata;
     });
@@ -574,7 +754,29 @@ export function createFileSkillLibraryService(options: {
     }
     return response(run);
   }
-  return { submit, query, async listSource(): Promise<JsonObject> { const { manifest } = await sourceManifest(); return { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary((await readState()).assets.find(item => item.skill_ref === manifest.asset_ref), manifest) }; } };
+  async function resolveManagedSiteTask(request: ManagedSiteTaskPackageRequest): Promise<VerifiedSiteTask> {
+    if (!request || request.package_ref !== approvedManagedSiteTaskPackage.package_ref || request.revision_ref !== approvedManagedSiteTaskPackage.revision_ref ||
+        request.package_digest !== approvedManagedSiteTaskPackage.package_digest || request.task_ref !== approvedManagedSiteTaskPackage.task_ref) return fail("managed_skill_revision_unavailable");
+    const sitePackage = await resolveApprovedSiteTaskPackage(options.lodeAssetsPath);
+    const state = await readState();
+    const record = findRecord(state, sitePackage.package_ref);
+    if (!record) return fail("managed_skill_not_installed");
+    if (!record.enabled || record.enabled_revision_ref !== sitePackage.revision_ref) return fail("managed_skill_disabled");
+    const installedRevision = record.revisions.find(revision => revision.revision_ref === sitePackage.revision_ref);
+    if (!installedRevision || installedRevision.package_type !== "site-skill" || installedRevision.package_digest !== sitePackage.package_digest || installedRevision.source_ref !== sitePackage.source_ref) return fail("managed_skill_revision_unavailable");
+    const stateResult = await installedBytes(record, installedRevision, sitePackage);
+    if (stateResult.state !== "available") return fail(`managed_skill_${stateResult.state}`);
+    return sitePackage;
+  }
+  return {
+    submit,
+    query,
+    resolveManagedSiteTask,
+    async listSource(): Promise<JsonObject> {
+      const { manifest } = await sourceManifest();
+      return { schema_version: skillResultSchemaVersion, skill: await verifiedStateSummary((await readState()).assets.find(item => item.skill_ref === manifest.asset_ref), manifest) };
+    }
+  };
 }
 
 export type FileSkillLibraryService = ReturnType<typeof createFileSkillLibraryService>;

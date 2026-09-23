@@ -148,6 +148,7 @@ import {
   createFileSkillLibraryService,
   approvedSkillManifestSha256,
   createManagedBrowserService,
+  createManagedTaskService,
   createManagedRecoveryService,
   createHttpHarborIdentityFactsReader,
   createHttpHarborRuntimeClient,
@@ -244,10 +245,14 @@ const managedBrowserService = harborRuntimeUrl
       harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
       ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
   : undefined;
+const managedTaskService = managedBrowserService
+  ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService })
+  : undefined;
 const server = createApiServer({
   supervisorToken,
   managedAccessStore,
   managedSkillService,
+  ...(managedTaskService === undefined ? {} : { managedTaskService }),
   ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
   ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
   ...(managedFileService === undefined ? {} : { managedFileService }),

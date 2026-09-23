@@ -38,6 +38,8 @@ export type CompleteRunResultInput = {
   output_schema_id?: string;
   data?: Record<string, unknown>;
   persisted_public_summary?: Record<string, unknown>;
+  /** Persist the terminal result envelope alongside the terminal Run update. */
+  persist_result_envelope?: boolean;
   projection_ref?: string;
   raw_payload_refs?: readonly string[];
   source_refs?: readonly string[];
@@ -49,6 +51,9 @@ export type CompleteRunResultInput = {
 export type CompleteRunFailureInput = {
   status?: FailureTerminalStatus;
   failure: FailureRecord;
+  persisted_public_summary?: Record<string, unknown>;
+  /** Persist the terminal failure envelope alongside the terminal Run update. */
+  persist_result_envelope?: boolean;
   evidence_refs?: readonly string[];
   retention_state?: RetentionState;
   post_check?: PostCheckResult;
@@ -155,6 +160,25 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
   if (!evidenceRefs?.length) throw new Error("result envelope requires evidence_refs");
   const retentionState = input.retention_state ?? "active";
   const outcome = input.outcome ?? "success";
+  const envelope: ResultEnvelope = {
+    ...envelopeBase(current),
+    ok: true,
+    outcome,
+    result_ref: input.result_ref,
+    result_kind: requireRef(input.result_kind, "result_kind"),
+    ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
+    ...(input.data === undefined ? {} : { data: input.data }),
+    ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
+    ...(input.raw_payload_refs === undefined ? {} : { raw_payload_refs: copyRequiredRefs(input.raw_payload_refs, "raw_payload_refs") }),
+    ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
+    evidence_refs: evidenceRefs,
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
+    retention_state: retentionState
+  };
+  const persistedPublicSummary = input.persisted_public_summary === undefined ? undefined : {
+    ...input.persisted_public_summary,
+    ...(input.persist_result_envelope ? { result: envelope } : {})
+  };
   const updated = await store.updateRunRecord(runId, {
     status: "succeeded",
     result_ref: requireRef(input.result_ref, "result_ref"),
@@ -162,7 +186,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
     ...(outcome === "success" ? {} : { result_outcome: outcome }),
     ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
     ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
-    ...(input.persisted_public_summary === undefined ? {} : { public_result_summary: input.persisted_public_summary }),
+    ...(persistedPublicSummary === undefined ? {} : { public_result_summary: persistedPublicSummary }),
     ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
     evidence_refs: evidenceRefs,
     retention_state: retentionState,
@@ -171,21 +195,7 @@ export async function completeRunWithResult(store: FileRunRecordStore, runId: st
 
   return {
     run_record: updated,
-    result_envelope: {
-      ...envelopeBase(updated),
-      ok: true,
-      outcome,
-      result_ref: input.result_ref,
-      result_kind: requireRef(input.result_kind, "result_kind"),
-      ...(input.output_schema_id === undefined ? {} : { output_schema_id: requireRef(input.output_schema_id, "output_schema_id") }),
-      ...(input.data === undefined ? {} : { data: input.data }),
-      ...(input.projection_ref === undefined ? {} : { projection_ref: requireRef(input.projection_ref, "projection_ref") }),
-      ...(input.raw_payload_refs === undefined ? {} : { raw_payload_refs: copyRequiredRefs(input.raw_payload_refs, "raw_payload_refs") }),
-      ...(input.source_refs === undefined ? {} : { source_refs: copyRequiredRefs(input.source_refs, "source_refs") }),
-      evidence_refs: evidenceRefs,
-      ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
-      retention_state: retentionState
-    }
+    result_envelope: { ...envelopeBase(updated), ...envelope }
   };
 }
 
@@ -194,9 +204,25 @@ export async function completeRunWithFailure(store: FileRunRecordStore, runId: s
   const evidenceRefs = copyRefs(input.evidence_refs, "evidence_refs");
   const retentionState = input.retention_state ?? "active";
   const failure = normalizeFailureRecord(input.failure);
+  const current = await store.getRunRecord(runId);
+  if (!current) throw new Error(`run record not found: ${runId}`);
+  const persistedEnvelope: ResultEnvelope = {
+    ...envelopeBase(current),
+    ok: false,
+    outcome: status,
+    ...(evidenceRefs === undefined ? {} : { evidence_refs: evidenceRefs }),
+    failure,
+    ...(input.post_check === undefined ? {} : { post_check: input.post_check }),
+    retention_state: retentionState
+  };
+  const persistedPublicSummary = input.persisted_public_summary === undefined ? undefined : {
+    ...input.persisted_public_summary,
+    ...(input.persist_result_envelope ? { result: persistedEnvelope } : {})
+  };
   const updated = await store.updateRunRecord(runId, {
     status,
     failure,
+    ...(persistedPublicSummary === undefined ? {} : { public_result_summary: persistedPublicSummary }),
     ...(evidenceRefs === undefined ? {} : { evidence_refs: evidenceRefs }),
     retention_state: retentionState,
     ...(input.post_check === undefined ? {} : { post_check: input.post_check })
@@ -206,8 +232,7 @@ export async function completeRunWithFailure(store: FileRunRecordStore, runId: s
     run_record: updated,
     result_envelope: {
       ...envelopeBase(updated),
-      ok: false,
-      outcome: status,
+      ...persistedEnvelope,
       ...(updated.evidence_refs === undefined ? {} : { evidence_refs: updated.evidence_refs }),
       failure,
       ...(input.post_check === undefined ? {} : { post_check: input.post_check }),

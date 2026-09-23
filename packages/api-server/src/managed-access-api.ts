@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ExecutionPolicyVersionConflictError, ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService, type createFileSkillLibraryService, type createManagedRecoveryService } from "@webenvoy/core-runtime";
+import { ExecutionPolicyVersionConflictError, ManagedAccessError, type FileManagedAccessStore, type createManagedBrowserService, type createFileSkillLibraryService, type createManagedRecoveryService, type createManagedTaskService } from "@webenvoy/core-runtime";
 
 export type ManagedAccessApiOptions = {
   supervisorToken?: string;
@@ -8,6 +8,7 @@ export type ManagedAccessApiOptions = {
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
     Partial<Pick<ReturnType<typeof createManagedBrowserService>, "describe" | "getManagementPolicy" | "putManagementPolicy">>;
   managedSkillService?: Pick<ReturnType<typeof createFileSkillLibraryService>, "submit" | "query">;
+  managedTaskService?: Pick<ReturnType<typeof createManagedTaskService>, "operate">;
   managedRecoveryService?: Pick<ReturnType<typeof createManagedRecoveryService>, "inspect" | "backup" | "plan" | "apply" | "status" | "request">;
   managedFileService?: {
     importFile(input: Record<string, unknown>): Promise<unknown>;
@@ -36,7 +37,7 @@ function equalToken(value: string, expected: string): boolean {
   return supplied.length === owner.length && timingSafeEqual(supplied, owner);
 }
 function agentRoute(path: string): boolean {
-  return path === "/agent-connections" || path === "/managed-browser/capabilities/describe" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path);
+  return path === "/agent-connections" || path === "/managed-browser/capabilities/describe" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path) || path === "/managed-tasks/operations";
 }
 function ownerRecoveryRoute(path: string): boolean {
   return path === "/owner/recovery/inspect" || path === "/owner/recovery/backup" || path === "/owner/recovery/plan" || path === "/owner/recovery/apply" || /^\/owner\/recovery\/status\/[^/]+$/.test(path);
@@ -59,21 +60,21 @@ export function authorizeCoreRequest(request: IncomingMessage, response: ServerR
   return true;
 }
 
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
-  if (request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") throw new ManagedAccessError("managed_access_invalid_input");
+async function body(request: IncomingMessage, maxBytes = 64 * 1024, invalidCode = "managed_access_invalid_input"): Promise<Record<string, unknown>> {
+  if (request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") throw new ManagedAccessError(invalidCode);
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.length;
-    if (size > 64 * 1024) throw new ManagedAccessError("managed_access_invalid_input");
+    if (size > maxBytes) throw new ManagedAccessError(invalidCode);
     chunks.push(bytes);
   }
   try {
     const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
     return parsed as Record<string, unknown>;
-  } catch { throw new ManagedAccessError("managed_access_invalid_input"); }
+  } catch { throw new ManagedAccessError(invalidCode); }
 }
 
 export async function handleManagedAccessApi(request: IncomingMessage, response: ServerResponse, path: string, options: ManagedAccessApiOptions): Promise<boolean> {
@@ -148,12 +149,18 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
         if (!service) { reject(response, 503, "managed_skill_unavailable"); return true; }
         send(response, 200, await service.submit(credentialHash, await body(request))); return true;
       }
+      if (path === "/managed-tasks/operations" && request.method === "POST") {
+        const service = options.managedTaskService;
+        if (!service) { reject(response, 503, "managed_task_unavailable"); return true; }
+        send(response, 200, await service.operate(credentialHash, await body(request, 128 * 1024, "managed_task_invalid_input"))); return true;
+      }
       const skillOperation = /^\/managed-skills\/operations\/([^/]+)$/.exec(path);
       if (skillOperation && request.method === "GET") {
         const service = options.managedSkillService;
         if (!service) { reject(response, 503, "managed_skill_unavailable"); return true; }
         send(response, 200, await service.query(credentialHash, decodeURIComponent(skillOperation[1]!))); return true;
       }
+      if (path === "/managed-tasks/operations") { reject(response, 405, "managed_task_method_not_allowed"); return true; }
     } else {
       if (path === "/agent-access/management-policy" && (request.method === "GET" || request.method === "PUT")) {
         const service = options.managedBrowserService;
@@ -212,11 +219,20 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     }
     const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
     // submit returns admitted Run failures itself; access errors escaping it precede dispatch.
-    const notDispatched = path === "/managed-browser/operations" && request.method === "POST" && error instanceof ManagedAccessError && code.startsWith("managed_access_");
+    const managedTaskRequest = path === "/managed-tasks/operations" && request.method === "POST";
+    const notDispatched = (path === "/managed-browser/operations" && request.method === "POST" || managedTaskRequest) && error instanceof ManagedAccessError && (code.startsWith("managed_access_") || code.startsWith("managed_task_"));
     const conflict = code === "managed_access_idempotency_conflict" || code === "managed_access_scope_conflict" || code === "managed_access_grant_conflict" || code === "managed_access_policy_conflict";
+    const managedTaskStatus = managedTaskRequest
+      ? code === "managed_task_operation_unavailable" ? 404
+        : code === "managed_task_invalid_input" || code === "managed_task_version_unsupported" ? 400
+          : ["managed_access_authentication_required", "managed_access_invalid_credential", "managed_access_connection_unavailable"].includes(code) ? 401
+            : code === "managed_access_denied" ? 403
+              : conflict ? 409
+                : error instanceof ManagedAccessError ? 403 : 503
+      : undefined;
     const isDiscovery = path === "/managed-browser/capabilities/describe" && request.method === "POST";
     const discoveryStatus: number | undefined = isDiscovery ? (code === "discovery_context_unavailable" ? 404 : code === "discovery_context_not_supported" || code === "managed_browser_invalid_input" ? 400 : ["managed_access_connection_unavailable", "managed_access_authentication_required", "managed_access_invalid_credential"].includes(code) ? 401 : ["managed_browser_runtime_refused", "runtime_facts_unavailable", "execution_policy_unavailable"].includes(code) ? 503 : undefined) : undefined;
-    reject(response, discoveryStatus ?? (code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503), code, notDispatched);
+    reject(response, managedTaskStatus ?? discoveryStatus ?? (code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503), code, notDispatched);
   }
   return true;
 }

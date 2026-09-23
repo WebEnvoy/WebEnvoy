@@ -34,10 +34,12 @@
 | shape | 关键字段 | 持久与内容边界 |
 | --- | --- | --- |
 | `webenvoy.skill-library.v1` root | `schema_version`、`assets`、`operations` | Core data-root 的唯一受管库状态。 |
-| `assets[]` / revision | `skill_ref`、`asset_name`、`source_repository`、`source_path`、`revisions[]`、`enabled`、`enabled_revision_ref`、`record_version`、`history[]`；revision 含 `revision_ref`、`source_ref`、`source_commit`、`source_blob`、`version`、`path`、`content_sha256`、`content_bytes`、`compatibility`、`installed_at` | `history` item 含 `event`、可选 revision/source/receipt ref、`at`、`run_id`；不保存正文。 |
+| `assets[]` / revision | `skill_ref`、`asset_name`、`source_repository`、`source_path`、`revisions[]`、`enabled`、`enabled_revision_ref`、`record_version`、`history[]`；revision 含 `revision_ref`、`source_ref`、`source_commit`、`source_blob`、`version`、`path`、`content_sha256`、`content_bytes`、`compatibility`、`installed_at`；完整 Lode revision 另含 `package_type=site-skill` 与 `package_digest` | `history` item 含 `event`、可选 revision/source/receipt ref、`at`、`run_id`；不保存正文。 |
 | `operations[]` | `run_id`、`principal_id`、`request_hash`、`operation`、`metadata`、`committed_at` | `metadata` 是非正文摘要；含 `content` 的持久记录拒绝。 |
 | `webenvoy.skill-operation-result.v1` | result `schema_version` 加统一 `{ok, run_id, status, result?, failure?}`；result 按 operation 使用 `skills`/`skill`、`revision`、`idempotent`、可选 `skill.site_tasks`（`webenvoy.site-task-summary/v1`），read 使用 `skill_ref`、`revision`、`receipt` | 即时 `skill.read` 响应可附真实 `content`；Run、operation metadata 和 query 不保存或返回正文。site task summary 只有获准的包元数据，不携带脚本正文或现场数据。 |
 | `webenvoy.skill-read-receipt.v1` | `receipt_ref`、`skill_ref`、`revision_ref`、`source_ref`、`content_sha256`、`content_bytes`、`record_version`、`read_at` | receipt 证明已校验的版本和字节摘要，不携带正文。 |
+
+完整 Lode 包沿同一 `assets[]/revisions[]` 保存，不另建安装状态。`content_sha256`、`content_bytes` 和 `source_blob` 仍描述实际 `SKILL.md` 字节；`package_digest` 描述 Lode 完整包。安装物化 manifest 与全部声明文件，读取、选择及任务解析均校验完整包；旧单文件 revision 可省略这两个包字段，不能据此当作可执行 site SKILL。包的来源、identity、文件清单和摘要算法仍由 [S2](site-skill-execution-v1.md) 引用的 Lode 合同拥有。
 
 库状态与 operation 摘要在受管锁内原子提交；提交后既有 Run 只是结果投影。若 Run 投影或响应丢失，恢复只从已提交的 operation metadata 补齐 Run/result envelope，不重新执行 install、enable、read、update、rollback 或 disable。
 

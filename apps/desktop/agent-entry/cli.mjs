@@ -11,7 +11,7 @@ import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './insta
 import { previousRoot } from './previous-installation.mjs';
 import { projectSessionSupervision } from './service-projection.mjs';
 import { CAMOUFOX_UPSTREAM_PINS, CHROME_OFFICIAL_INSTALL_SCHEMA, CHROME_OFFICIAL_PINS, classifyCamoufoxBinding, classifyChromeOfficialBinding, resolveCamoufoxSetupBinding, resolveChromeOfficialSetupBinding } from './provider-artifact.mjs';
-import { validateDescribeRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
+import { validateDescribeRequest, validateManagedTaskRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
 const [command, ...args] = process.argv.slice(2);
 const arg = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
 
@@ -69,7 +69,7 @@ result; omit --expected-control-file to use the immediately fresh inspect, or
 pass a strictly validated file to bind an earlier snapshot. stop targets the exact
 --runtime-session-ref and never stops Runtime. Reads never start Runtime; a lost
 write response requires fresh inspect and never a new key.`,
-  agent: `Usage: webenvoy agent <setup|uninstall|status|skill|connect|describe|operation|query|recovery|skills> [role-specific options]
+  agent: `Usage: webenvoy agent <setup|uninstall|status|skill|connect|describe|operation|query|task|recovery|skills> [role-specific options]
 
 Agent setup is separate: run as the configured Agent identity (the owner UID
 for trusted local mode, or the independent Agent UID for hardened mode) with
@@ -101,6 +101,25 @@ The request file is one operation envelope from the installed capability
 definition. It must include a fresh idempotency_key, grant_id, operation and
 single-operation task_scope. Unknown fields and fields outside that operation
 definition are rejected before dispatch.`,
+  'agent task': `Usage: webenvoy agent task <submit|query|stop> --request-file FILE --client-file FILE
+
+The request file is one webenvoy.managed-task-operation/v1 envelope. The Agent
+entry adds its current connection_id; request files cannot select a connection,
+Principal, owner route, or Runtime fallback. Query the original submit key after
+a lost response; never resubmit it to recover a Run.`,
+  'agent task submit': `Usage: webenvoy agent task submit --request-file FILE --client-file FILE
+
+Submit one fixed package revision and task_ref through POST
+/managed-tasks/operations. Core checks the current Grant and Page target and
+owns the Run, result and recovery facts.`,
+  'agent task query': `Usage: webenvoy agent task query --request-file FILE --client-file FILE
+
+Query one original Run or task.submit idempotency key through the same managed
+task envelope. Query does not create or redispatch a Run.`,
+  'agent task stop': `Usage: webenvoy agent task stop --request-file FILE --client-file FILE
+
+Stop later steps for one existing Run using a new idempotency key. Stop does
+not roll back effects already dispatched.`,
   'agent describe': `Usage: webenvoy agent describe --client-file FILE --request-file FILE
 
 The request file is a JSON object with one operation name. Minimal example:
@@ -154,6 +173,10 @@ const COMMAND_FLAGS = new Map([
   ['agent:describe', new Set(['--client-file', '--request-file'])],
   ['agent:operation', new Set(['--client-file', '--request-file'])],
   ['agent:query', new Set(['--client-file', '--run-id', '--idempotency-key'])],
+  ['agent:task', new Set()],
+  ['agent:task:submit', new Set(['--client-file', '--request-file'])],
+  ['agent:task:query', new Set(['--client-file', '--request-file'])],
+  ['agent:task:stop', new Set(['--client-file', '--request-file'])],
   ['agent:recovery', new Set(['--client-file', '--request-file'])],
   ['agent:skills', new Set(['--client-file', '--request-file'])],
   ['start', new Set(['--data-dir'])], ['diagnose', new Set(['--data-dir'])], ['stop', new Set(['--data-dir'])],
@@ -173,17 +196,21 @@ function validateCliSyntax(name, values) {
       if (value.startsWith('--')) throw cliError('help_topic_invalid');
       topics.push(value);
     }
-    if (topics.length > 2) throw cliError('help_topic_invalid');
+    if (topics.length > 3) throw cliError('help_topic_invalid');
     return;
   }
   const action = ['access', 'files', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
-  const key = action ? `${name}:${action}` : name;
+  const nestedAgentTask = name === 'agent' && action === 'task';
+  const nestedTaskHelp = nestedAgentTask && values[1] === '--help';
+  const nestedTaskCommand = nestedAgentTask && !nestedTaskHelp ? values[1] : undefined;
+  const key = nestedAgentTask ? nestedTaskCommand === undefined ? 'agent:task' : `agent:task:${nestedTaskCommand}` : action ? `${name}:${action}` : name;
+  const optionStart = nestedTaskCommand !== undefined ? 2 : action ? 1 : 0;
   const declared = COMMAND_FLAGS.get(key);
   const allowed = declared ? new Set([...declared, '--help']) : undefined;
   if (!allowed) throw cliError(action ? `unknown_${name}_command` : `unknown_command`);
   const seen = new Set();
   let positional = 0;
-  for (let i = action ? 1 : 0; i < values.length; i++) {
+  for (let i = nestedTaskHelp ? 1 : optionStart; i < values.length; i++) {
     const token = values[i];
     if (!token.startsWith('--')) { positional++; continue; }
     if (!allowed.has(token) || token.includes('=')) throw cliError(`unknown_flag:${token}`);
@@ -199,7 +226,9 @@ function validateCliSyntax(name, values) {
     if (action === 'uninstall' && seen.has('--owner-uid')) throw cliError('agent_uninstall_flag_invalid');
     if (seen.has('--client-file') || seen.has('--run-id') || seen.has('--idempotency-key')) throw cliError('agent_setup_flag_invalid');
   } else if (name === 'agent') {
+    if (action === 'task' && nestedTaskCommand === undefined) throw cliError('agent_task_command_required');
     if (!seen.has('--client-file')) throw cliError('--client-file_required');
+    if (action === 'task' && !seen.has('--request-file')) throw cliError('--request-file_required');
     if (seen.has('--data-dir') || seen.has('--host-dir') || seen.has('--owner-uid') || seen.has('--agent-endpoint')) throw cliError('agent_setup_only_flag');
     if (action === 'query' && (seen.has('--run-id') === seen.has('--idempotency-key'))) throw cliError('agent_query_selector_required');
     if (action !== 'query' && (seen.has('--run-id') || seen.has('--idempotency-key'))) throw cliError('agent_query_selector_forbidden');
@@ -209,9 +238,9 @@ function validateCliSyntax(name, values) {
 function printHelp(topic) { process.stdout.write(`${HELP[topic] ?? HELP.root}\n`); }
 
 function exitCodeFor(value) {
-  const status = value?.status;
+  const status = value?.status ?? value?.run?.status;
   const errorCode = value?.error?.code ?? value?.failure?.code;
-  if (value?.dispatch_state === 'possibly_dispatched' || ['unknown_outcome', 'managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(status) || ['managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(errorCode)) return 6;
+  if (value?.dispatch_state === 'possibly_dispatched' || value?.run?.dispatch_state === 'dispatched' && status === 'unknown_outcome' || ['unknown_outcome', 'managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(status) || ['managed_browser_outcome_unknown', 'runtime_unavailable_unknown_outcome'].includes(errorCode)) return 6;
   if (['runtime_unavailable', 'runtime_unavailable_query_without_replay', 'discovery_not_available', 'bundle_unavailable'].includes(errorCode)) return 7;
   if (status === 'unavailable') return 5;
   if (['requires_user_action', 'manual_recovery_required', 'pending'].includes(status)) return 4;
@@ -248,7 +277,7 @@ if (command === undefined) { printHelp('root'); process.exitCode = 2; }
 if (command === undefined) process.exit(2);
 validateCliSyntax(command, args);
 if (args.includes('--help')) {
-  printHelp(command === 'agent' && args[0] ? `agent ${args[0]}` : command);
+  printHelp(command === 'agent' && args[0] === 'task' && args[1] && args[1] !== '--help' ? `agent task ${args[1]}` : command === 'agent' && args[0] ? `agent ${args[0]}` : command);
   process.exit(0);
 }
 if (command === 'app') throw new Error('app_unsupported_formal_runtime');
@@ -647,6 +676,18 @@ async function runAgent(action, values) {
     try { return await request('/managed-browser/operations', { ...value, connection_id: connection.connection.connection_id }, false); }
     catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(value.idempotency_key); throw error; }
   }
+  if (action === 'task') {
+    const taskAction = values[1];
+    const value = validateManagedTaskRequest(await readJsonFile(argFrom(values, '--request-file'), 'managed_task_invalid_input'));
+    if (value.operation !== `task.${taskAction}`) throw new Error('managed_task_invalid_input');
+    const connection = await request('/agent-connections', {});
+    if (!connection?.connection?.connection_id) return connection;
+    try { return await request('/managed-tasks/operations', { ...value, connection_id: connection.connection.connection_id }, false); }
+    catch (error) {
+      if (!isDispatchedResponseLoss(error)) throw error;
+      return { ok: false, status: 'unknown_outcome', dispatch_state: 'possibly_dispatched', ...(typeof value.idempotency_key === 'string' ? { idempotency_key: value.idempotency_key } : {}), error: { code: 'runtime_unavailable_unknown_outcome' } };
+    }
+  }
   if (action === 'query') {
     let runId = argFrom(values, '--run-id');
     const idempotencyKey = argFrom(values, '--idempotency-key');
@@ -775,7 +816,7 @@ async function readJsonFile(path, invalidCode = 'recovery_json_file_invalid') { 
 function hostConfig(installRoot, clientPath, approveTools, includeRecovery, executable = join(installRoot, 'runtime/node')) {
   const legacyElectron = executable !== join(installRoot, 'runtime/node');
   let config = `[mcp_servers.webenvoy]\ncommand = ${JSON.stringify(executable)}\nargs = ${JSON.stringify([join(installRoot, 'agent-entry/mcp.mjs'), clientPath])}\nstartup_timeout_sec = 30\ntool_timeout_sec = 100\n${legacyElectron ? '[mcp_servers.webenvoy.env]\nELECTRON_RUN_AS_NODE = "1"\n' : ''}`;
-  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_describe', 'webenvoy_operation', 'webenvoy_query', 'webenvoy_skills', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
+  if (approveTools) for (const tool of ['webenvoy_skill', 'webenvoy_status', 'webenvoy_connect', 'webenvoy_describe', 'webenvoy_operation', 'webenvoy_query', 'webenvoy_task', 'webenvoy_skills', ...(includeRecovery ? ['webenvoy_recovery'] : [])]) config += `[mcp_servers.webenvoy.tools.${tool}]\napproval_mode = "approve"\n`;
   return config;
 }
 async function verifyPrevious(rootPath) {

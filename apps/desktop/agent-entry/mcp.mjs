@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { root, sha, verifyBundle } from './bundle.mjs';
 import { agentRequest, ensureAgentRuntime, readClient } from './client.mjs';
-import { validateDescribeRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
+import { managedTaskInputSchema, validateDescribeRequest, validateManagedTaskRequest, validateOperationRequest, validateRecoveryRequest, validateSkillsRequest } from './request-validation.mjs';
 const client = await readClient(process.argv[2]);
 let connection;
 async function readCapabilityDefinitions() {
@@ -192,6 +192,7 @@ const tools = [
   { name: 'webenvoy_query', description: 'Query a prior Run without replay. If the response was lost, reconnect and query the original idempotency_key.', inputSchema: { type: 'object', properties: { run_id: { type: 'string', pattern: '^managed-[a-f0-9]{64}$' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false } },
   { name: 'webenvoy_recovery', description: 'Inspect or request owner-managed recovery for a granted Profile, or query an existing recovery operation. This tool cannot backup, confirm, or apply a recovery.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['recovery.inspect','recovery.request','recovery.status'] }, task_scope: { type: 'object' }, profile_ref: { type: 'string' }, backup_ref: { type: 'string' }, operation_ref: { type: 'string' } }, required: ['idempotency_key','grant_id','operation','task_scope','profile_ref'], additionalProperties: false } },
   { name: 'webenvoy_skills', description: 'List, inspect, install, enable, read, update, rollback, or disable an explicitly authorized fixed SKILL revision. Reads return the verified content once; query returns only the durable receipt and summary.', inputSchema: { type: 'object', properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 512 }, grant_id: { type: 'string' }, operation: { type: 'string', enum: ['skill.list','skill.inspect','skill.install','skill.enable','skill.read','skill.update','skill.rollback','skill.disable'] }, task_scope: { type: 'object', properties: { operations: { type: 'array', items: { type: 'string' } }, skill_refs: { type: 'array', items: { type: 'string' } }, source_refs: { type: 'array', items: { type: 'string' } } }, required: ['operations','skill_refs','source_refs'], additionalProperties: false }, skill_ref: { type: 'string' }, source_ref: { type: 'string' }, revision_ref: { type: 'string' }, target_revision_ref: { type: 'string' }, expected_revision_ref: { type: ['string','null'] }, expected_current_revision_ref: { type: ['string','null'] }, expected_record_version: { type: 'integer', minimum: 0 } }, required: ['idempotency_key','grant_id','operation','task_scope'], additionalProperties: false } },
+  { name: 'webenvoy_task', description: 'Submit, query, or stop one pinned site task through Core managed access. Requires webenvoy_connect; this tool passes connection_id from that current context. Core owns package admission, Grant checks, Run, result and recovery. It does not use owner /tasks or /runs.', inputSchema: managedTaskInputSchema },
 ];
 async function call(name, args) {
   await verifyBundle();
@@ -215,10 +216,11 @@ async function call(name, args) {
     }
   }
   if (name === 'webenvoy_operation') validateOperationRequest(args, capabilityDefinitions);
+  if (name === 'webenvoy_task') validateManagedTaskRequest(args);
   if (name === 'webenvoy_recovery') validateRecoveryRequest(args);
   if (name === 'webenvoy_skills') validateSkillsRequest(args);
   if (name === 'webenvoy_query') validateQueryInput(args);
-  if (['webenvoy_operation', 'webenvoy_recovery', 'webenvoy_skills'].includes(name) && !connection) return { ok: false, error: { code: 'connect_first' } };
+  if (['webenvoy_operation', 'webenvoy_recovery', 'webenvoy_skills', 'webenvoy_task'].includes(name) && !connection) return { ok: false, error: { code: 'connect_first' } };
   const status = await ensureAgentRuntime(client);
   if (name === 'webenvoy_status') {
     const publicStatus = { ...status };
@@ -259,6 +261,13 @@ async function call(name, args) {
     if (!connection) return { ok: false, error: { code: 'connect_first' } };
     try { return await request('/managed-skills/operations', { ...args, connection_id: connection.connection_id }); }
     catch (error) { if (isDispatchedResponseLoss(error)) return unknownAgentOutcome(args.idempotency_key); throw error; }
+  }
+  if (name === 'webenvoy_task') {
+    try { return await request('/managed-tasks/operations', { ...args, connection_id: connection.connection_id }); }
+    catch (error) {
+      if (!isDispatchedResponseLoss(error)) throw error;
+      return { ok: false, status: 'unknown_outcome', dispatch_state: 'possibly_dispatched', ...(typeof args.idempotency_key === 'string' ? { idempotency_key: args.idempotency_key } : {}), error: { code: 'runtime_unavailable_unknown_outcome' } };
+    }
   }
   throw new Error('tool_not_found');
 }

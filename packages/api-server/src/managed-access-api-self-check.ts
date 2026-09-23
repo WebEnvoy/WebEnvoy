@@ -15,9 +15,27 @@ export async function assertManagedAccessApi(): Promise<void> {
   const hash = createHash("sha256").update(agent).digest("hex");
   const access = createFileManagedAccessStore({ directory, withStoppedProfile: async (_profileRef, _operationRef, action) => action() });
   let dispatches = 0;
+  const managedTaskInput = {
+    schema_version: "webenvoy.managed-task-operation/v1", operation: "task.submit", idempotency_key: "site-task-001", grant_id: "grant:example",
+    task_scope: { operations: ["task.submit"], skill_refs: ["lode://site-skill/example/catalog"], source_refs: ["lode://site-skill/example/catalog@1.0.0#commit"], profile_refs: [], origins: [] },
+    package: { package_ref: "lode://site-skill/example/catalog", revision_ref: "lode://site-skill/example/catalog@1.0.0#commit", package_digest: `sha256:${"a".repeat(64)}`, task_ref: "catalog-read" },
+    target: { target_type: "catalog_page", target_ref: "target:catalog" },
+    input: { schema_ref: "lode://schema/example/catalog-read-input@1.0.0", carrier: "none" },
+    intent: { summary: "Read the current catalog.", policy: { risk: "read", execution_intent: "read" } },
+    connection_id: "connection:task-test"
+  };
+  const taskResult = {
+    ok: true, schema_version: "webenvoy.managed-task-operation-result/v1", operation: "task.submit", operation_ref: "run:core/site-task",
+    run: { run_id: "run:core/site-task", task_intent_ref: "intent:site-task", package_ref: "lode://site-skill/example/catalog", status: "admitted", dispatch_state: "not_dispatched" },
+    input: { schema_ref: "lode://schema/example/catalog-read-input@1.0.0", carrier: "none", value_present: false }, result: null, failure: null
+  } as const;
+  let routedTask: unknown;
+  let routedTaskCount = 0;
   const server = createApiServer({ supervisorToken: owner, managedAccessStore: access, managedBrowserService: {
     async submit(credentialHash) { assert.equal(credentialHash, hash); dispatches++; return { ok: true, run_id: "managed-run", status: "succeeded" }; },
     async query(credentialHash, runId) { assert.equal(credentialHash, hash); assert.equal(runId, "managed-run"); return { ok: true, run_id: runId, status: "succeeded" }; },
+  }, managedTaskService: {
+    async operate(credentialHash, rawHttpBody) { assert.equal(credentialHash, hash); routedTaskCount++; routedTask = structuredClone(rawHttpBody); return taskResult; }
   } });
   const port = await listen(server);
   const call = async (path: string, token?: string, input?: unknown) => {
@@ -30,7 +48,7 @@ export async function assertManagedAccessApi(): Promise<void> {
   };
   try {
     assert.equal((await call("/health")).status, 200);
-    for (const path of ["/agent-access", "/runs/missing", "/execution-policy-configs/global", "/threads"]) {
+    for (const path of ["/agent-access", "/runs/missing", "/tasks", "/execution-policy-configs/global", "/threads"]) {
       assert.equal((await call(path)).status, 401);
       assert.equal((await call(path, agent)).status, 401);
     }
@@ -106,6 +124,17 @@ export async function assertManagedAccessApi(): Promise<void> {
     }
     assert.equal((await call("/managed-browser/operations", agent, {})).body.ok, true);
     assert.equal((await call("/managed-browser/operations/managed-run", agent)).body.run_id, "managed-run");
+    const task = await call("/managed-tasks/operations", agent, managedTaskInput);
+    assert.equal(task.status, 200);
+    assert.deepEqual(routedTask, managedTaskInput, "managed task route must pass the full HTTP envelope, including connection_id, directly to Core");
+    assert.deepEqual(task.body, taskResult, "managed task route must not rewrite the Core result envelope");
+    assert.equal((await call("/managed-tasks/operations", agent)).status, 405);
+    assert.equal((await call("/managed-tasks/operations", undefined, managedTaskInput)).status, 401);
+    const oversizedTask = await call("/managed-tasks/operations", agent, { ...managedTaskInput, ignored: "x".repeat(128 * 1024) });
+    assert.equal(oversizedTask.status, 400);
+    assert.equal(oversizedTask.body.error.code, "managed_task_invalid_input");
+    assert.equal(oversizedTask.body.dispatch_state, "not_dispatched");
+    assert.equal(routedTaskCount, 1, "the route-local envelope cap must reject oversized task input before calling Core");
     assert.equal((await call("/managed-browser/operations", undefined, {})).status, 401);
     assert.equal(dispatches, 1);
     const revoked = await call(`/agent-access/grants/${encodeURIComponent(grant.body.grant.grant_id)}/revoke`, owner, { idempotency_key: "revoke" });

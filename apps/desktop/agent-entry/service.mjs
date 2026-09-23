@@ -48,7 +48,7 @@ const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect
   ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
   (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/v2/grants', '/agent-access/profile-policies', '/agent-access/v2/profile-policies', '/agent-access/scope-confirmations'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url))) ||
   isOwnerHarborRoute(req);
-const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations'].includes(req.url)) ||
+const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations', '/managed-tasks/operations'].includes(req.url)) ||
   (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
 function harborControlReady() {
   return !stopping && Boolean(state.services?.some(service => service.id === 'harbor') &&
@@ -92,10 +92,11 @@ async function handle(role, req, res) {
     }
     const chunks = [];
     let bytes = 0;
+    const requestLimit = req.url === '/managed-tasks/operations' ? 128 * 1024 : 65536;
     for await (const chunk of req) {
       const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += value.length;
-      if (bytes > 65536) return send(res, 413, { ok: false, error: { code: 'input_too_large' } });
+      if (bytes > requestLimit) return send(res, 413, { ok: false, error: { code: 'input_too_large' } });
       chunks.push(value);
     }
     const body = Buffer.concat(chunks).toString('utf8');

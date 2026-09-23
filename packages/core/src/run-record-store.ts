@@ -20,6 +20,7 @@ import {
 } from "./authorization-decision-journal.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import { normalizeNonSensitiveText } from "./sensitive-field-taxonomy.js";
+import { approvedManagedSiteTaskCapabilityRef, approvedManagedSiteTaskCapabilityVersion, approvedManagedSiteTaskLockRef, approvedManagedSiteTaskPackage, approvedManagedSiteTaskSourceRef } from "./site-skill-package.js";
 import {
   FileOwnershipError,
   isFileOwnershipOwnerAlive,
@@ -1020,7 +1021,15 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
       return withFileOwnershipLock(runLockPath(directory, runId), lockTimeoutMs, async () => {
         const record = await getRunRecord(runId);
         if (!record) throw new Error("run record not found");
-        if (record.capability_ref !== "harbor:managed-browser" || record.status !== "running") {
+        const managedSiteTask = record.capability_ref === approvedManagedSiteTaskCapabilityRef &&
+          record.package_ref === approvedManagedSiteTaskPackage.package_ref &&
+          record.capability_version === approvedManagedSiteTaskCapabilityVersion &&
+          record.capability_source_ref === approvedManagedSiteTaskSourceRef &&
+          record.capability_lock_ref === approvedManagedSiteTaskLockRef &&
+          record.public_result_summary?.task_kind === "managed_site_task" &&
+          record.public_result_summary?.task_ref === approvedManagedSiteTaskPackage.task_ref &&
+          record.public_result_summary?.package_digest === approvedManagedSiteTaskPackage.package_digest;
+        if (record.capability_ref !== "harbor:managed-browser" && !managedSiteTask || record.status !== "running") {
           throw new Error("run_managed_browser_runtime_binding_unavailable");
         }
         if (binding.core_task_run !== true || !["core_task", "user", "agent", "none"].includes(binding.control_owner) ||

@@ -6,10 +6,12 @@ import { withFileOwnershipLock } from "./file-ownership.js";
 export const managedInteractionOperations = ["instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait"] as const;
 export const managedPageOperations = ["page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"] as const;
 export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.install", "skill.enable", "skill.read", "skill.update", "skill.rollback", "skill.disable"] as const;
+export const managedTaskOperations = ["task.submit", "task.query", "task.stop"] as const;
 export const managedFileOperations = ["file.upload", "file.download"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
+export type ManagedTaskOperation = typeof managedTaskOperations[number];
 const profileScopeIndependentReads: readonly ManagedOperation[] = ["profile.list", "profile.read", "recovery.inspect", "recovery.status"];
 export const managedScopeSemantics = ["legacy_request_guard_v1", "agent_operations_v2"] as const;
 export type ManagedScopeSemantics = typeof managedScopeSemantics[number];
@@ -483,12 +485,17 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const revisionRef = input.revision_ref === undefined ? undefined : string(input.revision_ref);
       const requestedFileRefs = input.file_refs === undefined ? undefined : fileRefs(input.file_refs);
       const skillOperation = (managedSkillOperations as readonly string[]).includes(op);
+      const taskOperation = (managedTaskOperations as readonly string[]).includes(op);
       const scope = skillOperation
         ? object(input.task_scope, ["operations", "skill_refs", "source_refs"], ["file_refs"])
-        : object(input.task_scope, ["operations", "profile_refs", "origins"], ["file_refs"]);
+        : taskOperation
+          ? object(input.task_scope, ["operations", "skill_refs", "source_refs", "profile_refs", "origins"])
+          : object(input.task_scope, ["operations", "profile_refs", "origins"], ["file_refs"]);
       const task = (skillOperation
         ? { operations: operations(scope.operations), profile_refs: [] as string[], origins: [] as string[], ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }), skill_refs: strings(scope.skill_refs), source_refs: strings(scope.source_refs) }
-        : { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }) }) as ManagedTaskScope;
+        : taskOperation
+          ? { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), skill_refs: strings(scope.skill_refs), source_refs: strings(scope.source_refs) }
+          : { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }) }) as ManagedTaskScope;
       const state = await read(), principal = authenticated(state, credentialHash);
       const connection = state.connections.find(item => item.connection_id === connectionId && item.principal_id === principal.principal_id && item.revoked_at === null);
       if (!connection) return fail("managed_access_connection_unavailable");
@@ -506,7 +513,16 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (skillRef === undefined && (sourceRef !== undefined || revisionRef !== undefined)) return fail("managed_access_invalid_input");
         return result;
       }
-      if (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined) return fail("managed_access_invalid_input");
+      if (taskOperation) {
+        const taskSkillRefs = task.skill_refs ?? [], taskSourceRefs = task.source_refs ?? [], grantSkillScope = grant.skill_scope;
+        if (!grantSkillScope || taskSkillRefs.some(ref => !grantSkillScope.skill_refs.includes(ref)) ||
+          taskSourceRefs.some(ref => !grantSkillScope.source_refs.includes(ref)) ||
+          skillRef === undefined || sourceRef === undefined || revisionRef !== undefined ||
+          !grantSkillScope.skill_refs.includes(skillRef) || !taskSkillRefs.includes(skillRef) ||
+          !grantSkillScope.source_refs.includes(sourceRef) || !taskSourceRefs.includes(sourceRef) ||
+          requestedFileRefs !== undefined || task.file_refs !== undefined || templateRef !== undefined) return fail("managed_access_denied");
+      }
+      if (!taskOperation && (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined)) return fail("managed_access_invalid_input");
       if (requestedFileRefs !== undefined && ![...requestedFileRefs].every(ref => (task.file_refs ?? []).includes(ref))) return fail("managed_access_denied");
       if (managedFileOperations.includes(op as typeof managedFileOperations[number])) {
         const filePermission = grant.file_scope;
@@ -539,7 +555,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (!profileScopeIndependentReads.includes(op) && scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
       const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
       if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
-      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations, ...managedTaskOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
       return { ...result, profile_policy: profile, authorized_origins };
     },

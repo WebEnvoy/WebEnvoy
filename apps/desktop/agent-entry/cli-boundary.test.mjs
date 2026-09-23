@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
 import definitions from '../../../packages/core/src/managed-capability-definitions.json' with { type: 'json' };
-import { validateOperationRequest } from './request-validation.mjs';
+import { validateManagedTaskRequest, validateOperationRequest } from './request-validation.mjs';
 
 const entryRoot = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(entryRoot, 'cli.mjs');
@@ -47,6 +47,23 @@ test('shared operation validator rejects unknown fields before dispatch', () => 
   assert.throws(() => validateOperationRequest({ ...valid, owner_secret: 'nope' }, definitions), /operation_input_refused/);
 });
 
+test('managed-task CLI validator accepts only the fixed S2 envelope and operation scope', () => {
+  const common = {
+    schema_version: 'webenvoy.managed-task-operation/v1', grant_id: 'grant:fixture',
+    task_scope: { operations: ['task.submit'], skill_refs: ['lode://site-skill/example/catalog'], source_refs: ['lode://site-skill/example/catalog@1.0.0#commit'], profile_refs: [], origins: [] },
+    idempotency_key: 'task-key', package: { package_ref: 'lode://site-skill/example/catalog', revision_ref: 'lode://site-skill/example/catalog@1.0.0#commit', package_digest: `sha256:${'a'.repeat(64)}`, task_ref: 'catalog-read' },
+    target: { target_type: 'catalog_page', target_ref: 'target:catalog' }, input: { schema_ref: 'lode://schema/example/catalog-read@1.0.0', carrier: 'none' },
+    intent: { summary: 'Read the catalog.', policy: { risk: 'read', execution_intent: 'read' } }
+  };
+  assert.deepEqual(validateManagedTaskRequest({ ...common, operation: 'task.submit' }), { ...common, operation: 'task.submit' });
+  assert.throws(() => validateManagedTaskRequest({ ...common, operation: 'task.submit', connection_id: 'connection:caller' }), /managed_task_invalid_input/);
+  assert.throws(() => validateManagedTaskRequest({ ...common, schema_version: 'webenvoy.managed-task-operation/v2', operation: 'task.submit' }), /managed_task_version_unsupported/);
+  assert.throws(() => validateManagedTaskRequest({ ...common, operation: 'task.submit', task_scope: { ...common.task_scope, operations: ['task.query'] } }), /managed_task_invalid_input/);
+  const query = { schema_version: common.schema_version, operation: 'task.query', grant_id: common.grant_id, task_scope: { ...common.task_scope, operations: ['task.query'] }, selector: { original_idempotency_key: 'task-key' } };
+  assert.deepEqual(validateManagedTaskRequest(query), query);
+  assert.throws(() => validateManagedTaskRequest({ ...query, selector: { run_id: 'run:a', original_idempotency_key: 'task-key' } }), /managed_task_invalid_input/);
+});
+
 test('Agent CLI does not read owner installation link before validating request', async () => {
   const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-agent-input-'));
   try {
@@ -56,6 +73,27 @@ test('Agent CLI does not read owner installation link before validating request'
     const result = await withInvalidOwnerLink(() => runCli(['agent', 'recovery', '--client-file', clientPath, '--request-file', requestPath]));
     assert.equal(result.code, 2);
     assert.deepEqual(JSON.parse(result.stderr).error.code, 'recovery_input_refused');
+    assert.equal(result.stdout, '');
+    await assert.rejects(lstat(join(dir, 'agent.sock')), error => error.code === 'ENOENT');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('Agent task CLI rejects caller-supplied connection context before connecting', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-agent-task-input-'));
+  try {
+    const clientPath = await writeAgentClient(dir);
+    const requestPath = join(dir, 'request.json');
+    await writeFile(requestPath, JSON.stringify({
+      schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.submit', idempotency_key: 'catalog-read-001', grant_id: 'grant:fixture', connection_id: 'connection:caller',
+      task_scope: { operations: ['task.submit'], skill_refs: ['lode://site-skill/controlled-local/page-summary'], source_refs: ['lode://site-skill/controlled-local/page-summary@1.0.0#commit'], profile_refs: [], origins: [] },
+      package: { package_ref: 'lode://site-skill/controlled-local/page-summary', revision_ref: 'lode://site-skill/controlled-local/page-summary@1.0.0#commit', package_digest: `sha256:${'a'.repeat(64)}`, task_ref: 'read-page-summary' },
+      target: { target_type: 'web_page', target_ref: 'target:catalog-fixture' },
+      input: { schema_ref: 'lode://schema/site-skill/controlled-local/page-summary/input@1.0.0', carrier: 'none' },
+      intent: { summary: 'Read the catalog page summary.', policy: { risk: 'read', execution_intent: 'read' } }
+    }));
+    const result = await runCli(['agent', 'task', 'submit', '--client-file', clientPath, '--request-file', requestPath]);
+    assert.equal(result.code, 2);
+    assert.equal(JSON.parse(result.stderr).error.code, 'managed_task_invalid_input');
     assert.equal(result.stdout, '');
     await assert.rejects(lstat(join(dir, 'agent.sock')), error => error.code === 'ENOENT');
   } finally { await rm(dir, { recursive: true, force: true }); }
@@ -142,6 +180,20 @@ test('Agent help exposes operation submission and durable query commands', async
   assert.match(operation.stdout, /webenvoy agent operation --client-file FILE --request-file FILE/);
   assert.equal(query.code, 0);
   assert.match(query.stdout, /webenvoy agent query --client-file FILE \(--run-id RUN_ID\|--idempotency-key KEY\)/);
+});
+
+test('Agent task help documents the managed task API and recovery selector', async () => {
+  const submit = await runCli(['help', 'agent', 'task', 'submit']);
+  const query = await runCli(['help', 'agent', 'task', 'query']);
+  const stop = await runCli(['help', 'agent', 'task', 'stop']);
+  assert.equal(submit.code, 0);
+  assert.match(submit.stdout, /POST\s+\/managed-tasks\/operations/);
+  assert.match(submit.stdout, /Core checks the current Grant and Page target/);
+  assert.equal(query.code, 0);
+  assert.match(query.stdout, /task\.submit idempotency key/);
+  assert.match(query.stdout, /does not create or redispatch a Run/);
+  assert.equal(stop.code, 0);
+  assert.match(stop.stdout, /does\s+not\s+roll back effects already dispatched/);
 });
 
 test('formal CLI rejects the historical App entry', async () => {
