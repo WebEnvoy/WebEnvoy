@@ -100,6 +100,10 @@ The request file is one operation envelope from the installed capability
 definition. It must include a fresh idempotency_key, grant_id, operation and
 single-operation task_scope. Unknown fields and fields outside that operation
 definition are rejected before dispatch.`,
+  'agent describe': `Usage: webenvoy agent describe --client-file FILE --request-file FILE
+
+The request file is a JSON object with one operation name. Minimal example:
+{"operation":"profile.create"}`,
   'agent query': `Usage: webenvoy agent query --client-file FILE (--run-id RUN_ID|--idempotency-key KEY)
 
 Query the original durable Run only. A lost response or unknown outcome must
