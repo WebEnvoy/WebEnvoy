@@ -73,6 +73,13 @@ test('CLI describes trusted local mode without claiming OS isolation', async () 
   assert.match(agentSetup.stdout, /provides no OS isolation/);
 });
 
+test('Agent describe help documents its JSON request shape', async () => {
+  const describe = await runCli(['help', 'agent', 'describe']);
+  assert.equal(describe.code, 0);
+  assert.match(describe.stdout, /Usage: webenvoy agent describe --client-file FILE --request-file FILE/);
+  assert.match(describe.stdout, /\{"operation":"profile\.create"\}/);
+});
+
 test('owner list, diagnose and inspect use live reads without Runtime startup', async () => {
   const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-owner-read-'));
   const socketPath = join(dir, 'owner-control.sock');
