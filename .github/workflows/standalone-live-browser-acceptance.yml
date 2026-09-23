@@ -1,0 +1,165 @@
+name: Standalone live Camoufox acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/standalone-live-browser-acceptance.yml"
+      - "apps/desktop/scripts/standalone-live-browser-check.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24.14.0"
+  PNPM_VERSION: "10.30.3"
+  PYTHON_VERSION: "3.12.10"
+  CAMOUFOX_BROWSER_VERSION: "152.0.4-beta.30"
+  CAMOUFOX_VERSION: "0.5.6"
+  PLAYWRIGHT_VERSION: "1.60.0"
+  CAMOUFOX_PROPERTIES_SHA256: "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+  CAMOUFOX_BROWSER_SHA256: "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3"
+  CAMOUFOX_WHEEL_SHA256: "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561"
+  PLAYWRIGHT_WHEEL_SHA256: "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+  CAMOUFOX_BROWSER_URL: "https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.30/camoufox-152.0.4-beta.30-mac.arm64.zip"
+  CAMOUFOX_WHEEL_URL: "https://files.pythonhosted.org/packages/6f/b3/5f93b720522cbc9e95d8b2a5e47a6a1797b61e45bd1f9a220f9a985af9e1/camoufox-0.5.6-py3-none-any.whl"
+  PLAYWRIGHT_WHEEL_URL: "https://files.pythonhosted.org/packages/59/7b/e1d32ae8a3ed937ec2be3721c5f728b13d731a0b7c6442e0b3bec5094ac0/playwright-1.60.0-py3-none-macosx_11_0_arm64.whl"
+
+jobs:
+  live-browser:
+    name: macOS arm64 live Camoufox browser
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PACKAGE_ROOT: /tmp/webenvoy-standalone-live-camoufox
+      MATERIAL_ROOT: /tmp/webenvoy-camoufox-materials
+      MATERIAL_DIGEST_PATH: /tmp/webenvoy-camoufox-materials.sha256
+      LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
+      LIVE_BROWSER_EVIDENCE_PATH: /tmp/webenvoy-live-browser-evidence.json
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node and Python
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up fixed arm64 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: arm64
+
+      - name: Verify fixed host and enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+          corepack enable
+          corepack prepare "pnpm@${PNPM_VERSION}" --activate
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(pnpm --version)" = "${PNPM_VERSION}"
+          test "$(python --version)" = "Python ${PYTHON_VERSION}"
+          test "$(python -c 'import platform; print(platform.machine())')" = "arm64"
+
+      - name: Resolve locked Lode source
+        id: lode
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode.commit)')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out locked Lode source
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: ${{ steps.lode.outputs.ref }}
+          path: .runtime-sources/lode
+          persist-credentials: false
+
+      - name: Verify exact source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C "$LODE_ROOT" rev-parse HEAD)" = "${{ steps.lode.outputs.ref }}"
+          test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude).runtime-sources' ':(exclude).runtime-sources/**')"
+          test -z "$(git -C "$LODE_ROOT" status --porcelain)"
+
+      - name: Install frozen workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download and verify official Camoufox materials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$MATERIAL_ROOT/browser"
+          browser_archive="$MATERIAL_ROOT/camoufox-${CAMOUFOX_BROWSER_VERSION}-mac.arm64.zip"
+          camoufox_wheel="$MATERIAL_ROOT/camoufox-${CAMOUFOX_VERSION}-py3-none-any.whl"
+          playwright_wheel="$MATERIAL_ROOT/playwright-${PLAYWRIGHT_VERSION}-py3-none-macosx_11_0_arm64.whl"
+          curl --fail --location --retry 3 --silent --show-error "$CAMOUFOX_BROWSER_URL" --output "$browser_archive"
+          curl --fail --location --retry 3 --silent --show-error "$CAMOUFOX_WHEEL_URL" --output "$camoufox_wheel"
+          curl --fail --location --retry 3 --silent --show-error "$PLAYWRIGHT_WHEEL_URL" --output "$playwright_wheel"
+          printf '%s  %s\n' "$CAMOUFOX_BROWSER_SHA256" "$browser_archive" | shasum -a 256 -c -
+          printf '%s  %s\n' "$CAMOUFOX_WHEEL_SHA256" "$camoufox_wheel" | shasum -a 256 -c -
+          printf '%s  %s\n' "$PLAYWRIGHT_WHEEL_SHA256" "$playwright_wheel" | shasum -a 256 -c -
+          unzip -q "$browser_archive" -d "$MATERIAL_ROOT/browser"
+          properties="$MATERIAL_ROOT/browser/Camoufox.app/Contents/Resources/properties.json"
+          test -f "$properties"
+          test "$(shasum -a 256 "$properties" | awk '{print $1}')" = "$CAMOUFOX_PROPERTIES_SHA256"
+          python -m venv "$MATERIAL_ROOT/venv"
+          "$MATERIAL_ROOT/venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir --no-input "$camoufox_wheel" "$playwright_wheel"
+          "$MATERIAL_ROOT/venv/bin/python" -I -B -c 'import importlib.metadata as m; assert m.version("camoufox") == "0.5.6"; assert m.version("playwright") == "1.60.0"'
+
+      - name: Build standalone candidate
+        env:
+          WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
+        run: pnpm --filter @webenvoy/app package:standalone "$PACKAGE_ROOT"
+
+      - name: Check standalone package
+        run: pnpm --filter @webenvoy/app check:standalone "$PACKAGE_ROOT"
+
+      - name: Verify isolated owner and Agent Runtime boundary
+        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
+
+      - name: Run live Camoufox observation and input acceptance
+        env:
+          LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
+        run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
+
+      - name: Record reviewable digests
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_sha256="$(shasum -a 256 "$PACKAGE_ROOT/agent-manifest.json" | awk '{print $1}')"
+          archive_sha256="$(shasum -a 256 "$PACKAGE_ROOT.tar.gz" | awk '{print $1}')"
+          echo "manifest_sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
+          echo "archive_sha256=$archive_sha256" >> "$GITHUB_OUTPUT"
+          test "$(awk '{print $1}' "$PACKAGE_ROOT.tar.gz.sha256")" = "$archive_sha256"
+          cat > "$MATERIAL_DIGEST_PATH" <<EOF
+          $CAMOUFOX_BROWSER_SHA256  camoufox-${CAMOUFOX_BROWSER_VERSION}-mac.arm64.zip
+          $CAMOUFOX_WHEEL_SHA256  camoufox-${CAMOUFOX_VERSION}-py3-none-any.whl
+          $PLAYWRIGHT_WHEEL_SHA256  playwright-${PLAYWRIGHT_VERSION}-py3-none-macosx_11_0_arm64.whl
+          $CAMOUFOX_PROPERTIES_SHA256  Camoufox.app/Contents/Resources/properties.json
+          EOF
+
+      - name: Upload live acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: webenvoy-live-camoufox-${{ env.SOURCE_SHA }}-${{ steps.metadata.outputs.manifest_sha256 }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
+            ${{ env.MATERIAL_DIGEST_PATH }}
+            ${{ env.PACKAGE_ROOT }}/agent-manifest.json
+            ${{ env.PACKAGE_ROOT }}.tar.gz.sha256
