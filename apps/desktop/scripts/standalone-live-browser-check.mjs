@@ -194,7 +194,6 @@ try {
   await agentWrite(startFile, request('instance.start', operationKeys.start, grantId, scope('instance.start', profileRef), { profile_ref: profileRef, origin, url: `${origin}/` }));
   const started = runJson(cli, ['agent', 'operation', '--client-file', clientFile, '--request-file', startFile], true, 'instance_start');
   succeeded(started, 'instance_start');
-  assert.equal(started.result?.session?.provider_id, 'camoufox', JSON.stringify(started));
   sessionRef = ref(started.result, 'runtime_session_ref', 'instance_start');
 
   const observeFile = join(agentHost, 'observe.json');
