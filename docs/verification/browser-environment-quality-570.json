@@ -1,0 +1,1856 @@
+{
+  "schema": "webenvoy.browser-environment-quality-w3/v1",
+  "state": "observations_completed",
+  "candidate": "9c317172b10960c7dd5d80527de1053a08e0f04b",
+  "package_manifest_sha256": "88a0527c438389edd7ab2ec63d577f025e478e51a814b0ae835b076fa96e1c76",
+  "platform": "darwin-arm64",
+  "provider": {
+    "provider_id": "webenvoy.camoufox-upstream/v1",
+    "source": "owner_verified_upstream",
+    "camoufox_version": "0.5.6",
+    "browser_version": "152.0.4-beta.30",
+    "playwright_version": "1.60.0",
+    "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4",
+    "source_sha256": {
+      "browser": "3b43e766574f286a6a63296cf58b660b7a3120952086c869b4df4c9a71604bc3",
+      "camoufox": "b906836cd952376a466f0e55445f139b8a65adfb9f18ab55cb2cd0c727b11561",
+      "playwright": "39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5"
+    }
+  },
+  "profile_class": "dedicated_no_account",
+  "evidence_types": [
+    "live_verified",
+    "fixture_verified"
+  ],
+  "real_provider": true,
+  "external_site": false,
+  "account": false,
+  "third_party_agent": false,
+  "paid_model": false,
+  "network_scope": "127.0.0.1 loopback fixture only",
+  "execution_path": {
+    "entry": "standalone package CLI + managed agent operations",
+    "viewer": "not used",
+    "network_routing": "legacy context.route enabled; offline during startup and service_workers blocked",
+    "page_actions": "managed snapshot/input/read; no arbitrary evaluate",
+    "input": "instance.input",
+    "headless": false,
+    "scope_semantics": "legacy_request_guard_v1",
+    "main_world_eval": true
+  },
+  "budget": {
+    "max_profiles": 2,
+    "max_simultaneous_instances": 2,
+    "max_instance_starts_A": 4,
+    "max_instance_starts_B": 1,
+    "max_call_ms": 120000,
+    "max_live_ms": 900000
+  },
+  "calls": [
+    {
+      "label": "isolated-package-version",
+      "command": "--version",
+      "duration_ms": null,
+      "stdout_bytes": 67,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "outcome": "completed",
+      "integrity": "verified",
+      "candidate": "9c317172b10960c7dd5d80527de1053a08e0f04b"
+    },
+    {
+      "label": "owner-setup",
+      "command": "setup --data-dir",
+      "duration_ms": 631,
+      "stdout_bytes": 642,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "runtime-start-initial",
+      "command": "start --data-dir",
+      "duration_ms": 1052,
+      "stdout_bytes": 2434,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "runtime-diagnose-initial",
+      "command": "diagnose --data-dir",
+      "duration_ms": 61,
+      "stdout_bytes": 2434,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "agent-host-setup",
+      "command": "agent setup",
+      "duration_ms": 331,
+      "stdout_bytes": 394,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "agent-register",
+      "command": "access register",
+      "duration_ms": 345,
+      "stdout_bytes": 166,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed",
+      "key_fingerprint": "a56292818c8a30b3"
+    },
+    {
+      "label": "agent-connect",
+      "command": "agent connect",
+      "duration_ms": 306,
+      "stdout_bytes": 229,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "creation-grant",
+      "command": "access grant",
+      "duration_ms": 302,
+      "stdout_bytes": 972,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed",
+      "key_fingerprint": "d1ecc3b5d0ce32e4"
+    },
+    {
+      "label": "create-profile-a",
+      "command": "agent operation",
+      "duration_ms": 332,
+      "stdout_bytes": 1357,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "1bbaeba22d03874f"
+    },
+    {
+      "label": "create-profile-b",
+      "command": "agent operation",
+      "duration_ms": 309,
+      "stdout_bytes": 1357,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "c23d6eaf52eaa975"
+    },
+    {
+      "label": "revoke-creation-grant",
+      "command": "access revoke",
+      "duration_ms": 276,
+      "stdout_bytes": 1132,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed",
+      "key_fingerprint": "97704cc132c40623"
+    },
+    {
+      "label": "profile-grant-a",
+      "command": "access grant",
+      "duration_ms": 278,
+      "stdout_bytes": 550,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed",
+      "key_fingerprint": "b7b12725f6bda676"
+    },
+    {
+      "label": "profile-grant-b",
+      "command": "access grant",
+      "duration_ms": 274,
+      "stdout_bytes": 550,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed",
+      "key_fingerprint": "1823a8674c2eba66"
+    },
+    {
+      "label": "cross-profile-read-denied",
+      "command": "agent operation",
+      "duration_ms": 280,
+      "stdout_bytes": 88,
+      "stderr_bytes": 0,
+      "exit_code": 3,
+      "signal": null,
+      "failure_code": "managed_access_denied",
+      "dispatch_state": "not_dispatched",
+      "business_outcome": null,
+      "outcome": "failed",
+      "key_fingerprint": "e5d0814b9dc4daac"
+    },
+    {
+      "label": "A1-start",
+      "command": "agent operation",
+      "duration_ms": 4845,
+      "stdout_bytes": 1715,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "87c5c4e2743bcf17"
+    },
+    {
+      "label": "A1-initial",
+      "command": "agent operation",
+      "duration_ms": 483,
+      "stdout_bytes": 1950,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "1b272188bdc94e16"
+    },
+    {
+      "label": "A-A1-target-observe",
+      "command": "agent operation",
+      "duration_ms": 333,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "f03f91bc359736f3"
+    },
+    {
+      "label": "A-A1-target-snapshot",
+      "command": "agent operation",
+      "duration_ms": 383,
+      "stdout_bytes": 1985,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "97bef10df79e4c3a"
+    },
+    {
+      "label": "A-A1-before",
+      "command": "agent operation",
+      "duration_ms": 337,
+      "stdout_bytes": 1307,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "3c37cdde66f088f6"
+    },
+    {
+      "label": "A-A1-input",
+      "command": "agent operation",
+      "duration_ms": 335,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "dfc00d030bd6a5a6"
+    },
+    {
+      "label": "A-A1-query",
+      "command": "agent query",
+      "duration_ms": 75,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "dfc00d030bd6a5a6"
+    },
+    {
+      "label": "A-A1-after-query",
+      "command": "agent operation",
+      "duration_ms": 309,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "c8840e43f1102a0c"
+    },
+    {
+      "label": "owner-stop-A-1",
+      "command": "instance stop",
+      "duration_ms": 278,
+      "stdout_bytes": 1334,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "A2-start",
+      "command": "agent operation",
+      "duration_ms": 2290,
+      "stdout_bytes": 1715,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "f1956acbbbf9efbf"
+    },
+    {
+      "label": "A2",
+      "command": "agent operation",
+      "duration_ms": 331,
+      "stdout_bytes": 1950,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "e43f16ac724ef0bb"
+    },
+    {
+      "label": "A-A2-target-observe",
+      "command": "agent operation",
+      "duration_ms": 337,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "ab6c19b6f2b87f86"
+    },
+    {
+      "label": "A-A2-target-snapshot",
+      "command": "agent operation",
+      "duration_ms": 378,
+      "stdout_bytes": 1983,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "b7bf0ac648909d22"
+    },
+    {
+      "label": "A-A2-before",
+      "command": "agent operation",
+      "duration_ms": 312,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "742098709f1a415b"
+    },
+    {
+      "label": "A-A2-input",
+      "command": "agent operation",
+      "duration_ms": 348,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "e5ba4b696f9dadd5"
+    },
+    {
+      "label": "A-A2-query",
+      "command": "agent query",
+      "duration_ms": 76,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "e5ba4b696f9dadd5"
+    },
+    {
+      "label": "A-A2-after-query",
+      "command": "agent operation",
+      "duration_ms": 324,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "be5ad33aca2d149d"
+    },
+    {
+      "label": "B1-start",
+      "command": "agent operation",
+      "duration_ms": 2699,
+      "stdout_bytes": 1715,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "0d81fe6eb948c602"
+    },
+    {
+      "label": "B1",
+      "command": "agent operation",
+      "duration_ms": 330,
+      "stdout_bytes": 1950,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "c9e8104f2b6ed72b"
+    },
+    {
+      "label": "B-B1-target-observe",
+      "command": "agent operation",
+      "duration_ms": 332,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "371bb14e827690c1"
+    },
+    {
+      "label": "B-B1-target-snapshot",
+      "command": "agent operation",
+      "duration_ms": 402,
+      "stdout_bytes": 1985,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "15e4d5d1f109f550"
+    },
+    {
+      "label": "B-B1-before",
+      "command": "agent operation",
+      "duration_ms": 337,
+      "stdout_bytes": 1307,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "b23bea1487f89326"
+    },
+    {
+      "label": "B-B1-input",
+      "command": "agent operation",
+      "duration_ms": 341,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "5d3a51de13ed150c"
+    },
+    {
+      "label": "B-B1-query",
+      "command": "agent query",
+      "duration_ms": 76,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "5d3a51de13ed150c"
+    },
+    {
+      "label": "B-B1-after-query",
+      "command": "agent operation",
+      "duration_ms": 314,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "9ca6e484ab8be124"
+    },
+    {
+      "label": "A-after-B-target-observe",
+      "command": "agent operation",
+      "duration_ms": 326,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "d1d1440cab35803f"
+    },
+    {
+      "label": "A-after-B-target-snapshot",
+      "command": "agent operation",
+      "duration_ms": 355,
+      "stdout_bytes": 1983,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "883d087c503f3c8d"
+    },
+    {
+      "label": "A-after-B-read",
+      "command": "agent operation",
+      "duration_ms": 326,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "b082f26cc8169326"
+    },
+    {
+      "label": "owner-stop-B-1",
+      "command": "instance stop",
+      "duration_ms": 232,
+      "stdout_bytes": 1334,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "owner-stop-A-2",
+      "command": "instance stop",
+      "duration_ms": 224,
+      "stdout_bytes": 1334,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "A3-start",
+      "command": "agent operation",
+      "duration_ms": 2193,
+      "stdout_bytes": 1715,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "b8ddbf18809d0fef"
+    },
+    {
+      "label": "A3",
+      "command": "agent operation",
+      "duration_ms": 321,
+      "stdout_bytes": 1950,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "35e62ddc01fd6003"
+    },
+    {
+      "label": "A-A3-target-observe",
+      "command": "agent operation",
+      "duration_ms": 302,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "294a00e8a5903f4a"
+    },
+    {
+      "label": "A-A3-target-snapshot",
+      "command": "agent operation",
+      "duration_ms": 359,
+      "stdout_bytes": 1983,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "0dbcde2b271f7858"
+    },
+    {
+      "label": "A-A3-before",
+      "command": "agent operation",
+      "duration_ms": 307,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "6d56ffe61a43d635"
+    },
+    {
+      "label": "A-A3-input",
+      "command": "agent operation",
+      "duration_ms": 335,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "613570e8cd04ea37"
+    },
+    {
+      "label": "A-A3-query",
+      "command": "agent query",
+      "duration_ms": 75,
+      "stdout_bytes": 805,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "613570e8cd04ea37"
+    },
+    {
+      "label": "A-A3-after-query",
+      "command": "agent operation",
+      "duration_ms": 311,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "82dd3e561f4b5c27"
+    },
+    {
+      "label": "owner-stop-A-3",
+      "command": "instance stop",
+      "duration_ms": 150,
+      "stdout_bytes": 1334,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "runtime-stop-for-restart",
+      "command": "stop --data-dir",
+      "duration_ms": 5699,
+      "stdout_bytes": 17,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "runtime-start-after-restart",
+      "command": "start --data-dir",
+      "duration_ms": 1116,
+      "stdout_bytes": 2434,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "runtime-diagnose-after-restart",
+      "command": "diagnose --data-dir",
+      "duration_ms": 57,
+      "stdout_bytes": 2434,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "A4-start",
+      "command": "agent operation",
+      "duration_ms": 2241,
+      "stdout_bytes": 1715,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "005debcfb7105c68"
+    },
+    {
+      "label": "A4-runtime-restart",
+      "command": "agent operation",
+      "duration_ms": 346,
+      "stdout_bytes": 1950,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "59949c3fabd12538"
+    },
+    {
+      "label": "A4-final-observe",
+      "command": "agent operation",
+      "duration_ms": 320,
+      "stdout_bytes": 1831,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "40bcbac72f3adb99"
+    },
+    {
+      "label": "A4-final-snapshot",
+      "command": "agent operation",
+      "duration_ms": 378,
+      "stdout_bytes": 1983,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": "not_dispatched",
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "ca5111bf217284a1"
+    },
+    {
+      "label": "A4-final-storage-read",
+      "command": "agent operation",
+      "duration_ms": 327,
+      "stdout_bytes": 1305,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": "succeeded",
+      "outcome": "completed",
+      "key_fingerprint": "320af4a5ffd7ef9a"
+    },
+    {
+      "label": "owner-stop-A-4",
+      "command": "instance stop",
+      "duration_ms": 165,
+      "stdout_bytes": 1334,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    },
+    {
+      "label": "cleanup-runtime-stop",
+      "command": "stop --data-dir",
+      "duration_ms": 5710,
+      "stdout_bytes": 17,
+      "stderr_bytes": 0,
+      "exit_code": 0,
+      "signal": null,
+      "failure_code": null,
+      "dispatch_state": null,
+      "business_outcome": null,
+      "outcome": "completed"
+    }
+  ],
+  "starts": {
+    "A": 4,
+    "B": 1
+  },
+  "environment_reads": [
+    {
+      "profile": "A",
+      "label": "A1-initial",
+      "schema_version": "harbor-profile-environment/v1",
+      "status": "completed",
+      "observation_status": "observed",
+      "configured": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "effective": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "pending": null,
+      "observed": {
+        "language": "en-US",
+        "languages": [
+          "en-US",
+          "en"
+        ],
+        "timezone": "UTC",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "screen": {
+          "width": 1728,
+          "height": 1117
+        },
+        "webgl_vendor_observed": false,
+        "webgl_renderer_observed": false,
+        "fonts_hash_observed": false,
+        "voices_hash_observed": false,
+        "canvas_hash_observed": false,
+        "audio_hash_observed": false
+      },
+      "provider": {
+        "camoufox_version": "0.5.6",
+        "browser_version": "152.0.4-beta.30",
+        "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+      },
+      "bundle_hash": "5686588bd11ae416c5b44aecb7eac31866ed2c0b0d08e149e3debeffdef6fe5f",
+      "drift": {
+        "state": "match",
+        "checked_fields": [
+          "timezone",
+          "language"
+        ],
+        "changed_fields": [],
+        "unknown_fields": [
+          "network_exit",
+          "geo",
+          "webrtc",
+          "media_devices",
+          "screen",
+          "hardware_concurrency",
+          "webgl_vendor",
+          "webgl_renderer",
+          "canvas_hash",
+          "audio_hash",
+          "device_memory",
+          "fonts_hash",
+          "voices_hash"
+        ]
+      },
+      "support": {
+        "configuration_fields": [
+          "timezone",
+          "language",
+          "viewport"
+        ],
+        "readback_fields": [
+          "language",
+          "languages",
+          "timezone",
+          "viewport",
+          "screen",
+          "hardware_concurrency"
+        ],
+        "limitations": [
+          "No proxy/network-exit/geo/WebRTC verification in this read",
+          "No arbitrary provider, hardware, seed or fingerprint changes",
+          "Verification is scoped to the current Instance and checked fields"
+        ]
+      }
+    },
+    {
+      "profile": "A",
+      "label": "A2",
+      "schema_version": "harbor-profile-environment/v1",
+      "status": "completed",
+      "observation_status": "observed",
+      "configured": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "effective": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "pending": null,
+      "observed": {
+        "language": "en-US",
+        "languages": [
+          "en-US",
+          "en"
+        ],
+        "timezone": "UTC",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "screen": {
+          "width": 1728,
+          "height": 1117
+        },
+        "webgl_vendor_observed": false,
+        "webgl_renderer_observed": false,
+        "fonts_hash_observed": false,
+        "voices_hash_observed": false,
+        "canvas_hash_observed": false,
+        "audio_hash_observed": false
+      },
+      "provider": {
+        "camoufox_version": "0.5.6",
+        "browser_version": "152.0.4-beta.30",
+        "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+      },
+      "bundle_hash": "5686588bd11ae416c5b44aecb7eac31866ed2c0b0d08e149e3debeffdef6fe5f",
+      "drift": {
+        "state": "match",
+        "checked_fields": [
+          "timezone",
+          "language"
+        ],
+        "changed_fields": [],
+        "unknown_fields": [
+          "network_exit",
+          "geo",
+          "webrtc",
+          "media_devices",
+          "screen",
+          "hardware_concurrency",
+          "webgl_vendor",
+          "webgl_renderer",
+          "canvas_hash",
+          "audio_hash",
+          "device_memory",
+          "fonts_hash",
+          "voices_hash"
+        ]
+      },
+      "support": {
+        "configuration_fields": [
+          "timezone",
+          "language",
+          "viewport"
+        ],
+        "readback_fields": [
+          "language",
+          "languages",
+          "timezone",
+          "viewport",
+          "screen",
+          "hardware_concurrency"
+        ],
+        "limitations": [
+          "No proxy/network-exit/geo/WebRTC verification in this read",
+          "No arbitrary provider, hardware, seed or fingerprint changes",
+          "Verification is scoped to the current Instance and checked fields"
+        ]
+      }
+    },
+    {
+      "profile": "B",
+      "label": "B1",
+      "schema_version": "harbor-profile-environment/v1",
+      "status": "completed",
+      "observation_status": "observed",
+      "configured": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "effective": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "pending": null,
+      "observed": {
+        "language": "en-US",
+        "languages": [
+          "en-US",
+          "en"
+        ],
+        "timezone": "UTC",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "screen": {
+          "width": 1728,
+          "height": 1117
+        },
+        "webgl_vendor_observed": false,
+        "webgl_renderer_observed": false,
+        "fonts_hash_observed": false,
+        "voices_hash_observed": false,
+        "canvas_hash_observed": false,
+        "audio_hash_observed": false
+      },
+      "provider": {
+        "camoufox_version": "0.5.6",
+        "browser_version": "152.0.4-beta.30",
+        "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+      },
+      "bundle_hash": "efe316b9d17fda1399cffba5e2fb186c2f62f281554ca9f3235f68bfeda6e378",
+      "drift": {
+        "state": "match",
+        "checked_fields": [
+          "timezone",
+          "language"
+        ],
+        "changed_fields": [],
+        "unknown_fields": [
+          "network_exit",
+          "geo",
+          "webrtc",
+          "media_devices",
+          "screen",
+          "hardware_concurrency",
+          "webgl_vendor",
+          "webgl_renderer",
+          "canvas_hash",
+          "audio_hash",
+          "device_memory",
+          "fonts_hash",
+          "voices_hash"
+        ]
+      },
+      "support": {
+        "configuration_fields": [
+          "timezone",
+          "language",
+          "viewport"
+        ],
+        "readback_fields": [
+          "language",
+          "languages",
+          "timezone",
+          "viewport",
+          "screen",
+          "hardware_concurrency"
+        ],
+        "limitations": [
+          "No proxy/network-exit/geo/WebRTC verification in this read",
+          "No arbitrary provider, hardware, seed or fingerprint changes",
+          "Verification is scoped to the current Instance and checked fields"
+        ]
+      }
+    },
+    {
+      "profile": "A",
+      "label": "A3",
+      "schema_version": "harbor-profile-environment/v1",
+      "status": "completed",
+      "observation_status": "observed",
+      "configured": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "effective": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "pending": null,
+      "observed": {
+        "language": "en-US",
+        "languages": [
+          "en-US",
+          "en"
+        ],
+        "timezone": "UTC",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "screen": {
+          "width": 1728,
+          "height": 1117
+        },
+        "webgl_vendor_observed": false,
+        "webgl_renderer_observed": false,
+        "fonts_hash_observed": false,
+        "voices_hash_observed": false,
+        "canvas_hash_observed": false,
+        "audio_hash_observed": false
+      },
+      "provider": {
+        "camoufox_version": "0.5.6",
+        "browser_version": "152.0.4-beta.30",
+        "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+      },
+      "bundle_hash": "5686588bd11ae416c5b44aecb7eac31866ed2c0b0d08e149e3debeffdef6fe5f",
+      "drift": {
+        "state": "match",
+        "checked_fields": [
+          "timezone",
+          "language"
+        ],
+        "changed_fields": [],
+        "unknown_fields": [
+          "network_exit",
+          "geo",
+          "webrtc",
+          "media_devices",
+          "screen",
+          "hardware_concurrency",
+          "webgl_vendor",
+          "webgl_renderer",
+          "canvas_hash",
+          "audio_hash",
+          "device_memory",
+          "fonts_hash",
+          "voices_hash"
+        ]
+      },
+      "support": {
+        "configuration_fields": [
+          "timezone",
+          "language",
+          "viewport"
+        ],
+        "readback_fields": [
+          "language",
+          "languages",
+          "timezone",
+          "viewport",
+          "screen",
+          "hardware_concurrency"
+        ],
+        "limitations": [
+          "No proxy/network-exit/geo/WebRTC verification in this read",
+          "No arbitrary provider, hardware, seed or fingerprint changes",
+          "Verification is scoped to the current Instance and checked fields"
+        ]
+      }
+    },
+    {
+      "profile": "A",
+      "label": "A4-runtime-restart",
+      "schema_version": "harbor-profile-environment/v1",
+      "status": "completed",
+      "observation_status": "observed",
+      "configured": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "effective": {
+        "provider_id": "camoufox",
+        "language": "en-US",
+        "timezone": "UTC",
+        "viewport": null,
+        "proxy_configured": false,
+        "geoip_mode": null
+      },
+      "pending": null,
+      "observed": {
+        "language": "en-US",
+        "languages": [
+          "en-US",
+          "en"
+        ],
+        "timezone": "UTC",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "screen": {
+          "width": 1728,
+          "height": 1117
+        },
+        "webgl_vendor_observed": false,
+        "webgl_renderer_observed": false,
+        "fonts_hash_observed": false,
+        "voices_hash_observed": false,
+        "canvas_hash_observed": false,
+        "audio_hash_observed": false
+      },
+      "provider": {
+        "camoufox_version": "0.5.6",
+        "browser_version": "152.0.4-beta.30",
+        "properties_sha256": "10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4"
+      },
+      "bundle_hash": "5686588bd11ae416c5b44aecb7eac31866ed2c0b0d08e149e3debeffdef6fe5f",
+      "drift": {
+        "state": "match",
+        "checked_fields": [
+          "timezone",
+          "language"
+        ],
+        "changed_fields": [],
+        "unknown_fields": [
+          "network_exit",
+          "geo",
+          "webrtc",
+          "media_devices",
+          "screen",
+          "hardware_concurrency",
+          "webgl_vendor",
+          "webgl_renderer",
+          "canvas_hash",
+          "audio_hash",
+          "device_memory",
+          "fonts_hash",
+          "voices_hash"
+        ]
+      },
+      "support": {
+        "configuration_fields": [
+          "timezone",
+          "language",
+          "viewport"
+        ],
+        "readback_fields": [
+          "language",
+          "languages",
+          "timezone",
+          "viewport",
+          "screen",
+          "hardware_concurrency"
+        ],
+        "limitations": [
+          "No proxy/network-exit/geo/WebRTC verification in this read",
+          "No arbitrary provider, hardware, seed or fingerprint changes",
+          "Verification is scoped to the current Instance and checked fields"
+        ]
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "profile": "A",
+      "task": "A1",
+      "outcome": "success",
+      "started_at": "2026-09-23T11:39:18.003Z",
+      "completed_at": "2026-09-23T11:39:19.779Z",
+      "duration_ms": 1775,
+      "output_bytes": 8038,
+      "before": {
+        "stored_count": 0,
+        "latest": "none",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": null
+        }
+      },
+      "after": {
+        "stored_count": 1,
+        "latest": "A1",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "idempotency_key_fingerprint": "dfc00d030bd6a5a6",
+      "queried_run_fingerprint": "53785b4bcfe8b5c0",
+      "run_fingerprint": "53785b4bcfe8b5c0",
+      "query_did_not_replay": true,
+      "runtime_session_fingerprint": "f28d9987ff24e416",
+      "page_ref_fingerprint": "0655007e2e8c951b",
+      "page_id_fingerprint": "f60cc208a5c9bf68",
+      "model_usage": "not_used",
+      "manual_intervention": "none",
+      "resources": {
+        "state": "observed",
+        "rss_kb": 419056,
+        "cpu_percent": 0.8
+      }
+    },
+    {
+      "profile": "A",
+      "task": "A2",
+      "outcome": "success",
+      "started_at": "2026-09-23T11:39:22.877Z",
+      "completed_at": "2026-09-23T11:39:24.654Z",
+      "duration_ms": 1777,
+      "output_bytes": 8034,
+      "before": {
+        "stored_count": 1,
+        "latest": "A1",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "after": {
+        "stored_count": 2,
+        "latest": "A2",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "idempotency_key_fingerprint": "e5ba4b696f9dadd5",
+      "queried_run_fingerprint": "05a1c0a60b586343",
+      "run_fingerprint": "05a1c0a60b586343",
+      "query_did_not_replay": true,
+      "runtime_session_fingerprint": "602966e724847864",
+      "page_ref_fingerprint": "d2502bdf69b32116",
+      "page_id_fingerprint": "04712269459f4280",
+      "model_usage": "not_used",
+      "manual_intervention": "none",
+      "resources": {
+        "state": "observed",
+        "rss_kb": 417648,
+        "cpu_percent": 0.8
+      }
+    },
+    {
+      "profile": "B",
+      "task": "B1",
+      "outcome": "success",
+      "started_at": "2026-09-23T11:39:27.860Z",
+      "completed_at": "2026-09-23T11:39:29.666Z",
+      "duration_ms": 1806,
+      "output_bytes": 8038,
+      "before": {
+        "stored_count": 0,
+        "latest": "none",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": null
+        }
+      },
+      "after": {
+        "stored_count": 1,
+        "latest": "B1",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "idempotency_key_fingerprint": "5d3a51de13ed150c",
+      "queried_run_fingerprint": "43c5f580ecde6597",
+      "run_fingerprint": "43c5f580ecde6597",
+      "query_did_not_replay": true,
+      "runtime_session_fingerprint": "86af4fd7ea5681de",
+      "page_ref_fingerprint": "1b7a441b01b1c413",
+      "page_id_fingerprint": "2400e4f8f063aedf",
+      "model_usage": "not_used",
+      "manual_intervention": "none",
+      "resources": {
+        "state": "observed",
+        "rss_kb": 420832,
+        "cpu_percent": 0.7
+      }
+    },
+    {
+      "profile": "A",
+      "task": "A3",
+      "outcome": "success",
+      "started_at": "2026-09-23T11:39:33.820Z",
+      "completed_at": "2026-09-23T11:39:35.511Z",
+      "duration_ms": 1691,
+      "output_bytes": 8034,
+      "before": {
+        "stored_count": 2,
+        "latest": "A2",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "after": {
+        "stored_count": 3,
+        "latest": "A3",
+        "exposure": {
+          "webdriver": false,
+          "user_agent_available": true,
+          "languages_available": true,
+          "last_input_is_trusted": true
+        }
+      },
+      "idempotency_key_fingerprint": "613570e8cd04ea37",
+      "queried_run_fingerprint": "32c8d093f45b48b2",
+      "run_fingerprint": "32c8d093f45b48b2",
+      "query_did_not_replay": true,
+      "runtime_session_fingerprint": "93ed9b7aa8f1f845",
+      "page_ref_fingerprint": "f24554e374edc751",
+      "page_id_fingerprint": "60c06678f3759b8e",
+      "model_usage": "not_used",
+      "manual_intervention": "none",
+      "resources": {
+        "state": "observed",
+        "rss_kb": 437392,
+        "cpu_percent": 1.1
+      }
+    }
+  ],
+  "steps": {
+    "cross_profile_read_denied": {
+      "state": "verified",
+      "failure_code": "managed_access_denied",
+      "dispatch_state": "not_dispatched"
+    },
+    "A1": {
+      "state": "started",
+      "cli_duration_ms": 4845,
+      "ready_duration_ms": 5037,
+      "resources": {
+        "state": "observed",
+        "rss_kb": 431136,
+        "cpu_percent": 39.2
+      }
+    },
+    "stop_A_1": {
+      "state": "stopped",
+      "result_status": "returned",
+      "browser_exited": true
+    },
+    "A2": {
+      "state": "started",
+      "cli_duration_ms": 2290,
+      "ready_duration_ms": 2440,
+      "resources": {
+        "state": "observed",
+        "rss_kb": 425728,
+        "cpu_percent": 45.7
+      }
+    },
+    "B1": {
+      "state": "started",
+      "cli_duration_ms": 2699,
+      "ready_duration_ms": 2858,
+      "resources": {
+        "state": "observed",
+        "rss_kb": 439360,
+        "cpu_percent": 62.5
+      }
+    },
+    "cross_profile_storage": {
+      "state": "verified",
+      "B_initial_count": 0,
+      "A_count_after_B": 2,
+      "distinct_sessions": true,
+      "distinct_pages": true,
+      "distinct_runs": true,
+      "control_lease_isolation": "unknown"
+    },
+    "stop_B_1": {
+      "state": "stopped",
+      "result_status": "returned",
+      "browser_exited": true
+    },
+    "stop_A_2": {
+      "state": "stopped",
+      "result_status": "returned",
+      "browser_exited": true
+    },
+    "A3": {
+      "state": "started",
+      "cli_duration_ms": 2193,
+      "ready_duration_ms": 2340,
+      "resources": {
+        "state": "observed",
+        "rss_kb": 432368,
+        "cpu_percent": 46.7
+      }
+    },
+    "stop_A_3": {
+      "state": "stopped",
+      "result_status": "returned",
+      "browser_exited": true
+    },
+    "A4": {
+      "state": "started",
+      "cli_duration_ms": 2241,
+      "ready_duration_ms": 2388,
+      "resources": {
+        "state": "observed",
+        "rss_kb": 428672,
+        "cpu_percent": 47.5
+      }
+    },
+    "stop_A_4": {
+      "state": "stopped",
+      "result_status": "returned",
+      "browser_exited": true
+    }
+  },
+  "live_started_at": "2026-09-23T11:39:08.133Z",
+  "runtime": {
+    "ready": true,
+    "harbor_pid_observed": true,
+    "build": "0.2.0"
+  },
+  "fixture": {
+    "scope": "loopback only",
+    "page": "/fixture",
+    "storage": "synthetic localStorage entries",
+    "signals": [
+      "navigator.webdriver",
+      "user-agent availability",
+      "language availability",
+      "input Event.isTrusted"
+    ]
+  },
+  "profiles": {
+    "A": "dedicated_profile_A",
+    "B": "dedicated_profile_B",
+    "distinct": true
+  },
+  "environment_comparisons": [
+    {
+      "transition": "A1_to_A2",
+      "configured_match": true,
+      "effective_match": true,
+      "observed_checked_fields": [
+        "language",
+        "languages",
+        "timezone",
+        "viewport",
+        "screen"
+      ],
+      "observed_changed_fields": [],
+      "observed_unknown_fields": [],
+      "provider_version_match": true,
+      "bundle_hash_match": true,
+      "current_drift": "match",
+      "current_unknown_fields": [
+        "network_exit",
+        "geo",
+        "webrtc",
+        "media_devices",
+        "screen",
+        "hardware_concurrency",
+        "webgl_vendor",
+        "webgl_renderer",
+        "canvas_hash",
+        "audio_hash",
+        "device_memory",
+        "fonts_hash",
+        "voices_hash"
+      ]
+    },
+    {
+      "transition": "A1_to_A3",
+      "configured_match": true,
+      "effective_match": true,
+      "observed_checked_fields": [
+        "language",
+        "languages",
+        "timezone",
+        "viewport",
+        "screen"
+      ],
+      "observed_changed_fields": [],
+      "observed_unknown_fields": [],
+      "provider_version_match": true,
+      "bundle_hash_match": true,
+      "current_drift": "match",
+      "current_unknown_fields": [
+        "network_exit",
+        "geo",
+        "webrtc",
+        "media_devices",
+        "screen",
+        "hardware_concurrency",
+        "webgl_vendor",
+        "webgl_renderer",
+        "canvas_hash",
+        "audio_hash",
+        "device_memory",
+        "fonts_hash",
+        "voices_hash"
+      ]
+    },
+    {
+      "transition": "A1_to_A4_after_runtime_restart",
+      "configured_match": true,
+      "effective_match": true,
+      "observed_checked_fields": [
+        "language",
+        "languages",
+        "timezone",
+        "viewport",
+        "screen"
+      ],
+      "observed_changed_fields": [],
+      "observed_unknown_fields": [],
+      "provider_version_match": true,
+      "bundle_hash_match": true,
+      "current_drift": "match",
+      "current_unknown_fields": [
+        "network_exit",
+        "geo",
+        "webrtc",
+        "media_devices",
+        "screen",
+        "hardware_concurrency",
+        "webgl_vendor",
+        "webgl_renderer",
+        "canvas_hash",
+        "audio_hash",
+        "device_memory",
+        "fonts_hash",
+        "voices_hash"
+      ]
+    }
+  ],
+  "continuity": {
+    "same_A_profile_label": true,
+    "instance_restarts": 2,
+    "runtime_restart": true,
+    "storage_count_after_runtime_restart": 3,
+    "bundle_hash_match_all_A_reads": true,
+    "environment_drift_states": [
+      "match",
+      "match",
+      "match",
+      "match"
+    ],
+    "not_a_marker_only_check": true
+  },
+  "short_task_attempts": [
+    "A1",
+    "A2",
+    "A3"
+  ],
+  "dimensions": {
+    "long_term_environment_continuity": "restricted",
+    "profile_isolation": "restricted",
+    "automation_exposure": "continue_investigation",
+    "operation_and_recovery": "restricted",
+    "performance_and_resources": "restricted"
+  },
+  "limits": [
+    "Local fixture only; no authorized third-party site or account.",
+    "Provider readback reports multiple environment fields as unknown; no product collection was added.",
+    "Fixture exposes limited navigator and trusted-input signals; this is not an undetectability claim.",
+    "No Network/visual route, viewer handoff, model, file path, or real site was exercised.",
+    "Isolation of raw data roots, separate Context internals, environment-material path and ControlLease mutation remains unknown.",
+    "Performance samples are three local fixture attempts, not an SLA; ps captures point-in-time process RSS/CPU only."
+  ],
+  "revalidation_triggers": [
+    "Provider/browser/Playwright source, hash or version changes",
+    "OS/architecture/display/install entry changes",
+    "Profile environment/bundle/seed/configuration changes",
+    "Harbor launch/Page/ControlLease/Run/unknown recovery changes",
+    "Network/viewer/main-world/input/wait path changes",
+    "meaningful resource, output, failure, challenge or site-condition changes"
+  ],
+  "completed_at": "2026-09-23T11:39:46.316Z",
+  "cleanup": {
+    "instances": {
+      "A": "stopped",
+      "B": "not_active"
+    },
+    "runtime": "stopped",
+    "local_origin": "stopped"
+  },
+  "source_evidence_sha256": "c50c9fff26e766678a576109ff5dfd55eeb91d19ce8628704439bf9f976e6f13",
+  "measured_harness_sha256": "9214e1433b303e1295030fa86024baf8f5ea5c7244a28344539d37dd58c11337",
+  "metadata_corrections": [
+    {
+      "field": "execution_path.network_routing",
+      "original": "not configured",
+      "corrected": "legacy context.route enabled; offline during startup and service_workers blocked",
+      "basis": "All 3 persisted grants and 2 profile policies omit scope_semantics; packages/core/src/managed-access.ts scopeSemantics(undefined) is legacy_request_guard_v1; shared Driver.start installs routing for this mode. No operation was rerun or reclassified."
+    }
+  ],
+  "system_call_summary": {
+    "count": 114,
+    "outcomes": {
+      "completed": 114
+    },
+    "kinds": {
+      "owner_control": 1,
+      "process_read": 113
+    },
+    "note": "Process-read calls summarized; all browser/CLI calls and resource samples retained individually."
+  },
+  "replay_harness_changes": "After this live run, metadata corrected from persisted authorization facts; unknown/manual/timeout classification self-checks strengthened and unused ownerCall removed. Runtime, fixture, operations and sampled results unchanged."
+}
