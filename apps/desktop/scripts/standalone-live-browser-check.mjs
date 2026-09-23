@@ -245,15 +245,23 @@ try {
     assert.equal(denied.dispatch_state, 'not_dispatched', JSON.stringify(denied));
     assert.equal(denied.failure?.code, 'control_lock_conflict', JSON.stringify(denied));
     const handback = allowJson(cli, ['instance', 'handback', '--data-dir', ownerData, '--runtime-session-ref', sessionRef], false, 'instance_handback');
-    assert.equal(handback.control_owner, 'core_task', JSON.stringify(handback));
-    assert.equal(handback.control_lock?.owner, 'core_task', JSON.stringify(handback));
-    assert.equal(handback.control_lock?.state, 'held', JSON.stringify(handback));
+    assert.equal(handback.runtime_session_ref, sessionRef, JSON.stringify(handback));
+    assert.equal(handback.lifecycle_state, 'idle', JSON.stringify(handback));
+    assert.equal(handback.control_owner, 'none', JSON.stringify(handback));
+    assert.equal(handback.control_lock?.owner, 'none', JSON.stringify(handback));
+    assert.equal(handback.control_lock?.state, 'released', JSON.stringify(handback));
     const afterHandbackFile = join(agentHost, 'observe-after-handback.json');
     await agentWrite(afterHandbackFile, request('instance.observe', operationKeys.handbackObserve, grantId, scope('instance.observe', profileRef), { profile_ref: profileRef, origin, runtime_session_ref: sessionRef }));
     const afterHandback = runJson(cli, ['agent', 'operation', '--client-file', clientFile, '--request-file', afterHandbackFile], true, 'observe_after_handback');
     succeeded(afterHandback, 'observe_after_handback');
+    assert.equal(afterHandback.result?.observation?.runtime_session_ref, sessionRef, JSON.stringify(afterHandback));
+    assert.equal(afterHandback.result?.observation?.profile_ref, profileRef, JSON.stringify(afterHandback));
     assert.equal(afterHandback.result?.observation?.page?.current_url, `${origin}/`, JSON.stringify(afterHandback));
-    takeoverEvidence = { state: 'verified', failure_code: denied.failure?.code, run_id: denied.run_id };
+    assert.notEqual(afterHandback.result?.observation?.observation_ref, observed.result?.observation?.observation_ref, JSON.stringify({ observed, afterHandback }));
+    assert.ok(Number.isSafeInteger(afterHandback.result?.observation?.control_generation) &&
+      afterHandback.result.observation.control_generation > observed.result?.observation?.control_generation, JSON.stringify({ observed, afterHandback }));
+    takeoverEvidence = { state: 'verified', controller: 'owner_cli', human_interaction: false, failure_code: denied.failure?.code,
+      run_id: denied.run_id, fresh_observe_run_id: afterHandback.run_id };
   }
   run(cli, ['instance', 'stop', '--data-dir', ownerData, '--runtime-session-ref', sessionRef]);
   sessionRef = undefined;
@@ -266,7 +274,8 @@ try {
       playwright_version: binding.playwright_version, properties_sha256: binding.properties_sha256, source_sha256: binding.source_sha256 },
     real_provider: true, external_site: false, account: false, third_party_agent: false, takeover: takeoverEvidence,
     runs: { profile_create: created.run_id, instance_start: started.run_id, observe: observed.run_id, snapshot: snapshot.run_id,
-      input: inputResult.run_id, read: freshRead.run_id, cli_query: cliQuery.run_id, mcp_query: mcpQuery.run_id, takeover_input: takeoverEvidence.run_id ?? null } };
+      input: inputResult.run_id, read: freshRead.run_id, cli_query: cliQuery.run_id, mcp_query: mcpQuery.run_id, takeover_input: takeoverEvidence.run_id ?? null,
+      observe_after_handback: takeoverEvidence.fresh_observe_run_id ?? null } };
   if (process.env.LIVE_BROWSER_EVIDENCE_PATH) await writeFile(resolve(process.env.LIVE_BROWSER_EVIDENCE_PATH), `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
   console.log(JSON.stringify(evidence));
 } finally {
