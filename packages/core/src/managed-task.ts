@@ -264,7 +264,12 @@ export function createManagedTaskService(options: {
     if (!run || run.public_result_summary?.principal_id !== principalId || !summaryFacts(run)) return fail("managed_task_operation_unavailable");
     const facts = summaryFacts(run)!;
     assertScopeMatches(input, { package_ref: facts.package_ref, revision_ref: facts.revision_ref, profile_ref: facts.profile_ref, origin: facts.origin });
-    await authorize(credentialHash, input, facts.profile_ref, facts.origin, facts.package_ref, facts.revision_ref);
+    try {
+      await authorize(credentialHash, input, facts.profile_ref, facts.origin, facts.package_ref, facts.revision_ref);
+    } catch (error) {
+      if (error instanceof ManagedAccessError && error.code === "managed_access_denied") return fail("managed_task_operation_unavailable");
+      throw error;
+    }
     return run;
   }
   async function stopRun(input: ParsedRequest, principalId: string, run: RunRecord): Promise<RunRecord> {

@@ -76,7 +76,11 @@ function requireSuccess(value, label) { assert.equal(value.ok, true, `${label}:$
 function requireDenied(value, label) {
   const code = value.failure?.code ?? value.error?.code ?? value.result?.failure?.code;
   const failedRun = value.run?.status === 'failed' && value.failure && value.result?.outcome === 'failed';
-  assert.ok(code && (value.ok === false || value.result?.ok === false || failedRun), `${label}_unexpected_success`);
+  assert.ok(code && (value.ok === false || value.error || value.result?.ok === false || failedRun), `${label}_unexpected_success`);
+  const expected = { not_installed: 'managed_skill_not_installed', disabled: 'managed_skill_disabled',
+    pin_mismatch: 'managed_skill_revision_unavailable', extra_input: 'managed_task_invalid_input', revoked_query: 'managed_access_grant_unavailable' };
+  if (expected[label]) assert.equal(code, expected[label], `${label}_wrong_failure`);
+  assert.notEqual(code, 'managed_task_unavailable', `${label}_entry_not_assembled`);
   if (value.run) assert.equal(value.run.dispatch_state, 'not_dispatched', `${label}_dispatched`);
   return code;
 }
