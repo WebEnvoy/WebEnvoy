@@ -1,0 +1,69 @@
+{
+  "schema": "webenvoy.site-task-installed-check/v1",
+  "candidate": "0c9e82f4e23adec8a3e42876a3a993a1a18b8707",
+  "manifest_sha256": "274f10ae0c6749b3011332245ccb6187d4a6eb12c430ae9aff9147b06f6b9a65",
+  "workspace_tree": "b074d8e7a025c96c1b9a44c229ff2249735b8aa0",
+  "platform": "darwin-arm64",
+  "node_version": "24.14.0",
+  "provider": {
+    "id": "camoufox",
+    "browser_version": "152.0.4-beta.30",
+    "package_version": "0.5.6",
+    "playwright_version": "1.60.0"
+  },
+  "package_ref": "lode://site-skill/controlled-local/page-summary",
+  "revision_ref": "lode://site-skill/controlled-local/page-summary@1.0.0#48ba83eff3d8321eae1699155e6be5a64b8efc5d",
+  "package_digest": "sha256:b5454650c8d143de8cd87392fd2a91f55225b0862224e681754ed1a41279acd8",
+  "installation_client": "installed webenvoy CLI",
+  "real_provider": true,
+  "third_party_model_agent": false,
+  "plugin_verified": false,
+  "real_third_party_site": false,
+  "account": false,
+  "release": false,
+  "normal_path_model_calls": 0,
+  "trust_mode": "trusted_local",
+  "steps": {
+    "not_installed": "managed_skill_not_installed",
+    "disabled": "managed_skill_disabled",
+    "pin_mismatch": "managed_access_denied",
+    "extra_input": "managed_task_invalid_input",
+    "stale_target": "managed_interaction_observation_stale",
+    "success": {
+      "run_id": "managed-task-2871097728a092c85255b327e56368f7e8dfe20dcd5612f8fd886489cfc3131b",
+      "result_sha256": "ba488a6090a837cfd5b1b1c047a92503b2c1dfe57ed7c7c31ce9d70d736494c4"
+    },
+    "withheld_response_query": {
+      "run_id": "managed-task-cf8961b665a4a9ceb1dbb930a7e65728f88fbc0a50764b7c629db734bddd8bc2",
+      "simulation": "CLI stdout discarded; original key queried without resubmit",
+      "unknown_write": false
+    },
+    "owner_takeover": {
+      "control_owner": "user",
+      "read_status": "failed",
+      "persisted_run_failure_code": "control_lock_conflict",
+      "verification": "Owner inspect retained control_owner=user; bounded code independently read back from the original persisted Run"
+    },
+    "restart_query": "same Run and result",
+    "stop_terminal_run": {
+      "run_id": "managed-task-2871097728a092c85255b327e56368f7e8dfe20dcd5612f8fd886489cfc3131b",
+      "status": "succeeded"
+    },
+    "revoked_query": "managed_access_grant_unavailable"
+  },
+  "state": "passed",
+  "page_get_count": 1,
+  "cleanup_failures": [],
+  "recorded_at": "2026-09-23T18:12:02.474Z",
+  "work_item": "https://github.com/WebEnvoy/WebEnvoy/issues/584",
+  "lode": {
+    "commit": "608ebfa425fbdeb4e651cb438d1e97c2618f2bc8",
+    "pr": "https://github.com/WebEnvoy/Lode/pull/323"
+  },
+  "archive_sha256": "af4e5b980f1af55f3c2190968d3b2cfe9de09a3497efabd00a74a17b23e221d7",
+  "harness": {
+    "path": "apps/desktop/scripts/standalone-site-task-check.mjs",
+    "sha256": "b7340e0ff1d44528267de1a97a41a767f1590a146d71120e381d8aa28fcf8d6d",
+    "source_note": "0c9e82f plus corrected expected pin-mismatch code managed_access_denied; bundled runtime unchanged"
+  }
+}
