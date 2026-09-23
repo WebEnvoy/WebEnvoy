@@ -1,0 +1,67 @@
+{
+  "schema": "managed-task-operation-request.schema.json",
+  "cases": [
+    {
+      "name": "unknown owner field",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.submit", "idempotency_key": "k", "grant_id": "grant:a", "connection_id": "connection:a", "owner_token": "forbidden",
+        "task_scope": { "operations": ["task.submit"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] },
+        "package": { "package_ref": "pkg:a", "revision_ref": "pkg:a@1#abc", "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "task_ref": "read" },
+        "target": { "target_type": "page", "target_ref": "target:a" }, "input": { "schema_ref": "schema:a", "carrier": "none" }, "intent": { "summary": "Read", "policy": { "risk": "read", "execution_intent": "read" } }
+      }
+    },
+    {
+      "name": "unsupported schema version",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v2", "operation": "task.query", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.query"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] }, "selector": { "run_id": "run:a" }
+      }
+    },
+    {
+      "name": "task scope operation does not match request",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.query", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.submit"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] }, "selector": { "run_id": "run:a" }
+      }
+    },
+    {
+      "name": "query has both selectors",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.query", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.query"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] }, "selector": { "run_id": "run:a", "original_idempotency_key": "submit:a" }
+      }
+    },
+    {
+      "name": "stop selector must be an existing run",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.stop", "idempotency_key": "stop:a", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.stop"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] }, "selector": { "original_idempotency_key": "submit:a" }
+      }
+    },
+    {
+      "name": "none carrier cannot carry a value",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.submit", "idempotency_key": "k", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.submit"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] },
+        "package": { "package_ref": "pkg:a", "revision_ref": "pkg:a@1#abc", "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "task_ref": "read" },
+        "target": { "target_type": "page", "target_ref": "target:a" }, "input": { "schema_ref": "schema:a", "carrier": "none", "value": null }, "intent": { "summary": "Read", "policy": { "risk": "read", "execution_intent": "read" } }
+      }
+    },
+    {
+      "name": "target ref cannot be a URL",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.submit", "idempotency_key": "k", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.submit"], "skill_refs": [], "source_refs": [], "profile_refs": [], "origins": [] },
+        "package": { "package_ref": "pkg:a", "revision_ref": "pkg:a@1#abc", "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "task_ref": "read" },
+        "target": { "target_type": "page", "target_ref": "https://example.test/catalog" }, "input": { "schema_ref": "schema:a", "carrier": "none" }, "intent": { "summary": "Read", "policy": { "risk": "read", "execution_intent": "read" } }
+      }
+    },
+    {
+      "name": "duplicate scope references",
+      "instance": {
+        "schema_version": "webenvoy.managed-task-operation/v1", "operation": "task.query", "grant_id": "grant:a", "connection_id": "connection:a",
+        "task_scope": { "operations": ["task.query"], "skill_refs": ["pkg:a", "pkg:a"], "source_refs": [], "profile_refs": [], "origins": [] }, "selector": { "run_id": "run:a" }
+      }
+    }
+  ]
+}

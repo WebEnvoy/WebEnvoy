@@ -1,0 +1,24 @@
+{
+  "$schema": "managed-task-operation-request.schema.json",
+  "schema_version": "webenvoy.managed-task-operation/v1",
+  "operation": "task.submit",
+  "idempotency_key": "catalog-read-inline-001",
+  "grant_id": "grant:fixture",
+  "connection_id": "connection:fixture",
+  "task_scope": {
+    "operations": ["task.submit"],
+    "skill_refs": ["lode://site-skill/local-catalog/catalog"],
+    "source_refs": ["lode://site-skill/local-catalog/catalog@0.1.0#0123456789abcdef0123456789abcdef01234567"],
+    "profile_refs": ["profile:local-catalog"],
+    "origins": ["http://127.0.0.1:4173"]
+  },
+  "package": {
+    "package_ref": "lode://site-skill/local-catalog/catalog",
+    "revision_ref": "lode://site-skill/local-catalog/catalog@0.1.0#0123456789abcdef0123456789abcdef01234567",
+    "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "task_ref": "catalog-read"
+  },
+  "target": { "target_type": "catalog_page", "target_ref": "target:local-catalog" },
+  "input": { "schema_ref": "lode://schema/local-catalog/read-input@0.1.0", "carrier": "webenvoy.managed-task-inline/v1", "value": { "limit": 10 } },
+  "intent": { "summary": "Read the current local catalog summary.", "policy": { "risk": "read", "execution_intent": "read" } }
+}

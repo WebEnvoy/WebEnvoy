@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,6 +27,7 @@ try {
   await mkdir(outDir, { recursive: true });
   await copyJsonTree(path.join(exportRoot, "registry"), path.join(outDir, "registry"));
   await copyJsonTree(path.join(exportRoot, "sites"), path.join(outDir, "sites"));
+  await copySiteSkillFiles(path.join(exportRoot, "sites"), path.join(outDir, "sites"));
   await writeFile(
     path.join(outDir, "provenance.json"),
     `${JSON.stringify({ schema_version: "webenvoy-lode-asset-provenance/v1", ...lodeLock }, null, 2)}\n`,
@@ -103,4 +104,36 @@ async function copyJsonTree(from, to) {
       return source === from || (!name.startsWith(".") && (!path.extname(source) || source.endsWith(".json")));
     },
   });
+}
+
+// A site SKILL is the complete declared package, including its knowledge entry.
+// Legacy capability packaging remains JSON-only.
+async function copySiteSkillFiles(from, to) {
+  if (!existsSync(from)) return;
+  const manifestPath = path.join(from, "manifest.json");
+  if (existsSync(manifestPath)) {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (manifest.package_type === "site-skill") {
+      if (!Array.isArray(manifest.integrity?.files)) throw new Error("site_skill_integrity_files_missing");
+      for (const file of manifest.integrity.files) {
+        if (typeof file.path !== "string" || file.path.includes("\\") || path.isAbsolute(file.path) ||
+          file.path.split("/").some(part => !part || part === "." || part === "..")) throw new Error("site_skill_file_path_invalid");
+        const source = path.join(from, file.path);
+        const parts = file.path.split("/");
+        for (let index = 1; index <= parts.length; index++) {
+          const info = await lstat(path.join(from, ...parts.slice(0, index)));
+          if (info.isSymbolicLink() || (index === parts.length ? !info.isFile() : !info.isDirectory())) throw new Error("site_skill_file_type_invalid");
+        }
+        const bytes = await readFile(source);
+        if (bytes.byteLength !== file.bytes || `sha256:${createHash("sha256").update(bytes).digest("hex")}` !== file.sha256) throw new Error("site_skill_file_integrity_mismatch");
+        const destination = path.join(to, file.path);
+        await mkdir(path.dirname(destination), { recursive: true });
+        await cp(source, destination);
+      }
+      return;
+    }
+  }
+  for (const entry of await readdir(from, { withFileTypes: true })) {
+    if (entry.isDirectory()) await copySiteSkillFiles(path.join(from, entry.name), path.join(to, entry.name));
+  }
 }

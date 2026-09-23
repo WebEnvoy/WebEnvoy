@@ -1,0 +1,17 @@
+{
+  "$schema": "managed-task-operation-result.schema.json",
+  "ok": true,
+  "schema_version": "webenvoy.managed-task-operation-result/v1",
+  "operation": "task.submit",
+  "operation_ref": "run:core/local-catalog-001",
+  "run": {
+    "run_id": "run:core/local-catalog-001",
+    "task_intent_ref": "intent:local-catalog-001",
+    "package_ref": "lode://site-skill/local-catalog/catalog",
+    "status": "admitted",
+    "dispatch_state": "not_dispatched"
+  },
+  "input": { "schema_ref": "lode://schema/local-catalog/read-input@0.1.0", "carrier": "none", "value_present": false },
+  "result": null,
+  "failure": null
+}

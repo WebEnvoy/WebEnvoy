@@ -1,0 +1,31 @@
+{
+  "schema": "managed-task-operation-result.schema.json",
+  "cases": [
+    {
+      "name": "none carrier cannot report a value",
+      "instance": {
+        "ok": true,
+        "schema_version": "webenvoy.managed-task-operation-result/v1",
+        "operation": "task.submit",
+        "operation_ref": "run:core/site-task",
+        "run": { "run_id": "run:core/site-task", "task_intent_ref": "intent:site-task", "package_ref": "pkg:site", "status": "admitted", "dispatch_state": "not_dispatched" },
+        "input": { "schema_ref": "schema:input", "carrier": "none", "value_present": true },
+        "result": null,
+        "failure": null
+      }
+    },
+    {
+      "name": "result uses only the existing Core Run status",
+      "instance": {
+        "ok": true,
+        "schema_version": "webenvoy.managed-task-operation-result/v1",
+        "operation": "task.submit",
+        "operation_ref": "run:core/site-task",
+        "run": { "run_id": "run:core/site-task", "task_intent_ref": "intent:site-task", "package_ref": "pkg:site", "status": "site_task_succeeded", "dispatch_state": "dispatched" },
+        "input": { "schema_ref": "schema:input", "carrier": "none", "value_present": false },
+        "result": null,
+        "failure": null
+      }
+    }
+  ]
+}

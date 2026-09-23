@@ -8,6 +8,7 @@ import {
   createFileSkillLibraryService,
   approvedSkillManifestSha256,
   createManagedBrowserService,
+  createManagedTaskService,
   createManagedRecoveryService,
   createFileAuthorizationDecisionStore,
   createFileExecutionPolicyConfigStore,
@@ -123,13 +124,18 @@ if (import.meta.url === entrypoint) {
   const managedSkillService = managedAccessStore && runRecordStore && skillLibraryDirectory
     ? createFileSkillLibraryService({ accessStore: managedAccessStore, runRecordStore, directory: skillLibraryDirectory,
         trustedManifestSha256: approvedSkillManifestSha256,
+        ...(process.env.WEBENVOY_LODE_ASSETS_PATH === undefined ? {} : { lodeAssetsPath: process.env.WEBENVOY_LODE_ASSETS_PATH }),
         ...(skillAssetsPath === undefined ? {} : { sourceManifestPath: join(skillAssetsPath, "manifest.json") }) })
+    : undefined;
+  const managedTaskService = managedAccessStore && runRecordStore && managedSkillService && managedBrowserService
+    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService })
     : undefined;
   const server = createApiServer({
     supervisorToken,
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
     ...(managedSkillService === undefined ? {} : { managedSkillService }),
+    ...(managedTaskService === undefined ? {} : { managedTaskService }),
     ...(managedRecoveryService === undefined ? {} : { managedRecoveryService }),
     ...(managedFileService === undefined ? {} : { managedFileService }),
     ...(runRecordStore === undefined ? {} : { runRecordStore }),

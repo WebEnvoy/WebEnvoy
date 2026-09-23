@@ -386,6 +386,7 @@ export {
   type ManagedCapabilityFieldGuidance
 } from "./managed-capabilities.js";
 export { createManagedBrowserService } from "./managed-browser.js";
+export { createManagedTaskService, type ManagedTaskService } from "./managed-task.js";
 export { createHttpManagedFileOwnerClient, type ManagedFileOwnerClient } from "./managed-file-owner.js";
 export {
   createFileSkillLibraryService,

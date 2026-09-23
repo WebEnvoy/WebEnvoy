@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/managed-task-operation-request.v1.schema.json",
+  "title": "WebEnvoy managed task operation request",
+  "description": "Core HTTP body for the fixed Site SKILL managed task projection. MCP and CLI parameters use the same operation shapes without connection_id; the Agent entry inserts the current connection into this HTTP body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "grant_id", "task_scope", "connection_id"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.managed-task-operation/v1" },
+    "operation": { "type": "string", "enum": ["task.submit", "task.query", "task.stop"] },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "grant_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "connection_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "task_scope": { "$ref": "#/$defs/task_scope" },
+    "package": { "$ref": "#/$defs/package" },
+    "target": { "$ref": "#/$defs/target" },
+    "input": { "$ref": "#/$defs/input" },
+    "intent": { "$ref": "#/$defs/intent" },
+    "selector": { "$ref": "#/$defs/query_selector" }
+  },
+  "oneOf": [
+    {
+      "properties": { "operation": { "const": "task.submit" } },
+      "required": ["schema_version", "operation", "idempotency_key", "grant_id", "task_scope", "package", "target", "input", "intent", "connection_id"],
+      "not": { "required": ["selector"] }
+    },
+    {
+      "properties": { "operation": { "const": "task.query" } },
+      "required": ["schema_version", "operation", "grant_id", "task_scope", "selector", "connection_id"],
+      "not": { "anyOf": [{ "required": ["idempotency_key"] }, { "required": ["package"] }, { "required": ["target"] }, { "required": ["input"] }, { "required": ["intent"] }] }
+    },
+    {
+      "properties": { "operation": { "const": "task.stop" } },
+      "required": ["schema_version", "operation", "idempotency_key", "grant_id", "task_scope", "selector", "connection_id"],
+      "not": { "anyOf": [{ "required": ["package"] }, { "required": ["target"] }, { "required": ["input"] }, { "required": ["intent"] }] }
+    }
+  ],
+  "allOf": [
+    {
+      "if": { "required": ["operation"], "properties": { "operation": { "const": "task.submit" } } },
+      "then": { "properties": { "task_scope": { "properties": { "operations": { "items": { "const": "task.submit" } } } } } }
+    },
+    {
+      "if": { "required": ["operation"], "properties": { "operation": { "const": "task.query" } } },
+      "then": { "properties": { "task_scope": { "properties": { "operations": { "items": { "const": "task.query" } } } } } }
+    },
+    {
+      "if": { "required": ["operation"], "properties": { "operation": { "const": "task.stop" } } },
+      "then": {
+        "properties": {
+          "task_scope": { "properties": { "operations": { "items": { "const": "task.stop" } } } },
+          "selector": { "$ref": "#/$defs/stop_selector" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "text_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "refs": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "$ref": "#/$defs/text_ref" } },
+    "task_scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operations", "skill_refs", "source_refs", "profile_refs", "origins"],
+      "properties": {
+        "operations": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["task.submit", "task.query", "task.stop"] } },
+        "skill_refs": { "$ref": "#/$defs/refs" },
+        "source_refs": { "$ref": "#/$defs/refs" },
+        "profile_refs": { "$ref": "#/$defs/refs" },
+        "origins": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "type": "string", "format": "webenvoy-public-origin" } }
+      }
+    },
+    "package": {
+      "type": "object", "additionalProperties": false,
+      "required": ["package_ref", "revision_ref", "package_digest", "task_ref"],
+      "properties": {
+        "package_ref": { "$ref": "#/$defs/text_ref" },
+        "revision_ref": { "$ref": "#/$defs/text_ref" },
+        "package_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "task_ref": { "$ref": "#/$defs/text_ref" }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_type", "target_ref"],
+      "properties": { "target_type": { "$ref": "#/$defs/text_ref" }, "target_ref": { "type": "string", "minLength": 1, "maxLength": 2048, "format": "webenvoy-stored-target-ref", "not": { "pattern": "://" }, "description": "Opaque registered Harbor/Core target ref; URLs and selectors are not accepted." } }
+    },
+    "input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_ref", "carrier"],
+      "properties": {
+        "schema_ref": { "$ref": "#/$defs/text_ref" },
+        "carrier": { "type": "string", "enum": ["none", "webenvoy.managed-task-inline/v1"] },
+        "value": { "description": "For the inline carrier, a JSON value limited to 65536 compact UTF-8 bytes and validated against the pinned Lode schema by Core." }
+      },
+      "oneOf": [
+        { "properties": { "carrier": { "const": "none" } }, "not": { "required": ["value"] } },
+        { "properties": { "carrier": { "const": "webenvoy.managed-task-inline/v1" } }, "required": ["value"] }
+      ],
+      "x-webenvoy-inline-json-max-bytes": 65536
+    },
+    "intent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["summary", "policy"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "policy": {
+          "type": "object", "additionalProperties": false,
+          "required": ["risk", "execution_intent"],
+          "properties": {
+            "risk": { "type": "string", "enum": ["read", "write", "submit", "destructive"] },
+            "execution_intent": { "type": "string", "enum": ["read", "validate_only", "draft", "preview", "execute_after_approval", "reconcile_status", "request_cancel"] },
+            "timeout_ms": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "query_selector": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "run_id": { "$ref": "#/$defs/text_ref" }, "original_idempotency_key": { "$ref": "#/$defs/text_ref" } },
+      "oneOf": [
+        { "required": ["run_id"] },
+        { "required": ["original_idempotency_key"] }
+      ]
+    },
+    "stop_selector": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id"],
+      "properties": { "run_id": { "$ref": "#/$defs/text_ref" } }
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Core Managed Task Projection",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.managed-task-operation/v1",
+    "compatibility_boundary": "Fixed Agent task.submit/task.query/task.stop HTTP body; CLI/MCP omit connection_id and the Agent entry injects the current connection. Core owns authorization, package pinning, Run, result and recovery semantics.",
+    "source_adrs": ["docs/specs/site-skill-execution-v1.md"],
+    "field_owners": { "schema_version": "Core", "operation": "Core", "connection_id": "Agent connection context", "package": "Lode package and Core integrity check", "task_scope": "Caller narrows; Core authorizes", "target": "Harbor/Core current target facts", "input": "Lode schema; Core validates and scopes" }
+  }
+}

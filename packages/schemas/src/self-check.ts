@@ -125,6 +125,22 @@ ajv.addKeyword({
   schemaType: "boolean",
   validate: (enabled: boolean, value: unknown) => !enabled || observationTargetShapeValid(value)
 });
+ajv.addKeyword({
+  keyword: "x-webenvoy-inline-json-max-bytes",
+  type: "object",
+  schemaType: "number",
+  validate: (maxBytes: number, value: unknown) => {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return false;
+    const input = value as JsonObject;
+    if (input.carrier !== "webenvoy.managed-task-inline/v1") return true;
+    try {
+      const serialized = JSON.stringify(input.value);
+      return serialized !== undefined && Buffer.byteLength(serialized, "utf8") <= maxBytes;
+    } catch {
+      return false;
+    }
+  }
+});
 ajv.addFormat("webenvoy-public-http-target", { type: "string", validate: (value: string) => normalizePublicHttpTarget(value).ok });
 ajv.addFormat("webenvoy-public-origin", { type: "string", validate: (value: string) => normalizePublicOrigin(value) !== undefined });
 ajv.addFormat("webenvoy-stored-target-ref", { type: "string", validate: (value: string) => normalizeStoredTargetRef(value) === value });
@@ -172,6 +188,20 @@ for (const file of fixtureFiles) {
   assertValid(validate, instance, file);
   assertObservationTargetShape(instance, file);
 }
+
+const managedTaskRequestSchema = schemasByFile.get("managed-task-operation-request.schema.json");
+assert(managedTaskRequestSchema, "managed task request schema must exist");
+const validateManagedTaskRequest = ajv.getSchema(asString(managedTaskRequestSchema.$id, "managed task request schema.$id"));
+assert(validateManagedTaskRequest, "managed task request validator must compile");
+const managedTaskRequest = await readJson(join(fixtureDir, "managed-task-operation-request.fixture.json"));
+const managedTaskInput = asObject(managedTaskRequest.input, "managed task input");
+managedTaskRequest.schema_version = "webenvoy.managed-task-operation/v1";
+managedTaskInput.carrier = "webenvoy.managed-task-inline/v1";
+managedTaskInput.value = "a".repeat(65534);
+delete managedTaskRequest.$schema;
+assertValid(validateManagedTaskRequest, managedTaskRequest, "inline managed task value at byte limit");
+managedTaskInput.value = "a".repeat(65535);
+assert.equal(validateManagedTaskRequest(managedTaskRequest), false, "inline managed task value over byte limit must be rejected");
 
 const validateTaskThread = ajv.getSchema(taskThreadSchemaId);
 assert(validateTaskThread, `${taskThreadSchemaFile} must compile as Draft 2020-12 JSON Schema`);

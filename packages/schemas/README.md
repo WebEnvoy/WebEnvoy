@@ -33,6 +33,8 @@ The files intentionally stay small:
 - `schemas/browser-file-result.schema.json`
 - `schemas/harbor-observation-targets.schema.json`
 - `schemas/harbor-observation-targets-request.schema.json`
+- `schemas/managed-task-operation-request.schema.json`
+- `schemas/managed-task-operation-result.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
 
@@ -51,6 +53,8 @@ Fixtures under `fixtures/` are representative examples used by the package self-
 `fixtures/harbor-observation-targets.fixture.json` is a bounded public `instance.snapshot` segment. Its self-check covers the cross-field relationship between the returned controls, continuation offset, captured count, completeness, and cursor state; raw DOM and form values are intentionally absent.
 
 `fixtures/harbor-observation-targets-request*.fixture.json` cover a new `instance.snapshot` batch and a bound continuation request. The matching negative fixtures verify that cursor continuation bindings, the 1–128 snapshot limit, and non-observation fields are rejected at the public request boundary.
+
+The managed-task operation fixtures cover the shared submit/query/stop envelope and its bounded projection of an existing Run. The request self-check also verifies the compact UTF-8 JSON byte limit for inline input.
 
 The execution-policy configuration/effective-view fixtures cover independent global, installed-skill-user, and next-turn thread versions. The single-action fixtures cover only an expiring `allow_once` or `deny_once` binding derived from a current Core confirmation.
 

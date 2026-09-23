@@ -386,10 +386,12 @@ export function createManagedBrowserService(options: {
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-operation-locks");
-  async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page" | "file"): Promise<ObjectValue> {
+  async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page" | "file", deadlineAt?: number): Promise<ObjectValue> {
+    const remainingMs = deadlineAt === undefined ? 70_000 : Math.min(70_000, deadlineAt - Date.now());
+    if (remainingMs <= 0) return fail("managed_task_timeout");
     const result = await fetch(new URL(path, options.harborBaseUrl), { method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(70_000) });
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(remainingMs) });
     const value = object(await result.json());
     if (receiptKind !== undefined) {
       if (["completed", "unavailable", "unknown_outcome"].includes(String(value.status)) && ["not_dispatched", "dispatched"].includes(String(value.dispatch_state))) return value;
@@ -402,9 +404,9 @@ export function createManagedBrowserService(options: {
     }
     return value;
   }
-  async function authorize(hash: string, input: Request, runId: string) {
+  async function authorize(hash: string, input: Request, runId: string, deadlineAt?: number) {
     const access = await options.accessStore.checkAccess(hash, accessRequest(input));
-    const catalog = await harbor("/runtime/managed-operation-catalog");
+    const catalog = await harbor("/runtime/managed-operation-catalog", undefined, undefined, deadlineAt);
     const version = digest(JSON.stringify(catalog));
     const controlled = isInteraction(input.operation);
     const preference = isProviderPreference(input.operation);
@@ -429,15 +431,27 @@ export function createManagedBrowserService(options: {
     if (evaluation.status !== "evaluated" || evaluation.next_step !== "execute") return fail("managed_browser_policy_refused");
     return { ...access, decision_ref: decision.decision_ref };
   }
-  async function execute(hash: string, input: Request, runId: string): Promise<ObjectValue> {
-    const access = await authorize(hash, input, runId);
-    const check = () => options.accessStore.checkAccess(hash, accessRequest(input));
+  async function execute(hash: string, input: Request, runId: string, deadlineAt?: number): Promise<ObjectValue> {
+    const ensureTaskActive = async () => {
+      if (deadlineAt !== undefined && Date.now() >= deadlineAt) return fail("managed_task_timeout");
+      if (deadlineAt !== undefined) {
+        const current = await store.getRunRecord(runId);
+        if (!current || current.status !== "running") return fail("managed_task_cancelled");
+      }
+    };
+    const runtimeHarbor = async (path: string, body?: ObjectValue, receiptKind?: "interaction" | "page" | "file") => {
+      await ensureTaskActive();
+      return harbor(path, body, receiptKind, deadlineAt);
+    };
+    const access = await authorize(hash, input, runId, deadlineAt);
+    const check = async () => { await ensureTaskActive(); return options.accessStore.checkAccess(hash, accessRequest(input)); };
+    await ensureTaskActive();
     await store.updateRunRecord(runId, { evidence_refs: [access.decision_ref] });
     const holder = access.principal.principal_id;
     if (isProviderPreference(input.operation)) {
       await check();
-      if (input.operation === "provider.preference.read") return { preference: await harbor("/runtime/browser-provider-preference"), authorization_decision_ref: access.decision_ref };
-      const preference = await harbor("/runtime/browser-provider-preference", input.operation === "provider.preference.set"
+      if (input.operation === "provider.preference.read") return { preference: await runtimeHarbor("/runtime/browser-provider-preference"), authorization_decision_ref: access.decision_ref };
+      const preference = await runtimeHarbor("/runtime/browser-provider-preference", input.operation === "provider.preference.set"
         ? { operation: "set", idempotency_key: runId, provider_id: input.provider_id! }
         : { operation: "clear", idempotency_key: runId });
       if (preference.status !== "completed") {
@@ -469,7 +483,7 @@ export function createManagedBrowserService(options: {
       const template = access.creation_template!;
       if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
       await check();
-      const created = await harbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
+      const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
         identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
       if (created.status !== "completed") return fail("managed_browser_creation_unknown");
       try {
@@ -481,7 +495,7 @@ export function createManagedBrowserService(options: {
         throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown");
       }
     }
-    const list = await harbor("/runtime/identity-environments");
+    const list = await runtimeHarbor("/runtime/identity-environments");
     if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
     const profiles = list.identity_environments.map(publicProfile);
     if (input.operation === "profile.list") return { profiles: profiles.filter(profile => access.grant.profile_refs.includes(text(profile.profile_ref))) };
@@ -491,16 +505,16 @@ export function createManagedBrowserService(options: {
     const identityEnvironmentRef = text(profile.identity_environment_ref);
     const identity = encodeURIComponent(identityEnvironmentRef);
     if (isEnvironment(input.operation)) await check();
-    if (input.operation === "environment.read") return await harbor(`/runtime/identity-environments/${identity}/environment`);
-    if (input.operation === "environment.update") return await harbor(`/runtime/identity-environments/${identity}/environment`, {
+    if (input.operation === "environment.read") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`);
+    if (input.operation === "environment.update") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`, {
       idempotency_key: runId, configuration: input.configuration!
     });
-    const active = await harbor(`/runtime/identity-environments/${identity}/session`);
+    const active = await runtimeHarbor(`/runtime/identity-environments/${identity}/session`);
     const activeSession = active.runtime_session === null ? undefined : object(active.runtime_session);
     let session = activeSession;
     if (input.operation === "instance.start" && !session) {
       await check();
-      session = await harbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
+      session = await runtimeHarbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
         operation_scope: "profile_management", url: input.url ?? input.origin, reuse_existing: true,
         control_owner: "core_task", holder_ref: holder, headless: false, timeout_ms: 60_000, scope_semantics: access.scope_semantics });
     }
@@ -516,7 +530,7 @@ export function createManagedBrowserService(options: {
       // A user-held Instance is never implicitly taken over by an Agent Page action.
       if (leaseSession.control_owner === "user" && lease.state === "held") return fail("control_lock_conflict");
       if (leaseSession.control_owner !== "core_task" || lease.state !== "held" || lease.holder_ref !== holder) {
-        leaseSession = await harbor(`/runtime/sessions/${ref}/lock`, { control_owner: "core_task", holder_ref: holder });
+        leaseSession = await runtimeHarbor(`/runtime/sessions/${ref}/lock`, { control_owner: "core_task", holder_ref: holder });
         session = leaseSession;
       }
       const acquired = object(leaseSession.control_lock);
@@ -526,7 +540,7 @@ export function createManagedBrowserService(options: {
     if ((managedPageOperations as readonly string[]).includes(input.operation)) {
       if (input.operation === "page.list") {
         const pageAccess = await check();
-        return await harbor(`/runtime/sessions/${ref}/pages`, {
+        return await runtimeHarbor(`/runtime/sessions/${ref}/pages`, {
           operation: input.operation, holder_ref: holder,
           authorized_origins: pageAccess.authorized_origins, scope_semantics: pageAccess.scope_semantics
         });
@@ -534,7 +548,7 @@ export function createManagedBrowserService(options: {
       const pageAccess = await acquireControlLease();
       const run = (await store.getRunRecord(runId))!;
       await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
-      const result = await harbor(`/runtime/sessions/${ref}/pages`, {
+      const result = await runtimeHarbor(`/runtime/sessions/${ref}/pages`, {
         operation: input.operation, holder_ref: holder, operation_ref: runId, idempotency_key: runId,
         ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}), ...(input.url ? { url: input.url } : {}),
@@ -548,7 +562,7 @@ export function createManagedBrowserService(options: {
       const fileAccess = await acquireControlLease();
       const run = (await store.getRunRecord(runId))!;
       await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
-      const result = await harbor(`/runtime/sessions/${ref}/files`, {
+      const result = await runtimeHarbor(`/runtime/sessions/${ref}/files`, {
         operation: input.operation,
         operation_ref: runId,
         idempotency_key: runId,
@@ -573,7 +587,7 @@ export function createManagedBrowserService(options: {
     if (input.operation === "instance.diagnostics") {
       // Network/console diagnostics are pure observation and must not acquire or refresh the input lease.
       const diagnosticsAccess = await check();
-      return await harbor(`/runtime/sessions/${ref}/diagnostics`, {
+      return await runtimeHarbor(`/runtime/sessions/${ref}/diagnostics`, {
         origin: input.origin!, authorized_origins: diagnosticsAccess.authorized_origins, scope_semantics: diagnosticsAccess.scope_semantics, ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {})
@@ -581,13 +595,20 @@ export function createManagedBrowserService(options: {
     }
     if (!isObservation(input.operation)) await acquireControlLease();
     else await check();
-    if (input.operation === "instance.stop") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/stop`, { control_owner: "core_task", holder_ref: holder })) };
-    if (input.operation === "instance.handoff") return { session: publicSession(await harbor(`/runtime/sessions/${ref}/handoff`, { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: holder })) };
+    if (input.operation === "instance.stop") return { session: publicSession(await runtimeHarbor(`/runtime/sessions/${ref}/stop`, { control_owner: "core_task", holder_ref: holder })) };
+    if (input.operation === "instance.handoff") return { session: publicSession(await runtimeHarbor(`/runtime/sessions/${ref}/handoff`, { control_owner: "user", expected_control_owner: "core_task", handoff_reason: "user_requested", holder_ref: holder })) };
     if (isInteraction(input.operation)) {
       const interactionAccess = await check();
       const run = (await store.getRunRecord(runId))!;
-      await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
-      const result = await harbor(`/runtime/sessions/${ref}/interactions`, {
+      if (input.operation === "instance.snapshot") {
+        // Snapshot is an observation, not a dispatched write. The same-status
+        // update is also the final atomic cancellation checkpoint before the
+        // Harbor request; a concurrent task.stop makes this update fail.
+        await store.updateRunRecord(runId, { status: "running" });
+      } else {
+        await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, dispatch_state: "dispatched" } });
+      }
+      const result = await runtimeHarbor(`/runtime/sessions/${ref}/interactions`, {
         holder_ref: holder, operation_ref: runId, expected_origin: input.origin, controlled_origin: input.origin,
         // Harbor must enforce the Core-checked grant ∩ Profile ∩ task
         // intersection for every request/redirect, not re-derive trust from
@@ -605,9 +626,9 @@ export function createManagedBrowserService(options: {
         scope_semantics: access.scope_semantics,
         ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
         ...(input.document_generation ? { document_generation: input.document_generation } : {}) };
-      await harbor(`/runtime/sessions/${ref}/observe`, pageBinding);
+      await runtimeHarbor(`/runtime/sessions/${ref}/observe`, pageBinding);
       await check();
-      const result = await harbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
+      const result = await runtimeHarbor(`/runtime/sessions/${ref}/${input.operation === "instance.navigate" ? "navigate" : "read"}`, {
         holder_ref: holder, expected_origin: input.origin, scope_semantics: access.scope_semantics, ...(input.page_id ? { page_id: input.page_id } : {}),
         ...(input.page_ref ? { page_ref: input.page_ref } : {}), ...(input.document_generation ? { document_generation: input.document_generation } : {}),
         ...(input.url ? { url: input.url } : {}) });
@@ -615,7 +636,7 @@ export function createManagedBrowserService(options: {
       if (boundary) throw new ScopeBoundaryFailure(boundary);
       return { session: publicSession(result.session), ...(result.text === undefined ? {} : { text: result.text, truncated: result.truncated }), observed_at: result.observed_at };
     }
-    const observation = await harbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder, expected_origin: input.origin, scope_semantics: access.scope_semantics,
+    const observation = await runtimeHarbor(`/runtime/sessions/${ref}/observe`, { holder_ref: holder, expected_origin: input.origin, scope_semantics: access.scope_semantics,
       ...(input.page_id ? { page_id: input.page_id } : {}), ...(input.page_ref ? { page_ref: input.page_ref } : {}),
       ...(input.document_generation ? { document_generation: input.document_generation } : {}) });
     const page = object(observation.page);
@@ -627,7 +648,7 @@ export function createManagedBrowserService(options: {
     }
     if (input.operation === "account.bind") {
       await check();
-      const bound = await harbor(`/runtime/identity-environments/${identity}/account-bindings`, {
+      const bound = await runtimeHarbor(`/runtime/identity-environments/${identity}/account-bindings`, {
         observation_ref: text(input.observation_ref), account_system_ref: text(input.account_system_ref), account_ref: text(input.account_ref),
         idempotency_key: runId, holder_ref: holder });
       return { profile: publicProfile(bound), observation };
@@ -861,6 +882,22 @@ export function createManagedBrowserService(options: {
       // These are the categories declared by Harbor's managed operation catalog.
       const mutation = normalizeExecutionPolicyMutation(value, { allowed_categories: new Set(["read", "prepare", "commit"]) });
       return options.executionPolicyConfigStore.putInstalledSkillConfiguration("harbor:managed-browser", mutation);
+    },
+    /**
+     * Core-internal dispatch hook for a pinned no-script site task. The caller
+     * owns the single Run and result/post-check commit; this method only reuses
+     * managed-browser admission, current Profile/Grant/Origin checks, and the
+     * existing Harbor snapshot dispatch against that Run id.
+     */
+    async executeTaskSnapshot(credentialHash: string, value: unknown, runId: string, timeoutMs = 60_000) {
+      // Only this Core-owned task adapter may discover the currently selected
+      // Runtime Session. Keep the ordinary managed-browser request parser's
+      // requirement for an Agent-supplied runtime_session_ref unchanged.
+      const internal = object(value);
+      const input = parse({ ...internal, runtime_session_ref: "core-managed-task-current-session" });
+      if (input.operation !== "instance.snapshot" || input.idempotency_key !== runId || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) return fail("managed_task_invalid_input");
+      delete input.runtime_session_ref;
+      return execute(credentialHash, input, runId, Date.now() + timeoutMs);
     },
     async submit(credentialHash: string, value: unknown) {
       const input = parse(value);

@@ -40,6 +40,14 @@ When a response is lost, reconnect and call `webenvoy_query` with the original i
 
 Human takeover stops Agent input for that Instance. Wait for explicit owner `webenvoy instance handback` and then take a new snapshot of the same Instance before continuing; do not resume old input or reclaim human control. Another authorized Profile can continue independently. Revocation prevents later operations and survives reconnect; it does not undo earlier page effects.
 
+## 固定站点任务
+
+Use `webenvoy_skills` with `skill.inspect` to obtain the approved package/revision/digest and `site_tasks` declaration. Install and explicitly enable that revision through the existing skill lifecycle; installation and tool visibility do not authorize execution. Only admitted capability-backed tasks are executable in this slice; no package scripts run.
+
+Call `webenvoy_task` with `schema_version: "webenvoy.managed-task-operation/v1"` and `operation: "task.submit"`, the exact discovered package pin, current opaque Page target, declared input carrier, and one current Grant. Its task scope contains exactly `operations`, `skill_refs`, `source_refs`, `profile_refs`, and `origins`; the connector supplies the current connection. Use `webenvoy help agent task submit` for the equivalent installed CLI request-file entry. Read the returned Run and result envelope: admission or a browser snapshot alone is not task success.
+
+After a lost response, use `task.query` with `selector.original_idempotency_key` from the original submit; do not resubmit or replace the key. Query a known Run with `selector.run_id`. To stop later work, use `task.stop`, that Run selector, and a new stop-only idempotency key. Query and stop recheck the current Grant and scope. They do not undo effects or replay unknown work; use the task entry, not generic browser query or owner routes.
+
 ## 受管文件闭环（browser-files-v1）
 
 The owner must first use the installed owner CLI (`files import`, `files inspect`, `files export`, `files revoke`, or `files delete`) to create and manage an immutable `attachment:runtime/<UUID>` material. The owner grants an exact `file_scope` with `upload_refs`, the allowed MIME subset, and a byte ceiling; an old Grant without that scope has no file permission. Owner paths, file bodies, selectors, headers, URLs, and credentials never enter Agent requests.

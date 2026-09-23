@@ -1,0 +1,15 @@
+{
+  "$schema": "managed-task-operation-request.schema.json",
+  "schema_version": "webenvoy.managed-task-operation/v1",
+  "operation": "task.query",
+  "grant_id": "grant:fixture",
+  "connection_id": "connection:fixture",
+  "task_scope": {
+    "operations": ["task.query"],
+    "skill_refs": ["lode://site-skill/local-catalog/catalog"],
+    "source_refs": ["lode://site-skill/local-catalog/catalog@0.1.0#0123456789abcdef0123456789abcdef01234567"],
+    "profile_refs": ["profile:local-catalog"],
+    "origins": ["http://127.0.0.1:4173"]
+  },
+  "selector": { "original_idempotency_key": "catalog-read-001" }
+}

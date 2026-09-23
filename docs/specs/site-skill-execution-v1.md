@@ -2,12 +2,12 @@
 
 状态：经独立审查并合入 main 后成为 Accepted 实施基线，不表示执行器或真实站点已验收；版本：v1；产品归口：`#563`（parent `#475`）；owner：Core（准入、授权、Run、结果与恢复）、Harbor（受管浏览器现场、Page/target、ControlLease）及第 5 节定义的 Agent-side worker host。Plugin、CLI、API 共同投影 Core 语义。
 
-包定义由配套 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/024891654dff700bab4b31c82bc54148bf4d6b00/docs/contracts/site-skill-package-v1.md)
+包定义由配套 [Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/608ebfa425fbdeb4e651cb438d1e97c2618f2bc8/docs/contracts/site-skill-package-v1.md)
 拥有；该链接固定合同内容，引用本身不表示包合同已经接受或进入 `main`。
 
 本文件定义一个已安装、已固定版本、已获运行授权的 site SKILL task 如何进入现有
 WebEnvoy Runtime 并得到结果。它不拥有 Lode 的包身份、version、source/hash、任务
-声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/024891654dff700bab4b31c82bc54148bf4d6b00/docs/contracts/site-skill-package-v1.md)
+声明或 schema；这些由 [Lode Site SKILL Package V1](https://github.com/WebEnvoy/Lode/blob/608ebfa425fbdeb4e651cb438d1e97c2618f2bc8/docs/contracts/site-skill-package-v1.md)
 拥有。本文件建立在 [Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、
 [Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、
 [Grant Wire Contract V1](grant-wire-contract-v1.md)、
@@ -69,7 +69,10 @@ Lode site SKILL 或 live 任务证据。
    不阻止获准的 install、enable 或 read。
 2. **Code gate**：指定 script source/version/hash 已通过 WebEnvoy 的受管可信代码准入，
    且准入记录绑定同一 package revision 和 script digest。没有准入时只能管理或读取
-   资产，不能进入 script dispatch。
+   资产，不能进入 script dispatch。仅引用已有正式 capability、没有 script 的 task
+   不加载包代码；此时校验该 capability 的固定来源和正式执行映射，不要求不存在的
+   worker。若 pre/post-check 或 normalizer 实际执行包内代码，同样适用 script 准入，
+   不能以检查或规范化的名称豁免。
 3. **Lifecycle gate**：Core 按 #508 对完整 revision 执行显式 install/enable/read，
    保持 disabled-by-default、CAS、来源和摘要校验。`enable` 只表示资产可被读取和
    选择，不等于 code admission；安装和启用不运行 script、不自动登录、启动浏览器或
@@ -182,6 +185,9 @@ Plugin 现有 `skill.inspect` 只读元数据，也不承担 task dispatch。#56
 POST /managed-tasks/operations
 ~~~
 
+机器校验分别使用 [请求 Schema](../../packages/schemas/schemas/managed-task-operation-request.schema.json)
+和 [响应 Schema](../../packages/schemas/schemas/managed-task-operation-result.schema.json)。
+
 三个 operation 共用 `webenvoy.managed-task-operation/v1` 请求和
 `webenvoy.managed-task-operation-result/v1` 响应；`task.query`/`task.stop` 也使用
 这个 POST action envelope，避免把 Grant 或 task scope 放进 URL、隐式 header 或 owner
@@ -283,8 +289,9 @@ capability ref 冒充该 task。
 Core 在 managed projection 内部生成唯一 `run_id`/`intent_id`，并将请求映射为同一
 `webenvoy.task-intent.v0`：
 
-- `entrypoint` 记录实际 projection（`mcp` 或 `cli`），`user_intent.summary` 来自
-  `intent.summary`；
+- `entrypoint` 记录 Core 实际接收的认证入口；本 HTTP projection 为 `api`。
+  现行 connection 不携带可验证的 CLI/MCP 来源，Core 不猜测客户端类型；CLI/MCP
+  消费身份由对应安装验证记录。`user_intent.summary` 来自 `intent.summary`；
 - capability-backed task 的 `capability.ref/version/source_ref/lock_ref`、resource refs
   和 evidence policy 来自 pinned Lode task declaration，不由 Agent 任意补充；完整
   `required_capabilities` 仍由同一 declaration 在 admission 中校验；
@@ -418,6 +425,11 @@ task 的授权或 Run 语义，只提供 Agent/owner OS identity 前提和 CLI/c
 channel。
 
 ## 5. 受管执行位置、脚本 ABI 与 OS 权限
+
+本节适用于执行包内代码的 task。仅使用正式 capability 和由 Core 解释的既有声明式
+检查的 task 不创建 worker，也不依赖 worker identity/ACL；仍须通过 package、
+lifecycle、Grant/现场、egress 和 business gate。声明式检查不能成为任意表达式、
+脚本或新 workflow DSL 的入口。
 
 Lode `scripts/` 中的第三方或站点代码不得被 import、eval 或直接执行在 Core/Harbor
 进程内。本 v1 选定的实际执行方式是 Agent supervisor 启动的 **Agent-side managed
