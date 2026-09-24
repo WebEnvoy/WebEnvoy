@@ -168,6 +168,7 @@ class Handle:
         self.fills = []
         self.presses = []
         self.disposals = 0
+        self.aria_snapshot_calls = 0
         self.dom_identity = object()
     def clone(self):
         clone = object.__new__(Handle)
@@ -227,6 +228,7 @@ class ControlLocator:
         return bool(self.handles) and bool(args) and self.handles[0].dom_identity is args[0].dom_identity
     async def aria_snapshot(self):
         handle = self.handles[0] if self.handles else None
+        if handle is not None: handle.aria_snapshot_calls += 1
         return None if handle is None else "- " + handle.public_role + " " + json.dumps(handle.public_name)
 
 class Mouse:
@@ -323,6 +325,11 @@ class ScanHandle:
     async def evaluate(self, expression, *args): raise AssertionError("scan sentinel is not a control")
     async def dispose(self): self.disposals += 1
 
+class UnobservableHandle(Handle):
+    async def evaluate(self, expression, *args):
+        if expression == module.CONTROL_SEMANTICS_SCRIPT: return None
+        return await super().evaluate(expression, *args)
+
 class ScanPage:
     url = "https://example.test/form"
     main_frame = object()
@@ -340,6 +347,18 @@ async def run():
     instance.request = {"timeout_ms": 1000}
     instance.close_requested = asyncio.Event()
     common = {"provider_page_ref": "page:1", "page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
+
+    # Unsupported/hidden selector candidates are filtered by the fixed DOM
+    # projection and must not trigger an expensive provider AX snapshot.
+    hidden_handle = UnobservableHandle(0)
+    visible_handle = Handle(1)
+    page.handles = [hidden_handle, visible_handle]
+    filtered_state = module.PageState("page:filtered", page, ["https://example.test"])
+    filtered_batch = await instance.snapshot(filtered_state, {"page_ref": "page:filtered", "page_id": "page:filtered", "document_generation": 1, "limit": 128})
+    assert filtered_batch["coverage"]["controls"]["captured_count"] == 1, filtered_batch
+    assert hidden_handle.aria_snapshot_calls == 0, hidden_handle.aria_snapshot_calls
+    assert visible_handle.aria_snapshot_calls == 2, visible_handle.aria_snapshot_calls
+    page.handles = PageImpl.make_handles()
 
     # Regression: a DOM semantic change after body text capture must reject
     # the first batch and release every original ElementHandle.

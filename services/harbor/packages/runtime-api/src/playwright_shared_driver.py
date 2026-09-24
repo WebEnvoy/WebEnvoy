@@ -1112,6 +1112,9 @@ class Driver:
                     raise
                 if sampled:
                     self._record_snapshot_phase("control_read", "completed", phase_started, phase_code)
+                if item is None:
+                    await self._dispose_handle(element)
+                    continue
 
                 phase_started = self._record_snapshot_phase("accessibility_semantics", "started", code=phase_code) if sampled else None
                 try:
@@ -1130,9 +1133,6 @@ class Driver:
                 for remaining in element_handles[index:]:
                     await self._dispose_handle(remaining)
                 raise
-            if item is None:
-                await self._dispose_handle(element)
-                continue
             if provider is not None:
                 item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
             normalized = self._normalized_control(item, start_url or "")
@@ -1242,8 +1242,10 @@ class Driver:
                 if len(current) >= MAX_OBSERVATION_CONTROLS:
                     continue
                 item = await self._read_control(handle)
+                if item is None:
+                    continue
                 provider = await self._indexed_public_semantics(state, index, handle, failure_class)
-                if provider is not None and item is not None:
+                if provider is not None:
                     item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
                 normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
                 if normalized is not None:
