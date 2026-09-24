@@ -254,7 +254,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     expires_at: expiresAt, max_created_profiles: 1,
     creation_template: { template_ref: `${prefix}-template`, provider_id: 'camoufox',
       site: { site_id: 'github-trending', origin: siteOrigin, display_name: 'GitHub Trending public read' }, language: 'en-US', timezone: 'UTC',
-      permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [] } }
+      permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [siteOrigin] } }
   });
   const profileCreateFile = join(agentHost, `${prefix}-profile-create.json`);
   await agentWrite(profileCreateFile, request('profile.create', `${prefix}-profile-create`, creationGrantId,
@@ -399,7 +399,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     lifecycle: { inspected: true, installed: true, explicitly_enabled: true, read_receipt_ref: read.result.receipt.receipt_ref },
     refusals,
     profile_creation_grant: { grant_id: creationGrantId, allowed_operations: ['profile.create'], allowed_origins: [siteOrigin],
-      max_created_profiles: 1, profile_permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [] } },
+      max_created_profiles: 1, profile_permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [siteOrigin] } },
     grant: { grant_id: grantId, allowed_operations: operations, allowed_origins: [siteOrigin], profile_refs: [profileRef],
       max_created_profiles: 0 },
     task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 30_000 },
