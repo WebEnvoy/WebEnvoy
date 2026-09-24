@@ -428,8 +428,8 @@ try {
   const setup = runJson(cli, ['setup', '--data-dir', ownerData, '--agent-uid', String(agentUid), ...providerArgs], false, 'owner_setup');
   assert.equal(setup.installed, true, JSON.stringify(setup));
   assert.equal(setup.boundary?.mode, 'distinct_uid_hardened', JSON.stringify(setup.boundary));
-  assert.equal(setup.boundary?.owner_uid, ownerUid);
-  assert.equal(setup.boundary?.agent_uid, agentUid);
+  assert.equal(setup.bootstrap?.owner_uid, ownerUid);
+  assert.equal(setup.bootstrap?.agent_uid, agentUid);
   assert.deepEqual(setup.camoufox_launch, { state: 'qualified', reason: 'official_upstream' }, JSON.stringify(setup));
   run(cli, ['start', '--data-dir', ownerData]);
   runtimeStarted = true;
