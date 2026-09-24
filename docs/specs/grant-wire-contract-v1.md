@@ -112,14 +112,24 @@ site-task 请求的 `task_scope` 是版本化 projection 的请求范围，恰�
 `skill_refs` 必须包含与 Lode 稳定 `package_ref` 一一对应的既有 `skill_ref`（不带版本），
 `source_refs` 必须覆盖本次选中的完整 `revision_ref`/approved source；二者共同覆盖获准
 package/revision，`profile_refs/origins` 必须覆盖
-任务声明实际需要的浏览器范围（无浏览器输入时为空）。请求还必须通过任务声明的
+任务声明实际需要的资源范围（纯资产任务可为空；不使用 Page 的程序侧匿名读取仍须
+各有一个真实 Profile 和 HTTPS origin）。请求还必须通过任务声明的
 capability/action、
-Profile ceiling、ControlLease、Runtime 和现有 egress 检查。未知字段、未声明 carrier 的
+Profile ceiling、任务实际需要的 ControlLease/Runtime 和现有 egress 检查。未知字段、未声明 carrier 的
 inline JSON、`file_refs`、路径、selector、Cookie、Token、credential、Provider handle 和
 Agent 自带 allowlist 拒绝。`task.query`/`task.stop` 必须由同一 Principal 的当前有效 connection
 和 Grant 重新授权；重连得到的新 connection 可以查询或停止，只要当前 Grant/task scope
 覆盖原 Run 的 package/revision 与目标范围。不能以新 key、另一个 Principal 或当前页面
 状态重放或改写原 Run。
+
+[#594 公共匿名只读候选](https://github.com/WebEnvoy/WebEnvoy/issues/594) 不新增
+Grant 字段或普通 Agent `network.*` operation。其 `task.submit` 仍要求当前
+`task.*`、精确 SKILL/source revision、一个真实 Profile 和任务 HTTPS origin
+均在已有 Grant、task scope 与 Profile policy 的交集中；无 Page 目标不等于无
+Profile/origin 授权。受管 worker 的 `network.read` 是该已接受 Run 内的 broker
+调用，不能由 Agent credential 单独调用或借其他包/修订复用。此段只有配套
+Network/S2/Plugin 合同及实现合并后才生效，旧 reader 遇到不认识的任务版本准确
+拒绝，不忽略字段继续执行。
 
 v1.5 reader 读取不含 `task.*` operation 的旧 Grant 时必须成功，但该 Grant 没有 site-task
 Agent 能力；旧严格 reader 遇到 `task.*` operation 必须明确拒绝，不能忽略后继续执行。

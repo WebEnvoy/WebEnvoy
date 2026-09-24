@@ -75,7 +75,7 @@ Managed-access API 必须把该 path 纳入现有 Agent credential route，同�
 `/tasks`/`/runs` bearer gate。它不能把 owner bearer 作为代理，不能调用 `webenvoy_query`
 替代 `task.query`，也不能从 `skill.inspect` 旁路 dispatch。Core 先核对 bearer-bound
 Principal、context-bound Connection、一个当前有效 Grant、v1.5 `task.*` operation、`skill_scope`、
-package lifecycle、Profile/ControlLease/Runtime，再内部生成同一
+package lifecycle、Profile 及该任务实际要求的 ControlLease/Runtime，再内部生成同一
 `webenvoy.task-intent.v0` 并调用既有 Task/Run service。
 
 `task.submit` response 是 bounded Run projection；终态 `result` 使用既有
@@ -89,6 +89,24 @@ mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。CLI 
 `webenvoy agent task submit|query|stop --request-file <path> --client-file <path>`；
 它不修改既有 `webenvoy agent operation` 的 managed-browser envelope。S1 只拥有参数
 解析和 trust channel，不拥有 task 字段、授权或 Run 状态。
+
+### #594 公共只读 adapter 投影候选
+
+该增量只在配套 Network、S2、Lode 合同合并后生效。已安装 Plugin 保持现有
+`webenvoy_skills` 和 `webenvoy_task` 两个工具；`skill.inspect` 投影 pinned
+`network.public_read` 任务的输入 schema、目标 origin、程序侧匿名读取限制、输出
+完整性和版本，不把源码或 raw 响应正文变成普通 Agent 结果。Agent 仍先获得精确
+Grant、安装并显式启用 revision，再用同一 `webenvoy_task.task.submit` 携带已验证
+inline JSON 输入。此类任务由 pinned declaration 决定 URL 规则，请求不接受 Agent
+自填的 URL/header/allowlist，也不携带 Page target；五组 task scope 仍绑定一个真实
+Profile 和任务 origin。页面型任务的 target 要求保持不变。
+
+程序侧匿名读取在 Core broker 内受控执行；它不启动或冒充浏览器 Page、
+ControlLease、登录态或 Provider 能力。查询/停止继续只访问同一 Run，失败及
+`unknown_outcome` 仍按原 selector/no-replay 语义处理。未匹配新版本的旧 Plugin/
+Runtime 只能准确拒绝新任务，不能退化为 `instance.snapshot` 或调用浏览器
+`fetch`。真实 Codex 只有经此安装投影实际完成对应任务并留存调用记录后，才可把
+该样本标为 `plugin_verified`。
 
 ## 十二类基线与 Plugin checkpoint
 
