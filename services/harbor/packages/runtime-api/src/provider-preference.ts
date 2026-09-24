@@ -6,8 +6,7 @@ import { acquireFileOwnership } from "./profile-storage.js";
 import {
   detectBrowserProviders,
   type BrowserProviderDetectionInput,
-  type BrowserProviderId,
-  type BrowserProviderStatus
+  type BrowserProviderId
 } from "./provider-management.js";
 import { secureIdentityEnvironmentStoreDirectory, secureIdentityEnvironmentStoreFile, writeSecureJsonFile } from "./identity-environment-store.js";
 
@@ -94,7 +93,7 @@ export class BrowserProviderPreferenceManager {
       let result: BrowserProviderPreferenceMutationResult | undefined;
       if (request.operation === "set") {
         const provider = detectBrowserProviders(this.options.provider_detection).providers.find((candidate) => candidate.provider_id === request.provider_id);
-        if (!provider || !isLaunchable(provider)) {
+        if (!provider || provider.availability.state !== "available") {
           result = rejected("set", snapshot(this.state.user_creation_default, this.options.provider_detection), "provider_unavailable", true);
         } else {
           nextPreference = { provider_id: request.provider_id, updated_at: new Date().toISOString() };
@@ -162,14 +161,14 @@ function snapshot(preference: StoredPreference | null, detection: BrowserProvide
     schema_version: HARBOR_BROWSER_PROVIDER_PREFERENCE_SCHEMA,
     project_recommendation: {
       provider_id: recommendation.provider_id,
-      availability: isLaunchable(recommendation) ? "available" : "unavailable",
-      unavailable_reason: isLaunchable(recommendation) ? null : providerUnavailableReason(recommendation)
+      availability: recommendation.availability.state,
+      unavailable_reason: recommendation.availability.unavailable_reason
     },
     user_creation_default: preference === null
       ? { provider_id: null, availability: "unset", unavailable_reason: null, updated_at: null }
       : saved === undefined
         ? { provider_id: preference.provider_id, availability: "unsupported", unavailable_reason: "provider_not_supported", updated_at: preference.updated_at }
-        : { provider_id: preference.provider_id, availability: isLaunchable(saved) ? "available" : "unavailable", unavailable_reason: isLaunchable(saved) ? null : providerUnavailableReason(saved), updated_at: preference.updated_at }
+        : { provider_id: preference.provider_id, availability: saved.availability.state, unavailable_reason: saved.availability.unavailable_reason, updated_at: preference.updated_at }
   };
 }
 
@@ -201,17 +200,6 @@ function validIdempotencyKey(value: unknown): value is string {
 
 function isProviderId(value: unknown): value is BrowserProviderId {
   return value === "cloakbrowser" || value === "chrome_official" || value === "camoufox";
-}
-
-function isLaunchable(provider: BrowserProviderStatus): boolean {
-  return provider.selectable && provider.install.status === "installed" && provider.install.launchability === "launchable";
-}
-
-function providerUnavailableReason(provider: BrowserProviderStatus): string {
-  if (provider.install.status === "missing") return "provider_not_installed";
-  if (provider.install.status === "path_invalid") return "provider_path_invalid";
-  if (provider.install.launchability === "not_executable") return "provider_not_executable";
-  return "provider_not_launchable";
 }
 
 function completed(operation: "set" | "clear", preference: BrowserProviderPreferenceSnapshot): BrowserProviderPreferenceMutationResult {

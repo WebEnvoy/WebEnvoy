@@ -12,6 +12,7 @@ import { normalizeExecutionPolicyMutation } from "./execution-policy-config.js";
 import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile-recovery.js";
+import { projectManagedProviderCatalogFacts, projectManagedProviderPreference, providerFactsMatchPreference } from "./managed-provider-facts.js";
 import {
   managedCapabilityDefinition,
   managedCapabilityDefinitions,
@@ -451,7 +452,16 @@ export function createManagedBrowserService(options: {
     const holder = access.principal.principal_id;
     if (isProviderPreference(input.operation)) {
       await check();
-      if (input.operation === "provider.preference.read") return { preference: await runtimeHarbor("/runtime/browser-provider-preference"), authorization_decision_ref: access.decision_ref };
+      if (input.operation === "provider.preference.read") {
+        const [preferenceValue, providerCatalogValue] = await Promise.all([
+          runtimeHarbor("/runtime/browser-provider-preference"),
+          runtimeHarbor("/runtime/browser-providers")
+        ]);
+        const preference = projectManagedProviderPreference(preferenceValue);
+        const providerFacts = projectManagedProviderCatalogFacts(providerCatalogValue);
+        if (!preference || !providerFacts || !providerFactsMatchPreference(preference, providerFacts)) return fail("managed_browser_provider_facts_malformed");
+        return { preference, provider_facts: providerFacts, authorization_decision_ref: access.decision_ref };
+      }
       const preference = await runtimeHarbor("/runtime/browser-provider-preference", input.operation === "provider.preference.set"
         ? { operation: "set", idempotency_key: runId, provider_id: input.provider_id! }
         : { operation: "clear", idempotency_key: runId });

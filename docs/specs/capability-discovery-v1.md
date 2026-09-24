@@ -21,7 +21,7 @@ Agent 在已安装 Plugin 内问“这个操作在这个环境能否使用、缺
 
 `profile.create/list/read`；`provider.preference.read/set/clear`；`instance.start/observe/diagnostics/navigate/read/snapshot/click/input/press/scroll/wait/handoff/stop`；`environment.read/update`；`page.list/open/activate/close/navigate/reload/back/forward`；`file.upload/download`。
 
-其中绑定既有 Profile 的操作提供第 4 节的上下文评估。`profile.create`、不指定 Profile 的 `profile.list` 和 `provider.preference.*` 本批提供完整静态调用规则；不增加创建/全局偏好动态预检。给这些操作提供 Profile 上下文返回 `discovery_context_not_supported`，不得谎称原操作不可用。
+其中绑定既有 Profile 的操作提供第 4 节的上下文评估。`profile.create`、不指定 Profile 的 `profile.list` 和 `provider.preference.*` 本批提供完整静态调用规则；本描述接口不增加创建/全局偏好动态预检。Agent 若需在新建前读取当前 Provider 推荐、支持、availability 与用户默认，应显式调用既有 `provider.preference.read` operation 并查询其只读 Run 结果，具体投影见 [Provider Selection V1](provider-selection-v1.md)；不得把描述请求隐式升级为 owner 事实查询。给这些操作提供 Profile 上下文返回 `discovery_context_not_supported`，不得谎称原操作不可用。
 
 `account.bind` 是已有公共定义但未暴露给本批 Plugin 的明确样本：返回 `definition.state=defined`、`invocation.exposure=not_exposed`，不提供内部调用地址或替代入口。本批不增加该能力。其他未知 operation 返回 `definition.state=unknown`，不把猜测名称当作未来支持承诺。`webenvoy_recovery`、`webenvoy_skills` 与 owner 管理操作不扩入本批 `webenvoy_describe` 覆盖；其原工具和合同保持可用，返回范围说明而非假报这些工具不存在。#563 的 site task 元数据由既有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 投影承载，执行由独立的 `webenvoy_task` managed projection 承载；本帮助工具不扩展 task submit/query/stop 合同，也不为 site task 发明 discovery token。
 

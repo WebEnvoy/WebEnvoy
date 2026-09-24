@@ -39,6 +39,7 @@ test("detects exact Chrome facts only when the complete owner pairing is present
   const exact = detect(detectionEnv());
   assert.equal(exact.role, "qualification");
   assert.equal(exact.project_recommended, false);
+  assert.deepEqual(exact.availability, { state: "available", unavailable_reason: null });
   assert.equal(exact.install.source, "official_release");
   assert.equal(exact.install.signature_status, "apple_codesign_verified");
   assert.equal(exact.install.source_sha256, "6b6cf06fc357a647d26a32453780f020d9d36978ebe30d69ba8a233b538373e3");
@@ -55,6 +56,43 @@ test("detects exact Chrome facts only when the complete owner pairing is present
   assert.equal(exact.capabilities.find(capability => capability.key === "native_fingerprint_control")?.state, "unsupported");
   assert.equal(exact.limitations.some(limitation => limitation.includes("核心支持范围")), true);
   assert.equal(exact.limitations.some(limitation => limitation.includes("受限后备")), false);
+});
+
+test("reports current launchability as a Harbor-owned Provider availability fact", () => {
+  const providers = detectBrowserProviders({
+    platform: "darwin",
+    arch: "arm64",
+    home_dir: "/Users/fixture",
+    env: {},
+    path_exists: () => false,
+    is_executable: () => false,
+    read_text: () => null,
+    list_dir: () => []
+  }).providers;
+  const cloak = providers.find(provider => provider.provider_id === "cloakbrowser")!;
+  assert.equal(cloak.install.status, "missing");
+  assert.deepEqual(cloak.availability, { state: "unavailable", unavailable_reason: "provider_not_installed" });
+
+  const invalidPath = detectBrowserProviders({
+    platform: "darwin", arch: "arm64", home_dir: "/Users/fixture",
+    env: { HARBOR_CLOAKBROWSER_PATH: "/fixture/missing" }, path_exists: () => false, is_executable: () => false,
+    read_text: () => null, list_dir: () => []
+  }).providers.find(provider => provider.provider_id === "cloakbrowser")!;
+  assert.deepEqual(invalidPath.availability, { state: "unavailable", unavailable_reason: "provider_path_invalid" });
+
+  const notExecutable = detectBrowserProviders({
+    platform: "darwin", arch: "arm64", home_dir: "/Users/fixture",
+    env: { HARBOR_CLOAKBROWSER_PATH: "/fixture/cloakbrowser" }, path_exists: path => path === "/fixture/cloakbrowser", is_executable: () => false,
+    read_text: () => null, list_dir: () => []
+  }).providers.find(provider => provider.provider_id === "cloakbrowser")!;
+  assert.deepEqual(notExecutable.availability, { state: "unavailable", unavailable_reason: "provider_not_executable" });
+
+  const notChecked = detectBrowserProviders({
+    platform: "darwin", arch: "arm64", home_dir: "/Users/fixture",
+    env: { HARBOR_CAMOUFOX_PATH: "/fixture/camoufox" }, path_exists: path => path === "/fixture/camoufox", is_executable: () => true,
+    read_text: () => null, list_dir: () => []
+  }).providers.find(provider => provider.provider_id === "camoufox")!;
+  assert.deepEqual(notChecked.availability, { state: "unavailable", unavailable_reason: "provider_not_launchable" });
 });
 
 test("keeps ordinary Chrome detection narrow when any exact pairing fact is absent or mismatched", () => {

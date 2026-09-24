@@ -26,6 +26,10 @@ export type BrowserProviderId = "cloakbrowser" | "chrome_official" | "camoufox";
 export type BrowserProviderRole = "primary" | "restricted_fallback" | "qualification";
 export type BrowserProviderInstallStatus = "installed" | "missing" | "path_invalid";
 export type BrowserProviderLaunchability = "launchable" | "not_executable" | "not_checked";
+export interface BrowserProviderAvailability {
+  state: "available" | "unavailable";
+  unavailable_reason: "provider_not_selectable" | "provider_not_installed" | "provider_path_invalid" | "provider_not_executable" | "provider_not_launchable" | null;
+}
 export type BrowserProviderCapabilityState = "supported" | "limited" | "unsupported" | "provider_claim" | "requires_validation";
 export type BrowserProviderFactSource = "configured" | "observed" | "provider_claim" | "validation_evidence" | "derived";
 export type BrowserProviderFailureClass =
@@ -107,8 +111,9 @@ export interface BrowserProviderStatus {
   provider_id: BrowserProviderId;
   display_name: string;
   role: BrowserProviderRole;
-  selectable: true;
+  selectable: boolean;
   project_recommended: boolean;
+  availability: BrowserProviderAvailability;
   /** @deprecated Project recommendation is not an automatic creation default. */
   default_for_identity_environment: boolean;
   management_mode: "managed" | "system" | "external";
@@ -312,6 +317,7 @@ function providerStatus(
     role,
     selectable: true,
     project_recommended: projectRecommended,
+    availability: browserProviderAvailability({ selectable: true, install }),
     default_for_identity_environment: false,
     management_mode: managementMode,
     install,
@@ -512,7 +518,19 @@ function binding(
 }
 
 function isLaunchable(provider: BrowserProviderStatus): boolean {
-  return provider.install.status === "installed" && provider.install.launchability === "launchable";
+  return browserProviderAvailability(provider).state === "available";
+}
+
+export function browserProviderAvailability(provider: Pick<BrowserProviderStatus, "selectable" | "install">): BrowserProviderAvailability {
+  if (provider.selectable && provider.install.status === "installed" && provider.install.launchability === "launchable") {
+    return { state: "available", unavailable_reason: null };
+  }
+  const unavailable_reason = !provider.selectable ? "provider_not_selectable"
+    : provider.install.status === "missing" ? "provider_not_installed"
+      : provider.install.status === "path_invalid" ? "provider_path_invalid"
+        : provider.install.launchability === "not_executable" ? "provider_not_executable"
+          : "provider_not_launchable";
+  return { state: "unavailable", unavailable_reason };
 }
 
 function context(input: BrowserProviderDetectionInput): DetectionContext {
