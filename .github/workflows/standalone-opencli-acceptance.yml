@@ -1,0 +1,91 @@
+name: Standalone OpenCLI public read acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/standalone-opencli-acceptance.yml"
+      - "apps/desktop/agent-entry/**"
+      - "apps/desktop/scripts/standalone-opencli-public-read-check.mjs"
+      - "apps/desktop/scripts/runtime-source-lock.json"
+      - "apps/desktop/scripts/package-lode-assets.mjs"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-read:
+    name: macOS arm64 installed OpenCLI public reads
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PACKAGE_ROOT: /tmp/webenvoy-opencli-ci/webenvoy-standalone-macos-arm64
+      LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
+      EVIDENCE_ROOT: /tmp/webenvoy-opencli-evidence
+    steps:
+      - name: Check out exact WebEnvoy candidate
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node and pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+      - name: Enable pinned pnpm and verify host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate
+          test "$(node --version)" = v24.14.0
+          test "$(pnpm --version)" = 10.30.3
+
+      - name: Resolve locked Lode source
+        id: lode
+        shell: bash
+        run: echo "ref=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("apps/desktop/scripts/runtime-source-lock.json", "utf8")).lode.commit)')" >> "$GITHUB_OUTPUT"
+      - name: Check out locked Lode source
+        uses: actions/checkout@v4
+        with:
+          repository: WebEnvoy/Lode
+          ref: ${{ steps.lode.outputs.ref }}
+          path: .runtime-sources/lode
+          persist-credentials: false
+      - name: Verify exact source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C "$LODE_ROOT" rev-parse HEAD)" = "${{ steps.lode.outputs.ref }}"
+          test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude).runtime-sources' ':(exclude).runtime-sources/**')"
+          test -z "$(git -C "$LODE_ROOT" status --porcelain)"
+          sudo -n -u nobody -- /usr/bin/id -u >/dev/null
+
+      - name: Build and verify one standalone candidate
+        env:
+          WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @webenvoy/app package:standalone "$PACKAGE_ROOT"
+          pnpm --filter @webenvoy/app check:standalone "$PACKAGE_ROOT"
+
+      - name: Run three fixed public tasks through the installed entry
+        run: node apps/desktop/scripts/standalone-opencli-public-read-check.mjs "$PACKAGE_ROOT" "$LODE_ROOT" "$EVIDENCE_ROOT"
+
+      - name: Preserve bounded candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webenvoy-opencli-${{ env.SOURCE_SHA }}-${{ steps.lode.outputs.ref }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: ${{ env.EVIDENCE_ROOT }}
