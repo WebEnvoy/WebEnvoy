@@ -500,6 +500,7 @@ export type {
   RuntimeSessionOwnerProjection,
   RuntimeSessionOwnerSummary,
   RuntimeSessionUnavailable,
+  RuntimeProviderOperationDiagnostic,
   RuntimeViewerEntry,
   ValidationRuntimeFacts
 } from "./runtime-session.js";

@@ -211,6 +211,13 @@ function safeRuntimeFacts(value) {
   const availability = value.availability;
   const error = value.current_error;
   const page = value.current_page;
+  const diagnostics = Array.isArray(value.provider_operation_diagnostics) ? value.provider_operation_diagnostics.slice(-12).flatMap(item => {
+    if (!item || typeof item !== 'object' || !['page_list_request', 'page_relation_refresh', 'provider_snapshot'].includes(item.stage) ||
+        !['completed', 'unavailable', 'timeout', 'error'].includes(item.outcome) || !Number.isSafeInteger(item.duration_ms)) return [];
+    return [{ stage: item.stage, outcome: item.outcome, duration_ms: Math.max(0, Math.min(120_000, item.duration_ms)),
+      ...(typeof item.observed_at === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(item.observed_at) ? { observed_at: item.observed_at } : {}),
+      ...(typeof item.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(item.code) ? { code: item.code } : {}) }];
+  }) : [];
   return {
     ...(typeof value.lifecycle_state === 'string' ? { lifecycle_state: value.lifecycle_state } : {}),
     ...(typeof value.provider_mode === 'string' ? { provider_mode: value.provider_mode } : {}),
@@ -223,7 +230,8 @@ function safeRuntimeFacts(value) {
     ...(page && typeof page === 'object' ? { current_page: {
       ...(typeof page.status === 'string' ? { status: page.status } : {}),
       ...(typeof page.error_reason?.code === 'string' ? { error_code: page.error_reason.code } : {})
-    } } : {})
+    } } : {}),
+    ...(diagnostics.length > 0 ? { provider_operation_diagnostics: diagnostics } : {})
   };
 }
 async function diagnoseTaskSnapshotFailure({ ownerData, agentHost, clientFile, grantId, profileRef, sessionRef, pageRef, siteOrigin, prefix }) {

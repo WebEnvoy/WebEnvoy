@@ -29,12 +29,17 @@ test("routes the Camoufox adapter through the shared launch factory", async () =
   await writeFile(helper, `import readline from "node:readline";
 const expected = process.env.HARBOR_EXPECTED_DRIVER_PATH;
 if (!expected || !process.argv.includes(expected)) process.exit(71);
-  const page = { provider_page_ref: "page:1", current_url: "https://example.test/start", title: "Example", status: "ready", origin: "https://example.test", active: true, document_generation: 1, task_selected: true, facts: [] };
+const page = { provider_page_ref: "page:1", current_url: "https://example.test/start", title: "Example", status: "ready", origin: "https://example.test", active: true, document_generation: 1, task_selected: true, facts: [] };
+let pageListCalls = 0;
 const rl = readline.createInterface({ input: process.stdin });
 for await (const line of rl) {
   const request = JSON.parse(line);
   let result;
   if (request.op === "launch") result = { status: "ready", driver_ref: "fixture-camoufox", page, pages: [page], viewer_entry: { availability: "unsupported", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [{ key: "fixture.browser_path", source: "observed", value: request.browser_path }, { key: "fixture.environment.proxy_server", source: "observed", value: String(request.environment?.proxy_server ?? "") }, { key: "fixture.environment.viewport", source: "observed", value: JSON.stringify(request.environment?.viewport ?? null) }] };
+  else if (request.op === "page_list" && ++pageListCalls > 1) {
+    process.stdout.write(JSON.stringify({ id: request.id, status: "error", message: "Private URL and provider stack details must not escape." }) + "\\n");
+    continue;
+  }
   else if (request.op === "page_list") result = { pages: [page], rejected_unattributed_count: 0 };
   else if (request.op === "observe") result = page;
   else if (request.op === "observe_identity") result = { current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: null, document_generation: 1 };
@@ -59,10 +64,11 @@ for await (const line of rl) {
         HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
         HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
       });
-      process.env.HARBOR_EXPECTED_DRIVER_PATH = helper;
-      process.env[provider.pythonEnv] = process.execPath;
-      if (provider.driverEnv) process.env[provider.driverEnv] = helper;
-      const input: LocalProviderLaunchInput = {
+    process.env.HARBOR_EXPECTED_DRIVER_PATH = helper;
+    process.env[provider.pythonEnv] = process.execPath;
+    if (provider.driverEnv) process.env[provider.driverEnv] = helper;
+    const providerDiagnostics: import("./runtime-session-types.js").RuntimeProviderOperationDiagnostic[] = [];
+    const input: LocalProviderLaunchInput = {
         operation_scope: "profile_management",
         browser_path: provider.browserPath,
         provider_id: provider.id,
@@ -73,6 +79,7 @@ for await (const line of rl) {
         profile_ref: `profile:${provider.id}`,
         profile_storage_ref: `storage:${provider.id}`,
         provider_ref: `provider:${provider.id}`,
+        record_provider_diagnostic: diagnostic => providerDiagnostics.push(diagnostic),
       } as LocalProviderLaunchInput;
       const result = await provider.launch(input);
       assert.equal(result.status, "ready", `${provider.id} did not launch: ${JSON.stringify(result)}`);
@@ -89,6 +96,13 @@ for await (const line of rl) {
       assert.equal("provider_id" in environment!.provider, false);
       assert.equal((await result.pageController!.listPages())[0]?.provider_page_ref, "page:1");
       assert.equal((await result.interaction!({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "page:1" })).status, "completed");
+      await assert.rejects(() => result.pageController!.listPages(), /Private URL and provider stack details must not escape/);
+      assert.deepEqual(providerDiagnostics.map(item => ({ stage: item.stage, outcome: item.outcome, code: item.code })), [
+        { stage: "page_list_request", outcome: "completed", code: undefined },
+        { stage: "provider_snapshot", outcome: "completed", code: undefined },
+        { stage: "page_list_request", outcome: "error", code: "request_failed" }
+      ]);
+      assert.equal(JSON.stringify(providerDiagnostics).includes("Private URL"), false);
       assert.deepEqual(await result.interaction!({ action: "input", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "missing", text: "never dispatched" }), { status: "unavailable", dispatch_state: "not_dispatched", failure_class: "page_relation_unavailable" });
       assert.equal((await result.interaction!({ action: "input", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "page:1", text: "lost" })).status, "unknown_outcome");
       assert.equal((await result.executeFileOperation!({ operation: "upload", provider_page_ref: "page:1", expected_origin: "https://example.test", authorized_origins: ["https://example.test"], target_ref: "target:file", source_path: "/managed/input.png" })).status, "completed");

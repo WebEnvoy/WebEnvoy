@@ -255,6 +255,30 @@ test("creates, reads, and closes a runtime session", async () => {
   assert.equal(closedStatus.control_status.owner, "none");
 });
 
+test("keeps bounded provider operation diagnostics on the owner projection only", async () => {
+  const fixture = createFixtureLauncher("ready");
+  const runtime = new HarborRuntime(async input => {
+    const launched = await fixture(input);
+    for (let index = 0; index < 14; index += 1) input.record_provider_diagnostic?.({
+      stage: "page_list_request",
+      outcome: "timeout",
+      duration_ms: 130_000,
+      observed_at: new Date().toISOString(),
+      ...(index === 13 ? { code: "invalid diagnostic code" } : { code: "request_timeout" })
+    });
+    return launched;
+  });
+  const session = await runtime.createSession();
+  const ownerFacts = runtime.getOwnerSessionFacts(session.runtime_session_ref);
+  const diagnostics = ownerFacts?.provider_operation_diagnostics;
+  assert.equal(diagnostics?.length, 12);
+  assert.equal(diagnostics?.[0]?.code, "request_timeout");
+  assert.equal(diagnostics?.[0]?.duration_ms, 120_000);
+  assert.equal(diagnostics?.at(-1)?.code, undefined);
+  assert.equal(diagnostics?.at(-1)?.duration_ms, 120_000);
+  assert.equal("provider_operation_diagnostics" in (runtime.getSession(session.runtime_session_ref) ?? {}), false);
+});
+
 test("reports provider unavailability as structured runtime facts", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("unavailable"));
   const session = await runtime.createSession();
