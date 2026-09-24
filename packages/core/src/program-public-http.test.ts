@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import {
+  createPinnedLookup,
   isPubliclyRoutableAddress,
   parseProgramPublicHttpPolicy,
   ProgramPublicHttpError,
@@ -12,6 +13,20 @@ import {
 } from "./program-public-http.js";
 
 const origin = "https://public.example";
+test("pinned DNS lookup returns the address shape requested by Node 24 HTTPS", async () => {
+  const lookup = createPinnedLookup({ address: "93.184.215.14", family: 4 });
+  await new Promise<void>((resolve, reject) => lookup("public.example", { all: true }, (error, addresses) => {
+    if (error) return reject(error);
+    assert.deepEqual(addresses, [{ address: "93.184.215.14", family: 4 }]);
+    resolve();
+  }));
+  await new Promise<void>((resolve, reject) => lookup("public.example", { all: false }, (error, address, family) => {
+    if (error) return reject(error);
+    assert.equal(address, "93.184.215.14");
+    assert.equal(family, 4);
+    resolve();
+  }));
+});
 function makePolicy(overrides: Partial<ProgramPublicHttpPolicy> = {}): ProgramPublicHttpPolicy {
   return parseProgramPublicHttpPolicy({
     transport: "program_anonymous_https", origin, pathname: "/api", allow_one_path_segment: false,

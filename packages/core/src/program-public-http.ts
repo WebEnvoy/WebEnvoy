@@ -220,10 +220,18 @@ function decodeResponse(response: IncomingMessage, maxBytes: number, timeoutMs: 
   });
 }
 
-async function sendPinnedHttps(url: URL, address: Address, headers: Record<string, string>, maxBytes: number, timeoutMs: number, signal?: AbortSignal): Promise<HopResult> {
-  const lookupPinned: LookupFunction = (_hostname, _options, callback) => {
-    (callback as (error: NodeJS.ErrnoException | null, address: string, family?: number) => void)(null, address.address, address.family);
+export function createPinnedLookup(address: Address): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (typeof options === "object" && options.all) {
+      (callback as (error: NodeJS.ErrnoException | null, addresses: Address[]) => void)(null, [address]);
+    } else {
+      (callback as (error: NodeJS.ErrnoException | null, address: string, family?: number) => void)(null, address.address, address.family);
+    }
   };
+}
+
+async function sendPinnedHttps(url: URL, address: Address, headers: Record<string, string>, maxBytes: number, timeoutMs: number, signal?: AbortSignal): Promise<HopResult> {
+  const lookupPinned = createPinnedLookup(address);
   const request = httpsRequest(url, {
     method: "GET", agent: false, lookup: lookupPinned, servername: url.hostname, rejectUnauthorized: true,
     headers: { ...headers, "accept-encoding": "gzip, deflate, br" }, ...(signal ? { signal } : {})

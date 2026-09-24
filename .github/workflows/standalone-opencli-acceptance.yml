@@ -86,29 +86,6 @@ jobs:
           test -z "$(git -C "$LODE_ROOT" status --porcelain)"
           sudo -n -u nobody -- /usr/bin/id -u >/dev/null
 
-      - name: Diagnose direct public HTTPS reachability
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import { lookup } from 'node:dns/promises';
-          import { request } from 'node:https';
-          const records = await lookup('github.com', { all: true, verbatim: true });
-          const first = records[0];
-          const result = { dns_families: records.map(item => item.family), proxy_configured: Boolean(process.env.HTTPS_PROXY || process.env.https_proxy) };
-          if (first) await new Promise(resolve => {
-            const call = request('https://github.com/trending?since=daily', {
-              method: 'GET', agent: false, servername: 'github.com',
-              lookup: (_host, _options, callback) => callback(null, first.address, first.family),
-              headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 (compatible; opencli/github-trending)' },
-              timeout: 10000
-            }, response => { result.status = response.statusCode; response.destroy(); resolve(); });
-            call.once('error', error => { result.error_code = error.code ?? error.name; resolve(); });
-            call.once('timeout', () => call.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
-            call.end();
-          });
-          console.log(JSON.stringify(result));
-          NODE
-
       - name: Build and verify one standalone candidate
         env:
           WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
