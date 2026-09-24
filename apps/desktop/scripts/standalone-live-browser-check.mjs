@@ -234,6 +234,16 @@ function safeRuntimeFacts(value) {
     ...(diagnostics.length > 0 ? { provider_operation_diagnostics: diagnostics } : {})
   };
 }
+async function readRuntimeDiagnostics(ownerData, sessionRef) {
+  const diagnostic = { diagnostic_only: true, affects_acceptance: false };
+  try {
+    const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}`);
+    diagnostic.harbor_session_facts = safeRuntimeFacts(facts);
+  } catch (error) {
+    diagnostic.harbor_session_facts_error = typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable';
+  }
+  return diagnostic;
+}
 async function diagnoseTaskSnapshotFailure({ ownerData, agentHost, clientFile, grantId, profileRef, sessionRef, pageRef, siteOrigin, prefix }) {
   const diagnostic = { diagnostic_only: true, affects_acceptance: false };
   try {
@@ -504,16 +514,14 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     startSkewMs = Math.abs(independentPage.startedAt - mcpSubmission.startedAt);
     assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
     assert.deepEqual(queried.result, submitted.result);
-    try {
-      const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}`);
-      runtimeDiagnostics = { diagnostic_only: true, affects_acceptance: false, harbor_session_facts: safeRuntimeFacts(facts) };
-    } catch (error) {
-      runtimeDiagnostics = { diagnostic_only: true, affects_acceptance: false,
-        harbor_session_facts_error: typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable' };
-    }
+    runtimeDiagnostics = await readRuntimeDiagnostics(ownerData, sessionRef);
   } catch (error) {
     const queriedResult = queried?.result;
     const failureCode = queried?.failure?.code ?? queriedResult?.failure?.code ?? submitted?.failure?.code ?? null;
+    // Capture the bounded Harbor-owned stage diagnostics for every terminal
+    // failure. This is a read-only owner query: it neither invokes another
+    // browser operation nor replays the original managed-task Run.
+    const runtimeFailureDiagnostic = failureDiagnostic ?? await readRuntimeDiagnostics(ownerData, sessionRef);
     const evidence = {
       schema: 'webenvoy.live-site-skill-script-acceptance/v1', state: 'failed', page_url: pageUrl,
       package: { package_ref: site.package_ref, revision_ref: site.revision_ref, package_digest: site.integrity.package_digest,
@@ -530,7 +538,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
       failure: { stage: failureStage, code: failureCode, name: error instanceof Error ? error.name : 'UnknownError',
         ...(taskDurationMs === undefined ? {} : { task_submit_started_at: new Date(mcpSubmission.startedAt).toISOString(),
           task_submit_completed_at: new Date(mcpSubmission.completedAt).toISOString(), task_submit_duration_ms: taskDurationMs }),
-        ...(failureDiagnostic === undefined ? {} : { diagnostic: failureDiagnostic }) },
+        diagnostic: runtimeFailureDiagnostic },
       ...(submitted?.run ? { run: { run_id: submitted.run.run_id ?? null, status: submitted.run.status ?? null,
         dispatch_state: submitted.run.dispatch_state ?? null, result_outcome: queriedResult?.outcome ?? null,
         result_failure_code: queriedResult?.failure?.code ?? null,
