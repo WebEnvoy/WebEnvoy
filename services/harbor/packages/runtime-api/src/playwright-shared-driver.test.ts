@@ -222,6 +222,9 @@ class ControlLocator:
         if not self.handles:
             return None
         return self.handles[0].clone() if self.fresh else self.handles[0]
+    async def evaluate(self, expression, *args):
+        assert expression == "(candidate, original) => candidate === original"
+        return bool(self.handles) and bool(args) and self.handles[0].dom_identity is args[0].dom_identity
     async def aria_snapshot(self):
         handle = self.handles[0] if self.handles else None
         return None if handle is None else "- " + handle.public_role + " " + json.dumps(handle.public_name)

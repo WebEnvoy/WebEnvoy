@@ -930,26 +930,17 @@ class Driver:
     async def _locator_semantics(self, locator: Any, original: Any, failure_class: str) -> tuple[str, str] | None:
         """Read public role/name only when the Locator still denotes original."""
         try:
-            before = await locator.element_handle()
+            before_matches = await locator.evaluate("(candidate, original) => candidate === original", original)
         except Exception:
             return None
-        if before is None:
-            return None
-        after = None
-        try:
-            if not await self._same_element(original, before):
-                raise ObservationFailure(failure_class)
-            snapshot = await locator.aria_snapshot()
-            after = await locator.element_handle()
-            if after is None or not await self._same_element(original, after):
-                raise ObservationFailure(failure_class)
-            parsed = self._parse_aria_snapshot(snapshot)
-            return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
-        finally:
-            if before is not original:
-                await self._dispose_handle(before)
-            if after is not None and after is not original and after is not before:
-                await self._dispose_handle(after)
+        if before_matches is not True:
+            raise ObservationFailure(failure_class)
+        snapshot = await locator.aria_snapshot()
+        after_matches = await locator.evaluate("(candidate, original) => candidate === original", original)
+        if after_matches is not True:
+            raise ObservationFailure(failure_class)
+        parsed = self._parse_aria_snapshot(snapshot)
+        return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
 
     async def _indexed_public_semantics(self, state: PageState, index: int, original: Any, failure_class: str) -> tuple[str, str] | None:
         try:
