@@ -322,3 +322,12 @@ export function validateSkillsRequest(value) {
   for (const key of ['operations', 'skill_refs', 'source_refs']) if (!Array.isArray(scope[key]) || scope[key].some(item => typeof item !== 'string')) throw new Error(code);
   return value;
 }
+
+export function validateAccountSystemRequest(value) {
+  const code = 'account_system_input_refused';
+  assertExactObject(value, ['grant_id', 'template_ref'], code);
+  assertString(value.grant_id, code);
+  assertString(value.template_ref, code);
+  if (!/^lode:\/\/account-system\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+$/.test(value.template_ref)) throw new Error(code);
+  return value;
+}

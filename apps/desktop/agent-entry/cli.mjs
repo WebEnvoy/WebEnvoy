@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { recoveryOperationRef, root, sha, verifyBundle } from './bundle.mjs';
-import { agentRequest, ensureAgentRuntime, ensureOwnerRuntime, ownerRequest, readClient } from './client.mjs';
+import { agentRequest, ensureAgentRuntime, ensureOwnerRuntime, ownerRequest, readClient, runManagedSiteWorker } from './client.mjs';
 import { agentDataSocket, verifyOsBoundary } from './os-boundary.mjs';
 import { atomicWrite, installManagedFiles, uninstallManagedFiles } from './installation.mjs';
 import { previousRoot } from './previous-installation.mjs';
@@ -111,7 +111,10 @@ a lost response; never resubmit it to recover a Run.`,
 
 Submit one fixed package revision and task_ref through POST
 /managed-tasks/operations. Core checks the current Grant and Page target and
-owns the Run, result and recovery facts.`,
+owns the Run, result and recovery facts. A declared, pinned script runs only in
+the installed Agent host's separate worker under a verified distinct non-admin
+Agent UID; trusted_local refuses script dispatch. The CLI consumes worker
+tickets internally and returns only the Run projection.`,
   'agent task query': `Usage: webenvoy agent task query --request-file FILE --client-file FILE
 
 Query one original Run or task.submit idempotency key through the same managed
@@ -682,7 +685,18 @@ async function runAgent(action, values) {
     if (value.operation !== `task.${taskAction}`) throw new Error('managed_task_invalid_input');
     const connection = await request('/agent-connections', {});
     if (!connection?.connection?.connection_id) return connection;
-    try { return await request('/managed-tasks/operations', { ...value, connection_id: connection.connection.connection_id }, false); }
+    try {
+      const result = await request('/managed-tasks/operations', { ...value, connection_id: connection.connection.connection_id }, false);
+      if (!result?.worker_execution) return result;
+      const ticket = result.worker_execution.ticket;
+      if (!ticket || typeof ticket !== 'object' || Array.isArray(ticket)) return { ok: false, run_id: result.run?.run_id, status: result.run?.status, error: { code: 'managed_site_worker_ticket_invalid' } };
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      process.once('SIGINT', abort);
+      process.once('SIGTERM', abort);
+      try { return await runManagedSiteWorker(client, ticket, { signal: controller.signal }); }
+      finally { process.removeListener('SIGINT', abort); process.removeListener('SIGTERM', abort); }
+    }
     catch (error) {
       if (!isDispatchedResponseLoss(error)) throw error;
       return { ok: false, status: 'unknown_outcome', dispatch_state: 'possibly_dispatched', ...(typeof value.idempotency_key === 'string' ? { idempotency_key: value.idempotency_key } : {}), error: { code: 'runtime_unavailable_unknown_outcome' } };

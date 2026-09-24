@@ -10,7 +10,12 @@ export const REQUIRED_DRIVER_ASSETS = [
   'dist-electron/runtime/harbor/dist/packages/runtime-api/src/camoufox-upstream-driver.py',
   'dist-electron/runtime/harbor/dist/packages/runtime-api/src/chrome_official_driver.py'
 ];
-export const REQUIRED_AGENT_ASSETS = ['agent-entry/managed-capability-definitions.json'];
+export const REQUIRED_AGENT_ASSETS = [
+  'agent-entry/managed-capability-definitions.json',
+  'agent-entry/managed-site-worker.mjs',
+  'agent-entry/managed-site-script-thread.mjs',
+  'agent-entry/managed-site-worker-supervisor.mjs'
+];
 export const INSTALLED_AGENT_MANIFEST_SCHEMA = 'webenvoy-installed-agent/v1';
 export const STANDALONE_MANIFEST_SCHEMA = 'webenvoy-installed-standalone/v1';
 export async function files(directory, prefix = '') {

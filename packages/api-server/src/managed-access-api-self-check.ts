@@ -31,17 +31,25 @@ export async function assertManagedAccessApi(): Promise<void> {
   } as const;
   let routedTask: unknown;
   let routedTaskCount = 0;
+  const workerHostIngress: unknown[] = [];
+  let routedBroker: unknown;
+  const workerRoutes: Record<string, unknown> = {};
+  const accountProjection = { schema_version: "webenvoy.account-system-agent-projection.v1", template_ref: "lode://account-system/github@1.0.0", identity_state: "unknown", evaluation_state: "not_evaluated" };
   const server = createApiServer({ supervisorToken: owner, managedAccessStore: access, managedBrowserService: {
     async submit(credentialHash) { assert.equal(credentialHash, hash); dispatches++; return { ok: true, run_id: "managed-run", status: "succeeded" }; },
     async query(credentialHash, runId) { assert.equal(credentialHash, hash); assert.equal(runId, "managed-run"); return { ok: true, run_id: runId, status: "succeeded" }; },
   }, managedTaskService: {
-    async operate(credentialHash, rawHttpBody) { assert.equal(credentialHash, hash); routedTaskCount++; routedTask = structuredClone(rawHttpBody); return taskResult; }
-  } });
+    async operate(credentialHash, rawHttpBody, context) { assert.equal(credentialHash, hash); routedTaskCount++; routedTask = structuredClone(rawHttpBody); workerHostIngress.push(context?.agentSocketIngressVerified); return taskResult; },
+    async workerStarted(credentialHash, value) { assert.equal(credentialHash, hash); workerRoutes.started = structuredClone(value); return { accepted: true }; },
+    async broker(credentialHash, value) { assert.equal(credentialHash, hash); routedBroker = structuredClone(value); return { accepted: true }; },
+    async workerComplete(credentialHash, value) { assert.equal(credentialHash, hash); workerRoutes.complete = structuredClone(value); return { completed: true }; },
+    async workerFailure(credentialHash, value) { assert.equal(credentialHash, hash); workerRoutes.fail = structuredClone(value); return { failed: true }; }
+  }, managedAccountSystemService: { async read(credentialHash, value) { assert.equal(credentialHash, hash); workerRoutes.account = structuredClone(value); return accountProjection; } } });
   const port = await listen(server);
-  const call = async (path: string, token?: string, input?: unknown) => {
+  const call = async (path: string, token?: string, input?: unknown, extraHeaders: Record<string, string> = {}) => {
     const result = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: input === undefined ? "GET" : "POST",
-      headers: { ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }), ...(input === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }), ...(input === undefined ? {} : { "Content-Type": "application/json" }), ...extraHeaders },
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
     return { status: result.status, body: await result.json() as Record<string, any> };
@@ -128,13 +136,35 @@ export async function assertManagedAccessApi(): Promise<void> {
     assert.equal(task.status, 200);
     assert.deepEqual(routedTask, managedTaskInput, "managed task route must pass the full HTTP envelope, including connection_id, directly to Core");
     assert.deepEqual(task.body, taskResult, "managed task route must not rewrite the Core result envelope");
+    assert.equal(workerHostIngress[0], false, "a direct Core API caller does not receive Agent socket ingress authorization");
+    const socketIngressTask = await call("/managed-tasks/operations", agent, { ...managedTaskInput, idempotency_key: "site-task-through-agent-socket" }, {
+      "x-webenvoy-agent-socket-ingress": owner
+    });
+    assert.equal(socketIngressTask.status, 200);
+    assert.equal(workerHostIngress[1], true, "only the internal owner credential on the dedicated Agent socket path proves ingress");
     assert.equal((await call("/managed-tasks/operations", agent)).status, 405);
-    assert.equal((await call("/managed-tasks/operations", undefined, managedTaskInput)).status, 401);
+  assert.equal((await call("/managed-tasks/operations", undefined, managedTaskInput)).status, 401);
+  const startedInput = { ticket_id: "one-time-ticket-12345678" };
+  assert.equal((await call("/managed-tasks/worker/started", agent, startedInput)).status, 200);
+  const brokerInput = { ticket_id: "one-time-ticket-12345678", method: "output.write", input: { accepted: true } };
+  const broker = await call("/managed-tasks/worker/broker", agent, brokerInput);
+  assert.equal(broker.status, 200);
+  assert.deepEqual(routedBroker, brokerInput);
+  assert.equal((await call("/managed-tasks/worker/complete", agent, startedInput)).status, 200);
+  assert.deepEqual(workerRoutes.started, startedInput);
+  assert.deepEqual(workerRoutes.complete, startedInput);
+  const accountInput = { schema_version: "webenvoy.account-system-agent-operation/v1", operation: "account_system.read", connection_id: "connection:account", grant_id: "grant:account", template_ref: accountProjection.template_ref };
+  const account = await call("/managed-account-systems/operations", agent, accountInput);
+  assert.equal(account.status, 200);
+  assert.deepEqual(account.body.result, accountProjection);
+  assert.deepEqual(workerRoutes.account, { connection_id: accountInput.connection_id, grant_id: accountInput.grant_id, template_ref: accountInput.template_ref });
+  assert.equal((await call("/managed-account-systems/operations", agent, { ...accountInput, task_scope: { operations: ["skill.inspect"] } })).status, 400,
+    "AccountSystem scope is fixed by Core and cannot be widened by Agent input");
     const oversizedTask = await call("/managed-tasks/operations", agent, { ...managedTaskInput, ignored: "x".repeat(128 * 1024) });
     assert.equal(oversizedTask.status, 400);
     assert.equal(oversizedTask.body.error.code, "managed_task_invalid_input");
     assert.equal(oversizedTask.body.dispatch_state, "not_dispatched");
-    assert.equal(routedTaskCount, 1, "the route-local envelope cap must reject oversized task input before calling Core");
+    assert.equal(routedTaskCount, 2, "the route-local envelope cap must reject oversized task input before calling Core");
     assert.equal((await call("/managed-browser/operations", undefined, {})).status, 401);
     assert.equal(dispatches, 1);
     const revoked = await call(`/agent-access/grants/${encodeURIComponent(grant.body.grant.grant_id)}/revoke`, owner, { idempotency_key: "revoke" });

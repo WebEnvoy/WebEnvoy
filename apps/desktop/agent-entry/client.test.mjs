@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
-import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
+import { chmod, copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
-import { localRequest } from './client.mjs';
+import { localRequest, runManagedSiteWorker } from './client.mjs';
 import { REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
 async function stopChild(child) {
@@ -86,6 +87,54 @@ async function writeFixtureClient(path, dataDir, agentEndpoint) {
   await writeFile(path, JSON.stringify(fixtureClient(dataDir, agentEndpoint)), { mode: 0o600 });
 }
 
+test('managed worker failure wrapper handles the nested Core response and queries the original Run only when needed', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'webenvoy-worker-client-test-'));
+  const dataDir = join(outer, 'data');
+  const socketPath = join(outer, 'agent.sock');
+  await mkdir(dataDir, { recursive: true });
+  const uid = process.getuid?.();
+  assert(Number.isSafeInteger(uid) && uid > 0);
+  const client = { data_dir: dataDir, credential: 'c'.repeat(32), agent_endpoint: socketPath, owner_uid: uid, agent_uid: uid };
+  const ticket = {
+    ticket_id: 'worker-ticket-test-0001', run_id: 'managed-task-run-test-0001',
+    authorization: { connection_id: 'connection:test', grant_id: 'grant:test', profile_ref: 'profile:test', origin: 'https://github.com' },
+    package: { package_ref: 'lode://site-skill/github/trending', revision_ref: 'lode://site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433' },
+    script: { source: 'must not be returned' }
+  };
+  const requests = [];
+  let failResult = { ok: true, run_id: ticket.run_id, status: 'failed', dispatch_state: 'not_dispatched' };
+  const server = createHttpServer(async (request, response) => {
+    let raw = '';
+    for await (const chunk of request) raw += chunk;
+    requests.push({ path: request.url, body: raw ? JSON.parse(raw) : undefined });
+    const payload = request.url === '/managed-tasks/worker/fail'
+      ? { ok: true, result: failResult }
+      : { ok: true, run: { run_id: ticket.run_id, status: 'failed', dispatch_state: 'not_dispatched' }, result: null };
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(payload));
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  await chmod(socketPath, 0o600);
+  try {
+    const completedFailure = await runManagedSiteWorker(client, ticket);
+    assert.deepEqual(completedFailure, failResult, 'worker/fail returns {ok:true,result:{ok:true,...}} and must finalize directly');
+    assert.deepEqual(requests.map(item => item.path), ['/managed-tasks/worker/fail']);
+    assert.equal(JSON.stringify(completedFailure).includes(ticket.script.source), false, 'the script source never reaches the caller result');
+
+    requests.length = 0;
+    failResult = { ok: false, error: { code: 'managed_task_ticket_inactive' } };
+    const queried = await runManagedSiteWorker(client, ticket);
+    assert.equal(queried.run.run_id, ticket.run_id);
+    assert.deepEqual(requests.map(item => item.path), ['/managed-tasks/worker/fail', '/managed-tasks/operations']);
+    assert.equal(requests[1].body.operation, 'task.query');
+    assert.equal(requests[1].body.selector.run_id, ticket.run_id, 'recovery queries the same Run and never submits a replacement');
+    assert.equal(JSON.stringify(queried).includes(ticket.script.source), false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(outer, { recursive: true, force: true });
+  }
+});
+
 // These MCP projection fixtures intentionally mock only the client transport.
 // They exercise MCP shape and no-fallback behavior; cross-UID IPC is covered by
 // the macOS standalone lane and must not be inferred from this same-UID fixture.
@@ -104,11 +153,15 @@ const MOCK_CLIENT_MODULE = [
   "}",
   "export function agentRequest(target, path, options = {}) { return localRequest(target, path, options); }",
   "export async function ensureAgentRuntime(target) { return localRequest(target, '/status'); }",
+  "export async function runManagedSiteWorker(client, ticket) { return { ok: true, run: { run_id: ticket.run_id, status: 'succeeded', dispatch_state: 'dispatched' }, result: { ok: true } }; }",
   "export const ensureRuntime = ensureAgentRuntime;"
 ].join('\n');
 async function installMockClient(bundleRoot) {
   await writeFile(join(bundleRoot, 'agent-entry/client.mjs'), MOCK_CLIENT_MODULE);
 }
+const agentAssetSource = name => name === 'agent-entry/managed-capability-definitions.json'
+  ? join(root, '../../packages/core/src/managed-capability-definitions.json')
+  : join(root, name);
 
 test('localRequest preserves UTF-8 when a socket response splits a code point', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'webenvoy-client-test-'));
@@ -124,6 +177,7 @@ test('localRequest preserves UTF-8 when a socket response splits a code point', 
     });
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  await chmod(socketPath, 0o600);
   try {
     assert.deepEqual(await localRequest(socketPath, '/status'), { ok: true, text: '时间和范围' });
   } finally {
@@ -145,7 +199,7 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     const operation = response.result.tools.find(tool => tool.name === 'webenvoy_operation');
     const describe = response.result.tools.find(tool => tool.name === 'webenvoy_describe');
     const task = response.result.tools.find(tool => tool.name === 'webenvoy_task');
-    const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
+    const definitions = JSON.parse(await readFile(agentAssetSource('agent-entry/managed-capability-definitions.json'), 'utf8'));
     assert.ok(operation);
     assert.ok(describe);
     assert.ok(task);
@@ -277,7 +331,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
     for (const name of files) {
       const target = join(bundleRoot, name);
       await mkdir(dirname(target), { recursive: true });
-      await copyFile(join(root, name), target);
+      await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
@@ -338,7 +392,7 @@ test('MCP validates capability description states and forwards correction guidan
     for (const name of files) {
       const target = join(bundleRoot, name);
       await mkdir(dirname(target), { recursive: true });
-      await copyFile(join(root, name), target);
+      await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0',
@@ -346,7 +400,7 @@ test('MCP validates capability description states and forwards correction guidan
       files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
     await writeFixtureClient(clientPath, dataDir, socketPath);
-    const definitions = JSON.parse(await readFile(join(root, 'agent-entry/managed-capability-definitions.json'), 'utf8'));
+    const definitions = JSON.parse(await readFile(agentAssetSource('agent-entry/managed-capability-definitions.json'), 'utf8'));
     const revision = `sha256:${createHash('sha256').update(canonical(definitions)).digest('hex')}`;
     const base = {
       ok: true,
@@ -456,7 +510,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
     for (const name of files) {
       const target = join(bundleRoot, name);
       await mkdir(dirname(target), { recursive: true });
-      await copyFile(join(root, name), target);
+      await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
     const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };

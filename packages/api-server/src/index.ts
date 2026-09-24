@@ -127,8 +127,17 @@ if (import.meta.url === entrypoint) {
         ...(process.env.WEBENVOY_LODE_ASSETS_PATH === undefined ? {} : { lodeAssetsPath: process.env.WEBENVOY_LODE_ASSETS_PATH }),
         ...(skillAssetsPath === undefined ? {} : { sourceManifestPath: join(skillAssetsPath, "manifest.json") }) })
     : undefined;
+  const ownerUid = Number(process.env.WEBENVOY_SITE_WORKER_OWNER_UID);
+  const agentUid = Number(process.env.WEBENVOY_SITE_WORKER_AGENT_UID);
+  const workerMode = process.env.WEBENVOY_SITE_WORKER_MODE;
+  const ownerSocketAcl = process.env.WEBENVOY_SITE_WORKER_OWNER_SOCKET_ACL;
+  const workerIdentity = Number.isSafeInteger(ownerUid) && ownerUid > 0 && Number.isSafeInteger(agentUid) && agentUid > 0 &&
+      (workerMode === "trusted_local" || workerMode === "distinct_uid_hardened") && typeof ownerSocketAcl === "string"
+    ? { owner_uid: ownerUid, agent_uid: agentUid, mode: workerMode, owner_socket_acl: ownerSocketAcl }
+    : undefined;
   const managedTaskService = managedAccessStore && runRecordStore && managedSkillService && managedBrowserService
-    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService })
+    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+        ...(workerIdentity === undefined ? {} : { workerIdentity }) })
     : undefined;
   const server = createApiServer({
     supervisorToken,

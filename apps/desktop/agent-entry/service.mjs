@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
@@ -48,7 +49,7 @@ const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect
   ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
   (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/v2/grants', '/agent-access/profile-policies', '/agent-access/v2/profile-policies', '/agent-access/scope-confirmations'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url))) ||
   isOwnerHarborRoute(req);
-const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations', '/managed-tasks/operations'].includes(req.url)) ||
+const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations', '/managed-tasks/operations', '/managed-tasks/worker/started', '/managed-tasks/worker/broker', '/managed-tasks/worker/complete', '/managed-tasks/worker/fail', '/managed-account-systems/operations'].includes(req.url)) ||
   (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
 function harborControlReady() {
   return !stopping && Boolean(state.services?.some(service => service.id === 'harbor') &&
@@ -92,7 +93,7 @@ async function handle(role, req, res) {
     }
     const chunks = [];
     let bytes = 0;
-    const requestLimit = req.url === '/managed-tasks/operations' ? 128 * 1024 : 65536;
+    const requestLimit = req.url === '/managed-tasks/operations' ? 128 * 1024 : req.url.startsWith('/managed-tasks/worker/') ? 2 * 1024 * 1024 : 65536;
     for await (const chunk of req) {
       const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += value.length;
@@ -120,9 +121,16 @@ async function handle(role, req, res) {
       const parsed = new URL(req.url, 'http://owner.local');
       return `${parsed.pathname}${parsed.search}`;
     })() : req.url;
+    const upstreamHeaders = { authorization: upstreamAuthorization, 'content-type': 'application/json' };
+    if (role === 'agent' && req.url === '/managed-tasks/operations' && liveBoundary.mode === 'distinct_uid_hardened' &&
+        liveBoundary.identity.socket_acl === 'verified' && liveBoundary.agent_transport && ownerToken) {
+      let operation;
+      try { operation = JSON.parse(body)?.operation; } catch { operation = undefined; }
+      if (operation === 'task.submit') upstreamHeaders['x-webenvoy-agent-socket-ingress'] = ownerToken;
+    }
     const upstream = await fetch(new URL(harborPath, upstreamBase), {
       method: req.method,
-      headers: { authorization: upstreamAuthorization, 'content-type': 'application/json' },
+      headers: upstreamHeaders,
       ...(['POST', 'PUT'].includes(req.method) ? { body } : {}),
       signal: AbortSignal.timeout(85_000)
     });
@@ -157,7 +165,21 @@ if (liveBoundary.state === 'supported') {
   agentServer = createServer((req, res) => handle('agent', req, res));
   await new Promise((resolveListen, reject) => {
     agentServer.once('error', reject);
-    agentServer.listen(agentSocket, () => chmod(agentSocket, 0o666).then(() => { agentSocketOwned = true; resolveListen(); }, reject));
+    agentServer.listen(agentSocket, async () => {
+      try {
+        await chmod(agentSocket, 0o600);
+        const { owner_uid: ownerUid, agent_uid: agentUid } = liveBoundary.identity;
+        if (ownerUid !== agentUid) {
+          const name = execFileSync('/usr/bin/id', ['-nu', String(agentUid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          if (!name || /[^A-Za-z0-9_.-]/.test(name)) throw new Error('agent_socket_acl_unavailable');
+          execFileSync('/bin/chmod', ['+a', `user:${name} allow read,write`, agentSocket], { stdio: ['ignore', 'ignore', 'ignore'] });
+        }
+        const verified = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: socket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
+        if (verified.state !== 'supported' || !verified.agent_transport) throw new Error('agent_socket_acl_unavailable');
+        agentSocketOwned = true;
+        resolveListen();
+      } catch (error) { reject(error); }
+    });
   });
 }
 await writeFile(join(dataDir, 'runtime.pid'), String(process.pid), { mode: 0o600 });
@@ -199,6 +221,12 @@ try {
   // local evidence only and are never converted into a launch path.
   for (const key of Object.keys(process.env)) if (/^(WEBENVOY_|HARBOR_|CAMOUFOX_)/.test(key)) delete process.env[key];
   Object.assign(process.env, installedRuntimeEnvironment({ parentEnvironment: process.env, dataDir, installRoot: root, camoufoxLaunch, camoufoxBinding: verifiedCamoufox, chromeLaunch, chromeBinding: verifiedChrome }));
+  Object.assign(process.env, {
+    WEBENVOY_SITE_WORKER_MODE: state.boundary.mode,
+    WEBENVOY_SITE_WORKER_OWNER_UID: String(state.boundary.identity.owner_uid),
+    WEBENVOY_SITE_WORKER_AGENT_UID: String(state.boundary.identity.agent_uid),
+    WEBENVOY_SITE_WORKER_OWNER_SOCKET_ACL: state.boundary.identity.socket_acl
+  });
   const { createRuntimeSupervisor } = await import('../dist-electron/runtimeSupervisor.js');
   supervisor = createRuntimeSupervisor({ dataDir });
   state = { ...state, ...publicConfig, owner_control_socket: socket, agent_data_socket: agentSocket, camoufox_launch: camoufoxLaunch, chrome_launch: chromeLaunch, assets };

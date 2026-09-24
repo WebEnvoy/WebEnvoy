@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createFileManagedAccessStore, managedSkillOperations, managedTaskOperations } from "./managed-access.js";
+import { createFileManagedAccessStore, managedPageOperations, managedSkillOperations, managedTaskOperations } from "./managed-access.js";
 import { createManagedTaskService } from "./managed-task.js";
 import { createFileRunRecordStore, type FileRunRecordStore, type RunRecordStatus } from "./run-record-store.js";
 import { createFileSkillLibraryService } from "./skill-library.js";
@@ -17,6 +18,15 @@ type PinnedTask = {
   output_schema_ref: string;
   result_kind: string;
   expected: { canonical_url: string; title: string; summary_contains: string };
+};
+type ScriptTaskPin = {
+  package: PinnedTask["package"];
+  source_ref: string;
+  origin: string;
+  input_schema_ref: string;
+  output_schema_ref: string;
+  result_kind: string;
+  script_path: string;
 };
 type Actor = { credential_hash: string; principal_id: string; connection_id: string; grant_id: string };
 type SnapshotHandler = (request: Json, runId: string, timeoutMs?: number) => Promise<Json>;
@@ -65,6 +75,29 @@ async function readPin(root: string): Promise<PinnedTask> {
       title: expected.title,
       summary_contains: expected.summary.contains
     }
+  };
+}
+
+async function readScriptTaskPin(root: string, packageRef: string): Promise<ScriptTaskPin> {
+  const registry = JSON.parse(await readFile(join(root, "registry/local-packages.json"), "utf8")) as Json;
+  const entries = registry.entries.filter((entry: Json) => entry.package_ref === packageRef);
+  assert.equal(entries.length, 1, `WEBENVOY_LODE_ROOT must contain ${packageRef}`);
+  const entry = entries[0] as Json;
+  const manifest = JSON.parse(await readFile(join(root, entry.manifest_path), "utf8")) as Json;
+  const taskLocator = manifest.tasks.find((task: Json) => task.task_ref === "read-daily-trending-top5") as Json;
+  const task = JSON.parse(await readFile(join(root, entry.package_path, taskLocator.path), "utf8")) as Json;
+  const script = manifest.scripts.find((item: Json) => item.script_ref === task.entrypoint.script_ref) as Json;
+  assert(script, "the pinned package must declare its script entrypoint");
+  assert.equal(task.inputs.carrier, "none");
+  assert.equal(task.applicability.target_type, "web_page");
+  return {
+    package: { package_ref: entry.package_ref, revision_ref: entry.revision_ref, package_digest: entry.package_digest, task_ref: task.task_ref },
+    source_ref: manifest.source.source_ref,
+    origin: task.applicability.origins[0],
+    input_schema_ref: task.inputs.schema_ref,
+    output_schema_ref: task.outputs.schema_ref,
+    result_kind: task.outputs.result_kind,
+    script_path: join(root, entry.package_path, script.path)
   };
 }
 
@@ -364,7 +397,7 @@ test("managed site task runs the pinned package through one durable Core Run", {
       await rejectsWithCode(managedTaskService.operate(credentialHash, wrongVersion), ["managed_task_version_unsupported"]);
       const wrongPin = submitRequest(pin, actor, "managed-task-wrong-pin");
       wrongPin.package.package_digest = `sha256:${"0".repeat(64)}`;
-      await rejectsWithCode(managedTaskService.operate(credentialHash, wrongPin), ["managed_access_denied"]);
+      await rejectsWithCode(managedTaskService.operate(credentialHash, wrongPin), ["managed_access_denied", "managed_skill_revision_unavailable"]);
       const injectedInput = submitRequest(pin, actor, "managed-task-extra-input");
       injectedInput.input.value = { arbitrary: true };
       await rejectsWithCode(managedTaskService.operate(credentialHash, injectedInput), ["managed_task_invalid_input"]);
@@ -530,6 +563,375 @@ test("managed site task runs the pinned package through one durable Core Run", {
       assert.equal(snapshotCalls.length, callCount + 1, "query and same-key submit cannot replay an ambiguous snapshot");
       assert.deepEqual(await runRecordStore.getRunRecord(ambiguous.run.run_id), original,
         "query and same-key submit must preserve the original unknown outcome facts");
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("GitHub Trending package executes through the Core broker after install and enable", {
+  skip: lodeRoot ? false : "WEBENVOY_LODE_ROOT is not configured; no pinned Lode package source is available",
+  timeout: 30_000
+}, async t => {
+  if (!lodeRoot) return;
+  const root = resolve(lodeRoot);
+  const pin = await readScriptTaskPin(root, "lode://site-skill/github/trending");
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-managed-script-task-test-"));
+  const accessDirectory = join(directory, "access");
+  const runDirectory = join(directory, "runs");
+  const libraryDirectory = join(directory, "library");
+  const credentialHash = "c".repeat(64);
+  const targetRef = "page_github_trending_test_001";
+  const names = ["alpha/one", "beta/two", "gamma/three", "delta/four", "epsilon/five"];
+  const trendingText = [
+    "Skip to content", "Navigation Menu", "Sign in", "Trending", "Repositories", "Developers",
+    "Spoken Language: Any", "Language: Any", "Date range: Today", "",
+    ...names.flatMap((name, index) => [name, `Description for ${name}`, `${["Python", "TypeScript", "Rust", "Go", "Java"][index]} 1,234 5,678 Built by`, `${310 - index * 20} stars today`, ""])
+  ].join("\n");
+  let managedTaskService: ReturnType<typeof createManagedTaskService>;
+  const snapshotCalls: Json[] = [];
+  let nextSnapshotFailure: Json | undefined;
+  const accessStore = createFileManagedAccessStore({ directory: accessDirectory });
+  const runRecordStore = createFileRunRecordStore({ directory: runDirectory });
+  const skillLibraryService = createFileSkillLibraryService({ directory: libraryDirectory, lodeAssetsPath: root, accessStore, runRecordStore });
+  const managedBrowserService = {
+    async executeTaskSnapshot(_credentialHash: string, value: unknown, runId: string): Promise<Json> {
+      const request = value as Json;
+      snapshotCalls.push(request);
+      assert.equal(request.operation, "instance.snapshot");
+      assert.equal(request.idempotency_key, runId);
+      if (nextSnapshotFailure) {
+        const receipt = nextSnapshotFailure;
+        nextSnapshotFailure = undefined;
+        throw Object.assign(new Error("managed_task_snapshot_unavailable"), { code: "managed_task_snapshot_unavailable", receipt });
+      }
+      return {
+        status: "completed", dispatch_state: "not_dispatched",
+        page: { page_ref: targetRef, current_url: "https://github.com/trending", title: "Trending repositories" },
+        snapshot: { page_ref: targetRef, observation_ref: `observation:${runId}`, text: trendingText, truncated: false,
+          coverage: { text: { state: "complete" } }, continuation: { has_more: false } }
+      };
+    }
+  };
+  const actor = await accessStore.registerPrincipal({ idempotency_key: "github-script-principal", display_name: "github-script-agent", credential_hash: credentialHash });
+  const connection = await accessStore.connect(credentialHash);
+  const grant = await accessStore.createGrant({
+    idempotency_key: "github-script-grant", principal_id: actor.principal_id,
+    allowed_operations: [...managedSkillOperations, ...managedTaskOperations, ...managedPageOperations], profile_refs: [profileRef], allowed_origins: [pin.origin],
+    expires_at: grantExpiry, creation_template: null, max_created_profiles: 0,
+    skill_scope: { skill_refs: [pin.package.package_ref], source_refs: [pin.source_ref, pin.package.revision_ref] }
+  });
+  await accessStore.setProfilePolicy({
+    idempotency_key: "github-script-profile-policy", profile_ref: profileRef,
+    allowed_operations: [...managedTaskOperations, ...managedPageOperations], allowed_origins: [pin.origin]
+  });
+  const skillScope = { operations: [...managedSkillOperations], skill_refs: [pin.package.package_ref], source_refs: [pin.source_ref, pin.package.revision_ref] };
+  const installed = await skillLibraryService.submit(credentialHash, {
+    idempotency_key: "github-script-install", connection_id: connection.connection_id, grant_id: grant.grant_id,
+    operation: "skill.install", skill_ref: pin.package.package_ref, task_scope: skillScope,
+    revision_ref: pin.package.revision_ref, source_ref: pin.source_ref
+  });
+  assert.equal((installed as Json).ok, true, JSON.stringify(installed));
+  const enabled = await skillLibraryService.submit(credentialHash, {
+    idempotency_key: "github-script-enable", connection_id: connection.connection_id, grant_id: grant.grant_id,
+    operation: "skill.enable", skill_ref: pin.package.package_ref, task_scope: skillScope,
+    target_revision_ref: pin.package.revision_ref, source_ref: pin.source_ref, expected_record_version: 1
+  });
+  assert.equal((enabled as Json).ok, true, JSON.stringify(enabled));
+  managedTaskService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService, managedBrowserService,
+    workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" } });
+  const request = (operation: string, idempotencyKey: string) => ({
+    schema_version: "webenvoy.managed-task-operation/v1", operation, idempotency_key: idempotencyKey,
+    grant_id: grant.grant_id, connection_id: connection.connection_id,
+    task_scope: { operations: [operation], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+    package: { ...pin.package }, target: { target_type: "web_page", target_ref: targetRef },
+    input: { schema_ref: pin.input_schema_ref, carrier: "none" },
+    intent: { summary: "Read the first five daily trending repositories.", policy: { risk: "read", execution_intent: "read", timeout_ms: 10_000 } }
+  });
+  try {
+    await t.test("the first durable Run write pins script execution and recovers an admitted crash", async () => {
+      const key = "github-script-crash-after-create-001";
+      let injected = false;
+      const crashStore: FileRunRecordStore = {
+        ...runRecordStore,
+        async updateRunRecord(runId, patch) {
+          if (!injected && patch.status === "running") {
+            injected = true;
+            throw new Error("simulated_core_exit_after_run_create");
+          }
+          return runRecordStore.updateRunRecord(runId, patch);
+        }
+      };
+      const interrupted = createManagedTaskService({ accessStore, runRecordStore: crashStore, skillLibraryService, managedBrowserService,
+        workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" } });
+      await assert.rejects(interrupted.operate(credentialHash, request("task.submit", key), { agentSocketIngressVerified: true }), /simulated_core_exit_after_run_create/);
+      assert.equal(injected, true);
+      const runId = `managed-task-${createHash("sha256").update(`${actor.principal_id}\0${key}`).digest("hex")}`;
+      const stranded = await runRecordStore.getRunRecord(runId);
+      assert.equal(stranded?.status, "admitted");
+      assert.equal(stranded?.public_result_summary?.script_execution, true, "script identity must be written atomically with the Run");
+      assert.equal(stranded?.public_result_summary?.script_sha256, `sha256:${createHash("sha256").update(await readFile(pin.script_path)).digest("hex")}`);
+      const restarted = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService, managedBrowserService,
+        workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" } });
+      const queried = response(await restarted.operate(credentialHash, {
+        schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
+        connection_id: connection.connection_id,
+        task_scope: { operations: ["task.query"], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+        selector: { run_id: runId }
+      }));
+      assert.equal(queried.run.run_id, runId);
+      assert.equal(queried.run.status, "failed");
+      assert.equal(queried.run.dispatch_state, "not_dispatched");
+      const replay = response(await restarted.operate(credentialHash, request("task.submit", key), { agentSocketIngressVerified: true }));
+      assert.equal(replay.run.run_id, runId);
+      assert.equal(replay.run.status, "failed");
+      assert.equal(Object.hasOwn(replay, "worker_execution"), false);
+      assert.equal(snapshotCalls.length, 0, "recovery cannot create a replacement ticket or call Harbor");
+    });
+
+    await t.test("a direct Core API submit cannot receive script source or a worker ticket", async () => {
+      const direct = await managedTaskService.operate(credentialHash, request("task.submit", "github-script-direct-api-001")) as Json;
+      assert.equal(direct.run.status, "failed");
+      assert.equal(direct.run.dispatch_state, "not_dispatched");
+      assert.equal(direct.failure.code, "managed_site_worker_host_unavailable");
+      assert.equal(Object.hasOwn(direct, "worker_execution"), false);
+      assert.equal(JSON.stringify(direct).includes(await readFile(pin.script_path, "utf8")), false);
+      assert.equal(snapshotCalls.length, 0, "unattested direct Core calls cannot reach Harbor");
+    });
+
+    const prepared = await managedTaskService.operate(credentialHash, request("task.submit", "github-script-run-001"), { agentSocketIngressVerified: true }) as Json;
+    const ticket = prepared.worker_execution.ticket as Json;
+    assert.equal(prepared.run.status, "running");
+    assert.equal(ticket.run_id, ticket.context.run_id);
+    assert.equal(ticket.package.package_ref, pin.package.package_ref);
+    assert.equal(ticket.package.revision_ref, pin.package.revision_ref);
+    assert.deepEqual(ticket.script.broker_capabilities, ["runtime.invoke", "output.write"]);
+    assert.equal(await readFile(pin.script_path, "utf8"), ticket.script.source);
+    assert.equal(JSON.stringify(prepared).includes("observation:"), false, "prepare ticket does not contain a browser receipt");
+
+    await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+    const snapshot = await managedTaskService.broker(credentialHash, {
+      ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" }
+    }) as Json;
+    assert.equal(snapshot.status, "completed");
+    assert.equal(snapshot.page.current_url, "https://github.com/trending");
+    assert.equal(snapshot.snapshot.text, trendingText);
+    const output = {
+      result_kind: "github_trending_daily_top5", status: "available",
+      normalized: { period: "daily", requested_count: 5,
+        rows: names.map((name, index) => ({ name, url: `https://github.com/${name}`, language: ["Python", "TypeScript", "Rust", "Go", "Java"][index],
+          language_state: "observed", today_stars: 310 - index * 20, today_stars_state: "observed" })),
+        completeness: "complete", snapshot_coverage: "complete" },
+      source_refs: [{ ref_id: targetRef, source_kind: "harbor_page" }],
+      evidence_refs: [{ ref_id: `observation:${ticket.run_id}`, evidence_kind: "snapshot_ref", producer: "harbor", redaction: "summary_only" }]
+    };
+    await managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "output.write", input: output });
+    const submitted = response(await managedTaskService.workerComplete(credentialHash, { ticket_id: ticket.ticket_id }));
+    assert.equal(submitted.run.status, "succeeded", JSON.stringify(submitted));
+    assert.equal(submitted.run.package_ref, pin.package.package_ref);
+    assert.equal(submitted.run.dispatch_state, "dispatched", "script execution is a one-time dispatched Run");
+    assert.equal(submitted.result.ok, true);
+    assert.equal(submitted.result.data.result_kind, "github_trending_daily_top5");
+    assert.deepEqual(submitted.result.data.normalized.rows.map((row: Json) => row.name), names);
+    assert.deepEqual(submitted.result.evidence_refs, [`observation:${submitted.run.run_id}`]);
+    assert.equal(submitted.result.post_check.status, "passed");
+    assert.equal(snapshotCalls.length, 1, "the script's single runtime.invoke maps to one Harbor snapshot");
+
+    const record = await runRecordStore.getRunRecord(submitted.run.run_id);
+    assert(record);
+    const reopenAccess = createFileManagedAccessStore({ directory: accessDirectory });
+    const reopenedRuns = createFileRunRecordStore({ directory: runDirectory });
+    const reopenedLibrary = createFileSkillLibraryService({ directory: libraryDirectory, lodeAssetsPath: root, accessStore: reopenAccess, runRecordStore: reopenedRuns });
+    const reopened = createManagedTaskService({ accessStore: reopenAccess, runRecordStore: reopenedRuns, skillLibraryService: reopenedLibrary, managedBrowserService });
+    const reconnected = await reopenAccess.connect(credentialHash);
+    const queried = response(await reopened.operate(credentialHash, {
+      schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
+      connection_id: reconnected.connection_id,
+      task_scope: { operations: ["task.query"], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+      selector: { original_idempotency_key: "github-script-run-001" }
+    }));
+    assert.equal(queried.run.run_id, submitted.run.run_id);
+    assert.deepEqual(queried.result, submitted.result);
+    assert.equal(snapshotCalls.length, 1, "query/restart never dispatches the original script again");
+
+    await t.test("Core restart resolves an unstarted ticket as not_dispatched without replay", async () => {
+      const key = "github-script-restart-prepared-001";
+      const before = snapshotCalls.length;
+      const preparedRun = await managedTaskService.operate(credentialHash, request("task.submit", key), { agentSocketIngressVerified: true }) as Json;
+      assert.equal(preparedRun.run.status, "running");
+      assert.equal(preparedRun.run.dispatch_state, "not_dispatched");
+      const restartedAccess = createFileManagedAccessStore({ directory: accessDirectory });
+      const restartedRuns = createFileRunRecordStore({ directory: runDirectory });
+      const restartedLibrary = createFileSkillLibraryService({ directory: libraryDirectory, lodeAssetsPath: root, accessStore: restartedAccess, runRecordStore: restartedRuns });
+      const restartedService = createManagedTaskService({ accessStore: restartedAccess, runRecordStore: restartedRuns, skillLibraryService: restartedLibrary, managedBrowserService });
+      const reconnect = await restartedAccess.connect(credentialHash);
+      const queried = response(await restartedService.operate(credentialHash, {
+        schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
+        connection_id: reconnect.connection_id,
+        task_scope: { operations: ["task.query"], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+        selector: { original_idempotency_key: key }
+      }));
+      assert.equal(queried.run.run_id, preparedRun.run.run_id);
+      assert.equal(queried.run.status, "failed");
+      assert.equal(queried.run.dispatch_state, "not_dispatched");
+      const replayRequest = request("task.submit", key);
+      replayRequest.connection_id = reconnect.connection_id;
+      const replay = response(await restartedService.operate(credentialHash, replayRequest, { agentSocketIngressVerified: true }));
+      assert.equal(replay.run.run_id, preparedRun.run.run_id);
+      assert.equal(replay.run.status, "failed");
+      assert.equal(snapshotCalls.length, before, "restart query and same-key submit do not mint a new ticket or dispatch");
+    });
+
+    await t.test("an unconsumed worker ticket expires to a terminal not_dispatched Run", async () => {
+      const key = "github-script-ticket-expiry-001";
+      const before = snapshotCalls.length;
+      const submit = request("task.submit", key);
+      submit.intent.policy.timeout_ms = 40;
+      const preparedRun = await managedTaskService.operate(credentialHash, submit, { agentSocketIngressVerified: true }) as Json;
+      assert.equal(preparedRun.run.status, "running");
+      assert.equal(preparedRun.run.dispatch_state, "not_dispatched");
+      assert.equal(typeof preparedRun.worker_execution.ticket.ticket_id, "string");
+      await delay(100);
+      const terminal = await runRecordStore.getRunRecord(preparedRun.run.run_id);
+      assert.equal(terminal?.status, "failed");
+      assert.equal(terminal?.public_result_summary?.dispatch_state, "not_dispatched");
+      assert.equal(terminal?.failure?.code, "managed_task_timeout");
+      const retry = response(await managedTaskService.operate(credentialHash, submit, { agentSocketIngressVerified: true }));
+      assert.equal(retry.run.run_id, preparedRun.run.run_id);
+      assert.equal(retry.run.status, "failed");
+      assert.equal(Object.hasOwn(retry, "worker_execution"), false);
+      assert.equal(snapshotCalls.length, before, "ticket expiry and same-key submit never invoke Harbor or mint a replacement");
+    });
+
+    await t.test("Core restart after snapshot records dispatched unknown and never replays", async () => {
+      const key = "github-script-restart-dispatched-001";
+      const before = snapshotCalls.length;
+      const preparedRun = await managedTaskService.operate(credentialHash, request("task.submit", key), { agentSocketIngressVerified: true }) as Json;
+      const ticket = preparedRun.worker_execution.ticket as Json;
+      await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+      await managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" } });
+      assert.equal(snapshotCalls.length, before + 1);
+      const restartedAccess = createFileManagedAccessStore({ directory: accessDirectory });
+      const restartedRuns = createFileRunRecordStore({ directory: runDirectory });
+      const restartedLibrary = createFileSkillLibraryService({ directory: libraryDirectory, lodeAssetsPath: root, accessStore: restartedAccess, runRecordStore: restartedRuns });
+      const restartedService = createManagedTaskService({ accessStore: restartedAccess, runRecordStore: restartedRuns, skillLibraryService: restartedLibrary, managedBrowserService });
+      const reconnect = await restartedAccess.connect(credentialHash);
+      const queried = response(await restartedService.operate(credentialHash, {
+        schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
+        connection_id: reconnect.connection_id,
+        task_scope: { operations: ["task.query"], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+        selector: { original_idempotency_key: key }
+      }));
+      assert.equal(queried.run.run_id, preparedRun.run.run_id);
+      assert.equal(queried.run.status, "unknown_outcome");
+      assert.equal(queried.run.dispatch_state, "dispatched");
+      assert.equal(snapshotCalls.length, before + 1, "restart recovery does not issue a second snapshot");
+    });
+
+    await t.test("a rejected first snapshot invoke is failed not_dispatched and never replayed", async () => {
+      const key = "github-script-first-invoke-rejected-001";
+      const before = snapshotCalls.length;
+      const preparedRun = await managedTaskService.operate(credentialHash, request("task.submit", key), { agentSocketIngressVerified: true }) as Json;
+      const ticket = preparedRun.worker_execution.ticket as Json;
+      await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+      nextSnapshotFailure = { status: "unavailable", dispatch_state: "not_dispatched" };
+      await rejectsWithCode(managedTaskService.broker(credentialHash, {
+        ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" }
+      }), ["managed_task_snapshot_unavailable"]);
+      await managedTaskService.workerFailure(credentialHash, { ticket_id: ticket.ticket_id, code: "managed_task_snapshot_unavailable" });
+      const terminal = await runRecordStore.getRunRecord(preparedRun.run.run_id);
+      assert.equal(terminal?.status, "failed");
+      assert.equal(terminal?.public_result_summary?.dispatch_state, "not_dispatched");
+      assert.equal(snapshotCalls.length, before + 1, "the rejected first invoke is never retried");
+    });
+
+    await t.test("Grant revocation after snapshot blocks output without a second browser call", async () => {
+      const freshGrant = await accessStore.createGrant({
+        idempotency_key: "github-script-revoke-grant", principal_id: actor.principal_id,
+        allowed_operations: [...managedSkillOperations, ...managedTaskOperations, ...managedPageOperations], profile_refs: [profileRef], allowed_origins: [pin.origin],
+        expires_at: grantExpiry, creation_template: null, max_created_profiles: 0,
+        skill_scope: { skill_refs: [pin.package.package_ref], source_refs: [pin.source_ref, pin.package.revision_ref] }
+      });
+      const before = snapshotCalls.length;
+      const revokedRequest = request("task.submit", "github-script-revoked-001");
+      revokedRequest.grant_id = freshGrant.grant_id;
+      const preparedRun = await managedTaskService.operate(credentialHash, revokedRequest, { agentSocketIngressVerified: true }) as Json;
+      const ticket = preparedRun.worker_execution.ticket as Json;
+      await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+      await managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" } });
+      assert.equal(snapshotCalls.length, before + 1);
+      await accessStore.revokeGrant({ idempotency_key: "github-script-revoke", grant_id: freshGrant.grant_id });
+      await rejectsWithCode(managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "output.write", input: {} }),
+        ["managed_access_grant_unavailable", "managed_access_denied"]);
+      await managedTaskService.workerFailure(credentialHash, { ticket_id: ticket.ticket_id, code: "managed_access_denied" });
+      const terminal = await runRecordStore.getRunRecord(preparedRun.run.run_id);
+      assert.equal(terminal?.status, "failed");
+      assert.equal(terminal?.public_result_summary?.dispatch_state, "dispatched");
+      assert.equal(snapshotCalls.length, before + 1, "revocation blocks output without another Harbor snapshot");
+    });
+
+    await t.test("task.stop after snapshot blocks late calls and preserves the cancelled Run", async () => {
+      const freshGrant = await accessStore.createGrant({
+        idempotency_key: "github-script-stop-grant", principal_id: actor.principal_id,
+        allowed_operations: [...managedSkillOperations, ...managedTaskOperations, ...managedPageOperations], profile_refs: [profileRef], allowed_origins: [pin.origin],
+        expires_at: grantExpiry, creation_template: null, max_created_profiles: 0,
+        skill_scope: { skill_refs: [pin.package.package_ref], source_refs: [pin.source_ref, pin.package.revision_ref] }
+      });
+      const before = snapshotCalls.length;
+      const submit = request("task.submit", "github-script-stop-submit-001");
+      submit.grant_id = freshGrant.grant_id;
+      const preparedRun = await managedTaskService.operate(credentialHash, submit, { agentSocketIngressVerified: true }) as Json;
+      const ticket = preparedRun.worker_execution.ticket as Json;
+      await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+      await managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" } });
+      assert.equal(snapshotCalls.length, before + 1);
+      const stopped = response(await managedTaskService.operate(credentialHash, {
+        schema_version: "webenvoy.managed-task-operation/v1", operation: "task.stop", idempotency_key: "github-script-stop-key-001",
+        grant_id: freshGrant.grant_id, connection_id: connection.connection_id,
+        task_scope: { operations: ["task.stop"], skill_refs: [pin.package.package_ref], source_refs: [pin.package.revision_ref], profile_refs: [profileRef], origins: [pin.origin] },
+        selector: { run_id: preparedRun.run.run_id }
+      }));
+      assert.equal(stopped.run.status, "cancelled");
+      await rejectsWithCode(managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "output.write", input: {} }), ["managed_task_ticket_inactive"]);
+      await rejectsWithCode(managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" } }),
+        ["managed_task_ticket_inactive", "managed_site_capability_not_admitted"]);
+      const terminal = await runRecordStore.getRunRecord(preparedRun.run.run_id);
+      assert.equal(terminal?.status, "cancelled");
+      assert.equal(snapshotCalls.length, before + 1, "stop prevents a second browser operation");
+    });
+
+    await t.test("disabling the package blocks new Runs but does not retarget an admitted ticket", async () => {
+      const before = snapshotCalls.length;
+      const preparedRun = await managedTaskService.operate(credentialHash,
+        request("task.submit", "github-script-disable-after-prepare-001"), { agentSocketIngressVerified: true }) as Json;
+      const ticket = preparedRun.worker_execution.ticket as Json;
+      const disabled = await skillLibraryService.submit(credentialHash, {
+        idempotency_key: "github-script-disable-while-running", connection_id: connection.connection_id,
+        grant_id: grant.grant_id, operation: "skill.disable", skill_ref: pin.package.package_ref,
+        task_scope: skillScope, expected_record_version: 2
+      }) as Json;
+      assert.equal(disabled.ok, true, JSON.stringify(disabled));
+      await managedTaskService.workerStarted(credentialHash, { ticket_id: ticket.ticket_id });
+      const snapshot = await managedTaskService.broker(credentialHash, {
+        ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" }
+      }) as Json;
+      assert.equal(snapshot.status, "completed");
+      const output = {
+        result_kind: "github_trending_daily_top5", status: "available",
+        normalized: { period: "daily", requested_count: 5,
+          rows: names.map((name, index) => ({ name, url: `https://github.com/${name}`, language: ["Python", "TypeScript", "Rust", "Go", "Java"][index],
+            language_state: "observed", today_stars: 310 - index * 20, today_stars_state: "observed" })),
+          completeness: "complete", snapshot_coverage: "complete" },
+        source_refs: [{ ref_id: targetRef, source_kind: "harbor_page" }],
+        evidence_refs: [{ ref_id: `observation:${ticket.run_id}`, evidence_kind: "snapshot_ref", producer: "harbor", redaction: "summary_only" }]
+      };
+      await managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "output.write", input: output });
+      const completed = response(await managedTaskService.workerComplete(credentialHash, { ticket_id: ticket.ticket_id }));
+      assert.equal(completed.run.status, "succeeded");
+      assert.equal(snapshotCalls.length, before + 1);
+      await rejectsWithCode(managedTaskService.operate(credentialHash,
+        request("task.submit", "github-script-new-after-disable-001"), { agentSocketIngressVerified: true }), ["managed_skill_disabled"]);
+      assert.equal(snapshotCalls.length, before + 1, "disabled package cannot create a new Harbor action");
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

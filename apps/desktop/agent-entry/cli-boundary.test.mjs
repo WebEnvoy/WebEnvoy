@@ -189,6 +189,8 @@ test('Agent task help documents the managed task API and recovery selector', asy
   assert.equal(submit.code, 0);
   assert.match(submit.stdout, /POST\s+\/managed-tasks\/operations/);
   assert.match(submit.stdout, /Core checks the current Grant and Page target/);
+  assert.match(submit.stdout, /verified distinct non-admin\s+Agent UID/);
+  assert.match(submit.stdout, /trusted_local refuses script dispatch/);
   assert.equal(query.code, 0);
   assert.match(query.stdout, /task\.submit idempotency key/);
   assert.match(query.stdout, /does not create or redispatch a Run/);
