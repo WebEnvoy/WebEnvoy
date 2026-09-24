@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
 import { createManagedBrowserService } from "./managed-browser.js";
+import { projectManagedProviderCatalogFacts } from "./managed-provider-facts.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
 import { createFileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import { createFileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
@@ -64,11 +65,17 @@ const providerCatalog = {
       diagnostics: []
     },
     {
+      // The Camoufox CDP note and limitations mirror Harbor's official capability catalog.
       provider_id: "camoufox", display_name: "Camoufox", role: "primary", selectable: true, project_recommended: true,
       availability: { state: "available", unavailable_reason: null },
       install: { status: "installed", path: "/private/camoufox/path", launchability: "launchable", executable_sha256: "private-hash" },
-      capabilities: [{ key: "cdp", state: "unsupported", source: "derived", note: "当前 Driver 不暴露 CDP endpoint。" }],
-      limitations: ["不提供 CDP。"], download_guide: { primary_url: "https://example.test", install_hint: "not exposed" },
+      capabilities: [{ key: "cdp", state: "unsupported", source: "validation_evidence", note: "原版 JSONL Driver 不暴露 CDP endpoint；Harbor 使用公开 Playwright Page。" }],
+      limitations: [
+        "仅接受 owner 提供且重新验证的 official_release source、Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0 和 properties hash。",
+        "Driver 只调用公开 launch_options、sync_playwright、persistent context 和 Page API；不恢复旧 patched/native adapter/browser builder。",
+        "popup 首请求在无法建立可信 Page 归属时本地拒绝；原生焦点是可选 Viewer，不能替代 task Page。",
+        "不暴露 CDP、原始 endpoint、raw DOM、HAR 或反检测成功保证。"
+      ], download_guide: { primary_url: "https://example.test", install_hint: "not exposed" },
       diagnostics: []
     }
   ], excluded_providers: []
@@ -343,10 +350,24 @@ try {
   assert.equal(providerFactsResult.preference.user_creation_default.availability, "unset");
   assert.equal(providerFactsResult.provider_facts.schema_version, "webenvoy.provider-catalog-facts/v1");
   assert.equal(providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "camoufox")?.role, "primary");
+  const camoufoxProjection = providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "camoufox")!;
+  assert.equal((camoufoxProjection.capabilities as Array<Record<string, unknown>>)[0]?.summary, "原版 JSONL Driver 不暴露远程调试接口；Harbor 使用公开 Playwright Page。");
+  assert.deepEqual(camoufoxProjection.limitations, [
+    "仅接受 owner 提供且重新验证的 official_release source、Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0 和 properties hash。",
+    "Driver 只调用公开 launch_options、sync_playwright、persistent context 和 Page API；不恢复旧 patched/native adapter/browser builder。",
+    "popup 首请求在无法建立可信 Page 归属时本地拒绝；原生焦点是可选 Viewer，不能替代 task Page。",
+    "不暴露远程调试接口、页面标记内容、网络归档或反检测成功保证。"
+  ]);
   assert.equal(((providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "cloakbrowser")?.availability as Record<string, unknown>).unavailable_reason), "provider_not_installed");
   assert.equal(JSON.stringify(readPreference.result).includes("/private/"), false, "Core must not expose Provider install paths");
   assert.equal(JSON.stringify(readPreference.result).includes("private-hash"), false, "Core must not expose executable hashes");
   assert.equal(JSON.stringify(readPreference.result).includes("download_guide"), false, "Core must not expose installation guides through Agent operation facts");
+  const unsafeCatalogWithPath = structuredClone(providerCatalog);
+  unsafeCatalogWithPath.providers[2]!.limitations = ["Harbor configuration path: /private/provider/secret-profile"];
+  assert.equal(projectManagedProviderCatalogFacts(unsafeCatalogWithPath), undefined, "raw Provider paths must remain rejected");
+  const unsafeCatalogWithSecret = structuredClone(providerCatalog);
+  unsafeCatalogWithSecret.providers[2]!.limitations = ["Provider token=private-secret-value"];
+  assert.equal(projectManagedProviderCatalogFacts(unsafeCatalogWithSecret), undefined, "secret-bearing Provider summaries must remain rejected");
   const recommendedCatalogProvider = providerCatalog.providers.find(provider => provider.provider_id === "camoufox")!;
   recommendedCatalogProvider.project_recommended = false;
   const malformedProviderFacts = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "malformed-provider-facts" });

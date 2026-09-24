@@ -20,6 +20,9 @@ const capabilityKeys = new Set([
 ]);
 const capabilityStates = new Set(["supported", "limited", "unsupported", "provider_claim", "requires_validation"]);
 const capabilitySources = new Set(["configured", "observed", "provider_claim", "validation_evidence", "derived"]);
+const providerPrivateLocation = /(?:^|[\s"'(=:：])(?:~\/|\/(?:Users|home|private|tmp|var|Volumes|Applications|opt|etc|root|mnt|workspace|workspaces)\/|\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+|[A-Za-z]:\\)/i;
+const providerAddress = /(?:https?|wss?|file):\/\/|\b(?:localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d{1,5})?/i;
+const providerSecretAssignment = /\b(?:cookie|token|password|secret|credential|authorization|api[_-]?key)\s*[:=]\s*["']?[^\s"',;]+/i;
 
 type ManagedProviderCatalogFacts = {
   schema_version: typeof managedProviderCatalogFactsSchemaVersion;
@@ -47,6 +50,22 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function safeText(value: unknown, maxLength: number): string | undefined {
   return normalizeNonSensitiveText(value, maxLength);
+}
+
+function safeProviderDescription(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || value.trim() !== value ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value) || providerPrivateLocation.test(value) || providerAddress.test(value) ||
+    providerSecretAssignment.test(value)) return undefined;
+
+  // Harbor's public summaries may name an interface without containing its private value.
+  const publicSummary = value
+    .replace(/(不暴露|暴露)\s+CDP\s*[、,，]\s*(?:原始\s+)?endpoint/giu, "$1远程调试接口")
+    .replace(/(不暴露|暴露)\s+CDP\s+endpoint/giu, "$1远程调试接口")
+    .replace(/CDP\s*[、,，]\s*(?:原始\s+)?endpoint/giu, "远程调试接口")
+    .replace(/\bCDP\s+endpoint\b/giu, "远程调试接口")
+    .replace(/\braw\s+DOM\b/giu, "页面标记内容")
+    .replace(/\bHAR\b\s*/gu, "网络归档");
+  return normalizeNonSensitiveText(publicSummary, maxLength);
 }
 
 function providerId(value: unknown): string | undefined {
@@ -93,13 +112,13 @@ export function projectManagedProviderCatalogFacts(value: unknown): ManagedProvi
     for (const value of provider.capabilities) {
       const capability = record(value);
       const key = capability?.key;
-      const summary = safeText(capability?.note, 512);
+      const summary = safeProviderDescription(capability?.note, 512);
       if (!capability || typeof key !== "string" || !capabilityKeys.has(key) || !capabilityStates.has(String(capability.state)) ||
         !capabilitySources.has(String(capability.source)) || typeof capability.note !== "string") return undefined;
       capabilities.push({ key, state: String(capability.state), source: String(capability.source), ...(summary ? { summary } : {}) });
     }
 
-    const limitations = provider.limitations.map(item => safeText(item, 512));
+    const limitations = provider.limitations.map(item => safeProviderDescription(item, 512));
     if (limitations.some(item => item === undefined)) return undefined;
     providers.push({
       provider_id: id,
