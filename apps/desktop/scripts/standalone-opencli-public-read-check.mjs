@@ -10,6 +10,7 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('
 const packageRoot = resolve(process.argv[2] ?? '');
 const lodeRoot = resolve(process.argv[3] ?? '');
 const evidenceRoot = resolve(process.argv[4] ?? '');
+const materialRoot = resolve(process.argv[5] ?? '');
 const cli = join(packageRoot, 'bin/webenvoy');
 const fixedNode = join(packageRoot, 'runtime/node');
 const root = await mkdtemp('/tmp/webenvoy-opencli-check-');
@@ -36,7 +37,7 @@ const evidence = {
   state: 'running', webenvoy_commit: bundle.workspace.commit, webenvoy_tree: bundle.workspace.tree,
   webenvoy_manifest_sha256: sha(manifestBytes), lode_commit: lodeLock.commit,
   lode_tree: lodeLock.tree, opencli_commit: '8271afc67e8504bda94c147f446ee29775d08274',
-  installation: 'macos-arm64 standalone candidate', installed_plugin_model_agent: false,
+  installation: 'macos-arm64 standalone candidate', profile_provider: 'camoufox', installed_plugin_model_agent: false,
   source_code_read_by_agent: false, browser_provider: null, account: false, release: false, samples: {},
 };
 await mkdir(evidenceRoot, { recursive: true });
@@ -132,7 +133,14 @@ try {
   assert.equal(bundle.schema, 'webenvoy-installed-standalone/v1');
   assert.equal(await readFile(join(lodeRoot, 'sites/github/opencli-trending-repos/manifest.json'), 'utf8'),
     await readFile(join(packageRoot, 'dist-electron/lode/sites/github/opencli-trending-repos/manifest.json'), 'utf8'), 'installed Lode bytes differ from locked source');
-  owner(['setup', '--data-dir', ownerData, '--agent-uid', String(Number(command('/usr/bin/id', ['-u', 'nobody']).stdout.trim()))]);
+  owner(['setup', '--data-dir', ownerData, '--agent-uid', String(Number(command('/usr/bin/id', ['-u', 'nobody']).stdout.trim())),
+    '--browser-install-root', join(materialRoot, 'browser/Camoufox.app'),
+    '--browser-executable', join(materialRoot, 'browser/Camoufox.app/Contents/MacOS/camoufox'),
+    '--python-path', join(materialRoot, 'venv/bin/python'), '--browser-version', '152.0.4-beta.30',
+    '--camoufox-version', '0.5.6', '--playwright-version', '1.60.0',
+    '--browser-source-path', join(materialRoot, 'camoufox-152.0.4-beta.30-mac.arm64.zip'),
+    '--camoufox-source-path', join(materialRoot, 'camoufox-0.5.6-py3-none-any.whl'),
+    '--playwright-source-path', join(materialRoot, 'playwright-1.60.0-py3-none-macosx_11_0_arm64.whl')]);
   owner(['start', '--data-dir', ownerData]); runtimeStarted = true;
   success(await ownerRequest(ownerData, '/agent-access/management-policy', { method: 'PUT', body: {
     schema_version: 'webenvoy.execution-policy-mutation.v0', idempotency_key: `${root.split('/').at(-1)}-policy`, expected_source_version: null,
