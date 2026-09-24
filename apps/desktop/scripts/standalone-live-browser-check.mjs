@@ -210,19 +210,26 @@ function safeRuntimeFacts(value) {
   if (!value || typeof value !== 'object') return undefined;
   const availability = value.availability;
   const error = value.current_error;
+  const page = value.current_page;
   return {
+    ...(typeof value.lifecycle_state === 'string' ? { lifecycle_state: value.lifecycle_state } : {}),
+    ...(typeof value.provider_mode === 'string' ? { provider_mode: value.provider_mode } : {}),
     ...(availability && typeof availability === 'object' ? { availability: Object.fromEntries(
       ['driver', 'cdp', 'viewer', 'snapshot', 'evidence'].filter(key => typeof availability[key] === 'string').map(key => [key, availability[key]])
     ) } : {}),
     ...(error && typeof error === 'object' ? { current_error: Object.fromEntries(
       ['code', 'retryable'].filter(key => typeof error[key] === 'string' || typeof error[key] === 'boolean').map(key => [key, error[key]])
-    ) } : {})
+    ) } : {}),
+    ...(page && typeof page === 'object' ? { current_page: {
+      ...(typeof page.status === 'string' ? { status: page.status } : {}),
+      ...(typeof page.error_reason?.code === 'string' ? { error_code: page.error_reason.code } : {})
+    } } : {})
   };
 }
 async function diagnoseTaskSnapshotFailure({ ownerData, agentHost, clientFile, grantId, profileRef, sessionRef, pageRef, siteOrigin, prefix }) {
   const diagnostic = { diagnostic_only: true, affects_acceptance: false };
   try {
-    const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}/runtime-facts`);
+    const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}`);
     diagnostic.harbor_session_facts = safeRuntimeFacts(facts);
   } catch (error) {
     diagnostic.harbor_session_facts_error = typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable';
