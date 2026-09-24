@@ -350,41 +350,81 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
       input: { ...submitRequest.input, value: { unexpected: true } }
     }, 'managed_task_invalid_input')
   };
-  const directPagePromise = readAnonymousTrendingPage(pageUrl);
-  const taskPromise = runMcpTool(clientFile, 'webenvoy_task', submitRequest);
-  const [mcpSubmission, independentPage] = await Promise.all([taskPromise, directPagePromise]);
-  const submitted = mcpSubmission.value;
-  const originalRunId = submitted?.run?.run_id;
-  assert.ok(typeof originalRunId === 'string', `github_managed_script_run_missing:${JSON.stringify(submitted)}`);
-  const queryFile = join(agentHost, `${prefix}-task-query.json`);
-  await agentWrite(queryFile, {
-    schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.query', grant_id: grantId,
-    task_scope: siteTaskScope('task.query', site.package_ref, site.revision_ref, profileRef, siteOrigin),
-    selector: { original_idempotency_key: submitKey }
-  });
-  const queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
-  assert.equal(queried.run.run_id, originalRunId);
-  if (submitted.run.status !== 'succeeded') {
-    throw new Error(`github_managed_script_submit_failed:${JSON.stringify({ submitted: { ok: submitted.ok, run: submitted.run, failure: submitted.failure }, queried: { run: queried.run, result: queried.result ?? null, failure: queried.failure ?? null } })}`);
+  let mcpSubmission;
+  let independentPage;
+  let submitted;
+  let queried;
+  let originalRunId;
+  let rows;
+  let verifiedNames;
+  let startSkewMs;
+  let failureStage = 'submit';
+  try {
+    const directPagePromise = readAnonymousTrendingPage(pageUrl);
+    const taskPromise = runMcpTool(clientFile, 'webenvoy_task', submitRequest);
+    [mcpSubmission, independentPage] = await Promise.all([taskPromise, directPagePromise]);
+    submitted = mcpSubmission.value;
+    originalRunId = submitted?.run?.run_id;
+    assert.ok(typeof originalRunId === 'string', `github_managed_script_run_missing:${JSON.stringify(submitted)}`);
+    const queryFile = join(agentHost, `${prefix}-task-query.json`);
+    await agentWrite(queryFile, {
+      schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.query', grant_id: grantId,
+      task_scope: siteTaskScope('task.query', site.package_ref, site.revision_ref, profileRef, siteOrigin),
+      selector: { original_idempotency_key: submitKey }
+    });
+    failureStage = 'original_run_query';
+    queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
+    assert.equal(queried.run.run_id, originalRunId);
+    if (submitted.run.status !== 'succeeded') {
+      throw new Error(`github_managed_script_submit_failed:${JSON.stringify({ submitted: { ok: submitted.ok, run: submitted.run, failure: submitted.failure }, queried: { run: queried.run, result: queried.result ?? null, failure: queried.failure ?? null } })}`);
+    }
+    failureStage = 'result_validation';
+    assert.equal(submitted?.ok, true, `github_managed_script_submit:${submitted?.failure?.code ?? submitted?.error?.code ?? 'refused'}`);
+    assert.equal(submitted.run.status, 'succeeded', JSON.stringify({ run: submitted.run, failure: submitted.failure }));
+    assert.equal(submitted.run.dispatch_state, 'dispatched');
+    assert.equal(submitted.result.schema_version, 'webenvoy.result-envelope.v0');
+    assert.equal(submitted.result.outcome, 'success');
+    assert.equal(submitted.result.result_kind, 'github_trending_daily_top5');
+    assert.equal(submitted.result.data.status, 'available');
+    assert.equal(submitted.result.data.normalized.completeness, 'complete');
+    rows = submitted.result.data.normalized.rows;
+    assert.equal(rows.length, 5);
+    assert.equal(new Set(rows.map(item => item.name)).size, 5);
+    assert.ok(rows.every(item => item.url === `${siteOrigin}/${item.name}` && item.today_stars_state === 'observed' && item.language_state !== 'unknown'));
+    verifiedNames = rows.filter(item => independentPage.html.includes(item.name));
+    assert.equal(verifiedNames.length, 5, 'independent_public_page_did_not_contain_all_returned_repository_names');
+    startSkewMs = Math.abs(independentPage.startedAt - mcpSubmission.startedAt);
+    assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
+    assert.deepEqual(queried.result, submitted.result);
+  } catch (error) {
+    const queriedResult = queried?.result ?? submitted?.result;
+    const failureCode = queried?.failure?.code ?? queriedResult?.failure?.code ?? submitted?.failure?.code ?? null;
+    const evidence = {
+      schema: 'webenvoy.live-site-skill-script-acceptance/v1', state: 'failed', page_url: pageUrl,
+      package: { package_ref: site.package_ref, revision_ref: site.revision_ref, package_digest: site.integrity.package_digest,
+        source_ref: site.source.source_ref, source_commit: site.source.commit, locked_lode_commit: lodeCommit,
+        task_ref: task.task_ref, script_ref: script.script_ref, script_sha256: script.sha256,
+        source_admission_ref: sourceAdmissionRef, code_admission_ref: codeAdmissionRef },
+      lifecycle: { inspected: true, installed: true, explicitly_enabled: true }, refusals,
+      profile_creation_grant: { grant_id: creationGrantId, allowed_operations: ['profile.create'], allowed_origins: [siteOrigin],
+        max_created_profiles: 1, profile_permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [siteOrigin] } },
+      grant: { grant_id: grantId, allowed_operations: operations, allowed_origins: [siteOrigin], profile_refs: [profileRef], max_created_profiles: 0 },
+      task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 60_000 },
+      consumer: { submit: 'installed WebEnvoy MCP tool webenvoy_task', query: 'installed WebEnvoy CLI agent task query',
+        real_model: false, third_party_agent: false, plugin_verified: false, account: false },
+      failure: { stage: failureStage, code: failureCode, name: error instanceof Error ? error.name : 'UnknownError' },
+      ...(submitted?.run ? { run: { run_id: submitted.run.run_id ?? null, status: submitted.run.status ?? null,
+        dispatch_state: submitted.run.dispatch_state ?? null, result_outcome: queriedResult?.outcome ?? null,
+        result_failure_code: queriedResult?.failure?.code ?? null,
+        ...(queriedResult ? { result_sha256: sha(JSON.stringify(queriedResult)) } : {}),
+        queried_same_original_result: queried?.run?.run_id === submitted.run.run_id && JSON.stringify(queried?.result) === JSON.stringify(submitted.result) } } : {}),
+      ...(independentPage ? { anonymous_independent_check: { state: 'observed', status: independentPage.status, url: independentPage.url,
+        requested_at: new Date(independentPage.startedAt).toISOString(), completed_at: new Date(independentPage.completedAt).toISOString(),
+        credentials_sent: false, repositories_matched: verifiedNames?.length ?? null, start_skew_ms: startSkewMs ?? null } } : {})
+    };
+    if (process.env.SITE_TASK_EVIDENCE_PATH) await writeFile(resolve(process.env.SITE_TASK_EVIDENCE_PATH), `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+    throw error;
   }
-  assert.equal(submitted?.ok, true, `github_managed_script_submit:${submitted?.failure?.code ?? submitted?.error?.code ?? 'refused'}`);
-  assert.equal(submitted.run.status, 'succeeded', JSON.stringify({ run: submitted.run, failure: submitted.failure }));
-  assert.equal(submitted.run.dispatch_state, 'dispatched');
-  assert.equal(submitted.result.schema_version, 'webenvoy.result-envelope.v0');
-  assert.equal(submitted.result.outcome, 'success');
-  assert.equal(submitted.result.result_kind, 'github_trending_daily_top5');
-  assert.equal(submitted.result.data.status, 'available');
-  assert.equal(submitted.result.data.normalized.completeness, 'complete');
-  const rows = submitted.result.data.normalized.rows;
-  assert.equal(rows.length, 5);
-  assert.equal(new Set(rows.map(item => item.name)).size, 5);
-  assert.ok(rows.every(item => item.url === `${siteOrigin}/${item.name}` && item.today_stars_state === 'observed' && item.language_state !== 'unknown'));
-  const verifiedNames = rows.filter(item => independentPage.html.includes(item.name));
-  assert.equal(verifiedNames.length, 5, 'independent_public_page_did_not_contain_all_returned_repository_names');
-  const startSkewMs = Math.abs(independentPage.startedAt - mcpSubmission.startedAt);
-  assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
-
-  assert.deepEqual(queried.result, submitted.result);
 
   const stopFile = join(agentHost, `${prefix}-instance-stop.json`);
   await agentWrite(stopFile, request('instance.stop', `${prefix}-instance-stop`, grantId,

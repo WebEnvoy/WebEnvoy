@@ -128,16 +128,7 @@ jobs:
       - name: Check standalone package
         run: pnpm --filter @webenvoy/app check:standalone "$PACKAGE_ROOT"
 
-      - name: Verify isolated owner and Agent Runtime boundary
-        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
-
-      - name: Run live Camoufox and installed GitHub Trending acceptance
-        env:
-          LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
-          SITE_TASK_EVIDENCE_PATH: ${{ env.SITE_TASK_EVIDENCE_PATH }}
-        run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
-
-      - name: Record reviewable digests
+      - name: Record pre-install candidate digests
         id: metadata
         shell: bash
         run: |
@@ -154,7 +145,17 @@ jobs:
           $CAMOUFOX_PROPERTIES_SHA256  Camoufox.app/Contents/Resources/properties.json
           EOF
 
+      - name: Verify isolated owner and Agent Runtime boundary
+        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
+
+      - name: Run live Camoufox and installed GitHub Trending acceptance
+        env:
+          LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
+          SITE_TASK_EVIDENCE_PATH: ${{ env.SITE_TASK_EVIDENCE_PATH }}
+        run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
+
       - name: Upload live acceptance evidence
+        if: always() && steps.metadata.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: webenvoy-live-camoufox-${{ env.SOURCE_SHA }}-${{ steps.metadata.outputs.manifest_sha256 }}
