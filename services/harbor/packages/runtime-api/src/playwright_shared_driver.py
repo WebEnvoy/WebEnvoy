@@ -38,6 +38,10 @@ WAIT_POLL_MS = 50
 MAX_SNAPSHOT_LIMIT = 128
 MAX_OBSERVATION_ELEMENTS = 20_000
 MAX_OBSERVATION_CONTROLS = 2_048
+# Keep the browser operation comfortably inside the managed-task request
+# deadline. Control coverage reports scan_limit_reached when this budget ends;
+# the independent page-text observation can still complete.
+MAX_OBSERVATION_CAPTURE_MS = 18_000
 SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL = 32
 MAX_OBSERVATION_METADATA_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATION_RESPONSE_BYTES = 256 * 1024
@@ -1079,6 +1083,7 @@ class Driver:
         selector = OBSERVATION_SELECTOR
         start_generation = state.generation
         start_url = safe_url(state.page.url)
+        capture_deadline_ns = time.monotonic_ns() + MAX_OBSERVATION_CAPTURE_MS * 1_000_000
         phase_started = self._record_snapshot_phase("candidate_query", "started")
         try:
             element_handles = await state.page.query_selector_all(selector)
@@ -1091,11 +1096,18 @@ class Driver:
         semantic_complete = True
         metadata_bytes = 0
         candidate_limit_hit = False
+        capture_budget_exhausted = False
         for index, element in enumerate(element_handles):
             if index >= MAX_OBSERVATION_ELEMENTS:
                 reasons.append("scan_limit_reached")
                 await self._dispose_handle(element)
                 continue
+            if time.monotonic_ns() >= capture_deadline_ns:
+                reasons.append("scan_limit_reached")
+                capture_budget_exhausted = True
+                for remaining in element_handles[index:]:
+                    await self._dispose_handle(remaining)
+                break
             if len(records) >= MAX_OBSERVATION_CONTROLS:
                 candidate_limit_hit = True
                 await self._dispose_handle(element)
@@ -1168,6 +1180,16 @@ class Driver:
             })
             if public["truncated_fields"]:
                 semantic_complete = False
+        if capture_budget_exhausted:
+            # Do not publish a prefix whose unscanned remainder could change
+            # identity or target disambiguation. The text observation is
+            # independent; retain it with explicit incomplete control
+            # coverage instead of holding the Provider until request timeout.
+            for record in records:
+                await self._dispose_handle(record["handle"])
+                if record.get("form_handle") is not None:
+                    await self._dispose_handle(record["form_handle"])
+            records.clear()
         if len(element_handles) > MAX_OBSERVATION_ELEMENTS and "scan_limit_reached" not in reasons:
             reasons.append("scan_limit_reached")
         if candidate_limit_hit and "capture_limit_reached" not in reasons:
@@ -1228,6 +1250,10 @@ class Driver:
         return cursor
 
     async def _verify_snapshot_batch(self, state: PageState, batch: dict[str, Any], failure_class: str = "observation_cursor_stale") -> None:
+        if not batch["enumeration_complete"] and not batch["records"]:
+            if state.generation != batch["generation"] or safe_url(state.page.url) != batch["page_url"]:
+                raise ObservationFailure(failure_class)
+            return
         selector = OBSERVATION_SELECTOR
         try:
             handles = await state.page.query_selector_all(selector)
@@ -1247,7 +1273,7 @@ class Driver:
                 provider = await self._indexed_public_semantics(state, index, handle, failure_class)
                 if provider is not None:
                     item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
-                normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
+                normalized = self._normalized_control(item, safe_url(state.page.url) or "")
                 if normalized is not None:
                     public = self._public_control(normalized)
                     encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
@@ -1382,7 +1408,10 @@ class Driver:
         except Exception:
             self._record_snapshot_phase("candidate_capture", "error", phase_started)
             raise
-        self._record_snapshot_phase("candidate_capture", "completed", phase_started)
+        self._record_snapshot_phase(
+            "candidate_capture", "completed", phase_started,
+            "scan_limit_reached" if "scan_limit_reached" in reasons else None,
+        )
         observation_ref = f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}"
         self._disambiguate(records, enumeration_complete)
         text_raw: Any

@@ -456,6 +456,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   let verifiedNames;
   let startSkewMs;
   let taskDurationMs;
+  let runtimeDiagnostics;
   let failureDiagnostic;
   let failureStage = 'submit';
   try {
@@ -503,6 +504,13 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     startSkewMs = Math.abs(independentPage.startedAt - mcpSubmission.startedAt);
     assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
     assert.deepEqual(queried.result, submitted.result);
+    try {
+      const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}`);
+      runtimeDiagnostics = { diagnostic_only: true, affects_acceptance: false, harbor_session_facts: safeRuntimeFacts(facts) };
+    } catch (error) {
+      runtimeDiagnostics = { diagnostic_only: true, affects_acceptance: false,
+        harbor_session_facts_error: typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable' };
+    }
   } catch (error) {
     const queriedResult = queried?.result;
     const failureCode = queried?.failure?.code ?? queriedResult?.failure?.code ?? submitted?.failure?.code ?? null;
@@ -562,6 +570,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 60_000 },
     consumer: { submit: 'installed WebEnvoy MCP tool webenvoy_task', query: 'installed WebEnvoy CLI agent task query',
       independent_check: 'acceptance harness only; not passed to the site script', real_model: false, third_party_agent: false, plugin_verified: false, account: false },
+    ...(runtimeDiagnostics === undefined ? {} : { runtime_diagnostics: runtimeDiagnostics }),
     run: { run_id: originalRunId, status: queried.run.status, dispatch_state: queried.run.dispatch_state,
       result_schema: queried.result.schema_version, outcome: queried.result.outcome, result_kind: queried.result.result_kind,
       result_sha256: sha(JSON.stringify(queried.result)), queried_same_original_result: true,

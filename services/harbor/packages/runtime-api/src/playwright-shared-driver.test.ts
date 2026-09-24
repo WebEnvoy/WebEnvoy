@@ -459,6 +459,27 @@ async def run():
     assert scan_controls["complete"] is False, scan_controls
     assert all(handle.disposals > 0 for handle in scan_page.handles), "scan-limit handles were not released"
 
+    # A bounded control-capture timeout preserves the independently captured
+    # page text and reports incomplete, non-actionable control coverage.
+    timed_page = PageImpl()
+    timed_page.fresh_after_first_query = True
+    timed_state = module.PageState("page:timed", timed_page, ["https://example.test"])
+    capture_budget = module.MAX_OBSERVATION_CAPTURE_MS
+    module.MAX_OBSERVATION_CAPTURE_MS = 0
+    try:
+        timed_batch = await instance.snapshot(timed_state, {"page_ref": "page:timed", "page_id": "page:timed", "document_generation": 1, "limit": 128})
+    finally:
+        module.MAX_OBSERVATION_CAPTURE_MS = capture_budget
+    timed_controls = timed_batch["coverage"]["controls"]
+    assert timed_batch["text"] == "short body", timed_batch
+    assert timed_batch["coverage"]["text"]["state"] == "complete", timed_batch
+    assert timed_controls["enumeration_complete"] is False, timed_controls
+    assert timed_controls["captured_count"] == 0 and timed_controls["total"] is None, timed_controls
+    assert timed_controls["reason_codes"] == ["scan_limit_reached"], timed_controls
+    assert timed_batch["continuation"]["has_more"] is False, timed_batch
+    assert all(handle.disposals == 1 for handle in timed_page.handles), "time-limited original handles were not released exactly once"
+    assert timed_page.query_count == 1, "empty incomplete snapshots must not rescan all candidates"
+
     page.handles = PageImpl.make_ambiguous_handles()
     ambiguous_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})
     ambiguous_ref = ambiguous_batch["controls"][0]["target_ref"]
