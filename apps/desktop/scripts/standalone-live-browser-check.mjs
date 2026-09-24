@@ -354,6 +354,19 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   const taskPromise = runMcpTool(clientFile, 'webenvoy_task', submitRequest);
   const [mcpSubmission, independentPage] = await Promise.all([taskPromise, directPagePromise]);
   const submitted = mcpSubmission.value;
+  const originalRunId = submitted?.run?.run_id;
+  assert.ok(typeof originalRunId === 'string', `github_managed_script_run_missing:${JSON.stringify(submitted)}`);
+  const queryFile = join(agentHost, `${prefix}-task-query.json`);
+  await agentWrite(queryFile, {
+    schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.query', grant_id: grantId,
+    task_scope: siteTaskScope('task.query', site.package_ref, site.revision_ref, profileRef, siteOrigin),
+    selector: { original_idempotency_key: submitKey }
+  });
+  const queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
+  assert.equal(queried.run.run_id, originalRunId);
+  if (submitted.run.status !== 'succeeded') {
+    throw new Error(`github_managed_script_submit_failed:${JSON.stringify({ submitted: { ok: submitted.ok, run: submitted.run, failure: submitted.failure }, queried: { run: queried.run, result: queried.result ?? null, failure: queried.failure ?? null } })}`);
+  }
   assert.equal(submitted?.ok, true, `github_managed_script_submit:${submitted?.failure?.code ?? submitted?.error?.code ?? 'refused'}`);
   assert.equal(submitted.run.status, 'succeeded', JSON.stringify({ run: submitted.run, failure: submitted.failure }));
   assert.equal(submitted.run.dispatch_state, 'dispatched');
@@ -371,15 +384,6 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   const startSkewMs = Math.abs(independentPage.startedAt - mcpSubmission.startedAt);
   assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
 
-  const originalRunId = submitted.run.run_id;
-  const queryFile = join(agentHost, `${prefix}-task-query.json`);
-  await agentWrite(queryFile, {
-    schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.query', grant_id: grantId,
-    task_scope: siteTaskScope('task.query', site.package_ref, site.revision_ref, profileRef, siteOrigin),
-    selector: { original_idempotency_key: submitKey }
-  });
-  const queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
-  assert.equal(queried.run.run_id, originalRunId);
   assert.deepEqual(queried.result, submitted.result);
 
   const stopFile = join(agentHost, `${prefix}-instance-stop.json`);
