@@ -302,7 +302,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   const read = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', skillReadFile], true, 'github_skill_read');
   assert.equal(read.ok, true, `github_skill_read:${read.failure?.code ?? read.error?.code}`);
   assert.equal(read.result.revision.revision_ref, site.revision_ref);
-  assert.equal(read.result.receipt.content_sha256, site.integrity.files.find(item => item.path === 'SKILL.md')?.sha256);
+  assert.equal(read.result.receipt.content_sha256, site.integrity.files.find(item => item.path === 'SKILL.md')?.sha256?.slice('sha256:'.length));
 
   const startFile = join(agentHost, `${prefix}-instance-start.json`);
   await agentWrite(startFile, request('instance.start', `${prefix}-instance-start`, grantId,
