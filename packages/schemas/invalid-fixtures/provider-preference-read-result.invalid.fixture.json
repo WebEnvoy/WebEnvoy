@@ -1,0 +1,79 @@
+{
+  "schema": "provider-preference-read-result.schema.json",
+  "cases": [
+    {
+      "name": "provider facts cannot expose install paths",
+      "instance": {
+        "preference": {
+          "schema_version": "harbor-browser-provider-preference/v1",
+          "project_recommendation": { "provider_id": "camoufox", "availability": "available", "unavailable_reason": null },
+          "user_creation_default": { "provider_id": null, "availability": "unset", "unavailable_reason": null, "updated_at": null }
+        },
+        "provider_facts": {
+          "schema_version": "webenvoy.provider-catalog-facts/v1",
+          "providers": [{
+            "provider_id": "camoufox", "display_name": "Camoufox", "role": "primary", "selectable": true, "project_recommended": true,
+            "availability": { "state": "available", "unavailable_reason": null }, "capabilities": [], "limitations": [],
+            "install": { "path": "/private/provider/path" }
+          }]
+        },
+        "authorization_decision_ref": "authorization-decision:fixture"
+      }
+    },
+    {
+      "name": "availability must use a known Harbor owner state",
+      "instance": {
+        "preference": {
+          "schema_version": "harbor-browser-provider-preference/v1",
+          "project_recommendation": { "provider_id": "camoufox", "availability": "available", "unavailable_reason": null },
+          "user_creation_default": { "provider_id": null, "availability": "unset", "unavailable_reason": null, "updated_at": null }
+        },
+        "provider_facts": {
+          "schema_version": "webenvoy.provider-catalog-facts/v1",
+          "providers": [{
+            "provider_id": "camoufox", "display_name": "Camoufox", "role": "primary", "selectable": true, "project_recommended": true,
+            "availability": { "state": "unavailable", "unavailable_reason": "future_reason" }, "capabilities": [], "limitations": []
+          }]
+        },
+        "authorization_decision_ref": "authorization-decision:fixture"
+      }
+    },
+    {
+      "name": "Provider support facts must not collapse unsupported into supported",
+      "instance": {
+        "preference": {
+          "schema_version": "harbor-browser-provider-preference/v1",
+          "project_recommendation": { "provider_id": "camoufox", "availability": "available", "unavailable_reason": null },
+          "user_creation_default": { "provider_id": null, "availability": "unset", "unavailable_reason": null, "updated_at": null }
+        },
+        "provider_facts": {
+          "schema_version": "webenvoy.provider-catalog-facts/v1",
+          "providers": [{
+            "provider_id": "camoufox", "display_name": "Camoufox", "role": "primary", "selectable": true, "project_recommended": true,
+            "availability": { "state": "available", "unavailable_reason": null },
+            "capabilities": [{ "key": "persistent_profile", "state": "verified", "source": "validation_evidence" }], "limitations": []
+          }]
+        },
+        "authorization_decision_ref": "authorization-decision:fixture"
+      }
+    },
+    {
+      "name": "unknown persisted preference must remain a bounded Provider id",
+      "instance": {
+        "preference": {
+          "schema_version": "harbor-browser-provider-preference/v1",
+          "project_recommendation": { "provider_id": "camoufox", "availability": "available", "unavailable_reason": null },
+          "user_creation_default": { "provider_id": "/private/profile", "availability": "unsupported", "unavailable_reason": "provider_not_supported", "updated_at": "2026-09-24T08:00:00.000Z" }
+        },
+        "provider_facts": {
+          "schema_version": "webenvoy.provider-catalog-facts/v1",
+          "providers": [{
+            "provider_id": "camoufox", "display_name": "Camoufox", "role": "primary", "selectable": true, "project_recommended": true,
+            "availability": { "state": "available", "unavailable_reason": null }, "capabilities": [], "limitations": []
+          }]
+        },
+        "authorization_decision_ref": "authorization-decision:fixture"
+      }
+    }
+  ]
+}

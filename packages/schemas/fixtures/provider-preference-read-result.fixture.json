@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/provider-preference-read-result.schema.json",
+  "preference": {
+    "schema_version": "harbor-browser-provider-preference/v1",
+    "project_recommendation": { "provider_id": "camoufox", "availability": "available", "unavailable_reason": null },
+    "user_creation_default": { "provider_id": "chrome_official", "availability": "available", "unavailable_reason": null, "updated_at": "2026-09-24T08:00:00.000Z" }
+  },
+  "provider_facts": {
+    "schema_version": "webenvoy.provider-catalog-facts/v1",
+    "providers": [
+      {
+        "provider_id": "camoufox", "display_name": "Camoufox", "role": "primary", "selectable": true, "project_recommended": true,
+        "availability": { "state": "available", "unavailable_reason": null },
+        "capabilities": [{ "key": "persistent_profile", "state": "supported", "source": "validation_evidence", "summary": "专用持久化 Profile 受支持。" }],
+        "limitations": ["不承诺目标站点的任务成功。"]
+      },
+      {
+        "provider_id": "chrome_official", "display_name": "官方 Chrome", "role": "qualification", "selectable": true, "project_recommended": false,
+        "availability": { "state": "available", "unavailable_reason": null },
+        "capabilities": [{ "key": "cookie_persistence", "state": "limited", "source": "configured" }],
+        "limitations": []
+      },
+      {
+        "provider_id": "cloakbrowser", "display_name": "CloakBrowser", "role": "restricted_fallback", "selectable": true, "project_recommended": false,
+        "availability": { "state": "unavailable", "unavailable_reason": "provider_not_installed" },
+        "capabilities": [{ "key": "native_fingerprint_control", "state": "provider_claim", "source": "provider_claim" }],
+        "limitations": ["该 Provider 当前不可用。"]
+      }
+    ]
+  },
+  "authorization_decision_ref": "authorization-decision:fixture"
+}

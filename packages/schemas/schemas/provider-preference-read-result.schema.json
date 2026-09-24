@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/provider-preference-read-result.v1.schema.json",
+  "title": "WebEnvoy Agent Provider preference read result",
+  "description": "Bounded Core projection of Harbor's current Provider catalog and creation preference facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["preference", "provider_facts", "authorization_decision_ref"],
+  "properties": {
+    "preference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "project_recommendation", "user_creation_default"],
+      "properties": {
+        "schema_version": { "const": "harbor-browser-provider-preference/v1" },
+        "project_recommendation": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider_id", "availability", "unavailable_reason"],
+          "properties": {
+            "provider_id": { "enum": ["cloakbrowser", "chrome_official", "camoufox"] },
+            "availability": { "enum": ["available", "unavailable"] },
+            "unavailable_reason": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/unavailable_reason" }] }
+          },
+          "oneOf": [
+            { "properties": { "availability": { "const": "available" }, "unavailable_reason": { "type": "null" } } },
+            { "properties": { "availability": { "const": "unavailable" }, "unavailable_reason": { "$ref": "#/$defs/unavailable_reason" } } }
+          ]
+        },
+        "user_creation_default": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider_id", "availability", "unavailable_reason", "updated_at"],
+          "properties": {
+            "provider_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_.-]*$" }] },
+            "availability": { "enum": ["unset", "available", "unavailable", "unsupported"] },
+            "unavailable_reason": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/unavailable_reason" }] },
+            "updated_at": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] }
+          },
+          "oneOf": [
+            { "properties": { "provider_id": { "type": "null" }, "availability": { "const": "unset" }, "unavailable_reason": { "type": "null" }, "updated_at": { "type": "null" } } },
+            { "properties": { "provider_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_.-]*$" }, "availability": { "const": "available" }, "unavailable_reason": { "type": "null" }, "updated_at": { "type": "string", "format": "date-time" } } },
+            { "properties": { "provider_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_.-]*$" }, "availability": { "const": "unavailable" }, "unavailable_reason": { "$ref": "#/$defs/unavailable_reason" }, "updated_at": { "type": "string", "format": "date-time" } } },
+            { "properties": { "provider_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_.-]*$" }, "availability": { "const": "unsupported" }, "unavailable_reason": { "const": "provider_not_supported" }, "updated_at": { "type": "string", "format": "date-time" } } }
+          ]
+        }
+      }
+    },
+    "provider_facts": {
+      "description": "Advisory current owner facts only; they do not grant permission, select a Provider, or replace profile.create revalidation.",
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "providers"],
+      "properties": {
+        "schema_version": { "const": "webenvoy.provider-catalog-facts/v1" },
+        "providers": {
+          "type": "array", "minItems": 1, "maxItems": 32,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["provider_id", "display_name", "role", "selectable", "project_recommended", "availability", "capabilities", "limitations"],
+            "properties": {
+              "provider_id": { "enum": ["cloakbrowser", "chrome_official", "camoufox"] },
+              "display_name": { "type": "string", "minLength": 1, "maxLength": 128, "format": "webenvoy-nonsensitive-text" },
+              "role": { "enum": ["primary", "restricted_fallback", "qualification"] },
+              "selectable": { "type": "boolean" },
+              "project_recommended": { "type": "boolean" },
+              "availability": {
+                "type": "object", "additionalProperties": false,
+                "required": ["state", "unavailable_reason"],
+                "properties": {
+                  "state": { "enum": ["available", "unavailable"] },
+                  "unavailable_reason": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/unavailable_reason" }] }
+                },
+                "oneOf": [
+                  { "properties": { "state": { "const": "available" }, "unavailable_reason": { "type": "null" } } },
+                  { "properties": { "state": { "const": "unavailable" }, "unavailable_reason": { "$ref": "#/$defs/unavailable_reason" } } }
+                ]
+              },
+              "capabilities": {
+                "type": "array", "maxItems": 32,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["key", "state", "source"],
+                  "properties": {
+                    "key": { "enum": ["persistent_profile", "independent_user_data_dir", "proxy", "timezone", "locale", "viewport", "extensions", "cookie_persistence", "cdp", "viewer", "snapshot_refs", "evidence_refs", "native_fingerprint_control", "anti_detection_binary_patches", "automation_exposure_reduction"] },
+                    "state": { "enum": ["supported", "limited", "unsupported", "provider_claim", "requires_validation"] },
+                    "source": { "enum": ["configured", "observed", "provider_claim", "validation_evidence", "derived"] },
+                    "summary": { "type": "string", "minLength": 1, "maxLength": 512, "format": "webenvoy-nonsensitive-text" }
+                  }
+                }
+              },
+              "limitations": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 512, "format": "webenvoy-nonsensitive-text" } }
+            }
+          }
+        }
+      }
+    },
+    "authorization_decision_ref": { "type": "string", "minLength": 1, "maxLength": 512 }
+  },
+  "$defs": {
+    "unavailable_reason": { "enum": ["provider_not_selectable", "provider_not_installed", "provider_path_invalid", "provider_not_executable", "provider_not_launchable", "provider_not_supported"] }
+  },
+  "x-webenvoy": {
+    "owner": "Core Runtime Agent operation result",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.provider-preference-read-result/v1",
+    "compatibility_boundary": "Additive provider.preference.read projection; owner facts inform a later create request but do not authorize, select, start a Profile or Instance, or replace creation-time checks.",
+    "source_adrs": ["docs/specs/provider-selection-v1.md", "docs/adr/0012-runtime-capability-plane-and-plugin-first.md"],
+    "field_owners": { "preference": "Harbor Provider preference", "provider_facts": "Harbor Provider catalog, projected by Core", "authorization_decision_ref": "Core" }
+  }
+}

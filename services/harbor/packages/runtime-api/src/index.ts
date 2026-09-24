@@ -390,6 +390,7 @@ export type {
   BrowserProviderCapabilityFact,
   BrowserProviderCapabilityKey,
   BrowserProviderCapabilityState,
+  BrowserProviderAvailability,
   BrowserProviderCatalog,
   BrowserProviderDetectionInput,
   BrowserProviderDiagnostic,

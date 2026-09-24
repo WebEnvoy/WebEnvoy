@@ -55,6 +55,10 @@ App 同时读取 catalog、preference 和 Profile binding。未设置时只展�
 
 三项 preference operation 必须逐项出现在 `allowed_operations`；旧 Grant 没有权限。set/clear 是 write risk，read 不能推出修改权限。没有新增 Provider ID scope 或第二权限系统；动态模板本身表示 owner 允许在 create 时按本次选择或用户默认解析，但不赋予修改默认权。
 
+在新建 Profile 前，已安装 Agent Plugin 可显式调用无 Profile scope 的 `provider.preference.read`。Core 沿既有 Principal、Connection、Grant、task scope 和执行策略检查后，分别读取 Harbor preference 与 Provider catalog，并在原 preference 结果旁附 `provider_facts`（`webenvoy.provider-catalog-facts/v1`）。preference 中的 `project_recommendation` 和 `user_creation_default` 保持独立；catalog 中逐 Provider 返回 Harbor 拥有的 role、selectable、availability、能力 key/state/source 与有界 limitation 摘要。Harbor 为推荐、已安装状态和 launchability 计算单一 `availability` owner fact；Core 只校验并投影，不依据它给 create 授权。
+
+这个 Agent read 建立普通只读 Run，不创建或启动 Profile/Instance，不修改或复制偏好，不暴露安装路径、二进制/hash、安装指南或 diagnostics。两次 owner 读取不一致或 catalog 无法安全投影时，operation 明确失败而不返回半份事实。Plugin 可以把这些 owner facts 展示给用户，之后仍须单独显式提交 `profile.create`；创建路径重新验证当前授权、模板、默认与 Provider 可用性。不可用或未授权的请求继续由 Harbor/Core 局部拒绝，不 fallback 到推荐值或其他 Provider。
+
 ## 兼容、失败与非目标
 
 旧固定模板的 string `provider_id` 原样有效；新 reader 接受 string 或 null。旧 reader 不认识 null、新 operation 或新 MCP 字段时必须明确拒绝，不能忽略后继续。稳定失败至少区分 `provider_selection_required`、`provider_unavailable`、`idempotency_conflict`、`persistence_failed` 和模板冲突；局部失败不改变其他资源。

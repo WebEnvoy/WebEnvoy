@@ -75,6 +75,10 @@ test("serves readiness and provider facts as JSON", async () => {
     const providers = await getJson(`${running.url}/runtime/browser-providers`);
     assert.equal(providers.schema_version, "harbor-browser-provider-status/v0");
     assert.equal(providers.providers.length, 3);
+    const recommendation = providers.providers.find((provider: { project_recommended: boolean }) => provider.project_recommended);
+    assert.ok(recommendation?.availability, "Harbor exposes owner-computed recommendation availability separately from user defaults");
+    assert.ok(["available", "unavailable"].includes(recommendation.availability.state));
+    assert.equal(recommendation.availability.state === "available", recommendation.availability.unavailable_reason === null);
 
     const alias = await getJson(`${running.url}/runtime/browser-provider-status`);
     assert.deepEqual(alias, providers);

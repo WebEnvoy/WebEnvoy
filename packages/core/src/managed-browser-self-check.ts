@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
 import { createManagedBrowserService } from "./managed-browser.js";
+import { projectManagedProviderCatalogFacts } from "./managed-provider-facts.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
 import { createFileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import { createFileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
@@ -43,6 +44,42 @@ let afterProfileList: (() => Promise<void>) | undefined;
 let principalId: string | undefined;
 let browserPreference: string | null = null, preferenceMutations = 0, dropPreferenceResponse = false;
 const preferenceReceipts = new Map<string, unknown>();
+let providerCatalogReads = 0;
+const providerCatalog = {
+  schema_version: "harbor-browser-provider-status/v0",
+  providers: [
+    {
+      provider_id: "cloakbrowser", display_name: "CloakBrowser", role: "restricted_fallback", selectable: true, project_recommended: false,
+      availability: { state: "unavailable", unavailable_reason: "provider_not_installed" },
+      install: { status: "missing", path: "/private/provider/path", launchability: "not_checked", executable_sha256: "private-hash" },
+      capabilities: [{ key: "persistent_profile", state: "limited", source: "configured", note: "專用 Profile 能力有限。" }],
+      limitations: ["缺少已安裝的執行環境。"], download_guide: { primary_url: "https://example.test", install_hint: "not exposed" },
+      diagnostics: [{ summary: "not exposed" }]
+    },
+    {
+      provider_id: "chrome_official", display_name: "官方 Chrome", role: "qualification", selectable: true, project_recommended: false,
+      availability: { state: "available", unavailable_reason: null },
+      install: { status: "installed", path: "/private/chrome/path", launchability: "launchable", executable_sha256: "private-hash" },
+      capabilities: [{ key: "persistent_profile", state: "supported", source: "validation_evidence", note: "Harbor 管理独立持久化 Profile。" }],
+      limitations: [], download_guide: { primary_url: "https://example.test", install_hint: "not exposed" },
+      diagnostics: []
+    },
+    {
+      // The Camoufox CDP note and limitations mirror Harbor's official capability catalog.
+      provider_id: "camoufox", display_name: "Camoufox", role: "primary", selectable: true, project_recommended: true,
+      availability: { state: "available", unavailable_reason: null },
+      install: { status: "installed", path: "/private/camoufox/path", launchability: "launchable", executable_sha256: "private-hash" },
+      capabilities: [{ key: "cdp", state: "unsupported", source: "validation_evidence", note: "原版 JSONL Driver 不暴露 CDP endpoint；Harbor 使用公开 Playwright Page。" }],
+      limitations: [
+        "仅接受 owner 提供且重新验证的 official_release source、Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0 和 properties hash。",
+        "Driver 只调用公开 launch_options、sync_playwright、persistent context 和 Page API；不恢复旧 patched/native adapter/browser builder。",
+        "popup 首请求在无法建立可信 Page 归属时本地拒绝；原生焦点是可选 Viewer，不能替代 task Page。",
+        "不暴露 CDP、原始 endpoint、raw DOM、HAR 或反检测成功保证。"
+      ], download_guide: { primary_url: "https://example.test", install_hint: "not exposed" },
+      diagnostics: []
+    }
+  ], excluded_providers: []
+};
 const requestedProviders: Array<string | undefined> = [];
 const preferenceSnapshot = (providerId: string | null) => ({
   schema_version: "harbor-browser-provider-preference/v1",
@@ -89,6 +126,9 @@ const server = createServer((req, res) => { void (async () => {
       preferenceReceipts.set(input.idempotency_key, value);
       if (dropPreferenceResponse) { req.socket.destroy(); return; }
     } else value = preferenceSnapshot(browserPreference);
+  } else if (req.url === "/runtime/browser-providers") {
+    providerCatalogReads++;
+    value = providerCatalog;
   }
   else if (req.url?.startsWith("/runtime/browser-provider-preference-mutations/")) value = preferenceReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else if (req.url === "/runtime/identity-environment-mutations") {
@@ -299,12 +339,57 @@ try {
   const preferenceOperations = ["provider.preference.read", "provider.preference.set", "provider.preference.clear"] as const;
   const preferenceGrant = await accessStore.createGrant({ idempotency_key: "preference-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...preferenceOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const preferenceRequest = { idempotency_key: "preference-read", connection_id: connection.connection_id, grant_id: preferenceGrant.grant_id, operation: "provider.preference.read" as const, task_scope: { operations: [...preferenceOperations], profile_refs: [], origins: [] } };
+  const providerReadsBefore = providerCatalogReads;
+  const createsBeforeProviderRead = creates;
   const readPreference = await service.submit(credentialHash, preferenceRequest);
   assert.equal(readPreference.status, "succeeded", JSON.stringify(readPreference));
+  assert.equal(providerCatalogReads, providerReadsBefore + 1, "authorized no-profile preference read includes the current Harbor Provider catalog");
+  assert.equal(creates, createsBeforeProviderRead, "Provider discovery must not create a Profile or start an Instance");
+  const providerFactsResult = readPreference.result as { preference: ReturnType<typeof preferenceSnapshot>; provider_facts: { schema_version: string; providers: Array<Record<string, unknown>> } };
+  assert.equal(providerFactsResult.preference.project_recommendation.provider_id, "camoufox");
+  assert.equal(providerFactsResult.preference.user_creation_default.availability, "unset");
+  assert.equal(providerFactsResult.provider_facts.schema_version, "webenvoy.provider-catalog-facts/v1");
+  assert.equal(providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "camoufox")?.role, "primary");
+  const camoufoxProjection = providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "camoufox")!;
+  assert.equal((camoufoxProjection.capabilities as Array<Record<string, unknown>>)[0]?.summary, "原版 JSONL Driver 不暴露远程调试接口；Harbor 使用公开 Playwright Page。");
+  assert.deepEqual(camoufoxProjection.limitations, [
+    "仅接受 owner 提供且重新验证的 official_release source、Camoufox 0.5.6、browser 152.0.4-beta.30、Playwright 1.60.0 和 properties hash。",
+    "Driver 只调用公开 launch_options、sync_playwright、persistent context 和 Page API；不恢复旧 patched/native adapter/browser builder。",
+    "popup 首请求在无法建立可信 Page 归属时本地拒绝；原生焦点是可选 Viewer，不能替代 task Page。",
+    "不暴露远程调试接口、页面标记内容、网络归档或反检测成功保证。"
+  ]);
+  assert.equal(((providerFactsResult.provider_facts.providers.find(provider => provider.provider_id === "cloakbrowser")?.availability as Record<string, unknown>).unavailable_reason), "provider_not_installed");
+  assert.equal(JSON.stringify(readPreference.result).includes("/private/"), false, "Core must not expose Provider install paths");
+  assert.equal(JSON.stringify(readPreference.result).includes("private-hash"), false, "Core must not expose executable hashes");
+  assert.equal(JSON.stringify(readPreference.result).includes("download_guide"), false, "Core must not expose installation guides through Agent operation facts");
+  const unsafeCatalogWithPath = structuredClone(providerCatalog);
+  unsafeCatalogWithPath.providers[2]!.limitations = ["Harbor configuration path: /private/provider/secret-profile"];
+  assert.equal(projectManagedProviderCatalogFacts(unsafeCatalogWithPath), undefined, "raw Provider paths must remain rejected");
+  const unsafeCatalogWithSecret = structuredClone(providerCatalog);
+  unsafeCatalogWithSecret.providers[2]!.limitations = ["Provider token=private-secret-value"];
+  assert.equal(projectManagedProviderCatalogFacts(unsafeCatalogWithSecret), undefined, "secret-bearing Provider summaries must remain rejected");
+  const recommendedCatalogProvider = providerCatalog.providers.find(provider => provider.provider_id === "camoufox")!;
+  recommendedCatalogProvider.project_recommended = false;
+  const malformedProviderFacts = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "malformed-provider-facts" });
+  recommendedCatalogProvider.project_recommended = true;
+  assert.equal(malformedProviderFacts.failure?.code, "managed_browser_provider_facts_malformed", "inconsistent Harbor recommendation facts fail closed");
+  assert.equal(JSON.stringify(malformedProviderFacts).includes("/private/"), false, "malformed Harbor catalog contents are not persisted into a failed Run");
+  const previousPreferenceValue = browserPreference;
+  browserPreference = "/private/profile";
+  const malformedPreference = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "malformed-provider-default" });
+  browserPreference = previousPreferenceValue;
+  assert.equal(malformedPreference.failure?.code, "managed_browser_provider_facts_malformed", "a malformed Harbor default reference is not returned to the Agent");
+  assert.equal(JSON.stringify(malformedPreference).includes("/private/profile"), false, "malformed Harbor preference values are not persisted into a failed Run");
+  const providerReadsBeforeDenied = providerCatalogReads;
   await assert.rejects(service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-bad-scope", task_scope: { ...preferenceRequest.task_scope, origins: ["https://example.com"] } }), /managed_access_denied/);
+  assert.equal(providerCatalogReads, providerReadsBeforeDenied, "denied Agent scope must not read Harbor Provider facts");
   const setPreference = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-set", operation: "provider.preference.set" as const, provider_id: "chrome_official" as const });
   assert.equal(setPreference.status, "succeeded", JSON.stringify(setPreference));
   assert.equal(browserPreference, "chrome_official");
+  const updatedPreference = await service.submit(credentialHash, { ...preferenceRequest, idempotency_key: "preference-read-after-set" });
+  assert.equal(updatedPreference.status, "succeeded", JSON.stringify(updatedPreference));
+  assert.equal((updatedPreference.result as { preference: ReturnType<typeof preferenceSnapshot> }).preference.user_creation_default.provider_id, "chrome_official");
+  assert.equal(providerCatalogReads, providerReadsBeforeDenied + 1, "a later authorized read observes the Harbor-owned user default");
 
   const dynamicTemplate = { ...grant.creation_template!, template_ref: "template:dynamic", provider_id: null };
   const dynamicGrant = await accessStore.createGrant({ idempotency_key: "dynamic-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: dynamicTemplate });
