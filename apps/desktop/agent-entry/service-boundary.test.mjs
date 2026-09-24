@@ -93,6 +93,9 @@ const server = createServer((req, res) => { void (async () => {
   if (id === 'core' && req.method === 'GET' && url.pathname === '/owner/runtime-sessions/demo/runs') {
     return send(res, 200, { schema_version: 'webenvoy.owner-session-runs/v1', runtime_session_ref: 'demo', status: 'available', runs: [] });
   }
+  if (id === 'core' && req.method === 'POST' && url.pathname === '/owner/site-task-admissions/operations') {
+    return send(res, 200, { ok: true, operation: body?.operation });
+  }
   if (id === 'harbor' && req.method === 'GET' && url.pathname === '/runtime/sessions') {
     return send(res, 200, { schema_version: 'harbor-runtime-session-list/v1', sessions: [session] });
   }
@@ -232,6 +235,11 @@ test('owner service preserves Harbor observation and control after the Core chil
     const core = status.services.find(service => service.id === 'core');
     const harbor = status.services.find(service => service.id === 'harbor');
     assert.ok(core?.pid && harbor?.pid);
+
+    const admission = await requestJson({ socketPath: ownerSocket, path: '/owner/site-task-admissions/operations',
+      method: 'POST', body: { operation: 'list_authoring_repositories' } });
+    assert.equal(admission.status, 200);
+    assert.equal(admission.body.operation, 'list_authoring_repositories');
 
     process.kill(core.pid, 'SIGKILL');
     const coreExitDeadline = Date.now() + 5000;
