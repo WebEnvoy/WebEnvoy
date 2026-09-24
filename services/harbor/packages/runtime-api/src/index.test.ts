@@ -279,6 +279,35 @@ test("keeps bounded provider operation diagnostics on the owner projection only"
   assert.equal("provider_operation_diagnostics" in (runtime.getSession(session.runtime_session_ref) ?? {}), false);
 });
 
+test("retains page-list and page-relation stage outcomes beside recent snapshot phases", async () => {
+  const fixture = createFixtureLauncher("ready");
+  const runtime = new HarborRuntime(async input => {
+    const launched = await fixture(input);
+    input.record_provider_diagnostic?.({
+      stage: "page_list_request", outcome: "timeout", duration_ms: 60_000,
+      observed_at: new Date().toISOString(), code: "request_timeout"
+    });
+    input.record_provider_diagnostic?.({
+      stage: "page_relation_refresh", outcome: "error", duration_ms: 12_000,
+      observed_at: new Date().toISOString(), code: "provider_unavailable"
+    });
+    for (let index = 0; index < 14; index += 1) input.record_provider_diagnostic?.({
+      stage: "provider_snapshot", phase: "candidate_query", outcome: "completed",
+      duration_ms: index, observed_at: new Date().toISOString()
+    });
+    return launched;
+  });
+  const session = await runtime.createSession();
+  const diagnostics = runtime.getOwnerSessionFacts(session.runtime_session_ref)?.provider_operation_diagnostics ?? [];
+  assert.equal(diagnostics.length, 12);
+  assert.deepEqual(diagnostics.slice(0, 2).map(({ stage, outcome, code }) => ({ stage, outcome, code })), [
+    { stage: "page_list_request", outcome: "timeout", code: "request_timeout" },
+    { stage: "page_relation_refresh", outcome: "error", code: "provider_unavailable" }
+  ]);
+  assert.ok(diagnostics.slice(2).every(item => item.stage === "provider_snapshot"));
+  assert.equal(diagnostics.at(-1)?.duration_ms, 13);
+});
+
 test("reports provider unavailability as structured runtime facts", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("unavailable"));
   const session = await runtime.createSession();

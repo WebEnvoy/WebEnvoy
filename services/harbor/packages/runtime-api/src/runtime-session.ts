@@ -309,6 +309,30 @@ function boundedProviderDiagnosticDuration(value: number): number {
   return Math.max(0, Math.min(120_000, Math.trunc(Number.isFinite(value) ? value : 0)));
 }
 
+function retainProviderOperationDiagnostics(diagnostics: RuntimeProviderOperationDiagnostic[]): void {
+  if (diagnostics.length <= MAX_PROVIDER_OPERATION_DIAGNOSTICS) return;
+  const keep = new Set<number>();
+  const required = new Set<number>();
+  const tailStart = Math.max(0, diagnostics.length - MAX_PROVIDER_OPERATION_DIAGNOSTICS);
+  for (let index = tailStart; index < diagnostics.length; index += 1) keep.add(index);
+  for (const stage of ["page_list_request", "page_relation_refresh"] as const) {
+    for (let index = diagnostics.length - 1; index >= 0; index -= 1) {
+      if (diagnostics[index]?.stage === stage) {
+        required.add(index);
+        keep.add(index);
+        break;
+      }
+    }
+  }
+  while (keep.size > MAX_PROVIDER_OPERATION_DIAGNOSTICS) {
+    const oldestUnrequired = [...keep].sort((left, right) => left - right).find(index => !required.has(index));
+    if (oldestUnrequired === undefined) break;
+    keep.delete(oldestUnrequired);
+  }
+  const retained = diagnostics.filter((_item, index) => keep.has(index));
+  diagnostics.splice(0, diagnostics.length, ...retained);
+}
+
 export type ManagedFileRuntimeInput = {
   operation: "upload" | "download";
   operation_ref: string;
@@ -368,9 +392,7 @@ export class RuntimeSessionStore {
         observed_at: diagnostic.observed_at,
         ...(boundedProviderDiagnosticCode(diagnostic.code) === undefined ? {} : { code: boundedProviderDiagnosticCode(diagnostic.code) })
       });
-      if (providerOperationDiagnostics.length > MAX_PROVIDER_OPERATION_DIAGNOSTICS) {
-        providerOperationDiagnostics.splice(0, providerOperationDiagnostics.length - MAX_PROVIDER_OPERATION_DIAGNOSTICS);
-      }
+      retainProviderOperationDiagnostics(providerOperationDiagnostics);
     };
     let profileOwnership: ProfileStorageOwnershipLock | null = null;
     const launch = await (async () => {
@@ -1510,9 +1532,7 @@ export class RuntimeSessionStore {
       observed_at: diagnostic.observed_at,
       ...(boundedProviderDiagnosticCode(diagnostic.code) === undefined ? {} : { code: boundedProviderDiagnosticCode(diagnostic.code) })
     });
-    if (record.provider_operation_diagnostics.length > MAX_PROVIDER_OPERATION_DIAGNOSTICS) {
-      record.provider_operation_diagnostics.splice(0, record.provider_operation_diagnostics.length - MAX_PROVIDER_OPERATION_DIAGNOSTICS);
-    }
+    retainProviderOperationDiagnostics(record.provider_operation_diagnostics);
   }
 
   private resolveLegacyPageBinding(
