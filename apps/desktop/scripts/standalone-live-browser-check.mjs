@@ -267,7 +267,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     expires_at: expiresAt, creation_template: null, max_created_profiles: 0,
     skill_scope: { skill_refs: [site.package_ref], source_refs: [site.revision_ref] }
   });
-  const skillRequest = (operation, fields = {}) => ({ idempotency_key: `${prefix}-${operation}`, grant_id: grantId, operation,
+  const skillRequest = (operation, fields = {}, requestLabel = operation) => ({ idempotency_key: `${prefix}-${requestLabel}`, grant_id: grantId, operation,
     task_scope: { operations: [operation], skill_refs: [site.package_ref], source_refs: [site.revision_ref] }, skill_ref: site.package_ref, ...fields });
   const inspectFile = join(agentHost, `${prefix}-skill-inspect.json`);
   await agentWrite(inspectFile, skillRequest('skill.inspect'));
@@ -286,9 +286,12 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   const installedResult = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', installFile], true, 'github_skill_install');
   assert.equal(installedResult.ok, true, `github_skill_install:${installedResult.failure?.code ?? installedResult.error?.code}`);
   const installedFile = join(agentHost, `${prefix}-skill-inspect-installed.json`);
-  await agentWrite(installedFile, skillRequest('skill.inspect'));
+  await agentWrite(installedFile, skillRequest('skill.inspect', {}, 'skill-inspect-installed'));
   const installed = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', installedFile], true, 'github_skill_inspect_installed');
   assert.equal(installed.ok, true, `github_skill_inspect_installed:${installed.failure?.code ?? installed.error?.code}`);
+  assert.equal(installed.result.skill.record_version, installedResult.result.skill.record_version);
+  assert.equal(installed.result.skill.enabled, false);
+  assert.equal(installed.result.skill.enabled_revision_ref, null);
   const enableFile = join(agentHost, `${prefix}-skill-enable.json`);
   await agentWrite(enableFile, skillRequest('skill.enable', { target_revision_ref: site.revision_ref,
     expected_revision_ref: null, expected_record_version: installed.result.skill.record_version }));
