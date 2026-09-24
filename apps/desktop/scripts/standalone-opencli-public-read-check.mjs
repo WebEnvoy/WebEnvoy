@@ -154,7 +154,7 @@ try {
       '--repository-ref', repositoryRef, '--package-ref', manifest.package_ref, '--first-admission', '--task-ref', task.task_ref]);
     const candidateRef = find(inspected, 'candidate_ref'); assert.ok(candidateRef);
     const diff = owner(['site-task-admission', 'candidate-diff', '--data-dir', ownerData, '--candidate-ref', candidateRef]);
-    assert.ok(typeof diff.diff === 'string' && diff.diff.includes(sample.path), `${sample.name}:candidate_diff_missing`);
+    assert.ok(find(diff, 'diff')?.includes(sample.path), `${sample.name}:candidate_diff_missing`);
     const source = owner(['site-task-admission', 'admit-source', '--data-dir', ownerData, '--candidate-ref', candidateRef]);
     const admissionRef = find(source, 'admission_ref'); assert.ok(admissionRef);
     const code = owner(['site-task-admission', 'admit-code', '--data-dir', ownerData, '--admission-ref', admissionRef]);
