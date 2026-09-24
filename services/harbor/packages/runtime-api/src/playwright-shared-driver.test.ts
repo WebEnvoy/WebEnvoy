@@ -50,7 +50,7 @@ for await (const line of rl) {
   else if (request.op === "environment") result = { status: "completed", observed_at: "2026-09-09T18:00:00.000Z", provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: "${"a".repeat(64)}" }, bundle_hash: "${"b".repeat(64)}", observed: { language: "zh-CN", languages: ["zh-CN"], timezone: "Asia/Shanghai", viewport: { width: 1280, height: 900 }, screen: { width: 1920, height: 1080 }, hardware_concurrency: 8, device_memory: null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null }, continuity: { state: "unknown", checked_fields: [], changed_fields: [], unknown_fields: [] } };
   else if (request.op === "close") result = { closed: true };
   else result = page;
-  if (request.op === "interact" && request.action === "snapshot") process.stdout.write(JSON.stringify({ id: 0, event: "provider_snapshot_phase", stage: "provider_snapshot", phase: "candidate_capture", outcome: "started", duration_ms: 0, observed_at: "2026-09-09T18:00:00.000Z" }) + "\\n");
+  if (request.op === "interact" && request.action === "snapshot") for (const phase of ["candidate_capture", "candidate_query", "control_read", "accessibility_semantics"]) process.stdout.write(JSON.stringify({ id: 0, event: "provider_snapshot_phase", stage: "provider_snapshot", phase, outcome: "started", duration_ms: 0, observed_at: "2026-09-09T18:00:00.000Z", ...(phase === "control_read" ? { code: "control_index_32" } : {}) }) + "\\n");
   process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
   }`);
   await chmod(helper, 0o700);
@@ -101,6 +101,9 @@ for await (const line of rl) {
       assert.deepEqual(providerDiagnostics.map(item => ({ stage: item.stage, ...(item.phase === undefined ? {} : { phase: item.phase }), outcome: item.outcome, code: item.code })), [
         { stage: "page_list_request", outcome: "completed", code: undefined },
         { stage: "provider_snapshot", phase: "candidate_capture", outcome: "started", code: undefined },
+        { stage: "provider_snapshot", phase: "candidate_query", outcome: "started", code: undefined },
+        { stage: "provider_snapshot", phase: "control_read", outcome: "started", code: "control_index_32" },
+        { stage: "provider_snapshot", phase: "accessibility_semantics", outcome: "started", code: undefined },
         { stage: "provider_snapshot", outcome: "completed", code: undefined },
         { stage: "page_list_request", outcome: "error", code: "request_failed" }
       ]);

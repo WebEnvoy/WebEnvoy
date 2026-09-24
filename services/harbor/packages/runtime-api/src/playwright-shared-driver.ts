@@ -55,7 +55,10 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 type JsonObject = Record<string, unknown>;
 type DriverResponse = { id: number; status?: "ok" | "error"; result?: unknown; message?: string; event?: string };
-const PROVIDER_DIAGNOSTIC_PHASES = new Set(["candidate_capture", "page_text", "batch_verification", "control_cleanup", "response_projection"]);
+const PROVIDER_DIAGNOSTIC_PHASES = new Set([
+  "candidate_capture", "candidate_query", "control_read", "accessibility_semantics",
+  "page_text", "batch_verification", "control_cleanup", "response_projection"
+]);
 
 export type SharedProviderAdapter = {
   provider_id: string;
@@ -278,7 +281,8 @@ class JsonlDriverProcess {
       this.recordDiagnostic({
         stage: "provider_snapshot", phase: raw.phase as RuntimeProviderOperationDiagnostic["phase"],
         outcome: raw.outcome as RuntimeProviderOperationDiagnostic["outcome"],
-        duration_ms: Math.max(0, Math.min(120_000, raw.duration_ms)), observed_at: raw.observed_at
+        duration_ms: Math.max(0, Math.min(120_000, raw.duration_ms)), observed_at: raw.observed_at,
+        ...(boundedDiagnosticCode(raw.code) === undefined ? {} : { code: boundedDiagnosticCode(raw.code) })
       });
     } catch { /* Driver diagnostics never affect Provider behavior. */ }
   }

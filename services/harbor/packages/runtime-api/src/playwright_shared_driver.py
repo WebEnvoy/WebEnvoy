@@ -38,6 +38,7 @@ WAIT_POLL_MS = 50
 MAX_SNAPSHOT_LIMIT = 128
 MAX_OBSERVATION_ELEMENTS = 20_000
 MAX_OBSERVATION_CONTROLS = 2_048
+SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL = 32
 MAX_OBSERVATION_METADATA_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATION_RESPONSE_BYTES = 256 * 1024
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
@@ -1087,10 +1088,13 @@ class Driver:
         selector = OBSERVATION_SELECTOR
         start_generation = state.generation
         start_url = safe_url(state.page.url)
+        phase_started = self._record_snapshot_phase("candidate_query", "started")
         try:
             element_handles = await state.page.query_selector_all(selector)
         except Exception as error:
+            self._record_snapshot_phase("candidate_query", "error", phase_started)
             raise ObservationFailure("observation_changed") from error
+        self._record_snapshot_phase("candidate_query", "completed", phase_started)
         records: list[dict[str, Any]] = []
         reasons: list[str] = []
         semantic_complete = True
@@ -1106,8 +1110,27 @@ class Driver:
                 await self._dispose_handle(element)
                 continue
             try:
-                item = await self._read_control(element)
-                provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+                sampled = index % SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL == 0
+                phase_code = f"control_index_{index}" if sampled else None
+                phase_started = self._record_snapshot_phase("control_read", "started", code=phase_code) if sampled else None
+                try:
+                    item = await self._read_control(element)
+                except Exception:
+                    if sampled:
+                        self._record_snapshot_phase("control_read", "error", phase_started, phase_code)
+                    raise
+                if sampled:
+                    self._record_snapshot_phase("control_read", "completed", phase_started, phase_code)
+
+                phase_started = self._record_snapshot_phase("accessibility_semantics", "started", code=phase_code) if sampled else None
+                try:
+                    provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+                except Exception:
+                    if sampled:
+                        self._record_snapshot_phase("accessibility_semantics", "error", phase_started, phase_code)
+                    raise
+                if sampled:
+                    self._record_snapshot_phase("accessibility_semantics", "completed", phase_started, phase_code)
             except Exception:
                 for record in records:
                     await self._dispose_handle(record["handle"])
@@ -1316,8 +1339,11 @@ class Driver:
         return response
 
     @staticmethod
-    def _record_snapshot_phase(phase: str, outcome: str, started_ns: int | None = None) -> int:
-        phases = {"candidate_capture", "page_text", "batch_verification", "control_cleanup", "response_projection"}
+    def _record_snapshot_phase(phase: str, outcome: str, started_ns: int | None = None, code: str | None = None) -> int:
+        phases = {
+            "candidate_capture", "candidate_query", "control_read", "accessibility_semantics",
+            "page_text", "batch_verification", "control_cleanup", "response_projection"
+        }
         outcomes = {"started", "completed", "error", "unavailable"}
         if phase not in phases or outcome not in outcomes:
             return time.monotonic_ns()
@@ -1327,6 +1353,8 @@ class Driver:
             "stage": "provider_snapshot", "phase": phase, "outcome": outcome,
             "duration_ms": duration_ms, "observed_at": now()
         }
+        if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+            diagnostic["code"] = code
         print(json.dumps({"id": 0, "event": "provider_snapshot_phase", **diagnostic}, separators=(",", ":")), flush=True)
         return now_ns
 
