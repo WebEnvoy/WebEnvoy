@@ -50,6 +50,7 @@ for await (const line of rl) {
   else if (request.op === "environment") result = { status: "completed", observed_at: "2026-09-09T18:00:00.000Z", provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: "${"a".repeat(64)}" }, bundle_hash: "${"b".repeat(64)}", observed: { language: "zh-CN", languages: ["zh-CN"], timezone: "Asia/Shanghai", viewport: { width: 1280, height: 900 }, screen: { width: 1920, height: 1080 }, hardware_concurrency: 8, device_memory: null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null }, continuity: { state: "unknown", checked_fields: [], changed_fields: [], unknown_fields: [] } };
   else if (request.op === "close") result = { closed: true };
   else result = page;
+  if (request.op === "interact" && request.action === "snapshot") process.stdout.write(JSON.stringify({ id: 0, event: "provider_snapshot_phase", stage: "provider_snapshot", phase: "candidate_capture", outcome: "started", duration_ms: 0, observed_at: "2026-09-09T18:00:00.000Z" }) + "\\n");
   process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
   }`);
   await chmod(helper, 0o700);
@@ -97,8 +98,9 @@ for await (const line of rl) {
       assert.equal((await result.pageController!.listPages())[0]?.provider_page_ref, "page:1");
       assert.equal((await result.interaction!({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "page:1" })).status, "completed");
       await assert.rejects(() => result.pageController!.listPages(), /Private URL and provider stack details must not escape/);
-      assert.deepEqual(providerDiagnostics.map(item => ({ stage: item.stage, outcome: item.outcome, code: item.code })), [
+      assert.deepEqual(providerDiagnostics.map(item => ({ stage: item.stage, ...(item.phase === undefined ? {} : { phase: item.phase }), outcome: item.outcome, code: item.code })), [
         { stage: "page_list_request", outcome: "completed", code: undefined },
+        { stage: "provider_snapshot", phase: "candidate_capture", outcome: "started", code: undefined },
         { stage: "provider_snapshot", outcome: "completed", code: undefined },
         { stage: "page_list_request", outcome: "error", code: "request_failed" }
       ]);
@@ -120,7 +122,7 @@ for await (const line of rl) {
 test("covers #540 G0 enumeration, semantics, identity, and bounded waits in the shared driver", () => {
   const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
   const script = String.raw`
-import asyncio, importlib.util, json, os, sys, time, types
+import asyncio, contextlib, importlib.util, io, json, os, sys, time, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
 async_api = types.ModuleType("playwright.async_api")
@@ -132,6 +134,20 @@ async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_a
 playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
 spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
 module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+previous_progress = os.environ.get("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS")
+os.environ["WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS"] = "1"
+progress_output = io.StringIO()
+with contextlib.redirect_stdout(progress_output):
+    started = module.Driver._record_snapshot_phase("candidate_capture", "started")
+    module.Driver._record_snapshot_phase("candidate_capture", "completed", started)
+progress_events = [json.loads(line) for line in progress_output.getvalue().splitlines()]
+assert len(progress_events) == 2, progress_events
+assert all(event["id"] == 0 and event["event"] == "provider_snapshot_phase" and event["stage"] == "provider_snapshot" for event in progress_events), progress_events
+assert all(event["phase"] == "candidate_capture" and "page_text" not in event for event in progress_events), progress_events
+assert [event["outcome"] for event in progress_events] == ["started", "completed"], progress_events
+if previous_progress is None: os.environ.pop("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS")
+else: os.environ["WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS"] = previous_progress
 
 class Handle:
     def __init__(self, index, role="button", name=None, name_source="none", description=None):

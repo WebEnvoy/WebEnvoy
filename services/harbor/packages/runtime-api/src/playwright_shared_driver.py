@@ -1315,6 +1315,23 @@ class Driver:
             state.control_metadata[record["target_ref"]]["exposed"] = True
         return response
 
+    @staticmethod
+    def _record_snapshot_phase(phase: str, outcome: str, started_ns: int | None = None) -> int:
+        if os.environ.get("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS") != "1":
+            return time.monotonic_ns()
+        phases = {"candidate_capture", "page_text", "batch_verification", "control_cleanup", "response_projection"}
+        outcomes = {"started", "completed", "error", "unavailable"}
+        if phase not in phases or outcome not in outcomes:
+            return time.monotonic_ns()
+        now_ns = time.monotonic_ns()
+        duration_ms = 0 if outcome == "started" or started_ns is None else max(0, min(120_000, (now_ns - started_ns) // 1_000_000))
+        diagnostic = {
+            "stage": "provider_snapshot", "phase": phase, "outcome": outcome,
+            "duration_ms": duration_ms, "observed_at": now()
+        }
+        print(json.dumps({"id": 0, "event": "provider_snapshot_phase", **diagnostic}, separators=(",", ":")), flush=True)
+        return now_ns
+
     async def snapshot(self, state: PageState, request: dict[str, Any] | None = None) -> dict[str, Any]:
         request = request or {}
         cursor = request.get("cursor")
@@ -1340,16 +1357,26 @@ class Driver:
         if request.get("observation_ref") is not None:
             raise ObservationFailure("observation_cursor_stale")
         state.snapshot_serial += 1
-        records, enumeration_complete, semantic_complete, reasons = await self._capture_candidate_records(state)
+        phase_started = self._record_snapshot_phase("candidate_capture", "started")
+        try:
+            records, enumeration_complete, semantic_complete, reasons = await self._capture_candidate_records(state)
+        except Exception:
+            self._record_snapshot_phase("candidate_capture", "error", phase_started)
+            raise
+        self._record_snapshot_phase("candidate_capture", "completed", phase_started)
         observation_ref = f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}"
         self._disambiguate(records, enumeration_complete)
         text_raw: Any
         text_unavailable = False
+        phase_started = self._record_snapshot_phase("page_text", "started")
         try:
             text_raw = await state.page.evaluate("""() => { const text = document.body?.innerText || ''; return { text: text.slice(0, 65536), length: text.length }; }""")
         except Exception:
             text_raw = {"text": "", "length": 0}
             text_unavailable = True
+            self._record_snapshot_phase("page_text", "unavailable", phase_started)
+        else:
+            self._record_snapshot_phase("page_text", "completed", phase_started)
         if isinstance(text_raw, dict):
             raw_text = text_raw.get("text", "") if isinstance(text_raw.get("text"), str) else ""
             text_length = int(text_raw.get("length", len(raw_text))) if isinstance(text_raw.get("length"), (int, float)) else len(raw_text)
@@ -1376,14 +1403,18 @@ class Driver:
             "initial_limit": limit,
             "cursors": {},
         }
+        phase_started = self._record_snapshot_phase("batch_verification", "started")
         try:
             await self._verify_snapshot_batch(state, batch, "observation_changed")
         except Exception:
+            self._record_snapshot_phase("batch_verification", "error", phase_started)
             for record in records:
                 await self._dispose_handle(record["handle"])
                 if record.get("form_handle") is not None:
                     await self._dispose_handle(record["form_handle"])
             raise
+        self._record_snapshot_phase("batch_verification", "completed", phase_started)
+        phase_started = self._record_snapshot_phase("control_cleanup", "started")
         await state.clear_controls()
         for record in records:
             state.controls[record["target_ref"]] = (record["public"]["role"], record["public"]["name"], record["action"].get("href"), None, record["handle"])
@@ -1397,8 +1428,12 @@ class Driver:
                 "disambiguation": record["public"]["disambiguation"],
                 "exposed": False,
             }
+        self._record_snapshot_phase("control_cleanup", "completed", phase_started)
         state.snapshot_batch = batch
-        return await self._snapshot_result(state, batch, 0, limit, False)
+        phase_started = self._record_snapshot_phase("response_projection", "started")
+        result = await self._snapshot_result(state, batch, 0, limit, False)
+        self._record_snapshot_phase("response_projection", "completed", phase_started)
+        return result
 
     async def target_failure(self, state: PageState, target: str, role: str | None = None) -> str | None:
         control = state.controls.get(target)

@@ -213,8 +213,8 @@ function safeRuntimeFacts(value) {
   const page = value.current_page;
   const diagnostics = Array.isArray(value.provider_operation_diagnostics) ? value.provider_operation_diagnostics.slice(-12).flatMap(item => {
     if (!item || typeof item !== 'object' || !['page_list_request', 'page_relation_refresh', 'provider_snapshot'].includes(item.stage) ||
-        !['completed', 'unavailable', 'timeout', 'error'].includes(item.outcome) || !Number.isSafeInteger(item.duration_ms)) return [];
-    return [{ stage: item.stage, outcome: item.outcome, duration_ms: Math.max(0, Math.min(120_000, item.duration_ms)),
+        !['started', 'completed', 'unavailable', 'timeout', 'error'].includes(item.outcome) || !Number.isSafeInteger(item.duration_ms)) return [];
+    return [{ stage: item.stage, ...(typeof item.phase === 'string' && ['candidate_capture', 'page_text', 'batch_verification', 'control_cleanup', 'response_projection'].includes(item.phase) ? { phase: item.phase } : {}), outcome: item.outcome, duration_ms: Math.max(0, Math.min(120_000, item.duration_ms)),
       ...(typeof item.observed_at === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(item.observed_at) ? { observed_at: item.observed_at } : {}),
       ...(typeof item.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(item.code) ? { code: item.code } : {}) }];
   }) : [];

@@ -11,13 +11,14 @@ const projectLock = value => value && typeof value === 'object' && !Array.isArra
   : undefined;
 
 const providerDiagnosticStages = new Set(['page_list_request', 'page_relation_refresh', 'provider_snapshot']);
-const providerDiagnosticOutcomes = new Set(['completed', 'unavailable', 'timeout', 'error']);
+const providerDiagnosticPhases = new Set(['candidate_capture', 'page_text', 'batch_verification', 'control_cleanup', 'response_projection']);
+const providerDiagnosticOutcomes = new Set(['started', 'completed', 'unavailable', 'timeout', 'error']);
 const projectProviderOperationDiagnostics = value => Array.isArray(value) ? value.slice(-12).flatMap(item => {
   if (!item || typeof item !== 'object' || Array.isArray(item) || !providerDiagnosticStages.has(item.stage) ||
       !providerDiagnosticOutcomes.has(item.outcome) || !Number.isSafeInteger(item.duration_ms) || item.duration_ms < 0 || item.duration_ms > 120_000 ||
       typeof item.observed_at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(item.observed_at) || !Number.isFinite(Date.parse(item.observed_at)) ||
       Object.hasOwn(item, 'code') && (typeof item.code !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(item.code))) return [];
-  return [{ stage: item.stage, outcome: item.outcome, duration_ms: item.duration_ms, observed_at: item.observed_at,
+  return [{ stage: item.stage, ...(providerDiagnosticPhases.has(item.phase) ? { phase: item.phase } : {}), outcome: item.outcome, duration_ms: item.duration_ms, observed_at: item.observed_at,
     ...(Object.hasOwn(item, 'code') ? { code: item.code } : {}) }];
 }) : [];
 

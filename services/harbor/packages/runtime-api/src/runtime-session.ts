@@ -362,6 +362,7 @@ export class RuntimeSessionStore {
     const recordProviderDiagnostic = (diagnostic: RuntimeProviderOperationDiagnostic) => {
       providerOperationDiagnostics.push({
         stage: diagnostic.stage,
+        ...(diagnostic.phase === undefined ? {} : { phase: diagnostic.phase }),
         outcome: diagnostic.outcome,
         duration_ms: boundedProviderDiagnosticDuration(diagnostic.duration_ms),
         observed_at: diagnostic.observed_at,
@@ -1503,6 +1504,7 @@ export class RuntimeSessionStore {
   private recordProviderDiagnostic(record: RuntimeSessionRecord, diagnostic: RuntimeProviderOperationDiagnostic): void {
     record.provider_operation_diagnostics.push({
       stage: diagnostic.stage,
+      ...(diagnostic.phase === undefined ? {} : { phase: diagnostic.phase }),
       outcome: diagnostic.outcome,
       duration_ms: boundedProviderDiagnosticDuration(diagnostic.duration_ms),
       observed_at: diagnostic.observed_at,

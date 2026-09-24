@@ -219,7 +219,8 @@ export interface RuntimeSessionOwnerProjection extends RuntimeSessionFacts {
 
 export interface RuntimeProviderOperationDiagnostic {
   stage: "page_list_request" | "page_relation_refresh" | "provider_snapshot";
-  outcome: "completed" | "unavailable" | "timeout" | "error";
+  phase?: "candidate_capture" | "page_text" | "batch_verification" | "control_cleanup" | "response_projection";
+  outcome: "started" | "completed" | "unavailable" | "timeout" | "error";
   duration_ms: number;
   observed_at: string;
   code?: string;

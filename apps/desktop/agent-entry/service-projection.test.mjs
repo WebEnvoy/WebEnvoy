@@ -39,6 +39,7 @@ test('owner session projection exposes only bounded provider stage diagnostics',
   const observedAt = '2026-09-22T00:00:00.000Z';
   const diagnostics = Array.from({ length: 13 }, (_, index) => ({
     stage: stages[index % stages.length], outcome: 'timeout', duration_ms: 60_000, observed_at: observedAt,
+    ...(index === 12 ? { phase: 'candidate_capture', outcome: 'started', duration_ms: 0 } : {}),
     code: 'request_timeout', page_text: 'private page content', stack: 'user:password@private.example'
   }));
   diagnostics.push({ stage: 'provider_snapshot', outcome: 'error', duration_ms: 1, observed_at: observedAt, code: 'https://user:password@private.example' });
@@ -52,10 +53,11 @@ test('owner session projection exposes only bounded provider stage diagnostics',
   assert.equal(result.provider_operation_diagnostics.length, 11);
   assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'page_relation_refresh'));
   assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'provider_snapshot'));
+  assert.ok(result.provider_operation_diagnostics.some(item => item.phase === 'candidate_capture' && item.outcome === 'started'));
   assert.equal(JSON.stringify(result).includes('private page content'), false);
   assert.equal(JSON.stringify(result).includes('password'), false);
   assert.ok(result.provider_operation_diagnostics.every(item => Object.keys(item).every(key =>
-    ['stage', 'outcome', 'duration_ms', 'observed_at', 'code'].includes(key))));
+    ['stage', 'phase', 'outcome', 'duration_ms', 'observed_at', 'code'].includes(key))));
 });
 
 test('invalid generation is never hidden by terminal stop compatibility', () => {

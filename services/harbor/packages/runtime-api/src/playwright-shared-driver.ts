@@ -54,7 +54,8 @@ const MAX_LINE_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 type JsonObject = Record<string, unknown>;
-type DriverResponse = { id: number; status: "ok" | "error"; result?: unknown; message?: string };
+type DriverResponse = { id: number; status?: "ok" | "error"; result?: unknown; message?: string; event?: string };
+const PROVIDER_DIAGNOSTIC_PHASES = new Set(["candidate_capture", "page_text", "batch_verification", "control_cleanup", "response_projection"]);
 
 export type SharedProviderAdapter = {
   provider_id: string;
@@ -247,6 +248,10 @@ class JsonlDriverProcess {
         void this.close();
         return;
       }
+      if (response.event === "provider_snapshot_phase") {
+        this.consumeProviderSnapshotPhase(response);
+        continue;
+      }
       const pending = this.pending.get(response.id);
       if (!pending) continue;
       clearTimeout(pending.timer);
@@ -260,6 +265,22 @@ class JsonlDriverProcess {
         pending.reject(error);
       }
     }
+  }
+
+  private consumeProviderSnapshotPhase(value: DriverResponse): void {
+    if (!this.recordDiagnostic || value.id !== 0 || value.status !== undefined) return;
+    try {
+      const raw = value as DriverResponse & Record<string, unknown>;
+      if (raw.stage !== "provider_snapshot" || typeof raw.phase !== "string" || !PROVIDER_DIAGNOSTIC_PHASES.has(raw.phase) ||
+        !["started", "completed", "error", "unavailable"].includes(String(raw.outcome)) ||
+        typeof raw.duration_ms !== "number" || !Number.isSafeInteger(raw.duration_ms) || typeof raw.observed_at !== "string" ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(raw.observed_at)) return;
+      this.recordDiagnostic({
+        stage: "provider_snapshot", phase: raw.phase as RuntimeProviderOperationDiagnostic["phase"],
+        outcome: raw.outcome as RuntimeProviderOperationDiagnostic["outcome"],
+        duration_ms: Math.max(0, Math.min(120_000, raw.duration_ms)), observed_at: raw.observed_at
+      });
+    } catch { /* Driver diagnostics never affect Provider behavior. */ }
   }
 
   private failAll(error: Error): void {
