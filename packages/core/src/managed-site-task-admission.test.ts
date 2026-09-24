@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -44,6 +44,7 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
     const skillPath = join(root, packagePath, "SKILL.md");
     const lockPath = join(root, packagePath, "package-lock.json");
     const capabilityPath = join(root, packagePath, "capabilities/managed-page-snapshot.json");
+    await writeFile(join(root, ".gitattributes"), `${packagePath}/SKILL.md diff=hostile\n`);
     const capabilityRef = "lode://site-capability/github/managed-page-snapshot@1.0.0";
     const capabilitySha = sha256("capability");
     const baseCode = "export function run() { return 'Built by'; }\n";
@@ -158,7 +159,15 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
     assert.equal(inspected.authoring_commit, authoringCommit);
     assert.equal(inspected.source_commit, sourceCommit);
     assert.deepEqual(inspected.changed_paths, ["SKILL.md", "capabilities/managed-page-snapshot.json", "manifest.json", "package-lock.json", "registry/local-packages.json", "scripts/read-daily-trending-top5.mjs"]);
+    const diffMarker = join(directory, "external-diff-ran");
+    const externalDiff = join(directory, "external-diff.sh");
+    await writeFile(externalDiff, `#!/bin/sh\nprintf 'ran' > '${diffMarker}'\nexit 0\n`);
+    await chmod(externalDiff, 0o700);
+    await git(root, "config", "diff.external", externalDiff);
+    await git(root, "config", "diff.hostile.textconv", externalDiff);
+    await git(root, "config", "core.pager", externalDiff);
     const diff = await store.candidateDiff({ candidate_ref: inspected.candidate_ref }) as Json;
+    await assert.rejects(access(diffMarker), { code: "ENOENT" }, "external diff, textconv, and pager programs are never executed by Core");
     assert.match(diff.diff, /Contributors/);
     assert.match(diff.diff, /registry\/local-packages\.json/);
 
@@ -197,6 +206,98 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
       store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: packageRef, base_revision_ref: basePin.revision_ref, task_ref: taskRef }),
       /managed_site_task_source_tree_mismatch/
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("owner Git inspection ignores executable config, inherited GIT overrides, custom filters, and redirected Git roots", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "webenvoy-site-task-git-safety-")));
+  const repo = join(directory, "authoring");
+  const redirectedRepo = join(directory, "redirected");
+  const marker = join(directory, "fsmonitor-ran");
+  const fsmonitor = join(directory, "fsmonitor.sh");
+  const envMarker = join(directory, "env-fsmonitor-ran");
+  const envFsmonitor = join(directory, "env-fsmonitor.sh");
+  const filterRepo = join(directory, "filter-repo");
+  const filterMarker = join(directory, "filter-ran");
+  const filter = join(directory, "clean-filter.sh");
+  const runtime: SiteTaskAdmissionRuntime = {
+    approvedBasePackageFor() { return undefined; },
+    async verifyPackageRoot() { throw new Error("not used in repository selection"); },
+    scriptCodeAdmissionRef() { return "not-used"; }
+  };
+  const store = createFileManagedSiteTaskAdmissionStore({
+    directory: join(directory, "owner"), managedDataRoot: join(directory, "managed"), runtime
+  });
+  try {
+    await mkdir(repo, { recursive: true });
+    await git(repo, "init", "--quiet");
+    await git(repo, "config", "user.name", "Git Safety Test");
+    await git(repo, "config", "user.email", "git-safety@example.invalid");
+    await writeFile(join(repo, "README.md"), "selected repository\n");
+    await commit(repo, "initialize selected repository");
+    await writeFile(fsmonitor, `#!/bin/sh\nprintf 'ran' > '${marker}'\nprintf 'token\\n'\n`);
+    await chmod(fsmonitor, 0o700);
+    const configPath = join(repo, ".git/config");
+    await writeFile(configPath, `${await readFile(configPath, "utf8")}\n[core]\n\tfsmonitor = ${fsmonitor}\n`);
+    const selected = await store.selectAuthoringRepository({ path: repo }) as Json;
+    await assert.rejects(access(marker), { code: "ENOENT" }, "Agent-authored core.fsmonitor is never executed by Core");
+
+    await mkdir(redirectedRepo, { recursive: true });
+    await git(redirectedRepo, "init", "--quiet");
+    await git(redirectedRepo, "config", "user.name", "Git Safety Test");
+    await git(redirectedRepo, "config", "user.email", "git-safety@example.invalid");
+    await writeFile(join(redirectedRepo, "README.md"), "selected repository\n");
+    await commit(redirectedRepo, "initialize redirected repository");
+    await writeFile(envFsmonitor, `#!/bin/sh\nprintf 'ran' > '${envMarker}'\nprintf 'token\\n'\n`);
+    await chmod(envFsmonitor, 0o700);
+    const envKeys = ["GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
+    const originalEnv = new Map(envKeys.map(key => [key, process.env[key]]));
+    try {
+      process.env.GIT_DIR = join(redirectedRepo, ".git");
+      process.env.GIT_WORK_TREE = redirectedRepo;
+      process.env.GIT_CONFIG_COUNT = "1";
+      process.env.GIT_CONFIG_KEY_0 = "core.fsmonitor";
+      process.env.GIT_CONFIG_VALUE_0 = envFsmonitor;
+      await assert.rejects(
+        store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: packageRef, base_revision_ref: "unapproved", task_ref: taskRef }),
+        /managed_site_task_base_revision_unapproved/
+      );
+    } finally {
+      for (const [key, value] of originalEnv) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    await assert.rejects(access(envMarker), { code: "ENOENT" }, "inherited GIT_* config and repository overrides are ignored");
+
+    await git(repo, "config", "core.worktree", redirectedRepo);
+    await assert.rejects(store.selectAuthoringRepository({ path: repo }), /managed_site_task_authoring_repository_invalid/);
+
+    await git(redirectedRepo, "config", "core.worktree", repo);
+    await rm(join(repo, ".git"), { recursive: true, force: true });
+    await writeFile(join(repo, ".git"), `gitdir: ${join(redirectedRepo, ".git")}\n`);
+    const redirectedStore = createFileManagedSiteTaskAdmissionStore({
+      directory: join(directory, "redirected-owner"), managedDataRoot: redirectedRepo, runtime
+    });
+    await assert.rejects(
+      redirectedStore.selectAuthoringRepository({ path: repo }),
+      /managed_site_task_authoring_repository_invalid|managed_site_task_authoring_repository_in_managed_root/
+    );
+
+    await mkdir(filterRepo, { recursive: true });
+    await git(filterRepo, "init", "--quiet");
+    await git(filterRepo, "config", "user.name", "Git Safety Test");
+    await git(filterRepo, "config", "user.email", "git-safety@example.invalid");
+    await writeFile(join(filterRepo, ".gitattributes"), "README.md filter=hostile\n");
+    await writeFile(join(filterRepo, "README.md"), "tracked bytes\n");
+    await commit(filterRepo, "initialize filter fixture");
+    await writeFile(filter, `#!/bin/sh\nprintf 'ran' > '${filterMarker}'\ncat\n`);
+    await chmod(filter, 0o700);
+    await git(filterRepo, "config", "filter.hostile.clean", filter);
+    await assert.rejects(store.selectAuthoringRepository({ path: filterRepo }), /managed_site_task_authoring_repository_invalid/);
+    await assert.rejects(access(filterMarker), { code: "ENOENT" }, "custom clean filters are rejected before status can execute them");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

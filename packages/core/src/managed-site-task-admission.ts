@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError } from "./managed-access.js";
 import type { SiteSkillPackagePin, VerifiedSiteTask } from "./site-skill-package.js";
@@ -61,6 +61,7 @@ const sourceCandidatePattern = /^webenvoy:site-task-candidate\/[0-9a-f-]{36}#sha
 const repositoryRefPattern = /^webenvoy:site-task-authoring-repository\/[0-9a-f-]{36}$/;
 const localRevisionPattern = /^webenvoy:site-task-source-revision\/[0-9a-f-]{36}@1#sha256:[a-f0-9]{64}$/;
 const sourceAdmissionPattern = /^webenvoy\.source-admission\/site-skill-package\/v1#sha256:[a-f0-9]{64}$/;
+const gitNullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
 
 type StoredRepository = { repository_ref: string; path: string; selected_at: string };
 type StoredCandidate = {
@@ -185,9 +186,28 @@ export type SiteTaskAdmissionRuntime = {
   scriptCodeAdmissionRef(pin: ExtendedSiteSkillPackagePin): string;
 };
 
-async function git(root: string, args: string[], maxBuffer = 2 * 1024 * 1024): Promise<GitResult> {
+async function git(root: string, args: string[], maxBuffer = 2 * 1024 * 1024, useSelectedWorktree = true): Promise<GitResult> {
   try {
-    const result = await execFileAsync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer });
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) if (/^GIT_/i.test(key)) delete env[key];
+    Object.assign(env, {
+      GIT_CONFIG_GLOBAL: gitNullDevice,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_ATTR_NOSYSTEM: "1",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_PAGER: "cat",
+      PAGER: "cat",
+      LC_ALL: "C"
+    });
+    const commandArgs = args[0] === "diff" ? ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)] : args;
+    const safeArgs = [
+      "--no-pager", "-c", "core.fsmonitor=false", "-c", `core.hooksPath=${gitNullDevice}`,
+      "-c", "core.pager=cat", "-c", "pager.status=false", "-c", "diff.external=", "-C", root
+    ];
+    if (useSelectedWorktree) safeArgs.push(`--work-tree=${root}`);
+    safeArgs.push(...commandArgs);
+    const result = await execFileAsync("git", safeArgs, { encoding: "utf8", maxBuffer, env });
     return { stdout: String(result.stdout), stderr: String(result.stderr) };
   } catch (error) {
     const code = (error as { code?: unknown }).code;
@@ -460,20 +480,74 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
     await assertNoSymlinkPath(repo.path);
     const root = await realpath(repo.path).catch(() => fail("managed_site_task_authoring_repository_unavailable"));
     if (root !== repo.path) return fail("managed_site_task_authoring_repository_invalid");
-    const top = (await git(root, ["rev-parse", "--show-toplevel"])).stdout.trim();
-    if (!top || await realpath(top).catch(() => "") !== root) return fail("managed_site_task_authoring_repository_invalid");
+    await assertOutsideManagedRoots(root);
+    await assertGitRepositoryBoundary(root);
+    await assertNoRepositoryFilters(root);
     const status = (await git(root, ["status", "--porcelain=v1", "--untracked-files=all"])).stdout;
     if (status !== "") return fail("managed_site_task_authoring_repository_dirty");
     const head = (await git(root, ["rev-parse", "HEAD"])).stdout.trim();
     if (!commitPattern.test(head)) return fail("managed_site_task_authoring_repository_invalid");
     return root;
   }
+  async function canonicalPotentialPath(path: string): Promise<string> {
+    const absolute = resolve(path);
+    try { return await realpath(absolute); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return fail("managed_site_task_authoring_repository_unavailable");
+      const parent = dirname(absolute);
+      if (parent === absolute) return absolute;
+      return join(await canonicalPotentialPath(parent), basename(absolute));
+    }
+  }
   async function assertOutsideManagedRoots(root: string): Promise<void> {
     const roots = [options.directory, options.managedDataRoot, ...(options.managedMaterializationPaths ?? [])].filter((value): value is string => Boolean(value));
     for (const protectedPath of roots) {
-      const absolute = resolve(protectedPath);
-      if (within(root, absolute)) return fail("managed_site_task_authoring_repository_in_managed_root");
+      const absolute = await canonicalPotentialPath(protectedPath);
+      if (within(root, absolute) || within(absolute, root)) return fail("managed_site_task_authoring_repository_in_managed_root");
     }
+  }
+  async function assertGitRepositoryBoundary(root: string): Promise<void> {
+    const dotGit = join(root, ".git");
+    const dotGitInfo = await lstat(dotGit).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+    if (dotGitInfo.isSymbolicLink() || !dotGitInfo.isDirectory() && !dotGitInfo.isFile() || dotGitInfo.isFile() && dotGitInfo.size > 4096) return fail("managed_site_task_authoring_repository_invalid");
+    const top = (await git(root, ["rev-parse", "--show-toplevel"], 2 * 1024 * 1024, false)).stdout.trim();
+    if (!top || await realpath(top).catch(() => "") !== root) return fail("managed_site_task_authoring_repository_invalid");
+    const gitDir = await realpath((await git(root, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"], 2 * 1024 * 1024, false)).stdout.trim())
+      .catch(() => fail("managed_site_task_authoring_repository_invalid"));
+    const commonDir = await realpath((await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"], 2 * 1024 * 1024, false)).stdout.trim())
+      .catch(() => fail("managed_site_task_authoring_repository_invalid"));
+    await assertNoSymlinkPath(gitDir);
+    await assertNoSymlinkPath(commonDir);
+    if (dotGitInfo.isDirectory()) {
+      if (gitDir !== await realpath(dotGit) || commonDir !== gitDir) return fail("managed_site_task_authoring_repository_invalid");
+    } else {
+      const gitFile = (await readFile(dotGit, "utf8")).trim();
+      const match = /^gitdir: (.+)$/.exec(gitFile);
+      if (!match) return fail("managed_site_task_authoring_repository_invalid");
+      const declaredGitDir = await realpath(resolve(root, match[1]!)).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+      if (declaredGitDir !== gitDir) return fail("managed_site_task_authoring_repository_invalid");
+      const commonFile = join(gitDir, "commondir");
+      const commonInfo = await lstat(commonFile).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+      if (!commonInfo.isFile() || commonInfo.isSymbolicLink() || commonInfo.size > 4096) return fail("managed_site_task_authoring_repository_invalid");
+      const declaredCommonDir = await realpath(resolve(gitDir, (await readFile(commonFile, "utf8")).trim())).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+      const worktreeParent = join(commonDir, "worktrees");
+      const worktreeId = relative(worktreeParent, gitDir);
+      if (declaredCommonDir !== commonDir || !worktreeId || worktreeId === ".." || worktreeId.startsWith(`..${sep}`) || worktreeId.includes(sep)) return fail("managed_site_task_authoring_repository_invalid");
+      const backlinkFile = join(gitDir, "gitdir");
+      const backlinkInfo = await lstat(backlinkFile).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+      if (!backlinkInfo.isFile() || backlinkInfo.isSymbolicLink() || backlinkInfo.size > 4096) return fail("managed_site_task_authoring_repository_invalid");
+      const backlink = await realpath(resolve(gitDir, (await readFile(backlinkFile, "utf8")).trim())).catch(() => fail("managed_site_task_authoring_repository_invalid"));
+      if (backlink !== dotGit) return fail("managed_site_task_authoring_repository_invalid");
+    }
+    await assertOutsideManagedRoots(gitDir);
+    await assertOutsideManagedRoots(commonDir);
+  }
+  async function assertNoRepositoryFilters(root: string): Promise<void> {
+    const filters = await git(root, ["config", "--local", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"]).catch(error => {
+      if ((error as { code?: unknown }).code === 1) return { stdout: "", stderr: "" };
+      throw error;
+    });
+    if (filters.stdout !== "") return fail("managed_site_task_authoring_repository_invalid");
   }
   async function head(root: string): Promise<string> { return (await git(root, ["rev-parse", "HEAD"])).stdout.trim(); }
   async function verifySourceTree(root: string, pin: ExtendedSiteSkillPackagePin, verified: Pick<VerifiedSiteTask, "files">): Promise<void> {
@@ -558,8 +632,8 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
       const root = await realpath(path).catch(() => fail("managed_site_task_authoring_repository_unavailable"));
       if (root !== resolve(path)) return fail("managed_site_task_authoring_repository_invalid");
       await assertOutsideManagedRoots(root);
-      const top = (await git(root, ["rev-parse", "--show-toplevel"])).stdout.trim();
-      if (!top || await realpath(top).catch(() => "") !== root) return fail("managed_site_task_authoring_repository_invalid");
+      await assertGitRepositoryBoundary(root);
+      await assertNoRepositoryFilters(root);
       if ((await git(root, ["status", "--porcelain=v1", "--untracked-files=all"])).stdout !== "") return fail("managed_site_task_authoring_repository_dirty");
       const repositoryRef = `webenvoy:site-task-authoring-repository/${randomUUID()}`;
       return transaction(state => {
