@@ -211,7 +211,15 @@ try {
       ...submit, target: { target_type: 'public_http_origin', target_ref: sample.origin } }), true);
     const wrongTargetCode = denied(wrongTarget, `${sample.name}:target_must_be_omitted`);
     assert.equal(wrongTargetCode, 'managed_task_invalid_input');
-    const completed = success(await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-execute`, ...submit })), `${sample.name}:submit`);
+    const attempted = await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-execute`, ...submit }), true);
+    if (attempted.run?.run_id && attempted.run.status !== 'succeeded') {
+      const original = await agent('task query', taskRequest('task.query', sample,
+        { selector: { run_id: attempted.run.run_id } }), true);
+      evidence.samples[sample.name] = { run_id: attempted.run.run_id, status: attempted.run.status,
+        dispatch_state: attempted.run.dispatch_state, failure_code: attempted.failure?.code,
+        original_query_same_run: original.run?.run_id === attempted.run.run_id };
+    }
+    const completed = success(attempted, `${sample.name}:submit`);
     assert.equal(completed.run.status, 'succeeded', `${sample.name}:run_status`);
     assert.equal(completed.result.outcome, 'success', `${sample.name}:result_outcome`);
     assert.equal(completed.result.data.status, 'available', `${sample.name}:business_status`);
