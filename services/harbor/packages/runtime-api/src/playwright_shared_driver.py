@@ -39,6 +39,7 @@ MAX_SNAPSHOT_LIMIT = 128
 MAX_OBSERVATION_ELEMENTS = 20_000
 MAX_OBSERVATION_CONTROLS = 2_048
 SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL = 32
+SNAPSHOT_CAPTURE_BATCH_SIZE = 16
 MAX_OBSERVATION_METADATA_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATION_RESPONSE_BYTES = 256 * 1024
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
@@ -1100,85 +1101,104 @@ class Driver:
         semantic_complete = True
         metadata_bytes = 0
         candidate_limit_hit = False
-        for index, element in enumerate(element_handles):
-            if index >= MAX_OBSERVATION_ELEMENTS:
-                reasons.append("scan_limit_reached")
-                await self._dispose_handle(element)
-                continue
-            if len(records) >= MAX_OBSERVATION_CONTROLS:
-                candidate_limit_hit = True
-                await self._dispose_handle(element)
-                continue
-            try:
-                sampled = index % SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL == 0
-                phase_code = f"control_index_{index}" if sampled else None
-                phase_started = self._record_snapshot_phase("control_read", "started", code=phase_code) if sampled else None
-                try:
-                    item = await self._read_control(element)
-                except Exception:
-                    if sampled:
-                        self._record_snapshot_phase("control_read", "error", phase_started, phase_code)
-                    raise
-                if sampled:
-                    self._record_snapshot_phase("control_read", "completed", phase_started, phase_code)
 
-                phase_started = self._record_snapshot_phase("accessibility_semantics", "started", code=phase_code) if sampled else None
-                try:
-                    provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
-                except Exception:
-                    if sampled:
-                        self._record_snapshot_phase("accessibility_semantics", "error", phase_started, phase_code)
-                    raise
-                if sampled:
-                    self._record_snapshot_phase("accessibility_semantics", "completed", phase_started, phase_code)
+        # Read-only per-control checks are safe to overlap. Results are folded
+        # in DOM order and retain the same before/after identity verification.
+        async def inspect_candidate(index: int, element: Any) -> tuple[dict[str, Any] | None, tuple[str, str] | None]:
+            sampled = index % SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL == 0
+            phase_code = f"control_index_{index}" if sampled else None
+            phase_started = self._record_snapshot_phase("control_read", "started", code=phase_code) if sampled else None
+            try:
+                item = await self._read_control(element)
             except Exception:
+                if sampled:
+                    self._record_snapshot_phase("control_read", "error", phase_started, phase_code)
+                raise
+            if sampled:
+                self._record_snapshot_phase("control_read", "completed", phase_started, phase_code)
+
+            phase_started = self._record_snapshot_phase("accessibility_semantics", "started", code=phase_code) if sampled else None
+            try:
+                provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+            except Exception:
+                if sampled:
+                    self._record_snapshot_phase("accessibility_semantics", "error", phase_started, phase_code)
+                raise
+            if sampled:
+                self._record_snapshot_phase("accessibility_semantics", "completed", phase_started, phase_code)
+            return item, provider
+
+        index = 0
+        scan_count = min(len(element_handles), MAX_OBSERVATION_ELEMENTS)
+        while index < scan_count:
+            available_controls = MAX_OBSERVATION_CONTROLS - len(records)
+            if available_controls <= 0:
+                candidate_limit_hit = True
+                for remaining in element_handles[index:]:
+                    await self._dispose_handle(remaining)
+                break
+            batch_size = min(SNAPSHOT_CAPTURE_BATCH_SIZE, scan_count - index, available_controls)
+            batch_handles = element_handles[index:index + batch_size]
+            inspected = await asyncio.gather(
+                *(inspect_candidate(index + offset, element) for offset, element in enumerate(batch_handles)),
+                return_exceptions=True
+            )
+            failure = next((value for value in inspected if isinstance(value, BaseException)), None)
+            if failure is not None:
                 for record in records:
                     await self._dispose_handle(record["handle"])
                     if record.get("form_handle") is not None:
                         await self._dispose_handle(record["form_handle"])
                 for remaining in element_handles[index:]:
                     await self._dispose_handle(remaining)
-                raise
-            if item is None:
-                await self._dispose_handle(element)
-                continue
-            if provider is not None:
-                item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
-            normalized = self._normalized_control(item, start_url or "")
-            if normalized is None:
-                await self._dispose_handle(element)
-                continue
-            public = self._public_control(normalized)
-            encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-            if metadata_bytes + encoded_size > MAX_OBSERVATION_METADATA_BYTES:
-                reasons.append("metadata_truncated")
-                semantic_complete = False
-                await self._dispose_handle(element)
-                continue
-            metadata_bytes += encoded_size
-            form_handle = None
-            if isinstance(normalized.get("action"), dict) and normalized["action"].get("form") is not None:
-                try:
-                    form_handle = await element.evaluate_handle("e => e.form")
-                except Exception:
+                raise failure
+
+            for offset, (item, provider) in enumerate(inspected):
+                element = batch_handles[offset]
+                if item is None:
+                    await self._dispose_handle(element)
+                    continue
+                if provider is not None:
+                    item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
+                normalized = self._normalized_control(item, start_url or "")
+                if normalized is None:
+                    await self._dispose_handle(element)
+                    continue
+                public = self._public_control(normalized)
+                encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                if metadata_bytes + encoded_size > MAX_OBSERVATION_METADATA_BYTES:
+                    reasons.append("metadata_truncated")
                     semantic_complete = False
-                    if "semantic_unavailable" not in reasons:
-                        reasons.append("semantic_unavailable")
-            ref = f"control:{state.generation}:{state.snapshot_serial}:{len(records)}"
-            records.append({
-                "target_ref": ref,
-                "handle": element,
-                "public": public,
-                "semantic": normalized["semantic"],
-                "action": normalized["action"],
-                "action_fingerprint": normalized["action_fingerprint"],
-                "form_handle": form_handle,
-                "provider_accessibility": provider is not None,
-            })
-            if public["truncated_fields"]:
-                semantic_complete = False
-        if len(element_handles) > MAX_OBSERVATION_ELEMENTS and "scan_limit_reached" not in reasons:
+                    await self._dispose_handle(element)
+                    continue
+                metadata_bytes += encoded_size
+                form_handle = None
+                if isinstance(normalized.get("action"), dict) and normalized["action"].get("form") is not None:
+                    try:
+                        form_handle = await element.evaluate_handle("e => e.form")
+                    except Exception:
+                        semantic_complete = False
+                        if "semantic_unavailable" not in reasons:
+                            reasons.append("semantic_unavailable")
+                ref = f"control:{state.generation}:{state.snapshot_serial}:{len(records)}"
+                records.append({
+                    "target_ref": ref,
+                    "handle": element,
+                    "public": public,
+                    "semantic": normalized["semantic"],
+                    "action": normalized["action"],
+                    "action_fingerprint": normalized["action_fingerprint"],
+                    "form_handle": form_handle,
+                    "provider_accessibility": provider is not None,
+                })
+                if public["truncated_fields"]:
+                    semantic_complete = False
+            index += batch_size
+        if len(element_handles) > MAX_OBSERVATION_ELEMENTS:
             reasons.append("scan_limit_reached")
+            if not candidate_limit_hit:
+                for element in element_handles[MAX_OBSERVATION_ELEMENTS:]:
+                    await self._dispose_handle(element)
         if candidate_limit_hit and "capture_limit_reached" not in reasons:
             reasons.append("capture_limit_reached")
         if state.generation != start_generation or safe_url(state.page.url) != start_url:
