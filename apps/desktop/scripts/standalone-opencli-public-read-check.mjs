@@ -74,6 +74,7 @@ function success(value, label) { assert.equal(value.ok, true, `${label}:${value.
 function denied(value, label) {
   const code = value.failure?.code ?? value.error?.code ?? value.result?.failure?.code;
   assert.ok(code && (value.ok === false || value.error || value.result?.ok === false), `${label}:unexpected_success`);
+  if (value.dispatch_state) assert.equal(value.dispatch_state, 'not_dispatched', `${label}:unexpected_dispatch`);
   assert.notEqual(code, 'managed_task_unavailable', `${label}:entry_not_assembled`);
   if (value.run) assert.equal(value.run.dispatch_state, 'not_dispatched', `${label}:dispatched`);
   return code;
@@ -194,18 +195,22 @@ try {
     sample.submit = submit;
     const beforeInstall = await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-before-install`, ...submit }), true);
     const beforeInstallCode = denied(beforeInstall, `${sample.name}:not_installed`);
+    assert.equal(beforeInstallCode, 'managed_skill_not_installed');
     success(await agent('skills', { ...skillRequest('skill.install', sample), revision_ref: manifest.revision_ref }), `${sample.name}:install`);
     const disabled = await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-disabled`, ...submit }), true);
     const disabledCode = denied(disabled, `${sample.name}:disabled`);
+    assert.equal(disabledCode, 'managed_skill_disabled');
     const afterInstall = success(await agent('skills', skillRequest('skill.inspect', sample)), `${sample.name}:inspect_installed`);
     success(await agent('skills', { ...skillRequest('skill.enable', sample), target_revision_ref: manifest.revision_ref,
       expected_revision_ref: null, expected_record_version: afterInstall.result.skill.record_version }), `${sample.name}:enable`);
     const wrongPin = await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-wrong-pin`,
       ...submit, package: { ...submit.package, package_digest: `sha256:${'0'.repeat(64)}` } }), true);
     const wrongPinCode = denied(wrongPin, `${sample.name}:wrong_pin`);
+    assert.equal(wrongPinCode, 'managed_access_denied');
     const wrongTarget = await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-wrong-target`,
       ...submit, target: { target_type: 'public_http_origin', target_ref: sample.origin } }), true);
     const wrongTargetCode = denied(wrongTarget, `${sample.name}:target_must_be_omitted`);
+    assert.equal(wrongTargetCode, 'managed_task_invalid_input');
     const completed = success(await agent('task submit', taskRequest('task.submit', sample, { idempotency_key: `${sample.name}-execute`, ...submit })), `${sample.name}:submit`);
     assert.equal(completed.run.status, 'succeeded', `${sample.name}:run_status`);
     assert.equal(completed.result.outcome, 'success', `${sample.name}:result_outcome`);

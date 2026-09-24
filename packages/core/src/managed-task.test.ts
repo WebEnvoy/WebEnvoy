@@ -64,7 +64,9 @@ test("program-side public read prepares without a browser service or Page target
       outputs: { schema_ref: "lode://schema/opencli-trending-output@0.1.0", result_kind: "github_trending", completeness: "required" },
       verification: { post_check_ref: "lode://check/opencli-trending@0.1.0" },
       data_handling: { external_egress: "declared" }, network_read: policy },
-    input_schema: { type: "object", properties: {}, additionalProperties: false },
+    input_schema: { type: "object", properties: { limit: { anyOf: [
+      { type: "integer", minimum: 1, maximum: 25 }, { type: "string", pattern: "^([1-9]|1[0-9]|2[0-5])$" }
+    ], default: 25 } }, additionalProperties: false },
     output_schema: { type: "object", properties: {}, additionalProperties: true }, post_check: {},
     manifest_bytes: Buffer.from("{}"), skill_text: Buffer.from("skill"), files: []
   };
@@ -87,14 +89,15 @@ test("program-side public read prepares without a browser service or Page target
       workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" }
       // No managedBrowserService: program-side reads must not need an Instance or Provider.
     });
-    const submitted = await taskService.operate(credentialHash, {
+    const submitRequest = {
       schema_version: "webenvoy.managed-task-operation/v1", operation: "task.submit", idempotency_key: "public-read-no-page-target",
       grant_id: grant.grant_id, connection_id: connection.connection_id,
       task_scope: { operations: ["task.submit"], skill_refs: [packageRef], source_refs: [revisionRef], profile_refs: [profile], origins: [origin] },
-      package: pin, input: { schema_ref: "lode://schema/opencli-trending-input@0.1.0", carrier: "webenvoy.managed-task-inline/v1", value: {} },
+      package: pin, input: { schema_ref: "lode://schema/opencli-trending-input@0.1.0", carrier: "webenvoy.managed-task-inline/v1", value: { limit: 2 } },
       intent: { summary: "Read public GitHub Trending data.", policy: { risk: "read", execution_intent: "read", timeout_ms: 10_000 } }
       // Deliberately omit target; the pinned task supplies its exact public origin.
-    }, { agentSocketIngressVerified: true }) as Json;
+    };
+    const submitted = await taskService.operate(credentialHash, submitRequest, { agentSocketIngressVerified: true }) as Json;
     assert.equal(submitted.ok, true, JSON.stringify(submitted));
     assert.equal(submitted.run.status, "running");
     const run = await runRecordStore.getRunRecord(submitted.run.run_id);
@@ -102,6 +105,11 @@ test("program-side public read prepares without a browser service or Page target
     assert.equal(run?.public_result_summary?.target_ref, origin);
     assert.equal(Object.hasOwn(submitted.worker_execution.ticket, "target"), false);
     assert.equal(submitted.worker_execution.ticket.authorization.profile_ref, profile);
+    const stringLimit = await taskService.operate(credentialHash, { ...submitRequest, idempotency_key: "public-read-string-limit",
+      input: { ...submitRequest.input, value: { limit: "2" } } }, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(stringLimit.ok, true, JSON.stringify(stringLimit));
+    await rejectsWithCode(taskService.operate(credentialHash, { ...submitRequest, idempotency_key: "public-read-out-of-range",
+      input: { ...submitRequest.input, value: { limit: 26 } } }, { agentSocketIngressVerified: true }), ["managed_access_denied"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

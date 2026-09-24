@@ -543,6 +543,9 @@ observation 和 browser Provider 绑定要求；固定来源、代码准入、�
 Instance/Page/ControlLease/browser Context。普通 Agent 的正式入口仍是
 `webenvoy_task.task.submit/query/stop`，只授予其实际 `task.*` operation 与精确
 package revision；`network.read` 只在该 Run 的 worker ticket 内出现。
+这里豁免的是任务执行时的 browser Provider 绑定；创建真实 Profile 仍遵守
+现行 Provider Selection 合同，需选择已安装且可用的 Provider。程序侧读取不启动
+该 Provider 的 Instance，也不从其 Context、Cookie 或代理取得请求材料。
 `task.submit` 对此目标必须完全省略 `target` 字段；Core 只从已验证的 task declaration 取得
 origin/请求策略，不从 Agent 输入或当前浏览器猜测。页面任务继续要求原 target。
 

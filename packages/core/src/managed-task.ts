@@ -256,12 +256,14 @@ function schemaValid(value: unknown, schemaValue: unknown): boolean {
     if (!Object.entries(value).every(([key, item]) => properties[key] === undefined || schemaValid(item, properties[key]))) return false;
   }
   if (Array.isArray(schema.allOf) && !schema.allOf.every(part => schemaValid(value, part))) return false;
+  if (schema.anyOf !== undefined && (!Array.isArray(schema.anyOf) || schema.anyOf.length === 0 ||
+      !schema.anyOf.every(isObject) || !schema.anyOf.some(part => schemaValid(value, part)))) return false;
   if (schema.if !== undefined) {
     if (!isObject(schema.if)) return false;
     const branch = schemaValid(value, schema.if) ? schema.then : schema.else;
     if (branch !== undefined && (!isObject(branch) || !schemaValid(value, branch))) return false;
   }
-  const supported = new Set(["$schema", "$id", "type", "const", "enum", "required", "properties", "items", "additionalProperties", "minItems", "maxItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "allOf", "if", "then", "else", "title", "description"]);
+  const supported = new Set(["$schema", "$id", "type", "const", "enum", "required", "properties", "items", "additionalProperties", "minItems", "maxItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "allOf", "anyOf", "if", "then", "else", "title", "description", "default"]);
   if (Object.keys(schema).some(key => !supported.has(key))) return false;
   return true;
 }
