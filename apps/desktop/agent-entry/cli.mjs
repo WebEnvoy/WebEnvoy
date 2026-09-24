@@ -26,6 +26,8 @@ Commands:
   uninstall   Remove receipt-managed host files (owner-only)
   access      Register, grant, revoke, and query owner access (owner-only)
   files       Manage owner-registered file references (owner-only)
+  account-system  Import and manage local AccountSystem definitions (owner-only)
+  site-task-admission  Review and admit private Git site-task repairs (owner-only)
   recovery    Inspect or apply owner-managed recovery (owner-only)
   instance    Discover and control a Runtime instance (owner-only)
   agent       Set up or consume the managed browser projection (Agent-only)
@@ -55,6 +57,20 @@ Owner control identity is required. File import accepts an optional correlation
 --operation-ref but it is not a receipt key. Export is protected by exclusive
 destination creation; revoke and delete are keyed by the exact --file-ref.
 After a lost response, inspect the same file and destination before retrying.`,
+  'account-system': `Usage: webenvoy account-system <import-template|list|create-draft|update-draft|check-draft|pin-draft|enable|disable|rollback|resolve> --data-dir DIR
+
+Owner-only local AccountSystem definitions. Import a fixed Lode template, edit
+an owner-local draft from a JSON file, inspect its exact field diff and
+dependencies, pin a new immutable revision, then explicitly enable or roll
+back. Template data never infers login identity or credentials.`,
+  'site-task-admission': `Usage: webenvoy site-task-admission <select-repository|list-repositories|inspect-candidate|candidate-diff|admit-source|admit-code|revoke-code|revoke-source|list-admissions> --data-dir DIR
+
+Owner-only admission for local repairs created in a private Git worktree.
+The installed Agent may draft files only in the owner-selected worktree;
+Core checks the exact Git source commit, package bytes, dependencies and
+script syntax before source admission. Code admission is a separate owner
+decision. Installation remains disabled until the owner explicitly enables
+the fixed revision; rollback and historical Run pins remain available.`,
   recovery: `Usage: webenvoy recovery <inspect|backup|plan|apply|status> --data-dir DIR
 
 Owner control identity is required. backup, plan and apply require a caller
@@ -142,7 +158,9 @@ const VALUE_FLAGS = new Set([
   '--chrome-playwright-version', '--chrome-source-path', '--chrome-source', '--chrome-archive', '--chrome-executable-sha256',
   '--display-name', '--credential-hash', '--idempotency-key', '--grant-file', '--policy-file', '--kind', '--id', '--operation-ref',
   '--source-path', '--profile-ref', '--mime-type', '--file-ref', '--destination-path', '--backup-ref', '--plan-file', '--confirmation-file',
-  '--client-file', '--request-file', '--run-id', '--runtime-session-ref', '--expected-control-file', '--agent-uid', '--owner-uid', '--agent-endpoint'
+  '--client-file', '--request-file', '--run-id', '--runtime-session-ref', '--expected-control-file', '--agent-uid', '--owner-uid', '--agent-endpoint',
+  '--template-ref', '--local-definition-ref', '--base-revision-ref', '--draft-ref', '--definition-file', '--expected-record-version', '--revision-ref',
+  '--path', '--repository-ref', '--package-ref', '--task-ref', '--candidate-ref', '--admission-ref'
 ]);
 const COMMAND_FLAGS = new Map([
   ['setup', new Set(['--data-dir', '--host-dir', '--agent-uid', '--codex-profile', '--approve-tools', '--previous-installation', '--browser-install-root', '--browser-root', '--browser-executable', '--python-path', '--python', '--browser-version', '--camoufox-version', '--playwright-version', '--browser-source-path', '--browser-source', '--browser-archive', '--camoufox-source-path', '--camoufox-source', '--camoufox-wheel', '--playwright-source-path', '--playwright-source', '--playwright-wheel', '--browser-executable-sha256', '--python-executable-sha256', '--camoufox-artifact', '--chrome-install-root', '--chrome-browser-root', '--chrome-executable', '--chrome-python-path', '--chrome-python', '--chrome-version', '--chrome-playwright-version', '--chrome-source-path', '--chrome-source', '--chrome-archive', '--chrome-executable-sha256'])],
@@ -158,6 +176,25 @@ const COMMAND_FLAGS = new Map([
   ['files:export', new Set(['--data-dir', '--file-ref', '--destination-path'])],
   ['files:revoke', new Set(['--data-dir', '--file-ref'])],
   ['files:delete', new Set(['--data-dir', '--file-ref'])],
+  ['account-system:import-template', new Set(['--data-dir', '--template-ref'])],
+  ['account-system:list', new Set(['--data-dir'])],
+  ['account-system:create-draft', new Set(['--data-dir', '--local-definition-ref', '--base-revision-ref'])],
+  ['account-system:update-draft', new Set(['--data-dir', '--draft-ref', '--definition-file'])],
+  ['account-system:check-draft', new Set(['--data-dir', '--draft-ref'])],
+  ['account-system:pin-draft', new Set(['--data-dir', '--draft-ref', '--expected-record-version'])],
+  ['account-system:enable', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--expected-record-version'])],
+  ['account-system:disable', new Set(['--data-dir', '--local-definition-ref', '--expected-record-version'])],
+  ['account-system:rollback', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--expected-record-version'])],
+  ['account-system:resolve', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--historical'])],
+  ['site-task-admission:select-repository', new Set(['--data-dir', '--path'])],
+  ['site-task-admission:list-repositories', new Set(['--data-dir'])],
+  ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--task-ref'])],
+  ['site-task-admission:candidate-diff', new Set(['--data-dir', '--candidate-ref'])],
+  ['site-task-admission:admit-source', new Set(['--data-dir', '--candidate-ref'])],
+  ['site-task-admission:admit-code', new Set(['--data-dir', '--admission-ref'])],
+  ['site-task-admission:revoke-code', new Set(['--data-dir', '--admission-ref'])],
+  ['site-task-admission:revoke-source', new Set(['--data-dir', '--admission-ref'])],
+  ['site-task-admission:list-admissions', new Set(['--data-dir', '--package-ref'])],
   ['recovery:inspect', new Set(['--data-dir', '--profile-ref', '--idempotency-key'])],
   ['recovery:backup', new Set(['--data-dir', '--profile-ref', '--idempotency-key'])],
   ['recovery:plan', new Set(['--data-dir', '--profile-ref', '--backup-ref', '--idempotency-key'])],
@@ -202,7 +239,7 @@ function validateCliSyntax(name, values) {
     if (topics.length > 3) throw cliError('help_topic_invalid');
     return;
   }
-  const action = ['access', 'files', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
+  const action = ['access', 'files', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
   const nestedAgentTask = name === 'agent' && action === 'task';
   const nestedTaskHelp = nestedAgentTask && values[1] === '--help';
   const nestedTaskCommand = nestedAgentTask && !nestedTaskHelp ? values[1] : undefined;
@@ -458,6 +495,75 @@ if (command === 'setup') {
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner(`/owner/files/${action}`, input);
   } else throw new Error('Use files import, inspect, export, revoke or delete with --data-dir. Owner file paths never enter Agent requests.');
+  printResult(result);
+} else if (command === 'account-system') {
+  const action = args[0];
+  const requestOwner = async (operation, fields = {}, write = false) => {
+    const body = { schema_version: 'webenvoy.account-system-owner-operation/v1', operation, ...fields };
+    if (write) await ensureOwnerRuntime(dataDir);
+    return write
+      ? ownerWriteRequest(dataDir, '/owner/account-systems/operations', body)
+      : ownerRequest(dataDir, '/owner/account-systems/operations', { method: 'POST', body });
+  };
+  const expectedVersion = () => {
+    const value = required('--expected-record-version');
+    if (!/^(0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error('account_system_record_version_invalid');
+    return Number(value);
+  };
+  let result;
+  if (action === 'import-template') {
+    result = await requestOwner('import_template', { template_ref: required('--template-ref') }, true);
+  } else if (action === 'list') {
+    result = await requestOwner('list');
+  } else if (action === 'create-draft') {
+    result = await requestOwner('create_draft', { local_definition_ref: required('--local-definition-ref'), base_revision_ref: required('--base-revision-ref') }, true);
+  } else if (action === 'update-draft') {
+    const definition = await readJsonFile(required('--definition-file'), 'account_system_definition_file_invalid');
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new Error('account_system_definition_file_invalid');
+    result = await requestOwner('update_draft', { draft_ref: required('--draft-ref'), definition }, true);
+  } else if (action === 'check-draft') {
+    result = await requestOwner('check_draft', { draft_ref: required('--draft-ref') });
+  } else if (action === 'pin-draft') {
+    result = await requestOwner('pin_draft', { draft_ref: required('--draft-ref'), expected_record_version: expectedVersion() }, true);
+  } else if (action === 'enable' || action === 'rollback') {
+    result = await requestOwner(action, { local_definition_ref: required('--local-definition-ref'), revision_ref: required('--revision-ref'), expected_record_version: expectedVersion() }, true);
+  } else if (action === 'disable') {
+    result = await requestOwner('disable', { local_definition_ref: required('--local-definition-ref'), expected_record_version: expectedVersion() }, true);
+  } else if (action === 'resolve') {
+    result = await requestOwner('resolve', { local_definition_ref: required('--local-definition-ref'),
+      ...(arg('--revision-ref') === undefined ? {} : { revision_ref: arg('--revision-ref') }),
+      ...(args.includes('--historical') ? { historical: true } : {}) });
+  } else throw new Error('Use account-system import-template, list, create-draft, update-draft, check-draft, pin-draft, enable, disable, rollback or resolve with --data-dir.');
+  printResult(result);
+} else if (command === 'site-task-admission') {
+  const action = args[0];
+  const requestOwner = async (operation, fields = {}, write = false) => {
+    const body = { schema_version: 'webenvoy.site-task-admission-owner-operation/v1', operation, ...fields };
+    if (write) await ensureOwnerRuntime(dataDir);
+    return write
+      ? ownerWriteRequest(dataDir, '/owner/site-task-admissions/operations', body)
+      : ownerRequest(dataDir, '/owner/site-task-admissions/operations', { method: 'POST', body });
+  };
+  let result;
+  if (action === 'select-repository') {
+    result = await requestOwner('select_authoring_repository', { path: resolve(required('--path')) }, true);
+  } else if (action === 'list-repositories') {
+    result = await requestOwner('list_authoring_repositories');
+  } else if (action === 'inspect-candidate') {
+    result = await requestOwner('inspect_candidate', {
+      repository_ref: required('--repository-ref'), package_ref: required('--package-ref'),
+      base_revision_ref: required('--base-revision-ref'), task_ref: required('--task-ref')
+    });
+  } else if (action === 'candidate-diff') {
+    result = await requestOwner('candidate_diff', { candidate_ref: required('--candidate-ref') });
+  } else if (action === 'admit-source') {
+    result = await requestOwner('admit_source', { candidate_ref: required('--candidate-ref') }, true);
+  } else if (action === 'admit-code' || action === 'revoke-code' || action === 'revoke-source') {
+    const operation = action.replaceAll('-', '_');
+    result = await requestOwner(operation, { admission_ref: required('--admission-ref') }, true);
+  } else if (action === 'list-admissions') {
+    result = await requestOwner('list_admissions', arg('--package-ref') === undefined ? {} : { package_ref: arg('--package-ref') });
+  } else throw new Error('Use site-task-admission select-repository, list-repositories, inspect-candidate, candidate-diff, admit-source, admit-code, revoke-code, revoke-source or list-admissions with --data-dir.');
   printResult(result);
 } else if (command === 'recovery') {
   const action = args[0];

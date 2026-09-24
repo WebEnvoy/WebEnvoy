@@ -1,0 +1,37 @@
+{
+  "schema": "managed-account-system-agent-operation-request.schema.json",
+  "cases": [
+    {
+      "name": "Agent cannot select an arbitrary operation",
+      "instance": {
+        "schema_version": "webenvoy.account-system-agent-operation/v1",
+        "operation": "skill.install",
+        "connection_id": "webenvoy:connection/00000000-0000-4000-8000-000000000001",
+        "grant_id": "webenvoy:grant/00000000-0000-4000-8000-000000000002",
+        "template_ref": "lode://account-system/github@1.0.0"
+      }
+    },
+    {
+      "name": "Agent cannot supply its own authorization scope",
+      "instance": {
+        "schema_version": "webenvoy.account-system-agent-operation/v1",
+        "operation": "account_system.read",
+        "connection_id": "webenvoy:connection/00000000-0000-4000-8000-000000000001",
+        "grant_id": "webenvoy:grant/00000000-0000-4000-8000-000000000002",
+        "template_ref": "lode://account-system/github@1.0.0",
+        "task_scope": { "operations": ["skill.inspect"], "skill_refs": ["*"], "source_refs": ["*"] }
+      }
+    },
+    {
+      "name": "local definition references are not caller inputs",
+      "instance": {
+        "schema_version": "webenvoy.account-system-agent-operation/v1",
+        "operation": "account_system.read",
+        "connection_id": "webenvoy:connection/00000000-0000-4000-8000-000000000001",
+        "grant_id": "webenvoy:grant/00000000-0000-4000-8000-000000000002",
+        "template_ref": "lode://account-system/github@1.0.0",
+        "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000003"
+      }
+    }
+  ]
+}

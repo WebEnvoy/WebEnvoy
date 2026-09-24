@@ -24,6 +24,61 @@ const manifestBytes = await readFile(join(packageRoot, 'agent-manifest.json'));
 const bundle = JSON.parse(manifestBytes);
 const site = JSON.parse(await readFile(join(packageRoot, 'dist-electron/lode/sites/controlled-local/page-summary/manifest.json'), 'utf8'));
 const task = JSON.parse(await readFile(join(packageRoot, 'dist-electron/lode/sites/controlled-local/page-summary', site.tasks[0].path), 'utf8'));
+const accountSystemRef = 'lode://account-system/github@1.0.0';
+const accountSystemPath = 'account-systems/github/1.0.0.json';
+const accountSystemSha256 = 'sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777';
+const accountSystemIndex = JSON.parse(await readFile(join(packageRoot, 'dist-electron/lode/registry/account-system-templates.json'), 'utf8'));
+const accountSystemEntries = accountSystemIndex.entries.filter(item => item.template_ref === accountSystemRef);
+assert.equal(accountSystemIndex.schema_version, 'lode.account-system-template-index.v1');
+assert.equal(accountSystemEntries.length, 1, 'installed package includes exactly one pinned GitHub AccountSystem template');
+assert.equal(accountSystemEntries[0].path, accountSystemPath);
+assert.equal(accountSystemEntries[0].sha256, accountSystemSha256);
+const accountSystemBytes = await readFile(join(packageRoot, 'dist-electron/lode', accountSystemPath));
+assert.equal(`sha256:${sha(accountSystemBytes)}`, accountSystemSha256, 'installed package template matches the fixed Lode byte pin');
+const accountSystem = JSON.parse(accountSystemBytes.toString('utf8'));
+assert.equal(accountSystem.template_ref, accountSystemRef);
+assert.equal(accountSystem.account_system_id, 'github');
+assert.equal(Object.hasOwn(accountSystem, 'identity_method'), false, 'installed public template does not infer identity');
+const packagedCore = await import(pathToFileURL(join(packageRoot, 'dist-electron/runtime/core/node_modules/@webenvoy/core-runtime/dist/index.js')).href);
+const accountSystemStore = packagedCore.createFileAccountSystemDefinitionStore({
+  directory: join(root, 'account-system-owner'),
+  lodeAssetsPath: join(packageRoot, 'dist-electron/lode'),
+});
+const importedAccountSystem = await accountSystemStore.importTemplate({ template_ref: accountSystemRef });
+assert.equal(importedAccountSystem.template_ref, accountSystemRef);
+assert.equal(importedAccountSystem.source.template_sha256, accountSystemSha256);
+assert.equal(Object.hasOwn(importedAccountSystem.definition, 'identity_method'), false);
+const resolvedAccountSystem = await accountSystemStore.resolveTemplate(accountSystemRef);
+assert.equal(resolvedAccountSystem.local_definition_ref, importedAccountSystem.local_definition_ref);
+assert.equal(resolvedAccountSystem.revision_ref, importedAccountSystem.revision_ref);
+const accountDraft = await accountSystemStore.createDraft({
+  local_definition_ref: importedAccountSystem.local_definition_ref,
+  base_revision_ref: importedAccountSystem.revision_ref,
+});
+const localDefinition = { ...accountDraft.definition, display_name: 'GitHub (local)' };
+await accountSystemStore.updateDraft({ draft_ref: accountDraft.draft_ref, definition: localDefinition });
+assert.equal((await accountSystemStore.checkDraft({ draft_ref: accountDraft.draft_ref })).valid, true);
+const pinnedLocalAccountSystem = await accountSystemStore.pinDraft({
+  draft_ref: accountDraft.draft_ref,
+  expected_record_version: importedAccountSystem.record_version,
+});
+await accountSystemStore.enable({
+  local_definition_ref: importedAccountSystem.local_definition_ref,
+  revision_ref: pinnedLocalAccountSystem.revision_ref,
+  expected_record_version: pinnedLocalAccountSystem.record_version,
+});
+const repeatedAccountSystemImport = await accountSystemStore.importTemplate({ template_ref: accountSystemRef });
+assert.equal(repeatedAccountSystemImport.local_definition_ref, importedAccountSystem.local_definition_ref);
+assert.equal(repeatedAccountSystemImport.revision_ref, pinnedLocalAccountSystem.revision_ref);
+assert.equal(repeatedAccountSystemImport.definition.display_name, 'GitHub (local)', 're-import of packaged public bytes does not overwrite the enabled owner-local definition');
+const rolledBackAccountSystem = await accountSystemStore.rollback({
+  local_definition_ref: importedAccountSystem.local_definition_ref,
+  revision_ref: importedAccountSystem.revision_ref,
+  expected_record_version: repeatedAccountSystemImport.record_version,
+});
+const afterAccountSystemRollback = await accountSystemStore.resolveTemplate(accountSystemRef);
+assert.equal(afterAccountSystemRollback.revision_ref, importedAccountSystem.revision_ref);
+assert.equal(afterAccountSystemRollback.definition.display_name, accountSystem.display_name);
 const origin = 'http://127.0.0.1:4173';
 assert.deepEqual(site.site.supported_origins, [origin]);
 const evidence = {
@@ -32,6 +87,16 @@ const evidence = {
   platform: `${process.platform}-${process.arch}`, node_version: bundle.runtime.node_version,
   provider: { id: 'camoufox', browser_version: '152.0.4-beta.30', package_version: '0.5.6', playwright_version: '1.60.0' },
   package_ref: site.package_ref, revision_ref: site.revision_ref, package_digest: site.integrity.package_digest,
+  account_system_template: { template_ref: accountSystemRef, template_sha256: accountSystemSha256, source: 'installed package dist-electron/lode' },
+  core_account_system_import: { state: 'passed', local_definition_ref: importedAccountSystem.local_definition_ref,
+    revision_ref: importedAccountSystem.revision_ref, template_ref: accountSystemRef, template_sha256: accountSystemSha256 },
+  account_system_local_owner_revision: {
+    state: 'passed', local_display_name: repeatedAccountSystemImport.definition.display_name,
+    local_revision_ref: pinnedLocalAccountSystem.revision_ref, explicitly_enabled: true,
+    reimport_preserved_local_definition: true,
+    rollback_revision_ref: rolledBackAccountSystem.enabled_revision_ref,
+    rollback_display_name: afterAccountSystemRollback.definition.display_name,
+  },
   installation_client: 'installed webenvoy CLI', real_provider: true, third_party_model_agent: false,
   plugin_verified: false, real_third_party_site: false, account: false, release: false,
   normal_path_model_calls: 0, trust_mode: 'trusted_local', steps: {}, state: 'running',

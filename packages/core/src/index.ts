@@ -387,6 +387,31 @@ export {
 } from "./managed-capabilities.js";
 export { createManagedBrowserService } from "./managed-browser.js";
 export { createManagedTaskService, type ManagedTaskService } from "./managed-task.js";
+export {
+  AccountSystemDefinitionError,
+  accountSystemDefinitionStoreSchemaVersion,
+  approvedAccountSystemTemplates,
+  createFileAccountSystemDefinitionStore,
+  type AccountSystemTemplate,
+  type FileAccountSystemDefinitionStore
+} from "./account-system-definition.js";
+export {
+  createManagedAccountSystemReadService,
+  managedAccountSystemReadOperation,
+  managedAccountSystemReadSchemaVersion,
+  type ManagedAccountSystemAgentProjection,
+  type ManagedAccountSystemReadRequest,
+  type ManagedAccountSystemReadService
+} from "./managed-account-system.js";
+export {
+  createFileManagedSiteTaskAdmissionStore,
+  managedSiteTaskAdmissionStoreSchemaVersion,
+  type ExtendedSiteSkillPackagePin,
+  type FileManagedSiteTaskAdmissionStore,
+  type ManagedSiteTaskPackageRequest,
+  type OwnerAdmittedSiteTaskPin,
+  type SiteTaskAdmissionRuntime
+} from "./managed-site-task-admission.js";
 export { createHttpManagedFileOwnerClient, type ManagedFileOwnerClient } from "./managed-file-owner.js";
 export {
   createFileSkillLibraryService,
