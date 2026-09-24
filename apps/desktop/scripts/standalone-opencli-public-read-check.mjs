@@ -23,8 +23,8 @@ const bundle = JSON.parse(manifestBytes);
 const lodeLock = JSON.parse(await readFile(join(packageRoot, 'dist-electron/lode/provenance.json'), 'utf8'));
 const samples = [
   { name: 'github', path: 'sites/github/opencli-trending-repos', origin: 'https://github.com', input: { since: 'daily', limit: 2 } },
-  { name: 'devto', path: 'sites/devto/opencli-latest-articles', origin: 'https://dev.to', input: { limit: 2, page: 1 } },
   { name: 'arxiv', path: 'sites/arxiv/opencli-recent-papers', origin: 'https://export.arxiv.org', input: { category: 'cs.AI', limit: 2 } },
+  { name: 'devto', path: 'sites/devto/opencli-latest-articles', origin: 'https://dev.to', input: { limit: 2, page: 1 } },
 ];
 for (const sample of samples) {
   sample.manifest = JSON.parse(await readFile(join(packageRoot, 'dist-electron/lode', sample.path, 'manifest.json'), 'utf8'));
@@ -47,6 +47,7 @@ let requestIndex = 0;
 let principalId;
 let hostCredentialFingerprint;
 const executionGrants = [];
+const failedSamples = [];
 
 function command(binary, args, { asAgent = false, input, allowFailure = false } = {}) {
   const commandArgs = asAgent ? ['-n', '-u', 'nobody', '--', binary, ...args] : args;
@@ -226,6 +227,9 @@ try {
         evidence.samples[sample.name].independent_public_probe = { exit_code: probe.status,
           status_and_content_type: probe.stdout.trim().slice(0, 128) };
       }
+      failedSamples.push(`${sample.name}:${attempted.failure?.code ?? attempted.run.status}`);
+      executionGrants.push(sample.grantId);
+      continue;
     }
     const completed = success(attempted, `${sample.name}:submit`);
     assert.equal(completed.run.status, 'succeeded', `${sample.name}:run_status`);
@@ -260,10 +264,16 @@ try {
   owner(['stop', '--data-dir', ownerData]); runtimeStarted = false;
   owner(['start', '--data-dir', ownerData]); runtimeStarted = true;
   for (const sample of samples) {
-    const queried = success(await agent('task query', taskRequest('task.query', sample,
-      { selector: { run_id: evidence.samples[sample.name].run_id } })), `${sample.name}:restart_query`);
-    assert.equal(sha(JSON.stringify(queried.result)), evidence.samples[sample.name].result_sha256);
-    evidence.samples[sample.name].restart_query = 'same original Run and result';
+    const queried = await agent('task query', taskRequest('task.query', sample,
+      { selector: { run_id: evidence.samples[sample.name].run_id } }), true);
+    if (evidence.samples[sample.name].result_sha256) {
+      success(queried, `${sample.name}:restart_query`);
+      assert.equal(sha(JSON.stringify(queried.result)), evidence.samples[sample.name].result_sha256);
+    } else {
+      assert.equal(queried.run.status, evidence.samples[sample.name].status);
+      assert.equal(queried.failure?.code, evidence.samples[sample.name].failure_code);
+    }
+    evidence.samples[sample.name].restart_query = 'same original Run and terminal result or failure';
   }
   for (const grantId of executionGrants) owner(['access', 'revoke', '--data-dir', ownerData, '--kind', 'grants', '--id', grantId,
     '--idempotency-key', `${root.split('/').at(-1)}-revoke-${grantId}`]);
@@ -275,6 +285,7 @@ try {
       intent: { summary: 'Should be rejected after revocation', policy: { risk: 'read', execution_intent: 'read', timeout_ms: 30000 } } }), true);
     evidence.samples[sample.name].revoked = denied(rejected, `${sample.name}:revoked`);
   }
+  if (failedSamples.length) throw new Error(`public_samples_incomplete: ${failedSamples.join(', ')}`);
   evidence.state = 'passed';
 } catch (error) {
   evidence.state = 'failed'; evidence.error = error.message;
