@@ -375,6 +375,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     failureStage = 'original_run_query';
     queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
     assert.equal(queried.run.run_id, originalRunId);
+    failureStage = 'submitted_result_status';
     if (submitted.run.status !== 'succeeded') {
       throw new Error(`github_managed_script_submit_failed:${JSON.stringify({ submitted: { ok: submitted.ok, run: submitted.run, failure: submitted.failure }, queried: { run: queried.run, result: queried.result ?? null, failure: queried.failure ?? null } })}`);
     }
@@ -417,7 +418,9 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
         dispatch_state: submitted.run.dispatch_state ?? null, result_outcome: queriedResult?.outcome ?? null,
         result_failure_code: queriedResult?.failure?.code ?? null,
         ...(queriedResult ? { result_sha256: sha(JSON.stringify(queriedResult)) } : {}),
-        queried_same_original_result: queried?.run?.run_id === submitted.run.run_id && JSON.stringify(queried?.result) === JSON.stringify(submitted.result) } } : {}),
+        query_addresses_original_run: queried?.run?.run_id === submitted.run.run_id,
+        submitted_result_returned: submitted.result !== undefined,
+        ...(submitted.result === undefined ? {} : { queried_same_original_result: queried?.run?.run_id === submitted.run.run_id && JSON.stringify(queried?.result) === JSON.stringify(submitted.result) }) } } : {}),
       ...(independentPage ? { anonymous_independent_check: { state: 'observed', status: independentPage.status, url: independentPage.url,
         requested_at: new Date(independentPage.startedAt).toISOString(), completed_at: new Date(independentPage.completedAt).toISOString(),
         credentials_sent: false, repositories_matched: verifiedNames?.length ?? null, start_skew_ms: startSkewMs ?? null } } : {})
