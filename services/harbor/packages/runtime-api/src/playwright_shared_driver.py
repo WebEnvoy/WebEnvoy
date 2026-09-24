@@ -38,6 +38,11 @@ WAIT_POLL_MS = 50
 MAX_SNAPSHOT_LIMIT = 128
 MAX_OBSERVATION_ELEMENTS = 20_000
 MAX_OBSERVATION_CONTROLS = 2_048
+# Keep the browser operation comfortably inside the managed-task request
+# deadline. Control coverage reports scan_limit_reached when this budget ends;
+# the independent page-text observation can still complete.
+MAX_OBSERVATION_CAPTURE_MS = 18_000
+SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL = 32
 MAX_OBSERVATION_METADATA_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATION_RESPONSE_BYTES = 256 * 1024
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
@@ -929,26 +934,17 @@ class Driver:
     async def _locator_semantics(self, locator: Any, original: Any, failure_class: str) -> tuple[str, str] | None:
         """Read public role/name only when the Locator still denotes original."""
         try:
-            before = await locator.element_handle()
+            before_matches = await locator.evaluate("(candidate, original) => candidate === original", original)
         except Exception:
             return None
-        if before is None:
-            return None
-        after = None
-        try:
-            if not await self._same_element(original, before):
-                raise ObservationFailure(failure_class)
-            snapshot = await locator.aria_snapshot()
-            after = await locator.element_handle()
-            if after is None or not await self._same_element(original, after):
-                raise ObservationFailure(failure_class)
-            parsed = self._parse_aria_snapshot(snapshot)
-            return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
-        finally:
-            if before is not original:
-                await self._dispose_handle(before)
-            if after is not None and after is not original and after is not before:
-                await self._dispose_handle(after)
+        if before_matches is not True:
+            raise ObservationFailure(failure_class)
+        snapshot = await locator.aria_snapshot()
+        after_matches = await locator.evaluate("(candidate, original) => candidate === original", original)
+        if after_matches is not True:
+            raise ObservationFailure(failure_class)
+        parsed = self._parse_aria_snapshot(snapshot)
+        return parsed if parsed is not None and parsed[0] in OBSERVATION_ROLES else None
 
     async def _indexed_public_semantics(self, state: PageState, index: int, original: Any, failure_class: str) -> tuple[str, str] | None:
         try:
@@ -1087,27 +1083,60 @@ class Driver:
         selector = OBSERVATION_SELECTOR
         start_generation = state.generation
         start_url = safe_url(state.page.url)
+        capture_deadline_ns = time.monotonic_ns() + MAX_OBSERVATION_CAPTURE_MS * 1_000_000
+        phase_started = self._record_snapshot_phase("candidate_query", "started")
         try:
             element_handles = await state.page.query_selector_all(selector)
         except Exception as error:
+            self._record_snapshot_phase("candidate_query", "error", phase_started)
             raise ObservationFailure("observation_changed") from error
+        self._record_snapshot_phase("candidate_query", "completed", phase_started)
         records: list[dict[str, Any]] = []
         reasons: list[str] = []
         semantic_complete = True
         metadata_bytes = 0
         candidate_limit_hit = False
+        capture_budget_exhausted = False
         for index, element in enumerate(element_handles):
             if index >= MAX_OBSERVATION_ELEMENTS:
                 reasons.append("scan_limit_reached")
                 await self._dispose_handle(element)
                 continue
+            if time.monotonic_ns() >= capture_deadline_ns:
+                reasons.append("scan_limit_reached")
+                capture_budget_exhausted = True
+                for remaining in element_handles[index:]:
+                    await self._dispose_handle(remaining)
+                break
             if len(records) >= MAX_OBSERVATION_CONTROLS:
                 candidate_limit_hit = True
                 await self._dispose_handle(element)
                 continue
             try:
-                item = await self._read_control(element)
-                provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+                sampled = index % SNAPSHOT_DIAGNOSTIC_SAMPLE_INTERVAL == 0
+                phase_code = f"control_index_{index}" if sampled else None
+                phase_started = self._record_snapshot_phase("control_read", "started", code=phase_code) if sampled else None
+                try:
+                    item = await self._read_control(element)
+                except Exception:
+                    if sampled:
+                        self._record_snapshot_phase("control_read", "error", phase_started, phase_code)
+                    raise
+                if sampled:
+                    self._record_snapshot_phase("control_read", "completed", phase_started, phase_code)
+                if item is None:
+                    await self._dispose_handle(element)
+                    continue
+
+                phase_started = self._record_snapshot_phase("accessibility_semantics", "started", code=phase_code) if sampled else None
+                try:
+                    provider = await self._indexed_public_semantics(state, index, element, "observation_changed")
+                except Exception:
+                    if sampled:
+                        self._record_snapshot_phase("accessibility_semantics", "error", phase_started, phase_code)
+                    raise
+                if sampled:
+                    self._record_snapshot_phase("accessibility_semantics", "completed", phase_started, phase_code)
             except Exception:
                 for record in records:
                     await self._dispose_handle(record["handle"])
@@ -1116,9 +1145,6 @@ class Driver:
                 for remaining in element_handles[index:]:
                     await self._dispose_handle(remaining)
                 raise
-            if item is None:
-                await self._dispose_handle(element)
-                continue
             if provider is not None:
                 item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
             normalized = self._normalized_control(item, start_url or "")
@@ -1154,6 +1180,16 @@ class Driver:
             })
             if public["truncated_fields"]:
                 semantic_complete = False
+        if capture_budget_exhausted:
+            # Do not publish a prefix whose unscanned remainder could change
+            # identity or target disambiguation. The text observation is
+            # independent; retain it with explicit incomplete control
+            # coverage instead of holding the Provider until request timeout.
+            for record in records:
+                await self._dispose_handle(record["handle"])
+                if record.get("form_handle") is not None:
+                    await self._dispose_handle(record["form_handle"])
+            records.clear()
         if len(element_handles) > MAX_OBSERVATION_ELEMENTS and "scan_limit_reached" not in reasons:
             reasons.append("scan_limit_reached")
         if candidate_limit_hit and "capture_limit_reached" not in reasons:
@@ -1214,6 +1250,10 @@ class Driver:
         return cursor
 
     async def _verify_snapshot_batch(self, state: PageState, batch: dict[str, Any], failure_class: str = "observation_cursor_stale") -> None:
+        if not batch["enumeration_complete"] and not batch["records"]:
+            if state.generation != batch["generation"] or safe_url(state.page.url) != batch["page_url"]:
+                raise ObservationFailure(failure_class)
+            return
         selector = OBSERVATION_SELECTOR
         try:
             handles = await state.page.query_selector_all(selector)
@@ -1228,10 +1268,12 @@ class Driver:
                 if len(current) >= MAX_OBSERVATION_CONTROLS:
                     continue
                 item = await self._read_control(handle)
+                if item is None:
+                    continue
                 provider = await self._indexed_public_semantics(state, index, handle, failure_class)
-                if provider is not None and item is not None:
+                if provider is not None:
                     item = {**item, "role": provider[0], "name": provider[1], "name_source": "provider_accessibility"}
-                normalized = self._normalized_control(item, safe_url(state.page.url) or "") if item is not None else None
+                normalized = self._normalized_control(item, safe_url(state.page.url) or "")
                 if normalized is not None:
                     public = self._public_control(normalized)
                     encoded_size = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
@@ -1315,6 +1357,26 @@ class Driver:
             state.control_metadata[record["target_ref"]]["exposed"] = True
         return response
 
+    @staticmethod
+    def _record_snapshot_phase(phase: str, outcome: str, started_ns: int | None = None, code: str | None = None) -> int:
+        phases = {
+            "candidate_capture", "candidate_query", "control_read", "accessibility_semantics",
+            "page_text", "batch_verification", "control_cleanup", "response_projection"
+        }
+        outcomes = {"started", "completed", "error", "unavailable"}
+        if phase not in phases or outcome not in outcomes:
+            return time.monotonic_ns()
+        now_ns = time.monotonic_ns()
+        duration_ms = 0 if outcome == "started" or started_ns is None else max(0, min(120_000, (now_ns - started_ns) // 1_000_000))
+        diagnostic = {
+            "stage": "provider_snapshot", "phase": phase, "outcome": outcome,
+            "duration_ms": duration_ms, "observed_at": now()
+        }
+        if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+            diagnostic["code"] = code
+        print(json.dumps({"id": 0, "event": "provider_snapshot_phase", **diagnostic}, separators=(",", ":")), flush=True)
+        return now_ns
+
     async def snapshot(self, state: PageState, request: dict[str, Any] | None = None) -> dict[str, Any]:
         request = request or {}
         cursor = request.get("cursor")
@@ -1340,16 +1402,29 @@ class Driver:
         if request.get("observation_ref") is not None:
             raise ObservationFailure("observation_cursor_stale")
         state.snapshot_serial += 1
-        records, enumeration_complete, semantic_complete, reasons = await self._capture_candidate_records(state)
+        phase_started = self._record_snapshot_phase("candidate_capture", "started")
+        try:
+            records, enumeration_complete, semantic_complete, reasons = await self._capture_candidate_records(state)
+        except Exception:
+            self._record_snapshot_phase("candidate_capture", "error", phase_started)
+            raise
+        self._record_snapshot_phase(
+            "candidate_capture", "completed", phase_started,
+            "scan_limit_reached" if "scan_limit_reached" in reasons else None,
+        )
         observation_ref = f"observation:{state.ref}:{state.generation}:{state.snapshot_serial}"
         self._disambiguate(records, enumeration_complete)
         text_raw: Any
         text_unavailable = False
+        phase_started = self._record_snapshot_phase("page_text", "started")
         try:
             text_raw = await state.page.evaluate("""() => { const text = document.body?.innerText || ''; return { text: text.slice(0, 65536), length: text.length }; }""")
         except Exception:
             text_raw = {"text": "", "length": 0}
             text_unavailable = True
+            self._record_snapshot_phase("page_text", "unavailable", phase_started)
+        else:
+            self._record_snapshot_phase("page_text", "completed", phase_started)
         if isinstance(text_raw, dict):
             raw_text = text_raw.get("text", "") if isinstance(text_raw.get("text"), str) else ""
             text_length = int(text_raw.get("length", len(raw_text))) if isinstance(text_raw.get("length"), (int, float)) else len(raw_text)
@@ -1376,14 +1451,18 @@ class Driver:
             "initial_limit": limit,
             "cursors": {},
         }
+        phase_started = self._record_snapshot_phase("batch_verification", "started")
         try:
             await self._verify_snapshot_batch(state, batch, "observation_changed")
         except Exception:
+            self._record_snapshot_phase("batch_verification", "error", phase_started)
             for record in records:
                 await self._dispose_handle(record["handle"])
                 if record.get("form_handle") is not None:
                     await self._dispose_handle(record["form_handle"])
             raise
+        self._record_snapshot_phase("batch_verification", "completed", phase_started)
+        phase_started = self._record_snapshot_phase("control_cleanup", "started")
         await state.clear_controls()
         for record in records:
             state.controls[record["target_ref"]] = (record["public"]["role"], record["public"]["name"], record["action"].get("href"), None, record["handle"])
@@ -1397,8 +1476,12 @@ class Driver:
                 "disambiguation": record["public"]["disambiguation"],
                 "exposed": False,
             }
+        self._record_snapshot_phase("control_cleanup", "completed", phase_started)
         state.snapshot_batch = batch
-        return await self._snapshot_result(state, batch, 0, limit, False)
+        phase_started = self._record_snapshot_phase("response_projection", "started")
+        result = await self._snapshot_result(state, batch, 0, limit, False)
+        self._record_snapshot_phase("response_projection", "completed", phase_started)
+        return result
 
     async def target_failure(self, state: PageState, target: str, role: str | None = None) -> str | None:
         control = state.controls.get(target)

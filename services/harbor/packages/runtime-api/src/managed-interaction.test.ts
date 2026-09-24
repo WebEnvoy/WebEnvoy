@@ -5,6 +5,7 @@ import { identityInput, isolateProfileStorage } from "./identity-environment-mut
 import { trustManagedInteractionOperation, type ManagedInteractionInput, type ManagedInteractionResult } from "./managed-interaction.js";
 import { parseManagedInteractionRequest, type ManagedInteractionRequest } from "./managed-interaction-request.js";
 import { RuntimeSessionStore } from "./runtime-session.js";
+import type { LocalProviderPageController, LocalProviderPageState } from "./runtime-session-types.js";
 import { startHarborRuntimeServer } from "./server.js";
 
 after(isolateProfileStorage("managed-interaction"));
@@ -71,6 +72,52 @@ test("Core snapshot page_ref is accepted and stale Page refs are refused before 
     refused(await f.runtime.operateManagedInteraction(f.a, f.request("snapshot", { page_ref: "p".repeat(257) })), "managed_interaction_invalid_input");
     assert.equal(f.calls.length, callsBeforeStale);
   } finally { await f.close(); }
+});
+
+test("owner runtime facts distinguish a failed Page relation refresh without exposing Provider errors", async () => {
+  const secret = "Provider failed at https://user:password@private.example/path";
+  const launcher: LocalProviderLauncher = async input => {
+    const ready = await createFixtureLauncher("ready")(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    const page: LocalProviderPageState = {
+      provider_page_ref: "provider:diagnostic", current_url: `${origin}/fixture`, title: "Fixture", status: "ready", facts: [], active: true, document_generation: 1
+    };
+    const pageController: LocalProviderPageController = {
+      listPages: async () => { throw new Error(secret); },
+      openPage: async () => page,
+      activatePage: async () => page,
+      closePage: async () => [],
+      navigatePage: async () => page
+    };
+    return {
+      ...ready,
+      execution_surface: "local_provider",
+      page,
+      pages: [page],
+      pageController,
+      interaction: trustManagedInteractionOperation(async () => { throw new Error("must not dispatch after Page refresh failure"); })
+    };
+  };
+  const runtime = new HarborRuntime(launcher);
+  runtime.createLocalIdentityEnvironment({ ...identityInput("identity:diagnostic", "profile:diagnostic"),
+    site: { site_id: "controlled", origin, display_name: "Fixture" } });
+  const session = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:diagnostic", url: `${origin}/fixture`,
+    control_owner: "core_task", holder_ref: holder, operation_scope: "profile_management" });
+  if ("status" in session) throw new Error("session unavailable");
+  try {
+    const result = await runtime.operateManagedInteraction(session.runtime_session_ref, {
+      ...scope, operation_ref: "operation:refresh-diagnostic", action: "snapshot"
+    });
+    assert.equal(result.status, "unavailable");
+    assert.equal(result.dispatch_state, "not_dispatched");
+    assert.equal(result.failure_class, "provider_unavailable");
+    const ownerFacts = runtime.getOwnerSessionFacts(session.runtime_session_ref);
+    assert.deepEqual(ownerFacts?.provider_operation_diagnostics?.map(({ stage, outcome, code }) => ({ stage, outcome, code })), [
+      { stage: "page_relation_refresh", outcome: "error", code: "provider_unavailable" }
+    ]);
+    assert.equal(JSON.stringify(ownerFacts).includes("password"), false);
+    assert.equal(JSON.stringify(ownerFacts).includes("private.example"), false);
+  } finally { await runtime.stopSession(session.runtime_session_ref); }
 });
 
 test("fixture HTTP interaction rejects unprivileged callers and malformed scope/actions without dispatch; receipts require supervisor", async () => {

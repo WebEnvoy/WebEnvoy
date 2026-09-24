@@ -106,6 +106,28 @@ test('a rejected first invoke remains not_dispatched and is not replayed by the 
   }
 });
 
+test('a broker rejection after the bounded worker exits stays controlled and is not replayed', async () => {
+  let invokeCount = 0;
+  const supervisor = createManagedSiteWorkerSupervisor({
+    installRoot, ownerUid: agentUid - 1, agentUid, mode: 'distinct_uid_hardened', probeOwnerSocket: async () => 'denied'
+  });
+  const request = ticket(undefined, 'worker-ticket-closed-pipe');
+  request.deadline_at = Date.now() + 1_000;
+  try {
+    await assert.rejects(supervisor.run(request, {
+      onStarted: async () => {},
+      onBroker: async () => {
+        invokeCount++;
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+        throw Object.assign(new Error('managed_task_snapshot_unavailable'), { dispatch_state: 'possibly_dispatched' });
+      }
+    }), error => error.message === 'managed_site_worker_unavailable' && error.dispatch_state === 'dispatched');
+    assert.equal(invokeCount, 1);
+  } finally {
+    await supervisor.stopAll();
+  }
+});
+
 test('Agent supervisor rejects a consumed ticket without another worker or broker call', async () => {
   let brokerCount = 0;
   const supervisor = createManagedSiteWorkerSupervisor({

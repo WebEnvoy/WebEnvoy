@@ -37,6 +37,7 @@ jobs:
       MATERIAL_DIGEST_PATH: /tmp/webenvoy-camoufox-materials.sha256
       LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
       LIVE_BROWSER_EVIDENCE_PATH: /tmp/webenvoy-live-browser-evidence.json
+      SITE_TASK_EVIDENCE_PATH: /tmp/webenvoy-live-site-task-evidence.json
     steps:
       - name: Check out exact candidate source
         uses: actions/checkout@v4
@@ -127,15 +128,7 @@ jobs:
       - name: Check standalone package
         run: pnpm --filter @webenvoy/app check:standalone "$PACKAGE_ROOT"
 
-      - name: Verify isolated owner and Agent Runtime boundary
-        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
-
-      - name: Run live Camoufox observation and input acceptance
-        env:
-          LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
-        run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
-
-      - name: Record reviewable digests
+      - name: Record pre-install candidate digests
         id: metadata
         shell: bash
         run: |
@@ -152,7 +145,17 @@ jobs:
           $CAMOUFOX_PROPERTIES_SHA256  Camoufox.app/Contents/Resources/properties.json
           EOF
 
+      - name: Verify isolated owner and Agent Runtime boundary
+        run: node apps/desktop/scripts/standalone-boundary-check.mjs "$PACKAGE_ROOT"
+
+      - name: Run live Camoufox and installed GitHub Trending acceptance
+        env:
+          LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
+          SITE_TASK_EVIDENCE_PATH: ${{ env.SITE_TASK_EVIDENCE_PATH }}
+        run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
+
       - name: Upload live acceptance evidence
+        if: always() && steps.metadata.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: webenvoy-live-camoufox-${{ env.SOURCE_SHA }}-${{ steps.metadata.outputs.manifest_sha256 }}
@@ -160,6 +163,8 @@ jobs:
           retention-days: 7
           path: |
             ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
+            ${{ env.SITE_TASK_EVIDENCE_PATH }}
             ${{ env.MATERIAL_DIGEST_PATH }}
             ${{ env.PACKAGE_ROOT }}/agent-manifest.json
+            ${{ env.PACKAGE_ROOT }}.tar.gz
             ${{ env.PACKAGE_ROOT }}.tar.gz.sha256

@@ -29,12 +29,17 @@ test("routes the Camoufox adapter through the shared launch factory", async () =
   await writeFile(helper, `import readline from "node:readline";
 const expected = process.env.HARBOR_EXPECTED_DRIVER_PATH;
 if (!expected || !process.argv.includes(expected)) process.exit(71);
-  const page = { provider_page_ref: "page:1", current_url: "https://example.test/start", title: "Example", status: "ready", origin: "https://example.test", active: true, document_generation: 1, task_selected: true, facts: [] };
+const page = { provider_page_ref: "page:1", current_url: "https://example.test/start", title: "Example", status: "ready", origin: "https://example.test", active: true, document_generation: 1, task_selected: true, facts: [] };
+let pageListCalls = 0;
 const rl = readline.createInterface({ input: process.stdin });
 for await (const line of rl) {
   const request = JSON.parse(line);
   let result;
   if (request.op === "launch") result = { status: "ready", driver_ref: "fixture-camoufox", page, pages: [page], viewer_entry: { availability: "unsupported", access_mode: "none", transport: "not_applicable", input_capabilities: [] }, facts: [{ key: "fixture.browser_path", source: "observed", value: request.browser_path }, { key: "fixture.environment.proxy_server", source: "observed", value: String(request.environment?.proxy_server ?? "") }, { key: "fixture.environment.viewport", source: "observed", value: JSON.stringify(request.environment?.viewport ?? null) }] };
+  else if (request.op === "page_list" && ++pageListCalls > 1) {
+    process.stdout.write(JSON.stringify({ id: request.id, status: "error", message: "Private URL and provider stack details must not escape." }) + "\\n");
+    continue;
+  }
   else if (request.op === "page_list") result = { pages: [page], rejected_unattributed_count: 0 };
   else if (request.op === "observe") result = page;
   else if (request.op === "observe_identity") result = { current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: null, document_generation: 1 };
@@ -45,6 +50,7 @@ for await (const line of rl) {
   else if (request.op === "environment") result = { status: "completed", observed_at: "2026-09-09T18:00:00.000Z", provider: { camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", properties_sha256: "${"a".repeat(64)}" }, bundle_hash: "${"b".repeat(64)}", observed: { language: "zh-CN", languages: ["zh-CN"], timezone: "Asia/Shanghai", viewport: { width: 1280, height: 900 }, screen: { width: 1920, height: 1080 }, hardware_concurrency: 8, device_memory: null, webgl_vendor: null, webgl_renderer: null, fonts_hash: null, voices_hash: null, canvas_hash: null, audio_hash: null }, continuity: { state: "unknown", checked_fields: [], changed_fields: [], unknown_fields: [] } };
   else if (request.op === "close") result = { closed: true };
   else result = page;
+  if (request.op === "interact" && request.action === "snapshot") for (const phase of ["candidate_capture", "candidate_query", "control_read", "accessibility_semantics"]) process.stdout.write(JSON.stringify({ id: 0, event: "provider_snapshot_phase", stage: "provider_snapshot", phase, outcome: "started", duration_ms: 0, observed_at: "2026-09-09T18:00:00.000Z", ...(phase === "control_read" ? { code: "control_index_32" } : {}) }) + "\\n");
   process.stdout.write(JSON.stringify({ id: request.id, status: "ok", result }) + "\\n");
   }`);
   await chmod(helper, 0o700);
@@ -59,10 +65,11 @@ for await (const line of rl) {
         HARBOR_CAMOUFOX_BROWSER_VERSION: CAMOUFOX_UPSTREAM_PINS.browser_version,
         HARBOR_CAMOUFOX_PLAYWRIGHT_VERSION: CAMOUFOX_UPSTREAM_PINS.playwright_version
       });
-      process.env.HARBOR_EXPECTED_DRIVER_PATH = helper;
-      process.env[provider.pythonEnv] = process.execPath;
-      if (provider.driverEnv) process.env[provider.driverEnv] = helper;
-      const input: LocalProviderLaunchInput = {
+    process.env.HARBOR_EXPECTED_DRIVER_PATH = helper;
+    process.env[provider.pythonEnv] = process.execPath;
+    if (provider.driverEnv) process.env[provider.driverEnv] = helper;
+    const providerDiagnostics: import("./runtime-session-types.js").RuntimeProviderOperationDiagnostic[] = [];
+    const input: LocalProviderLaunchInput = {
         operation_scope: "profile_management",
         browser_path: provider.browserPath,
         provider_id: provider.id,
@@ -73,6 +80,7 @@ for await (const line of rl) {
         profile_ref: `profile:${provider.id}`,
         profile_storage_ref: `storage:${provider.id}`,
         provider_ref: `provider:${provider.id}`,
+        record_provider_diagnostic: diagnostic => providerDiagnostics.push(diagnostic),
       } as LocalProviderLaunchInput;
       const result = await provider.launch(input);
       assert.equal(result.status, "ready", `${provider.id} did not launch: ${JSON.stringify(result)}`);
@@ -89,6 +97,17 @@ for await (const line of rl) {
       assert.equal("provider_id" in environment!.provider, false);
       assert.equal((await result.pageController!.listPages())[0]?.provider_page_ref, "page:1");
       assert.equal((await result.interaction!({ action: "snapshot", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "page:1" })).status, "completed");
+      await assert.rejects(() => result.pageController!.listPages(), /Private URL and provider stack details must not escape/);
+      assert.deepEqual(providerDiagnostics.map(item => ({ stage: item.stage, ...(item.phase === undefined ? {} : { phase: item.phase }), outcome: item.outcome, code: item.code })), [
+        { stage: "page_list_request", outcome: "completed", code: undefined },
+        { stage: "provider_snapshot", phase: "candidate_capture", outcome: "started", code: undefined },
+        { stage: "provider_snapshot", phase: "candidate_query", outcome: "started", code: undefined },
+        { stage: "provider_snapshot", phase: "control_read", outcome: "started", code: "control_index_32" },
+        { stage: "provider_snapshot", phase: "accessibility_semantics", outcome: "started", code: undefined },
+        { stage: "provider_snapshot", outcome: "completed", code: undefined },
+        { stage: "page_list_request", outcome: "error", code: "request_failed" }
+      ]);
+      assert.equal(JSON.stringify(providerDiagnostics).includes("Private URL"), false);
       assert.deepEqual(await result.interaction!({ action: "input", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "missing", text: "never dispatched" }), { status: "unavailable", dispatch_state: "not_dispatched", failure_class: "page_relation_unavailable" });
       assert.equal((await result.interaction!({ action: "input", expected_origin: "https://example.test", control_generation: 1, provider_page_ref: "page:1", text: "lost" })).status, "unknown_outcome");
       assert.equal((await result.executeFileOperation!({ operation: "upload", provider_page_ref: "page:1", expected_origin: "https://example.test", authorized_origins: ["https://example.test"], target_ref: "target:file", source_path: "/managed/input.png" })).status, "completed");
@@ -106,7 +125,7 @@ for await (const line of rl) {
 test("covers #540 G0 enumeration, semantics, identity, and bounded waits in the shared driver", () => {
   const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
   const script = String.raw`
-import asyncio, importlib.util, json, os, sys, time, types
+import asyncio, contextlib, importlib.util, io, json, os, sys, time, types
 sys.path.insert(0, os.path.dirname(sys.argv[1]))
 playwright = types.ModuleType("playwright"); playwright.__path__ = []
 async_api = types.ModuleType("playwright.async_api")
@@ -118,6 +137,16 @@ async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_a
 playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
 spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
 module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+progress_output = io.StringIO()
+with contextlib.redirect_stdout(progress_output):
+    started = module.Driver._record_snapshot_phase("candidate_capture", "started")
+    module.Driver._record_snapshot_phase("candidate_capture", "completed", started)
+progress_events = [json.loads(line) for line in progress_output.getvalue().splitlines()]
+assert len(progress_events) == 2, progress_events
+assert all(event["id"] == 0 and event["event"] == "provider_snapshot_phase" and event["stage"] == "provider_snapshot" for event in progress_events), progress_events
+assert all(event["phase"] == "candidate_capture" and "page_text" not in event for event in progress_events), progress_events
+assert [event["outcome"] for event in progress_events] == ["started", "completed"], progress_events
 
 class Handle:
     def __init__(self, index, role="button", name=None, name_source="none", description=None):
@@ -139,6 +168,7 @@ class Handle:
         self.fills = []
         self.presses = []
         self.disposals = 0
+        self.aria_snapshot_calls = 0
         self.dom_identity = object()
     def clone(self):
         clone = object.__new__(Handle)
@@ -193,8 +223,12 @@ class ControlLocator:
         if not self.handles:
             return None
         return self.handles[0].clone() if self.fresh else self.handles[0]
+    async def evaluate(self, expression, *args):
+        assert expression == "(candidate, original) => candidate === original"
+        return bool(self.handles) and bool(args) and self.handles[0].dom_identity is args[0].dom_identity
     async def aria_snapshot(self):
         handle = self.handles[0] if self.handles else None
+        if handle is not None: handle.aria_snapshot_calls += 1
         return None if handle is None else "- " + handle.public_role + " " + json.dumps(handle.public_name)
 
 class Mouse:
@@ -291,6 +325,11 @@ class ScanHandle:
     async def evaluate(self, expression, *args): raise AssertionError("scan sentinel is not a control")
     async def dispose(self): self.disposals += 1
 
+class UnobservableHandle(Handle):
+    async def evaluate(self, expression, *args):
+        if expression == module.CONTROL_SEMANTICS_SCRIPT: return None
+        return await super().evaluate(expression, *args)
+
 class ScanPage:
     url = "https://example.test/form"
     main_frame = object()
@@ -308,6 +347,18 @@ async def run():
     instance.request = {"timeout_ms": 1000}
     instance.close_requested = asyncio.Event()
     common = {"provider_page_ref": "page:1", "page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "expected_origin": "https://example.test", "authorized_origins": ["https://example.test"]}
+
+    # Unsupported/hidden selector candidates are filtered by the fixed DOM
+    # projection and must not trigger an expensive provider AX snapshot.
+    hidden_handle = UnobservableHandle(0)
+    visible_handle = Handle(1)
+    page.handles = [hidden_handle, visible_handle]
+    filtered_state = module.PageState("page:filtered", page, ["https://example.test"])
+    filtered_batch = await instance.snapshot(filtered_state, {"page_ref": "page:filtered", "page_id": "page:filtered", "document_generation": 1, "limit": 128})
+    assert filtered_batch["coverage"]["controls"]["captured_count"] == 1, filtered_batch
+    assert hidden_handle.aria_snapshot_calls == 0, hidden_handle.aria_snapshot_calls
+    assert visible_handle.aria_snapshot_calls == 2, visible_handle.aria_snapshot_calls
+    page.handles = PageImpl.make_handles()
 
     # Regression: a DOM semantic change after body text capture must reject
     # the first batch and release every original ElementHandle.
@@ -407,6 +458,27 @@ async def run():
     assert scan_batch["continuation"]["has_more"] is False, scan_batch
     assert scan_controls["complete"] is False, scan_controls
     assert all(handle.disposals > 0 for handle in scan_page.handles), "scan-limit handles were not released"
+
+    # A bounded control-capture timeout preserves the independently captured
+    # page text and reports incomplete, non-actionable control coverage.
+    timed_page = PageImpl()
+    timed_page.fresh_after_first_query = True
+    timed_state = module.PageState("page:timed", timed_page, ["https://example.test"])
+    capture_budget = module.MAX_OBSERVATION_CAPTURE_MS
+    module.MAX_OBSERVATION_CAPTURE_MS = 0
+    try:
+        timed_batch = await instance.snapshot(timed_state, {"page_ref": "page:timed", "page_id": "page:timed", "document_generation": 1, "limit": 128})
+    finally:
+        module.MAX_OBSERVATION_CAPTURE_MS = capture_budget
+    timed_controls = timed_batch["coverage"]["controls"]
+    assert timed_batch["text"] == "short body", timed_batch
+    assert timed_batch["coverage"]["text"]["state"] == "complete", timed_batch
+    assert timed_controls["enumeration_complete"] is False, timed_controls
+    assert timed_controls["captured_count"] == 0 and timed_controls["total"] is None, timed_controls
+    assert timed_controls["reason_codes"] == ["scan_limit_reached"], timed_controls
+    assert timed_batch["continuation"]["has_more"] is False, timed_batch
+    assert all(handle.disposals == 1 for handle in timed_page.handles), "time-limited original handles were not released exactly once"
+    assert timed_page.query_count == 1, "empty incomplete snapshots must not rescan all candidates"
 
     page.handles = PageImpl.make_ambiguous_handles()
     ambiguous_batch = await instance.snapshot(state, {"page_ref": "page:1", "page_id": "page:1", "document_generation": 1, "limit": 128})

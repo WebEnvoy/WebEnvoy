@@ -52,6 +52,7 @@ import {
   type RuntimeSessionOwnerProjection,
   type RuntimeSessionOwnerSummary,
   type RuntimeSessionUnavailable,
+  type RuntimeProviderOperationDiagnostic,
   type RuntimeViewerEntry,
   type ValidationRuntimeFacts
 } from "./runtime-session-types.js";
@@ -145,6 +146,7 @@ export type {
   RuntimeSessionOwnerProjection,
   RuntimeSessionOwnerSummary,
   RuntimeSessionUnavailable,
+  RuntimeProviderOperationDiagnostic,
   RuntimeViewerEntry,
   ValidationRuntimeFacts
 } from "./runtime-session-types.js";
@@ -155,6 +157,7 @@ export interface RuntimeSessionRecord {
   facts: RuntimeSessionFacts;
   control_generation: number;
   active_provider_interactions: number;
+  provider_operation_diagnostics: RuntimeProviderOperationDiagnostic[];
   active_provider_interaction_kind?: "passive_wait" | "mutating";
   /** A rejected mutating handoff invalidates the current generation and
    * fences subsequent Agent input until the owner retries the handoff after
@@ -296,6 +299,40 @@ const baselineFacts: RuntimeFact[] = [
   { key: "provider.anti_detection_success", source: "provider_claim", value: "not_claimed" }
 ];
 
+const MAX_PROVIDER_OPERATION_DIAGNOSTICS = 12;
+
+function boundedProviderDiagnosticCode(value: unknown): string | undefined {
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : undefined;
+}
+
+function boundedProviderDiagnosticDuration(value: number): number {
+  return Math.max(0, Math.min(120_000, Math.trunc(Number.isFinite(value) ? value : 0)));
+}
+
+function retainProviderOperationDiagnostics(diagnostics: RuntimeProviderOperationDiagnostic[]): void {
+  if (diagnostics.length <= MAX_PROVIDER_OPERATION_DIAGNOSTICS) return;
+  const keep = new Set<number>();
+  const required = new Set<number>();
+  const tailStart = Math.max(0, diagnostics.length - MAX_PROVIDER_OPERATION_DIAGNOSTICS);
+  for (let index = tailStart; index < diagnostics.length; index += 1) keep.add(index);
+  for (const stage of ["page_list_request", "page_relation_refresh"] as const) {
+    for (let index = diagnostics.length - 1; index >= 0; index -= 1) {
+      if (diagnostics[index]?.stage === stage) {
+        required.add(index);
+        keep.add(index);
+        break;
+      }
+    }
+  }
+  while (keep.size > MAX_PROVIDER_OPERATION_DIAGNOSTICS) {
+    const oldestUnrequired = [...keep].sort((left, right) => left - right).find(index => !required.has(index));
+    if (oldestUnrequired === undefined) break;
+    keep.delete(oldestUnrequired);
+  }
+  const retained = diagnostics.filter((_item, index) => keep.has(index));
+  diagnostics.splice(0, diagnostics.length, ...retained);
+}
+
 export type ManagedFileRuntimeInput = {
   operation: "upload" | "download";
   operation_ref: string;
@@ -345,6 +382,18 @@ export class RuntimeSessionStore {
     const requestedUrl = input.url ?? "about:blank";
     const controlOwner = input.control_owner ?? "system";
     const headless = input.headless ?? controlOwner !== "user";
+    const providerOperationDiagnostics: RuntimeProviderOperationDiagnostic[] = [];
+    const recordProviderDiagnostic = (diagnostic: RuntimeProviderOperationDiagnostic) => {
+      providerOperationDiagnostics.push({
+        stage: diagnostic.stage,
+        ...(diagnostic.phase === undefined ? {} : { phase: diagnostic.phase }),
+        outcome: diagnostic.outcome,
+        duration_ms: boundedProviderDiagnosticDuration(diagnostic.duration_ms),
+        observed_at: diagnostic.observed_at,
+        ...(boundedProviderDiagnosticCode(diagnostic.code) === undefined ? {} : { code: boundedProviderDiagnosticCode(diagnostic.code) })
+      });
+      retainProviderOperationDiagnostics(providerOperationDiagnostics);
+    };
     let profileOwnership: ProfileStorageOwnershipLock | null = null;
     const launch = await (async () => {
       if (input.identity_environment_ref) this.openingIdentityEnvironmentRefs.add(input.identity_environment_ref);
@@ -380,7 +429,8 @@ export class RuntimeSessionStore {
           provider_ref,
           identity_environment: input.managed_identity_environment,
           scope_semantics: scopeSemantics,
-          resolve_proxy: this.launchOptions.resolve_proxy
+          resolve_proxy: this.launchOptions.resolve_proxy,
+          record_provider_diagnostic: recordProviderDiagnostic
         });
         if (result.status !== "ready" || (input.profile_storage_ref && profileStorageHasExternalLock(input.profile_storage_ref))) {
           profileOwnership?.release();
@@ -466,6 +516,7 @@ export class RuntimeSessionStore {
       facts,
       control_generation: 0,
       active_provider_interactions: 0,
+      provider_operation_diagnostics: providerOperationDiagnostics,
       headless,
       identity_binding: {
         profile_storage_ref: input.profile_storage_ref ?? null
@@ -524,7 +575,11 @@ export class RuntimeSessionStore {
 
   getOwnerSessionFacts(runtime_session_ref: string): RuntimeSessionOwnerProjection | null {
     const record = this.records.get(runtime_session_ref);
-    return record ? { ...snapshot(record.facts), control_generation: record.control_generation } : null;
+    return record ? {
+      ...snapshot(record.facts),
+      control_generation: record.control_generation,
+      ...(record.provider_operation_diagnostics.length > 0 ? { provider_operation_diagnostics: snapshot(record.provider_operation_diagnostics) } : {})
+    } : null;
   }
 
   listOwnerSessionFacts(profile_ref?: string): RuntimeSessionOwnerSummary[] {
@@ -1451,12 +1506,33 @@ export class RuntimeSessionStore {
   /** Refresh the Provider Page relation before any operation that consumes it. */
   private async refreshPageRelation(record: RuntimeSessionRecord): Promise<"page_relation_unavailable" | "provider_unavailable" | null> {
     if (!record.page_registry) return "page_relation_unavailable";
+    const startedAt = Date.now();
     try {
       await record.page_registry.refresh();
+      this.recordProviderDiagnostic(record, {
+        stage: "page_relation_refresh", outcome: "completed", duration_ms: Date.now() - startedAt, observed_at: new Date().toISOString()
+      });
       return null;
     } catch (cause) {
-      return pageNavigationFailureClass(cause) === "provider_unavailable" ? "provider_unavailable" : "page_relation_unavailable";
+      const failureClass = pageNavigationFailureClass(cause);
+      this.recordProviderDiagnostic(record, {
+        stage: "page_relation_refresh", outcome: failureClass === "provider_unavailable" ? "error" : "unavailable",
+        duration_ms: Date.now() - startedAt, observed_at: new Date().toISOString(), code: failureClass
+      });
+      return failureClass === "provider_unavailable" ? "provider_unavailable" : "page_relation_unavailable";
     }
+  }
+
+  private recordProviderDiagnostic(record: RuntimeSessionRecord, diagnostic: RuntimeProviderOperationDiagnostic): void {
+    record.provider_operation_diagnostics.push({
+      stage: diagnostic.stage,
+      ...(diagnostic.phase === undefined ? {} : { phase: diagnostic.phase }),
+      outcome: diagnostic.outcome,
+      duration_ms: boundedProviderDiagnosticDuration(diagnostic.duration_ms),
+      observed_at: diagnostic.observed_at,
+      ...(boundedProviderDiagnosticCode(diagnostic.code) === undefined ? {} : { code: boundedProviderDiagnosticCode(diagnostic.code) })
+    });
+    retainProviderOperationDiagnostics(record.provider_operation_diagnostics);
   }
 
   private resolveLegacyPageBinding(

@@ -66,7 +66,24 @@ try {
   assert.equal((await lstat(ownerData)).mode & 0o777, 0o700, 'owner data must remain owner-only');
   await expectMissing(agentEndpoint, 'Agent socket must not exist before owner start');
 
-  run(cli, ['start', '--data-dir', ownerData]);
+  try {
+    run(cli, ['start', '--data-dir', ownerData]);
+  } catch (error) {
+    const lastStartError = await readFile(join(ownerData, 'last-start-error.json'), 'utf8').then(JSON.parse).catch(() => undefined);
+    const knownStartCodes = new Set([
+      'runtime_endpoint_or_process_failed', 'runtime_start_timeout', 'runtime_version_mismatch', 'installation_endpoint_invalid',
+      'runtime_endpoints_not_separate', 'agent_socket_acl_unavailable', 'owner_agent_isolation_unavailable'
+    ]);
+    const rawCode = typeof lastStartError?.error === 'string' ? lastStartError.error.match(/^[a-z][a-z0-9_]{1,63}/)?.[0] : undefined;
+    const startDiagnostic = {
+      client_code: typeof error?.message === 'string' && error.message.includes('runtime start failed') ? 'runtime_start_failed' : 'start_command_failed',
+      last_start_error_present: Boolean(lastStartError),
+      last_start_error_code: rawCode && knownStartCodes.has(rawCode) ? rawCode : rawCode ? 'unclassified' : undefined,
+      owner_socket_present: await access(ownerSocket).then(() => true, () => false),
+      agent_socket_present: await access(agentEndpoint).then(() => true, () => false)
+    };
+    throw new Error(`boundary_runtime_start_failed:${JSON.stringify(startDiagnostic)}`);
+  }
   started = true;
   const ownerStatus = lastJson(run(cli, ['diagnose', '--data-dir', ownerData]).stdout, 'owner_diagnose');
   assert.equal(ownerStatus.ready, true, 'owner Runtime must become ready');

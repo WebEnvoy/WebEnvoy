@@ -214,7 +214,19 @@ export interface RuntimeSessionControlInput {
 
 export interface RuntimeSessionOwnerProjection extends RuntimeSessionFacts {
   control_generation: number;
+  provider_operation_diagnostics?: RuntimeProviderOperationDiagnostic[];
 }
+
+export interface RuntimeProviderOperationDiagnostic {
+  stage: "page_list_request" | "page_relation_refresh" | "provider_snapshot";
+  phase?: "candidate_capture" | "candidate_query" | "control_read" | "accessibility_semantics" | "page_text" | "batch_verification" | "control_cleanup" | "response_projection";
+  outcome: "started" | "completed" | "unavailable" | "timeout" | "error";
+  duration_ms: number;
+  observed_at: string;
+  code?: string;
+}
+
+export type RuntimeProviderOperationDiagnosticSink = (diagnostic: RuntimeProviderOperationDiagnostic) => void;
 
 export interface RuntimeSessionOwnerSummary {
   schema_version: typeof HARBOR_RUNTIME_FACTS_SCHEMA;
@@ -252,6 +264,8 @@ export interface LocalProviderLaunchInput {
   /** Core-derived only; never accepted from Agent/task payloads. */
   scope_semantics?: ManagedScopeSemantics;
   resolve_proxy?: (proxy_ref: string) => string | null;
+  /** Runtime-local diagnostic summaries only; never derived from Agent payloads. */
+  record_provider_diagnostic?: RuntimeProviderOperationDiagnosticSink;
 }
 
 export interface LocalProviderPageFacts {

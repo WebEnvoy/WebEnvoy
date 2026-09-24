@@ -107,6 +107,13 @@ export function createManagedSiteWorkerSupervisor({ installRoot, ownerUid, agent
     } catch (error) {
       throw Object.assign(notDispatched(mode === 'distinct_uid_hardened' ? 'worker_identity_unavailable' : 'managed_site_worker_unavailable'), { cause: error });
     }
+    let workerInputFailed = false;
+    child.stdin.on('error', () => { workerInputFailed = true; });
+    const writeWorkerFrame = frame => {
+      if (workerInputFailed || child.stdin.destroyed || child.stdin.writableEnded) throw new Error('managed_site_worker_unavailable');
+      try { child.stdin.write(`${JSON.stringify(frame)}\n`); }
+      catch { workerInputFailed = true; throw new Error('managed_site_worker_unavailable'); }
+    };
     const exitPromise = new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', (code, exitSignal) => resolve({ code, signal: exitSignal }));
@@ -126,8 +133,8 @@ export function createManagedSiteWorkerSupervisor({ installRoot, ownerUid, agent
       }
       if (cancelled || signal?.aborted) throw new Error('managed_site_worker_cancelled');
       await onStarted({ ticket_id: ticket.ticket_id });
-      child.stdin.write(`${JSON.stringify({ source: ticket.script.source, input: ticket.input.value, context: ticket.context,
-        broker_capabilities: ticket.script.broker_capabilities, execution_timeout_ms: remaining })}\n`);
+      writeWorkerFrame({ source: ticket.script.source, input: ticket.input.value, context: ticket.context,
+        broker_capabilities: ticket.script.broker_capabilities, execution_timeout_ms: remaining });
       let expectedId = 1;
       for (;;) {
         if (cancelled || signal?.aborted) throw new Error('managed_site_worker_cancelled');
@@ -141,10 +148,10 @@ export function createManagedSiteWorkerSupervisor({ installRoot, ownerUid, agent
           try {
             const result = await onBroker({ ticket_id: ticket.ticket_id, method: frame.method, input: frame.input });
             if (frame.method === 'runtime.invoke') brokerDispatched = true;
-            child.stdin.write(`${JSON.stringify({ type: 'broker.response', id: frame.id, ok: true, result: result ?? null })}\n`);
+            writeWorkerFrame({ type: 'broker.response', id: frame.id, ok: true, result: result ?? null });
           } catch (error) {
             if (frame.method === 'runtime.invoke' && error?.dispatch_state !== 'not_dispatched') brokerDispatched = true;
-            child.stdin.write(`${JSON.stringify({ type: 'broker.response', id: frame.id, ok: false, code: errorCode(error, 'managed_site_broker_denied') })}\n`);
+            writeWorkerFrame({ type: 'broker.response', id: frame.id, ok: false, code: errorCode(error, 'managed_site_broker_denied') });
           }
           continue;
         }

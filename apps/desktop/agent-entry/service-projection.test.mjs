@@ -34,6 +34,38 @@ test('inspect and non-terminal stop still require control generation', () => {
   assert.equal(projectHarborResponse({ method: 'POST', url: '/runtime/sessions/session:one/stop' }, active), undefined);
 });
 
+test('owner session projection exposes only bounded provider stage diagnostics', () => {
+  const stages = ['page_list_request', 'page_relation_refresh', 'provider_snapshot'];
+  const observedAt = '2026-09-22T00:00:00.000Z';
+  const diagnostics = Array.from({ length: 13 }, (_, index) => ({
+    stage: stages[index % stages.length], outcome: 'timeout', duration_ms: 60_000, observed_at: observedAt,
+    ...(index === 12 ? { phase: 'candidate_capture', outcome: 'started', duration_ms: 0 } : {}),
+    code: 'request_timeout', page_text: 'private page content', stack: 'user:password@private.example'
+  }));
+  diagnostics.push({ stage: 'provider_snapshot', outcome: 'error', duration_ms: 1, observed_at: observedAt, code: 'https://user:password@private.example' });
+  diagnostics.splice(-1, 0, ...['candidate_query', 'control_read', 'accessibility_semantics'].map(phase => ({
+    stage: 'provider_snapshot', phase, outcome: 'started', duration_ms: 0, observed_at: observedAt, code: 'control_index_32'
+  })));
+  const value = {
+    ...terminalFacts(), lifecycle_state: 'active', control_owner: 'core_task', control_generation: 4,
+    control_lock: { owner: 'core_task', state: 'held', holder_ref: 'holder:one' },
+    provider_operation_diagnostics: diagnostics
+  };
+
+  const result = projectHarborResponse({ method: 'GET', url: '/runtime/sessions/session:one' }, value);
+  assert.equal(result.provider_operation_diagnostics.length, 11);
+  assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'page_relation_refresh'));
+  assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'provider_snapshot'));
+  assert.ok(result.provider_operation_diagnostics.some(item => item.phase === 'candidate_capture' && item.outcome === 'started'));
+  for (const phase of ['candidate_query', 'control_read', 'accessibility_semantics']) {
+    assert.ok(result.provider_operation_diagnostics.some(item => item.phase === phase && item.code === 'control_index_32'));
+  }
+  assert.equal(JSON.stringify(result).includes('private page content'), false);
+  assert.equal(JSON.stringify(result).includes('password'), false);
+  assert.ok(result.provider_operation_diagnostics.every(item => Object.keys(item).every(key =>
+    ['stage', 'phase', 'outcome', 'duration_ms', 'observed_at', 'code'].includes(key))));
+});
+
 test('invalid generation is never hidden by terminal stop compatibility', () => {
   const value = { ...terminalFacts(), control_generation: 'old-format' };
   assert.equal(projectHarborResponse({ method: 'POST', url: '/runtime/sessions/session:one/stop' }, value), undefined);

@@ -43,6 +43,8 @@ import type {
   LocalProviderPageFacts,
   LocalProviderPageState,
   LocalProviderScreenshotFacts,
+  RuntimeProviderOperationDiagnostic,
+  RuntimeProviderOperationDiagnosticSink,
   RuntimeErrorFact,
   RuntimeFact,
   RuntimeViewerEntry
@@ -52,7 +54,11 @@ const MAX_LINE_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 type JsonObject = Record<string, unknown>;
-type DriverResponse = { id: number; status: "ok" | "error"; result?: unknown; message?: string };
+type DriverResponse = { id: number; status?: "ok" | "error"; result?: unknown; message?: string; event?: string };
+const PROVIDER_DIAGNOSTIC_PHASES = new Set([
+  "candidate_capture", "candidate_query", "control_read", "accessibility_semantics",
+  "page_text", "batch_verification", "control_cleanup", "response_projection"
+]);
 
 export type SharedProviderAdapter = {
   provider_id: string;
@@ -110,19 +116,38 @@ export function inheritPopupAuthorizedOrigins(input: {
 }
 
 class SharedDriverError extends Error {
-  constructor(readonly code: "source_untrusted" | "driver_unavailable" | "request_failed" | "profile_locked" | "protocol_error", message: string) {
+  constructor(readonly code: "source_untrusted" | "driver_unavailable" | "request_failed" | "request_timeout" | "profile_locked" | "protocol_error", message: string) {
     super(message);
   }
 }
 
+type DriverDiagnosticStage = Extract<RuntimeProviderOperationDiagnostic["stage"], "page_list_request" | "provider_snapshot">;
+type PendingDriverRequest = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+  diagnostic_stage?: DriverDiagnosticStage;
+  started_at: number;
+};
+
+function driverDiagnosticStage(op: string, payload: JsonObject): DriverDiagnosticStage | undefined {
+  if (op === "page_list") return "page_list_request";
+  if (op === "interact" && payload.action === "snapshot") return "provider_snapshot";
+  return undefined;
+}
+
+function boundedDiagnosticCode(value: unknown): string | undefined {
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : undefined;
+}
+
 class JsonlDriverProcess {
   private readonly child: ChildProcessWithoutNullStreams;
-  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly pending = new Map<number, PendingDriverRequest>();
   private buffer = Buffer.alloc(0);
   private nextId = 1;
   private closed = false;
 
-  constructor(pythonPath: string, driverPath: string, env: NodeJS.ProcessEnv) {
+  constructor(pythonPath: string, driverPath: string, env: NodeJS.ProcessEnv, private readonly recordDiagnostic?: RuntimeProviderOperationDiagnosticSink) {
     // The node command branch is test-only injection; installed owner paths
     // always use Python's -B entrypoint.
     const commandArgs = pythonPath === process.execPath ? [driverPath] : ["-B", driverPath];
@@ -138,23 +163,62 @@ class JsonlDriverProcess {
   }
 
   request(op: string, payload: JsonObject, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
-    if (this.closed || this.child.stdin.destroyed) return Promise.reject(new SharedDriverError("driver_unavailable", "Shared Provider Driver is not running."));
+    const diagnosticStage = driverDiagnosticStage(op, payload);
+    const startedAt = Date.now();
+    if (this.closed || this.child.stdin.destroyed) {
+      this.recordRequestDiagnostic(diagnosticStage, "error", "driver_unavailable", startedAt);
+      return Promise.reject(new SharedDriverError("driver_unavailable", "Shared Provider Driver is not running."));
+    }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new SharedDriverError("request_failed", `Shared Provider Driver request timed out: ${op}.`));
+        this.recordRequestDiagnostic(diagnosticStage, "timeout", "request_timeout", startedAt);
+        reject(new SharedDriverError("request_timeout", `Shared Provider Driver request timed out: ${op}.`));
         void this.close();
       }, Math.max(1, timeoutMs));
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, diagnostic_stage: diagnosticStage, started_at: startedAt });
       try {
         this.child.stdin.write(`${JSON.stringify({ id, op, ...payload })}\n`);
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
+        this.recordRequestDiagnostic(diagnosticStage, "error", "request_failed", startedAt);
         reject(error instanceof Error ? error : new Error("Driver write failed."));
       }
     });
+  }
+
+  private recordRequestDiagnostic(
+    stage: DriverDiagnosticStage | undefined,
+    outcome: RuntimeProviderOperationDiagnostic["outcome"],
+    code: string | undefined,
+    startedAt: number
+  ): void {
+    if (!stage || !this.recordDiagnostic) return;
+    const diagnostic: RuntimeProviderOperationDiagnostic = {
+      stage,
+      outcome,
+      duration_ms: Math.max(0, Math.min(120_000, Date.now() - startedAt)),
+      observed_at: new Date().toISOString(),
+      ...(boundedDiagnosticCode(code) === undefined ? {} : { code: boundedDiagnosticCode(code) })
+    };
+    try { this.recordDiagnostic(diagnostic); } catch { /* Diagnostics never change Provider behavior. */ }
+  }
+
+  private recordPendingFailure(pending: PendingDriverRequest, error: Error): void {
+    this.recordRequestDiagnostic(pending.diagnostic_stage, "error",
+      error instanceof SharedDriverError ? error.code : "request_failed", pending.started_at);
+  }
+
+  private recordPendingResponse(pending: PendingDriverRequest, result: unknown): void {
+    if (!pending.diagnostic_stage) return;
+    const value = object(result);
+    const status = value?.status;
+    const pageListCompleted = pending.diagnostic_stage === "page_list_request" && Array.isArray(value?.pages);
+    const outcome = pageListCompleted || status === "completed" ? "completed" : status === "unavailable" ? "unavailable" : "error";
+    this.recordRequestDiagnostic(pending.diagnostic_stage, outcome,
+      boundedDiagnosticCode(value?.failure_class), pending.started_at);
   }
 
   async close(): Promise<void> {
@@ -187,18 +251,46 @@ class JsonlDriverProcess {
         void this.close();
         return;
       }
+      if (response.event === "provider_snapshot_phase") {
+        this.consumeProviderSnapshotPhase(response);
+        continue;
+      }
       const pending = this.pending.get(response.id);
       if (!pending) continue;
       clearTimeout(pending.timer);
       this.pending.delete(response.id);
-      if (response.status === "ok") pending.resolve(response.result);
-      else pending.reject(new SharedDriverError("request_failed", typeof response.message === "string" ? response.message : "Shared Provider operation failed."));
+      if (response.status === "ok") {
+        this.recordPendingResponse(pending, response.result);
+        pending.resolve(response.result);
+      } else {
+        const error = new SharedDriverError("request_failed", typeof response.message === "string" ? response.message : "Shared Provider operation failed.");
+        this.recordPendingFailure(pending, error);
+        pending.reject(error);
+      }
     }
+  }
+
+  private consumeProviderSnapshotPhase(value: DriverResponse): void {
+    if (!this.recordDiagnostic || value.id !== 0 || value.status !== undefined) return;
+    try {
+      const raw = value as DriverResponse & Record<string, unknown>;
+      if (raw.stage !== "provider_snapshot" || typeof raw.phase !== "string" || !PROVIDER_DIAGNOSTIC_PHASES.has(raw.phase) ||
+        !["started", "completed", "error", "unavailable"].includes(String(raw.outcome)) ||
+        typeof raw.duration_ms !== "number" || !Number.isSafeInteger(raw.duration_ms) || typeof raw.observed_at !== "string" ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(raw.observed_at)) return;
+      this.recordDiagnostic({
+        stage: "provider_snapshot", phase: raw.phase as RuntimeProviderOperationDiagnostic["phase"],
+        outcome: raw.outcome as RuntimeProviderOperationDiagnostic["outcome"],
+        duration_ms: Math.max(0, Math.min(120_000, raw.duration_ms)), observed_at: raw.observed_at,
+        ...(boundedDiagnosticCode(raw.code) === undefined ? {} : { code: boundedDiagnosticCode(raw.code) })
+      });
+    } catch { /* Driver diagnostics never affect Provider behavior. */ }
   }
 
   private failAll(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      this.recordPendingFailure(pending, error);
       pending.reject(error);
     }
     this.pending.clear();
@@ -295,7 +387,7 @@ export async function launchSharedPlaywrightProvider(
   if (!pythonPath || !isSafeExecutablePath(driverPath) || !isSafeExecutablePath(browserPath)) {
     return unavailable("driver_unavailable", "固定官方 Playwright Driver 未由 installed owner 提供。", [...providerFacts, ...profileStorage.facts]);
   }
-  const driver = new JsonlDriverProcess(pythonPath, driverPath, process.env);
+  const driver = new JsonlDriverProcess(pythonPath, driverPath, process.env, input.record_provider_diagnostic);
   try {
     const result = await driver.request("launch", {
       ...adapter.launchFields(input),
