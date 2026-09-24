@@ -81,10 +81,10 @@ process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
 }
 
-function command(commandName, args, asAgent = false, input) {
+function command(commandName, args, asAgent = false, input, timeoutMs = 120_000) {
   const executable = asAgent ? '/usr/bin/sudo' : commandName;
   const commandArgs = asAgent ? ['-n', '-u', 'nobody', '--', commandName, ...args] : args;
-  const result = spawnSync(executable, commandArgs, { cwd: packageRoot, encoding: 'utf8', input, timeout: 120_000, env: { ...process.env, LC_ALL: 'C' } });
+  const result = spawnSync(executable, commandArgs, { cwd: packageRoot, encoding: 'utf8', input, timeout: timeoutMs, env: { ...process.env, LC_ALL: 'C' } });
   if (result.error) throw result.error;
   return result;
 }
@@ -98,7 +98,7 @@ function jsonFrom(result, label) {
   throw new Error(`${label}_json_missing`);
 }
 function runJson(commandName, args, asAgent, label) { return jsonFrom(run(commandName, args, asAgent), label); }
-function allowJson(commandName, args, asAgent, label) { return jsonFrom(command(commandName, args, asAgent), label); }
+function allowJson(commandName, args, asAgent, label, timeoutMs = 120_000) { return jsonFrom(command(commandName, args, asAgent, undefined, timeoutMs), label); }
 function findString(value, keys) {
   if (!value || typeof value !== 'object') return undefined;
   for (const key of keys) if (typeof value[key] === 'string') return value[key];
@@ -177,6 +177,88 @@ async function runMcpQuery(clientPath, idempotencyKey) {
 }
 function siteTaskScope(operation, packageRef, revisionRef, profileRef, siteOrigin) {
   return { operations: [operation], skill_refs: [packageRef], source_refs: [revisionRef], profile_refs: [profileRef], origins: [siteOrigin] };
+}
+function harborReceiptSummary(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  if (['completed', 'unavailable', 'unknown_outcome'].includes(value.status) &&
+      ['not_dispatched', 'dispatched'].includes(value.dispatch_state)) {
+    return {
+      status: value.status,
+      dispatch_state: value.dispatch_state,
+      ...(typeof value.failure_class === 'string' ? { failure_class: value.failure_class } : {}),
+      ...(typeof value.operation_ref === 'string' ? { operation_ref: value.operation_ref } : {})
+    };
+  }
+  for (const child of Object.values(value)) {
+    const found = harborReceiptSummary(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+function snapshotRunSummary(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const result = {
+    ...(typeof value.run_id === 'string' ? { run_id: value.run_id } : {}),
+    ...(typeof value.status === 'string' ? { status: value.status } : {}),
+    ...(typeof value.dispatch_state === 'string' ? { dispatch_state: value.dispatch_state } : {}),
+    ...(typeof value.failure?.code === 'string' ? { failure_code: value.failure.code } : {})
+  };
+  const receipt = harborReceiptSummary(value.result);
+  return { ...result, ...(receipt ? { harbor_receipt: receipt } : {}) };
+}
+function safeRuntimeFacts(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const availability = value.availability;
+  const error = value.current_error;
+  return {
+    ...(availability && typeof availability === 'object' ? { availability: Object.fromEntries(
+      ['driver', 'cdp', 'viewer', 'snapshot', 'evidence'].filter(key => typeof availability[key] === 'string').map(key => [key, availability[key]])
+    ) } : {}),
+    ...(error && typeof error === 'object' ? { current_error: Object.fromEntries(
+      ['code', 'retryable'].filter(key => typeof error[key] === 'string' || typeof error[key] === 'boolean').map(key => [key, error[key]])
+    ) } : {})
+  };
+}
+async function diagnoseTaskSnapshotFailure({ ownerData, agentHost, clientFile, grantId, profileRef, sessionRef, pageRef, siteOrigin, prefix }) {
+  const diagnostic = { diagnostic_only: true, affects_acceptance: false };
+  try {
+    const facts = await ownerRequest(ownerData, `/runtime/sessions/${encodeURIComponent(sessionRef)}/runtime-facts`);
+    diagnostic.harbor_session_facts = safeRuntimeFacts(facts);
+  } catch (error) {
+    diagnostic.harbor_session_facts_error = typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable';
+  }
+
+  // This is a distinct, authorized read with its own key after the original
+  // task has been queried. A timeout is resolved only by querying this key;
+  // it never resubmits or changes the original task Run.
+  const idempotencyKey = `${prefix}-post-task-snapshot-diagnostic`;
+  const requestFile = join(agentHost, `${idempotencyKey}.json`);
+  await agentWrite(requestFile, request('instance.snapshot', idempotencyKey, grantId,
+    { operations: ['instance.snapshot'], profile_refs: [profileRef], origins: [siteOrigin] },
+    { profile_ref: profileRef, origin: siteOrigin, runtime_session_ref: sessionRef, page_ref: pageRef }));
+  const startedAt = Date.now();
+  let submitted;
+  let submitError;
+  try {
+    submitted = allowJson(cli, ['agent', 'operation', '--client-file', clientFile, '--request-file', requestFile], true, 'post_task_snapshot_diagnostic', 30_000);
+  } catch (error) {
+    submitError = typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable';
+  }
+  const completedAt = Date.now();
+  let queried;
+  try {
+    queried = allowJson(cli, ['agent', 'query', '--client-file', clientFile, '--idempotency-key', idempotencyKey], true, 'post_task_snapshot_diagnostic_query', 15_000);
+  } catch (error) {
+    diagnostic.query_error = typeof error?.code === 'string' ? error.code : error?.name ?? 'unavailable';
+  }
+  diagnostic.snapshot_probe = {
+    started_at: new Date(startedAt).toISOString(), completed_at: new Date(completedAt).toISOString(),
+    duration_ms: completedAt - startedAt,
+    ...(submitError ? { submit_error: submitError } : {}),
+    ...(submitted ? { submitted: snapshotRunSummary(submitted) } : {}),
+    ...(queried ? { queried: snapshotRunSummary(queried) } : {})
+  };
+  return diagnostic;
 }
 async function readAnonymousTrendingPage(url) {
   const startedAt = Date.now();
@@ -358,12 +440,15 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   let rows;
   let verifiedNames;
   let startSkewMs;
+  let taskDurationMs;
+  let failureDiagnostic;
   let failureStage = 'submit';
   try {
     const directPagePromise = readAnonymousTrendingPage(pageUrl);
     const taskPromise = runMcpTool(clientFile, 'webenvoy_task', submitRequest);
     [mcpSubmission, independentPage] = await Promise.all([taskPromise, directPagePromise]);
     submitted = mcpSubmission.value;
+    taskDurationMs = mcpSubmission.completedAt - mcpSubmission.startedAt;
     originalRunId = submitted?.run?.run_id;
     assert.ok(typeof originalRunId === 'string', `github_managed_script_run_missing:${JSON.stringify(submitted)}`);
     const queryFile = join(agentHost, `${prefix}-task-query.json`);
@@ -378,6 +463,11 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     assert.equal(queried.run.run_id, originalRunId);
     failureStage = 'submitted_result_status';
     if (submitted.run.status !== 'succeeded') {
+      if (submitted.run.status === 'unknown_outcome' &&
+          (queried.result?.failure?.code ?? queried.failure?.code) === 'managed_task_snapshot_unavailable') {
+        failureDiagnostic = await diagnoseTaskSnapshotFailure({ ownerData, agentHost, clientFile, grantId, profileRef, sessionRef,
+          pageRef: targetRef, siteOrigin, prefix });
+      }
       throw new Error(`github_managed_script_submit_failed:${JSON.stringify({ submitted: { ok: submitted.ok, run: submitted.run, failure: submitted.failure }, queried: { run: queried.run, result: queried.result ?? null, failure: queried.failure ?? null } })}`);
     }
     failureStage = 'result_validation';
@@ -414,7 +504,10 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
       task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 60_000 },
       consumer: { submit: 'installed WebEnvoy MCP tool webenvoy_task', query: 'installed WebEnvoy CLI agent task query',
         real_model: false, third_party_agent: false, plugin_verified: false, account: false },
-      failure: { stage: failureStage, code: failureCode, name: error instanceof Error ? error.name : 'UnknownError' },
+      failure: { stage: failureStage, code: failureCode, name: error instanceof Error ? error.name : 'UnknownError',
+        ...(taskDurationMs === undefined ? {} : { task_submit_started_at: new Date(mcpSubmission.startedAt).toISOString(),
+          task_submit_completed_at: new Date(mcpSubmission.completedAt).toISOString(), task_submit_duration_ms: taskDurationMs }),
+        ...(failureDiagnostic === undefined ? {} : { diagnostic: failureDiagnostic }) },
       ...(submitted?.run ? { run: { run_id: submitted.run.run_id ?? null, status: submitted.run.status ?? null,
         dispatch_state: submitted.run.dispatch_state ?? null, result_outcome: queriedResult?.outcome ?? null,
         result_failure_code: queriedResult?.failure?.code ?? null,
