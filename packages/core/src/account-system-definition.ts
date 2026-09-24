@@ -542,12 +542,14 @@ export function createFileAccountSystemDefinitionStore(options: {
     async resolveTemplate(templateRefValue: string): Promise<JsonObject> {
       const templateRef = nonSensitiveText(templateRefValue);
       const state = await readState();
-      const matching = state.definitions.filter(record => {
-        const revision = record.enabled_revision_ref ? record.revisions.find(item => item.revision_ref === record.enabled_revision_ref) : undefined;
-        return record.enabled && revision?.template_ref === templateRef;
-      });
+      const matching = state.definitions.filter(record => record.revisions.some(revision => revision.template_ref === templateRef));
       if (matching.length !== 1) return fail(matching.length === 0 ? "account_system_definition_unavailable" : "account_system_definition_conflict");
-      return this.resolve(matching[0]!.local_definition_ref);
+      const record = matching[0]!;
+      const enabledRevision = record.enabled_revision_ref
+        ? record.revisions.find(revision => revision.revision_ref === record.enabled_revision_ref)
+        : undefined;
+      if (!record.enabled || !enabledRevision || enabledRevision.template_ref !== templateRef) return fail("account_system_definition_disabled");
+      return this.resolve(record.local_definition_ref);
     }
   };
 }

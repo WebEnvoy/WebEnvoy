@@ -144,6 +144,12 @@ import {
   createFileExecutionPolicyConfigStore,
   createFileRunRecordStore,
   createFileManagedAccessStore,
+  createFileAccountSystemDefinitionStore,
+  createManagedAccountSystemReadService,
+  createFileManagedSiteTaskAdmissionStore,
+  approvedManagedSiteTaskPackageFor,
+  managedSiteScriptCodeAdmissionRef,
+  verifySiteSkillPackageRoot,
   ManagedAccessError,
   createFileSkillLibraryService,
   approvedSkillManifestSha256,
@@ -228,14 +234,34 @@ const managedAccessStore = createFileManagedAccessStore({
     }
   } : {})
 });
+const lodeAssetsPath = process.env.WEBENVOY_LODE_ASSETS_PATH;
+const accountSystemDefinitionService = lodeAssetsPath
+  ? createFileAccountSystemDefinitionStore({ directory: join(runtimeDataDir, "core-account-systems"), lodeAssetsPath })
+  : undefined;
+const managedAccountSystemService = accountSystemDefinitionService
+  ? createManagedAccountSystemReadService({ managedAccessStore, accountSystemDefinitionService })
+  : undefined;
 const skillLibraryDirectory = process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? runtimeDataDir;
 const skillAssetsPath = process.env.WEBENVOY_SKILL_ASSETS_PATH ?? join(process.cwd(), "agent-entry", "skill-assets");
+const managedSiteTaskAdmissionService = lodeAssetsPath
+  ? createFileManagedSiteTaskAdmissionStore({
+      directory: join(runtimeDataDir, "core-site-task-admissions"),
+      managedDataRoot: runtimeDataDir,
+      managedMaterializationPaths: [skillLibraryDirectory, join(skillLibraryDirectory, "skill-library")],
+      runtime: {
+        approvedBasePackageFor: approvedManagedSiteTaskPackageFor,
+        verifyPackageRoot: verifySiteSkillPackageRoot,
+        scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef
+      }
+    })
+  : undefined;
 const managedSkillService = createFileSkillLibraryService({
   accessStore: managedAccessStore,
   runRecordStore,
   directory: skillLibraryDirectory,
   trustedManifestSha256: approvedSkillManifestSha256,
-  sourceManifestPath: join(skillAssetsPath, "manifest.json")
+  sourceManifestPath: join(skillAssetsPath, "manifest.json"),
+  ...(managedSiteTaskAdmissionService === undefined ? {} : { managedSiteTaskAdmissionStore: managedSiteTaskAdmissionService })
 });
 const managedRecoveryService = harborRuntimeUrl
   ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
@@ -245,12 +271,24 @@ const managedBrowserService = harborRuntimeUrl
       harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
       ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
   : undefined;
+const workerOwnerUid = Number(process.env.WEBENVOY_SITE_WORKER_OWNER_UID);
+const workerAgentUid = Number(process.env.WEBENVOY_SITE_WORKER_AGENT_UID);
+const workerMode = process.env.WEBENVOY_SITE_WORKER_MODE;
+const workerSocketAcl = process.env.WEBENVOY_SITE_WORKER_OWNER_SOCKET_ACL;
+const workerIdentity = Number.isSafeInteger(workerOwnerUid) && workerOwnerUid > 0 && Number.isSafeInteger(workerAgentUid) && workerAgentUid > 0 &&
+    (workerMode === "trusted_local" || workerMode === "distinct_uid_hardened") && typeof workerSocketAcl === "string"
+  ? { owner_uid: workerOwnerUid, agent_uid: workerAgentUid, mode: workerMode, owner_socket_acl: workerSocketAcl }
+  : undefined;
 const managedTaskService = managedBrowserService
-  ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService })
+  ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+      ...(workerIdentity === undefined ? {} : { workerIdentity }) })
   : undefined;
 const server = createApiServer({
   supervisorToken,
   managedAccessStore,
+  ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
+  ...(managedAccountSystemService === undefined ? {} : { managedAccountSystemService }),
+  ...(managedSiteTaskAdmissionService === undefined ? {} : { siteTaskAdmissionService: managedSiteTaskAdmissionService }),
   managedSkillService,
   ...(managedTaskService === undefined ? {} : { managedTaskService }),
   ...(managedBrowserService === undefined ? {} : { managedBrowserService }),

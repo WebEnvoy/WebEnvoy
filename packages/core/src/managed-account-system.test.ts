@@ -115,7 +115,7 @@ test("installed Agent AccountSystem read checks the existing skill Grant and pro
     assert.equal(rolledBackProjection.local_revision_ref, imported.revision_ref);
     assert.equal(rolledBackProjection.site.display_name, "GitHub");
     const disabled = await definitionStore.disable({ local_definition_ref: imported.local_definition_ref, expected_record_version: rolledBack.record_version });
-    await assert.rejects(service.read(credentialHash, request), /account_system_definition_unavailable/);
+    await assert.rejects(service.read(credentialHash, request), /account_system_definition_disabled/);
     assert.equal(disabled.enabled, false);
   } finally {
     await rm(directory, { recursive: true, force: true });

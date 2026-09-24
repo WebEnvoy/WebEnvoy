@@ -412,6 +412,12 @@ export {
   type OwnerAdmittedSiteTaskPin,
   type SiteTaskAdmissionRuntime
 } from "./managed-site-task-admission.js";
+export {
+  approvedManagedSiteTaskPackageFor,
+  managedSiteScriptCodeAdmissionRef,
+  verifySiteSkillPackageRoot,
+  type SiteSkillPackagePin
+} from "./site-skill-package.js";
 export { createHttpManagedFileOwnerClient, type ManagedFileOwnerClient } from "./managed-file-owner.js";
 export {
   createFileSkillLibraryService,

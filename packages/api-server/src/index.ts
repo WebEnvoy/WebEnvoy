@@ -18,6 +18,11 @@ import {
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
   createFileAccountSystemDefinitionStore,
+  createManagedAccountSystemReadService,
+  createFileManagedSiteTaskAdmissionStore,
+  approvedManagedSiteTaskPackageFor,
+  managedSiteScriptCodeAdmissionRef,
+  verifySiteSkillPackageRoot,
   recoverInterruptedCoreTaskSessions,
   ManagedAccessError
 } from "@webenvoy/core-runtime";
@@ -116,7 +121,10 @@ if (import.meta.url === entrypoint) {
     ? createFileAccountSystemDefinitionStore({
         directory: join(runtimeDataRoot, "core", "account-systems"),
         lodeAssetsPath
-      })
+    })
+    : undefined;
+  const managedAccountSystemService = managedAccessStore && accountSystemDefinitionService
+    ? createManagedAccountSystemReadService({ managedAccessStore, accountSystemDefinitionService })
     : undefined;
   const managedRecoveryService = runRecordStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
@@ -129,11 +137,24 @@ if (import.meta.url === entrypoint) {
   const skillLibraryDirectory = runRecordStore
     ? process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? process.env.WEBENVOY_RUNTIME_DATA_DIR ?? join(runRecordStore.directory, "..", "..")
     : undefined;
+  const managedSiteTaskAdmissionService = runtimeDataRoot && lodeAssetsPath
+    ? createFileManagedSiteTaskAdmissionStore({
+        directory: join(runtimeDataRoot, "core", "site-task-admissions"),
+        managedDataRoot: runtimeDataRoot,
+        ...(skillLibraryDirectory === undefined ? {} : { managedMaterializationPaths: [skillLibraryDirectory, join(skillLibraryDirectory, "skill-library")] }),
+        runtime: {
+          approvedBasePackageFor: approvedManagedSiteTaskPackageFor,
+          verifyPackageRoot: verifySiteSkillPackageRoot,
+          scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef
+        }
+      })
+    : undefined;
   const skillAssetsPath = process.env.WEBENVOY_SKILL_ASSETS_PATH;
   const managedSkillService = managedAccessStore && runRecordStore && skillLibraryDirectory
     ? createFileSkillLibraryService({ accessStore: managedAccessStore, runRecordStore, directory: skillLibraryDirectory,
         trustedManifestSha256: approvedSkillManifestSha256,
         ...(process.env.WEBENVOY_LODE_ASSETS_PATH === undefined ? {} : { lodeAssetsPath: process.env.WEBENVOY_LODE_ASSETS_PATH }),
+        ...(managedSiteTaskAdmissionService === undefined ? {} : { managedSiteTaskAdmissionStore: managedSiteTaskAdmissionService }),
         ...(skillAssetsPath === undefined ? {} : { sourceManifestPath: join(skillAssetsPath, "manifest.json") }) })
     : undefined;
   const ownerUid = Number(process.env.WEBENVOY_SITE_WORKER_OWNER_UID);
@@ -151,6 +172,8 @@ if (import.meta.url === entrypoint) {
   const server = createApiServer({
     supervisorToken,
     ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
+    ...(managedAccountSystemService === undefined ? {} : { managedAccountSystemService }),
+    ...(managedSiteTaskAdmissionService === undefined ? {} : { siteTaskAdmissionService: managedSiteTaskAdmissionService }),
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
     ...(managedSkillService === undefined ? {} : { managedSkillService }),

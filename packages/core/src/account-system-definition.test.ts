@@ -97,7 +97,8 @@ test("local AccountSystem definitions import a fixed template, preserve owner re
     const disabled = asJson(await service.disable({ local_definition_ref: imported.local_definition_ref, expected_record_version: rolledBack.record_version }));
     assert.equal(disabled.enabled, false);
     await assert.rejects(service.resolve(imported.local_definition_ref), /account_system_definition_disabled/);
-    await assert.rejects(service.resolveTemplate(templateRef), /account_system_definition_unavailable/);
+    await assert.rejects(service.resolveTemplate(templateRef), /account_system_definition_disabled/);
+    await assert.rejects(service.resolveTemplate("lode://account-system/missing@1.0.0"), /account_system_definition_unavailable/);
     assert.equal(asJson(await service.resolve(imported.local_definition_ref, pinned.revision_ref, { historical: true })).revision_ref, pinned.revision_ref);
 
     const reconnected = createFileAccountSystemDefinitionStore({ directory: join(directory, "owner"), lodeAssetsPath: assets });

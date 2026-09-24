@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdtemp, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { createManagedBrowserService, createFileRunRecordStore, createFileAuthorizationDecisionStore, createFileExecutionPolicyConfigStore, createFileManagedAccessStore, managedScopeConfirmationSchemaVersion } from "@webenvoy/core-runtime";
+import { createManagedBrowserService, createFileRunRecordStore, createFileAuthorizationDecisionStore, createFileExecutionPolicyConfigStore, createFileManagedAccessStore, createFileAccountSystemDefinitionStore, createManagedAccountSystemReadService, managedScopeConfirmationSchemaVersion } from "@webenvoy/core-runtime";
 import { createApiServer } from "./server.js";
 import { listen, closeServer } from "./self-check-process-support.js";
 
@@ -185,7 +185,74 @@ export async function assertManagedAccessApi(): Promise<void> {
     try { assert.equal((await fetch(`http://127.0.0.1:${unconfiguredPort}/agent-access`)).status, 401); }
     finally { await closeServer(unconfigured); }
     await assertManagementPolicyApi();
+    await assertManagedAccountSystemRoute();
     console.log("Validated owner/Agent API authentication, duplicate-header rejection, redacted receipts and revocation.");
+  } finally {
+    await closeServer(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function assertManagedAccountSystemRoute(): Promise<void> {
+  const lodeAssetsPath = process.env.WEBENVOY_LODE_ASSETS_PATH ?? resolve(process.cwd(), "../../apps/desktop/dist-electron/lode");
+  try { await lstat(join(lodeAssetsPath, "registry/account-system-templates.json")); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      console.log("Skipped AccountSystem Agent-route integration check: packaged Lode assets are not available.");
+      return;
+    }
+    throw error;
+  }
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-account-system-agent-route-"));
+  const ownerToken = "owner-account-system-route-token-123456";
+  const agentToken = "agent-account-system-route-token-123456";
+  const credentialHash = createHash("sha256").update(agentToken).digest("hex");
+  const templateRef = "lode://account-system/github@1.0.0";
+  const access = createFileManagedAccessStore({ directory: join(directory, "access") });
+  const definitions = createFileAccountSystemDefinitionStore({ directory: join(directory, "account-systems"), lodeAssetsPath });
+  const imported = await definitions.importTemplate({ template_ref: templateRef });
+  const principal = await access.registerPrincipal({ idempotency_key: "register", display_name: "Account Route Agent", credential_hash: credentialHash });
+  const connection = await access.connect(credentialHash);
+  const grant = await access.createGrant({
+    idempotency_key: "grant-with-template-scope", principal_id: principal.principal_id, profile_refs: [],
+    allowed_operations: ["skill.inspect"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    creation_template: null, max_created_profiles: 0,
+    skill_scope: { skill_refs: [templateRef], source_refs: [templateRef] }
+  });
+  const unscopedGrant = await access.createGrant({
+    idempotency_key: "grant-without-template-scope", principal_id: principal.principal_id, profile_refs: [],
+    allowed_operations: ["skill.inspect"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    creation_template: null, max_created_profiles: 0
+  });
+  const server = createApiServer({
+    supervisorToken: ownerToken, managedAccessStore: access,
+    managedAccountSystemService: createManagedAccountSystemReadService({ managedAccessStore: access, accountSystemDefinitionService: definitions })
+  });
+  const port = await listen(server);
+  const call = async (grantId: string) => {
+    const response = await fetch(`http://127.0.0.1:${port}/managed-account-systems/operations`, {
+      method: "POST", headers: { authorization: `Bearer ${agentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ schema_version: "webenvoy.account-system-agent-operation/v1", operation: "account_system.read",
+        connection_id: connection.connection_id, grant_id: grantId, template_ref: templateRef })
+    });
+    return { status: response.status, body: await response.json() as Record<string, any> };
+  };
+  try {
+    const read = await call(grant.grant_id);
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.equal(read.body.result.local_definition_ref, imported.local_definition_ref);
+    assert.equal(read.body.result.local_revision_ref, imported.revision_ref);
+    assert.equal(read.body.result.template_ref, templateRef);
+    assert.equal(read.body.result.identity_state, "unknown");
+    assert.equal(read.body.result.evaluation_state, "not_evaluated");
+    assert.equal(Object.keys(read.body.result).some(key => /cookie|credential|identity_method|email/i.test(key)), false);
+    const unscoped = await call(unscopedGrant.grant_id);
+    assert.equal(unscoped.status, 403);
+    assert.equal(unscoped.body.error.code, "managed_access_denied");
+    await definitions.disable({ local_definition_ref: String(imported.local_definition_ref), expected_record_version: Number(imported.record_version) });
+    const disabled = await call(grant.grant_id);
+    assert.equal(disabled.status, 409);
+    assert.equal(disabled.body.error.code, "account_system_definition_disabled");
   } finally {
     await closeServer(server);
     await rm(directory, { recursive: true, force: true });

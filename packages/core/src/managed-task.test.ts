@@ -323,6 +323,53 @@ test("managed site task runs the pinned package through one durable Core Run", {
     assert.equal((enabled as Json).ok, true, JSON.stringify(enabled));
     assert.equal((enabled as Json).result.skill.enabled, true);
 
+    await t.test("task-declared AccountSystem is resolved before dispatch and pinned to the Run", async () => {
+      const templateRef = "lode://account-system/github@1.0.0";
+      const baseResolve = skillLibraryService.resolveManagedSiteTask.bind(skillLibraryService);
+      const accountBoundLibrary = {
+        ...skillLibraryService,
+        async resolveManagedSiteTask(request: Parameters<typeof skillLibraryService.resolveManagedSiteTask>[0]) {
+          const verified = await baseResolve(request);
+          const task = verified.task as Json;
+          return { ...verified, task: { ...task, applicability: { ...task.applicability, account_system_ref: templateRef } } };
+        }
+      };
+      const before = await managedTaskRunCount(runRecordStore);
+      const missingService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService: accountBoundLibrary, managedBrowserService });
+      await assert.rejects(missingService.operate(credentialHash, submitRequest(pin, actor, "managed-task-account-system-missing")), /account_system_definition_unavailable/);
+      assert.equal(await managedTaskRunCount(runRecordStore), before, "a declared local definition must resolve before the first durable Run write");
+
+      const disabledService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService: accountBoundLibrary, managedBrowserService,
+        managedAccountSystemService: { async resolveTemplate() { throw new Error("account_system_definition_disabled"); } } });
+      await assert.rejects(disabledService.operate(credentialHash, submitRequest(pin, actor, "managed-task-account-system-disabled")), /account_system_definition_disabled/);
+      assert.equal(await managedTaskRunCount(runRecordStore), before, "disabled definitions must fail before Run creation and Harbor dispatch");
+
+      const localDefinition = {
+        local_definition_ref: "webenvoy:account-system/00000000-0000-4000-8000-000000000001",
+        revision_ref: "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000001@1#sha256:" + "a".repeat(64),
+        template_ref: templateRef,
+        template_sha256: "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777",
+        historical: false
+      };
+      const accountAwareService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService: accountBoundLibrary, managedBrowserService,
+        managedAccountSystemService: { async resolveTemplate(receivedRef) {
+          assert.equal(receivedRef, templateRef);
+          return localDefinition;
+        } } });
+      const submitted = response(await accountAwareService.operate(credentialHash,
+        submitRequest(pin, actor, "managed-task-account-system-pinned")));
+      assert.equal(submitted.run.status, "succeeded");
+      const record = await runRecordStore.getRunRecord(submitted.run.run_id);
+      assert(record);
+      assert.deepEqual(record.public_result_summary?.account_system, {
+        template_ref: templateRef,
+        local_definition_ref: localDefinition.local_definition_ref,
+        local_revision_ref: localDefinition.revision_ref,
+        template_sha256: localDefinition.template_sha256
+      });
+      assert.equal(snapshotCalls.at(-1)?.runId, submitted.run.run_id, "the Run pins AccountSystem before its Harbor execution begins");
+    });
+
     await t.test("pinned package output and original-key query survive service/store restart", { timeout: 10_000 }, async () => {
       snapshotHandler = async (request, runId) => snapshotReceipt(pin, request.page_ref, runId);
       const key = "managed-task-success-001";

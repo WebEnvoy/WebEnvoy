@@ -305,6 +305,21 @@ export function createManagedTaskService(options: {
   async function authorize(credentialHash: string, input: ParsedRequest, profileRef: string, origin: string, packageRef: string, revisionRef: string) {
     return options.accessStore.checkAccess(credentialHash, accessRequest(input, profileRef, origin, packageRef, revisionRef));
   }
+  async function resolveTaskAccountSystem(templateRef: string | undefined): Promise<{ local_definition_ref: string; local_revision_ref: string; template_ref: string; template_sha256: string } | undefined> {
+    if (templateRef === undefined) return undefined;
+    if (!options.managedAccountSystemService) return fail("account_system_definition_unavailable");
+    const resolved = await options.managedAccountSystemService.resolveTemplate(templateRef);
+    if (!isObject(resolved) || resolved.template_ref !== templateRef || resolved.historical === true ||
+        typeof resolved.local_definition_ref !== "string" || !/^webenvoy:account-system\/[0-9a-f-]{36}$/.test(resolved.local_definition_ref) ||
+        typeof resolved.revision_ref !== "string" || !/^webenvoy:account-system-revision\/[0-9a-f-]{36}@[1-9][0-9]*#sha256:[a-f0-9]{64}$/.test(resolved.revision_ref) ||
+        typeof resolved.template_sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/.test(resolved.template_sha256)) return fail("account_system_definition_unavailable");
+    return {
+      template_ref: templateRef,
+      local_definition_ref: resolved.local_definition_ref,
+      local_revision_ref: resolved.revision_ref,
+      template_sha256: resolved.template_sha256
+    };
+  }
   function runId(principalId: string, key: string): string { return `managed-task-${digest(`${principalId}\0${key}`)}`; }
   async function finishFailure(runId: string, code: string, status: "failed" | "unknown_outcome", dispatchState: "not_dispatched" | "dispatched", options: { evidenceRef?: string; sourceRef?: string; postCheck?: PostCheckResult; failure?: FailureRecord } = {}): Promise<RunRecord> {
     const current = await store.getRunRecord(runId);
@@ -668,6 +683,10 @@ export function createManagedTaskService(options: {
         const taskFacts = assertPinnedTask(sitePackage.task, sitePackage);
         if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || !schemaValid({}, sitePackage.input_schema) ||
             request.target!.target_type !== String((sitePackage.task.applicability as JsonObject).target_type)) return fail("managed_access_denied");
+        // A task's AccountSystem dependency is part of its admission inputs. Resolve
+        // the enabled owner-local revision before the first durable Run write so
+        // recovery and result queries retain the exact definition this Run used.
+        const accountSystem = await resolveTaskAccountSystem(taskFacts.accountSystemRef);
         const taskIntentValue = {
           schema_version: "webenvoy.task-intent.v0", intent_id: `task-intent-${runRef}`, correlation_id: runRef, entrypoint: "api",
           user_intent: { summary: request.intent!.summary },
@@ -686,6 +705,7 @@ export function createManagedTaskService(options: {
           capability_ref: taskIntentCapabilityRef, profile_ref: profileRef, origin, target_type: request.target!.target_type,
           target_ref: request.target!.target_ref, input_schema_ref: taskFacts.inputSchemaRef, input_carrier: "none", input: inputSummary,
           task_intent: taskIntent, dispatch_state: "not_dispatched",
+          ...(accountSystem === undefined ? {} : { account_system: accountSystem }),
           ...(sitePackage.script ? {
             script_execution: true, script_ref: sitePackage.script.script_ref, script_version: sitePackage.script.version,
             script_sha256: sitePackage.script.sha256, script_runtime_kind: sitePackage.script.runtime_kind,
