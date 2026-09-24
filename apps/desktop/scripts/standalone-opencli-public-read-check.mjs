@@ -230,6 +230,14 @@ try {
           probeUrl], { encoding: 'utf8', timeout: 12_000 });
         evidence.samples[sample.name].independent_public_probe = { exit_code: probe.status,
           status_and_content_type: probe.stdout.trim().slice(0, 128) };
+        if (sample.name === 'devto') {
+          const nodeProbe = spawnSync('/usr/bin/curl', ['--silent', '--show-error', '--http1.1', '--max-time', '10',
+            '--output', '/dev/null', '--write-out', '%{http_code} %{content_type}',
+            '--header', 'accept: application/json', '--header', 'user-agent: node', probeUrl],
+          { encoding: 'utf8', timeout: 12_000 });
+          evidence.samples[sample.name].node_fetch_user_agent_probe = { exit_code: nodeProbe.status,
+            status_and_content_type: nodeProbe.stdout.trim().slice(0, 128) };
+        }
       }
       failedSamples.push(`${sample.name}:${attempted.failure?.code ?? attempted.run.status}`);
       executionGrants.push(sample.grantId);
